@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
@@ -251,6 +252,11 @@ public class SpoolmanController(
             SpoolmanSpoolDto result = await spoolman.CreateSpoolInSpoolmanAsync(request, ct);
             return StatusCode(StatusCodes.Status201Created, result);
         }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogError(ex, "Error creating spool: {Message}", ex.Message);
+            return BadRequest(new { message = $"Create failed: {DescribeSpoolmanFailure(ex)}" });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating spool: {Message}", ex.Message);
@@ -310,6 +316,20 @@ public class SpoolmanController(
                 "Spool imported from barcode.");
 
             return StatusCode(StatusCodes.Status201Created, result);
+        }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", request.Barcode, ex.Message);
+            string message = $"Import failed: {DescribeSpoolmanFailure(ex)}";
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Import,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status400BadRequest,
+                null,
+                null,
+                message);
+            return BadRequest(new { message });
         }
         catch (Exception ex)
         {
@@ -796,6 +816,20 @@ public class SpoolmanController(
 
             return Ok(result);
         }
+        catch (SpoolmanApiException ex)
+        {
+            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
+            string message = $"Barcode mapping failed: {DescribeSpoolmanFailure(ex)}";
+            await LogBarcodeScanAsync(
+                request.Barcode.Trim(),
+                BarcodeScanAction.Mapping,
+                BarcodeScanOutcome.Error,
+                StatusCodes.Status400BadRequest,
+                request.FilamentId,
+                null,
+                message);
+            return BadRequest(new { message });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
@@ -956,7 +990,10 @@ public class SpoolmanController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating filament: {Message}", ex.Message);
-            return BadRequest(new { message = $"Create failed: {ex.Message}" });
+            string detail = ex is SpoolmanApiException spoolmanEx
+                ? DescribeSpoolmanFailure(spoolmanEx)
+                : "Check server logs for details.";
+            return BadRequest(new { message = $"Create failed: {detail}" });
         }
     }
 
@@ -1316,6 +1353,25 @@ public class SpoolmanController(
                     Error: $"Network scan failed: {ex.Message}")
             });
         }
+    }
+
+    /// <summary>
+    /// Builds a user-facing description of an upstream Spoolman rejection. Prefers the detail
+    /// parsed from Spoolman's response body (e.g. "body.density: Field required") so operators
+    /// see which field was rejected rather than a bare status code.
+    /// </summary>
+    private static string DescribeSpoolmanFailure(SpoolmanApiException ex)
+    {
+        if (!string.IsNullOrWhiteSpace(ex.Detail))
+        {
+            return ex.StatusCode is null
+                ? ex.Detail
+                : $"Spoolman returned {(int)ex.StatusCode.Value} - {ex.Detail}";
+        }
+
+        return ex.StatusCode is null
+            ? "Spoolman rejected the request."
+            : $"Spoolman returned {(int)ex.StatusCode.Value} ({ex.StatusCode.Value}).";
     }
 
     private async Task LogBarcodeScanAsync(
