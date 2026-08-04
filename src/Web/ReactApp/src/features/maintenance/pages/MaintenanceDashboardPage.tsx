@@ -152,7 +152,7 @@ export function MaintenanceDashboardPage() {
       }
     >
       {/* ═══════════════════ Ribbon Stats ═══════════════════ */}
-      <div className="flex items-center justify-between gap-6 bg-pf-bg-1 border border-pf-border rounded-xl px-6 py-4 mb-6 overflow-x-auto">
+      <div className="flex items-center justify-between gap-6 bg-pf-bg-1 border border-pf-border rounded-lg px-6 py-4 mb-6 overflow-x-auto">
         <SummaryStat
           label="Printers"
           value={stats?.totalPrinters ?? 0}
@@ -232,7 +232,7 @@ export function MaintenanceDashboardPage() {
               <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
                 {/* Priority Alerts */}
                 <section className="xl:col-span-1" aria-labelledby="alerts-heading">
-                  <div className="bg-pf-panel border border-pf-border rounded-xl h-full">
+                  <div className="bg-pf-panel border border-pf-border rounded-lg h-full">
                     <div className="px-5 py-4 border-b border-pf-border flex items-center gap-2">
                       <AlertIcon className="h-5 w-5 text-pf-warning" />
                       <div>
@@ -260,7 +260,7 @@ export function MaintenanceDashboardPage() {
 
                 {/* Printer Status Grid */}
                 <section className="xl:col-span-2" aria-labelledby="printer-grid-heading">
-                  <div className="bg-pf-panel border border-pf-border rounded-xl h-full">
+                  <div className="bg-pf-panel border border-pf-border rounded-lg h-full">
                     <div className="px-5 py-4 border-b border-pf-border">
                       <h2 id="printer-grid-heading" className="text-base font-semibold text-pf-text-primary font-bebas uppercase tracking-wide">
                         Printer Status
@@ -290,7 +290,7 @@ export function MaintenanceDashboardPage() {
           {/* ─────────── Schedule Tab ─────────── */}
           <Tabs.Panel id="schedule">
             <div className="space-y-6 mt-6">
-              <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
                 <div className="px-5 py-4 border-b border-pf-border">
                   <h2 className="text-base font-semibold text-pf-text-primary font-bebas uppercase tracking-wide">
                     Upcoming Maintenance
@@ -324,7 +324,7 @@ export function MaintenanceDashboardPage() {
                           />
                         </div>
                         <div className="lg:col-span-1">
-                          <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4">
+                          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
                             <h3 className="font-semibold text-pf-text-primary mb-3">
                               {selectedDate
                                 ? format(selectedDate, 'MMMM d, yyyy')
@@ -372,7 +372,7 @@ export function MaintenanceDashboardPage() {
           {/* ─────────── Library Tab (Task Catalog + Plans) ─────────── */}
           <Tabs.Panel id="library">
             <div className="space-y-0 mt-6">
-              <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
                 <Tabs defaultTab="plans" className="p-0">
                   <Tabs.List className="border-b border-pf-border bg-pf-bg-2 px-2">
                     <Tabs.Tab id="plans" icon={<ListIcon className="h-4 w-4" />}>
@@ -422,7 +422,7 @@ export function MaintenanceDashboardPage() {
             <div className="space-y-8 mt-6">
               {/* Fleet Statistics Table */}
               <section aria-labelledby="fleet-stats-heading">
-                <div className="bg-pf-panel border border-pf-border rounded-xl">
+                <div className="bg-pf-panel border border-pf-border rounded-lg">
                   <div className="px-5 py-4 border-b border-pf-border">
                     <h2
                       id="fleet-stats-heading"
@@ -442,7 +442,7 @@ export function MaintenanceDashboardPage() {
 
               {/* Charts Grid */}
               <section aria-labelledby="analytics-heading">
-                <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+                <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
                   <div className="px-5 py-4 border-b border-pf-border">
                     <h2
                       id="analytics-heading"
@@ -475,7 +475,7 @@ export function MaintenanceDashboardPage() {
               <LowStockAlert maxItems={5} />
 
               {/* Parts Inventory + Replacement History */}
-              <div className="bg-pf-panel border border-pf-border rounded-xl overflow-hidden">
+              <div className="bg-pf-panel border border-pf-border rounded-lg overflow-hidden">
                 <Tabs defaultTab="parts" className="p-0">
                   <Tabs.List className="border-b border-pf-border bg-pf-bg-2 px-2">
                     <Tabs.Tab id="parts" icon={<PackageIcon className="h-4 w-4" />}>
@@ -528,7 +528,7 @@ export function MaintenanceDashboardPage() {
 
       {/* Error Display */}
       {(statsError || alertsError || tasksError || componentsError) && (
-        <div className="bg-pf-error/10 border border-pf-error/30 rounded-xl p-4 mt-6" role="alert">
+        <div className="bg-pf-error/10 border border-pf-error/30 rounded-lg p-4 mt-6" role="alert">
           <p className="text-sm text-pf-error">
             {statsError?.message || alertsError?.message || tasksError?.message || componentsError?.message || 'An error occurred loading maintenance data'}
           </p>

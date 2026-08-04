@@ -104,7 +104,7 @@ export function CameraCard({
   };
 
   return (
-    <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
+    <div className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col min-h-0">
       {/* Camera feed - main content */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
         {cameraMode === 'stream' && hasStream && activeUrl ? (
@@ -168,7 +168,7 @@ export function CameraCard({
             </Badge>
           )}
           {primaryCamera && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
+            <span className="inline-flex items-center gap-1.5 rounded-xs bg-pf-bg-2 px-2 py-1 text-[11px] text-pf-text-secondary">
               <span
                 className={`h-2 w-2 rounded-full ${getHealthDotColor(primaryCamera.healthStatus)}`}
                 title={`Camera health: ${primaryCamera.healthStatus}`}
@@ -215,7 +215,7 @@ export function CameraCard({
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
             {hasModeToggle && (
-              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
                 <Button
                   type="button"
                   variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}

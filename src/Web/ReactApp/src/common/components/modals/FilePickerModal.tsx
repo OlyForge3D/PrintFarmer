@@ -299,6 +299,7 @@ function FilePickerContent({
                         type="button"
                         variant="unstyled"
                         onClick={() => handleTagToggle(tag.id)}
+                        data-pf-radius="full"
                         className={clsx(
                           'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors cursor-pointer',
                           isActive
@@ -327,7 +328,7 @@ function FilePickerContent({
                 <label className="block text-xs font-medium text-pf-text-secondary mb-1">Material (from loaded files)</label>
                 <div className="flex flex-wrap gap-1.5">
                   {materialOptions.map(mat => (
-                    <span key={mat} className="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-pf-bg-0 text-pf-text-primary border border-pf-border">
+                    <span key={mat} className="inline-flex items-center px-2 py-0.5 rounded-xs text-xs bg-pf-bg-0 text-pf-text-primary border border-pf-border">
                       {mat}
                     </span>
                   ))}
@@ -438,6 +439,7 @@ function FilePickerContent({
                       {file.tags.slice(0, 2).map(tag => (
                         <span
                           key={tag.id}
+                          data-pf-radius="full"
                           className="text-[9px] px-1 rounded-full border border-pf-border text-pf-text-tertiary"
                         >
                           {tag.name}

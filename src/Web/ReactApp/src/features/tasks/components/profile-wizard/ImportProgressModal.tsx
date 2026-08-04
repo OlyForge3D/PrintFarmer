@@ -38,8 +38,8 @@ export const ImportProgressModal: React.FC<ImportProgressModalProps> = ({
         {/* Animated import icon */}
         <div className="flex justify-center mb-6">
           <div className="relative">
-            {/* Spinning outer ring */}
-            <div className="absolute inset-0 rounded-full border-4 border-pf-accent/20" />
+            {/* Spinning outer ring, sized to match the arc it sits behind */}
+            <div className="absolute inset-0 size-20 rounded-full border-4 border-pf-accent/20" />
             <div className="w-20 h-20 rounded-full border-4 border-transparent border-t-pf-accent animate-spin" />
             {/* Center icon */}
             <div className="absolute inset-0 flex items-center justify-center">

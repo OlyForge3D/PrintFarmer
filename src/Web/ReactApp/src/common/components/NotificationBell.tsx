@@ -28,7 +28,8 @@ export function NotificationBell({ buttonClassName }: NotificationBellProps) {
       >
         <BellIcon className="h-5 w-5" />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 bg-pf-accent-bg text-[var(--pf-on-accent)] text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center leading-none">
+          // Count badge: circle at one digit, pill at two or three.
+          <span data-pf-radius="full" className="absolute -top-1 -right-1 bg-pf-accent-bg text-[var(--pf-on-accent)] text-[9px] font-bold rounded-full min-w-[16px] h-[16px] flex items-center justify-center leading-none">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}

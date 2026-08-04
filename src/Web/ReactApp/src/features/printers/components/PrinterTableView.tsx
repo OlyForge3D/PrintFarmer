@@ -141,7 +141,7 @@ export function PrinterTableView({
   };
 
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl overflow-hidden">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg overflow-hidden">
       {/* Optional debug panel for table-level realtime data */}
       {window.PrintFarmerDebug?.printerTableDisplay && (
         <div className="p-2 border-b border-pf-border bg-pf-bg-0 text-xs text-pf-text-tertiary">

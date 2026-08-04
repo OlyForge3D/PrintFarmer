@@ -377,6 +377,7 @@ export function TasksWidget() {
     taskCount > 0 ? (
       <span
         className="inline-flex items-center justify-center h-5 min-w-5 px-1.5 text-xs font-medium rounded-full bg-pf-warning text-white"
+        data-pf-radius="full"
         data-testid="tasks-widget-badge"
       >
         {taskCount}

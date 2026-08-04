@@ -63,7 +63,7 @@ function ComponentCard({ data, isSelected, onSelect }: ComponentCardProps) {
       type="button"
       onClick={onSelect}
       className={`
-        w-full text-left p-4 rounded-xl transition-all duration-150
+        w-full text-left p-4 rounded-lg transition-all duration-150
         ${isSelected 
           ? 'bg-pf-accent/10 ring-2 ring-pf-accent/30' 
           : 'bg-pf-bg-1 hover:bg-pf-border/30'
@@ -141,7 +141,7 @@ interface ComponentDetailPanelProps {
 
 function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-5">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-5">
       <div className="flex items-center gap-3 mb-4">
         <div className={`p-2 rounded-lg bg-pf-bg-2 ${getComponentColor(data)}`}>
           {getComponentIcon()}
@@ -299,11 +299,11 @@ export function ComponentMaintenanceTracker({
       <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 ${className}`}>
         <div className="lg:col-span-1 space-y-3">
           {Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="h-32 pf-skeleton pf-animate-skeleton rounded-xl" />
+            <div key={i} className="h-32 pf-skeleton pf-animate-skeleton rounded-lg" />
           ))}
         </div>
         <div className="lg:col-span-2">
-          <div className="h-96 pf-skeleton pf-animate-skeleton rounded-xl" />
+          <div className="h-96 pf-skeleton pf-animate-skeleton rounded-lg" />
         </div>
       </div>
     );
@@ -340,7 +340,7 @@ export function ComponentMaintenanceTracker({
         {selectedData ? (
           <ComponentDetailPanel data={selectedData} />
         ) : (
-          <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-8 text-center h-full flex flex-col items-center justify-center">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-8 text-center h-full flex flex-col items-center justify-center">
             <GearIcon className="h-12 w-12 text-pf-text-tertiary mb-3" />
             <h3 className="font-medium text-pf-text-primary">Select a Component</h3>
             <p className="text-sm text-pf-text-tertiary mt-1">

@@ -116,20 +116,40 @@ Industrial design rejects soft, rounded "friendly" corners. PrintFarmer's radii 
 | Token | Value | Use |
 |---|---|---|
 | `--pf-radius-none` | 0 | Full-bleed surfaces, dividers |
-| `--pf-radius-xs` | 2px | Badges, status pills, inline tags |
-| `--pf-radius-sm` | 4px | Buttons, inputs, selects, small controls |
+| `--pf-radius-xs` | 2px | Badges, status pills, count badges |
+| `--pf-radius-sm` | 4px | Buttons, inputs, selects, small controls, colour swatches |
 | `--pf-radius-md` | 6px | Cards, panels, modals |
 | `--pf-radius-lg` | 8px | Hero cards, large containers |
-| `--pf-radius-full` | 9999px | Avatars, circular icon buttons, progress dots |
+| `--pf-radius-full` | 9999px | Avatars, circular icon buttons, dots, tag chips, progress bars, toggle tracks |
 
-**Rule**: never exceed `--pf-radius-lg` for rectangular surfaces. The only fully-rounded shapes are avatars and dots.
+**Rule**: never exceed `--pf-radius-lg` for rectangular surfaces. Fully-rounded is reserved for
+shapes that are circular by nature (avatars, dots, circular icon buttons) plus the pill-shaped
+exceptions listed below.
+
+**The sanctioned pill exceptions**, and nothing else:
+
+- **Tag chips** — user-authored labels from the tag system. Use `<Badge shape="tag">`, which
+  carries the radius and signs the waiver for you. A *status* pill is not a tag chip: status is
+  a fixed vocabulary the app owns, and it takes `--pf-radius-xs`.
+- **Progress bars** — track and fill both, marked `data-pf-progress-track` / `-fill`.
+- **Switch and toggle tracks**, including their travelling thumb.
+- **Fixed-dimension count badges** — a notification counter drawn at `h-4 min-w-4` or
+  `h-5 min-w-5` is a circle at one digit and a lozenge beyond, and reads as neither if squared
+  off. A count badge with only text-driven padding (`px-3 py-1`) is *not* this case; it is a
+  status pill and takes `--pf-radius-xs`.
+- **Domain literals** — the rare element that depicts a physically round object (the Z-offset
+  bead). Comment the intent at the site; this exception does not generalise.
+
+Anything not on that list is flattened to the scale. A `data-pf-radius="full"` waiver is a
+signature, not a way to quiet the linter: if the element is not one of the above, the waiver is
+the defect.
 
 **Enforcement**: `local/pf-no-oversized-radius` (see `eslint-rules/README.md`) fails the build on
-radii above the ceiling. It runs at the documented 8px ceiling with `checkFullRound` inside
-`features/admin`, `features/settings` and `design-system`; the rest of the app is grandfathered
-at 12px until its `rounded-xl` sites are adjudicated. Genuinely circular shapes are excused
+radii above the ceiling. Since #1022 it runs at the documented 8px ceiling with `checkFullRound`
+repo-wide — there is no grandfathered tier. Genuinely circular shapes are excused
 automatically when their dimensions prove it (`size-*`, matching `w-`/`h-`, `aspect-square`,
-spinner animation); anything else that is truly a pill declares `data-pf-radius="full"`.
+spinner animation); anything else that is truly a pill declares `data-pf-radius="full"`, and the
+attribute must carry that value — a bare `data-pf-radius` asserts nothing and does not waive.
 
 ---
 
@@ -1130,6 +1150,7 @@ TEXT        text-pf-text-primary / -secondary / -tertiary / -muted
 BORDER      border border-pf-border (-strong | -subtle)
 ACCENT      text-pf-accent / bg-pf-accent-bg
 RADIUS      rounded-xs (2) / rounded-sm (4) / rounded-md (6) / rounded-lg (8)
+            rounded-full — sanctioned exceptions only, see "Border Radii"
 SHADOW      shadow-pf-xs / -sm / -md / -lg
 SPACING     gap-2 / p-4 / px-6 (always 4px grid)
 FOCUS       focus-visible:ring-2 focus-visible:ring-pf-focus

@@ -234,11 +234,11 @@ export const LocationDashboardPage: React.FC = () => {
 
           {manageMode && isFarmAdmin ? (
             <Tabs defaultTab="locations">
-              <Tabs.List aria-label="Location management sections" className="rounded-t-xl border border-pf-border border-b-0 bg-pf-bg-1">
+              <Tabs.List aria-label="Location management sections" className="rounded-t-md border border-pf-border border-b-0 bg-pf-bg-1">
                 <Tabs.Tab id="locations" icon={<LocationIcon className="h-4 w-4" />}>Locations</Tabs.Tab>
                 <Tabs.Tab id="assignments" icon={<PrinterIcon className="h-4 w-4" />}>Assignments</Tabs.Tab>
               </Tabs.List>
-              <Tabs.Panels className="rounded-b-xl">
+              <Tabs.Panels className="rounded-b-md">
                 <Tabs.Panel id="locations">
                   <LocationManagement
                     embedded

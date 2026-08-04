@@ -2,8 +2,9 @@
  * ESLint rule: pf-no-oversized-radius
  *
  * DESIGN-LANGUAGE.md, "Border Radii":
- *   "never exceed --pf-radius-lg for rectangular surfaces.
- *    The only fully-rounded shapes are avatars and dots."
+ *   "never exceed --pf-radius-lg for rectangular surfaces. Fully-rounded is
+ *    reserved for shapes that are circular by nature (avatars, dots, circular
+ *    icon buttons) plus the pill-shaped exceptions listed below."
  *
  * The operative phrase is *rectangular surfaces*. The same document sanctions
  * `--pf-radius-full` for avatars and circular icon buttons (Border Radii table),
@@ -127,34 +128,69 @@ function arbitraryToPx(value) {
   return match[2] === 'px' ? scalar : scalar * 16
 }
 
-/** True when the flattened class text proves the element renders as a circle. */
-function looksCircular(classText) {
-  const widths = new Set()
-  const heights = new Set()
+/** The variant prefix of a token: `md:`, `hover:`, `[&::-webkit-slider-thumb]:`, or `''`. */
+function variantPrefix(token) {
+  return token.slice(0, token.length - stripVariants(token).length)
+}
+
+/**
+ * Index the shape evidence on an element by variant scope.
+ *
+ * Returns a predicate: given the variant prefix of a `rounded-full`, is the
+ * element provably a circle *where that radius applies*?
+ *
+ * Evidence is bucketed by raw prefix string, and matched by string equality —
+ * there is no understanding of what a variant means, which is what keeps this
+ * small. `hover:w-4` never pairs with `focus:h-4` because `'hover:' !== 'focus:'`.
+ *
+ * Unprefixed evidence counts everywhere, because an unconditional square is
+ * square at every breakpoint and in every state: `aspect-square md:rounded-full`
+ * is a circle. Prefixed evidence counts only in its own scope, which preserves
+ * the case this function has always had to catch -- `md:aspect-square` with a
+ * bare `rounded-full` is a rectangle below `md`, and still reports.
+ */
+function circularScopes(classText) {
+  const scopes = new Map()
+  const scopeOf = key => {
+    let entry = scopes.get(key)
+    if (!entry) {
+      entry = { absolute: false, widths: new Set(), heights: new Set() }
+      scopes.set(key, entry)
+    }
+    return entry
+  }
 
   for (const raw of classText.split(/\s+/)) {
     if (!raw) continue
-    // Deliberately NOT `stripVariants`. A circle has to be unconditional to
-    // justify `rounded-full`: `md:aspect-square` is a rectangle below `md`, and
-    // exempting it there is exactly the bug this rule exists to catch.
-    const token = raw
+    const scope = scopeOf(variantPrefix(raw))
+    const token = stripVariants(raw)
 
-    if (token === 'aspect-square') return true
-    if (/^size-\S+$/.test(token)) return true
+    if (token === 'aspect-square' || /^size-\S+$/.test(token)) {
+      scope.absolute = true
+      continue
+    }
     if (token === 'animate-spin' || token === 'animate-ping' || token === 'pf-animate-spin') {
-      return true
+      scope.absolute = true
+      continue
     }
 
     const width = /^w-(\S+)$/.exec(token)
-    if (width) widths.add(width[1])
+    if (width) scope.widths.add(width[1])
     const height = /^h-(\S+)$/.exec(token)
-    if (height) heights.add(height[1])
+    if (height) scope.heights.add(height[1])
   }
 
-  for (const value of widths) {
-    if (heights.has(value)) return true
+  const isCircle = entry => {
+    if (!entry) return false
+    if (entry.absolute) return true
+    for (const value of entry.widths) {
+      if (entry.heights.has(value)) return true
+    }
+    return false
   }
-  return false
+
+  const global = isCircle(scopes.get(''))
+  return prefix => global || isCircle(scopes.get(prefix))
 }
 
 /** Collect every string literal and template quasi beneath a className value. */
@@ -301,9 +337,11 @@ export default {
         if (strings.length === 0) return
 
         // The shape evidence may live in a sibling fragment of the same
-        // clsx()/template call, so judge circularity against the whole element.
+        // clsx()/template call, so gather it from the whole element -- but
+        // index it by variant scope, so a scoped radius is judged against the
+        // evidence that applies where it applies.
         const classText = strings.map(entry => entry.text).join(' ')
-        const circular = looksCircular(classText)
+        const circularIn = circularScopes(classText)
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
@@ -313,7 +351,7 @@ export default {
             if (size === null) continue
 
             const reportFullRound = () => {
-              if (!checkFullRound || circular || waived) return
+              if (!checkFullRound || waived || circularIn(variantPrefix(rawToken))) return
               reportToken({
                 stringNode,
                 quasi,

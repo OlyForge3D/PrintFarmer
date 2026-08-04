@@ -90,7 +90,7 @@ export function FailureDetectionMonitoringOverlay({
         variant="unstyled"
         onClick={() => setIsDetailsOpen(true)}
         className={clsx(
-          'inline-flex items-center gap-1.5 rounded-full border bg-slate-950/80 px-2.5 py-1 backdrop-blur-sm pointer-events-auto transition-colors hover:bg-slate-950/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white/70',
+          'inline-flex items-center gap-1.5 rounded-xs border bg-slate-950/80 px-2.5 py-1 backdrop-blur-sm pointer-events-auto transition-colors hover:bg-slate-950/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white/70',
           styles.border,
           styles.glow,
           className

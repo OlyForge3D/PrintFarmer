@@ -363,8 +363,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
   const sidebarShellClassName = layout === 'content'
-    ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
-    : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-2xl border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
+    ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
@@ -702,7 +702,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xs text-xs font-medium shrink-0 bg-black/30 border border-white/20">
               <span className={`h-2 w-2 rounded-full ${statusIndicatorClassName}`} aria-hidden="true" />
               <span className="text-pf-text-primary">{statusLabel}</span>
             </div>
@@ -926,12 +926,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       <div className="truncate text-sm font-medium text-pf-text-primary">{object.name}</div>
                       <div className="mt-1 flex flex-wrap gap-1 text-[10px] uppercase tracking-wide">
                         {object.isCurrent && (
-                          <span className="rounded-full border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
+                          <span className="rounded-xs border border-pf-accent/50 bg-pf-accent-bg px-2 py-0.5 text-pf-accent">
                             Printing
                           </span>
                         )}
                         {object.isExcluded && (
-                          <span className="rounded-full border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
+                          <span className="rounded-xs border border-pf-border bg-pf-bg-2 px-2 py-0.5 text-pf-text-secondary">
                             Skipped
                           </span>
                         )}

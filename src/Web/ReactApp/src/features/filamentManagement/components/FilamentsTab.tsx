@@ -411,7 +411,7 @@ export function FilamentsTab() {
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4" aria-label="Loading filaments">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="bg-pf-bg-1 border border-pf-border rounded-xl p-4 space-y-3">
+            <div key={i} className="bg-pf-bg-1 border border-pf-border rounded-lg p-4 space-y-3">
               <div className="flex items-center gap-2">
                 <div className="skeleton-base skeleton-pill w-4 h-4 rounded-full" />
                 <Skeleton width="60%" />
@@ -614,7 +614,7 @@ export function FilamentsTab() {
 
       {/* Filters */}
       {filaments.length > 0 && (
-        <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4">
+        <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
           <div className="flex items-center gap-2 mb-3">
             <FilterIcon className="h-4 w-4 text-pf-text-secondary" />
             <span className="text-sm font-medium text-pf-text-primary">Filters:</span>
@@ -739,7 +739,7 @@ export function FilamentsTab() {
 
       {/* Bulk edit toolbar */}
       {someSelected && (
-        <div className="bg-pf-accent-bg/15 border border-pf-accent/50 rounded-xl px-4 py-3 flex items-center justify-between">
+        <div className="bg-pf-accent-bg/15 border border-pf-accent/50 rounded-lg px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="text-sm font-medium text-pf-accent">
               {selectedIds.size} filament{selectedIds.size !== 1 ? 's' : ''} selected

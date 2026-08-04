@@ -146,6 +146,7 @@ export default function HistoryJobCard({
             <Badge
               key={tag.id}
               variant={getCategoryBadgeVariant(tag.category)}
+              shape="tag"
               size="sm"
             >
               {tag.category && (

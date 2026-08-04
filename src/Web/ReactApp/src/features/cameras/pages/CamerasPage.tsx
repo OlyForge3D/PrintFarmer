@@ -285,7 +285,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
   const showInlineAttention = Boolean(cameraAttention) && !imageError && (hasStream || hasSnapshot);
 
   return (
-    <div className="rounded-xl shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
+    <div className="rounded-lg shadow-lg backdrop-blur-xl bg-pf-bg-0/5 border border-white/10 hover:border-white/20 transition-colors overflow-hidden flex flex-col">
       {/* Camera feed */}
       <div ref={previewContainerRef} className="relative w-full aspect-video bg-pf-bg-2">
         {cameraMode === 'stream' && hasStream && activeUrl ? (
@@ -399,7 +399,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
         )}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-2 rounded-full bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
+          <div className="inline-flex items-center gap-2 rounded-xs bg-pf-bg-2 px-2.5 py-1 text-[11px] text-pf-text-secondary">
             <span>{cameraMode === 'stream' ? 'Live stream' : 'Snapshot preview'}</span>
           </div>
 
@@ -415,7 +415,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
               iconCenter={<RotateCw className="w-4 h-4" />}
             />
             {hasModeToggle && (
-              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
                 <Button
                   type="button"
                   variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}
@@ -443,7 +443,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
                 href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-8 items-center justify-center rounded-full border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                className="inline-flex h-8 items-center justify-center rounded-sm border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
                 title={`Open ${camera.name} in a new tab`}
                 aria-label={`Open ${camera.name} in a new tab`}
               >

@@ -276,7 +276,7 @@ export const ProfileImportWizardPage: React.FC = () => {
       {/* Header with printer info - only show when model is selected */}
       {(modelId || selectedModelInfo) && (
         <div className="mb-6">
-          <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-4">
+          <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-4">
             <div className="flex items-center gap-4">
               <div className="p-3 bg-pf-accent/10 rounded-lg">
                 <Package className="h-6 w-6 text-pf-accent" />

@@ -227,7 +227,7 @@ export function MaterialClustersTab() {
                     {cluster.members.map((member) => (
                       <span
                         key={member.filamentTypeId}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-pf-accent-bg px-3 py-1 text-sm text-pf-text-primary"
+                        className="inline-flex items-center gap-1.5 rounded-xs bg-pf-accent-bg px-3 py-1 text-sm text-pf-text-primary"
                       >
                         {member.filamentTypeName}
                         <Button

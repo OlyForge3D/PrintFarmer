@@ -98,7 +98,7 @@ export function DashboardWidget({
   const contentId = `widget-content-${storageKey || title.replace(/\s+/g, '-').toLowerCase()}`;
 
   return (
-    <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden self-start ${className}`}>
+    <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden self-start ${className}`}>
       {/* Header - matches MaintenanceAlertsWidget styling exactly */}
       <div className={`px-4 py-3 flex items-center justify-between ${!isCollapsed ? 'border-b border-pf-border' : ''}`}>
         {/* Left side: Icon + Title/Subtitle */}

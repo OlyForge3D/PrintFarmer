@@ -445,16 +445,16 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
   return (
     <article
-      className="pf-detailed-printer-card relative rounded-xl border border-white/10 bg-pf-card p-3 shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
+      className="pf-detailed-printer-card relative rounded-lg border border-white/10 bg-pf-card p-3 shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
       style={{ transform: 'translateZ(0)' }}
     >
       {/* Colored header — background tinted by printer state */}
-      <div className={`px-3 pt-3 pb-2 rounded-t-xl -mx-3 -mt-3 ${headerClassName}`}>
+      <div className={`px-3 pt-3 pb-2 rounded-t-lg -mx-3 -mt-3 ${headerClassName}`}>
         <div className="flex items-center gap-2">
           <div className="font-bold text-lg text-pf-text-primary font-bebas uppercase tracking-wide truncate">
             {printer.name}
           </div>
-          <div className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+          <div className="inline-flex items-center px-2 py-0.5 rounded-xs text-xs font-medium shrink-0 bg-black/30 border border-white/20">
             <span className="text-pf-text-primary font-medium">
               {statusLabel}
             </span>

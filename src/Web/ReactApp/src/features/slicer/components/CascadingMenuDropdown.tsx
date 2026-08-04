@@ -299,7 +299,7 @@ export function FilamentProfileDropdown({
                         key={mfr}
                         type="button"
                         onClick={() => toggleHiddenMfr(mfr)}
-                        className={`px-2 py-0.5 text-xs rounded-full border transition-colors
+                        className={`px-2 py-0.5 text-xs rounded-sm border transition-colors
                           ${hidden ? 'border-pf-border text-pf-text-muted bg-transparent' : 'border-pf-accent-2 text-pf-accent-2 bg-pf-accent-2/10'}`}
                       >
                         {mfr}
@@ -319,7 +319,7 @@ export function FilamentProfileDropdown({
                         key={mat}
                         type="button"
                         onClick={() => toggleHiddenMat(mat)}
-                        className={`px-2 py-0.5 text-xs rounded-full border transition-colors
+                        className={`px-2 py-0.5 text-xs rounded-sm border transition-colors
                           ${hidden ? 'border-pf-border text-pf-text-muted bg-transparent' : 'border-pf-accent-2 text-pf-accent-2 bg-pf-accent-2/10'}`}
                       >
                         {mat}

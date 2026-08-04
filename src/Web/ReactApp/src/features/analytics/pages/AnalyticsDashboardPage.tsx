@@ -186,7 +186,7 @@ const MaintenanceForecastSection: React.FC<MaintenanceForecastSectionProps> = ({
                     ~{task.estimatedDaysUntilDue} days
                   </span>
                   <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                    className={`rounded-xs px-2 py-0.5 text-xs font-medium ${
                       task.priority === 'High'
                         ? 'bg-pf-error/10 text-pf-error'
                         : 'bg-pf-warning/10 text-pf-warning'

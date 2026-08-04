@@ -107,7 +107,7 @@ export function PrinterCameraPreview({
   return (
     <div
       className={clsx(
-        'relative overflow-hidden rounded-xl border border-pf-border bg-pf-bg-2/40',
+        'relative overflow-hidden rounded-lg border border-pf-border bg-pf-bg-2/40',
         className
       )}
     >
@@ -221,7 +221,7 @@ export function PrinterCameraPreview({
             )}
 
             {hasModeToggle && (
-              <div className="flex gap-1 rounded-full border border-pf-border bg-pf-bg-2 p-1">
+              <div className="flex gap-1 rounded-md border border-pf-border bg-pf-bg-2 p-1">
                 <Button
                   type="button"
                   variant={cameraMode === 'snapshot' ? 'primary' : 'ghost'}

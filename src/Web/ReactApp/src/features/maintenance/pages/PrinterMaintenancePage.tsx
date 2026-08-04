@@ -608,7 +608,7 @@ export function PrinterMaintenancePage() {
                         <span className="font-medium text-pf-text-primary">{alert.title}</span>
                         {alert.toolheadId && (
                           <span
-                            className="text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                            className="text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-xs"
                             data-testid={`alert-toolhead-tag-${alert.id}`}
                           >
                             {toolheadLabel(alert.toolheadId)}
@@ -655,7 +655,7 @@ export function PrinterMaintenancePage() {
                           <span className="font-medium text-pf-text-primary">{deployment.planName}</span>
                           {deployment.toolheadId && (
                             <span
-                              className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                              className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-xs"
                               data-testid={`deployment-toolhead-tag-${deployment.id}`}
                             >
                               {toolheadLabel(deployment.toolheadId)}
@@ -713,7 +713,7 @@ export function PrinterMaintenancePage() {
                             )}
                             {log.toolheadId && (
                               <span
-                                className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-full"
+                                className="ml-2 text-xs px-2 py-0.5 border border-pf-border text-pf-text-secondary rounded-xs"
                                 data-testid={`log-toolhead-tag-${log.id}`}
                               >
                                 {toolheadLabel(log.toolheadId)}

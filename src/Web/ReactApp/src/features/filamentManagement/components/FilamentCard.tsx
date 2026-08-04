@@ -26,7 +26,7 @@ export const FilamentCard = React.memo(function FilamentCard({
 }: FilamentCardProps) {
   return (
     <article
-      className={`group relative overflow-hidden rounded-xl border bg-pf-bg-1 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/50 hover:bg-pf-bg-secondary hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0 ${isSelected ? 'border-pf-accent ring-1 ring-pf-accent/30' : 'border-pf-border'}`}
+      className={`group relative overflow-hidden rounded-lg border bg-pf-bg-1 p-4 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/50 hover:bg-pf-bg-secondary hover:shadow-xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0 ${isSelected ? 'border-pf-accent ring-1 ring-pf-accent/30' : 'border-pf-border'}`}
       style={{ transform: 'translateZ(0)' }}
     >
       <div className="flex items-center gap-2 mb-1">
