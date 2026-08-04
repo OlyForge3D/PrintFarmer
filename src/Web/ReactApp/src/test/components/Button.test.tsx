@@ -242,12 +242,17 @@ describe('Button', () => {
   });
 
   // Regression guard for #1087. The ghost variant used to declare its surface as
-  // Tailwind utilities (`[background:none]`, `text-inherit`, `border-transparent`,
-  // `shadow-none`). Those sit in `@layer utilities` alongside everything a caller
-  // passes through `className`, where they competed on source order and won —
-  // silently killing caller backgrounds, gradients, text colours and shadows. The
-  // defaults now live in `@layer components` (`styles/controls.css`) keyed off
-  // `[data-pf-variant='ghost']`, so caller utilities win on layer order.
+  // Tailwind utilities: the CSS `background` shorthand set to none, plus colour,
+  // border-colour and box-shadow resets. Those sit in `@layer utilities` alongside
+  // everything a caller passes through `className`, where they competed on source
+  // order and won — silently killing caller backgrounds, gradients, text colours
+  // and shadows. The defaults now live in `@layer components`
+  // (`styles/controls.css`) keyed off `[data-pf-variant='ghost']`, so caller
+  // utilities win on layer order.
+  //
+  // The class names are described rather than written out on purpose: Tailwind
+  // scans this file as source, so naming a utility even in a comment makes it
+  // emit the rule again.
   //
   // A unit test cannot observe the cascade, but it can observe the precondition:
   // ghost must contribute no paint utility of its own.
