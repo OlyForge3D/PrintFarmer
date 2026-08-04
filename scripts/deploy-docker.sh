@@ -43,7 +43,7 @@ VERSIONS_FILE="$SCRIPT_DIR/docker/container-versions.conf"
 if [[ -f "$VERSIONS_FILE" ]]; then
     source "$VERSIONS_FILE"
     # Export all sourced variables so they're available to called scripts
-    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION BUILD_VERBOSITY
+    export SDK_TAG ASPNET_TAG NODE_TAG NGINX_TAG UBUNTU_TAG ORCASLICER_VERSION ORCASLICER_SHA256 BUILD_VERBOSITY
 fi
 
 # Extract .NET major version from SDK_TAG for display messages (e.g., "10.0-noble" -> "10.0")
@@ -2535,34 +2535,14 @@ EOF
 # Use an absolute path so the script loads the same config regardless of CWD
 CONFIG_FILE="$REPO_ROOT/.deploy-config"
 
-# Load previous configuration if it exists
-resolve_configured_orcaslicer_checksum() {
-    local pinned_checksum
-    pinned_checksum="$(orcaslicer_sha256_for_version "${ORCASLICER_VERSION:-}")"
-
-    if [[ -n "$pinned_checksum" ]]; then
-        ORCASLICER_SHA256="$pinned_checksum"
-    else
-        ORCASLICER_SHA256="${ORCASLICER_SHA256:-}"
-    fi
-
-    export ORCASLICER_VERSION ORCASLICER_SHA256
-}
-
 load_previous_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        local initial_orcaslicer_version="${ORCASLICER_VERSION:-}"
-        local initial_orcaslicer_sha256="${ORCASLICER_SHA256:-}"
-
         print_info "Found previous deployment configuration"
         
         # Source the config file to load variables
         # shellcheck disable=SC1090
-        unset ORCASLICER_SHA256
         source "$CONFIG_FILE"
-        if [[ -z "${ORCASLICER_SHA256:-}" && "${ORCASLICER_VERSION:-}" == "$initial_orcaslicer_version" ]]; then
-            ORCASLICER_SHA256="$initial_orcaslicer_sha256"
-        fi
+        enforce_supported_orcaslicer_release
 
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.
@@ -2736,8 +2716,8 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
-ORCASLICER_SHA256=${ORCASLICER_SHA256:-}
+ORCASLICER_VERSION=$SUPPORTED_ORCASLICER_VERSION
+ORCASLICER_SHA256=$SUPPORTED_ORCASLICER_SHA256
 
 EOF
 
@@ -3391,7 +3371,8 @@ configure_slicing() {
         # Default to 'no' to avoid accidental enabling when slicer work is paused
         prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.4.2}" "ORCASLICER_VERSION"
+            enforce_supported_orcaslicer_release
+            print_info "Using repository-supported OrcaSlicer version $ORCASLICER_VERSION"
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
             ORCA_WORKER_COUNT=0
@@ -4244,8 +4225,8 @@ PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" ||
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
-ORCASLICER_SHA256=${ORCASLICER_SHA256:-}
+ORCASLICER_VERSION=$SUPPORTED_ORCASLICER_VERSION
+ORCASLICER_SHA256=$SUPPORTED_ORCASLICER_SHA256
 # Set only after resolving or pushing an immutable worker image. Leaving this empty keeps
 # calibration generation unavailable while ordinary slicing can continue.
 ORCASLICER_CONTAINER_DIGEST=${ORCASLICER_CONTAINER_DIGEST:-}
@@ -6502,6 +6483,7 @@ redeploy_existing() {
     print_info "Loading previous deployment configuration..."
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
+    enforce_supported_orcaslicer_release
     
     print_success "Loaded configuration:"
     echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
@@ -6521,9 +6503,22 @@ redeploy_existing() {
     # Validate configuration first
     validate_configuration
     
-    # Generate fresh env files with same config
+    # Migrate saved state and generate fresh env files with the supported release.
+    save_deployment_config
     generate_env_file
     generate_react_env_production
+
+    local output_dir="$(pwd)"
+    if ! generate_deployment_config \
+        "${INCLUDE_MONITORING:-false}" \
+        "${INCLUDE_TELEMETRY:-false}" \
+        "${INCLUDE_SECURITY:-false}" \
+        "${INCLUDE_REGISTRY:-false}" \
+        "${INCLUDE_DISCOVERY:-false}" \
+        "$output_dir"; then
+        print_error "Failed to regenerate deployment configuration."
+        exit 1
+    fi
     
     # Remove stale legacy override file - the compose-generator produces a complete
     # docker-compose.yml that already includes the database service configuration.
@@ -6661,7 +6656,9 @@ main() {
         print_info "Loading stored configuration from $CONFIG_FILE"
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
+        enforce_supported_orcaslicer_release
         
+        save_deployment_config
         generate_env_file
         generate_react_env_production
         
@@ -6796,12 +6793,8 @@ main() {
 
     configure_networking
     adjust_connection_strings_for_network_mode
-    local orcaslicer_version_before_configuration="${ORCASLICER_VERSION:-}"
     configure_slicing
-    if [[ "${ORCASLICER_VERSION:-}" != "$orcaslicer_version_before_configuration" ]]; then
-        ORCASLICER_SHA256=""
-    fi
-    resolve_configured_orcaslicer_checksum
+    enforce_supported_orcaslicer_release
     configure_external_storage
     configure_additional
     if ! validate_configuration; then

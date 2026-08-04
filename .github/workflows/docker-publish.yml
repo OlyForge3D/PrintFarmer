@@ -249,7 +249,6 @@ jobs:
               workflow_id: 'orcaslicer-base-image.yml',
               ref: context.ref,
               inputs: {
-                orca_version: '${{ env.ORCA_VERSION }}',
                 force_rebuild: 'false'
               }
             });

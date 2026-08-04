@@ -340,6 +340,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     local worker_compose
     local docker_utils
     local api_docs
+    local container_versions
     local ensure_orca_job
     local global_workflow_permissions
     multistage=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
@@ -354,6 +355,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     worker_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml")
     docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
     api_docs=$(cat "$REPO_ROOT/docs/API.md")
+    container_versions=$(cat "$REPO_ROOT/scripts/docker/container-versions.conf")
     ensure_orca_job=$(sed -n '/^  ensure-orca-base:/,/^  build-containers:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
     global_workflow_permissions=$(sed -n '/^permissions:/,/^jobs:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
 
@@ -369,6 +371,16 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$deploy_script" 'validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}"' "Auto-detected cache images should be validated"
     assert_contains "$deploy_script" 'ALLOW_STUB=false" --build-arg "_SKIP_ORCA_BINARY_BUILD=1' "Cached binary builds must keep embedded metadata validation enabled"
     assert_contains "$powershell_deploy_script" "Get-FileHash -Path \$resolvedAppImagePath -Algorithm SHA256" "PowerShell should verify cached AppImages"
+    assert_not_contains "$deploy_script" "OrcaSlicer version to deploy" "Bash deployment should not offer an OrcaSlicer version selector"
+    assert_not_contains "$powershell_deploy_script" "OrcaSlicer version to deploy" "PowerShell deployment should not offer an OrcaSlicer version selector"
+    assert_contains "$powershell_deploy_script" '$script:SupportedOrcaSlicerVersion = "2.4.2"' "PowerShell deployment should force the supported version"
+    assert_contains "$powershell_deploy_script" '$env:ORCASLICER_VERSION = $script:SupportedOrcaSlicerVersion' "PowerShell compose calls should override inherited versions"
+    assert_contains "$powershell_deploy_script" 'Set-SupportedOrcaSlicerEnvFile -Path ".env"' "PowerShell redeploy should migrate stale environment files"
+    assert_contains "$powershell_deploy_script" '& pwsh -File (Join-Path $PSScriptRoot "compose-generator.ps1") @generatorArgs' "PowerShell redeploy should regenerate stale compose files"
+    assert_contains "$container_versions" 'export SUPPORTED_ORCASLICER_VERSION="2.4.2"' "Container versions should define one supported OrcaSlicer release"
+    assert_contains "$container_versions" 'export ORCASLICER_VERSION="$SUPPORTED_ORCASLICER_VERSION"' "Container versions should override inherited OrcaSlicer versions"
+    assert_contains "$deploy_script" 'enforce_supported_orcaslicer_release' "Bash deployment should reapply the supported release after loading config"
+    assert_contains "$deploy_script" 'Failed to regenerate deployment configuration.' "Bash redeploy should regenerate stale compose files"
     assert_contains "$registry_pull_script" 'validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"' "Registry cache images should be validated before retagging"
     assert_contains "$publish_workflow" 'source scripts/docker-utils.sh' "Publishing should use shared cache validation"
     assert_contains "$ensure_orca_job" 'actions: write' "Base-image bootstrap should receive workflow-dispatch permission"
@@ -388,6 +400,9 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$docker_utils" 'container_id=$(docker create "$image_name" /printfarmer-metadata-inspection' "Cache attestation should inspect a stopped container"
     assert_contains "$docker_utils" 'docker cp' "Cache attestation should copy metadata without executing the image"
     assert_contains "$base_workflow" 'sha256sum --check --strict' "Base image workflow should verify the pinned AppImage checksum"
+    assert_contains "$base_workflow" "ORCA_VERSION: '2.4.2'" "Base image workflow should use the repository-supported release"
+    assert_not_contains "$base_workflow" 'orca_version:' "Base image workflow should not expose a version input"
+    assert_not_contains "$publish_workflow" 'orca_version:' "Publishing should not dispatch a selectable version"
     assert_contains "$preseed_workflow" "default: ''" "Shared Prusa/Orca workflow should not apply an Orca version to Prusa"
     assert_contains "$preseed_workflow" 'VERSION_IN="$ORCASLICER_VERSION"' "Default Orca preseed should use the repository-pinned release"
     assert_contains "$strict_workflow" 'ORCASLICER_VERSION: 2.4.2' "Calibration publication should track the latest supported worker"
@@ -404,7 +419,8 @@ test_stable_default_and_checksum_are_pinned() {
 
     local resolved
     resolved=$(
-        unset ORCASLICER_VERSION ORCASLICER_SHA256
+        export ORCASLICER_VERSION=2.4.0
+        export ORCASLICER_SHA256=46556197dcc2fb55140e0b1e70c28b4c4da3208f12a4a2522012837c9d77ee10
         source "$REPO_ROOT/scripts/docker/container-versions.conf"
         printf '%s|%s' "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
     )

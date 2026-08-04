@@ -63,9 +63,17 @@ While many components are implemented, the OrcaSlicer integration is **NOT produ
 
 ---
 
-## Dual-Engine (Current + Previous) Support
+## Current Worker and Legacy Job Drain
 
-As of issue #578, PrintFarmer can run **two** OrcaSlicer engine versions concurrently — the current default (`2.4.2`) plus the previous version (`2.3.1`). This lets operators finish jobs sliced against a prior engine while migrating to the newer one, without a big-bang cutover.
+PrintFarmer deploys one repository-supported current OrcaSlicer worker release
+(`2.4.2`). The Bash and PowerShell deployment scripts do not expose a version
+selector and replace stale environment or saved configuration values with the
+supported version and checksum.
+
+Issue #578 also provides an opt-in `2.3.1` worker solely for draining existing
+jobs pinned to the legacy engine during migration. This compatibility service
+runs alongside the current worker; it cannot replace or change the supported
+current worker release.
 
 ### How dispatch works
 
@@ -308,9 +316,6 @@ LABEL orcaslicer.version="${ORCASLICER_VERSION}" \
 # Option 1: Build script (recommended)
 ./scripts/build-orcaslicer-optimized.sh
 
-# With specific version
-ORCASLICER_VERSION=2.4.2 ./scripts/build-orcaslicer-optimized.sh
-
 # With GitHub token (avoid rate limits)
 GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 
@@ -339,7 +344,7 @@ docker compose --profile orca build orcaslicer-worker
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ORCASLICER_VERSION` | 2.4.2 | Stable OrcaSlicer release version to download |
+| `ORCASLICER_VERSION` | 2.4.2 | Repository-controlled stable release build argument |
 | `ORCASLICER_SHA256` | `d12fb8...029fd` | Official x86_64 Ubuntu 24.04 AppImage SHA-256 |
 | `ALLOW_STUB` | false | Explicit CI-only escape hatch; production builds remain fail-closed |
 
@@ -347,6 +352,8 @@ Cached binary images are reusable only when both `orcaslicer.version` and
 `orcaslicer.sha256` labels exactly match the requested release. The same
 values are embedded in the binary layer. Missing or mismatched metadata causes
 the deploy/build path to reject the cached image instead of retagging it.
+Deployment scripts always request the repository-supported version/checksum
+pair; these build arguments are retained only as internal upgrade surfaces.
 
 ### Performance
 
@@ -1068,7 +1075,13 @@ dotnet test --filter "FullyQualifiedName~OrcaSlicer"
 
 ## Schema Version Awareness (#578)
 
-PrintFarmer runs two OrcaSlicer engine versions side by side (current 2.4.2 and previous 2.3.1). Settings that a user edits on the Slice Job page must match the engine that will actually process the job — fields added in 2.4.x must not appear when the job is pinned to 2.3.1, fields retired in 2.4.x must not appear when the job is pinned to 2.4.2, and fields that were renamed between versions must resolve to the correct key for the pinned engine.
+PrintFarmer normally runs the single repository-supported OrcaSlicer engine
+(current 2.4.2). During a legacy-job drain, it may temporarily run the isolated
+previous 2.3.1 worker alongside it. Settings that a user edits on the Slice Job
+page must match the engine that will actually process the job: fields added in
+2.4.x must not appear for a job already pinned to 2.3.1, fields retired in
+2.4.x must not appear for 2.4.2, and renamed fields must resolve to the key for
+the pinned engine.
 
 ### API surface
 

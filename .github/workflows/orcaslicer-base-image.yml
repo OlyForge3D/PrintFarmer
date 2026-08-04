@@ -11,26 +11,18 @@ on:
       - '.github/workflows/orcaslicer-base-image.yml'
   workflow_dispatch:
     inputs:
-      orca_version:
-        description: 'OrcaSlicer version to build'
-        required: false
-        default: '2.4.2'
       force_rebuild:
         description: 'Force rebuild even if image exists'
         required: false
         default: 'false'
   # Trigger from other workflows
   workflow_call:
-    inputs:
-      orca_version:
-        type: string
-        default: '2.4.2'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
   BASE_IMAGE_NAME: orcaslicer-base
-  ORCA_VERSION: ${{ inputs.orca_version || '2.4.2' }}
+  ORCA_VERSION: '2.4.2'
   ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 
 jobs:
@@ -55,11 +47,6 @@ jobs:
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
           echo "Checking for existing image: $IMAGE"
 
-          if [ "$ORCA_VERSION" != "2.4.2" ]; then
-            echo "::error::No pinned AppImage checksum is configured for OrcaSlicer v${ORCA_VERSION}"
-            exit 1
-          fi
-          
           # Force rebuild if workflow file changed (detected by checking if this is a push to workflow path)
           # This handles the case where we need to fix the image build process
           if [ "${{ github.event_name }}" = "push" ]; then

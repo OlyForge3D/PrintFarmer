@@ -36,6 +36,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:SupportedOrcaSlicerVersion = "2.4.2"
+$script:SupportedOrcaSlicerSha256 = "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+$env:ORCASLICER_VERSION = $script:SupportedOrcaSlicerVersion
+$env:ORCASLICER_SHA256 = $script:SupportedOrcaSlicerSha256
 
 # ============================================================================
 # ALL FUNCTION DEFINITIONS - Place before any execution code
@@ -69,6 +73,29 @@ function Write-Header {
     Write-Host "  $Message" -ForegroundColor Blue
     Write-Host "=============================================================" -ForegroundColor Blue
     Write-Host ""
+}
+
+function Set-SupportedOrcaSlicerConfig {
+    param([hashtable]$Config)
+
+    $Config['ORCASLICER_VERSION'] = $script:SupportedOrcaSlicerVersion
+    $Config['ORCASLICER_SHA256'] = $script:SupportedOrcaSlicerSha256
+}
+
+function Set-SupportedOrcaSlicerEnvFile {
+    param([string]$Path = ".env")
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $content = @(
+        Get-Content $Path |
+            Where-Object { $_ -notmatch '^ORCASLICER_(VERSION|SHA256)=' }
+    )
+    $content += "ORCASLICER_VERSION=$script:SupportedOrcaSlicerVersion"
+    $content += "ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256"
+    Set-Content -Path $Path -Value $content -Encoding UTF8
 }
 
 # Show help message
@@ -550,6 +577,8 @@ PFARM__NetworkDiscovery__DiscoverySubnets=
 # Deployment
 DEPLOYMENT_MODE=$Architecture
 ENABLE_DISTRIBUTED_SLICING=true
+ORCASLICER_VERSION=$script:SupportedOrcaSlicerVersion
+ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256
 "@
     
     # Write to file
@@ -930,9 +959,10 @@ function Deploy-OfflineMode {
 # Download OrcaSlicer Linux AppImage for offline deployments
 function Cache-OrcaSlicer {
     param(
-        [string]$TargetDir = "./docker-images/orcaslicer",
-        [string]$Version = "2.4.2"
+        [string]$TargetDir = "./docker-images/orcaslicer"
     )
+
+    $Version = $script:SupportedOrcaSlicerVersion
     
     Write-Header "Caching OrcaSlicer Linux AppImage"
     
@@ -982,13 +1012,7 @@ function Cache-OrcaSlicer {
         $fileName = $appImageAsset.name
         $appImagePath = Join-Path $TargetDir $fileName
 
-        $pinnedChecksums = @{
-            '2.4.2' = 'd12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd'
-        }
-        if (-not $pinnedChecksums.ContainsKey($Version)) {
-            throw "No pinned SHA-256 checksum is configured for OrcaSlicer $Version"
-        }
-        $expectedSha256 = $pinnedChecksums[$Version]
+        $expectedSha256 = $script:SupportedOrcaSlicerSha256
 
         $assetDigest = [string]$appImageAsset.digest
         if ($assetDigest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
@@ -1225,11 +1249,14 @@ function Load-DeploymentConfig {
                 $config[$matches[1]] = $matches[2]
             }
         }
+        Set-SupportedOrcaSlicerConfig -Config $config
         return $config
     }
     
     Write-Info "No existing configuration found"
-    return @{}
+    $config = @{}
+    Set-SupportedOrcaSlicerConfig -Config $config
+    return $config
 }
 
 # Save deployment configuration to file
@@ -1239,6 +1266,7 @@ function Save-DeploymentConfig {
         [string]$ConfigPath = "./.deploy-config"
     )
     
+    Set-SupportedOrcaSlicerConfig -Config $Config
     Write-Info "Saving deployment configuration to $ConfigPath..."
     
     $content = @"
@@ -1702,6 +1730,43 @@ function Verify-Deployment {
 
 function Redeploy-Deployment {
     Write-Header "Redeploying PrintFarmer"
+    Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
+
+    if (-not (Test-Path "./.deploy-config")) {
+        Write-ErrorMsg "No previous deployment configuration found"
+        exit 1
+    }
+
+    $config = Load-DeploymentConfig -ConfigPath "./.deploy-config"
+    Save-DeploymentConfig -Config $config -ConfigPath "./.deploy-config"
+    Set-SupportedOrcaSlicerEnvFile -Path ".env"
+
+    $generatorArgs = @(
+        "-Architecture", $config['ARCHITECTURE'],
+        "-DbProvider", $config['DB_PROVIDER'],
+        "-OutputDir", (Get-Location).Path
+    )
+    if ($config['INCLUDE_MONITORING'] -eq 'true') {
+        $generatorArgs += "-IncludeMonitoring"
+    }
+    if ($config['INCLUDE_TELEMETRY'] -eq 'true') {
+        $generatorArgs += "-IncludeTelemetry"
+    }
+    if ($config['INCLUDE_SECURITY'] -eq 'true') {
+        $generatorArgs += "-IncludeSecurity"
+    }
+    if ($config['INCLUDE_REGISTRY'] -eq 'true') {
+        $generatorArgs += "-IncludeRegistry"
+    }
+    if ($config['ENABLE_ORCA_WORKER'] -eq 'true') {
+        $generatorArgs += "-EnableOrcaWorker", $config['ORCA_WORKER_COUNT']
+    }
+
+    & pwsh -File (Join-Path $PSScriptRoot "compose-generator.ps1") @generatorArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to regenerate docker-compose.yml"
+        exit 1
+    }
     
     Write-Info "Stopping existing containers..."
     try {
@@ -1878,9 +1943,8 @@ if (-not $NonInteractive) {
             $config['ENABLE_ORCA_WORKER'] = 'true'
             Write-Success "OrcaSlicer workers enabled"
             
-            # OrcaSlicer version
-            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.4.2)"
-            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.4.2' } else { $orcaVersion }
+            Set-SupportedOrcaSlicerConfig -Config $config
+            Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
             
             # Worker replica count
             $workerCount = Read-Host "Number of OrcaSlicer worker replicas (default: 1)"
