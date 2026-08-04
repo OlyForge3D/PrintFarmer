@@ -187,7 +187,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
                   <div
                     key={alias.id}
                     className={`flex items-center justify-between gap-2 rounded px-3 py-2 ${
-                      alias.isNew ? 'bg-pf-success/10 border border-pf-success/30' : 'bg-pf-bg-secondary'
+                      alias.isNew ? 'bg-pf-success/10 border border-pf-success/30' : 'bg-pf-bg-1'
                     }`}
                   >
                     <span className="text-sm text-pf-text-primary">
@@ -212,7 +212,7 @@ export const ModelAliasEditor = forwardRef<ModelAliasEditorRef, ModelAliasEditor
       </div>
 
       {aliases.length === 0 && (
-        <div className="text-center py-4 text-pf-text-secondary rounded-sm bg-pf-bg-secondary">
+        <div className="text-center py-4 text-pf-text-secondary rounded-sm bg-pf-bg-1">
           <p className="text-sm">No aliases configured yet</p>
           <p className="text-xs mt-1">Add aliases to help map slicer-specific model names</p>
         </div>

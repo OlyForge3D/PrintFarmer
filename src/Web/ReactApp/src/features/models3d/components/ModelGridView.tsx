@@ -58,7 +58,7 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
           return (
             <div
               key={model.id}
-              className={`bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:bg-pf-bg-secondary hover:shadow-lg transition-colors flex flex-col group ${
+              className={`bg-pf-bg-1 rounded-lg border border-pf-border overflow-hidden hover:bg-pf-bg-2 hover:shadow-lg transition-colors flex flex-col group ${
                 isSelected ? 'ring-2 ring-pf-accent' : ''
               }`}
               onContextMenu={handleRightClick}

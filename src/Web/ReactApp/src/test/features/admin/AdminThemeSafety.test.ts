@@ -211,52 +211,42 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * name. Checking the name directly reports `pf-card` and `pf-sidebar` as dead
  * when both paint correctly.
  *
- * This is the other half, written as a ratchet rather than a clean assertion.
- * The pre-existing offenders are pinned by name below and the comparison is an
- * exact set equality, so:
+ * This is the other half. It began as a ratchet: the pre-existing offenders were
+ * pinned by name and compared with exact set equality, so introducing a new dead
+ * utility failed (not in the list) and fixing a pinned one also failed, forcing
+ * its line to be deleted. The list could only shrink.
  *
- *   - introducing a new dead utility fails (it is not in the list), and
- *   - fixing a pinned one also fails, forcing its line to be deleted.
+ * It has now shrunk to nothing (#1046), so the ratchet is gone and this is the
+ * clean assertion it was always meant to become: no colour utility may name a
+ * token that does not exist.
  *
- * The list can therefore only shrink. Burning it down is tracked separately —
- * it spans 105 call sites across features unrelated to any settings work, and
- * each one needs a human decision about which existing token it meant.
+ * One limit worth stating, because the previous version of this scan did not
+ * state its own and so read as a stronger guarantee than it gave: this checks
+ * *utilities*. A raw `var(--color-pf-x)` written into an inline style or a
+ * `style={{}}` prop is not a utility and is invisible here. `Slider.tsx` and
+ * `MmuControlBox.tsx` both do that today against tokens that do not exist; they
+ * are tracked separately rather than silently covered by this assertion.
+ *
+ * The same blind spot covers Tailwind arbitrary values: a class written as an
+ * arbitrary value puts a bracket where the pattern below needs the token name,
+ * so it never anchors. This repo had five such usages, all naming
+ * `--pf-hover-overlay`. Rather than document that hole, it was closed: the
+ * token is now mapped in `@theme` as `--color-pf-hover-overlay` and all five
+ * sites use the ordinary `hover:bg-pf-hover-overlay`, so they are governed by
+ * the assertion below like any other utility. Verified by removing the mapping,
+ * which turns this suite red naming `pf-hover-overlay`.
+ *
+ * Zero arbitrary-value usages *of `--pf-hover-overlay`* remain. Arbitrary
+ * colour values in general do not: `Button.tsx` and `ThemeSwitcher.tsx` among
+ * others still write `bg-[var(--pf-card-bg)]` and similar, and every one of
+ * those is invisible here for the same bracket reason. They name live tokens
+ * today, so none is dead, but that is a fact about the current tree and not
+ * something this assertion enforces. Together with the inline-`var()` sites
+ * above they are the surviving instances of the blind spot, tracked in #1086,
+ * which proposes resolving every `var()` reference against every theme as a
+ * separate check, since that needs a different mechanism from this one.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
-  const KNOWN_DEAD = [
-    'pf-accent-dark',
-    'pf-background',
-    'pf-background-secondary',
-    'pf-bg',
-    'pf-bg-3',
-    'pf-bg-card',
-    'pf-bg-dark',
-    'pf-bg-hover',
-    'pf-bg-primary',
-    'pf-bg-secondary',
-    'pf-bg-tertiary',
-    'pf-border-hover',
-    'pf-hover',
-    'pf-info-text',
-    'pf-input',
-    'pf-muted',
-    'pf-panel-hover',
-    'pf-panel-secondary',
-    'pf-primary',
-    'pf-primary-hover',
-    'pf-status-danger',
-    'pf-surface',
-    'pf-surface-elevated',
-    'pf-surface-hover',
-    'pf-surface-secondary',
-    'pf-surface-tertiary',
-    'pf-table-header',
-    'pf-table-header-text',
-    'pf-text',
-    'pf-text-0',
-    'pf-text-1',
-  ];
-
   const SRC = resolve(HERE, '../../..');
 
   /**
@@ -290,7 +280,34 @@ describe('colour utilities name a token that exists (#1023)', () => {
     return { declared, mapped };
   }
 
-  /** `pf-*` colour utilities used in source, excluding this file's own examples. */
+  /**
+   * `pf-*` colour utilities used in source, excluding this file's own examples.
+   *
+   * The prefix list has to cover every Tailwind utility that can name a colour
+   * token, not just the bare seven. A narrower pattern is not merely incomplete,
+   * it is misleading: it lets the assertion below report "no dead utilities"
+   * while `border-t-pf-bg-3`, `to-pf-accent-dark` and `ring-offset-pf-bg` are
+   * all live in the tree naming tokens that do not exist (found in review of
+   * #1046, after a narrower version of this scan certified the burn-down done).
+   *
+   * Covered beyond the bare colour prefixes:
+   *   - directional borders and dividers  `border-t-`, `divide-x-`
+   *   - gradient stops                    `from-`, `via-`, `to-`
+   *   - ring offset                       `ring-offset-`
+   *   - outline / shadow / accent / caret / placeholder / decoration
+   *
+   * `placeholder-` was added after review of #1046 found the list still short
+   * by one prefix with four live sites (FileUpload, UnifiedLoggingDashboard,
+   * PrinterSelectorModal, CascadingMenuDropdown). All four happen to name live
+   * tokens today, so nothing was dead -- but the hole was real and only shows
+   * up under mutation, which is how it was found. That is twice this list has
+   * been widened by enumeration and twice it was still incomplete afterwards;
+   * enumerating prefixes only closes the cases someone thought of. Inverting
+   * this to "any prefix followed by `-pf-`, minus an allow-list" is tracked
+   * separately in #1086, because it needs to exclude `--pf-*` custom-property
+   * *declarations* (e.g. `--pf-hover-overlay:`), which are legitimately not
+   * utilities and would otherwise all be reported dead.
+   */
   function usedUtilities(): Set<string> {
     const found = new Set<string>();
     const walk = (dir: string) => {
@@ -305,7 +322,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
         if (entry.name === 'AdminThemeSafety.test.ts') continue;
         const text = readFileSync(full, 'utf8');
         for (const m of text.matchAll(
-          /\b(?:bg|text|border|ring|fill|stroke|divide)-(pf-[a-z0-9-]+)/g,
+          /\b(?:(?:bg|text|border|ring|fill|stroke|divide|outline|shadow|accent|caret|placeholder|decoration)(?:-(?:t|b|l|r|s|e|x|y|offset))?|from|via|to)-(pf-[a-z0-9-]+)/g,
         )) {
           found.add(m[1]);
         }
@@ -364,7 +381,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
     }
   });
 
-  it('introduces no new dead colour utility', () => {
-    expect(deadUtilities()).toEqual([...KNOWN_DEAD].sort());
+  it('has no dead colour utility', () => {
+    expect(deadUtilities()).toEqual([]);
   });
 });

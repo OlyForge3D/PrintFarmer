@@ -26,7 +26,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
   toggle: 'bg-transparent text-pf-text-secondary enabled:hover:text-pf-text-primary border-transparent',
-  link: 'bg-transparent text-pf-primary enabled:hover:underline border-transparent px-0 py-0 shadow-none',
+  link: 'bg-transparent text-pf-accent enabled:hover:underline border-transparent px-0 py-0 shadow-none',
   unstyled: '' // No default styles - fully controlled by className prop
 };
 
@@ -54,7 +54,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
 ) {
   // For tab variant, apply active styles
   const tabActiveClasses = variant === 'tab' && active
-    ? 'border-pf-primary text-pf-text-primary'
+    ? 'border-pf-accent text-pf-text-primary'
     : variant === 'tab'
     ? 'text-pf-text-muted enabled:hover:text-pf-text-primary'
     : '';

@@ -443,7 +443,7 @@ function CameraViewCard({ camera, canManage, onEdit, onDelete }: CameraViewCardP
                 href={externalUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex h-8 items-center justify-center rounded-sm border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-3"
+                className="inline-flex h-8 items-center justify-center rounded-sm border border-pf-border bg-pf-bg-2 px-2.5 text-pf-text-primary transition hover:border-pf-border-strong hover:bg-pf-bg-1"
                 title={`Open ${camera.name} in a new tab`}
                 aria-label={`Open ${camera.name} in a new tab`}
               >

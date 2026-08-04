@@ -54,8 +54,8 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
           onClick={() => onChange({ type: 'preset', days: opt.value })}
           className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             !isCustom && presetDays === opt.value
-              ? 'bg-pf-primary text-white'
-              : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+              ? 'bg-pf-accent text-white'
+              : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-bg-2'
           }`}
           aria-pressed={!isCustom && presetDays === opt.value}
         >
@@ -69,8 +69,8 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
             onClick={handleCustomToggle}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               isCustom
-                ? 'bg-pf-primary text-white'
-                : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+                ? 'bg-pf-accent text-white'
+                : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-bg-2'
             }`}
             aria-pressed={isCustom}
           >

@@ -486,7 +486,7 @@ export function PrinterMaintenancePage() {
       </p>
       {isLoading ? (
         <div className="flex items-center justify-center py-12">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-primary" />
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent" />
         </div>
       ) : (
         <div className="space-y-6">
@@ -546,7 +546,7 @@ export function PrinterMaintenancePage() {
 
           {/* Scope filter — only for multi-toolhead printers. */}
           {eligibleToolheads.length >= 2 && (
-            <div className="bg-pf-bg-card border border-pf-border rounded-lg p-4">
+            <div className="bg-pf-card border border-pf-border rounded-lg p-4">
               <ToolheadScopePicker
                 toolheads={printerDetails?.toolheads ?? []}
                 value={scope}
@@ -589,7 +589,7 @@ export function PrinterMaintenancePage() {
 
           {/* Active Alerts Section */}
           {activeAlerts.length > 0 && (
-            <section aria-label="Active alerts" className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
+            <section aria-label="Active alerts" className="bg-pf-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
                 <ExclamationTriangleIcon className="h-5 w-5 text-pf-warning" />
                 Active Alerts
@@ -598,7 +598,7 @@ export function PrinterMaintenancePage() {
                 {activeAlerts.map(alert => (
                   <div 
                     key={alert.id}
-                    className="flex items-center justify-between p-4 bg-pf-bg-dark/50 rounded-lg border border-pf-border"
+                    className="flex items-center justify-between p-4 bg-pf-bg-0/50 rounded-lg border border-pf-border"
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
@@ -636,9 +636,9 @@ export function PrinterMaintenancePage() {
           {/* Two-column layout for Deployed Plans and History */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Deployed Maintenance Plans */}
-            <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
+            <section className="bg-pf-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
-                <ClockIcon className="h-5 w-5 text-pf-primary" />
+                <ClockIcon className="h-5 w-5 text-pf-accent" />
                 Deployed Plans
               </h2>
               {scopedDeployments.length === 0 ? (
@@ -648,7 +648,7 @@ export function PrinterMaintenancePage() {
                   {scopedDeployments.map(deployment => (
                     <div 
                       key={deployment.id}
-                      className="p-4 rounded-lg border bg-pf-bg-dark/50 border-pf-border"
+                      className="p-4 rounded-lg border bg-pf-bg-0/50 border-pf-border"
                     >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
@@ -686,7 +686,7 @@ export function PrinterMaintenancePage() {
             </section>
 
             {/* Maintenance History */}
-            <section className="bg-pf-bg-card border border-pf-border rounded-lg p-6">
+            <section className="bg-pf-card border border-pf-border rounded-lg p-6">
               <h2 className="text-lg font-semibold text-pf-text-primary mb-4 flex items-center gap-2">
                 <CheckCircleIcon className="h-5 w-5 text-pf-success" />
                 Maintenance History
@@ -701,13 +701,13 @@ export function PrinterMaintenancePage() {
                     .map(log => (
                       <div 
                         key={log.id}
-                        className="p-4 bg-pf-bg-dark/50 rounded-lg border border-pf-border"
+                        className="p-4 bg-pf-bg-0/50 rounded-lg border border-pf-border"
                       >
                         <div className="flex items-start justify-between">
                           <div className="flex-1">
                             <span className="font-medium text-pf-text-primary">{log.taskName}</span>
                             {log.component && (
-                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-primary rounded-sm">
+                              <span className="ml-2 text-xs px-2 py-0.5 bg-pf-accent-bg/20 text-pf-accent rounded-sm">
                                 {log.component}
                               </span>
                             )}
@@ -786,9 +786,9 @@ interface StatCardProps {
 
 function StatCard({ icon: Icon, label, value, highlight }: StatCardProps) {
   return (
-    <div className={`p-4 rounded-lg border ${highlight ? 'bg-pf-warning/10 border-pf-warning/30' : 'bg-pf-bg-card border-pf-border'}`}>
+    <div className={`p-4 rounded-lg border ${highlight ? 'bg-pf-warning/10 border-pf-warning/30' : 'bg-pf-card border-pf-border'}`}>
       <div className="flex items-center gap-3">
-        <Icon className={`h-8 w-8 ${highlight ? 'text-pf-warning' : 'text-pf-primary'}`} />
+        <Icon className={`h-8 w-8 ${highlight ? 'text-pf-warning' : 'text-pf-accent'}`} />
         <div>
           <p className="text-2xl font-bold text-pf-text-primary">{value}</p>
           <p className="text-xs text-pf-text-tertiary">{label}</p>

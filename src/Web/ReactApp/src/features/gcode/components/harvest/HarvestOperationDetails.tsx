@@ -121,24 +121,24 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       {/* Row 1: Printer name, Status, Started/Completed on same line */}
       <div className="flex items-center gap-6 mb-3">
         <div className="shrink-0">
-          <div className="text-lg font-bold text-pf-primary">{operation.printerName}</div>
+          <div className="text-lg font-bold text-pf-accent">{operation.printerName}</div>
         </div>
         <div className="shrink-0">
-          <span className="text-sm font-medium text-pf-text-1">Status:</span>
-          <span className="ml-1 text-sm font-semibold text-pf-text-0">{operation.status}</span>
+          <span className="text-sm font-medium text-pf-text-secondary">Status:</span>
+          <span className="ml-1 text-sm font-semibold text-pf-text-primary">{operation.status}</span>
         </div>
         <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium text-pf-text-1">
+          <span className="text-sm font-medium text-pf-text-secondary">
             {started.toLocaleString()}
             {completed && <span> → {completed.toLocaleString()}</span>}
-            {completed && <span className="ml-2 text-xs text-pf-muted">({duration})</span>}
+            {completed && <span className="ml-2 text-xs text-pf-text-muted">({duration})</span>}
           </span>
         </div>
       </div>
       
       {/* Row 2: File Stats Chicklets */}
       <div className="flex flex-wrap gap-2">
-        <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-0 text-xs font-semibold flex items-center justify-center px-2">
+        <div className="h-7 rounded-sm bg-pf-bg-2 border border-pf-border text-pf-text-primary text-xs font-semibold flex items-center justify-center px-2">
           Found <span className="font-bold ml-1">{operation.filesFound}</span>
         </div>
         <div className="h-7 rounded-sm bg-pf-success-bg border border-pf-success-border text-pf-success-text text-xs font-semibold flex items-center justify-center px-2">
@@ -172,7 +172,7 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
           <CloseIcon className="h-4 w-4" />
         </Button>
       )}
-      <h2 className="text-xl font-bold mb-3 text-pf-text-0 shrink-0">Harvest Operation Details</h2>
+      <h2 className="text-xl font-bold mb-3 text-pf-text-primary shrink-0">Harvest Operation Details</h2>
       <div className="mb-3 shrink-0">
         {summaryTable}
       </div>
@@ -277,8 +277,8 @@ export function HarvestOperationDetails({ operation: initialOperation, operation
       )}
 
       <div className="mb-2 shrink-0">
-        <div className="text-md font-semibold text-pf-primary mb-1">Discovered Files</div>
-        <div className="text-xs text-pf-muted mb-2">
+        <div className="text-md font-semibold text-pf-accent mb-1">Discovered Files</div>
+        <div className="text-xs text-pf-text-muted mb-2">
           You can retry or skip failed files, or import selected files to the library. This list is available for review even after completion or cancellation.
         </div>
       </div>

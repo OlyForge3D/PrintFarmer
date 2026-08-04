@@ -430,7 +430,7 @@ export const GcodeFileBrowser = ({
       if (!gcodeFile) return null;
 
       return (
-        <div className={`relative h-full rounded-lg transition-all ${isSelected ? 'ring-2 ring-pf-primary' : ''}`}>
+        <div className={`relative h-full rounded-lg transition-all ${isSelected ? 'ring-2 ring-pf-accent' : ''}`}>
           <div className="absolute top-2 left-2 z-10">
             <Checkbox
               aria-label={`Select ${file.fileName}`}

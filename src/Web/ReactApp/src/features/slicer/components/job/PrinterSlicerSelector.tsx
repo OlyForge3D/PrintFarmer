@@ -98,7 +98,7 @@ export const PrinterSlicerSelector: React.FC<PrinterSlicerSelectorProps> = ({
         </div>
       ) : printers.length === 0 ? (
         <div className="text-sm text-pf-text-muted p-2 bg-pf-bg-1 rounded-sm">
-          No printers configured. <a href="/printers" className="text-pf-primary hover:underline">Add a printer</a> to get started.
+          No printers configured. <a href="/printers" className="text-pf-accent hover:underline">Add a printer</a> to get started.
         </div>
       ) : (
         <>

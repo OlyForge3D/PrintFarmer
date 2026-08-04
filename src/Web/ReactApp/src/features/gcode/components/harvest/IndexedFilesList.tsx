@@ -386,7 +386,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center gap-3 py-8 text-pf-primary">
+      <div className="flex flex-col items-center justify-center gap-3 py-8 text-pf-accent">
         <svg className="w-8 h-8 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         <p className="font-medium">Loading files...</p>
         <p className="text-sm text-pf-text-secondary">Connecting to harvest operation</p>
@@ -403,7 +403,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   }
   if (!files.length) {
     return (
-      <div className="flex items-center gap-2 text-pf-muted bg-pf-bg-1 rounded-sm px-3 py-2">
+      <div className="flex items-center gap-2 text-pf-text-muted bg-pf-bg-1 rounded-sm px-3 py-2">
         <svg className="w-5 h-5 text-pf-accent animate-spin" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg>
         Discovering files... Files will appear here as they are found.
       </div>
@@ -422,11 +422,11 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
   return (
     <div className="flex flex-col h-full">
       {!hideHeader && (
-        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-primary sticky top-0 bg-pf-bg-1 z-20">Indexed Files</h4>
+        <h4 className="font-semibold px-4 pt-3 pb-2 text-pf-accent sticky top-0 bg-pf-bg-1 z-20">Indexed Files</h4>
       )}
       <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="min-w-full text-sm">
-          <thead className="sticky top-0 bg-pf-table-header text-pf-table-header-text z-30">
+          <thead className="sticky top-0 bg-pf-bg-2 text-pf-text-secondary z-30">
             <tr>
               <th className="p-2 border-b border-pf-border whitespace-nowrap">
                 <Checkbox checked={paginatedFiles.length > 0 && paginatedFiles.every(f => selected.has(f.id))} onChange={e => setSelected(e.target.checked ? new Set([...selected, ...paginatedFiles.map(f => f.id)]) : new Set([...selected].filter(id => !paginatedFiles.map(f => f.id).includes(id))))} title="Select all files on this page" aria-label="Select all files on this page" />
@@ -447,14 +447,14 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
               return (
                 <tr
                   key={key}
-                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'} ${error ? 'border-l-4 border-pf-error' : ''}`}
+                  className={`transition-colors ${selected.has(file.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'} ${error ? 'border-l-4 border-pf-error' : ''}`}
                   tabIndex={0}
                   aria-label={`File ${file.fileName}, status: ${status}${error ? ', error: ' + error : ''}`}
                 >
                   <td className="p-2 border-b border-pf-border text-center">
                     <Checkbox checked={selected.has(file.id)} onChange={() => toggleSelect(file.id)} title={`Select file ${file.fileName}`} aria-label={`Select file ${file.fileName}`} />
                   </td>
-                  <td className="p-2 border-b border-pf-border font-mono text-pf-primary" title={file.filePath}>
+                  <td className="p-2 border-b border-pf-border font-mono text-pf-accent" title={file.filePath}>
                     <div className="flex items-center gap-2">
                       {file.thumbnailUrl && (
                         <img
@@ -476,14 +476,14 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                             ariaLabel={`${file.fileName} import progress`}
                             showPercent={false}
                           />
-                          <span className="text-xs text-pf-muted">
+                          <span className="text-xs text-pf-text-muted">
                             {file.progress.percent}% ({(file.progress.bytesCopied / 1024 / 1024).toFixed(1)}MB / {(file.progress.totalBytes / 1024 / 1024).toFixed(1)}MB)
                           </span>
                         </div>
                       )}
                     </td>
                   )}
-                  <td className="p-2 border-b border-pf-border text-right text-pf-muted">
+                  <td className="p-2 border-b border-pf-border text-right text-pf-text-muted">
                     <span className="text-xs">{(file.fileSizeBytes / 1024).toFixed(1)} KB</span>
                   </td>
                   <td className="p-2 border-b border-pf-border text-center">
@@ -541,7 +541,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
               </Select>
             </div>
           </div>
-          <span className="text-pf-muted text-xs">
+          <span className="text-pf-text-muted text-xs">
             Showing {files.length === 0 ? 0 : startIdx + 1}-{Math.min(endIdx, files.length)} of {files.length} files
           </span>
           {totalPages > 1 && (
@@ -564,7 +564,7 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
                 title="Previous page"
                 iconLeft={<ArrowLeftIcon className="h-3 w-3" />}
               />
-              <span className="text-pf-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
+              <span className="text-pf-text-muted text-xs px-2 py-1">Page {currentPage + 1} of {totalPages}</span>
               <Button
                 variant="secondary"
                 size="sm"
@@ -610,11 +610,11 @@ export const IndexedFilesList = forwardRef<IndexedFilesListRef, IndexedFilesList
         <Modal isOpen={!!errorModalFile} onClose={() => setErrorModalFile(null)} title="File Import Error" size="md">
           <div className="space-y-4">
             <div>
-              <h3 className="font-semibold text-pf-primary mb-2">File Name</h3>
+              <h3 className="font-semibold text-pf-accent mb-2">File Name</h3>
               <p className="text-pf-text-secondary font-mono text-sm">{errorModalFile.fileName}</p>
             </div>
             <div>
-              <h3 className="font-semibold text-pf-primary mb-2">Error Details</h3>
+              <h3 className="font-semibold text-pf-accent mb-2">Error Details</h3>
               <p className="text-pf-error bg-pf-error-bg rounded-sm px-3 py-2 text-sm">{errorModalFile.error || 'No error details available'}</p>
             </div>
             <div className="flex gap-2 justify-end pt-4">

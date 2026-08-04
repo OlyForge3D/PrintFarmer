@@ -107,7 +107,7 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-primary" />
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent" />
       </div>
     );
   }
@@ -211,7 +211,7 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
         <div className="text-center py-3 border-t border-pf-border">
           <Button 
             variant="link"
-            className="text-sm text-pf-primary hover:text-pf-primary-hover"
+            className="text-sm text-pf-accent hover:text-pf-accent-hover"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
             View all {stats.length} printers →

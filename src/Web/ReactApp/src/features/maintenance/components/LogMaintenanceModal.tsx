@@ -185,7 +185,7 @@ export function LogMaintenanceModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Log Maintenance"
-      titleIcon={<WrenchIcon className="h-6 w-6 text-pf-primary" />}
+      titleIcon={<WrenchIcon className="h-6 w-6 text-pf-accent" />}
       size="xl"
       isDisabled={isSubmitting}
       footer={
@@ -365,7 +365,7 @@ export function LogMaintenanceModal({
           <Input
             value={user?.username || user?.email || 'Unknown'}
             disabled
-            className="bg-pf-bg-dark/50"
+            className="bg-pf-bg-0/50"
           />
         </div>
       </form>

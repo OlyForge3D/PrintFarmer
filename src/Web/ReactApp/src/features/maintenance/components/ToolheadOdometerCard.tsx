@@ -49,7 +49,7 @@ export function ToolheadOdometerCard({
       onClick={interactive ? () => onActivate!(odometer.toolheadId) : undefined}
       aria-pressed={interactive ? Boolean(isActive) : undefined}
       className={clsx(
-        'w-full text-left p-4 rounded-lg border bg-pf-bg-card',
+        'w-full text-left p-4 rounded-lg border bg-pf-card',
         isActive ? 'border-pf-accent ring-1 ring-pf-accent/50' : 'border-pf-border',
         interactive &&
           'transition-colors hover:border-pf-accent focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent focus-visible:ring-offset-1 focus-visible:ring-offset-pf-bg-0',
@@ -61,7 +61,7 @@ export function ToolheadOdometerCard({
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium text-pf-text-primary truncate">{label}</div>
           <div className="mt-2 flex items-center gap-2 text-xs">
-            <ClockIcon className="h-4 w-4 shrink-0 text-pf-primary" aria-hidden />
+            <ClockIcon className="h-4 w-4 shrink-0 text-pf-accent" aria-hidden />
             <div className="min-w-0">
               <div className="text-pf-text-tertiary">Cumulative print hours</div>
               <div
@@ -141,7 +141,7 @@ const DUE_STATE_META: Record<
   unknown: {
     label: 'No data',
     icon: QuestionMarkCircleIcon,
-    className: 'bg-pf-bg-dark/50 border-pf-border text-pf-text-tertiary',
+    className: 'bg-pf-bg-0/50 border-pf-border text-pf-text-tertiary',
   },
 };
 

@@ -83,7 +83,7 @@ export function CostDashboardContent({
             label="Material Cost %"
             value={`${materialCostPercentage}%`}
             loading={summaryLoading}
-            color="text-pf-primary"
+            color="text-pf-accent"
           />
           <KpiCard
             label="Energy Cost %"
@@ -241,7 +241,7 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
         <div className="pf-skeleton pf-animate-skeleton h-8 w-20 rounded" />
       </div>
     ) : (
-      <p className={`mt-1 text-2xl font-bold ${color ?? 'text-pf-text'}`}>{value}</p>
+      <p className={`mt-1 text-2xl font-bold ${color ?? 'text-pf-text-primary'}`}>{value}</p>
     )}
   </Card>
 );

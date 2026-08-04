@@ -686,7 +686,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
             Need Help?
           </h2>
           <p className="text-pf-text-secondary text-sm">
-            See the <a href="/docs/SLICER_CONFIGURATION.md" className="text-pf-primary hover:underline">Slicer Configuration Guide</a> for
+            See the <a href="/docs/SLICER_CONFIGURATION.md" className="text-pf-accent hover:underline">Slicer Configuration Guide</a> for
             step-by-step instructions on configuring PrusaSlicer, OrcaSlicer, and other slicers to work with PrintFarmer.
           </p>
         </div>

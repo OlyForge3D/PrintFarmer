@@ -75,9 +75,9 @@ export const AccordionButton: React.FC<AccordionButtonProps> = ({
       disabled={disabled}
       className={clsx(
         'w-full flex items-center justify-between',
-        'bg-pf-bg-secondary hover:bg-pf-bg-tertiary',
+        'bg-pf-bg-1 hover:bg-pf-bg-2',
         'transition-colors',
-        'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-pf-bg-secondary',
+        'disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-pf-bg-1',
         sizeClasses[size],
         className
       )}

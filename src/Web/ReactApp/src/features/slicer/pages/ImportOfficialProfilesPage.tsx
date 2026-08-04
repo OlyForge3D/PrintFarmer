@@ -138,7 +138,7 @@ export const ImportOfficialProfilesPage: React.FC = () => {
                         </FormField>
 
                         {selectedPrinter && (
-                            <div className="mt-4 p-3 bg-pf-background rounded-sm text-sm space-y-1">
+                            <div className="mt-4 p-3 bg-pf-bg-0 rounded-sm text-sm space-y-1">
                                 <p className="text-pf-text-muted">
                                     Printer: <span className="font-medium text-pf-text-primary">{selectedPrinter.name}</span>
                                 </p>

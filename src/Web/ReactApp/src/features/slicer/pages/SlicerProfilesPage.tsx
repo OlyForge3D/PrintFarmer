@@ -977,7 +977,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
                   placeholder="Search profiles by name, material, or manufacturer..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-pf-background border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-primary focus:border-transparent"
+                  className="w-full pl-10 pr-4 py-2 bg-pf-bg-0 border border-pf-border rounded-lg focus:ring-2 focus:ring-pf-accent focus:border-transparent"
                 />
               </div>
               <Button
@@ -992,7 +992,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
             </div>
 
             {/* Primary selection flow (always visible): Manufacturer -> Machine Model -> Process/Filament */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-background rounded-lg">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-3 bg-pf-bg-0 rounded-lg">
               <div>
                 <label className="block text-sm font-medium mb-1">Manufacturer</label>
                 <Select
@@ -1052,7 +1052,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
 
             {/* Advanced filters */}
             {showFilters && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 p-3 bg-pf-background rounded-lg">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3 p-3 bg-pf-bg-0 rounded-lg">
                 <div>
                   <label className="block text-sm font-medium mb-1">Engine</label>
                   <Select
@@ -1505,7 +1505,7 @@ export const SlicerProfilesPage: React.FC<EmbeddablePageProps> = ({ embedded = f
           {/* Status Icon */}
           {reseedStatus === 'loading' && (
             <div className="animate-spin">
-              <TimerSandIcon className="h-12 w-12 text-pf-primary" />
+              <TimerSandIcon className="h-12 w-12 text-pf-accent" />
             </div>
           )}
           {reseedStatus === 'success' && (

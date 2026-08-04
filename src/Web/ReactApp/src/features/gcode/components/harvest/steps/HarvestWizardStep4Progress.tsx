@@ -190,18 +190,18 @@ export function HarvestWizardStep4Progress({
 
           {/* Stats */}
           <div className="grid grid-cols-3 gap-3">
-            <div className="bg-pf-bg p-2 rounded-sm text-center">
+            <div className="bg-pf-bg-0 p-2 rounded-sm text-center">
               <div className="text-lg font-semibold text-pf-success">{completedCount}</div>
               <div className="text-xs text-pf-text-secondary">Imported</div>
             </div>
             {failedCount > 0 && (
-              <div className="bg-pf-bg p-2 rounded-sm text-center">
+              <div className="bg-pf-bg-0 p-2 rounded-sm text-center">
                 <div className="text-lg font-semibold text-pf-error">{failedCount}</div>
                 <div className="text-xs text-pf-text-secondary">Failed</div>
               </div>
             )}
             {skippedCount > 0 && (
-              <div className="bg-pf-bg p-2 rounded-sm text-center">
+              <div className="bg-pf-bg-0 p-2 rounded-sm text-center">
                 <div className="text-lg font-semibold text-pf-warning">{skippedCount}</div>
                 <div className="text-xs text-pf-text-secondary">Skipped</div>
               </div>
@@ -226,7 +226,7 @@ export function HarvestWizardStep4Progress({
       {/* File list */}
       <div className="space-y-2">
         <h3 className="text-sm font-medium text-pf-text-primary">Import Details</h3>
-        <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-lg p-3 bg-pf-bg">
+        <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-lg p-3 bg-pf-bg-0">
           {fileStatuses.map(file => {
             // Find the selected file info to get additional details
             const selectedFile = selectedFiles.find(f => f.name === file.fileName);

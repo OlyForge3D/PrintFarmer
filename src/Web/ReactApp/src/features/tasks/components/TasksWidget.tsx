@@ -109,7 +109,7 @@ function TaskItem({
 
   const buttonClasses = [
     'flex-1 flex items-start gap-3 text-left rounded-lg transition-colors',
-    isActionable ? 'hover:bg-pf-bg-hover cursor-pointer' : '',
+    isActionable ? 'hover:bg-pf-bg-2 cursor-pointer' : '',
     'disabled:cursor-default disabled:opacity-100',
   ]
     .filter(Boolean)

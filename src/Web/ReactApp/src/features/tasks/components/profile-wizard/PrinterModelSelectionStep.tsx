@@ -170,7 +170,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
                     className={`w-full justify-start rounded-none px-4 py-3 h-auto font-normal border-b border-pf-border/50 ${
                       isSelected
                         ? 'bg-pf-accent/10 border-l-2 border-l-pf-accent'
-                        : 'hover:bg-pf-bg-hover'
+                        : 'hover:bg-pf-bg-2'
                     }`}
                   >
                     <Package className={`h-5 w-5 shrink-0 ${isSelected ? 'text-pf-accent' : 'text-pf-text-tertiary'}`} />

@@ -95,7 +95,7 @@ function ColorSwatch({ color }: { color?: string }) {
     return (
       <span
         role="img"
-        className="inline-block w-5 h-5 rounded-full bg-pf-surface-tertiary border border-pf-border"
+        className="inline-block w-5 h-5 rounded-full bg-pf-bg-2 border border-pf-border"
         title="Unknown color"
         aria-label="Unknown color"
       />
@@ -135,7 +135,7 @@ function GateSlot({ gate, isActive, onSelect }: GateSlotProps) {
         flex flex-col items-center gap-1 p-2 rounded-lg border transition-colors cursor-pointer min-w-[70px]
         ${isActive
           ? 'border-pf-accent bg-pf-accent-bg/15'
-          : 'border-pf-border bg-pf-surface-secondary hover:bg-pf-surface-tertiary'}
+          : 'border-pf-border bg-pf-bg-1 hover:bg-pf-bg-2'}
       `}
       onClick={() => onSelect(gate.index)}
       aria-pressed={isActive}
@@ -320,7 +320,7 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
       <div className="space-y-3">
         {/* Unit tab bar */}
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 px-3 py-1.5 rounded-t-lg bg-pf-surface-secondary border border-b-0 border-pf-border">
+          <div className="flex items-center gap-1 px-3 py-1.5 rounded-t-lg bg-pf-bg-1 border border-b-0 border-pf-border">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-pf-text-secondary" aria-hidden="true">
               <path d="M2 6h20v12H2V6zm2 2v8h16V8H4zm2 2h4v2H6v-2zm6 0h4v2h-4v-2z" />
             </svg>
@@ -366,7 +366,7 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {/* Rack spool (currently loaded tool) */}
           {activeGate !== null && activeGate < mmuStatus.gates.length && (
-            <div className="flex flex-col items-center gap-1 p-2 rounded-lg border border-pf-border bg-pf-surface-secondary min-w-[70px]">
+            <div className="flex flex-col items-center gap-1 p-2 rounded-lg border border-pf-border bg-pf-bg-1 min-w-[70px]">
               <span className="text-[10px] uppercase tracking-wide text-pf-text-secondary font-bold">Rack</span>
               <SpoolIcon
                 color={mmuStatus.gates[activeGate]?.color}
@@ -412,7 +412,7 @@ export function MmuControlBox({ printerId, mmuStatus, isOnline }: MmuControlBoxP
 
         {/* Selected gate detail panel */}
         {displayGateData && (
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs p-3 rounded-lg bg-pf-surface-secondary border border-pf-border">
+          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-xs p-3 rounded-lg bg-pf-bg-1 border border-pf-border">
             <span className="text-pf-text-secondary">Material</span>
             <span className="font-medium text-pf-text-primary">{displayGateData.material || '—'}</span>
 

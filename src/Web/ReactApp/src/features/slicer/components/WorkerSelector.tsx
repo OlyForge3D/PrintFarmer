@@ -75,9 +75,9 @@ export const WorkerSelector: React.FC<WorkerSelectorProps> = ({
             onClick={() => onWorkerSelect && onWorkerSelect(worker.id)}
             className={`
               border rounded p-3 cursor-pointer transition-all
-              ${isSelected ? 'border-pf-primary bg-pf-accent-bg/5 ring-2 ring-pf-primary/20' : 'border-pf-border hover:border-pf-primary/50'}
+              ${isSelected ? 'border-pf-accent bg-pf-accent-bg/5 ring-2 ring-pf-accent/20' : 'border-pf-border hover:border-pf-accent/50'}
               ${!available && highlightAvailable ? 'opacity-60' : ''}
-              ${onWorkerSelect ? 'hover:bg-pf-panel-hover' : ''}
+              ${onWorkerSelect ? 'hover:bg-pf-bg-2' : ''}
             `}
             role="button"
             tabIndex={0}

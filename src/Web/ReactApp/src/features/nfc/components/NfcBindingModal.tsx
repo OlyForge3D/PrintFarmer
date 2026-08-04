@@ -42,7 +42,7 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
             readOnly
             value={event?.tagUid ?? ''}
             aria-label="Tag UID"
-            className="w-full rounded border border-pf-border bg-pf-bg-secondary px-3 py-2 text-sm text-pf-text-primary"
+            className="w-full rounded border border-pf-border bg-pf-bg-1 px-3 py-2 text-sm text-pf-text-primary"
           />
         </FormField>
 
@@ -72,7 +72,7 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
             onChange={(e) => setSpoolId(e.target.value)}
             placeholder="Enter spool ID to bind"
             aria-label="Spool ID"
-            className="w-full rounded border border-pf-border bg-pf-bg-secondary px-3 py-2 text-sm text-pf-text-primary"
+            className="w-full rounded border border-pf-border bg-pf-bg-1 px-3 py-2 text-sm text-pf-text-primary"
           />
         </FormField>
       </div>

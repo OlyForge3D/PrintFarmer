@@ -706,7 +706,7 @@ export function SpoolsTab() {
               href={spoolmanBaseUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-3 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
+              className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-1 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
               aria-label="Open Spoolman"
               title="Open Spoolman"
             >

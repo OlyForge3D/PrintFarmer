@@ -321,7 +321,7 @@ export function ThemeSwitcher() {
                   'focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pf-focus-ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--pf-focus-ring-offset)]',
                   isActive
                     ? 'border-[var(--pf-accent)] bg-[var(--pf-accent-bg)] text-[var(--pf-on-accent)] shadow-[var(--pf-glow-accent)]'
-                    : 'border-[var(--pf-border)] bg-[var(--pf-card-bg)] hover:border-[var(--pf-border-strong)] hover:bg-[var(--pf-hover-overlay)]',
+                    : 'border-[var(--pf-border)] bg-[var(--pf-card-bg)] hover:border-[var(--pf-border-strong)] hover:bg-pf-hover-overlay',
                 )}
                 title={option.description}
               >

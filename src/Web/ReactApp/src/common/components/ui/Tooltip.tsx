@@ -26,10 +26,10 @@ const positionClasses: Record<TooltipPosition, string> = {
 };
 
 const arrowClasses: Record<TooltipPosition, string> = {
-  top: 'top-full left-1/2 -translate-x-1/2 border-t-pf-bg-3 border-x-transparent border-b-transparent',
-  bottom: 'bottom-full left-1/2 -translate-x-1/2 border-b-pf-bg-3 border-x-transparent border-t-transparent',
-  left: 'left-full top-1/2 -translate-y-1/2 border-l-pf-bg-3 border-y-transparent border-r-transparent',
-  right: 'right-full top-1/2 -translate-y-1/2 border-r-pf-bg-3 border-y-transparent border-l-transparent',
+  top: 'top-full left-1/2 -translate-x-1/2 border-t-pf-bg-2 border-x-transparent border-b-transparent',
+  bottom: 'bottom-full left-1/2 -translate-x-1/2 border-b-pf-bg-2 border-x-transparent border-t-transparent',
+  left: 'left-full top-1/2 -translate-y-1/2 border-l-pf-bg-2 border-y-transparent border-r-transparent',
+  right: 'right-full top-1/2 -translate-y-1/2 border-r-pf-bg-2 border-y-transparent border-l-transparent',
 };
 
 export const Tooltip: React.FC<TooltipProps> = ({
@@ -81,7 +81,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
         <div
           className={clsx(
             'absolute z-50 px-2 py-1 text-xs font-medium rounded-sm shadow-lg',
-            'bg-pf-bg-3 text-pf-text-primary border border-pf-border',
+            'bg-pf-bg-2 text-pf-text-primary border border-pf-border',
             'whitespace-nowrap pointer-events-none',
             'animate-in fade-in-0 zoom-in-95 duration-150',
             positionClasses[position],

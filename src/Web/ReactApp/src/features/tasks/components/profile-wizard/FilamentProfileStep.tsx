@@ -258,7 +258,7 @@ export const FilamentProfileStep: React.FC<FilamentProfileStepProps> = ({
                     <label
                       key={filament.name}
                       className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${
-                        isSelected ? 'bg-pf-accent/10' : 'hover:bg-pf-bg-hover'
+                        isSelected ? 'bg-pf-accent/10' : 'hover:bg-pf-bg-2'
                       }`}
                     >
                       <Checkbox checked={isSelected} onChange={() => onToggleFilament(filament.name)} />
@@ -339,7 +339,7 @@ const FilterColumn: React.FC<FilterColumnProps> = ({
               variant="subtle"
               onClick={() => onSelectOption(option)}
               className={`w-full justify-start rounded-none px-3 py-2 text-sm h-auto font-normal transition-colors ${
-                isSelected ? 'bg-pf-accent text-white hover:bg-pf-accent/90 hover:text-white' : 'text-pf-text-primary hover:bg-pf-bg-hover'
+                isSelected ? 'bg-pf-accent text-white hover:bg-pf-accent/90 hover:text-white' : 'text-pf-text-primary hover:bg-pf-bg-2'
               }`}
             >
               {option}

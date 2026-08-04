@@ -624,7 +624,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={handleNetworkScan}
                 disabled={isScanning}
-                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded-sm text-sm hover:bg-pf-accent-dark disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
               >
                 <SearchIcon className="h-4 w-4" />
                 {isScanning ? 'Scanning...' : 'Scan Network'}
