@@ -4703,9 +4703,56 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         }
     }
 
+    /// A `.connected` state whose socket has received nothing recently is a
+    /// lie: iOS tears the WebSocket down while the app is suspended, and a
+    /// NAT/AP timeout can half-open it silently. In both cases
+    /// `URLSessionWebSocketTask` only surfaces the failure when a pending
+    /// read eventually errors — asynchronously, and often *after* the app has
+    /// already foregrounded. If `ensureConnected()` trusted the state it
+    /// would return immediately, the banner would go green, and the user
+    /// would sit on a dead socket receiving nothing.
+    ///
+    /// Non-vacuity: with the staleness check removed this test fails, because
+    /// `ensureConnected()` would short-circuit on `.connected` and the second
+    /// socket would never be driven to handshake.
+    func testEnsureConnected_whenConnectedButSocketIsStale_reconnects() async throws {
+        let socketA = MockSignalRWebSocket()
+        let socketB = MockSignalRWebSocket()
+        let service = makeService(
+            sockets: MockWebSocketSwitcher([socketA, socketB]),
+            // Any elapsed time counts as stale, so the branch is reached
+            // deterministically without sleeping for 45s.
+            inboundStalenessThreshold: -1
+        )
+
+        let result = await connect(
+            service,
+            socket: socketA,
+            handshake: .data(makeSignalRHandshakeData())
+        )
+        try result.get()
+        XCTAssertEqual(service.connectionState, .connected)
+
+        let reconnect = Task { await service.ensureConnected() }
+
+        // A fresh socket being driven to handshake is the positive witness
+        // that the stale connection was superseded rather than trusted.
+        await socketB.waitForReceiveCall()
+        socketB.completeReceive(with: .data(makeSignalRHandshakeData()))
+        await reconnect.value
+
+        XCTAssertEqual(
+            service.connectionState,
+            .connected,
+            "the replacement socket must complete its handshake"
+        )
+        await service.disconnect()
+    }
+
     private func makeService(
         sockets: MockWebSocketSwitcher,
-        sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper()
+        sleeper: LifecycleControlledSleeper = LifecycleControlledSleeper(),
+        inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold
     ) -> SignalRService {
         installNegotiateHandler()
         return SignalRService(
@@ -4714,6 +4761,7 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
             tokenProvider: { nil },
             reconnectBackoff: { _ in 1 },
             reconnectSleeper: sleeper.makeSleeper(),
+            inboundStalenessThreshold: inboundStalenessThreshold,
             webSocketFactory: { _ in sockets.next() }
         )
     }

@@ -89,12 +89,11 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
 
     static let defaultReconnectBackoff: @Sendable (Int) -> TimeInterval = { attempt in
         let base = min(pow(2.0, Double(max(attempt - 1, 0))), 30.0)
-        // Full-width jitter on the top 25% of the interval. Without it an
-        // access-point blip makes every client on the farm retry in exact
-        // lockstep, which turns a transient outage into a synchronized
-        // thundering herd against the API. Never returns less than 0.5s.
-        let jitter = Double.random(in: 0...(base * 0.25))
-        return max(base - (base * 0.25) + jitter, 0.5)
+        // +/-25% jitter. Without it an access-point blip makes every client on
+        // the farm retry in exact lockstep, which turns a transient outage into
+        // a synchronized thundering herd against the API. Never returns less
+        // than 0.5s; the effective ceiling is 30s * 1.25 = 37.5s.
+        return max(base * Double.random(in: 0.75...1.25), 0.5)
     }
 
     /// Async reconnect sleeper (r9 blocker #4). Production sleeps via
@@ -146,6 +145,32 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     private var reconnectToken: UUID?
     private var reconnectAttempt = 0
     private var intentionalDisconnect = false
+    /// Wall-clock timestamp of the last frame received on the current
+    /// socket, or `nil` when no socket is installed. Guarded by
+    /// `lifecycleSync` like every other lifecycle field.
+    ///
+    /// Used solely by ``ensureConnected()`` to detect a half-open
+    /// socket. `URLSessionWebSocketTask` does not surface a NAT
+    /// timeout or a suspended-app teardown until a read actually
+    /// fails, and that failure is delivered asynchronously — so on
+    /// foreground the service can still report `.connected` over a
+    /// socket that is already dead. Seeded when the hub goes live and
+    /// refreshed by every inbound frame (the server's keepalive ping
+    /// counts).
+    private var lastInboundFrameAt: Date?
+
+    /// How long the current socket may go without a single inbound
+    /// frame before ``ensureConnected()`` treats a `.connected` state
+    /// as a lie and forces a reconnect.
+    ///
+    /// The server's `KeepAliveInterval` is 15s (see
+    /// `src/api/Startup/SignalRStartup.cs`), so a healthy idle
+    /// connection receives a ping every 15s. 45s is three missed
+    /// keepalives — comfortably beyond normal scheduling jitter, and
+    /// always exceeded by an app that spent any real time suspended.
+    /// Injectable so tests can force the stale branch deterministically.
+    static let defaultInboundStalenessThreshold: TimeInterval = 45
+    private let inboundStalenessThreshold: TimeInterval
     /// Deferred successor request from an immediate receive-failure /
     /// type-7 that arrived while the reconnect slot was still held by
     /// the current retry owner. Keyed by the OWNING owner's token so
@@ -287,6 +312,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         reconnectBackoff: @escaping @Sendable (Int) -> TimeInterval = SignalRService.defaultReconnectBackoff,
         reconnectSleeper: @escaping SignalRReconnectSleeper = defaultSignalRReconnectSleeper,
         maxReconnectAttempts: Int? = nil,
+        inboundStalenessThreshold: TimeInterval = SignalRService.defaultInboundStalenessThreshold,
         webSocketFactory: (@Sendable (URL) -> SignalRWebSocket)? = nil
     ) {
         self.serverURL = serverURL
@@ -295,6 +321,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         self.reconnectBackoff = reconnectBackoff
         self.reconnectSleeper = reconnectSleeper
         self.maxReconnectAttempts = maxReconnectAttempts
+        self.inboundStalenessThreshold = inboundStalenessThreshold
         // Capture `session` in a local Sendable so the closure escapes
         // safely into the actor-agnostic factory.
         let capturedSession = session
@@ -521,8 +548,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// Idempotent "make sure we're live" entry point.
     ///
     /// Safe to call repeatedly from lifecycle hooks (notably app
-    /// foregrounding). Does nothing when a connection is already live or
-    /// handshaking, and refuses to resurrect a service the user
+    /// foregrounding). Refuses to resurrect a service the user
     /// intentionally disconnected (logout / server switch).
     ///
     /// When the service is `.disconnected` or `.reconnecting` this calls
@@ -532,17 +558,41 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// backoff sleep is exactly the "takes forever to go live" symptom this
     /// exists to fix.
     ///
+    /// A reported `.connected` state is **not** taken at face value. iOS
+    /// tears the socket down while the app is suspended, and a NAT/AP
+    /// timeout can half-open it without either side noticing; in both cases
+    /// `URLSessionWebSocketTask` only reports the failure when a pending read
+    /// eventually errors, which is delivered asynchronously and can easily
+    /// land *after* this method has already decided everything was fine.
+    /// Waiting for that EOF costs the user the full backoff ladder. So if no
+    /// frame has arrived within ``inboundStalenessThreshold`` — impossible on
+    /// a healthy connection, since the server pings every 15s — the socket is
+    /// treated as dead and reconnected immediately.
+    ///
+    /// `.connecting` is left alone: a handshake in flight has by definition
+    /// not had time to receive anything yet.
+    ///
     /// Never throws — a failed attempt leaves the reconnect ladder running.
     func ensureConnected() async {
-        let shouldConnect: Bool = lifecycleSync {
-            let state = self.connectionStateHub.snapshot()
-            if state == .connected || state == .connecting { return false }
+        let decision: (shouldConnect: Bool, wasStale: Bool) = lifecycleSync {
             // A deliberate disconnect (logout, server switch) must stay down
             // until something calls `connect()` explicitly.
-            if self.intentionalDisconnect { return false }
-            return true
+            if self.intentionalDisconnect { return (shouldConnect: false, wasStale: false) }
+            let state = self.connectionStateHub.snapshot()
+            if state == .connecting { return (shouldConnect: false, wasStale: false) }
+            guard state == .connected else { return (shouldConnect: true, wasStale: false) }
+            // Claims to be connected — verify the socket is actually carrying
+            // traffic before believing it.
+            guard let last = self.lastInboundFrameAt else { return (shouldConnect: true, wasStale: true) }
+            let idle = Date().timeIntervalSince(last)
+            return idle > self.inboundStalenessThreshold
+                ? (shouldConnect: true, wasStale: true)
+                : (shouldConnect: false, wasStale: false)
         }
-        guard shouldConnect else { return }
+        guard decision.shouldConnect else { return }
+        if decision.wasStale {
+            logger.warning("ensureConnected: hub reported connected but the socket is stale; reconnecting")
+        }
         do {
             try await connect()
         } catch {
@@ -695,6 +745,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // receive task.
             self.receiveCompletionBarrier = barrier
             self.pingTask = self.makePingTask()
+            // Seed liveness at the moment the hub goes live so a
+            // freshly-connected socket is never judged stale.
+            self.lastInboundFrameAt = Date()
             self.connectionStateHub.setState(.connected)
             if !handshakeTrailingData.isEmpty {
                 // The receive task cannot enter lifecycleSync until this
@@ -899,6 +952,9 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
                         guard self.generation == myGen, !self.intentionalDisconnect else {
                             return
                         }
+                        // Any inbound frame — including the server's own
+                        // keepalive ping — is proof the socket is alive.
+                        self.lastInboundFrameAt = Date()
                         self.handleMessage(message)
                     }
                 } catch {
@@ -1943,6 +1999,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // teardown.
         receiveCompletionBarrier = nil
         frameParser.reset()
+        lastInboundFrameAt = nil
         pingTask?.cancel()
         pingTask = nil
         webSocketTask?.cancel(with: .normalClosure, reason: nil)

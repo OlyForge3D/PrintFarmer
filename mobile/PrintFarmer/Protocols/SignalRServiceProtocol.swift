@@ -76,8 +76,12 @@ protocol SignalRServiceProtocol: AnyObject, Sendable {
 
 extension SignalRServiceProtocol {
     /// Default: only connect when the hub is not already live or handshaking.
-    /// `SignalRService` overrides this with a lifecycle-queue-atomic version
-    /// that also honours an intentional disconnect.
+    ///
+    /// `SignalRService` overrides this with a stronger version that runs on
+    /// the lifecycle queue, honours an intentional disconnect, and — crucially
+    /// — refuses to trust a `.connected` state whose socket has received
+    /// nothing recently. Test doubles have no socket, so this default is
+    /// sufficient for them.
     func ensureConnected() async {
         let state = connectionState
         guard state != .connected, state != .connecting else { return }

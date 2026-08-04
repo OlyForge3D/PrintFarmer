@@ -32,6 +32,18 @@ final class ConnectionMonitor {
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
 
+    /// Monotonic ticket issued to every in-flight ``refresh()``.
+    ///
+    /// `refresh()` suspends on the network probe, so the foreground-resume
+    /// refresh and the poll loop's refresh can overlap. Without a fence a
+    /// slower, older probe (whose `isReachable()` may have merely been
+    /// cancelled, which the API client reports as `false`) can land after a
+    /// newer healthy sample and overwrite it — re-painting the banner red.
+    /// Only the newest issued sample is allowed to publish.
+    @ObservationIgnored private var sampleTicket: UInt64 = 0
+    /// Ticket of the most recently *published* sample.
+    @ObservationIgnored private var appliedTicket: UInt64 = 0
+
     /// Interval between connectivity samples.
     @ObservationIgnored var pollInterval: Duration = .seconds(5)
 
@@ -80,6 +92,9 @@ final class ConnectionMonitor {
     /// Points the monitor at the currently-active services. Safe to call again
     /// after a server switch to rebind to the new client/hub.
     func configure(apiClient: APIClient?, signalRService: any SignalRServiceProtocol) {
+        // Invalidate any probe still in flight against the previous client.
+        sampleTicket &+= 1
+        appliedTicket = sampleTicket
         self.apiClient = apiClient
         self.signalRService = signalRService
     }
@@ -110,8 +125,12 @@ final class ConnectionMonitor {
         resetState()
     }
 
-    /// Resets the published state to a neutral "connecting" baseline.
+    /// Resets the published state to a neutral "connecting" baseline and
+    /// invalidates every in-flight sample so a probe issued against the
+    /// previous server/epoch cannot publish after the reset.
     private func resetState() {
+        sampleTicket &+= 1
+        appliedTicket = sampleTicket
         status = .connecting
         signalRState = .disconnected
         isServerReachable = false
@@ -119,9 +138,17 @@ final class ConnectionMonitor {
     }
 
     /// Performs a single connectivity sample and updates ``status``.
+    ///
+    /// Safe to call concurrently with the poll loop (the app-foreground hook
+    /// does exactly that): stale samples are discarded by the ticket fence.
     func refresh() async {
+        sampleTicket &+= 1
+        let ticket = sampleTicket
         let reachable = await apiClient?.isReachable() ?? false
         let signalR = signalRService?.connectionState ?? .disconnected
+        // A newer sample (or a stop()/configure() epoch bump) already published.
+        guard ticket > appliedTicket else { return }
+        appliedTicket = ticket
         if reachable {
             consecutiveReachabilityFailures = 0
         } else {
