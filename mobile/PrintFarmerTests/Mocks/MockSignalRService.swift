@@ -42,6 +42,11 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
 
     var connectCalled = false
     var disconnectCalled = false
+    /// Number of times ``ensureConnected()`` was invoked. Counts *entries*, not
+    /// connects — the whole point of the debounce tests is to prove the entry
+    /// point is not called repeatedly, and the default implementation short-
+    /// circuits once the hub reports `.connected`.
+    private(set) var ensureConnectedCallCount = 0
     var fallbackGroupsUpdatedHandler: (@Sendable (FallbackGroupsUpdatedEvent) -> Void)?
     var errorToThrow: Error?
     /// Optional deterministic hook awaited at the start of `disconnect()`. Lets a
@@ -63,6 +68,17 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
         disconnectCalled = true
         if let disconnectHook { await disconnectHook() }
         connectionStateHub.setStateSync(.disconnected)
+    }
+
+    /// Mirrors the `SignalRServiceProtocol` default implementation, adding a
+    /// call counter. Overriding rather than relying on the protocol extension is
+    /// deliberate: an extension member is statically dispatched, so a counter
+    /// added there would not be observable through the existential.
+    func ensureConnected() async {
+        ensureConnectedCallCount += 1
+        let state = connectionState
+        guard state != .connected, state != .connecting else { return }
+        try? await connect()
     }
 
     @discardableResult
