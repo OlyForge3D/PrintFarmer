@@ -20,6 +20,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly IWorkerStateService _workerState;
     private readonly string _workingDirectory;
     private readonly string _orcaSlicerBinaryPath;
+    private readonly string _engineVersion;
     private readonly Uri _apiBaseUri;
 
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
@@ -33,6 +34,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
+        _engineVersion = (configuration["Worker:EngineVersion"]
+            ?? configuration["SlicerRegistry:Version"]
+            ?? WorkerConstants.SlicerVersion).Trim();
         string apiBaseUrl = configuration["SlicerApi:BaseUrl"]
             ?? configuration["Worker:ApiBaseUrl"]
             ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL")
@@ -104,7 +108,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 LayerCount = metadata.LayerCount,
                 Success = true
             };
-            result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
+            result.Metadata["SlicerVersion"] = $"OrcaSlicer {_engineVersion}";
             result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
             result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
             if (modelFilePaths.Count > 1)

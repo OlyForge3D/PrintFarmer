@@ -13,7 +13,7 @@ namespace Farm.OrcaSlicer.Worker;
 
 internal static class WorkerConstants
 {
-    public const string SlicerVersion = "2.3.1";
+    public const string SlicerVersion = "2.4.2";
     public const string UpstreamDistributionCapability = "orcaslicer-upstream";
 
     // Legacy static capability list — retained for the diagnostic root endpoint.
@@ -124,17 +124,19 @@ public static class Program
             Predicate = c => (c.Name == "readiness" || c.Name == "orca_binary") && (!relaxedReadiness || c.Name != "orca_binary")
         });
 
-        _ = app.MapGet("/", (IOrcaBinaryDetector detector) => Results.Ok(new
+        _ = app.MapGet("/", (IOrcaBinaryDetector detector, WorkerCapabilityProvider capabilityProvider) => Results.Ok(new
         {
             service = "orcaslicer-worker",
-            version = WorkerConstants.SlicerVersion,
+            version = capabilityProvider.EngineVersion,
             status = "running",
             realBinary = detector.IsRealBinaryPresent(),
             capabilities = WorkerConstants.Capabilities
         }));
 
         // Version endpoint handler shared by /version and /api/system/version
-        async Task<IResult> GetVersionInfoAsync(IOrcaBinaryDetector detector)
+        async Task<IResult> GetVersionInfoAsync(
+            IOrcaBinaryDetector detector,
+            WorkerCapabilityProvider capabilityProvider)
         {
             string? orcaVersion = await detector.GetVersionAsync();
             var asm = System.Reflection.Assembly.GetEntryAssembly();
@@ -159,13 +161,19 @@ public static class Program
                 orcaslicerVersion = orcaVersion,
                 environment = app.Environment.EnvironmentName,
                 runtime = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
-                workerVersion = WorkerConstants.SlicerVersion,
+                workerVersion = capabilityProvider.EngineVersion,
                 timestamp = DateTime.UtcNow,
             });
         }
 
-        _ = app.MapGet("/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
-        _ = app.MapGet("/api/system/version", (IOrcaBinaryDetector detector) => GetVersionInfoAsync(detector));
+        _ = app.MapGet(
+            "/version",
+            (IOrcaBinaryDetector detector, WorkerCapabilityProvider capabilityProvider) =>
+                GetVersionInfoAsync(detector, capabilityProvider));
+        _ = app.MapGet(
+            "/api/system/version",
+            (IOrcaBinaryDetector detector, WorkerCapabilityProvider capabilityProvider) =>
+                GetVersionInfoAsync(detector, capabilityProvider));
 
         // Diagnostic endpoint: check process profile expression evaluation results
         _ = app.MapGet("/api/debug/process-eval/{manufacturer}", async (string manufacturer, ISlicerProfilesService profilesService) =>
@@ -228,7 +236,7 @@ public static class Program
         // is enabled. Without this the RegistrationBackgroundService + QueueConsumerService
         // start advertising and claiming version-pinned jobs even when the binary
         // reports a different version than the worker advertises — the queue would
-        // silently deliver v2.3.1 work to a v2.4.0 binary. WORKER_RELAXED_READINESS
+        // silently deliver v2.3.1 work to a current-version binary. WORKER_RELAXED_READINESS
         // (already respected below for the readiness endpoint) also disables this
         // startup gate so local dev containers without a real binary still boot.
         if (!relaxedReadiness)

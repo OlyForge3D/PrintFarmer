@@ -848,7 +848,7 @@ function Prepare-OfflineDeployment {
         if ($succeeded) {
             Write-Host ""
             Write-Header "STEP 3/3: Caching OrcaSlicer AppImage"
-            if (-not (Cache-OrcaSlicer -TargetDir "$TargetDir/orcaslicer" -Version "latest")) {
+            if (-not (Cache-OrcaSlicer -TargetDir "$TargetDir/orcaslicer" -Version "2.4.2")) {
                 Write-ErrorMsg "Failed to cache OrcaSlicer AppImage"
                 $succeeded = $false
             }
@@ -931,7 +931,7 @@ function Deploy-OfflineMode {
 function Cache-OrcaSlicer {
     param(
         [string]$TargetDir = "./docker-images/orcaslicer",
-        [string]$Version = "2.4.0"
+        [string]$Version = "2.4.2"
     )
     
     Write-Header "Caching OrcaSlicer Linux AppImage"
@@ -968,25 +968,36 @@ function Cache-OrcaSlicer {
         
         $json = $response.Content.ReadAsStringAsync().Result | ConvertFrom-Json
         
-        # Find the Linux AppImage asset (prefer x86_64 Ubuntu variant)
-        $appImageAsset = $json.assets | Where-Object { 
-            $_.name -match 'AppImage' -and $_.name -match 'Linux' -and $_.name -match 'x86_64|amd64'
-        } | Select-Object -First 1
+        # Select the exact x86_64 Ubuntu 24.04 asset whose digest is pinned below.
+        $expectedAssetName = "OrcaSlicer_Linux_AppImage_Ubuntu2404_V${Version}.AppImage"
+        $appImageAsset = $json.assets |
+            Where-Object { $_.name -eq $expectedAssetName } |
+            Select-Object -First 1
         
         if (-not $appImageAsset) {
-            # Try any non-ARM Linux AppImage (the x86_64 Ubuntu asset carries no arch token)
-            $appImageAsset = $json.assets | Where-Object { 
-                $_.name -match 'AppImage' -and $_.name -match 'Linux' -and $_.name -notmatch 'aarch64|arm64'
-            } | Select-Object -First 1
-        }
-        
-        if (-not $appImageAsset) {
-            throw "Could not find AppImage asset for Linux in release"
+            throw "Could not find expected release asset $expectedAssetName"
         }
         
         $downloadUrl = $appImageAsset.browser_download_url
         $fileName = $appImageAsset.name
         $appImagePath = Join-Path $TargetDir $fileName
+
+        $pinnedChecksums = @{
+            '2.4.2' = 'd12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd'
+        }
+        if (-not $pinnedChecksums.ContainsKey($Version)) {
+            throw "No pinned SHA-256 checksum is configured for OrcaSlicer $Version"
+        }
+        $expectedSha256 = $pinnedChecksums[$Version]
+
+        $assetDigest = [string]$appImageAsset.digest
+        if ($assetDigest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+            throw "GitHub did not provide a valid SHA-256 digest for $fileName"
+        }
+        $releaseSha256 = $Matches[1].ToLowerInvariant()
+        if ($releaseSha256 -ne $expectedSha256) {
+            throw "GitHub release digest for $fileName does not match the repository-pinned SHA-256"
+        }
         
         # Resolve to absolute path for reliable checking
         $resolvedAppImagePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($appImagePath)
@@ -996,9 +1007,16 @@ function Cache-OrcaSlicer {
         $fileSize = if ($fileExists) { (Get-Item $resolvedAppImagePath -ErrorAction SilentlyContinue).Length } else { 0 }
         
         if ($fileExists -and $fileSize -gt 50MB) {
-            $size = $fileSize / 1MB
-            Write-Success "OrcaSlicer AppImage already cached: $resolvedAppImagePath ($([math]::Round($size, 1)) MB)"
-            return $true
+            $cachedSha256 = (Get-FileHash -Path $resolvedAppImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($cachedSha256 -eq $expectedSha256) {
+                $size = $fileSize / 1MB
+                Write-Success "OrcaSlicer AppImage already cached and checksum-verified: $resolvedAppImagePath ($([math]::Round($size, 1)) MB)"
+                return $true
+            }
+
+            Write-Warning "Cached OrcaSlicer AppImage checksum does not match the official release; deleting and re-downloading..."
+            Remove-Item $resolvedAppImagePath -Force
+            $fileExists = $false
         }
         
         # If file exists but is too small or corrupted, delete it and re-download
@@ -1050,6 +1068,13 @@ function Cache-OrcaSlicer {
         if (-not (Test-Path $appImagePath)) {
             throw "File written but not found at $appImagePath"
         }
+
+        $downloadedSha256 = (Get-FileHash -Path $appImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($downloadedSha256 -ne $expectedSha256) {
+            Remove-Item $appImagePath -Force
+            throw "Downloaded OrcaSlicer AppImage checksum does not match the official GitHub release digest"
+        }
+        Write-Success "Official AppImage SHA-256 verified"
         
         # Verify ELF magic number for Linux binary
         try {
@@ -1854,8 +1879,8 @@ if (-not $NonInteractive) {
             Write-Success "OrcaSlicer workers enabled"
             
             # OrcaSlicer version
-            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.4.0)"
-            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.4.0' } else { $orcaVersion }
+            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.4.2)"
+            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.4.2' } else { $orcaVersion }
             
             # Worker replica count
             $workerCount = Read-Host "Number of OrcaSlicer worker replicas (default: 1)"

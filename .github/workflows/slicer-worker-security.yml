@@ -26,7 +26,8 @@ permissions:
   security-events: write # For uploading SARIF results to GitHub Security
 
 env:
-  ORCASLICER_VERSION: "2.4.0"
+  ORCASLICER_VERSION: "2.4.2"
+  ORCASLICER_SHA256: "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
   PRUSASLICER_VERSION: "2.9.3"
 
 jobs:
@@ -117,7 +118,8 @@ jobs:
           SHA='${{ github.sha }}'
           docker build --platform linux/amd64 \
             --build-arg ORCASLICER_VERSION=${{ env.ORCASLICER_VERSION }} \
-            --build-arg ALLOW_STUB=true \
+            --build-arg ORCASLICER_SHA256=${{ env.ORCASLICER_SHA256 }} \
+            --build-arg ALLOW_STUB=false \
             --build-arg GITHUB_TOKEN=${GITHUB_TOKEN} \
             --label "org.opencontainers.image.revision=${SHA}" --label "org.opencontainers.image.created=${TIMESTAMP}" \
             -f scripts/docker/dockerfiles/Dockerfile.multistage --target orcaslicer-worker \

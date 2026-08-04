@@ -14,7 +14,7 @@ on:
       orca_version:
         description: 'OrcaSlicer version to build'
         required: false
-        default: '2.4.0'
+        default: '2.4.2'
       force_rebuild:
         description: 'Force rebuild even if image exists'
         required: false
@@ -24,13 +24,14 @@ on:
     inputs:
       orca_version:
         type: string
-        default: '2.4.0'
+        default: '2.4.2'
 
 env:
   REGISTRY: ghcr.io
   IMAGE_OWNER: ${{ github.repository_owner }}
   BASE_IMAGE_NAME: orcaslicer-base
-  ORCA_VERSION: ${{ inputs.orca_version || '2.4.0' }}
+  ORCA_VERSION: ${{ inputs.orca_version || '2.4.2' }}
+  ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 
 jobs:
   build-base:
@@ -46,8 +47,14 @@ jobs:
       - name: Check if image already exists
         id: check
         run: |
+          set -euo pipefail
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
           echo "Checking for existing image: $IMAGE"
+
+          if [ "$ORCA_VERSION" != "2.4.2" ]; then
+            echo "::error::No pinned AppImage checksum is configured for OrcaSlicer v${ORCA_VERSION}"
+            exit 1
+          fi
           
           # Force rebuild if workflow file changed (detected by checking if this is a push to workflow path)
           # This handles the case where we need to fix the image build process
@@ -57,12 +64,24 @@ jobs:
             exit 0
           fi
           
-          # Try to pull the manifest (doesn't download layers)
-          if docker manifest inspect "$IMAGE" > /dev/null 2>&1; then
-            echo "Image already exists"
+          if ! docker pull "$IMAGE" > /dev/null 2>&1; then
+            echo "Image does not exist, will build"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$IMAGE")
+          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$IMAGE")
+          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version' 2>/dev/null || true)
+          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256' 2>/dev/null || true)
+          if [ "$ACTUAL_VERSION" = "$ORCA_VERSION" ] &&
+             [ "$ACTUAL_SHA256" = "$ORCA_SHA256" ] &&
+             [ "$EMBEDDED_VERSION" = "$ORCA_VERSION" ] &&
+             [ "$EMBEDDED_SHA256" = "$ORCA_SHA256" ]; then
+            echo "Image metadata matches the requested OrcaSlicer release"
             echo "exists=true" >> $GITHUB_OUTPUT
           else
-            echo "Image does not exist, will build"
+            echo "::warning::Rejecting cached image with label version='${ACTUAL_VERSION}' sha256='${ACTUAL_SHA256}' and embedded version='${EMBEDDED_VERSION}' sha256='${EMBEDDED_SHA256}'"
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
 
@@ -88,16 +107,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
+          set -euo pipefail
           VERSION="${{ env.ORCA_VERSION }}"
           echo "Downloading OrcaSlicer v${VERSION}..."
+          ASSET_NAME="OrcaSlicer_Linux_AppImage_Ubuntu2404_V${VERSION}.AppImage"
           
           # Get download URL from GitHub API
           DOWNLOAD_URL=$(curl -fsSL \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             "https://api.github.com/repos/OrcaSlicer/OrcaSlicer/releases/tags/v${VERSION}" | \
-            jq -r '.assets[] | select((.name | test("Linux.*AppImage$"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1)
+            jq -r --arg name "$ASSET_NAME" '.assets[] | select(.name == $name) | .browser_download_url' | head -n1)
           
           if [ -z "$DOWNLOAD_URL" ]; then
             echo "ERROR: Could not find Linux AppImage for v${VERSION}"
@@ -109,6 +129,7 @@ jobs:
           # Download AppImage
           mkdir -p orcaslicer-extract
           curl -fSL -o orcaslicer.AppImage "$DOWNLOAD_URL"
+          echo "${ORCA_SHA256}  orcaslicer.AppImage" | sha256sum --check --strict -
           chmod +x orcaslicer.AppImage
           
           # Extract AppImage (works on GitHub runners - they have FUSE or we use --appimage-extract)
@@ -117,6 +138,8 @@ jobs:
           
           # Move to expected location
           mv squashfs-root orcaslicer-extract/orcaslicer
+          printf '%s\n' "$VERSION" > orcaslicer-extract/orcaslicer/orcaslicer.version
+          printf '%s\n' "$ORCA_SHA256" > orcaslicer-extract/orcaslicer/orcaslicer.sha256
           
           # CRITICAL: The repo's .dockerignore excludes **/bin/ which would prevent
           # the OrcaSlicer bin/ directory from being copied. We rename it to work around this.
@@ -162,6 +185,9 @@ jobs:
         run: |
           cat > Dockerfile.orca-base << 'EOF'
           FROM ubuntu:24.04
+
+          ARG ORCA_VERSION
+          ARG ORCA_SHA256
           
           # Install runtime dependencies for OrcaSlicer
           RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -217,6 +243,9 @@ jobs:
           
           LABEL org.opencontainers.image.description="OrcaSlicer base image with extracted binaries"
           LABEL org.opencontainers.image.source="https://github.com/OrcaSlicer/OrcaSlicer"
+          LABEL orcaslicer.version="${ORCA_VERSION}"
+          LABEL orcaslicer.sha256="${ORCA_SHA256}"
+          LABEL orcaslicer.allow_stub="false"
           EOF
 
       - name: Extract metadata
@@ -239,13 +268,33 @@ jobs:
           platforms: linux/amd64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          no-cache: true
+          build-args: |
+            ORCA_VERSION=${{ env.ORCA_VERSION }}
+            ORCA_SHA256=${{ env.ORCA_SHA256 }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Verify published image metadata
+        if: steps.check.outputs.exists != 'true' || inputs.force_rebuild == 'true'
+        run: |
+          set -euo pipefail
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
+          docker pull "$IMAGE"
+          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$IMAGE")
+          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$IMAGE")
+          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version')
+          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256')
+          test "$ACTUAL_VERSION" = "$ORCA_VERSION"
+          test "$ACTUAL_SHA256" = "$ORCA_SHA256"
+          test "$EMBEDDED_VERSION" = "$ORCA_VERSION"
+          test "$EMBEDDED_SHA256" = "$ORCA_SHA256"
 
       - name: Summary
         run: |
           echo "## OrcaSlicer Base Image" >> $GITHUB_STEP_SUMMARY
           echo "- Version: ${{ env.ORCA_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "- SHA-256: ${{ env.ORCA_SHA256 }}" >> $GITHUB_STEP_SUMMARY
           echo "- Image: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}" >> $GITHUB_STEP_SUMMARY
           if [ "${{ steps.check.outputs.exists }}" = "true" ] && [ "${{ inputs.force_rebuild }}" != "true" ]; then
             echo "- Status: **Skipped** (image already exists)" >> $GITHUB_STEP_SUMMARY

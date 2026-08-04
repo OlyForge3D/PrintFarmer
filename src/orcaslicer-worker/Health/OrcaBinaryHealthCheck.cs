@@ -9,7 +9,7 @@ namespace Farm.OrcaSlicer.Worker.Health;
 /// Readiness gate for the OrcaSlicer binary. When
 /// <c>Worker:VerifyBinaryVersion</c> is <c>true</c> (default) the binary's
 /// self-reported version is compared to the worker's advertised engine version
-/// and the worker reports Unhealthy on mismatch, preventing a v2.4.0 worker
+/// and the worker reports Unhealthy on mismatch, preventing a current-version worker
 /// from silently running a v2.3.1 binary — the exact failure mode the
 /// pre-PR review flagged for issue #578.
 /// </summary>
@@ -72,8 +72,8 @@ public sealed class OrcaBinaryHealthCheck(
 
     /// <summary>
     /// Compare two version strings tolerating a trailing "+build" or "-suffix"
-    /// on either side (Orca sometimes reports "2.4.0+abc" while ORCASLICER_VERSION
-    /// is just "2.4.0"). Parsing via System.Version keeps ordering meaningful and
+    /// on either side (Orca sometimes reports "2.4.2+abc" while ORCASLICER_VERSION
+    /// is just "2.4.2"). Parsing via System.Version keeps ordering meaningful and
     /// rejects malformed inputs like "2.3.x".
     /// </summary>
     internal static bool VersionsMatch(string advertised, string binary)

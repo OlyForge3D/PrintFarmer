@@ -210,7 +210,7 @@ DOCKER_BUILDKIT_IMAGE="docker/dockerfile:1"
 
 # Locally-built images for offline deployment (built during --prepare-offline, not pulled from registry)
 DOCKER_LOCAL_IMAGES=(
-    "orcaslicer-binaries:2.4.0"
+    "orcaslicer-binaries:${ORCASLICER_VERSION}"
 )
 
 # Derived arrays from DOCKER_IMAGES_CONFIG (for backward compatibility with existing code)
@@ -1618,12 +1618,16 @@ build_base_images() {
     # Build OrcaSlicer binary layer
     print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     
-    # Check if orcaslicer-binaries:2.4.0 already exists locally
-    if docker image inspect "orcaslicer-binaries:2.4.0" >/dev/null 2>&1; then
-        print_success "✓ orcaslicer-binaries:2.4.0 already exists locally (skipping rebuild)"
+    local orca_binary_image="orcaslicer-binaries:${ORCASLICER_VERSION}"
+    if docker image inspect "$orca_binary_image" >/dev/null 2>&1; then
+        if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
+            print_error "Cached OrcaSlicer binary layer failed identity validation; refusing offline preparation."
+            return 1
+        fi
+        print_success "✓ $orca_binary_image already exists locally (skipping rebuild)"
         ((successful++))
     else
-        print_info "Building: orcaslicer-binaries:2.4.0"
+        print_info "Building: $orca_binary_image"
         print_info "  Extracts OrcaSlicer Linux AppImage for caching"
         print_info "  Dockerfile: Dockerfile.base-orcaslicer-binaries"
         print_info "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1631,9 +1635,10 @@ build_base_images() {
         # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
         local build_args=(
             -f "$docker_dir/Dockerfile.base-orcaslicer-binaries"
-            -t "orcaslicer-binaries:2.4.0"
+            -t "$orca_binary_image"
             --label="printfarmer-precache=true"
-            --build-arg ORCASLICER_VERSION=2.4.0
+            --build-arg "ORCASLICER_VERSION=$ORCASLICER_VERSION"
+            --build-arg "ORCASLICER_SHA256=$ORCASLICER_SHA256"
             --build-arg "CACHE_BUST=$cache_bust"
         )
         
@@ -1651,12 +1656,15 @@ build_base_images() {
         build_args+=(.)
         
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
-            
-            print_success "✓ Build successful: orcaslicer-binaries:2.4.0"
+            if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
+                print_error "Built OrcaSlicer binary layer failed identity validation."
+                return 1
+            fi
+            print_success "✓ Build successful: $orca_binary_image"
             ((successful++))
         else
-            print_warning "⚠ Build failed: orcaslicer-binaries:2.4.0 (optional, continuing)"
-            # Don't count as failure - OrcaSlicer binaries are optional
+            print_error "✗ Build failed: $orca_binary_image"
+            return 1
         fi
     fi
     echo
@@ -2708,7 +2716,7 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}
 ORCA_WORKER_COUNT=${ORCA_WORKER_COUNT:-0}
 ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
 
 EOF
 
@@ -3362,7 +3370,7 @@ configure_slicing() {
         # Default to 'no' to avoid accidental enabling when slicer work is paused
         prompt_yes_no "Enable OrcaSlicer worker(s)?" "no" "ENABLE_ORCA_WORKER"
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.4.0}" "ORCASLICER_VERSION"
+            prompt_with_default "OrcaSlicer version to deploy:" "${ORCASLICER_VERSION:-2.4.2}" "ORCASLICER_VERSION"
             prompt_with_default "Number of OrcaSlicer worker replicas:" "1" "ORCA_WORKER_COUNT"
         else
             ORCA_WORKER_COUNT=0
@@ -4215,7 +4223,7 @@ PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" ||
 DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
 # Slicer Versions
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
 ORCASLICER_SHA256=${ORCASLICER_SHA256:-}
 # Set only after resolving or pushing an immutable worker image. Leaving this empty keeps
 # calibration generation unavailable while ordinary slicing can continue.
@@ -4770,7 +4778,7 @@ EOF
             ENABLE_ORCA_WORKER="no"
         fi
         if [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
-            ORCA_VERSION="${ORCASLICER_VERSION:-2.4.0}"
+            ORCA_VERSION="${ORCASLICER_VERSION:-2.4.2}"
             if [ -z "${ORCASLICER_SHA256:-}" ]; then
                 print_error "No authoritative OrcaSlicer checksum is configured for version ${ORCA_VERSION}."
                 print_error "Set ORCASLICER_SHA256 to the official upstream AppImage SHA-256."
@@ -4789,9 +4797,13 @@ EOF
             # If caller supplied a prebuilt ORCA_ASSET_IMAGE and it exists locally, tag and skip building
             if [ -n "${ORCA_ASSET_IMAGE:-}" ]; then
                 if docker image inspect "${ORCA_ASSET_IMAGE}" >/dev/null 2>&1; then
-                    print_info "Found local ORCA_ASSET_IMAGE: ${ORCA_ASSET_IMAGE} - tagging for use and skipping build"
-                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:${ORCA_VERSION}" || true
-                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:latest" || true
+                    if ! validate_orcaslicer_binary_image "${ORCA_ASSET_IMAGE}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
+                        print_error "ORCA_ASSET_IMAGE does not attest the requested OrcaSlicer release; refusing to retag it."
+                        exit 1
+                    fi
+                    print_info "Found verified ORCA_ASSET_IMAGE: ${ORCA_ASSET_IMAGE} - tagging for use and skipping build"
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:${ORCA_VERSION}"
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:latest"
                     # Mark to skip the build step
                     export _PF_SKIP_ORCA_BUILD=1
                 else
@@ -4803,6 +4815,10 @@ EOF
             # This handles the case where images were loaded externally before this script runs
             if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ]; then
                 if docker image inspect "orcaslicer-binaries:${ORCA_VERSION}" >/dev/null 2>&1; then
+                    if ! validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
+                        print_error "Cached OrcaSlicer binary layer is stale or unverifiable; refusing to reuse it."
+                        exit 1
+                    fi
                     print_success "✓ orcaslicer-binaries:${ORCA_VERSION} already exists locally - skipping rebuild"
                     export _PF_SKIP_ORCA_BUILD=1
                 fi
@@ -4824,6 +4840,10 @@ EOF
                 print_success "Skipping orcaslicer-binaries build (using prebuilt image)"
             else
                 if "${ORCA_BUILD_CMD[@]}"; then
+                    if ! validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
+                        print_error "New OrcaSlicer binary layer failed identity validation."
+                        exit 1
+                    fi
                     print_success "orcaslicer-binaries:${ORCA_VERSION} layer built successfully (cached for future builds)"
                 else
                     print_error "Failed to build orcaslicer-binaries:${ORCA_VERSION} layer"
@@ -4894,8 +4914,8 @@ EOF
         # When using prebuilt orcaslicer-binaries image via additional_contexts,
         # tell the Dockerfile to skip building the binary and use only what's in the prebuilt image
         if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
-            compose_build_args+=(--build-arg "ALLOW_STUB=true" --build-arg "_SKIP_ORCA_BINARY_BUILD=1")
-            print_info "Configuring build to use prebuilt orcaslicer-binaries (ALLOW_STUB=true, skip binary build)"
+            compose_build_args+=(--build-arg "ALLOW_STUB=false" --build-arg "_SKIP_ORCA_BINARY_BUILD=1")
+            print_info "Configuring build to use verified prebuilt orcaslicer-binaries (skip binary build)"
         fi
 
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then

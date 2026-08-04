@@ -8,9 +8,13 @@ on:
         required: true
         default: 'orca'
       version:
-        description: 'Version string (for Prusa: 2.8.0 or for Orca: 2.4.0). If empty, script will attempt to use latest release.'
+        description: 'Version string (for Prusa: 2.8.0 or for Orca: v2.4.2). If empty, script will attempt to use latest release.'
         required: false
-        default: ''
+        default: 'v2.4.2'
+
+env:
+  ORCASLICER_VERSION: v2.4.2
+  ORCASLICER_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 
 permissions:
   contents: read
@@ -25,9 +29,12 @@ jobs:
 
       - name: Determine target
         id: target
+        env:
+          INPUT_SLICER: ${{ github.event.inputs.slicer }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
-          SLICER="${{ github.event.inputs.slicer }}"
-          VERSION_IN="${{ github.event.inputs.version }}"
+          SLICER="$INPUT_SLICER"
+          VERSION_IN="$INPUT_VERSION"
           if [ -z "$SLICER" ]; then echo "slicer=prusa" >> $GITHUB_OUTPUT; else echo "slicer=$SLICER" >> $GITHUB_OUTPUT; fi
           echo "version=$VERSION_IN" >> $GITHUB_OUTPUT
 
@@ -35,10 +42,10 @@ jobs:
         id: download
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SLICER: ${{ steps.target.outputs.slicer }}
+          VERSION_IN: ${{ steps.target.outputs.version }}
         run: |
           set -euo pipefail
-          SLICER=${{ steps.target.outputs.slicer }}
-          VERSION_IN=${{ steps.target.outputs.version }}
           TMPDIR=$(mktemp -d)
           cd "$TMPDIR"
 
@@ -61,6 +68,9 @@ jobs:
           # Choose release by VERSION_IN if provided, else pick latest stable (non-prerelease)
           if [ -n "$VERSION_IN" ]; then
             tag_match="$VERSION_IN"
+            if [ "$SLICER" = "orca" ] && [[ "$tag_match" != v* ]]; then
+              tag_match="v${tag_match}"
+            fi
             release_entry=$(echo "$releases_json" | jq -r --arg tag "$tag_match" '.[] | select(.tag_name==($tag) or .name==($tag) ) | .')
           else
             release_entry=$(echo "$releases_json" | jq -r '.[] | select(.prerelease==false) | .[0]' | head -n1)
@@ -71,11 +81,29 @@ jobs:
             exit 2
           fi
 
-          # Attempt to find a matching asset URL
-          asset_url=$(echo "$release_entry" | jq -r '.assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
+          release_tag=$(echo "$release_entry" | jq -r '.tag_name')
+          if [ "$SLICER" = "orca" ] && [ "$release_tag" != "$ORCASLICER_VERSION" ]; then
+            echo "No repository-pinned checksum is configured for OrcaSlicer ${release_tag}" >&2
+            exit 2
+          fi
+
+          if [ "$SLICER" = "orca" ]; then
+            # Select the exact x86_64 Ubuntu 24.04 asset covered by the pinned digest.
+            asset_name="OrcaSlicer_Linux_AppImage_Ubuntu2404_V${release_tag#v}.AppImage"
+            asset_url=$(echo "$release_entry" | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .browser_download_url' | head -n1 || true)
+            asset_digest=$(echo "$release_entry" | jq -r --arg name "$asset_name" '.assets[]? | select(.name == $name) | .digest' | head -n1 || true)
+          else
+            asset_name=""
+            asset_url=$(echo "$release_entry" | jq -r '.assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
+            asset_digest=""
+          fi
           if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
             echo "No AppImage asset found in release; trying fallback listing" >&2
-            asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "${VERSION_IN}" '.[] | select(.tag_name==($tag)) | .assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
+            if [ "$SLICER" = "orca" ]; then
+              asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "$release_tag" --arg name "$asset_name" '.[] | select(.tag_name == $tag) | .assets[]? | select(.name == $name) | .browser_download_url' | head -n1 || true)
+            else
+              asset_url=$(curl -sS $AUTH_HEADER "$API_URL" | jq -r --arg tag "$release_tag" '.[] | select(.tag_name == $tag) | .assets[]? | select((.name | test("AppImage"; "i")) and (.name | test("aarch64|arm64"; "i") | not)) | .browser_download_url' | head -n1 || true)
+            fi
           fi
 
           if [ -z "$asset_url" ] || [ "$asset_url" = "null" ]; then
@@ -86,15 +114,24 @@ jobs:
           echo "Downloading AppImage from: $asset_url"
           # Save to known filename
           OUTNAME="${SLICER}-appimage-${VERSION_IN:-latest}.AppImage"
-          curl -L -o "$OUTNAME" -fS "$asset_url"
-          ls -lh "$OUTNAME"
+          OUTPATH="${GITHUB_WORKSPACE}/${OUTNAME}"
+          curl -L -o "$OUTPATH" -fS "$asset_url"
+          if [ "$SLICER" = "orca" ]; then
+            if [ "$asset_digest" != "sha256:${ORCASLICER_SHA256}" ]; then
+              echo "GitHub release digest does not match the repository-pinned OrcaSlicer checksum" >&2
+              exit 4
+            fi
+            echo "${ORCASLICER_SHA256}  ${OUTPATH}" | sha256sum --check --strict -
+          fi
+          ls -lh "$OUTPATH"
           echo "artifact_name=$OUTNAME" >> $GITHUB_OUTPUT
+          echo "artifact_path=$OUTPATH" >> $GITHUB_OUTPUT
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.download.outputs.artifact_name }}
-          path: ${{ steps.download.outputs.artifact_name }}
+          path: ${{ steps.download.outputs.artifact_path }}
 
       - name: Cleanup tmp
         if: always()

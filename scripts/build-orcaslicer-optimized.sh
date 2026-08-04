@@ -2,9 +2,16 @@
 # Build script for OrcaSlicer binary layer optimization
 # This script builds the binary layer first for optimal caching using consolidated multistage Dockerfile
 
-set -e
+set -euo pipefail
 
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/docker/container-versions.conf"
+source "$SCRIPT_DIR/docker-utils.sh"
+
+if [[ -z "$ORCASLICER_SHA256" ]]; then
+    print_error "No pinned checksum is configured for OrcaSlicer ${ORCASLICER_VERSION}."
+    exit 1
+fi
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
@@ -30,11 +37,13 @@ ORCA_BIN_CMD+=( -f "./Dockerfile.multistage" --target orcaslicer-binaries \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     -t orcaslicer-binaries:latest \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     ${GITHUB_TOKEN:+--build-arg GITHUB_TOKEN=$GITHUB_TOKEN} \
     .)
 
 "${ORCA_BIN_CMD[@]}"
+validate_orcaslicer_binary_image "orcaslicer-binaries:$ORCASLICER_VERSION" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 echo "✅ Binary layer built successfully!"
 echo ""
@@ -49,10 +58,12 @@ WORKER_CMD+=( -f Dockerfile.multistage \
     --target orcaslicer-worker \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     .)
 
 "${WORKER_CMD[@]}"
+validate_orcaslicer_binary_image "printfarmer-orcaslicer-worker" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 echo "✅ OrcaSlicer worker built successfully!"
 echo ""

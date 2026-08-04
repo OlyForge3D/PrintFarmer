@@ -2863,7 +2863,7 @@ public class ProfilesService(
             // to avoid multi-enumeration warnings when we probe four times.
             List<SlicerService> orcaCandidates = allSlicers.Where(s =>
                 s.SlicerType == 1 &&
-                CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+                OrcaSlicerProfileCompatibility.IsSupportedVersion(s.Version) &&
                 CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
                 !string.IsNullOrEmpty(s.Host)).ToList();
 
