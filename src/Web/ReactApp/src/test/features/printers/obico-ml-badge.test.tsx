@@ -233,10 +233,10 @@ describe('ShieldIcon', () => {
   // because the stray render happens after cleanup has already run.
   //
   // The `vi.resetModules()` that used to sit in a `beforeEach` here is gone with
-  // it: its only purpose was to force these imports to re-resolve, which made
-  // these two tests pay the full transform cost on *every* run and left them the
-  // most exposed in the file. ShieldIcon is a stateless SVG, so nothing depends
-  // on the module being re-evaluated.
+  // it: it cleared each test's evaluated-module state, so the second import
+  // re-executed the module instead of reusing the first — `resetModules` clears
+  // evaluation state, not Vite's transform cache. ShieldIcon is a stateless SVG,
+  // so re-evaluating it changes nothing here.
   let ShieldIcon: (typeof import('@/common/components/icons/MdiIcons'))['ShieldIcon'];
 
   beforeAll(async () => {
