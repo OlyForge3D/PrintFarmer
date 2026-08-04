@@ -165,6 +165,51 @@ struct SpoolmanFilamentRequest: Codable, Sendable {
     }
 }
 
+extension SpoolmanFilamentRequest {
+    /// Spoolman's `FilamentParameters` declares `density` and `diameter` with no default
+    /// (`density: float = Field(gt=0)`), so a create payload that omits either is rejected
+    /// with HTTP 422. These fallbacks match the ones the backend's SpoolmanDB import uses.
+    static let defaultDensityGramsPerCubicCentimeter: Double = 1.24
+    static let defaultDiameterMillimeters: Double = 1.75
+
+    /// Builds a create-filament request that is always valid for Spoolman: density and
+    /// diameter fall back to sane defaults, and non-positive weights are dropped rather
+    /// than sent as zeros (Spoolman requires `weight > 0` when present).
+    static func newFilament(
+        name: String,
+        material: String,
+        vendorId: Int? = nil,
+        colorHex: String? = nil,
+        density: Double? = nil,
+        diameter: Double? = nil,
+        weight: Double? = nil,
+        spoolWeight: Double? = nil,
+        articleNumber: String? = nil
+    ) -> SpoolmanFilamentRequest {
+        SpoolmanFilamentRequest(
+            name: name,
+            vendorId: vendorId,
+            material: material,
+            colorHex: colorHex,
+            density: positive(density) ?? defaultDensityGramsPerCubicCentimeter,
+            diameter: positive(diameter) ?? defaultDiameterMillimeters,
+            weight: positive(weight),
+            spoolWeight: nonNegative(spoolWeight),
+            articleNumber: articleNumber
+        )
+    }
+
+    private static func positive(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value > 0 else { return nil }
+        return value
+    }
+
+    private static func nonNegative(_ value: Double?) -> Double? {
+        guard let value, value.isFinite, value >= 0 else { return nil }
+        return value
+    }
+}
+
 // MARK: - Spoolman Vendor (matches SpoolmanVendorDto)
 
 struct SpoolmanVendor: Codable, Identifiable, Sendable {

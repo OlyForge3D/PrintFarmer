@@ -145,6 +145,8 @@ private struct UnknownBarcodeView: View {
     @State private var colorHex = "#10b981"
     @State private var totalWeightG: Double = 1000
     @State private var spoolWeightG: Double = 200
+    @State private var densityGPerCm3: Double = SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter
+    @State private var diameterMm: Double = SpoolmanFilamentRequest.defaultDiameterMillimeters
 
     private var filteredFilaments: [SpoolmanFilament] {
         guard !searchText.isEmpty else { return filaments }
@@ -158,7 +160,10 @@ private struct UnknownBarcodeView: View {
     }
 
     private var canCreateFilament: Bool {
-        !filamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !selectedMaterial.isEmpty
+        !filamentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !selectedMaterial.isEmpty
+            && densityGPerCm3 > 0
+            && diameterMm > 0
     }
 
     var body: some View {
@@ -242,6 +247,9 @@ private struct UnknownBarcodeView: View {
                         Text(material.name).tag(material.name)
                     }
                 }
+                .onChange(of: selectedMaterial) { _, newMaterial in
+                    applyMaterialDensity(for: newMaterial)
+                }
             }
 
             if vendors.isEmpty {
@@ -286,6 +294,36 @@ private struct UnknownBarcodeView: View {
                     .multilineTextAlignment(.trailing)
                     .frame(width: 100)
                 Text("g")
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+
+            // Spoolman requires both of these on create and rejects the filament with
+            // HTTP 422 when either is missing, so they are always sent.
+            HStack {
+                Text("Diameter")
+                Spacer()
+                TextField("mm", value: $diameterMm, format: .number)
+                    #if os(iOS)
+                    .keyboardType(.decimalPad)
+                    #endif
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+                    .accessibilityLabel("Filament diameter in millimeters")
+                Text("mm")
+                    .foregroundStyle(Color.pfTextSecondary)
+            }
+
+            HStack {
+                Text("Density")
+                Spacer()
+                TextField("g/cm³", value: $densityGPerCm3, format: .number)
+                    #if os(iOS)
+                    .keyboardType(.decimalPad)
+                    #endif
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+                    .accessibilityLabel("Filament density in grams per cubic centimeter")
+                Text("g/cm³")
                     .foregroundStyle(Color.pfTextSecondary)
             }
 
@@ -366,19 +404,30 @@ private struct UnknownBarcodeView: View {
         }
     }
 
+    private func applyMaterialDensity(for materialName: String) {
+        guard let match = materials.first(where: { $0.name == materialName }),
+              let density = match.density,
+              density > 0 else {
+            return
+        }
+        densityGPerCm3 = density
+    }
+
     private func createAndSelectFilament() {
         isSaving = true
         errorMessage = nil
         Task { @MainActor in
             do {
                 let trimmedName = filamentName.trimmingCharacters(in: .whitespacesAndNewlines)
-                let request = SpoolmanFilamentRequest(
+                let request = SpoolmanFilamentRequest.newFilament(
                     name: trimmedName,
-                    vendorId: selectedVendorId,
                     material: selectedMaterial,
+                    vendorId: selectedVendorId,
                     colorHex: colorHex.isEmpty ? nil : colorHex,
-                    weight: totalWeightG > 0 ? totalWeightG : nil,
-                    spoolWeight: spoolWeightG > 0 ? spoolWeightG : nil,
+                    density: densityGPerCm3,
+                    diameter: diameterMm,
+                    weight: totalWeightG,
+                    spoolWeight: spoolWeightG,
                     articleNumber: barcode
                 )
                 let filament = try await spoolService.createFilament(request)

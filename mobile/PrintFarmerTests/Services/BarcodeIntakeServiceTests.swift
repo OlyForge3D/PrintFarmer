@@ -232,4 +232,64 @@ final class BarcodeIntakeServiceTests: XCTestCase {
         XCTAssertNil(json?["vendor"])
         XCTAssertEqual(json?["articleNumber"] as? String, "000123")
     }
+
+    // MARK: - Filament create payload (issue #1067)
+
+    func testNewFilamentAlwaysCarriesDensityAndDiameter() throws {
+        let request = SpoolmanFilamentRequest.newFilament(
+            name: "Sunlu PLA Grey",
+            material: "PLA",
+            vendorId: 7,
+            colorHex: "#808080",
+            weight: 1000,
+            spoolWeight: 200,
+            articleNumber: "6971170411231"
+        )
+
+        // Spoolman rejects a filament create with HTTP 422 when either field is missing.
+        XCTAssertEqual(request.density, SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter)
+        XCTAssertEqual(request.diameter, SpoolmanFilamentRequest.defaultDiameterMillimeters)
+
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(request)) as? [String: Any]
+        XCTAssertNotNil(json?["density"])
+        XCTAssertNotNil(json?["diameter"])
+        XCTAssertEqual(json?["articleNumber"] as? String, "6971170411231")
+    }
+
+    func testNewFilamentKeepsCallerSuppliedDensityAndDiameter() {
+        let request = SpoolmanFilamentRequest.newFilament(
+            name: "PETG",
+            material: "PETG",
+            density: 1.27,
+            diameter: 2.85
+        )
+
+        XCTAssertEqual(request.density, 1.27)
+        XCTAssertEqual(request.diameter, 2.85)
+    }
+
+    func testNewFilamentReplacesNonPositiveDensityAndDiameterWithDefaults() {
+        let request = SpoolmanFilamentRequest.newFilament(
+            name: "ABS",
+            material: "ABS",
+            density: 0,
+            diameter: -1
+        )
+
+        XCTAssertEqual(request.density, SpoolmanFilamentRequest.defaultDensityGramsPerCubicCentimeter)
+        XCTAssertEqual(request.diameter, SpoolmanFilamentRequest.defaultDiameterMillimeters)
+    }
+
+    func testNewFilamentDropsNonPositiveWeight() {
+        let request = SpoolmanFilamentRequest.newFilament(
+            name: "TPU",
+            material: "TPU",
+            weight: 0,
+            spoolWeight: 0
+        )
+
+        // Spoolman requires weight > 0 when present, but allows spool_weight >= 0.
+        XCTAssertNil(request.weight)
+        XCTAssertEqual(request.spoolWeight, 0)
+    }
 }

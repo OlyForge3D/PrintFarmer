@@ -7,6 +7,7 @@ using System.Threading;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
@@ -18,6 +19,19 @@ namespace Farm.Infrastructure.Services.Spoolman;
 
 public class SpoolmanService(HttpClient http, ISettingsService settingsService, ILogger<SpoolmanService> logger) : ISpoolmanService
 {
+    /// <summary>
+    /// Density applied when a caller creates a filament without one. Spoolman requires
+    /// <c>density</c> (it has no default) and rejects the payload with HTTP 422 otherwise.
+    /// Matches the fallback already used by the SpoolmanDB import in FilamentTypeService.
+    /// </summary>
+    internal const double DefaultFilamentDensity = 1.24d;
+
+    /// <summary>
+    /// Diameter applied when a caller creates a filament without one. Spoolman requires
+    /// <c>diameter</c> (it has no default) and rejects the payload with HTTP 422 otherwise.
+    /// </summary>
+    internal const double DefaultFilamentDiameter = 1.75d;
+
     private readonly HttpClient http = http;
     private readonly ISettingsService settingsService = settingsService;
     private readonly ILogger<SpoolmanService> logger = logger;
@@ -695,7 +709,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         string jsonBody = JsonSerializer.Serialize(body);
         using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
         HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSpoolmanSuccessAsync(response, "create a vendor", cts.Token);
 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);
@@ -715,14 +729,23 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         string url = $"{cfg.BaseUrl.TrimEnd('/')}/api/v1/filament";
-        string jsonBody = BuildFilamentJson(request);
+
+        // Spoolman requires density and diameter on create; both are omitted from the JSON
+        // when null, which makes Spoolman reject the whole payload with HTTP 422. Backfill
+        // sane defaults so clients that don't collect these fields still succeed.
+        SpoolmanCreateFilamentRequest normalized = request with
+        {
+            Density = request.Density is > 0 ? request.Density : DefaultFilamentDensity,
+            Diameter = request.Diameter is > 0 ? request.Diameter : DefaultFilamentDiameter,
+        };
+        string jsonBody = BuildFilamentJson(normalized);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         cts.CancelAfter(TimeSpan.FromSeconds(15));
 
         using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
         HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSpoolmanSuccessAsync(response, "create a filament", cts.Token);
 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);
@@ -749,7 +772,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
         };
         HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSpoolmanSuccessAsync(response, $"update filament {filamentId}", cts.Token);
 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);
@@ -904,6 +927,112 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         return new SpoolmanBulkUpdateResult(deleted, errorCount, [.. errors]);
+    }
+
+    /// <summary>
+    /// Throws a <see cref="SpoolmanApiException"/> carrying Spoolman's own error detail when the
+    /// response is not successful. Preferred over <c>EnsureSuccessStatusCode()</c>, whose message
+    /// ("Response status code does not indicate success: 422 (Unprocessable Entity).") tells the
+    /// user nothing about which field Spoolman rejected.
+    /// </summary>
+    private static async Task EnsureSpoolmanSuccessAsync(HttpResponseMessage response, string operation, CancellationToken ct)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        string body;
+        try
+        {
+            body = await response.Content.ReadAsStringAsync(ct);
+        }
+        catch (Exception)
+        {
+            body = string.Empty;
+        }
+
+        throw new SpoolmanApiException(response.StatusCode, operation, ParseSpoolmanErrorDetail(body));
+    }
+
+    /// <summary>
+    /// Extracts a readable message from a Spoolman error body. FastAPI validation failures use
+    /// <c>{"detail":[{"loc":["body","density"],"msg":"Field required"}]}</c>; Spoolman's own
+    /// handlers use <c>{"detail":"..."}</c> or <c>{"message":"..."}</c>.
+    /// </summary>
+    private static string? ParseSpoolmanErrorDetail(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(body);
+            JsonElement root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return Truncate(body);
+            }
+
+            if (root.TryGetProperty("detail", out JsonElement detail))
+            {
+                switch (detail.ValueKind)
+                {
+                    case JsonValueKind.String:
+                        return Truncate(detail.GetString());
+                    case JsonValueKind.Array:
+                        List<string> parts = [];
+                        foreach (JsonElement item in detail.EnumerateArray())
+                        {
+                            if (item.ValueKind != JsonValueKind.Object)
+                            {
+                                continue;
+                            }
+
+                            string? msg = item.TryGetProperty("msg", out JsonElement msgElement) ? msgElement.GetString() : null;
+                            string? field = null;
+                            if (item.TryGetProperty("loc", out JsonElement loc) && loc.ValueKind == JsonValueKind.Array)
+                            {
+                                field = string.Join(
+                                    '.',
+                                    loc.EnumerateArray()
+                                        .Select(l => l.ValueKind == JsonValueKind.String ? l.GetString() : l.ToString())
+                                        .Where(l => !string.IsNullOrEmpty(l)));
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(msg))
+                            {
+                                parts.Add(string.IsNullOrWhiteSpace(field) ? msg : $"{field}: {msg}");
+                            }
+                        }
+
+                        return parts.Count > 0 ? Truncate(string.Join("; ", parts)) : Truncate(body);
+                    default:
+                        break;
+                }
+            }
+
+            return root.TryGetProperty("message", out JsonElement message) && message.ValueKind == JsonValueKind.String
+                ? Truncate(message.GetString())
+                : Truncate(body);
+        }
+        catch (JsonException)
+        {
+            return Truncate(body);
+        }
+    }
+
+    private static string? Truncate(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        string trimmed = value.Trim();
+        return trimmed.Length <= 500 ? trimmed : trimmed[..500];
     }
 
     private static string BuildFilamentJson(SpoolmanCreateFilamentRequest request)
@@ -1308,7 +1437,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
 
         using var content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json");
         HttpResponseMessage response = await http.PostAsync(url, content, cts.Token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSpoolmanSuccessAsync(response, "create a spool", cts.Token);
 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);
@@ -1335,7 +1464,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             Content = new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json")
         };
         HttpResponseMessage response = await http.SendAsync(httpRequest, cts.Token);
-        response.EnsureSuccessStatusCode();
+        await EnsureSpoolmanSuccessAsync(response, $"update spool {spoolId}", cts.Token);
 
         string json = await response.Content.ReadAsStringAsync(cts.Token);
         using JsonDocument doc = JsonDocument.Parse(json);

@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
@@ -176,6 +177,157 @@ public class SpoolmanServiceTests
         IEnumerable<SpoolmanDiscoveryResult> results = await svc.ScanNetworkForSpoolmanAsync(new[] { "192.168.1.0/29" });
         // The helper expands small ranges; ensure at least one available result is returned for the 192.168.1.5
         Assert.Contains(results, r => r.IsAvailable && r.Url.Contains("192.168.1.5"));
+    }
+
+    [Fact]
+    public async Task CreateFilamentInSpoolmanAsync_SendsDefaultDensityAndDiameter_WhenCallerOmitsThem()
+    {
+        // Regression test for issue #1067: Spoolman requires density and diameter on create,
+        // and rejects the payload with HTTP 422 when either key is absent.
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        string? capturedBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                string json = JsonSerializer.Serialize(new { id = 55, name = "Sunlu PLA" });
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanFilamentDto result = await svc.CreateFilamentInSpoolmanAsync(
+            new SpoolmanCreateFilamentRequest { Name = "Sunlu PLA", Material = "PLA" },
+            CancellationToken.None);
+
+        Assert.Equal(55, result.Id);
+        Assert.NotNull(capturedBody);
+
+        using JsonDocument body = JsonDocument.Parse(capturedBody);
+        Assert.Equal(1.24d, body.RootElement.GetProperty("density").GetDouble());
+        Assert.Equal(1.75d, body.RootElement.GetProperty("diameter").GetDouble());
+    }
+
+    [Fact]
+    public async Task CreateFilamentInSpoolmanAsync_PreservesCallerSuppliedDensityAndDiameter()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        string? capturedBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { id = 7 }), Encoding.UTF8, "application/json")
+                };
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        _ = await svc.CreateFilamentInSpoolmanAsync(
+            new SpoolmanCreateFilamentRequest { Name = "PETG", Material = "PETG", Density = 1.27d, Diameter = 2.85d },
+            CancellationToken.None);
+
+        using JsonDocument body = JsonDocument.Parse(capturedBody!);
+        Assert.Equal(1.27d, body.RootElement.GetProperty("density").GetDouble());
+        Assert.Equal(2.85d, body.RootElement.GetProperty("diameter").GetDouble());
+    }
+
+    [Fact]
+    public async Task UpdateFilamentInSpoolmanAsync_DoesNotInjectDensityOrDiameter()
+    {
+        // A barcode mapping PATCHes only article_number; injecting defaults here would
+        // silently overwrite the filament's real density and diameter.
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        string? capturedBody = null;
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(JsonSerializer.Serialize(new { id = 9 }), Encoding.UTF8, "application/json")
+                };
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        _ = await svc.UpdateFilamentInSpoolmanAsync(
+            9,
+            new SpoolmanCreateFilamentRequest { ArticleNumber = "6971170411231" },
+            CancellationToken.None);
+
+        using JsonDocument body = JsonDocument.Parse(capturedBody!);
+        Assert.False(body.RootElement.TryGetProperty("density", out _));
+        Assert.False(body.RootElement.TryGetProperty("diameter", out _));
+        Assert.Equal("6971170411231", body.RootElement.GetProperty("article_number").GetString());
+    }
+
+    [Fact]
+    public async Task CreateFilamentInSpoolmanAsync_SurfacesSpoolmanValidationDetail_OnUnprocessableEntity()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        const string FastApiError = """
+            {"detail":[{"loc":["body","density"],"msg":"Field required","type":"missing"}]}
+            """;
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            new HttpResponseMessage(HttpStatusCode.UnprocessableEntity)
+            {
+                Content = new StringContent(FastApiError, Encoding.UTF8, "application/json")
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanApiException ex = await Assert.ThrowsAsync<SpoolmanApiException>(
+            () => svc.CreateFilamentInSpoolmanAsync(
+                new SpoolmanCreateFilamentRequest { Name = "Broken", Material = "PLA" },
+                CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.UnprocessableEntity, ex.StatusCode);
+        Assert.Equal("body.density: Field required", ex.Detail);
+        Assert.Contains("body.density: Field required", ex.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("does not indicate success", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CreateSpoolInSpoolmanAsync_SurfacesSpoolmanMessage_OnBadRequest()
+    {
+        Mock<ISettingsService> settings = new Mock<ISettingsService>();
+        _ = settings.Setup(s => s.Get<SpoolmanSettings>()).Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
+        Mock<ILogger<SpoolmanService>> logger = new Mock<ILogger<SpoolmanService>>();
+
+        using FakeHttpMessageHandler handler = new FakeHttpMessageHandler((req) =>
+            new HttpResponseMessage(HttpStatusCode.BadRequest)
+            {
+                Content = new StringContent("""{"message":"Filament 12 does not exist."}""", Encoding.UTF8, "application/json")
+            });
+
+        using HttpClient http = new HttpClient(handler) { BaseAddress = new Uri("http://spoolman.local") };
+        SpoolmanService svc = new SpoolmanService(http, settings.Object, logger.Object);
+
+        SpoolmanApiException ex = await Assert.ThrowsAsync<SpoolmanApiException>(
+            () => svc.CreateSpoolInSpoolmanAsync(new SpoolmanSpoolRequest { FilamentId = 12 }, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.BadRequest, ex.StatusCode);
+        Assert.Equal("Filament 12 does not exist.", ex.Detail);
     }
 
     [Fact]
