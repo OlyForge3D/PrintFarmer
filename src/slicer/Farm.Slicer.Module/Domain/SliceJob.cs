@@ -236,15 +236,24 @@ public class SliceJob
     [JsonIgnore]
     public string? FilamentProfileJson { get; set; }
 
-    /// <summary>SHA-256 (hex) of <see cref="MachineProfileJson"/>.</summary>
+    /// <summary>
+    /// SHA-256 (hex) of the effective native machine profile. For named legacy selections this is
+    /// recorded from the authenticated worker's completion report.
+    /// </summary>
     [MaxLength(64)]
     public string? MachineProfileSha256 { get; set; }
 
-    /// <summary>SHA-256 (hex) of <see cref="ProcessProfileJson"/>.</summary>
+    /// <summary>
+    /// SHA-256 (hex) of the effective native process profile. For named legacy selections this is
+    /// recorded from the authenticated worker's completion report.
+    /// </summary>
     [MaxLength(64)]
     public string? ProcessProfileSha256 { get; set; }
 
-    /// <summary>SHA-256 (hex) of <see cref="FilamentProfileJson"/>.</summary>
+    /// <summary>
+    /// SHA-256 (hex) of the effective native filament profile set. For named legacy selections this
+    /// is recorded from the authenticated worker's completion report.
+    /// </summary>
     [MaxLength(64)]
     public string? FilamentProfileSha256 { get; set; }
 

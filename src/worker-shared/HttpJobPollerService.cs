@@ -153,6 +153,7 @@ public abstract class HttpJobPollerService(
                     ModelSha256 = jobStatus.ModelSha256,
                     EngineType = jobStatus.SlicerEngine,
                     SlicerEngine = jobStatus.SlicerEngine.ToString(),
+                    SlicerProfileJson = jobStatus.SlicerProfileJson,
                     Status = SlicingJobStatus.Slicing, // in-progress mapping
                     StartedAt = DateTime.UtcNow,
                     ModelTransformJson = jobStatus.ModelTransformJson,
@@ -167,10 +168,13 @@ public abstract class HttpJobPollerService(
                         jobStatus.MachineProfileSha256,
                         jobStatus.ProcessProfileSha256,
                         jobStatus.FilamentProfileSha256),
+                    MachineProfileSha256 = jobStatus.MachineProfileSha256,
+                    ProcessProfileSha256 = jobStatus.ProcessProfileSha256,
+                    FilamentProfileSha256 = jobStatus.FilamentProfileSha256,
                 };
 
                 // Resolve profile names from SlicerProfileJson into full SlicerProfileDto
-                job.Profile = await ResolveProfileFromJsonAsync(jobStatus.SlicerProfileJson, stoppingToken);
+                job.Profile = await ResolveProfileFromJsonAsync(job.SlicerProfileJson, stoppingToken);
 
                 // The lease this job was claimed under is registered inside HandleJobAsync and
                 // released there, so it is never ambient on the client's default headers.
@@ -318,9 +322,9 @@ public abstract class HttpJobPollerService(
                 EstimatedPrintTimeSeconds = (int?)Math.Round(result.EstimatedPrintTimeSeconds),
                 FilamentUsedGrams = (decimal?)Math.Round(result.EstimatedFilamentUsageGrams, 2),
                 LogText = result.Metadata.TryGetValue("SlicerLog", out string? logObj) ? logObj?.ToString() : null,
-                MachineProfileSha256 = job.NativeProfiles?.MachineSha256,
-                ProcessProfileSha256 = job.NativeProfiles?.ProcessSha256,
-                FilamentProfileSha256 = job.NativeProfiles?.FilamentSha256,
+                MachineProfileSha256 = job.MachineProfileSha256 ?? job.NativeProfiles?.MachineSha256,
+                ProcessProfileSha256 = job.ProcessProfileSha256 ?? job.NativeProfiles?.ProcessSha256,
+                FilamentProfileSha256 = job.FilamentProfileSha256 ?? job.NativeProfiles?.FilamentSha256,
             };
 
             using HttpRequestMessage completeMessage = CreateJobMutationRequest(

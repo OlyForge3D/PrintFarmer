@@ -270,15 +270,24 @@ public class CompleteSliceJobRequest
 
     public string? LogText { get; set; }
 
-    /// <summary>SHA-256 of the machine profile the worker actually wrote, echoed back for verification.</summary>
+    /// <summary>
+    /// SHA-256 of the effective native machine profile the worker wrote. The API verifies a
+    /// claim-delivered digest or records this value for a worker-resolved named selection.
+    /// </summary>
     [MaxLength(64)]
     public string? MachineProfileSha256 { get; set; }
 
-    /// <summary>SHA-256 of the process profile the worker actually wrote, echoed back for verification.</summary>
+    /// <summary>
+    /// SHA-256 of the effective native process profile the worker wrote. The API verifies a
+    /// claim-delivered digest or records this value for a worker-resolved named selection.
+    /// </summary>
     [MaxLength(64)]
     public string? ProcessProfileSha256 { get; set; }
 
-    /// <summary>SHA-256 of the filament profile the worker actually wrote, echoed back for verification.</summary>
+    /// <summary>
+    /// SHA-256 of the effective native filament profile set the worker wrote. The API verifies a
+    /// claim-delivered digest or records this value for a worker-resolved named selection.
+    /// </summary>
     [MaxLength(64)]
     public string? FilamentProfileSha256 { get; set; }
 }

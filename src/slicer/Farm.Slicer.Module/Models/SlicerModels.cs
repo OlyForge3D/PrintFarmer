@@ -151,9 +151,23 @@ public class DistributedSlicingJob : SlicingJobDto
     public SlicerEngineType EngineType { get; set; }
 
     /// <summary>
+    /// Raw named-profile selection delivered by the API for worker-local resolution.
+    /// </summary>
+    public string? SlicerProfileJson { get; set; }
+
+    /// <summary>
     /// Exact native slicer profile documents plus digests, delivered with the claim.
     /// </summary>
     public NativeSlicerProfiles? NativeProfiles { get; set; }
+
+    /// <summary>SHA-256 of the effective native machine profile passed to the slicer.</summary>
+    public string? MachineProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 of the effective native process profile passed to the slicer.</summary>
+    public string? ProcessProfileSha256 { get; set; }
+
+    /// <summary>SHA-256 of the effective native filament profile set passed to the slicer.</summary>
+    public string? FilamentProfileSha256 { get; set; }
 
     /// <summary>SHA-256 (hex) of the stored model bytes, verified after download.</summary>
     public string? ModelSha256 { get; set; }
