@@ -94,6 +94,7 @@ start_services(){
   mkdir -p "$LOG_DIR" "$PID_DIR"
   rm -f "$API_LOG" "$VITE_LOG" "$META_PID_FILE"
   export ASPNETCORE_ENVIRONMENT=Development
+  export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
   export ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-"$SPA_DEV_URL"}
   export ASPNETCORE_URLS="$API_URL"
   export DEPLOYMENT_MODE=monolithic

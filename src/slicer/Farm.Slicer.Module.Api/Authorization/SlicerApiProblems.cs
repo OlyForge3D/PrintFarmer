@@ -17,13 +17,6 @@ public static class SlicerApiProblems
             "Authentication required",
             "authentication_required");
 
-    public static ObjectResult AuthenticationUnavailable(HttpContext context) =>
-        Create(
-            context,
-            StatusCodes.Status503ServiceUnavailable,
-            "Authentication service unavailable",
-            "authentication_unavailable");
-
     public static ObjectResult ResourceForbidden(ControllerBase controller) =>
         Create(
             controller.HttpContext,

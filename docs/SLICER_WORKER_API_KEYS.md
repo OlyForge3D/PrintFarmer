@@ -1,7 +1,9 @@
 ## Slicer worker key generation
 
-`scripts/deploy-docker.sh` generates a cryptographically random shared
-registration key when OrcaSlicer workers are enabled. The generated `.env`
+`install.sh` and `scripts/deploy-docker.sh` generate a cryptographically random
+shared registration key. Reinstalls and in-place upgrades preserve the existing
+key. The installer aborts if no cryptographically secure random source is
+available rather than writing a predictable fallback. The generated `.env`
 contains:
 
 ```dotenv
@@ -33,8 +35,15 @@ Run deployment from the repository root:
 ./scripts/deploy-docker.sh
 ```
 
-Enable OrcaSlicer workers when prompted. In non-interactive environments,
-configure the worker count in `.deploy-config` and run:
+The one-command installer configures the lite monolith automatically:
+
+```bash
+./install.sh --profile lite
+```
+
+For the full deployment script, enable OrcaSlicer workers when prompted. In
+non-interactive environments, configure the worker count in `.deploy-config`
+and run:
 
 ```bash
 ./scripts/deploy-docker.sh --non-interactive
@@ -62,6 +71,25 @@ Worker__SharedKey=<same-random-secret>
 The worker may instead set `SlicerRegistry__ApiKey` for registration. The
 shared value is not sent to worker-only job routes; those routes use the
 per-service key returned by successful registration.
+
+### Startup requirements
+
+When the slicer module is loaded, the API or slicer host refuses to start
+without a shared registration key. Configure `WorkerAuth:SharedKey` through
+environment variables, user secrets, or the deployment secret store. A missing
+validator or invalid request key always returns `401`; missing configuration
+never disables authentication implicitly.
+
+Local development can explicitly opt into unauthenticated registration:
+
+```dotenv
+PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true
+```
+
+This flag is accepted only when the host environment is `Development`. It is
+rejected at startup in every other environment and emits a critical startup
+log when active. The repository's local launch scripts set this opt-in for their
+Development processes. Never configure it in a deployed environment.
 
 ### Verify configuration
 

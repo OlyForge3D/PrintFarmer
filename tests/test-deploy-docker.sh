@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy-docker.sh"
 COMPOSE_GENERATOR="$REPO_ROOT/scripts/docker/compose-generator.sh"
+INSTALL_SCRIPT="$REPO_ROOT/install.sh"
 
 # Source test framework
 source "$SCRIPT_DIR/test-framework.sh"
@@ -1217,6 +1218,225 @@ EOFTEST
     pass_test
 }
 
+# Create a Docker stub that satisfies install.sh prerequisite and upgrade calls.
+create_installer_docker_stub() {
+    local mock_bin="$1"
+    mkdir -p "$mock_bin"
+    cat > "$mock_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+case "${1:-}" in
+    --version)
+        echo "Docker version 27.0.0, build test"
+        ;;
+    info)
+        exit 0
+        ;;
+    compose)
+        if [[ "${2:-}" == "version" ]]; then
+            echo "Docker Compose version v2.29.0"
+        fi
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$mock_bin/docker"
+}
+
+create_failing_command_stubs() {
+    local mock_bin="$1"
+    shift
+    local command_name
+    mkdir -p "$mock_bin"
+    for command_name in "$@"; do
+        cat > "$mock_bin/$command_name" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+        chmod +x "$mock_bin/$command_name"
+    done
+}
+
+# Test: install.sh generates and preserves the lite monolith shared key.
+test_installer_lite_slicer_worker_key() {
+    start_test "installer lite profile configures slicer worker authentication"
+
+    local install_dir="$TEST_TEMP_DIR/installer-lite"
+    local mock_bin="$TEST_TEMP_DIR/installer-bin"
+    local expected_key="test-worker-shared-key-907"
+    create_installer_docker_stub "$mock_bin"
+
+    capture_output "PATH='$mock_bin:$PATH' WORKER_SHARED_API_KEY='$expected_key' '$INSTALL_SCRIPT' --non-interactive --profile lite --port 18907 --dir '$install_dir' --dry-run"
+    local output
+    output=$(get_output)
+
+    assert_file_exists "$install_dir/.env" "Lite installer should create .env"
+    assert_file_exists "$install_dir/docker-compose.yml" "Lite installer should create docker-compose.yml"
+    assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
+    assert_not_contains "$output" "$expected_key" "Installer output must not expose the shared key"
+    local env_mode
+    env_mode=$(stat -c '%a' "$install_dir/.env" 2>/dev/null || stat -f '%Lp' "$install_dir/.env")
+    assert_equals "600" "$env_mode" "Generated .env should be readable only by its owner"
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --non-interactive --profile lite --port 18907 --dir '$install_dir' --reuse-config --dry-run"
+    local preserved_key
+    preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+    assert_equals "$expected_key" "$preserved_key" "Reinstall should preserve the shared key"
+
+    pass_test
+}
+
+# Test: install.sh upgrades old lite installs without rotating the generated key.
+test_installer_upgrade_adds_slicer_worker_key() {
+    start_test "installer upgrade adds stable slicer worker authentication"
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=latest
+DEPLOY_PROFILE=lite
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  printfarmer:
+    container_name: printfarmer-monolith
+    environment:
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+    local output
+    output=$(get_output)
+    local generated_key
+    generated_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+
+    assert_not_equals "" "$generated_key" "Upgrade should generate a shared key for an old lite install"
+    assert_equals "64" "${#generated_key}" "Upgrade should generate the requested 64-character shared key"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Upgrade should wire the generated key into the monolith"
+    assert_not_contains "$output" "$generated_key" "Upgrade output must not expose the generated key"
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+    local preserved_key
+    preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
+    local key_count
+    key_count=$(grep -c '^WORKER_SHARED_API_KEY=' "$install_dir/.env")
+    local mapping_count
+    mapping_count=$(grep -c 'WorkerAuth__SharedKey=' "$install_dir/docker-compose.yml")
+
+    assert_equals "$generated_key" "$preserved_key" "Repeated upgrades should not rotate the shared key"
+    assert_equals "1" "$key_count" "Upgrade should keep one canonical shared-key entry"
+    assert_equals "1" "$mapping_count" "Upgrade should keep one monolith key mapping"
+
+    pass_test
+}
+
+# Test: initial .env generation replaces existing config atomically.
+test_installer_env_write_is_atomic() {
+    start_test "installer writes secret configuration atomically"
+
+    local install_dir="$TEST_TEMP_DIR/installer-atomic"
+    local mock_bin="$TEST_TEMP_DIR/installer-atomic-bin"
+    local original_env
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+    create_failing_command_stubs "$mock_bin" mv
+
+    original_env=$'DEPLOY_PROFILE=lite\nJwt__Key=test-jwt\nWORKER_SHARED_API_KEY=test-worker-key'
+    printf '%s\n' "$original_env" > "$install_dir/.env"
+
+    local output_file="$TEST_TEMP_DIR/installer-atomic.out"
+    local exit_code
+    set +e
+    PATH="$mock_bin:$PATH" "$INSTALL_SCRIPT" \
+        --non-interactive \
+        --profile lite \
+        --port 18908 \
+        --dir "$install_dir" \
+        --reuse-config \
+        --dry-run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Installer should fail when atomic replacement fails"
+    assert_equals "$original_env" "$(cat "$install_dir/.env")" "Failed replacement must not clobber the existing config"
+    local temp_count
+    temp_count=$(find "$install_dir" -maxdepth 1 -name '.env.tmp.*' -type f | wc -l | tr -d ' ')
+    assert_equals "0" "$temp_count" "Failed replacement should clean the mode-600 temporary file"
+
+    pass_test
+}
+
+# Test: secret generation aborts instead of returning predictable fallback data.
+test_installer_fails_without_secure_entropy() {
+    start_test "installer fails closed when secure entropy is unavailable"
+
+    local install_dir="$TEST_TEMP_DIR/installer-entropy"
+    local mock_bin="$TEST_TEMP_DIR/installer-entropy-bin"
+    local original_env
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+    create_failing_command_stubs "$mock_bin" openssl dd base64
+
+    original_env=$'DEPLOY_PROFILE=lite\nJwt__Key=existing-test-jwt'
+    printf '%s\n' "$original_env" > "$install_dir/.env"
+
+    local output_file="$TEST_TEMP_DIR/installer-entropy.out"
+    local exit_code
+    set +e
+    PATH="$mock_bin:$PATH" "$INSTALL_SCRIPT" \
+        --non-interactive \
+        --profile lite \
+        --port 18909 \
+        --dir "$install_dir" \
+        --reuse-config \
+        --dry-run > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Installer should fail when no CSPRNG succeeds"
+    assert_contains "$(cat "$output_file")" "Unable to generate a secure secret" "Failure should explain the secure entropy requirement"
+    assert_equals "$original_env" "$(cat "$install_dir/.env")" "Entropy failure must preserve the existing config"
+
+    pass_test
+}
+
+assert_development_api_block_opt_in() {
+    local block="$1"
+    local label="$2"
+    local expected='export PFARM__WorkerAuth__AllowInsecureDevelopmentRegistration=true'
+    assert_contains "$block" "ASPNETCORE_ENVIRONMENT=Development" "$label should set the Development environment"
+    assert_contains "$block" "$expected" "$label should explicitly enable the Development-only registration bypass"
+    assert_contains "$block" "dotnet run --project api/Farm.Web.Api.csproj" "$label should contain an API start path"
+}
+
+# Test: every supported Development API-start path explicitly selects the bypass.
+test_development_launchers_opt_in_to_insecure_registration() {
+    start_test "development API start paths explicitly opt in to insecure slicer registration"
+
+    local pf_dev_block
+    pf_dev_block=$(sed -n '/^start_services()/,/^stop_services()/p' "$REPO_ROOT/scripts/pf-dev.sh")
+    assert_development_api_block_opt_in "$pf_dev_block" "pf-dev.sh start"
+
+    local start_all_block
+    start_all_block=$(sed -n '/# Environment setup/,/# Start Printer Discovery service/p' "$REPO_ROOT/scripts/start-all-local.sh")
+    assert_development_api_block_opt_in "$start_all_block" "start-all-local.sh"
+
+    local workers_api_only_block
+    workers_api_only_block=$(sed -n '/# Early exit for API-only mode:/,/^[[:space:]]*exit 0/p' "$REPO_ROOT/scripts/start-all-local-with-workers.sh")
+    assert_development_api_block_opt_in "$workers_api_only_block" "start-all-local-with-workers.sh --api-only"
+
+    local workers_full_block
+    workers_full_block=$(sed -n '/# Environment setup for API with distributed slicing enabled/,/# Start React dev server/p' "$REPO_ROOT/scripts/start-all-local-with-workers.sh")
+    assert_development_api_block_opt_in "$workers_full_block" "start-all-local-with-workers.sh full startup"
+
+    pass_test
+}
+
 # Test: Slicer worker API key generation
 test_slicer_worker_api_key_generation() {
     start_test "Slicer worker API key generation"
@@ -1457,6 +1677,11 @@ run_all_tests() {
     test_pfarm_network_discovery_subnets_in_env
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
+    test_installer_lite_slicer_worker_key
+    test_installer_upgrade_adds_slicer_worker_key
+    test_installer_env_write_is_atomic
+    test_installer_fails_without_secure_entropy
+    test_development_launchers_opt_in_to_insecure_registration
     test_slicer_worker_api_key_generation
     test_slicer_worker_api_key_single_worker
     test_postgres_password_authentication_integration

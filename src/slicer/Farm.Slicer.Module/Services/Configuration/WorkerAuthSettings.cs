@@ -13,8 +13,15 @@ public sealed class WorkerAuthSettings
 
     /// <summary>
     /// Shared API key value that workers must present via X-Worker-Key header.
-    /// If null/empty, endpoints fall back to permissive behavior only in Testing environment.
+    /// The slicer host fails startup when this is empty unless the explicit
+    /// development-only registration bypass is enabled.
     /// </summary>
     [MaxLength(256)]
     public string? SharedKey { get; set; }
+
+    /// <summary>
+    /// Allows unauthenticated slicer registration only when the host environment
+    /// is Development. This unsafe option is rejected in every other environment.
+    /// </summary>
+    public bool AllowInsecureDevelopmentRegistration { get; set; }
 }

@@ -16,7 +16,7 @@ namespace Farm.Slicer.Module.Tests;
 public class SlicerApiKeyFilterTests
 {
     [Fact]
-    public async Task RequireSlicerApiKey_NoValidatorInProduction_ReturnsServiceUnavailableProblem()
+    public async Task RequireSlicerApiKey_NoValidatorRegistered_ReturnsUnauthorizedProblem()
     {
         bool executed = false;
         ActionExecutingContext context = CreateContext("Production");
@@ -30,13 +30,13 @@ public class SlicerApiKeyFilterTests
 
         _ = executed.Should().BeFalse();
         ObjectResult result = context.Result.Should().BeOfType<ObjectResult>().Subject;
-        _ = result.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _ = result.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
         ProblemDetails problem = result.Value.Should().BeOfType<ProblemDetails>().Subject;
-        _ = problem.Extensions["code"].Should().Be("authentication_unavailable");
+        _ = problem.Extensions["code"].Should().Be("authentication_required");
     }
 
     [Fact]
-    public async Task RequireSlicerServiceApiKey_NoValidatorInProduction_ReturnsServiceUnavailableProblem()
+    public async Task RequireSlicerServiceApiKey_NoValidatorRegistered_ReturnsUnauthorizedProblem()
     {
         bool executed = false;
         ActionExecutingContext context = CreateContext("Production");
@@ -50,9 +50,9 @@ public class SlicerApiKeyFilterTests
 
         _ = executed.Should().BeFalse();
         ObjectResult result = context.Result.Should().BeOfType<ObjectResult>().Subject;
-        _ = result.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        _ = result.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
         ProblemDetails problem = result.Value.Should().BeOfType<ProblemDetails>().Subject;
-        _ = problem.Extensions["code"].Should().Be("authentication_unavailable");
+        _ = problem.Extensions["code"].Should().Be("authentication_required");
     }
 
     private static ActionExecutingContext CreateContext(string environmentName)
