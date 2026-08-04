@@ -28,7 +28,16 @@
   --pf-text-tertiary:  #6790b8;
   --pf-text-muted:     #4d7299;
   --pf-text-inverse:   #0c1a2e;
-  --pf-on-accent:      #0c1a2e;
+  /*
+   * Deliberately darker than --pf-bg-0 (#0c1a2e), which this used to reuse.
+   * Against --pf-accent-bg (#0284c7) that pairing measured 4.263:1, short of the
+   * 4.5:1 AA floor for normal-weight text — and `size="sm"` controls render at
+   * 12px, which is normal weight, not large. #07101b measures 4.666:1.
+   *
+   * The shortfall was invisible until #1087, because the ghost Button variant was
+   * wiping caller backgrounds, so this pairing was never actually painted.
+   */
+  --pf-on-accent:      #07101b;
   --pf-text-on-accent: var(--pf-on-accent);
 
   /* --- Accent --------------------------------------------------------------- */

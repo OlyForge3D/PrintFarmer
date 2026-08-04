@@ -13,10 +13,13 @@ export function SelectableRow({ isSelected = false, className, children, ref, ..
   //
   // The hover is applied only to the UNSELECTED branch. `bg-*` compiles to
   // `background-color`, which replaces the base rather than layering over it,
-  // so an unconditional hover would paint a selected row the same colour as an
-  // unselected one and erase the selection highlight. The three other rows that
-  // use this overlay (IndexedFilesList, BulkTagAssignmentModal, FileRow) are all
-  // conditional for that reason; this one is now consistent with them.
+  // and `:hover` scores (0,1,1) against the selected class's (0,1,0) inside the
+  // same utilities layer -- so an unconditional hover would repaint a selected
+  // row and erase its highlight (#1088). Every selectable table row whose only
+  // selection signal is a background is conditional for that reason. (Some
+  // non-table pickers -- LocationTreePicker, WorkerSelector -- do pair an
+  // unconditional hover with a tinted selection, but they also carry accent
+  // text or a ring, so the selection survives the repaint.)
   const classes = `${isSelected ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'} transition-colors ${className ?? ''}`.trim();
 
   return (

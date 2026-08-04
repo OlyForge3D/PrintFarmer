@@ -87,7 +87,7 @@ public sealed class SlicerRegistrationClientTests
         IConfiguration configuration = CreateConfiguration(
             new KeyValuePair<string, string?>("SlicerApi:BaseUrl", "http://api:5245"),
             new KeyValuePair<string, string?>("WorkerAuth:SharedKey", "test-registration-key"),
-            new KeyValuePair<string, string?>("Worker:EngineVersion", "2.4.0"));
+            new KeyValuePair<string, string?>("Worker:EngineVersion", "2.4.2"));
         SlicerRegistrationClient client = new SlicerRegistrationClient(
             httpClient,
             configuration,
@@ -98,6 +98,7 @@ public sealed class SlicerRegistrationClientTests
         _ = await client.RegisterAsync();
 
         using JsonDocument registration = JsonDocument.Parse(requestBody!);
+        _ = registration.RootElement.GetProperty("Version").GetString().Should().Be("2.4.2");
         string capabilitiesJson = registration.RootElement.GetProperty("CapabilitiesJson").GetString()!;
         using JsonDocument capabilities = JsonDocument.Parse(capabilitiesJson);
         string[] advertisedCapabilities = capabilities.RootElement
@@ -106,7 +107,7 @@ public sealed class SlicerRegistrationClientTests
             .Select(value => value.GetString()!)
             .ToArray();
         _ = advertisedCapabilities.Should().Contain(WorkerConstants.UpstreamDistributionCapability);
-        _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.0");
+        _ = advertisedCapabilities.Should().Contain("orcaslicer:2.4.2");
     }
 
     [Theory]

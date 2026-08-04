@@ -28,6 +28,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     private readonly IWorkerStateService _workerState;
     private readonly string _workingDirectory;
     private readonly string _orcaSlicerBinaryPath;
+    private readonly string _engineVersion;
     private readonly Uri _apiBaseUri;
     private readonly long _maxModelDownloadBytes;
     private readonly TimeSpan _modelDownloadTimeout;
@@ -51,6 +52,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
         _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
+        _engineVersion = (configuration["Worker:EngineVersion"]
+            ?? configuration["SlicerRegistry:Version"]
+            ?? WorkerConstants.SlicerVersion).Trim();
         string? apiBaseUrl = configuration["SlicerApi:BaseUrl"]
             ?? configuration["Worker:ApiBaseUrl"]
             ?? Environment.GetEnvironmentVariable("WORKER_API_BASE_URL");
@@ -174,13 +178,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 LayerCount = metadata.LayerCount,
                 Success = true
             };
-            result.Metadata["SlicerVersion"] = "OrcaSlicer 1.8.0";
-            result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
-            result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
-            if (modelFilePaths.Count > 1)
-            {
-                result.Metadata["ModelCount"] = modelFilePaths.Count.ToString(CultureInfo.InvariantCulture);
-            }
+            PopulateResultMetadata(result, job, modelFilePaths.Count);
 
             preserveResultForUpload = true;
             return result;
@@ -200,6 +198,20 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
             }
+        }
+    }
+
+    internal void PopulateResultMetadata(SlicingResult result, DistributedSlicingJob job, int modelCount)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        ArgumentNullException.ThrowIfNull(job);
+
+        result.Metadata["SlicerVersion"] = $"OrcaSlicer {_engineVersion}";
+        result.Metadata["ProcessedAt"] = DateTime.UtcNow.ToString("O");
+        result.Metadata["WorkerId"] = job.WorkerId ?? "unknown";
+        if (modelCount > 1)
+        {
+            result.Metadata["ModelCount"] = modelCount.ToString(CultureInfo.InvariantCulture);
         }
     }
 

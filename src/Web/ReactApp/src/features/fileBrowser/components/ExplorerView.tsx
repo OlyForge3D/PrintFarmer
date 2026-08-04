@@ -398,7 +398,7 @@ export const ExplorerView = ({
 
           {/* Resizable Divider - only show when panel is expanded */}
           <div
-            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent transition-colors cursor-col-resize shrink-0"
+            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent-hover transition-colors cursor-col-resize shrink-0"
             onMouseDown={handleResizeDivider}
             role="separator"
             aria-orientation="vertical"
@@ -519,8 +519,11 @@ export const ExplorerView = ({
                     key={file.id}
                     draggable={isDraggable}
                     onDragStart={handleDragStart}
-                    className={`border-b border-pf-border hover:bg-pf-bg-2 transition-colors ${
-                      isSelected ? 'bg-pf-accent-bg/5' : ''
+                    className={`border-b border-pf-border transition-colors ${
+                      // Hover is withheld while selected: `hover:bg-*` scores (0,1,1)
+                      // against the selected class's (0,1,0) in the same utilities
+                      // layer, so an unconditional hover erased the highlight. #1088
+                      isSelected ? 'bg-pf-accent-bg/5' : 'hover:bg-pf-bg-2'
                     } ${isDraggable ? 'cursor-grab active:cursor-grabbing' : ''}`}
                   >
                     <td className="px-3 py-2 w-10">

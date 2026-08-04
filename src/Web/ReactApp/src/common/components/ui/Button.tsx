@@ -22,7 +22,12 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
   danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] shadow-md font-semibold',
   subtle: 'bg-transparent enabled:hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
-  ghost: '[background:none] enabled:hover:[background:rgba(255,255,255,0.10)] text-inherit border-transparent shadow-none',
+  // Ghost deliberately declares no utilities at all. Its defaults — transparent
+  // surface, inherited text colour, transparent border, no shadow, and the hover
+  // overlay — live in the components layer (`styles/controls.css`), keyed off
+  // `[data-pf-variant='ghost']`, so that anything a caller passes through
+  // `className` wins on layer order instead of losing on source order. See #1087.
+  ghost: '',
   success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
   tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
   toggle: 'bg-transparent text-pf-text-secondary enabled:hover:text-pf-text-primary border-transparent',
@@ -70,6 +75,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     <button
       ref={ref}
       data-pf-button
+      data-pf-variant={variant}
       className={clsx(
         applyBaseStyles &&
           'rounded-xs font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',

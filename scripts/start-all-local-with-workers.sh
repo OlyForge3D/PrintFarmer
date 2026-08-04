@@ -69,6 +69,9 @@ success() { echo -e "${GREEN}✅ $*${NC}"; }
 warn() { echo -e "${YELLOW}⚠️  $*${NC}"; }
 error() { echo -e "${RED}❌ $*${NC}"; exit 1; }
 
+source "$ROOT_DIR/scripts/docker/container-versions.conf"
+source "$ROOT_DIR/scripts/docker-utils.sh"
+
 # Utility to free a TCP port if in use
 check_port() {
   local port=$1
@@ -599,7 +602,15 @@ fi
 # ...existing code...
 
 # Check for Docker images
-if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1 ); then
+ORCA_VERSION="$ORCASLICER_VERSION"
+ORCA_SHA256="$ORCASLICER_SHA256"
+ORCA_IMAGE_VALID=0
+if docker image inspect printfarmer/orcaslicer-worker >/dev/null 2>&1 &&
+   validate_orcaslicer_binary_image "printfarmer/orcaslicer-worker" "$ORCA_VERSION" "$ORCA_SHA256"; then
+  ORCA_IMAGE_VALID=1
+fi
+
+if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || [[ $ORCA_IMAGE_VALID -eq 0 ]] ); then
   warn "OrcaSlicer worker image not found. Building it with optimized binary caching..."
   cd "$ROOT_DIR"
   
@@ -607,7 +618,6 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   # No separate build needed - docker compose or manual build will handle it automatically
   
   # Build optimized binary layer first (cached for future builds) using consolidated Dockerfile.multistage
-  ORCA_VERSION="${ORCASLICER_VERSION:-2.4.0}"
   info "Building orcaslicer-binaries:${ORCA_VERSION} (cached binary layer via Dockerfile.multistage)..."
   
   # Verify Dockerfile.multistage exists
@@ -624,9 +634,11 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
     -t "orcaslicer-binaries:${ORCA_VERSION}" \
     -t "orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+    --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
     --build-arg ALLOW_STUB=false \
     "$ROOT_DIR")
   "${ORCA_BIN_CMD[@]}"
+  validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCA_SHA256"
   
   # Build worker using cached binaries (fast)
   info "Building orcaslicer-worker using cached binaries via Dockerfile.multistage..."
@@ -637,8 +649,10 @@ if [[ $NO_ORCA -eq 0 ]] && ( [[ $BUILD_ORCA -eq 1 ]] || ! docker image inspect p
   ORCA_WORKER_CMD+=(-f "$ROOT_DIR/Dockerfile.multistage" --target orcaslicer-worker \
     -t printfarmer/orcaslicer-worker \
     --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+    --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
     "$ROOT_DIR")
   "${ORCA_WORKER_CMD[@]}"
+  validate_orcaslicer_binary_image "printfarmer/orcaslicer-worker" "$ORCA_VERSION" "$ORCA_SHA256"
 fi
 
 

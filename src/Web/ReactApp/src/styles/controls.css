@@ -1623,6 +1623,53 @@
     cursor: not-allowed;
   }
 
+  /*
+   * Ghost Button defaults.
+   *
+   * These live here, in the components layer, rather than in the `ghost` entry of
+   * `variantClasses` in `Button.tsx`, because a caller must be able to override
+   * them. Layer order beats specificity, so anything in `@layer utilities` — every
+   * Tailwind class a caller passes through `className` — displaces this block no
+   * matter how specific the selector is.
+   *
+   * As utilities they did the opposite. The old default was the CSS `background`
+   * *shorthand* set to none, so it reset `background-color` and `background-image`
+   * together, killing gradients as well as flat fills; and because Tailwind sorts
+   * colour utilities alphabetically it landed after every caller class and won.
+   * Measured in the built stylesheet: the ghost rule at offset 166233 against
+   * `.bg-pf-bg-0\/60` at 102730. Every background a ghost caller declared was
+   * dead, leaving light text painting on the page surface — 1.07:1 measured in the
+   * light theme. Switching to the transparent background *utility* is not a fix
+   * either: it sorts at 117611, still after every `.bg-pf-*`. It would have
+   * rescued the gradient, since it never touches `background-image`, but it fails
+   * on flat fills and fails invisibly.
+   *
+   * The same trap applied to the other three defaults, which is why all of them
+   * moved: the colour utility beat the caller's arbitrary `text-[var(...)]`, the
+   * border-colour utility beat `border-pf-success-bg`, and the shadow utility beat
+   * the caller's arbitrary inset shadow. See #1087.
+   *
+   * Do not write the removed utility class names literally in this file. Tailwind
+   * scans CSS as source, so naming a class even inside a comment is enough to make
+   * it emit the rule again — an explanation of the fix that quietly reinstates
+   * what it describes.
+   *
+   * CALLER CONTRACT: the hover below is a default, and it sits in this layer, so a
+   * caller that passes any `bg-*` utility overrides it in *both* states and the
+   * hover goes inert. If you give a ghost Button a background, give it a
+   * `hover:bg-*` too. See #1107.
+   */
+  [data-pf-button][data-pf-variant='ghost'] {
+    color: inherit;
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  [data-pf-button][data-pf-variant='ghost']:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
   /**
    * Fieldset - Group of related form fields
    */
@@ -1684,6 +1731,27 @@
     transition: background-color 0.2s ease-in-out;
   }
 
+  /*
+   * Row hover default.
+   *
+   * This sits in `@layer components`, so every Tailwind `bg-*` a caller passes
+   * through `className` displaces it — layer order beats specificity, and
+   * `@import 'tailwindcss'` pins components below utilities. Verified two ways:
+   * in the built stylesheet this rule falls inside the `@layer components`
+   * block while `.bg-pf-bg-2` falls inside the later `@layer utilities` block
+   * (re-derive the offsets per build, the hash and the byte positions both
+   * move); and in chromium with transitions suppressed, `<tr class="bg-pf-bg-2">`
+   * reads the same computed background at rest and on hover in all seven themes.
+   *
+   * So this rule is NOT what erases a selected row's highlight, despite the
+   * (0,1,3) vs (0,1,0) specificity reading in #1088. That was the row's own
+   * unconditional `hover:bg-*` utility: same layer, and `:hover` at (0,1,1)
+   * outranks the selected class at (0,1,0). The fix is to withhold the hover
+   * utility while the row is selected, which is what every selectable table row
+   * whose only selection signal is a background now does. Do not add
+   * `hover:bg-x` alongside `bg-x` to defeat this rule — it is a no-op against a
+   * default that already loses to utilities.
+   */
   table tbody tr:hover {
     background-color: var(--pf-hover-overlay);
   }

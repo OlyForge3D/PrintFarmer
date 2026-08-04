@@ -114,7 +114,7 @@ export default function QueueDateRangeBar({ dateFrom, dateTo, onChange }: QueueD
               aria-pressed={activePreset === preset.label}
               className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
                 activePreset === preset.label
-                  ? "bg-pf-accent text-white hover:bg-pf-accent"
+                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] hover:bg-pf-accent-bg"
                   : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary"
               }`}
             >

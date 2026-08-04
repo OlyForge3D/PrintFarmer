@@ -240,4 +240,61 @@ describe('Button', () => {
       expect(iconWrapper).toHaveAttribute('aria-hidden', 'true');
     });
   });
+
+  // Regression guard for #1087. The ghost variant used to declare its surface as
+  // Tailwind utilities: the CSS `background` shorthand set to none, plus colour,
+  // border-colour and box-shadow resets. Those sit in `@layer utilities` alongside
+  // everything a caller passes through `className`, where they competed on source
+  // order and won — silently killing caller backgrounds, gradients, text colours
+  // and shadows. The defaults now live in `@layer components`
+  // (`styles/controls.css`) keyed off `[data-pf-variant='ghost']`, so caller
+  // utilities win on layer order.
+  //
+  // The class names are described rather than written out on purpose: Tailwind
+  // scans this file as source, so naming a utility even in a comment makes it
+  // emit the rule again.
+  //
+  // A unit test cannot observe the cascade, but it can observe the precondition:
+  // ghost must contribute no paint utility of its own.
+  describe('ghost variant does not emit paint utilities (#1087)', () => {
+    const FORBIDDEN: Array<[string, RegExp]> = [
+      ['background shorthand', /\[background:/],
+      ['background-color utility', /(?:^|\s|:)bg-/],
+      ['colour utility', /(?:^|\s|:)text-(?:inherit|white|black|current|pf-|\[)/],
+      ['border-colour utility', /(?:^|\s|:)border-(?:transparent|current|pf-|\[)/],
+      ['box-shadow utility', /(?:^|\s|:)shadow-/]
+    ];
+
+    it('contributes no background, colour, border-colour or shadow class', () => {
+      render(<Button variant="ghost">Ghost</Button>);
+      const className = screen.getByRole('button', { name: 'Ghost' }).className;
+
+      for (const [label, pattern] of FORBIDDEN) {
+        expect(
+          pattern.test(className),
+          `ghost variant emitted a ${label} (${className}); it would defeat caller ` +
+            'classes on source order — see #1087'
+        ).toBe(false);
+      }
+    });
+
+    it('exposes the variant so the components layer can style it', () => {
+      render(<Button variant="ghost">Ghost</Button>);
+      expect(screen.getByRole('button', { name: 'Ghost' })).toHaveAttribute(
+        'data-pf-variant',
+        'ghost'
+      );
+    });
+
+    it('preserves caller paint classes verbatim', () => {
+      render(
+        <Button variant="ghost" className="bg-pf-accent-bg text-[var(--pf-on-accent)]">
+          Active
+        </Button>
+      );
+      const button = screen.getByRole('button', { name: 'Active' });
+      expect(button).toHaveClass('bg-pf-accent-bg');
+      expect(button).toHaveClass('text-[var(--pf-on-accent)]');
+    });
+  });
 });

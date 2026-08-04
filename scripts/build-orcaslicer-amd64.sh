@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$SCRIPT_DIR/docker/container-versions.conf"
+source "$SCRIPT_DIR/docker-utils.sh"
 # Build the orcaslicer-worker image for amd64 using optimized binary layer caching via consolidated Dockerfile.multistage.
 # This script builds both the binary layer and worker for amd64 to obtain a real (non-stub) OrcaSlicer binary even on arm64 hosts.
 # Requires docker buildx with an amd64 builder configured (example: docker run --privileged --rm tonistiigi/binfmt --install all).
@@ -22,7 +27,12 @@ if [ ! -f "./Dockerfile.multistage" ]; then
     exit 1
 fi
 
-ORCA_VERSION="${ORCASLICER_VERSION:-2.4.0}"
+ORCA_VERSION="$ORCASLICER_VERSION"
+ORCA_SHA256="$ORCASLICER_SHA256"
+if [[ -z "$ORCA_SHA256" ]]; then
+  print_error "No pinned checksum is configured for OrcaSlicer ${ORCA_VERSION}."
+  exit 1
+fi
 
 echo "[buildx] Building orcaslicer-binaries:${ORCA_VERSION} for linux/amd64 (cached layer) using Dockerfile.multistage";
 
@@ -32,8 +42,11 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -t "orcaslicer-binaries:${ORCA_VERSION}" \
   -f ./Dockerfile.multistage --target orcaslicer-binaries \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+  --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
   --build-arg ALLOW_STUB=false \
   --load .
+
+validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCA_SHA256"
 
 echo "[buildx] Building worker image for linux/amd64 -> ${TAG} (using cached binaries)";
 DOCKER_BUILDKIT=1 docker buildx build \
@@ -42,7 +55,10 @@ DOCKER_BUILDKIT=1 docker buildx build \
   -f ./Dockerfile.multistage --target orcaslicer-worker \
   -t "${TAG}" \
   --build-arg ORCASLICER_VERSION="${ORCA_VERSION}" \
+  --build-arg ORCASLICER_SHA256="${ORCA_SHA256}" \
   --load .
+
+validate_orcaslicer_binary_image "${TAG}" "$ORCA_VERSION" "$ORCA_SHA256"
 
 # Tag for local development stack compatibility
 docker tag "${TAG}" printfarmer-orca-worker:latest

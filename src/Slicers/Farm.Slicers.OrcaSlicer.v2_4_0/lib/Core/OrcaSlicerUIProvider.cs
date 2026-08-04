@@ -13,7 +13,7 @@ public class OrcaSlicerUIProvider_v2_4_0 : ISlicerUIProvider
     public string SlicerName => "OrcaSlicer";
 
     // Aligned with OrcaSlicerLibrary_v2_4_0.SlicerVersion (routing/binary version).
-    public string SlicerVersion => "2.4.1";
+    public string SlicerVersion => "2.4.2";
 
     // OrcaSlicer has bundle import/export
     public bool HasBundleSupport => true;
@@ -30,6 +30,6 @@ public class OrcaSlicerUIProvider_v2_4_0 : ISlicerUIProvider
     public Type SettingsType => typeof(object);
 
 #pragma warning disable CA1024 // Use property instead of method
-    public string GetDescription() => "OrcaSlicer v2.4.0 - Supports bundle import/export, custom assets, and engine-specific settings.";
+    public string GetDescription() => "OrcaSlicer v2.4.2 - Supports bundle import/export, custom assets, and engine-specific settings.";
 #pragma warning restore CA1024
 }

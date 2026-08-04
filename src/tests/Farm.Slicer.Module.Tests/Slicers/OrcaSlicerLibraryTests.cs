@@ -71,6 +71,33 @@ public class OrcaSlicerProfilesProviderTests
     }
 
     [Fact]
+    public void SampleProfileMirror_OrcaSlicer242Assets_HasCompleteBinaryInventory()
+    {
+        string currentDir = Directory.GetCurrentDirectory();
+        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        Dictionary<string, int> expectedAssets = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [".png"] = 120,
+            [".stl"] = 78,
+            [".svg"] = 72,
+        };
+
+        foreach ((string extension, int expectedCount) in expectedAssets)
+        {
+            int actualCount = Directory
+                .EnumerateFiles(sampleProfilesPath, "*", SearchOption.AllDirectories)
+                .Count(path => Path.GetExtension(path).Equals(
+                    extension,
+                    StringComparison.OrdinalIgnoreCase));
+
+            actualCount.Should().Be(
+                expectedCount,
+                $"the OrcaSlicer 2.4.2 fixture mirror should include every {extension} asset");
+        }
+    }
+
+    [Fact]
     public async Task ListOfficialProfiles_IncludesPrusaCoreOneProfiles()
     {
         // Use sample profiles from the repository (real OrcaSlicer structure)
@@ -547,7 +574,7 @@ public class OrcaSlicerLibraryTests
         var library = new OrcaSlicerLibrary_v2_4_0();
 
         library.SlicerName.Should().Be("OrcaSlicer");
-        library.SlicerVersion.Should().Be("2.4.1");
+        library.SlicerVersion.Should().Be("2.4.2");
         library.SlicerType.Should().Be("OrcaSlicer");
 
         library.ProfilesProvider.Should().NotBeNull();
@@ -566,10 +593,10 @@ public class OrcaSlicerUiProviderTests
         var ui = new OrcaSlicerUIProvider_v2_4_0();
 
         ui.SlicerName.Should().Be("OrcaSlicer");
-        ui.SlicerVersion.Should().Be("2.4.1");
+        ui.SlicerVersion.Should().Be("2.4.2");
         ui.HasBundleSupport.Should().BeTrue();
         ui.HasAssetCustomization.Should().BeTrue();
         ui.HasEngineSpecificSettings.Should().BeTrue();
-        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.0");
+        ui.GetDescription().Should().Contain("OrcaSlicer v2.4.2");
     }
 }

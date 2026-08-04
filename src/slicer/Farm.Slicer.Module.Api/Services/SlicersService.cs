@@ -308,7 +308,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         // Default is pull-based (profiles imported on-demand when printers are added)
         if (svc.SlicerType == 1 &&
             dto.SeedProfilesOnRegistration &&
-            CalibrationContractConstants.IsSupportedSlicerVersion(svc.Version) &&
+            OrcaSlicerProfileCompatibility.IsSupportedVersion(svc.Version) &&
             CalibrationContractConstants.AttestsUpstreamSlicer(svc.CapabilitiesJson))
         {
             try
@@ -650,7 +650,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         IReadOnlyList<SlicerService> slicers = await _repo.ListAsync(ct);
         SlicerService? orcaWorker = slicers.FirstOrDefault(s =>
             s.SlicerType == 1 &&
-            CalibrationContractConstants.IsSupportedSlicerVersion(s.Version) &&
+            OrcaSlicerProfileCompatibility.IsSupportedVersion(s.Version) &&
             CalibrationContractConstants.AttestsUpstreamSlicer(s.CapabilitiesJson) &&
             !string.IsNullOrWhiteSpace(s.Host));
 

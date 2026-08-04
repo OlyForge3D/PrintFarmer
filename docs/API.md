@@ -98,7 +98,7 @@ caller-specific permissions:
     {
       "type": "OrcaSlicer",
       "distribution": "upstream",
-      "version": "2.3.1",
+      "version": "2.4.2",
       "supported": true
     }
   ],
@@ -129,13 +129,13 @@ caller-specific permissions:
     "healthyCount": 0,
     "availableSlots": 0,
     "engine": "OrcaSlicer",
-    "requiredVersion": "2.3.1"
+    "requiredVersion": "2.4.2"
   },
   "unavailableReasons": [
     {
       "feature": "slicing",
       "code": "compatible_worker_unavailable",
-      "message": "No healthy upstream OrcaSlicer 2.3.1 worker is available."
+      "message": "No healthy upstream OrcaSlicer 2.4.2 worker is available."
     }
   ]
 }
@@ -144,7 +144,7 @@ caller-specific permissions:
 `slicingConfigured` means slicing is enabled in configuration and the worker
 registry holds at least one enabled worker with a registry-issued credential.
 `slicingOperational` additionally requires reachable slicer persistence,
-artifact storage, and a fresh enabled upstream OrcaSlicer `2.3.1` worker with
+artifact storage, and a fresh enabled upstream OrcaSlicer `2.4.2` worker with
 available capacity. Calibration context is operational when the caller can
 reach the local upstream OrcaSlicer profile resolver. The monolith advertises
 and serves that context; a split API without a caller-reachable resolver
@@ -289,7 +289,7 @@ durable orchestration that drives them is documented under
 
 Generation is fail closed on one conjunctive compatibility tuple: firmware
 family `Klipper` **and** G-code dialect `Klipper` **and** slicer engine
-`OrcaSlicer` **and** distribution `upstream` **and** pinned version `2.3.1`
+`OrcaSlicer` **and** distribution `upstream` **and** pinned version `2.4.2`
 **and** a non-empty authoritative container digest **and** binary digest.
 Nothing is inferred from manufacturer, printer model, backend kind, aliases or a
 Moonraker response, and a missing digest is returned as an explicit dependency
@@ -353,7 +353,7 @@ time. Deployments inject the resolved immutable image digest as
 runtime. A container cannot embed its own final digest during its build because
 that would change the digest itself. A general slicing worker on a newer
 OrcaSlicer release does not satisfy calibration generation until it attests the
-exact supported `2.3.1` binary and container identities.
+exact supported `2.4.2` binary and container identities.
 
 Supported methods: `temperature`, `flow_ratio_coarse`, `flow_ratio_fine`,
 `flow_ratio_high_range`, `pressure_advance_tower`, `pressure_advance_line`,
@@ -479,7 +479,7 @@ scope deliberately does not invent slicer queue semantics.
 The flag is true only when **every** production hop was resolved and answered a
 real probe in this process: the deterministic generation core, authorized stored
 model resolution, the canonical slice submission path, readable and writable
-artifacts, a registered online worker that attests upstream OrcaSlicer `2.3.1`
+artifacts, a registered online worker that attests upstream OrcaSlicer `2.4.2`
 with both a container digest and a binary digest, an operational promotion hop, a
 responsive durable orchestration store and a healthy recovery loop. A registered
 type, a configuration switch or a test double is never accepted as evidence. When
@@ -548,7 +548,7 @@ stable `{ code, field, message }` rejection reasons.
     "slicer": {
       "engine": "OrcaSlicer",
       "distribution": "upstream",
-      "version": "2.3.1",
+      "version": "2.4.2",
       "profileFormat": "orca-json"
     },
     "eligible": true,

@@ -81,7 +81,7 @@ public sealed class CalibrationProfilePatchExporterTests
             .Be(specification.Document.Profiles.Process!.Sha256);
         _ = patch.GeneratorVersion.Should().Be(CalibrationGeneratorIdentity.Current.Version);
         _ = patch.SchemaVersion.Should().Be(CalibrationProfilePatchExporter.PatchSchemaVersion);
-        _ = patch.SlicerVersion.Should().Be("2.3.1");
+        _ = patch.SlicerVersion.Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = patch.SlicerContainerDigest.Should()
             .Be(CalibrationGenerationTestData.ContainerDigest);
     }

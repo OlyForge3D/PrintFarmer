@@ -646,7 +646,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       key={index}
                       type="button"
                       onClick={() => selectSpoolmanInstance(instance.url)}
-                      className="w-full text-left p-2 bg-pf-bg-2 hover:bg-pf-bg-2 border border-pf-border rounded-sm text-xs flex items-center justify-between transition-colors"
+                      className="w-full text-left p-2 bg-pf-bg-2 hover:bg-pf-bg-1 border border-pf-border rounded-sm text-xs flex items-center justify-between transition-colors"
                     >
                       <div>
                         <div className="font-medium">{instance.url}</div>
@@ -685,7 +685,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={testSpoolman}
                 disabled={testingSpoolman}
-                className="px-3 py-2 bg-pf-accent-bg text-white rounded-sm text-sm hover:bg-pf-accent-bg disabled:opacity-50"
+                className="px-3 py-2 bg-pf-accent-bg text-white rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
               >
                 {testingSpoolman ? 'Testing...' : 'Test URL'}
               </button>

@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.OrcaSlicer;
 
 namespace Farm.Infrastructure.PrinterCalibration;
 
@@ -11,7 +12,7 @@ public static class CalibrationContractConstants
     public const string SchemaVersion = "1.0";
     public const string SlicerEngine = "OrcaSlicer";
     public const string SlicerDistribution = "upstream";
-    public const string SlicerVersion = "2.3.1";
+    public const string SlicerVersion = OrcaSlicerVersionConstants.LatestSupported;
     public const string ProfileFormat = "orca-json";
     public const string UpstreamSlicerCapability = "orcaslicer-upstream";
 

@@ -27,6 +27,144 @@ if ! declare -F print_info > /dev/null 2>&1; then
     print_error() { echo -e "${RED}❌ $1${NC}"; }
 fi
 
+# Read an image label without treating absent labels as valid empty values.
+# Usage: docker_image_label "image:tag" "orcaslicer.version"
+docker_image_label() {
+    local image_name="$1"
+    local label_name="$2"
+    local label_value
+
+    label_value=$(docker image inspect \
+        --format "{{ index .Config.Labels \"${label_name}\" }}" \
+        "$image_name" 2>/dev/null || true)
+
+    if [[ "$label_value" == "<no value>" ]]; then
+        label_value=""
+    fi
+
+    printf '%s' "$label_value"
+}
+
+# Resolve a pulled image to an immutable repository digest reference.
+# Usage: docker_image_digest_reference "registry.example/image:tag"
+docker_image_digest_reference() {
+    local image_name="$1"
+    local digest_reference
+
+    digest_reference=$(docker image inspect \
+        --format '{{ index .RepoDigests 0 }}' \
+        "$image_name" 2>/dev/null || true)
+
+    if [[ ! "$digest_reference" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+        print_error "Unable to resolve immutable digest for Docker image '$image_name'."
+        return 1
+    fi
+
+    printf '%s' "$digest_reference"
+}
+
+# Read the embedded OrcaSlicer version and checksum from a stopped image
+# container without executing the image or depending on its platform.
+docker_image_embedded_orcaslicer_identity() {
+    local image_name="$1"
+    local container_id
+    local temp_dir
+    local metadata_root
+    local status=1
+
+    container_id=$(docker create "$image_name" /printfarmer-metadata-inspection 2>/dev/null) || return 1
+    temp_dir=$(mktemp -d) || {
+        docker rm -f "$container_id" >/dev/null 2>&1 || true
+        return 1
+    }
+
+    for metadata_root in /orcaslicer-dist /etc/printfarmer /opt/orcaslicer; do
+        rm -f "$temp_dir/orcaslicer.version" "$temp_dir/orcaslicer.sha256"
+        if docker cp \
+            "$container_id:${metadata_root}/orcaslicer.version" \
+            "$temp_dir/orcaslicer.version" >/dev/null 2>&1 &&
+           docker cp \
+            "$container_id:${metadata_root}/orcaslicer.sha256" \
+            "$temp_dir/orcaslicer.sha256" >/dev/null 2>&1; then
+            printf '%s\n%s' \
+                "$(cat "$temp_dir/orcaslicer.version")" \
+                "$(cat "$temp_dir/orcaslicer.sha256")"
+            status=0
+            break
+        fi
+    done
+
+    docker rm -f "$container_id" >/dev/null 2>&1 || true
+    rm -f "$temp_dir/orcaslicer.version" "$temp_dir/orcaslicer.sha256"
+    rmdir "$temp_dir" >/dev/null 2>&1 || true
+    return "$status"
+}
+
+# Accept a cached OrcaSlicer binary layer only when its attested identity exactly
+# matches the requested release. Generic tags and legacy `version` labels are not
+# sufficient because they allowed stale binaries to be silently retagged.
+# Usage: validate_orcaslicer_binary_image "image:tag" "2.4.2" "<sha256>"
+validate_orcaslicer_binary_image() {
+    local image_name="$1"
+    local expected_version="$2"
+    local expected_sha256="${3#sha256:}"
+    local actual_version
+    local actual_sha256
+    local allow_stub
+    local embedded_identity
+    local embedded_version
+    local embedded_sha256
+
+    if ! docker image inspect "$image_name" >/dev/null 2>&1; then
+        print_error "OrcaSlicer binary image not found: $image_name"
+        return 1
+    fi
+
+    actual_version=$(docker_image_label "$image_name" "orcaslicer.version")
+    actual_sha256=$(docker_image_label "$image_name" "orcaslicer.sha256")
+    actual_sha256="${actual_sha256#sha256:}"
+    allow_stub=$(docker_image_label "$image_name" "orcaslicer.allow_stub")
+
+    if [[ -z "$actual_version" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': missing required label 'orcaslicer.version'."
+        return 1
+    fi
+    if [[ "$actual_version" != "$expected_version" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': version metadata '$actual_version' does not match requested '$expected_version'."
+        return 1
+    fi
+    if [[ -z "$actual_sha256" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': missing required label 'orcaslicer.sha256'."
+        return 1
+    fi
+    if [[ "$actual_sha256" != "$expected_sha256" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': checksum metadata '$actual_sha256' does not match the configured checksum."
+        return 1
+    fi
+    if [[ "$allow_stub" != "false" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': missing or unsafe 'orcaslicer.allow_stub=false' attestation."
+        return 1
+    fi
+
+    if ! embedded_identity=$(docker_image_embedded_orcaslicer_identity "$image_name"); then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': missing embedded version/checksum metadata."
+        return 1
+    fi
+    embedded_version="${embedded_identity%%$'\n'*}"
+    embedded_sha256="${embedded_identity#*$'\n'}"
+    embedded_sha256="${embedded_sha256#sha256:}"
+    if [[ "$embedded_version" != "$expected_version" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': embedded version '$embedded_version' does not match requested '$expected_version'."
+        return 1
+    fi
+    if [[ "$embedded_sha256" != "$expected_sha256" ]]; then
+        print_error "Rejecting cached OrcaSlicer image '$image_name': embedded checksum '$embedded_sha256' does not match the configured checksum."
+        return 1
+    fi
+
+    print_success "Verified cached OrcaSlicer image '$image_name' (version $actual_version, labels and embedded metadata matched)"
+}
+
 # Audit log helper (if not already defined)
 if ! declare -F audit_log > /dev/null 2>&1; then
     DEPLOY_AUDIT_LOG=${DEPLOY_AUDIT_LOG:-"./.docker-ops-audit.log"}

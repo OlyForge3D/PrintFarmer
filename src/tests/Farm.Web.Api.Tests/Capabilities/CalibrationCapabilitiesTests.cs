@@ -63,7 +63,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = root.GetProperty("supportedSlicerEngines")[0].GetProperty("type")
             .GetString().Should().Be("OrcaSlicer");
         _ = root.GetProperty("supportedSlicerEngines")[0].GetProperty("version")
-            .GetString().Should().Be("2.3.1");
+            .GetString().Should().Be(CalibrationContractConstants.SlicerVersion);
         _ = root.GetProperty("supportedSlicerEngines")[0].GetProperty("distribution")
             .GetString().Should().Be("upstream");
 
@@ -255,7 +255,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     {
         await AddOrcaWorkerAsync(
             _anonymousFactory,
-            version: "2.3.1",
+            version: CalibrationContractConstants.SlicerVersion,
             lastHeartbeat: DateTime.UtcNow.AddMinutes(-3));
         using HttpClient client = _anonymousFactory.CreateClient();
 
@@ -276,7 +276,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     {
         await AddOrcaWorkerAsync(
             _anonymousFactory,
-            version: "2.3.1",
+            version: CalibrationContractConstants.SlicerVersion,
             lastHeartbeat: DateTime.UtcNow,
             capabilitiesJson: """{"capabilities":["orcaslicer"]}""");
         using HttpClient client = _anonymousFactory.CreateClient();
@@ -297,7 +297,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     {
         await AddOrcaWorkerAsync(
             _anonymousFactory,
-            version: "2.3.1",
+            version: CalibrationContractConstants.SlicerVersion,
             lastHeartbeat: DateTime.UtcNow,
             workerCapabilitiesJson: """{"capabilities":["orcaslicer"]}""");
         using HttpClient client = _anonymousFactory.CreateClient();
@@ -386,7 +386,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     {
         await AddOrcaWorkerAsync(
             _anonymousFactory,
-            version: "2.3.1",
+            version: CalibrationContractConstants.SlicerVersion,
             lastHeartbeat: DateTime.UtcNow,
             apiKey: null);
         using HttpClient client = _anonymousFactory.CreateClient();
@@ -447,7 +447,7 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
     }
 
     private static Task AddHealthyOrcaServiceAsync(CustomWebApplicationFactory factory) =>
-        AddOrcaWorkerAsync(factory, "2.3.1", DateTime.UtcNow);
+        AddOrcaWorkerAsync(factory, CalibrationContractConstants.SlicerVersion, DateTime.UtcNow);
 
     private static async Task AddOrcaServiceAsync(
         CustomWebApplicationFactory factory,
