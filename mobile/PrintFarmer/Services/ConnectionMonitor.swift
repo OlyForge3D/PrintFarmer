@@ -37,9 +37,9 @@ final class ConnectionMonitor {
     /// `refresh()` suspends on the network probe, so the foreground-resume
     /// refresh and the poll loop's refresh can overlap. Without a fence a
     /// slower, older probe (whose `isReachable()` may have merely been
-    /// cancelled, which the API client reports as `false`) can land after a
-    /// newer healthy sample and overwrite it — re-painting the banner red.
-    /// Only the newest issued sample is allowed to publish.
+    /// cancelled, which the API client reports as `false`) can land after —
+    /// or ahead of — a newer healthy sample and paint the banner red. Only
+    /// the newest *issued* sample is allowed to publish.
     @ObservationIgnored private var sampleTicket: UInt64 = 0
     /// Ticket of the most recently *published* sample.
     @ObservationIgnored private var appliedTicket: UInt64 = 0
@@ -146,8 +146,12 @@ final class ConnectionMonitor {
         let ticket = sampleTicket
         let reachable = await apiClient?.isReachable() ?? false
         let signalR = signalRService?.connectionState ?? .disconnected
-        // A newer sample (or a stop()/configure() epoch bump) already published.
-        guard ticket > appliedTicket else { return }
+        // Only the newest *issued* sample may publish. Comparing against
+        // `appliedTicket` alone is insufficient: if an older probe finishes
+        // while a newer one is still in flight it would publish first and
+        // transiently restore the wrong banner before the newer sample
+        // corrects it.
+        guard ticket == sampleTicket, ticket > appliedTicket else { return }
         appliedTicket = ticket
         if reachable {
             consecutiveReachabilityFailures = 0

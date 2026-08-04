@@ -4712,9 +4712,9 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
     /// would return immediately, the banner would go green, and the user
     /// would sit on a dead socket receiving nothing.
     ///
-    /// Non-vacuity: with the staleness check removed this test fails, because
-    /// `ensureConnected()` would short-circuit on `.connected` and the second
-    /// socket would never be driven to handshake.
+    /// Non-vacuity: with the staleness check removed `connect()`'s
+    /// already-live guard short-circuits and socketB is never driven, so
+    /// the ceiling below fails the test instead of hanging.
     func testEnsureConnected_whenConnectedButSocketIsStale_reconnects() async throws {
         let socketA = MockSignalRWebSocket()
         let socketB = MockSignalRWebSocket()
@@ -4733,13 +4733,18 @@ final class SignalRHandshakeTrailingRecordsTests: XCTestCase {
         try result.get()
         XCTAssertEqual(service.connectionState, .connected)
 
-        let reconnect = Task { await service.ensureConnected() }
-
-        // A fresh socket being driven to handshake is the positive witness
-        // that the stale connection was superseded rather than trusted.
-        await socketB.waitForReceiveCall()
-        socketB.completeReceive(with: .data(makeSignalRHandshakeData()))
-        await reconnect.value
+        await FailureCeiling.awaitOrFail(
+            seconds: 10,
+            label: "ensureConnected must supersede a stale socket",
+            testCase: self
+        ) {
+            let reconnect = Task { await service.ensureConnected() }
+            // A fresh socket being driven to handshake is the positive
+            // witness that the stale connection was superseded, not trusted.
+            await socketB.waitForReceiveCall()
+            socketB.completeReceive(with: .data(makeSignalRHandshakeData()))
+            await reconnect.value
+        }
 
         XCTAssertEqual(
             service.connectionState,

@@ -449,7 +449,13 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         // reconnects under the new generation.
         let (myGen, alreadyLive, superseded): (UInt64, Bool, Task<Void, Never>?) = lifecycleSync {
             let state = connectionStateHub.snapshot()
-            if state == .connected || state == .connecting {
+            // A `.connected` state whose socket has received nothing for
+            // longer than `inboundStalenessThreshold` is not actually live —
+            // see `isSocketStaleLocked()`. Treating it as live here is what
+            // used to make `ensureConnected()`'s stale branch a no-op: it
+            // would detect the dead socket and then call into a `connect()`
+            // that trusted the very state it had just declared a lie.
+            if state == .connecting || (state == .connected && !self.isSocketStaleLocked()) {
                 return (self.generation, true, nil)
             }
             let priorReconnect = self.reconnectTask
@@ -551,26 +557,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
     /// foregrounding). Refuses to resurrect a service the user
     /// intentionally disconnected (logout / server switch).
     ///
-    /// When the service is `.disconnected` or `.reconnecting` this calls
-    /// `connect()`, which supersedes any in-flight reconnect owner. That
-    /// supersede is deliberate: foregrounding is a strong signal that the
-    /// network path just changed, and waiting out the remainder of a 30s
-    /// backoff sleep is exactly the "takes forever to go live" symptom this
-    /// exists to fix.
-    ///
-    /// A reported `.connected` state is **not** taken at face value. iOS
+    /// Otherwise it simply delegates to `connect()`, which is already
+    /// idempotent and — since `isSocketStaleLocked()` feeds its
+    /// already-live check — supersedes a `.connected` state whose socket
+    /// has gone silent. That supersede is deliberate on foreground: iOS
     /// tears the socket down while the app is suspended, and a NAT/AP
-    /// timeout can half-open it without either side noticing; in both cases
-    /// `URLSessionWebSocketTask` only reports the failure when a pending read
-    /// eventually errors, which is delivered asynchronously and can easily
-    /// land *after* this method has already decided everything was fine.
-    /// Waiting for that EOF costs the user the full backoff ladder. So if no
-    /// frame has arrived within ``inboundStalenessThreshold`` — impossible on
-    /// a healthy connection, since the server pings every 15s — the socket is
-    /// treated as dead and reconnected immediately.
-    ///
-    /// `.connecting` is left alone: a handshake in flight has by definition
-    /// not had time to receive anything yet.
+    /// timeout can half-open it without either side noticing. In both
+    /// cases `URLSessionWebSocketTask` only reports the failure when a
+    /// pending read eventually errors, which is delivered asynchronously
+    /// and routinely lands *after* this method has run — leaving the user
+    /// on a green banner and a dead socket, or waiting out the remainder
+    /// of a 30s backoff sleep.
     ///
     /// Never throws — a failed attempt leaves the reconnect ladder running.
     func ensureConnected() async {
@@ -579,15 +576,12 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // until something calls `connect()` explicitly.
             if self.intentionalDisconnect { return (shouldConnect: false, wasStale: false) }
             let state = self.connectionStateHub.snapshot()
+            // A handshake in flight has by definition not had time to
+            // receive anything yet; leave it alone.
             if state == .connecting { return (shouldConnect: false, wasStale: false) }
             guard state == .connected else { return (shouldConnect: true, wasStale: false) }
-            // Claims to be connected — verify the socket is actually carrying
-            // traffic before believing it.
-            guard let last = self.lastInboundFrameAt else { return (shouldConnect: true, wasStale: true) }
-            let idle = Date().timeIntervalSince(last)
-            return idle > self.inboundStalenessThreshold
-                ? (shouldConnect: true, wasStale: true)
-                : (shouldConnect: false, wasStale: false)
+            let stale = self.isSocketStaleLocked()
+            return (shouldConnect: stale, wasStale: stale)
         }
         guard decision.shouldConnect else { return }
         if decision.wasStale {
@@ -599,6 +593,17 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
             // The reconnect ladder owns recovery from here.
             logger.info("ensureConnected: connect attempt failed, reconnect ladder continues")
         }
+    }
+
+    /// Whether the installed socket has gone silent long enough to be
+    /// presumed dead. Must be called on the lifecycle queue.
+    ///
+    /// A healthy connection cannot satisfy this: the server pings every
+    /// `KeepAliveInterval` (15s), and every inbound frame — pings
+    /// included — refreshes `lastInboundFrameAt`.
+    private func isSocketStaleLocked() -> Bool {
+        guard let last = lastInboundFrameAt else { return true }
+        return Date().timeIntervalSince(last) > inboundStalenessThreshold
     }
 
     @discardableResult
