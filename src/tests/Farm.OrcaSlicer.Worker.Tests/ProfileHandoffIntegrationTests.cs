@@ -27,13 +27,16 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
     private readonly string _testRoot =
         Path.Combine(Path.GetTempPath(), $"printfarmer-profile-handoff-{Guid.NewGuid():N}");
 
-    [Fact]
-    public async Task ExecuteAsync_ClaimedNamedProfiles_InvokesOrcaAndCompletesWithEffectiveHashes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ClaimedNamedProfiles_InvokesOrcaAndCompletesWithEffectiveHashes(
+        bool emitPipeProgress)
     {
         _ = Directory.CreateDirectory(_testRoot);
         string captureDirectory = Path.Combine(_testRoot, "capture");
         _ = Directory.CreateDirectory(captureDirectory);
-        string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory);
+        string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory, emitPipeProgress);
 
         Guid workerId = Guid.NewGuid();
         var handler = new WorkerApiHandler();
@@ -83,7 +86,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             poller.Dispose();
         }
 
-        _ = terminal.Path.Should().EndWith("/complete");
+        _ = terminal.Path.Should().EndWith("/complete", terminal.Body);
         _ = terminal.Body.Should().NotContain(nameof(ArgumentNullException));
         _ = handler.ArtifactUploaded.Should().BeTrue("the fake slicer output must reach artifact upload");
         _ = poller.ExecutedJob.Should().NotBeNull();
@@ -121,7 +124,9 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         return ValueTask.CompletedTask;
     }
 
-    private async Task<string> CreateFakeOrcaAsync(string captureDirectory)
+    private async Task<string> CreateFakeOrcaAsync(
+        string captureDirectory,
+        bool emitPipeProgress)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -145,18 +150,22 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         }
 
         string unixScriptPath = Path.Combine(_testRoot, "fake-orca");
+        string progressCommand = emitPipeProgress
+            ? "printf '%s\\n' '{\"total_percent\":50,\"message\":\"Testing\"}' > \"$PWD/progress.pipe\""
+            : ":";
         string unixScript = $"""
             #!/bin/sh
             set -eu
             cp "$PWD/machine.json" "{Path.Combine(captureDirectory, "machine.json")}"
             cp "$PWD/process.json" "{Path.Combine(captureDirectory, "process.json")}"
             cp "$PWD/filament.json" "{Path.Combine(captureDirectory, "filament.json")}"
+            {progressCommand}
             printf 'invoked\n' > "{Path.Combine(captureDirectory, "orca-invoked.txt")}"
             printf '; estimated printing time = 120s\n; filament used = 1g\n; layer_count = 2\nG28\n' > "$PWD/output/plate_1.gcode"
             """;
         await File.WriteAllTextAsync(
             unixScriptPath,
-            unixScript,
+            unixScript.ReplaceLineEndings("\n"),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
         File.SetUnixFileMode(
             unixScriptPath,

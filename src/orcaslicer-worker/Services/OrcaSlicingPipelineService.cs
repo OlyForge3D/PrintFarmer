@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -15,6 +16,9 @@ namespace Farm.OrcaSlicer.Worker.Services;
 public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 {
     private const int DownloadBufferSize = 81920;
+    private const int LinuxInterruptedSystemCall = 4;
+    private const int LinuxOpenNonBlocking = 0x800;
+    private const int LinuxTryAgain = 11;
     private const long DefaultMaxModelDownloadBytes = 512L * 1024L * 1024L;
     private const int DefaultModelDownloadTimeoutSeconds = 120;
     private const int MaxModelDownloadTimeoutSeconds = 3600;
@@ -950,77 +954,71 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         Process process,
         CancellationToken cancellationToken)
     {
+        int fileDescriptor = -1;
+        IntPtr unmanagedBuffer = IntPtr.Zero;
         try
         {
-            // Open the pipe for reading — blocks until OrcaSlicer opens it for writing.
-            // Use a timeout so we fall back to time-based if OrcaSlicer never opens the pipe.
-            using CancellationTokenSource pipeOpenCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            pipeOpenCts.CancelAfter(TimeSpan.FromSeconds(15));
-
-            FileStream? pipeStream = null;
-            try
+            fileDescriptor = OpenFileDescriptor(pipePath, LinuxOpenNonBlocking);
+            if (fileDescriptor < 0)
             {
-                // FileStream.Open on a FIFO blocks until a writer opens it.
-                // Run in a thread pool thread to avoid blocking the async context.
-                pipeStream = await Task.Run(
-                    () => new FileStream(pipePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite),
-                    pipeOpenCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogWarning("Pipe open timed out for job {JobId}, falling back to time-based progress", jobId);
-                await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
-                return;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to open progress pipe for job {JobId}, falling back to time-based progress", jobId);
+                int error = Marshal.GetLastPInvokeError();
+                _logger.LogWarning(
+                    "Failed to open progress pipe for job {JobId} (errno {Error}), falling back to time-based progress",
+                    jobId,
+                    error);
                 await MonitorSlicingProgressAsync(jobId, claimToken, process, cancellationToken);
                 return;
             }
 
-            using (pipeStream)
-            using (StreamReader reader = new StreamReader(pipeStream, Encoding.UTF8))
+            const int bufferSize = 4096;
+            unmanagedBuffer = Marshal.AllocHGlobal(bufferSize);
+            byte[] buffer = new byte[bufferSize];
+            char[] characters = new char[Encoding.UTF8.GetMaxCharCount(bufferSize)];
+            Decoder decoder = Encoding.UTF8.GetDecoder();
+            var pending = new StringBuilder();
+
+            while (!process.HasExited && !cancellationToken.IsCancellationRequested)
             {
-                while (!process.HasExited && !cancellationToken.IsCancellationRequested)
+                nint bytesRead = ReadFileDescriptor(
+                    fileDescriptor,
+                    unmanagedBuffer,
+                    (nuint)bufferSize);
+                if (bytesRead > 0)
                 {
-                    string? line = await reader.ReadLineAsync(cancellationToken);
-                    if (line is null)
-                    {
-                        break; // Writer closed the pipe
-                    }
+                    int count = checked((int)bytesRead);
+                    Marshal.Copy(unmanagedBuffer, buffer, 0, count);
+                    int characterCount = decoder.GetChars(
+                        buffer,
+                        0,
+                        count,
+                        characters,
+                        0,
+                        flush: false);
+                    _ = pending.Append(characters, 0, characterCount);
+                    await ReportCompletePipeLinesAsync(
+                        jobId,
+                        claimToken,
+                        pending,
+                        cancellationToken);
+                    continue;
+                }
 
-                    if (string.IsNullOrWhiteSpace(line))
+                if (bytesRead < 0)
+                {
+                    int error = Marshal.GetLastPInvokeError();
+                    if (error == LinuxInterruptedSystemCall)
                     {
                         continue;
                     }
 
-                    try
+                    if (error != LinuxTryAgain)
                     {
-                        using JsonDocument doc = JsonDocument.Parse(line);
-                        JsonElement root = doc.RootElement;
-
-                        int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp) ? tp.GetInt32() : -1;
-                        string message = root.TryGetProperty("message", out JsonElement msg) ? msg.GetString() ?? "Slicing..." : "Slicing...";
-
-                        if (root.TryGetProperty("warning", out JsonElement warn))
-                        {
-                            _logger.LogWarning("OrcaSlicer warning for job {JobId}: {Warning}", jobId, warn.GetString());
-                        }
-
-                        if (totalPercent >= 0)
-                        {
-                            // Map OrcaSlicer's 0-100 to our 30-70 range
-                            int mapped = 30 + (int)(totalPercent * 0.4);
-                            mapped = Math.Clamp(mapped, 30, 70);
-                            await _progressReporter.ReportProgressAsync(jobId, claimToken, mapped, message, cancellationToken);
-                        }
-                    }
-                    catch (JsonException)
-                    {
-                        // Non-JSON line — ignore
+                        throw new IOException(
+                            $"Reading the OrcaSlicer progress pipe failed with errno {error}.");
                     }
                 }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
             }
         }
         catch (OperationCanceledException)
@@ -1029,6 +1027,78 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error reading progress pipe for job {JobId}", jobId);
+        }
+        finally
+        {
+            if (unmanagedBuffer != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(unmanagedBuffer);
+            }
+
+            if (fileDescriptor >= 0)
+            {
+                _ = CloseFileDescriptor(fileDescriptor);
+            }
+        }
+    }
+
+    private async Task ReportCompletePipeLinesAsync(
+        Guid jobId,
+        Guid claimToken,
+        StringBuilder pending,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            string buffered = pending.ToString();
+            int lineBreak = buffered.IndexOf('\n', StringComparison.Ordinal);
+            if (lineBreak < 0)
+            {
+                return;
+            }
+
+            string line = buffered[..lineBreak].TrimEnd('\r');
+            _ = pending.Remove(0, lineBreak + 1);
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                continue;
+            }
+
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(line);
+                JsonElement root = doc.RootElement;
+
+                int totalPercent = root.TryGetProperty("total_percent", out JsonElement tp)
+                    ? tp.GetInt32()
+                    : -1;
+                string message = root.TryGetProperty("message", out JsonElement msg)
+                    ? msg.GetString() ?? "Slicing..."
+                    : "Slicing...";
+
+                if (root.TryGetProperty("warning", out JsonElement warn))
+                {
+                    _logger.LogWarning(
+                        "OrcaSlicer warning for job {JobId}: {Warning}",
+                        jobId,
+                        warn.GetString());
+                }
+
+                if (totalPercent >= 0)
+                {
+                    int mapped = Math.Clamp(30 + (int)(totalPercent * 0.4), 30, 70);
+                    await _progressReporter.ReportProgressAsync(
+                        jobId,
+                        claimToken,
+                        mapped,
+                        message,
+                        cancellationToken);
+                }
+            }
+            catch (JsonException)
+            {
+                // OrcaSlicer can emit non-JSON diagnostics on the progress channel.
+            }
         }
     }
 
@@ -1071,6 +1141,11 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private bool TryCreateNamedPipe(string pipePath)
     {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/usr/bin/mkfifo"))
+        {
+            return false;
+        }
+
         try
         {
             if (File.Exists(pipePath))
@@ -1108,6 +1183,25 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             return false;
         }
     }
+
+    #pragma warning disable CA2101, SYSLIB1054 // libc open requires a UTF-8 char*; LibraryImport requires unsafe blocks.
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int OpenFileDescriptor(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [DllImport("libc", EntryPoint = "read", SetLastError = true)]
+    private static extern nint ReadFileDescriptor(
+        int fileDescriptor,
+        IntPtr buffer,
+        nuint count);
+
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [DllImport("libc", EntryPoint = "close", SetLastError = true)]
+    private static extern int CloseFileDescriptor(int fileDescriptor);
+    #pragma warning restore CA2101, SYSLIB1054
 
     private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {
