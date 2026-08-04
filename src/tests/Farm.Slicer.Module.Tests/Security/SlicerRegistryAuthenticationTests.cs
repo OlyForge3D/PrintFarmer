@@ -103,9 +103,34 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
         _ = normalizedBody.Should().NotContain("capabilities");
     }
 
-    private static async Task<RegisteredService> RegisterAsync(HttpClient client, string name)
+    [Fact]
+    public async Task RegisterAsync_SameInstanceAndHost_IssuesDistinctWorkerCredentials()
     {
-        using HttpRequestMessage request = CreateRegistrationRequest(name, "test-worker-key");
+        using HttpClient client = _factory.CreateClient();
+        RegisteredService first = await RegisterAsync(
+            client,
+            "first-replica",
+            instanceId: "shared-diagnostic-instance");
+        RegisteredService second = await RegisterAsync(
+            client,
+            "second-replica",
+            instanceId: "shared-diagnostic-instance");
+
+        _ = second.Id.Should().NotBe(first.Id);
+        _ = second.ApiKey.Should().NotBe(first.ApiKey);
+        await AssertWorkerCredentialAcceptedAsync(client, first);
+        await AssertWorkerCredentialAcceptedAsync(client, second);
+    }
+
+    private static async Task<RegisteredService> RegisterAsync(
+        HttpClient client,
+        string name,
+        string? instanceId = null)
+    {
+        using HttpRequestMessage request = CreateRegistrationRequest(
+            name,
+            "test-worker-key",
+            instanceId);
         HttpResponseMessage response = await client.SendAsync(request);
         string body = await response.Content.ReadAsStringAsync();
         _ = response.StatusCode.Should().Be(HttpStatusCode.Created, body);
@@ -117,7 +142,30 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
                 ?? throw new InvalidOperationException("Registration did not return a service API key."));
     }
 
-    private static HttpRequestMessage CreateRegistrationRequest(string name, string? sharedKey)
+    private static async Task AssertWorkerCredentialAcceptedAsync(
+        HttpClient client,
+        RegisteredService registered)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Post, "/api/slice/claim")
+        {
+            Content = JsonContent.Create(new ClaimJobRequest
+            {
+                WorkerId = registered.Id,
+                Capabilities = ["orcaslicer"],
+            }),
+        };
+        request.Headers.Add("X-Worker-Id", registered.Id.ToString());
+        request.Headers.Add("X-Worker-Key", registered.ApiKey);
+
+        HttpResponseMessage response = await client.SendAsync(request);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.NoContent);
+    }
+
+    private static HttpRequestMessage CreateRegistrationRequest(
+        string name,
+        string? sharedKey,
+        string? instanceId = null)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/slicers/register")
         {
@@ -129,7 +177,7 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
                 Host = "http://private-worker.internal",
                 CapabilitiesJson = """{"capabilities":["orcaslicer","orcaslicer-upstream"]}""",
                 MaxConcurrentJobs = 1,
-                InstanceId = name,
+                InstanceId = instanceId ?? name,
             }),
         };
         if (!string.IsNullOrEmpty(sharedKey))

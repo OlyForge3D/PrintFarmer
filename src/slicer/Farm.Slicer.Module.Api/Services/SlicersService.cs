@@ -199,64 +199,34 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         int maxJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs));
 
-        // Look for an existing service by stable instance ID to handle container restarts
-        SlicerService? svc = !string.IsNullOrWhiteSpace(dto.InstanceId)
-            ? await _repo.GetByInstanceIdAsync(dto.InstanceId, ct)
-            : null;
-
-        bool isReregistration = svc != null;
-
-        if (svc != null)
+        // Every registration receives fresh credentials. InstanceId is diagnostic metadata,
+        // never proof of ownership and never a key-recovery mechanism.
+        SlicerService svc = new()
         {
-            // Re-registration: update existing service in place
-            _logger.LogInformation(
-                "Re-registering existing slicer service {ServiceId} with InstanceId {InstanceId} (container restart detected)",
-                svc.Id, svc.InstanceId);
+            Id = Guid.NewGuid(),
+            Name = dto.Name ?? "orca-service",
+            SlicerType = dto.SlicerType,
+            Version = dto.Version,
+            Host = dto.Host,
+            UiManifestUrl = dto.UiManifestUrl,
+            CapabilitiesJson = dto.CapabilitiesJson,
+            MaxConcurrentJobs = maxJobs,
+            Status = "Online",
+            LastSeen = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            Tags = dto.Tags,
+            InstanceId = dto.InstanceId,
+            ApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_'),
+        };
 
-            svc.Name = dto.Name ?? svc.Name;
-            svc.Version = dto.Version;
-            svc.UiManifestUrl = dto.UiManifestUrl;
-            svc.CapabilitiesJson = dto.CapabilitiesJson;
-            svc.MaxConcurrentJobs = maxJobs;
-            svc.Status = "Online";
-            svc.LastSeen = DateTime.UtcNow;
-            svc.UpdatedAt = DateTime.UtcNow;
-            svc.Tags = dto.Tags;
-            svc.Host = dto.Host;
-
-            // Keep existing ApiKey so the worker doesn't need to re-auth
-        }
-        else
-        {
-            // Fresh registration
-            svc = new SlicerService
-            {
-                Id = Guid.NewGuid(),
-                Name = dto.Name ?? "orca-service",
-                SlicerType = dto.SlicerType,
-                Version = dto.Version,
-                Host = dto.Host,
-                UiManifestUrl = dto.UiManifestUrl,
-                CapabilitiesJson = dto.CapabilitiesJson,
-                MaxConcurrentJobs = maxJobs,
-                Status = "Online",
-                LastSeen = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                Tags = dto.Tags,
-                InstanceId = dto.InstanceId
-            };
-
-            svc.ApiKey = Convert.ToBase64String(Guid.NewGuid().ToByteArray()).Replace("=", string.Empty);
-
-            await _repo.AddAsync(svc, ct);
-        }
+        await _repo.AddAsync(svc, ct);
 
         // Synchronize to Worker table for dispatcher
-        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString())
-            ?? (!string.IsNullOrWhiteSpace(svc.Host)
-                ? await _workerRepo.GetByEndpointUrlAsync(svc.Host)
-                : null);
+        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
 
         if (worker != null)
         {

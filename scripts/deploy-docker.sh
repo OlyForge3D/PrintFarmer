@@ -821,6 +821,31 @@ generate_slicer_api_key() {
     printf '%s' "$generated_key"
 }
 
+# Resolve the bootstrap registration key before any deployment file is rewritten.
+resolve_worker_shared_api_key() {
+    if [ -n "${WORKER_SHARED_API_KEY:-}" ]; then
+        print_info "Using existing worker bootstrap registration key (preserved)"
+        export WORKER_SHARED_API_KEY
+        return 0
+    fi
+
+    local env_file="${ENV_FILE:-.env}"
+    if [ -f "${CONFIG_FILE:-}" ]; then
+        WORKER_SHARED_API_KEY=$(get_kv_from_file "$CONFIG_FILE" "WORKER_SHARED_API_KEY" || true)
+    fi
+    if [ -z "${WORKER_SHARED_API_KEY:-}" ] && [ -f "$env_file" ]; then
+        WORKER_SHARED_API_KEY=$(get_kv_from_file "$env_file" "WORKER_SHARED_API_KEY" || true)
+    fi
+    if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
+        WORKER_SHARED_API_KEY=$(generate_slicer_api_key) || return 1
+        print_info "Generated a new worker bootstrap registration key"
+    else
+        print_info "Recovered the existing worker bootstrap registration key"
+    fi
+
+    export WORKER_SHARED_API_KEY
+}
+
 # Helper: generate a secure JWT signing key
 # Returns a Base64-encoded 256-bit (32-byte) key suitable for HMAC-SHA256
 generate_jwt_key() {
@@ -2720,17 +2745,6 @@ ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
 
 EOF
 
-    # Save slicer worker identities to preserve single-worker registration across deployments.
-    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && [ -n "${SLICER_WORKER_INSTANCE_IDS[0]:-}" ]; then
-        echo "" >> "$CONFIG_FILE"
-        echo "# Slicer Worker Instance IDs (preserved to prevent duplicate registrations on restart)" >> "$CONFIG_FILE"
-        for ((i=0; i<${#SLICER_WORKER_INSTANCE_IDS[@]}; i++)); do
-            local id_index=$((i+1))
-            local instance_id="${SLICER_WORKER_INSTANCE_IDS[$i]}"
-            echo "SLICER_WORKER_INSTANCE_ID_${id_index}=$instance_id" >> "$CONFIG_FILE"
-        done
-    fi
-
     # Save JWT signing key to preserve user sessions across deployments
     if [ -n "${Jwt__Key:-}" ]; then
         cat >> "$CONFIG_FILE" << EOF
@@ -3884,73 +3898,6 @@ configure_additional() {
     fi
 }
 
-# Generate and manage slicer worker identities.
-generate_slicer_worker_identities() {
-    if [ "$ENABLE_ORCA_WORKER" != "yes" ] || [ "$ORCA_WORKER_COUNT" -eq 0 ]; then
-        return 0
-    fi
-
-    if [ -n "${SLICER_WORKER_INSTANCE_IDS[0]:-}" ]; then
-        return 0
-    fi
-
-    print_header "Configuring Slicer Worker Identities"
-    
-    SLICER_WORKER_NAMES=()
-    SLICER_WORKER_INSTANCE_IDS=()
-    
-    # Stable configured identities are used only for single-worker deployments. Scaled
-    # replicas derive unique identities inside each worker process.
-    for ((i=1; i<=ORCA_WORKER_COUNT; i++)); do
-        local worker_name="orcaslicer-worker"
-        if [ "$ORCA_WORKER_COUNT" -gt 1 ]; then
-            worker_name="${worker_name}-$i"
-        fi
-
-        local instance_id
-        local instance_config_var="SLICER_WORKER_INSTANCE_ID_${i}"
-        instance_id="${!instance_config_var:-}"
-
-        if [ -z "$instance_id" ]; then
-            instance_id=$(cat /proc/sys/kernel/random/uuid 2>/dev/null || uuidgen 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || echo "$(date +%s)-$$-$RANDOM")
-            print_info "Generated a worker identity for replica $i"
-        else
-            print_info "Reusing the worker identity for replica $i"
-        fi
-        
-        SLICER_WORKER_NAMES+=("$worker_name")
-        SLICER_WORKER_INSTANCE_IDS+=("$instance_id")
-    done
-    
-    print_success "Configured ${#SLICER_WORKER_INSTANCE_IDS[@]} OrcaSlicer worker identities"
-}
-
-# Export a stable configured identity for a single worker. A shared configured identity
-# is deliberately omitted for scaled replicas.
-export_slicer_worker_identities() {
-    if [ "$ENABLE_ORCA_WORKER" != "yes" ] || [ "$ORCA_WORKER_COUNT" -eq 0 ]; then
-        return 0
-    fi
-    
-    if [ -z "${SLICER_WORKER_INSTANCE_IDS[0]:-}" ]; then
-        generate_slicer_worker_identities
-    fi
-    
-    if [ "$ORCA_WORKER_COUNT" -eq 1 ]; then
-        local primary_instance_id="${SLICER_WORKER_INSTANCE_IDS[0]}"
-        cat >> "$ENV_FILE" << EOF
-
-# Slicer Worker Instance ID - Stable across container restarts
-# Workers send this ID during registration so the API can upsert instead of creating duplicates
-ORCA_WORKER_INSTANCE_ID=$primary_instance_id
-EOF
-        print_info "Exported the stable slicer worker identity to $ENV_FILE"
-    else
-        unset ORCA_WORKER_INSTANCE_ID
-        print_info "Scaled workers will derive distinct identities at runtime."
-    fi
-}
-
 # Export the shared credential used only for printer-discovery event ingestion.
 export_discovery_service_key() {
     if [ "$ARCHITECTURE" != "microservices" ]; then
@@ -3977,6 +3924,12 @@ generate_env_file() {
     
     # Set default env file if not already set
     ENV_FILE="${ENV_FILE:-.env}"
+
+    # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
+    resolve_worker_shared_api_key || {
+        print_error "Unable to resolve a worker bootstrap registration key"
+        return 1
+    }
     
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
@@ -4324,30 +4277,11 @@ Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
 Jwt__Audience=${Jwt__Audience:-PrintFarmer}
 EOF
 
-    # Generate Worker Shared API Key for slicer-host ↔ worker job claim auth
-    # Preserved across redeploys so in-flight workers keep working
-    if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
-        if [ -f "$CONFIG_FILE" ]; then
-            WORKER_SHARED_API_KEY=$(get_kv_from_file "$CONFIG_FILE" "WORKER_SHARED_API_KEY" || true)
-        fi
-        if [ -z "${WORKER_SHARED_API_KEY:-}" ] && [ -f "$ENV_FILE" ]; then
-            WORKER_SHARED_API_KEY=$(get_kv_from_file "$ENV_FILE" "WORKER_SHARED_API_KEY" || true)
-        fi
-        if [ -z "${WORKER_SHARED_API_KEY:-}" ]; then
-            WORKER_SHARED_API_KEY=$(generate_slicer_api_key)
-            print_info "Generated new worker shared API key for job claim auth"
-        else
-            print_info "Using existing worker shared API key (preserved)"
-        fi
-    fi
     echo "" >> "$ENV_FILE"
     echo "# Worker bootstrap registration key (registry-issued credentials protect worker-only routes)" >> "$ENV_FILE"
     echo "WORKER_SHARED_API_KEY=$WORKER_SHARED_API_KEY" >> "$ENV_FILE"
 
     export_discovery_service_key
-
-    generate_slicer_worker_identities
-    export_slicer_worker_identities
     
     # Confirm authentication setup without emitting secret material.
     if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ]; then
@@ -6690,7 +6624,10 @@ main() {
         exit 1
     fi
 
-    generate_slicer_worker_identities
+    resolve_worker_shared_api_key || {
+        print_error "Unable to resolve a worker bootstrap registration key"
+        exit 1
+    }
     save_deployment_config
     generate_env_file
     generate_react_env_production

@@ -22,8 +22,8 @@ public class RegisterSlicerDto
     public string? Tags { get; set; }
 
     /// <summary>
-    /// Stable instance identifier for this worker, persisted across container restarts.
-    /// When provided, the API upserts instead of creating duplicate registrations.
+    /// Diagnostic identifier for this worker process. It is not authentication material,
+    /// and registration always creates a fresh service identity and key.
     /// </summary>
     public string? InstanceId { get; set; }
 

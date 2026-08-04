@@ -1492,6 +1492,15 @@ EOF
     assert_not_contains "$output" "$shared_key_value" "Deployment output must not expose bootstrap key material"
     assert_not_equals "$discovery_key_value" "" "Discovery service key should not be empty"
 
+    # A second run must recover the original bootstrap key before rewriting either file.
+    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    local second_output
+    second_output=$(get_output)
+    local preserved_key_value
+    preserved_key_value=$(grep "^WORKER_SHARED_API_KEY=" "$env_file" | head -1 | cut -d'=' -f2-)
+    assert_equals "$shared_key_value" "$preserved_key_value" "Redeploy should preserve the worker bootstrap key"
+    assert_not_contains "$second_output" "$preserved_key_value" "Redeploy output must not expose preserved bootstrap key material"
+
     # Clean up
     rm -f .deploy-config "$env_file" || true
 
@@ -1546,9 +1555,9 @@ EOF
     local env_content
     env_content=$(cat "$env_file")
 
-    # Verify the canonical bootstrap input and a stable single-worker identity are present.
+    # Verify the canonical bootstrap input is present without a reusable process identity.
     assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and worker with a bootstrap key"
-    assert_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Should preserve a stable identity for one worker"
+    assert_not_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Single workers must derive fresh runtime identities"
     assert_not_contains "$env_content" "SlicerRegistry__ApiKey=" "Should not emit the removed registry-key alias"
 
     local shared_key_line

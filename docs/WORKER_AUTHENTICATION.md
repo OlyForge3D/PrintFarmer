@@ -50,8 +50,10 @@ key:
 }
 ```
 
-Registration creates the `SlicerService` and its internal `Worker` record
-atomically. A synchronization failure leaves neither record persisted.
+Every registration creates a fresh `SlicerService`, service key, and internal
+`Worker` record atomically. A synchronization failure leaves neither record
+persisted. Registration never returns an existing service key based on
+caller-supplied metadata.
 
 The worker keeps the returned GUID and key as its registered service identity.
 They are sent as `X-Worker-Id` and `X-Worker-Key` on every worker-only request.
@@ -59,10 +61,11 @@ PrintFarmer resolves that GUID to the internal enabled worker record and
 validates the key bound to that record. A key issued to one service cannot be
 paired with another service's GUID.
 
-`Worker:InstanceId` may provide a stable deployment identity for one worker.
-When it is unset, each worker process derives its own identity from its machine
-and process identity. Scaled Docker replicas intentionally leave the setting
-unset so they cannot overwrite one another's registration.
+`Worker:InstanceId` is optional diagnostic metadata, not proof of ownership or
+a credential-recovery token. When it is unset, each worker process generates a
+random GUID. Docker deployments leave it unset for both single and scaled
+workers. Even if two callers present the same value and host, registration
+issues separate service GUIDs and keys and preserves both worker records.
 
 ### Registry routes
 

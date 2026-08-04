@@ -44,7 +44,7 @@ The worker now registers itself with the central slicer registry API on startup:
 | `SlicerRegistry__Host`              | Worker's public URL                      | `http://orcaslicer-worker:8080` |
 | `SlicerRegistry__HeartbeatIntervalSeconds` | Heartbeat frequency (seconds)     | `30`                   |
 | `WorkerAuth__SharedKey`             | Required bootstrap registration secret   | (none)                 |
-| `Worker__InstanceId`                | Optional stable single-worker identity   | Process-derived        |
+| `Worker__InstanceId`                | Optional diagnostic process identifier   | Random per process     |
 
 ## Health Endpoints
 

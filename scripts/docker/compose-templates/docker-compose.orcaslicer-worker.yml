@@ -65,7 +65,6 @@ services:
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
-      - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
       # Inject the immutable image digest after build/pull. It cannot be embedded while
       # constructing the image because doing so would change the digest itself.

@@ -143,7 +143,14 @@ public sealed class SlicerRegistrationClientTests
 
         using JsonDocument registration = JsonDocument.Parse(requestBody!);
         string instanceId = registration.RootElement.GetProperty("InstanceId").GetString()!;
-        _ = instanceId.Should().Be(expectedInstanceId ?? WorkerIdentity.Create());
+        if (expectedInstanceId is not null)
+        {
+            _ = instanceId.Should().Be(expectedInstanceId);
+        }
+        else
+        {
+            _ = Guid.TryParseExact(instanceId, "N", out _).Should().BeTrue();
+        }
     }
 
     private static IConfiguration CreateConfiguration(params KeyValuePair<string, string?>[] values)

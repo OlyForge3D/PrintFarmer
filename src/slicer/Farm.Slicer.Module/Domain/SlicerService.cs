@@ -45,8 +45,8 @@ public class SlicerService
     public string? Tags { get; set; }
 
     /// <summary>
-    /// Stable instance identifier assigned by the deployment environment.
-    /// Survives container restarts to enable re-registration without duplicates.
+    /// Diagnostic process identifier supplied during registration.
+    /// It is not used to recover or authenticate a service identity.
     /// </summary>
     [JsonIgnore]
     public string? InstanceId { get; set; }
