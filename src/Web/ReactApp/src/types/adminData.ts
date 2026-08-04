@@ -1,5 +1,12 @@
 // Types for admin data export/import functionality
 
+/**
+ * Intentionally numeric. This is outbound-only and is compared solely against
+ * local `useState` form state (DataManagementPage), never against a value
+ * received from the API. The server's `JsonStringEnumConverter` accepts integers
+ * on read, so sending the ordinal is safe. Do not "fix" this to a string enum
+ * for consistency with `types/api.ts`.
+ */
 export enum ImportMode {
   Merge = 0,
   Replace = 1,
