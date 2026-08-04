@@ -14,8 +14,17 @@ final class AuthViewModelTests: XCTestCase {
     private var services: ServiceContainer!
     private var viewModel: AuthViewModel!
 
+    private var priorDemoModeState: Bool = false
+
     override func setUp() async throws {
         try await super.setUp()
+        // `DemoMode` is a process-global singleton backed by UserDefaults, and
+        // `login()` branches on it. Without an explicit reset a leaked demo flag
+        // makes these tests non-deterministic: `switchToReal()` would rebuild the
+        // container and discard the injected `authService` below, silently
+        // exercising real services instead of the mock.
+        priorDemoModeState = DemoMode.shared.isActive
+        DemoMode.shared.deactivate()
         mockAPIClient = MockAPIClient()
         apiClient = mockAPIClient.apiClient
         // These tests exercise the AuthViewModel → AuthService → APIClient auth path;
@@ -29,6 +38,7 @@ final class AuthViewModelTests: XCTestCase {
 
     override func tearDown() async throws {
         UserDefaults.standard.removeObject(forKey: APIClient.serverURLKey)
+        DemoMode.shared.isActive = priorDemoModeState
         viewModel = nil
         services = nil
         authService = nil
@@ -518,4 +528,48 @@ extension AuthViewModelTests {
         XCTAssertFalse(viewModel.isLoading)
     }
 
+
+    // MARK: - Demo Mode Teardown on Login (regression: PR #1065)
+
+    /// Registering a real backend must leave demo mode, otherwise `DemoAuthService`
+    /// accepts any credentials and strands the user in mock data.
+    func testLoginExitsDemoModeWhenDemoIsActive() async {
+        DemoMode.shared.activate()
+        XCTAssertTrue(DemoMode.shared.isActive)
+
+        await viewModel.login(serverURL: Self.unreachableURL, username: "u", password: "p")
+
+        XCTAssertFalse(DemoMode.shared.isActive, "a real login attempt must exit demo mode")
+    }
+
+    /// The teardown happens BEFORE authentication, so it must also hold when the
+    /// login fails - the user must land on the real (failed) path, not silently
+    /// back in demo data.
+    func testFailedLoginStillExitsDemoModeAndSurfacesError() async {
+        DemoMode.shared.activate()
+
+        await viewModel.login(serverURL: Self.unreachableURL, username: "u", password: "p")
+
+        XCTAssertFalse(DemoMode.shared.isActive, "failed login must not leave the user in demo mode")
+        XCTAssertFalse(viewModel.isAuthenticated, "a failed login must not authenticate")
+        XCTAssertNotNil(viewModel.errorMessage, "the user must be told why login failed")
+        XCTAssertFalse(viewModel.isLoading, "loading must clear so the user can retry")
+    }
+
+    /// Guards the inverse: the demo branch must not fire (and must not rebuild the
+    /// container, discarding the injected mock authService) on a normal login.
+    func testLoginLeavesDemoModeInactiveWhenAlreadyInactive() async {
+        XCTAssertFalse(DemoMode.shared.isActive)
+        mockAPIClient.stubResponse(json: TestJSON.authResponseSuccess)
+
+        await viewModel.login(serverURL: "http://localhost:5245", username: "u", password: "p")
+
+        XCTAssertFalse(DemoMode.shared.isActive)
+    }
+
+    /// Loopback port 1 refuses instantly. These two tests deliberately bypass
+    /// `MockURLProtocol`: `switchToReal()` rebuilds the container with a real
+    /// `URLSession`, so the injected mock is gone by the time the request is made.
+    /// A refused loopback connection keeps that path fast and hermetic.
+    private static let unreachableURL = "http://127.0.0.1:1"
 }

@@ -8,6 +8,7 @@ import { usePrinters } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import type { PrinterGroup, CreatePrinterGroupRequest, UpdatePrinterGroupRequest, PrinterGroupPrinter } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
+import { getPrinterBackendName } from '@/common/utils/enumHelpers';
 
 interface PrinterGroupModalProps {
   isOpen: boolean;
@@ -18,8 +19,7 @@ interface PrinterGroupModalProps {
 }
 
 function backendLabel(backend: PrinterBackend | number): string {
-  if (typeof backend === 'number') return PrinterBackend[backend] || 'Unknown';
-  return backend;
+  return getPrinterBackendName(backend) || 'Unknown';
 }
 
 export function PrinterGroupModal({ isOpen, onClose, editGroup, assignedPrinters = [] }: PrinterGroupModalProps) {
