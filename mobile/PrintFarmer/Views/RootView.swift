@@ -18,7 +18,6 @@ struct RootView: View {
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
     @State private var staleRegistrySignOutTask: Task<Void, Never>?
-    @State private var foregroundResumeTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -95,7 +94,6 @@ struct RootView: View {
                 pendingReadyMonitor.stopMonitoring()
                 connectionMonitor.stop()
                 router.pendingReadyCount = 0
-                foregroundResumeTask?.cancel()
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
@@ -116,7 +114,6 @@ struct RootView: View {
             connectionMonitor.stop()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
-            foregroundResumeTask?.cancel()
         }
     }
 
@@ -128,25 +125,13 @@ struct RootView: View {
     /// was whatever stale sample the monitor last took — typically a failed one,
     /// hence the red offline banner that only a manual pull-to-refresh cleared.
     ///
-    /// On `.active` we therefore (1) probe reachability immediately instead of
-    /// waiting out the poll interval, and (2) ask the hub to reconnect right
-    /// away rather than sitting through the remainder of a backoff sleep.
-    /// Both operations are idempotent and safe to run on every foreground.
+    /// The actual recovery sequence lives on ``ConnectionMonitor`` because the
+    /// network-path observer triggers the identical sequence; this hook only
+    /// decides *whether* the app is in a state where resuming makes sense.
     @MainActor
     private func resumeConnectivityAfterForeground() {
         guard isShowingMainContent, !DemoMode.shared.isActive else { return }
-        foregroundResumeTask?.cancel()
-        foregroundResumeTask = Task {
-            // Probe REST first: it is a single fast request and it clears a
-            // stale offline banner without waiting on the hub handshake.
-            await connectionMonitor.refresh()
-            guard !Task.isCancelled else { return }
-            await services.signalRService.ensureConnected()
-            guard !Task.isCancelled else { return }
-            // Re-sample so the bar reflects the hub result immediately rather
-            // than on the next poll tick.
-            await connectionMonitor.refresh()
-        }
+        connectionMonitor.requestResume()
     }
 
     /// True only when the authenticated `ContentView` shell is actually on

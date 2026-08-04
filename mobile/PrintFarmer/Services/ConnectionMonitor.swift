@@ -32,6 +32,20 @@ final class ConnectionMonitor {
     @ObservationIgnored private var signalRService: (any SignalRServiceProtocol)?
     @ObservationIgnored private var pollTask: Task<Void, Never>?
 
+    /// Observer supplied by tests. `nil` in production, where ``start()``
+    /// creates a real ``NWPathMonitorObserver`` instead.
+    @ObservationIgnored private let injectedPathObserver: (any NetworkPathObserving)?
+    /// The live observer, owned for the lifetime of a ``start()``/``stop()``
+    /// cycle. Exactly one exists at a time — ``startPathObserver()`` cancels any
+    /// predecessor — so a server switch cannot leak monitors.
+    @ObservationIgnored private var pathObserver: (any NetworkPathObserving)?
+    /// Last snapshot seen, for change detection. Cleared on stop so a restart
+    /// does not compare against the previous session's path.
+    @ObservationIgnored private var lastPathSnapshot: NetworkPathSnapshot?
+    /// The in-flight recovery. Cancel-and-replace is what gives ``requestResume(after:)``
+    /// its debounce.
+    @ObservationIgnored private var resumeTask: Task<Void, Never>?
+
     /// Monotonic ticket issued to every in-flight ``refresh()``.
     ///
     /// `refresh()` suspends on the network probe, so the foreground-resume
@@ -57,6 +71,20 @@ final class ConnectionMonitor {
     /// (~one poll interval of genuine unreachability) filters those blips out
     /// without meaningfully delaying a real outage.
     @ObservationIgnored var offlineFailureThreshold = 2
+
+    /// Quiet period a network-path change must survive before it triggers
+    /// recovery.
+    ///
+    /// `NWPathMonitor` emits several events for a single Wi-Fi↔cellular handoff.
+    /// Each trigger cancels the pending resume and starts a new one, so a burst
+    /// collapses into a single probe instead of hammering `ensureConnected()`.
+    @ObservationIgnored var pathChangeDebounce: Duration = .milliseconds(400)
+
+    /// - Parameter pathObserver: Injected in tests. Production passes `nil`,
+    ///   which makes ``start()`` create a real ``NWPathMonitorObserver``.
+    init(pathObserver: (any NetworkPathObserving)? = nil) {
+        self.injectedPathObserver = pathObserver
+    }
 
     /// Pure state-resolution used by the poll loop (and unit tests).
     /// - Offline when the server is unreachable over REST.
@@ -99,12 +127,14 @@ final class ConnectionMonitor {
         self.signalRService = signalRService
     }
 
-    /// Starts (or restarts) the periodic connectivity poll loop.
+    /// Starts (or restarts) the periodic connectivity poll loop and the network
+    /// path observer.
     func start() {
         pollTask?.cancel()
         // Reset to a neutral state so a restart (e.g. a server switch) never
         // surfaces the previous server's status while the first probe is in flight.
         resetState()
+        startPathObserver()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { break }
@@ -119,6 +149,11 @@ final class ConnectionMonitor {
     func stop() {
         pollTask?.cancel()
         pollTask = nil
+        resumeTask?.cancel()
+        resumeTask = nil
+        pathObserver?.cancel()
+        pathObserver = nil
+        lastPathSnapshot = nil
         // Clear the displayed state immediately so a stopped monitor (e.g. during
         // a server switch) never keeps showing the previous server's status while
         // the next connect attempt is still in flight.
@@ -166,5 +201,93 @@ final class ConnectionMonitor {
             consecutiveFailures: consecutiveReachabilityFailures,
             threshold: offlineFailureThreshold
         )
+    }
+
+    // MARK: - Network path observation
+
+    /// Decides whether a path transition warrants re-arming connectivity.
+    ///
+    /// Pure, so the policy is testable without a radio. Three rules:
+    ///
+    /// 1. A path that is not `.satisfied` never triggers anything. A path change
+    ///    is only ever a *hint to probe* — the failure-threshold hysteresis in
+    ///    ``refresh()`` remains the sole authority on publishing `.offline`, so
+    ///    a momentary flap cannot paint the red banner.
+    /// 2. The very first snapshot is ignored. `NWPathMonitor` delivers the
+    ///    current path immediately on start, and ``start()`` already probes.
+    /// 3. Otherwise any *difference* triggers — which covers both regaining a
+    ///    path and an interface change (Wi-Fi↔cellular handoff, where the device
+    ///    never looked offline but every existing socket is dead) — while
+    ///    identical repeat events, which the handler emits freely, are dropped.
+    static func shouldTriggerRecovery(
+        previous: NetworkPathSnapshot?,
+        current: NetworkPathSnapshot
+    ) -> Bool {
+        guard current.reachability == .satisfied else { return false }
+        guard let previous else { return false }
+        return previous != current
+    }
+
+    /// Handles one snapshot from the path observer. Internal rather than private
+    /// so tests can drive it directly.
+    func handlePathChange(_ snapshot: NetworkPathSnapshot) {
+        let previous = lastPathSnapshot
+        lastPathSnapshot = snapshot
+        guard Self.shouldTriggerRecovery(previous: previous, current: snapshot) else { return }
+        requestResume(after: pathChangeDebounce)
+    }
+
+    private func startPathObserver() {
+        pathObserver?.cancel()
+        lastPathSnapshot = nil
+        let observer = injectedPathObserver ?? NWPathMonitorObserver()
+        pathObserver = observer
+        observer.start { [weak self] snapshot in
+            self?.handlePathChange(snapshot)
+        }
+    }
+
+    // MARK: - Recovery
+
+    /// Schedules the recovery sequence, cancelling any resume already pending.
+    ///
+    /// - Parameter delay: Debounce window. Foreground resumes pass `.zero`
+    ///   because they are a single discrete event; path changes pass
+    ///   ``pathChangeDebounce`` because they arrive in bursts.
+    func requestResume(after delay: Duration = .zero) {
+        resumeTask?.cancel()
+        resumeTask = Task { [weak self] in
+            if delay > .zero {
+                try? await Task.sleep(for: delay)
+            }
+            // Checked after the sleep *and* when there was no sleep at all: a
+            // superseded task still runs its body, so without this a burst of
+            // path events would fan out into concurrent recoveries.
+            guard !Task.isCancelled else { return }
+            await self?.resumeConnectivity()
+        }
+    }
+
+    /// Awaits the pending resume, if any. Test seam — production never needs to
+    /// join this task.
+    func awaitPendingResume() async {
+        guard let resumeTask else { return }
+        await resumeTask.value
+    }
+
+    /// The shared "re-arm connectivity now" sequence, used by both the
+    /// app-foreground hook and the network-path observer.
+    ///
+    /// Probes REST first: it is a single fast request and it clears a stale
+    /// offline banner without waiting on the hub handshake. Then re-arms the hub
+    /// rather than sitting out the remainder of a backoff sleep, and re-samples
+    /// so the bar reflects the hub result immediately instead of on the next
+    /// poll tick. Every step is idempotent.
+    func resumeConnectivity() async {
+        await refresh()
+        guard !Task.isCancelled else { return }
+        await signalRService?.ensureConnected()
+        guard !Task.isCancelled else { return }
+        await refresh()
     }
 }

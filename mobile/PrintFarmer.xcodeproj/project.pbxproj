@@ -248,6 +248,7 @@
 		CD8577F6945003EB16C1FF53 /* DashboardViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC19E58C13E4D3505F4AC0B5 /* DashboardViewModel.swift */; };
 		815CA1100000000000000001 /* CanonicalLoadCoordination.swift in Sources */ = {isa = PBXBuildFile; fileRef = 815CA1100000000000000002 /* CanonicalLoadCoordination.swift */; };
 		CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0002 /* ConnectionMonitor.swift */; };
+		CF11AA0000000000000D0001 /* NetworkPathObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000D0002 /* NetworkPathObserver.swift */; };
 		CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */; };
 		CF11AA0000000000000C0005 /* ConnectionMonitorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */; };
 		CF49398DE8F99324505C3137 /* APIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 319B5A8D931B2E186BEA6C24 /* APIClientTests.swift */; };
@@ -756,6 +757,7 @@
 		819AAA098A0347629E03F9E8 /* PrinterHistoryModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterHistoryModels.swift; sourceTree = "<group>"; };
 		CEF704D6157DB730DA925AD5 /* MockPartsInventoryService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MockPartsInventoryService.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0002 /* ConnectionMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitor.swift; sourceTree = "<group>"; };
+		CF11AA0000000000000D0002 /* NetworkPathObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathObserver.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0004 /* ConnectionStatusBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionStatusBar.swift; sourceTree = "<group>"; };
 		CF11AA0000000000000C0006 /* ConnectionMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionMonitorTests.swift; sourceTree = "<group>"; };
 		CF16548F3F1D5C3EAB3E4E14 /* LocationServiceProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationServiceProtocol.swift; sourceTree = "<group>"; };
@@ -1016,6 +1018,7 @@
 				CA110D6A7E1234567890AD04 /* CompletionRegistry.swift */,
 				CA110D6A7E1234567890B004 /* SignalRLifecycleInvariants.swift */,
 				CF11AA0000000000000C0002 /* ConnectionMonitor.swift */,
+				CF11AA0000000000000D0002 /* NetworkPathObserver.swift */,
 				BF23D467957EDEE89DB0A90A /* SpoolService.swift */,
 				E5F6A7B8C9D0E1F2A3B4C5D6 /* NFCService.swift */,
 				D4E5F6A7B8C9D0E1F2A3B4C5 /* QRSpoolScannerService.swift */,
@@ -1861,6 +1864,7 @@
 				BC1000000000000000000007 /* BarcodeIntakeView.swift in Sources */,
 				82D78FD0563C041F9256AEF2 /* DemoModeBanner.swift in Sources */,
 				CF11AA0000000000000C0001 /* ConnectionMonitor.swift in Sources */,
+				CF11AA0000000000000D0001 /* NetworkPathObserver.swift in Sources */,
 				CF11AA0000000000000C0003 /* ConnectionStatusBar.swift in Sources */,
 				20C7007EC7BAF78868D23835 /* DemoMode.swift in Sources */,
 				F7060003000000000000A002 /* UITestBootstrap.swift in Sources */,
