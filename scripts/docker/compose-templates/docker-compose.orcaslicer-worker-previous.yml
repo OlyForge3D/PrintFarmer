@@ -67,6 +67,8 @@ services:
       - Worker__WorkerId=orcaslicer-worker-previous-1
       - Worker__InstanceId=${ORCA_WORKER_PREVIOUS_INSTANCE_ID:-orcaslicer-worker-previous-1}
       - Worker__MaxConcurrentJobs=1
+      - Worker__ModelDownloadMaxBytes=${WORKER_MODEL_DOWNLOAD_MAX_BYTES:-536870912}
+      - Worker__ModelDownloadTimeoutSeconds=${WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS:-120}
       - Worker__MaxMemoryMb=1024
       # Version-aware routing (issue #578): worker advertises orcaslicer:<v>
       # and refuses to accept jobs pinned to a different version.

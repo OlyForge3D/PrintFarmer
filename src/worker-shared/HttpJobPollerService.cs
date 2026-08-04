@@ -53,6 +53,14 @@ public abstract class HttpJobPollerService(
 
     private const string DefaultApiBaseUrl = "http://localhost:5245"; // fallback dev URL
 
+    internal static Uri ResolveModelFileUri(Uri apiBaseAddress, string modelFileUrl)
+    {
+        ArgumentNullException.ThrowIfNull(apiBaseAddress);
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelFileUrl);
+
+        return new Uri(apiBaseAddress, modelFileUrl);
+    }
+
     /// <summary>
     /// Marker file that claims ownership of a job's local work after an ambiguous outcome.
     /// </summary>
@@ -140,7 +148,7 @@ public abstract class HttpJobPollerService(
                     Id = jobStatus.Id,
                     ClaimToken = jobStatus.ClaimToken,
                     WorkerId = registeredServiceId.Value.ToString(),
-                    ModelFileUrl = new Uri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
+                    ModelFileUrl = ResolveModelFileUri(httpClient.BaseAddress, jobStatus.ModelFileUrl),
                     ModelFileName = jobStatus.ModelFileName,
                     ModelSha256 = jobStatus.ModelSha256,
                     EngineType = jobStatus.SlicerEngine,
