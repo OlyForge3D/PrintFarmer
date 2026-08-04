@@ -236,10 +236,15 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * the assertion below like any other utility. Verified by removing the mapping,
  * which turns this suite red naming `pf-hover-overlay`.
  *
- * Zero arbitrary-value colour usages remain. The inline-`var()` sites above are
- * the only surviving instance of the blind spot, and #1086 tracks resolving
- * every `var()` reference against every theme as a separate check, since that
- * needs a different mechanism from this one.
+ * Zero arbitrary-value usages *of `--pf-hover-overlay`* remain. Arbitrary
+ * colour values in general do not: `Button.tsx` and `ThemeSwitcher.tsx` among
+ * others still write `bg-[var(--pf-card-bg)]` and similar, and every one of
+ * those is invisible here for the same bracket reason. They name live tokens
+ * today, so none is dead, but that is a fact about the current tree and not
+ * something this assertion enforces. Together with the inline-`var()` sites
+ * above they are the surviving instances of the blind spot, tracked in #1086,
+ * which proposes resolving every `var()` reference against every theme as a
+ * separate check, since that needs a different mechanism from this one.
  */
 describe('colour utilities name a token that exists (#1023)', () => {
   const SRC = resolve(HERE, '../../..');
