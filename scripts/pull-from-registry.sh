@@ -2,12 +2,15 @@
 # Pull and deploy OrcaSlicer images from local registry
 # Run this script on your deployment server
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/docker/container-versions.conf"
+source "$SCRIPT_DIR/docker-utils.sh"
 
 REGISTRY_HOST=${REGISTRY_HOST:-}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
 
-if [ -z "$REGISTRY_HOST" ]; then
+if [[ -z "$REGISTRY_HOST" ]]; then
     echo "❌ REGISTRY_HOST environment variable is required"
     echo "Usage: REGISTRY_HOST=192.168.1.100:5000 $0"
     echo "Or:    $0 192.168.1.100:5000"
@@ -15,7 +18,7 @@ if [ -z "$REGISTRY_HOST" ]; then
 fi
 
 # Allow passing registry host as first argument
-if [ -n "$1" ]; then
+if [[ -n "${1:-}" ]]; then
     REGISTRY_HOST="$1"
 fi
 
@@ -41,11 +44,15 @@ echo ""
 echo "📥 Pulling binary layer..."
 docker pull "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"
 docker pull "$REGISTRY_HOST/orcaslicer-binaries:latest"
+validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
+validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:latest" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 # Pull worker
 echo "📥 Pulling worker..."
 docker pull "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest"
 docker pull "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION"
+validate_orcaslicer_binary_image "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
+validate_orcaslicer_binary_image "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 echo ""
 echo "🏷️  Tagging images for local use..."

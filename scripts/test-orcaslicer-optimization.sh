@@ -4,7 +4,8 @@
 
 set -e
 
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
+ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.2}
+ORCASLICER_SHA256=${ORCASLICER_SHA256:-d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd}
 
 # Docker build progress flag (tty=pretty, plain=verbose, auto=smart)
 DOCKER_PROGRESS=${DOCKER_PROGRESS:-tty}
@@ -43,6 +44,7 @@ time_command "Building binary layer (this will be slow initially)" \
     docker build --progress="${DOCKER_PROGRESS}" -f "./Dockerfile.multistage" --target orcaslicer-binaries \
     -t orcaslicer-binaries:$ORCASLICER_VERSION \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     .
 
@@ -50,6 +52,7 @@ time_command "Building worker using cached binaries" \
     docker build --progress="${DOCKER_PROGRESS}" -f Dockerfile.multistage --target orcaslicer-worker \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     .
 
 echo "🔄 Phase 2: Simulated code change (worker rebuild only)"
@@ -60,6 +63,7 @@ time_command "Rebuilding worker after code change (should be fast)" \
     docker build --progress="${DOCKER_PROGRESS}" -f Dockerfile.multistage --target orcaslicer-worker \
     -t printfarmer-orcaslicer-worker \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     .
 
 echo "🎉 Test Complete!"

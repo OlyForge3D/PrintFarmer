@@ -167,6 +167,61 @@ EOF
     pass_test
 }
 
+test_orcaslicer_release_is_repository_controlled() {
+    start_test "OrcaSlicer release is repository controlled"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+ORCASLICER_VERSION=2.4.1
+ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
+EOF
+
+    capture_output "ORCASLICER_VERSION=2.4.0 ORCASLICER_SHA256=46556197dcc2fb55140e0b1e70c28b4c4da3208f12a4a2522012837c9d77ee10 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --batch 2>&1 || true"
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+    local generated_env
+    generated_env=$(cat ".env")
+
+    assert_contains "$persisted_config" "ORCASLICER_VERSION=2.4.2" "Config should migrate to the supported OrcaSlicer version"
+    assert_contains "$persisted_config" "ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" "Config should persist the supported checksum"
+    assert_not_contains "$persisted_config" "ORCASLICER_VERSION=2.4.1" "Config should not retain a stale OrcaSlicer version"
+    assert_contains "$generated_env" "ORCASLICER_VERSION=2.4.2" "Environment should use the supported OrcaSlicer version"
+    assert_contains "$generated_env" "ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" "Environment should use the supported checksum"
+
+    pass_test
+}
+
+test_regenerate_config_migrates_orcaslicer_release() {
+    start_test "config regeneration migrates the OrcaSlicer release"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    cat >> ".deploy-config" << 'EOF'
+ORCASLICER_VERSION=2.4.1
+ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+EOF
+
+    capture_output "ORCASLICER_VERSION=2.4.0 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+    local generated_env
+    generated_env=$(cat ".env")
+
+    assert_contains "$persisted_config" "ORCASLICER_VERSION=2.4.2" "Regeneration should migrate persisted OrcaSlicer version"
+    assert_contains "$persisted_config" "ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" "Regeneration should migrate persisted OrcaSlicer checksum"
+    assert_contains "$generated_env" "ORCASLICER_VERSION=2.4.2" "Regeneration should write the supported OrcaSlicer version"
+    assert_contains "$generated_env" "ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd" "Regeneration should write the supported OrcaSlicer checksum"
+
+    pass_test
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -174,6 +229,8 @@ run_all_tests() {
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
+    test_orcaslicer_release_is_repository_controlled
+    test_regenerate_config_migrates_orcaslicer_release
     
     teardown
 }

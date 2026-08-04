@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.IO.Compression;
 using System.Text;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Web.Api.Services.Calibration.Generation;
 
 namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
@@ -76,7 +77,7 @@ internal static class CalibrationGenerationTestData
                 "Klipper",
                 "OrcaSlicer",
                 "upstream",
-                "2.3.1",
+                CalibrationContractConstants.SlicerVersion,
                 ContainerDigest,
                 BinaryDigest,
                 "orca-json"),

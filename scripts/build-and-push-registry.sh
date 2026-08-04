@@ -2,11 +2,19 @@
 # Build and push OrcaSlicer images to local registry
 # This script builds the optimized binary layer and worker, then pushes to local registry
 
-set -e
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/docker/container-versions.conf"
+source "$SCRIPT_DIR/docker-utils.sh"
 
 REGISTRY_HOST=${REGISTRY_HOST:-localhost:5000}
-ORCASLICER_VERSION=${ORCASLICER_VERSION:-2.4.0}
 GITHUB_TOKEN=${GITHUB_TOKEN:-}
+
+if [[ -z "$ORCASLICER_SHA256" ]]; then
+    print_error "No pinned checksum is configured for OrcaSlicer ${ORCASLICER_VERSION}."
+    exit 1
+fi
 
 # Short git SHA of the source commit, injected into the worker build so
 # /api/system/version reports the deployed commit (.git is not in the build context).
@@ -49,11 +57,13 @@ ORCA_BUILD_CMD+=( -f ./Dockerfile.multistage --target orcaslicer-binaries \
     -t "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION" \
     -t "$REGISTRY_HOST/orcaslicer-binaries:latest" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     ${GITHUB_TOKEN:+--build-arg GITHUB_TOKEN=$GITHUB_TOKEN} \
     .)
 
 "${ORCA_BUILD_CMD[@]}"
+validate_orcaslicer_binary_image "orcaslicer-binaries:$ORCASLICER_VERSION" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 echo "✅ Binary layer built successfully"
 echo ""
@@ -69,11 +79,13 @@ WORKER_CMD+=( -f Dockerfile.multistage --target orcaslicer-worker \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:latest" \
     -t "$REGISTRY_HOST/printfarmer-orcaslicer-worker:$ORCASLICER_VERSION" \
     --build-arg ORCASLICER_VERSION=$ORCASLICER_VERSION \
+    --build-arg ORCASLICER_SHA256=$ORCASLICER_SHA256 \
     --build-arg ALLOW_STUB=false \
     --build-arg GIT_SHA=$GIT_SHA \
     .)
 
 "${WORKER_CMD[@]}"
+validate_orcaslicer_binary_image "printfarmer-orcaslicer-worker:latest" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"
 
 echo "✅ Worker built successfully"
 echo ""

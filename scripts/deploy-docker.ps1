@@ -36,6 +36,10 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:SupportedOrcaSlicerVersion = "2.4.2"
+$script:SupportedOrcaSlicerSha256 = "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+$env:ORCASLICER_VERSION = $script:SupportedOrcaSlicerVersion
+$env:ORCASLICER_SHA256 = $script:SupportedOrcaSlicerSha256
 
 # ============================================================================
 # ALL FUNCTION DEFINITIONS - Place before any execution code
@@ -69,6 +73,29 @@ function Write-Header {
     Write-Host "  $Message" -ForegroundColor Blue
     Write-Host "=============================================================" -ForegroundColor Blue
     Write-Host ""
+}
+
+function Set-SupportedOrcaSlicerConfig {
+    param([hashtable]$Config)
+
+    $Config['ORCASLICER_VERSION'] = $script:SupportedOrcaSlicerVersion
+    $Config['ORCASLICER_SHA256'] = $script:SupportedOrcaSlicerSha256
+}
+
+function Set-SupportedOrcaSlicerEnvFile {
+    param([string]$Path = ".env")
+
+    if (-not (Test-Path $Path)) {
+        return
+    }
+
+    $content = @(
+        Get-Content $Path |
+            Where-Object { $_ -notmatch '^ORCASLICER_(VERSION|SHA256)=' }
+    )
+    $content += "ORCASLICER_VERSION=$script:SupportedOrcaSlicerVersion"
+    $content += "ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256"
+    Set-Content -Path $Path -Value $content -Encoding UTF8
 }
 
 # Show help message
@@ -550,6 +577,8 @@ PFARM__NetworkDiscovery__DiscoverySubnets=
 # Deployment
 DEPLOYMENT_MODE=$Architecture
 ENABLE_DISTRIBUTED_SLICING=true
+ORCASLICER_VERSION=$script:SupportedOrcaSlicerVersion
+ORCASLICER_SHA256=$script:SupportedOrcaSlicerSha256
 "@
     
     # Write to file
@@ -848,7 +877,7 @@ function Prepare-OfflineDeployment {
         if ($succeeded) {
             Write-Host ""
             Write-Header "STEP 3/3: Caching OrcaSlicer AppImage"
-            if (-not (Cache-OrcaSlicer -TargetDir "$TargetDir/orcaslicer" -Version "latest")) {
+            if (-not (Cache-OrcaSlicer -TargetDir "$TargetDir/orcaslicer" -Version "2.4.2")) {
                 Write-ErrorMsg "Failed to cache OrcaSlicer AppImage"
                 $succeeded = $false
             }
@@ -930,9 +959,10 @@ function Deploy-OfflineMode {
 # Download OrcaSlicer Linux AppImage for offline deployments
 function Cache-OrcaSlicer {
     param(
-        [string]$TargetDir = "./docker-images/orcaslicer",
-        [string]$Version = "2.4.0"
+        [string]$TargetDir = "./docker-images/orcaslicer"
     )
+
+    $Version = $script:SupportedOrcaSlicerVersion
     
     Write-Header "Caching OrcaSlicer Linux AppImage"
     
@@ -968,25 +998,30 @@ function Cache-OrcaSlicer {
         
         $json = $response.Content.ReadAsStringAsync().Result | ConvertFrom-Json
         
-        # Find the Linux AppImage asset (prefer x86_64 Ubuntu variant)
-        $appImageAsset = $json.assets | Where-Object { 
-            $_.name -match 'AppImage' -and $_.name -match 'Linux' -and $_.name -match 'x86_64|amd64'
-        } | Select-Object -First 1
+        # Select the exact x86_64 Ubuntu 24.04 asset whose digest is pinned below.
+        $expectedAssetName = "OrcaSlicer_Linux_AppImage_Ubuntu2404_V${Version}.AppImage"
+        $appImageAsset = $json.assets |
+            Where-Object { $_.name -eq $expectedAssetName } |
+            Select-Object -First 1
         
         if (-not $appImageAsset) {
-            # Try any non-ARM Linux AppImage (the x86_64 Ubuntu asset carries no arch token)
-            $appImageAsset = $json.assets | Where-Object { 
-                $_.name -match 'AppImage' -and $_.name -match 'Linux' -and $_.name -notmatch 'aarch64|arm64'
-            } | Select-Object -First 1
-        }
-        
-        if (-not $appImageAsset) {
-            throw "Could not find AppImage asset for Linux in release"
+            throw "Could not find expected release asset $expectedAssetName"
         }
         
         $downloadUrl = $appImageAsset.browser_download_url
         $fileName = $appImageAsset.name
         $appImagePath = Join-Path $TargetDir $fileName
+
+        $expectedSha256 = $script:SupportedOrcaSlicerSha256
+
+        $assetDigest = [string]$appImageAsset.digest
+        if ($assetDigest -notmatch '^sha256:([0-9a-fA-F]{64})$') {
+            throw "GitHub did not provide a valid SHA-256 digest for $fileName"
+        }
+        $releaseSha256 = $Matches[1].ToLowerInvariant()
+        if ($releaseSha256 -ne $expectedSha256) {
+            throw "GitHub release digest for $fileName does not match the repository-pinned SHA-256"
+        }
         
         # Resolve to absolute path for reliable checking
         $resolvedAppImagePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($appImagePath)
@@ -996,9 +1031,16 @@ function Cache-OrcaSlicer {
         $fileSize = if ($fileExists) { (Get-Item $resolvedAppImagePath -ErrorAction SilentlyContinue).Length } else { 0 }
         
         if ($fileExists -and $fileSize -gt 50MB) {
-            $size = $fileSize / 1MB
-            Write-Success "OrcaSlicer AppImage already cached: $resolvedAppImagePath ($([math]::Round($size, 1)) MB)"
-            return $true
+            $cachedSha256 = (Get-FileHash -Path $resolvedAppImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($cachedSha256 -eq $expectedSha256) {
+                $size = $fileSize / 1MB
+                Write-Success "OrcaSlicer AppImage already cached and checksum-verified: $resolvedAppImagePath ($([math]::Round($size, 1)) MB)"
+                return $true
+            }
+
+            Write-Warning "Cached OrcaSlicer AppImage checksum does not match the official release; deleting and re-downloading..."
+            Remove-Item $resolvedAppImagePath -Force
+            $fileExists = $false
         }
         
         # If file exists but is too small or corrupted, delete it and re-download
@@ -1050,6 +1092,13 @@ function Cache-OrcaSlicer {
         if (-not (Test-Path $appImagePath)) {
             throw "File written but not found at $appImagePath"
         }
+
+        $downloadedSha256 = (Get-FileHash -Path $appImagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($downloadedSha256 -ne $expectedSha256) {
+            Remove-Item $appImagePath -Force
+            throw "Downloaded OrcaSlicer AppImage checksum does not match the official GitHub release digest"
+        }
+        Write-Success "Official AppImage SHA-256 verified"
         
         # Verify ELF magic number for Linux binary
         try {
@@ -1200,11 +1249,14 @@ function Load-DeploymentConfig {
                 $config[$matches[1]] = $matches[2]
             }
         }
+        Set-SupportedOrcaSlicerConfig -Config $config
         return $config
     }
     
     Write-Info "No existing configuration found"
-    return @{}
+    $config = @{}
+    Set-SupportedOrcaSlicerConfig -Config $config
+    return $config
 }
 
 # Save deployment configuration to file
@@ -1214,6 +1266,7 @@ function Save-DeploymentConfig {
         [string]$ConfigPath = "./.deploy-config"
     )
     
+    Set-SupportedOrcaSlicerConfig -Config $Config
     Write-Info "Saving deployment configuration to $ConfigPath..."
     
     $content = @"
@@ -1677,6 +1730,43 @@ function Verify-Deployment {
 
 function Redeploy-Deployment {
     Write-Header "Redeploying PrintFarmer"
+    Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
+
+    if (-not (Test-Path "./.deploy-config")) {
+        Write-ErrorMsg "No previous deployment configuration found"
+        exit 1
+    }
+
+    $config = Load-DeploymentConfig -ConfigPath "./.deploy-config"
+    Save-DeploymentConfig -Config $config -ConfigPath "./.deploy-config"
+    Set-SupportedOrcaSlicerEnvFile -Path ".env"
+
+    $generatorArgs = @(
+        "-Architecture", $config['ARCHITECTURE'],
+        "-DbProvider", $config['DB_PROVIDER'],
+        "-OutputDir", (Get-Location).Path
+    )
+    if ($config['INCLUDE_MONITORING'] -eq 'true') {
+        $generatorArgs += "-IncludeMonitoring"
+    }
+    if ($config['INCLUDE_TELEMETRY'] -eq 'true') {
+        $generatorArgs += "-IncludeTelemetry"
+    }
+    if ($config['INCLUDE_SECURITY'] -eq 'true') {
+        $generatorArgs += "-IncludeSecurity"
+    }
+    if ($config['INCLUDE_REGISTRY'] -eq 'true') {
+        $generatorArgs += "-IncludeRegistry"
+    }
+    if ($config['ENABLE_ORCA_WORKER'] -eq 'true') {
+        $generatorArgs += "-EnableOrcaWorker", $config['ORCA_WORKER_COUNT']
+    }
+
+    & pwsh -File (Join-Path $PSScriptRoot "compose-generator.ps1") @generatorArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Failed to regenerate docker-compose.yml"
+        exit 1
+    }
     
     Write-Info "Stopping existing containers..."
     try {
@@ -1853,9 +1943,8 @@ if (-not $NonInteractive) {
             $config['ENABLE_ORCA_WORKER'] = 'true'
             Write-Success "OrcaSlicer workers enabled"
             
-            # OrcaSlicer version
-            $orcaVersion = Read-Host "OrcaSlicer version to deploy (default: 2.4.0)"
-            $config['ORCASLICER_VERSION'] = if ([string]::IsNullOrWhiteSpace($orcaVersion)) { '2.4.0' } else { $orcaVersion }
+            Set-SupportedOrcaSlicerConfig -Config $config
+            Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
             
             # Worker replica count
             $workerCount = Read-Host "Number of OrcaSlicer worker replicas (default: 1)"

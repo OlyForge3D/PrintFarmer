@@ -1,4 +1,5 @@
-﻿using Farm.Web.Api.Services.Calibration.Generation;
+﻿using Farm.Infrastructure.PrinterCalibration;
+using Farm.Web.Api.Services.Calibration.Generation;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Services.Calibration.Generation;
@@ -24,10 +25,10 @@ public sealed class CalibrationSpecificationCompilerTests
     }
 
     [Theory]
-    [InlineData("Marlin", "Klipper", "OrcaSlicer", "upstream", "2.3.1", "firmware_family_unsupported")]
-    [InlineData("Klipper", "Marlin", "OrcaSlicer", "upstream", "2.3.1", "gcode_dialect_unsupported")]
-    [InlineData("Klipper", "Klipper", "PrusaSlicer", "upstream", "2.3.1", "slicer_engine_unsupported")]
-    [InlineData("Klipper", "Klipper", "OrcaSlicer", "vendor-fork", "2.3.1", "slicer_distribution_unsupported")]
+    [InlineData("Marlin", "Klipper", "OrcaSlicer", "upstream", CalibrationContractConstants.SlicerVersion, "firmware_family_unsupported")]
+    [InlineData("Klipper", "Marlin", "OrcaSlicer", "upstream", CalibrationContractConstants.SlicerVersion, "gcode_dialect_unsupported")]
+    [InlineData("Klipper", "Klipper", "PrusaSlicer", "upstream", CalibrationContractConstants.SlicerVersion, "slicer_engine_unsupported")]
+    [InlineData("Klipper", "Klipper", "OrcaSlicer", "vendor-fork", CalibrationContractConstants.SlicerVersion, "slicer_distribution_unsupported")]
     [InlineData("Klipper", "Klipper", "OrcaSlicer", "upstream", "2.2.0", "slicer_version_unsupported")]
     public void Compile_WithTupleElementOutsideTheSupportedTuple_RejectsFailClosed(
         string firmwareFamily,
@@ -69,7 +70,7 @@ public sealed class CalibrationSpecificationCompilerTests
                 "Klipper",
                 "OrcaSlicer",
                 "upstream",
-                "2.3.1",
+                CalibrationContractConstants.SlicerVersion,
                 null,
                 CalibrationGenerationTestData.BinaryDigest,
                 "orca-json"),
@@ -94,7 +95,7 @@ public sealed class CalibrationSpecificationCompilerTests
                 "Klipper",
                 "OrcaSlicer",
                 "upstream",
-                "2.3.1",
+                CalibrationContractConstants.SlicerVersion,
                 CalibrationGenerationTestData.ContainerDigest,
                 "   ",
                 "orca-json"),

@@ -1152,6 +1152,12 @@
           "bedModel": "/assets/orcaslicer/elegoo/Elegoo%20OrangeStorm%20Giga_bed.stl",
           "bedTexture": "/assets/orcaslicer/elegoo/Elegoo%20OrangeStorm%20Giga_texture.svg",
           "bedTextureFormat": "svg"
+        },
+        {
+          "id": "elegoo_centauri_2",
+          "name": "Elegoo Centauri 2",
+          "bedModel": "/assets/orcaslicer/elegoo/Elegoo%20Centauri%202_bed.stl",
+          "cover": "/assets/orcaslicer/elegoo/Elegoo%20Centauri%202_cover.png"
         }
       ]
     },
@@ -3351,8 +3357,8 @@
     }
   ],
   "statistics": {
-    "totalPrinters": 386,
-    "printersWithBedModel": 350,
+    "totalPrinters": 387,
+    "printersWithBedModel": 351,
     "printersWithBedTexture": 337
   }
 }

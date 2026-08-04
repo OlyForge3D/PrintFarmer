@@ -63,9 +63,17 @@ While many components are implemented, the OrcaSlicer integration is **NOT produ
 
 ---
 
-## Dual-Engine (Current + Previous) Support
+## Current Worker and Legacy Job Drain
 
-As of issue #578, PrintFarmer can run **two** OrcaSlicer engine versions concurrently — the current default (`2.4.0`) plus the previous version (`2.3.1`). This lets operators finish jobs sliced against a prior engine while migrating to the newer one, without a big-bang cutover.
+PrintFarmer deploys one repository-supported current OrcaSlicer worker release
+(`2.4.2`). The Bash and PowerShell deployment scripts do not expose a version
+selector and replace stale environment or saved configuration values with the
+supported version and checksum.
+
+Issue #578 also provides an opt-in `2.3.1` worker solely for draining existing
+jobs pinned to the legacy engine during migration. This compatibility service
+runs alongside the current worker; it cannot replace or change the supported
+current worker release.
 
 ### How dispatch works
 
@@ -277,27 +285,29 @@ Original builds downloaded 200MB+ OrcaSlicer AppImage on every rebuild, taking 8
 **Location**: `scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries`
 
 ```dockerfile
-FROM ubuntu:24.04 AS orcaslicer-binaries-base
-ARG ORCASLICER_VERSION=2.4.0
-ARG GITHUB_TOKEN
+ARG ORCASLICER_VERSION=2.4.2
+ARG ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
+
+FROM --platform=linux/amd64 ubuntu:24.04 AS orca-download
+ARG ORCASLICER_VERSION
+ARG ORCASLICER_SHA256
 
 # Install extraction tools
 RUN apt-get update && apt-get install -y \
     curl ca-certificates jq p7zip-full squashfs-tools libarchive-tools file wget
 
-# Download and extract OrcaSlicer
-# - Discovers correct URL from GitHub API
-# - Multiple extraction methods: unsquashfs, --appimage-extract, 7z, bsdtar
-# - Creates stub binary if all methods fail (for CI)
-
-RUN set -e; \
-    # ... download logic with multiple fallback URLs ... \
-    # ... extraction logic with multiple fallback methods ... \
-    # Creates /orcaslicer-dist/opt/orcaslicer/ with extracted binary
+# Download the exact official x86_64 AppImage and verify it before extraction.
+ADD https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v${ORCASLICER_VERSION}/OrcaSlicer_Linux_AppImage_Ubuntu2404_V${ORCASLICER_VERSION}.AppImage /tmp/orcaslicer.AppImage
+RUN echo "${ORCASLICER_SHA256}  /tmp/orcaslicer.AppImage" | sha256sum -c --strict - && \
+    # ... extract the AppImage and write orcaslicer.version/orcaslicer.sha256 ...
+    test -x /orcaslicer-dist/opt/orcaslicer/AppRun
 
 FROM scratch AS orcaslicer-binaries
-COPY --from=orcaslicer-binaries-base /orcaslicer-dist /orcaslicer-dist
-LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSION}"
+ARG ORCASLICER_VERSION
+ARG ORCASLICER_SHA256
+COPY --from=orca-download /orcaslicer-dist /orcaslicer-dist
+LABEL orcaslicer.version="${ORCASLICER_VERSION}" \
+      orcaslicer.sha256="${ORCASLICER_SHA256}"
 ```
 
 ### Build Commands
@@ -306,24 +316,23 @@ LABEL prebuild="true" purpose="orcaslicer-binaries" version="${ORCASLICER_VERSIO
 # Option 1: Build script (recommended)
 ./scripts/build-orcaslicer-optimized.sh
 
-# With specific version
-ORCASLICER_VERSION=2.4.0 ./scripts/build-orcaslicer-optimized.sh
-
 # With GitHub token (avoid rate limits)
 GITHUB_TOKEN=your_token ./scripts/build-orcaslicer-optimized.sh
 
 # Option 2: Manual two-stage build
 # Step 1: Build binary layer (slow first time, cached after)
 docker build -f scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries \
-  -t orcaslicer-binaries:2.4.0 \
-  --build-arg ORCASLICER_VERSION=2.4.0 \
+  -t orcaslicer-binaries:2.4.2 \
+  --build-arg ORCASLICER_VERSION=2.4.2 \
+  --build-arg ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd \
   .
 
 # Step 2: Build worker (fast, uses cached binaries)
 docker build -f Dockerfile.multistage \
   --target orcaslicer-worker \
   -t printfarmer-orcaslicer-worker \
-  --build-arg ORCASLICER_VERSION=2.4.0 \
+  --build-arg ORCASLICER_VERSION=2.4.2 \
+  --build-arg ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd \
   .
 
 # Option 3: Docker Compose
@@ -335,11 +344,16 @@ docker compose --profile orca build orcaslicer-worker
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `ORCASLICER_VERSION` | 2.4.0 | OrcaSlicer release version to download |
-| `ORCASLICER_URL` | (auto-discovered) | Override download URL |
-| `ALLOW_STUB` | true | Create stub binary if download fails |
-| `GITHUB_TOKEN` | (optional) | Avoid GitHub API rate limits |
-| `CACHE_BUST` | latest | Force layer rebuild |
+| `ORCASLICER_VERSION` | 2.4.2 | Repository-controlled stable release build argument |
+| `ORCASLICER_SHA256` | `d12fb8...029fd` | Official x86_64 Ubuntu 24.04 AppImage SHA-256 |
+| `ALLOW_STUB` | false | Explicit CI-only escape hatch; production builds remain fail-closed |
+
+Cached binary images are reusable only when both `orcaslicer.version` and
+`orcaslicer.sha256` labels exactly match the requested release. The same
+values are embedded in the binary layer. Missing or mismatched metadata causes
+the deploy/build path to reject the cached image instead of retagging it.
+Deployment scripts always request the repository-supported version/checksum
+pair; these build arguments are retained only as internal upgrade surfaces.
 
 ### Performance
 
@@ -988,7 +1002,8 @@ To load bed STL models:
 ### Pinned Worker Publication & Mandatory Calibration Smoke Gate
 
 Calibration generation (issue #899) is only allowed to report itself operational after the **published,
-digest-pinned** OrcaSlicer 2.3.1 worker has completed a real calibration run. This is enforced by
+digest-pinned** latest supported OrcaSlicer worker (currently 2.4.2) has completed a real
+calibration run. This is enforced by
 `.github/workflows/orcaslicer-strict-build.yml`, which is manual-dispatch only and double-guarded.
 
 **Publication (`build-orcaslicer-strict`)**
@@ -1108,7 +1123,13 @@ dotnet test --filter "FullyQualifiedName~OrcaSlicer"
 
 ## Schema Version Awareness (#578)
 
-PrintFarmer runs two OrcaSlicer engine versions side by side (current 2.4.1 and previous 2.3.1). Settings that a user edits on the Slice Job page must match the engine that will actually process the job — fields added in 2.4.x must not appear when the job is pinned to 2.3.1, fields retired in 2.4.x must not appear when the job is pinned to 2.4.1, and fields that were renamed between versions must resolve to the correct key for the pinned engine.
+PrintFarmer normally runs the single repository-supported OrcaSlicer engine
+(current 2.4.2). During a legacy-job drain, it may temporarily run the isolated
+previous 2.3.1 worker alongside it. Settings that a user edits on the Slice Job
+page must match the engine that will actually process the job: fields added in
+2.4.x must not appear for a job already pinned to 2.3.1, fields retired in
+2.4.x must not appear for 2.4.2, and renamed fields must resolve to the key for
+the pinned engine.
 
 ### API surface
 

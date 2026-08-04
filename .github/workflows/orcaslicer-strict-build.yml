@@ -4,9 +4,9 @@ name: OrcaSlicer Strict Build
 # We keep the workflow file for historical and manual use but make it manual-only and add
 # a double-guard (repo var + workflow input) so it remains effectively disabled by default.
 #
-# Scope: this workflow owns the *pinned* 2.3.1 calibration worker only. General 2.4.x slicing is
-# built and published separately by docker-publish.yml and orcaslicer-base-image.yml, which are
-# untouched by anything here.
+# Scope: this workflow owns the digest-pinned calibration worker for the latest supported OrcaSlicer
+# version. General slicing is built and published separately by docker-publish.yml and
+# orcaslicer-base-image.yml.
 on:
   workflow_dispatch:
     inputs:
@@ -25,8 +25,8 @@ permissions:
   contents: read
 
 env:
-  ORCASLICER_VERSION: 2.3.1
-  ORCASLICER_SHA256: f199e5408914efdbbbfa4fd6752cd6ad4727209b488bc47bff9a0da5f053a701
+  ORCASLICER_VERSION: 2.4.2
+  ORCASLICER_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
   ALLOW_STUB: 'false'
   REGISTRY: ghcr.io
   PINNED_WORKER_IMAGE_NAME: printfarmer-orcaslicer-worker-pinned

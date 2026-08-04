@@ -39,7 +39,8 @@ env:
   IMAGE_OWNER: olyforge3d
   DOTNET_VERSION: '10.0.x'
   NODE_VERSION: '24'
-  ORCA_VERSION: '2.4.0'
+  ORCA_VERSION: '2.4.2'
+  ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 
 permissions:
   contents: read
@@ -198,12 +199,16 @@ jobs:
     name: Ensure OrcaSlicer Base
     runs-on: ubuntu-latest
     permissions:
+      actions: write
       contents: read
       id-token: write
       packages: write
     outputs:
-      base_image: ${{ steps.output.outputs.base_image }}
+      base_image: ${{ steps.verify.outputs.base_image }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Log in to GHCR (for manifest check)
         uses: docker/login-action@v4
         with:
@@ -214,15 +219,22 @@ jobs:
       - name: Check if OrcaSlicer base image exists
         id: check
         run: |
+          set -euo pipefail
+          source scripts/docker-utils.sh
           BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
           echo "Checking for base image: $BASE_IMAGE"
-          
-          if docker manifest inspect "$BASE_IMAGE" > /dev/null 2>&1; then
-            echo "✓ Base image exists"
-            echo "exists=true" >> $GITHUB_OUTPUT
+
+          if ! docker pull "$BASE_IMAGE" > /dev/null 2>&1; then
+            echo "Base image not found - will trigger build"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "✗ Base image not found - will trigger build"
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::Rejecting cached base image whose attested identity does not match OrcaSlicer ${ORCA_VERSION}"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Trigger base image build if needed
@@ -237,7 +249,6 @@ jobs:
               workflow_id: 'orcaslicer-base-image.yml',
               ref: context.ref,
               inputs: {
-                orca_version: '${{ env.ORCA_VERSION }}',
                 force_rebuild: 'false'
               }
             });
@@ -250,23 +261,41 @@ jobs:
             while (Date.now() - startTime < maxWait) {
               await new Promise(r => setTimeout(r, 30000)); // Wait 30s
               
-              // Check if manifest exists now
-              const { execSync } = require('child_process');
+              // Pull and attest the candidate without executing its entrypoint or shell.
+              const { execFileSync } = require('child_process');
               try {
-                execSync(`docker manifest inspect ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}`, { stdio: 'pipe' });
-                console.log('Base image is now available!');
+                const image = '${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}';
+                execFileSync('docker', ['pull', image], { stdio: 'pipe' });
+                execFileSync(
+                  'bash',
+                  [
+                    '-c',
+                    'set -euo pipefail; source scripts/docker-utils.sh; validate_orcaslicer_binary_image "$1" "$2" "$3"',
+                    '_',
+                    image,
+                    '${{ env.ORCA_VERSION }}',
+                    '${{ env.ORCA_SHA256 }}'
+                  ],
+                  { stdio: 'pipe' }
+                );
+                console.log('Base image is now available with matching metadata!');
                 return;
               } catch {
-                console.log('Still waiting for base image...');
+                console.log('Base image is unavailable or its attestation is stale; still waiting...');
               }
             }
             
             core.setFailed('Timed out waiting for base image');
 
-      - name: Output base image reference
-        id: output
+      - name: Verify OrcaSlicer base image metadata
+        id: verify
         run: |
-          echo "base_image=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}" >> $GITHUB_OUTPUT
+          set -euo pipefail
+          source scripts/docker-utils.sh
+          BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
+          docker pull "$BASE_IMAGE"
+          validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"
+          echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")" >> "$GITHUB_OUTPUT"
 
   # ====================
   # JOB 4: Build native container images (api, frontend, discovery, orcaslicer-worker)
@@ -447,8 +476,24 @@ jobs:
                 org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
                 org.opencontainers.image.revision="${VCS_REF}" \
                 org.opencontainers.image.version="${BUILD_VERSION}" \
+                orcaslicer.version="${{ env.ORCA_VERSION }}" \
+                orcaslicer.sha256="${{ env.ORCA_SHA256 }}" \
+                orcaslicer.allow_stub="false" \
                 org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
                 org.printfarmer.sbom="${SBOM_URL}"
+
+          RUN test -s /opt/orcaslicer/orcaslicer.version && \
+              test -s /opt/orcaslicer/orcaslicer.sha256 && \
+              test "$(cat /opt/orcaslicer/orcaslicer.version)" = "${{ env.ORCA_VERSION }}" && \
+              test "$(cat /opt/orcaslicer/orcaslicer.sha256)" = "${{ env.ORCA_SHA256 }}"
+
+          RUN set -e; \
+              test -x /opt/orcaslicer/AppRun; \
+              install -d -m 0755 /etc/printfarmer; \
+              cp /opt/orcaslicer/orcaslicer.version /etc/printfarmer/orcaslicer.version; \
+              cp /opt/orcaslicer/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
+              chmod 0644 /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256; \
+              ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer
           
           # Install .NET runtime
           RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -468,7 +513,10 @@ jobs:
           COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           
           ENV ASPNETCORE_URLS=http://+:8080
-          ENV ORCASLICER_PATH=/opt/orcaslicer
+          ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+          ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
+          ENV Worker__EngineVersion=${{ env.ORCA_VERSION }}
+          ENV SlicerRegistry__Version=${{ env.ORCA_VERSION }}
           EXPOSE 8080
           
           ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
@@ -694,6 +742,8 @@ jobs:
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
             SOURCE_ARCHIVE_URL=${{ steps.source.outputs.source_archive_url }}
             SBOM_URL=${{ steps.source.outputs.sbom_url }}
+            ORCASLICER_VERSION=${{ env.ORCA_VERSION }}
+            ORCASLICER_SHA256=${{ env.ORCA_SHA256 }}
 
       - name: Install Syft
         uses: anchore/sbom-action/download-syft@v0.24.0

@@ -6,8 +6,8 @@
 ############################################################
 
 # Global build arguments
-ARG ORCASLICER_VERSION=2.4.1
-ARG ORCASLICER_SHA256=7aff29a0ac6bb906f11c069eefe83459781c3364bac20ba9529eb9937a231402
+ARG ORCASLICER_VERSION=2.4.2
+ARG ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
 ARG BUILD_VERBOSITY=quiet
 # Short git SHA of the source commit; embedded into each service's version endpoint
 ARG GIT_SHA=unknown
@@ -285,6 +285,9 @@ ARG ORCASLICER_SHA256
 ARG ALLOW_STUB=false
 ARG GITHUB_TOKEN
 ARG _SKIP_ORCA_BINARY_BUILD=0
+LABEL orcaslicer.version="${ORCASLICER_VERSION}" \
+      orcaslicer.sha256="${ORCASLICER_SHA256}" \
+      orcaslicer.allow_stub="${ALLOW_STUB}"
 WORKDIR /tmp
 
 # Install AppImage/tooling stack (matches upgraded base image)
@@ -461,9 +464,11 @@ RUN set -e; \
     # worker register as unverified instead of claiming a pin it cannot prove. \
     if [ -f /orcaslicer-dist/orcaslicer ] && [ "${checksum_verified}" = "1" ]; then \
         printf '%s' "${ORCASLICER_SHA256}" > /orcaslicer-dist/orcaslicer.sha256; \
+        printf '%s' "${ORCASLICER_VERSION}" > /orcaslicer-dist/orcaslicer.version; \
         echo "[orcaslicer-binaries] Attested installed binary digest"; \
     else \
         printf '' > /orcaslicer-dist/orcaslicer.sha256; \
+        rm -f /orcaslicer-dist/orcaslicer.version; \
         echo "[orcaslicer-binaries] No verified binary installed; attestation left empty"; \
     fi; \
     \
@@ -536,6 +541,7 @@ LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
       org.printfarmer.sbom="${SBOM_URL}" \
       component="orcaslicer-worker" \
       orcaslicer.version="${ORCASLICER_VERSION}" \
+      orcaslicer.sha256="${ORCASLICER_SHA256}" \
       orcaslicer.distribution="upstream" \
       orcaslicer.attestation="/etc/printfarmer/orcaslicer.sha256" \
       orcaslicer.allow_stub="${ALLOW_STUB}" \
@@ -544,15 +550,34 @@ LABEL org.opencontainers.image.title="PrintFarmer OrcaSlicer Worker" \
 # Copy OrcaSlicer binaries from the binary layer (as appuser)
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/orcaslicer /usr/local/bin/orcaslicer
 COPY --chown=appuser:appuser --from=orcaslicer-binaries /orcaslicer-dist/opt/orcaslicer /opt/orcaslicer
-# A legacy external binary context may predate attestation support. Preserve an existing
-# attestation, or write an empty one so the worker registers the installed binary as unverified.
+# Reject external binary contexts that do not attest the exact requested release.
 RUN --mount=type=bind,from=orcaslicer-binaries,source=/orcaslicer-dist,target=/tmp/orcaslicer-dist,readonly \
-    install -d -o appuser -g appuser -m 0755 /etc/printfarmer && \
-    if [ -f /tmp/orcaslicer-dist/orcaslicer.sha256 ]; then \
-        install -o appuser -g appuser -m 0644 /tmp/orcaslicer-dist/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
-    else \
-        install -o appuser -g appuser -m 0644 /dev/null /etc/printfarmer/orcaslicer.sha256; \
-    fi
+    set -e; \
+    actual_version="$(cat /tmp/orcaslicer-dist/orcaslicer.version 2>/dev/null || true)"; \
+    actual_sha256="$(cat /tmp/orcaslicer-dist/orcaslicer.sha256 2>/dev/null || true)"; \
+    if [ "${ALLOW_STUB}" != "true" ]; then \
+        if [ -z "$actual_version" ]; then \
+            echo "ERROR: cached OrcaSlicer binary layer is missing embedded version metadata"; \
+            exit 1; \
+        fi; \
+        if [ "$actual_version" != "${ORCASLICER_VERSION}" ]; then \
+            echo "ERROR: cached OrcaSlicer binary version '$actual_version' does not match requested '${ORCASLICER_VERSION}'"; \
+            exit 1; \
+        fi; \
+        if [ -z "$actual_sha256" ]; then \
+            echo "ERROR: cached OrcaSlicer binary layer is missing checksum metadata"; \
+            exit 1; \
+        fi; \
+        if [ "$actual_sha256" != "${ORCASLICER_SHA256}" ]; then \
+            echo "ERROR: cached OrcaSlicer binary checksum does not match the requested release"; \
+            exit 1; \
+        fi; \
+    fi; \
+    install -d -o appuser -g appuser -m 0755 /etc/printfarmer; \
+    printf '%s' "$actual_version" > /etc/printfarmer/orcaslicer.version; \
+    printf '%s' "$actual_sha256" > /etc/printfarmer/orcaslicer.sha256; \
+    chown appuser:appuser /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256; \
+    chmod 0644 /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256
 
 # Copy OrcaSlicer Worker binaries from shared build stage (as appuser)
 COPY --chown=appuser:appuser --from=shared-build /app/publish/orcaslicer-worker .
@@ -561,6 +586,10 @@ COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer
 
 # Verify binary installation and set up permissions
 RUN set -e; \
+    if [ -f /opt/orcaslicer/AppRun ]; then \
+        rm -f /usr/local/bin/orcaslicer; \
+        ln -s /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer; \
+    fi; \
     chmod +x /usr/local/bin/orcaslicer && \
     test -f /usr/local/bin/orcaslicer && \
     test -s ./Farm.OrcaSlicer.Worker.dll && \

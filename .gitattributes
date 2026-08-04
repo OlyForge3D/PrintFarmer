@@ -15,6 +15,9 @@ install.sh text eol=lf
 *.png binary
 *.stl binary
 
+# OrcaSlicer profile fixtures mirror upstream JSON byte formatting
+/sample_profiles/orcaslicer/**/*.json text eol=lf
+
 # Git hooks must always use LF line endings
 .githooks/pre-commit text eol=lf
 .githooks/pre-push text eol=lf

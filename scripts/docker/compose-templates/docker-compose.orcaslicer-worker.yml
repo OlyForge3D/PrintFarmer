@@ -19,7 +19,7 @@ x-orcaslicer-build: &orcaslicer-build
     SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
     SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
     SBOM_URL: ${SBOM_URL:-}
-    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.1}
+    ORCASLICER_VERSION: ${ORCASLICER_VERSION:-2.4.2}
     ORCASLICER_SHA256: ${ORCASLICER_SHA256}
     ALLOW_STUB: ${ALLOW_STUB:-0}
     ORCA_ASSET_PATH: ${ORCA_ASSET_PATH:-}
@@ -63,7 +63,7 @@ services:
       - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
+      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
       - Worker__WorkerId=orcaslicer-worker-1
       - Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}
       - Worker__SharedKey=${WORKER_SHARED_API_KEY:-}
