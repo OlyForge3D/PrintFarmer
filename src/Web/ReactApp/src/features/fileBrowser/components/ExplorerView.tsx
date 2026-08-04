@@ -398,7 +398,7 @@ export const ExplorerView = ({
 
           {/* Resizable Divider - only show when panel is expanded */}
           <div
-            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent transition-colors cursor-col-resize shrink-0"
+            className="w-1 bg-pf-border hover:bg-pf-accent active:bg-pf-accent-hover transition-colors cursor-col-resize shrink-0"
             onMouseDown={handleResizeDivider}
             role="separator"
             aria-orientation="vertical"
