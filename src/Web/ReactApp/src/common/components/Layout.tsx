@@ -722,7 +722,7 @@ export function Layout() {
         onClick={handleClick}
         onKeyDown={handleKeyDown}
         className={clsx(
-          'group flex items-center rounded-xl border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+          'group flex items-center rounded-sm border-l-3 px-3 py-2 text-sm transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
           isActive
             ? 'border-pf-accent bg-pf-bg-2 font-semibold text-pf-accent'
             : 'border-transparent text-pf-text-secondary hover:bg-pf-bg-2 hover:text-pf-text-primary'
@@ -795,7 +795,7 @@ export function Layout() {
     }
 
     return (
-      <section className="mb-3 rounded-xl border border-pf-border bg-pf-bg-2 p-2" aria-label="Customize navigation">
+      <section className="mb-3 rounded-lg border border-pf-border bg-pf-bg-2 p-2" aria-label="Customize navigation">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
             <h2 className="text-sm font-semibold text-pf-text-primary">Customize nav</h2>
@@ -989,7 +989,9 @@ export function Layout() {
                 aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
               >
                 <AlertIcon className="h-4 w-4" />
-                <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                {/* Count badge: `h-4 min-w-4` is a circle at one digit and a
+                    pill at two, which is the intended shape at both. */}
+                <span data-pf-radius="full" className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
                   {pendingAttentionCount}
                 </span>
               </Button>
@@ -1114,7 +1116,8 @@ export function Layout() {
                     aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
                   >
                     <AlertIcon className="h-4 w-4" />
-                    <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                    {/* Count badge: circle at one digit, pill at two. */}
+                    <span data-pf-radius="full" className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
                       {pendingAttentionCount}
                     </span>
                   </Button>
@@ -1136,7 +1139,7 @@ export function Layout() {
                       aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
                       iconCenter={<AlertIcon className="h-4 w-4" />}
                     >
-                      <span className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                      <span data-pf-radius="full" className="absolute right-0.5 top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
                         {pendingAttentionCount}
                       </span>
                     </Button>

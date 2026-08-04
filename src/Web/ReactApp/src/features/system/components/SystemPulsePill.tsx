@@ -184,10 +184,12 @@ function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
         aria-valuemax={100}
         aria-valuenow={Number(normalizedValue.toFixed(1))}
         aria-valuetext={`${formatPercent(normalizedValue)} used`}
+        data-pf-progress-track
         className="h-2 overflow-hidden rounded-full border border-pf-border/70 bg-pf-progress-track"
       >
         <div
           aria-hidden="true"
+          data-pf-progress-fill
           className={clsx('h-full rounded-full transition-[width]', getMeterFillClassName(normalizedValue))}
           style={{ width: `${normalizedValue}%` }}
         />
@@ -339,7 +341,7 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
           onClick={onClick}
           title={usesExternalAction ? 'View system status' : 'System status degraded — unable to reach health endpoint'}
           className={clsx(
-            'h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em]',
+            'h-8 rounded-sm border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em]',
             errorTone.buttonClassName,
             className,
           )}
@@ -374,7 +376,7 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
         aria-controls={!usesExternalAction && isOpen ? dialogId : undefined}
         title={usesExternalAction ? `View system status — ${tone.label}` : `System pulse — ${tone.label}`}
         className={clsx(
-          'h-8 rounded-full border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
+          'h-8 rounded-sm border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
           tone.buttonClassName,
           className,
         )}
@@ -449,7 +451,7 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
               />
             </div>
 
-            <section aria-label="Service versions" className="rounded-xl border border-pf-border/70 bg-pf-bg-0/90 p-3">
+            <section aria-label="Service versions" className="rounded-lg border border-pf-border/70 bg-pf-bg-0/90 p-3">
               <div className="mb-2 flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <span className="flex h-7 w-7 items-center justify-center rounded-full border border-pf-border/70 bg-pf-bg-1 text-pf-text-secondary" aria-hidden="true">

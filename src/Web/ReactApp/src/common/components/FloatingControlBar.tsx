@@ -16,12 +16,17 @@ import { NotificationBell } from '@/common/components/NotificationBell';
 import { Button } from '@/common/components/ui';
 import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
 
+// These are standalone `const` strings rather than `className` attributes, so the
+// radius rule cannot see them and each corner below was decided by hand. The bar
+// and the account button were rectangles wearing pills; the icon button is a real
+// circle and keeps its `h-9 w-9` proof. Raised by Hicks, who read the file the
+// linter could not.
 const DESKTOP_WRAPPER_CLASS_NAME = 'pointer-events-none fixed right-4 top-4 z-40 hidden lg:block';
-const FLOATING_BAR_CLASS_NAME = 'pointer-events-auto flex items-center gap-1.5 rounded-full border border-pf-border/70 bg-pf-bg-1/72 p-2 shadow-[0_18px_48px_-26px_rgba(0,0,0,0.8)] ring-1 ring-black/10 backdrop-blur-sm';
+const FLOATING_BAR_CLASS_NAME = 'pointer-events-auto flex items-center gap-1.5 rounded-lg border border-pf-border/70 bg-pf-bg-1/72 p-2 shadow-[0_18px_48px_-26px_rgba(0,0,0,0.8)] ring-1 ring-black/10 backdrop-blur-sm';
 const MOBILE_BAR_CLASS_NAME = 'relative z-40 flex items-center gap-1.5';
 const ICON_BUTTON_CLASS_NAME = 'h-9 w-9 rounded-full p-0 text-pf-text-primary transition-colors hover:bg-pf-bg-2/80 focus-visible:ring-2 focus-visible:ring-pf-accent';
-const ACCOUNT_BUTTON_CLASS_NAME = 'h-9 rounded-full px-2.5 text-pf-text-primary transition-colors hover:bg-pf-bg-2/80 focus-visible:ring-2 focus-visible:ring-pf-accent';
-const MENU_PANEL_CLASS_NAME = 'absolute right-0 top-full z-10 mt-3 w-64 overflow-hidden rounded-2xl border border-pf-border/80 bg-pf-bg-1/96 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-sm';
+const ACCOUNT_BUTTON_CLASS_NAME = 'h-9 rounded-sm px-2.5 text-pf-text-primary transition-colors hover:bg-pf-bg-2/80 focus-visible:ring-2 focus-visible:ring-pf-accent';
+const MENU_PANEL_CLASS_NAME = 'absolute right-0 top-full z-10 mt-3 w-64 overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-1/96 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-sm';
 
 interface FloatingControlBarProps {
   mobile?: boolean;

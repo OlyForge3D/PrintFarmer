@@ -211,6 +211,7 @@ export const MetadataProfileEditor: React.FC<MetadataProfileEditorProps> = ({
           <span className="inline-flex items-center gap-1.5">
             <img src="/icons/orcaslicer-advanced.svg" alt="" className="w-4 h-4" />
             <span
+              data-pf-radius="full"
               className={`relative inline-block w-7 h-3.5 rounded-full transition-colors ${
                 viewMode === 'advanced' ? 'bg-pf-accent-2' : 'bg-pf-border'
               }`}

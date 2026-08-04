@@ -316,6 +316,7 @@ function buildModelCard(
               {model.tags.slice(0, 3).map((tag) => (
                 <span
                   key={tag.id}
+                  data-pf-radius="full"
                   className="rounded-full bg-pf-bg-2 px-2 py-0.5 text-[10px] font-medium"
                   style={tag.color ? { color: tag.color } : undefined}
                 >

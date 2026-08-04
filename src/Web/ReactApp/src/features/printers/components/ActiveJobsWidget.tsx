@@ -95,7 +95,7 @@ export function ActiveJobsWidget({ maxJobs = 5, className = '' }: ActiveJobsWidg
                 </div>
 
                 {/* Status badge */}
-                <span className={`ml-2 inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                <span className={`ml-2 inline-flex items-center px-2 py-1 rounded-xs text-xs font-medium whitespace-nowrap ${
                   item.job.status === 'Printing' 
                     ? 'bg-pf-success/10 text-pf-success'
                     : 'bg-pf-accent-bg/15 text-pf-accent'

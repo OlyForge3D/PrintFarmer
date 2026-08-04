@@ -238,17 +238,17 @@ function QueueForm({ jobId, onClose, selectedSpoolId, requiredPrinterModel, requ
           <p className="text-xs font-medium text-pf-text-secondary">Auto-assigned requirements</p>
           <div className="flex flex-wrap gap-1.5">
             {requiredPrinterModel && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-xs bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
                 🖨 {requiredPrinterModel}
               </span>
             )}
             {requiredMaterialType && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-xs bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
                 🧵 {requiredMaterialType}
               </span>
             )}
             {requiredNozzleDiameter != null && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-xs bg-pf-accent-bg/15 text-xs text-pf-accent font-medium">
                 ⌀ {requiredNozzleDiameter}mm nozzle
               </span>
             )}

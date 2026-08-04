@@ -24,7 +24,7 @@ export function QueueViewModeSelector({ value, onChange }: QueueViewModeSelector
 
   return (
     <div
-      className="inline-flex rounded-xl border border-pf-border/80 overflow-hidden bg-pf-bg-0/70 backdrop-blur-sm shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+      className="inline-flex rounded-md border border-pf-border/80 overflow-hidden bg-pf-bg-0/70 backdrop-blur-sm shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
       role="group"
       aria-label="Queue view mode"
     >

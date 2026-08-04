@@ -38,7 +38,7 @@ const TemperatureGauge: React.FC<{
           {target > 0 && <span className="text-pf-text-secondary">→{target}°C</span>}
         </span>
       </div>
-      <div className="h-2 rounded-full overflow-hidden bg-pf-border-dark">
+      <div data-pf-progress-track className="h-2 rounded-full overflow-hidden bg-pf-border-dark">
         <div
           className="h-full transition-all duration-300"
           style={{
@@ -101,7 +101,7 @@ const StatusBadge: React.FC<{
   };
 
   return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full ${statusClasses[state]}`}>
+    <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-xs ${statusClasses[state]}`}>
       <div className={`w-2 h-2 rounded-full animate-pulse ${statusDotClasses[state]}`} />
       <span className={`text-sm font-semibold ${statusTextClasses[state]}`}>{state}</span>
     </div>

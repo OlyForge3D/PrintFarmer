@@ -422,7 +422,7 @@ export function Modal({
     >
       <div 
         className={clsx(
-          'bg-pf-bg-1 rounded-xl shadow-xl border border-pf-border w-full overflow-hidden flex flex-col',
+          'bg-pf-bg-1 rounded-md shadow-xl border border-pf-border w-full overflow-hidden flex flex-col',
           widthClass,
           maxHeight,
           className

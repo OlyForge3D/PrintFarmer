@@ -1,6 +1,20 @@
 @import 'tailwindcss';
+
 /* Import component-specific styles to ensure all classes are available */
 @import './styles/components.css' layer(base);
+
+/*
+  Tailwind scans plain source text, so any class-shaped string becomes real CSS —
+  including ones quoted inside comments, docs and test fixtures. The ESLint rule
+  fixtures deliberately contain malformed utilities (that is the point of them),
+  and at least one of those emits CSS that PostCSS cannot parse. None of these
+  files render anything, so exclude them from the content scan entirely.
+
+  These must sit below every `@import`: CSS requires imports to come first, and
+  PostCSS warns once per import that follows another statement.
+*/
+@source not '../eslint-rules';
+@source not './test/eslint-rules';
 
 /*
   The default border color has changed to `currentcolor` in Tailwind CSS v4,

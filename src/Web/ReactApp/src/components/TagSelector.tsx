@@ -95,6 +95,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
         {selectedTags.map(tag => (
           <div
             key={tag.id}
+            data-pf-radius="full"
             className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium text-white"
             style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
           >

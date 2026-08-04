@@ -77,7 +77,7 @@ export function RecentPrintsWidget({ maxPrints = 5, className = '' }: RecentPrin
                 <p className="text-xs font-medium text-pf-text-secondary">
                   {durationMin}m
                 </p>
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
+                <span className={`inline-flex items-center px-2 py-1 rounded-xs text-xs font-medium whitespace-nowrap ${
                   entry.status === 'Completed'
                     ? 'bg-pf-success/10 text-pf-success' 
                     : entry.status === 'Failed' 

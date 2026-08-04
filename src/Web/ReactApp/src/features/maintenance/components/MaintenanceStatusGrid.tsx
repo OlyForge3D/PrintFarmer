@@ -75,7 +75,7 @@ function PrinterCard({ printer, onClick }: PrinterCardProps) {
       type="button"
       onClick={onClick}
       className={`
-        w-full text-left bg-pf-bg-1 border border-pf-border rounded-xl p-4
+        w-full text-left bg-pf-bg-1 border border-pf-border rounded-lg p-4
         hover:border-pf-accent/50 hover:shadow-md transition-all duration-200
         focus:outline-hidden focus:ring-2 focus:ring-pf-accent/50 focus:ring-offset-2 focus:ring-offset-pf-bg
       `}
@@ -174,7 +174,7 @@ export function MaintenanceStatusGrid({
         {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <div 
             key={i} 
-            className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-xl p-4"
+            className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-lg p-4"
           >
             <div className="flex items-start gap-3 mb-3">
               <div className="w-9 h-9 bg-pf-border rounded-lg" />
@@ -192,7 +192,7 @@ export function MaintenanceStatusGrid({
 
   if (printers.length === 0) {
     return (
-      <div className={`bg-pf-bg-1 border border-pf-border rounded-xl p-8 text-center ${className}`}>
+      <div className={`bg-pf-bg-1 border border-pf-border rounded-lg p-8 text-center ${className}`}>
         <PrinterIcon className="h-12 w-12 mx-auto text-pf-text-tertiary mb-3" aria-hidden="true" />
         <p className="text-pf-text-secondary font-medium">No printers found</p>
         <p className="text-sm text-pf-text-tertiary mt-1">

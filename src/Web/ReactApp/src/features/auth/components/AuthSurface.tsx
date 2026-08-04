@@ -90,7 +90,7 @@ export function AuthSurface({
     <div className={clsx('mx-auto w-full', widthClass)}>
       <div
         className={clsx(
-          'overflow-hidden rounded-xl border border-pf-border bg-pf-bg-1 shadow-xl',
+          'overflow-hidden rounded-lg border border-pf-border bg-pf-bg-1 shadow-xl',
           className,
         )}
       >

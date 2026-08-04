@@ -179,7 +179,7 @@ export function UpcomingMaintenanceCalendar({
 
   if (isLoading) {
     return (
-      <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden ${className}`}>
+      <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden ${className}`}>
         <div className="p-4 border-b border-pf-border">
           <div className="pf-skeleton pf-animate-skeleton h-6 w-40 rounded-sm" />
         </div>
@@ -195,7 +195,7 @@ export function UpcomingMaintenanceCalendar({
   }
 
   return (
-    <div className={`bg-pf-panel border border-pf-border rounded-xl overflow-hidden ${className}`}>
+    <div className={`bg-pf-panel border border-pf-border rounded-lg overflow-hidden ${className}`}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-pf-border flex items-center justify-between">
         <div className="flex items-center gap-3">

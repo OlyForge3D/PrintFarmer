@@ -37,7 +37,7 @@ const variantStyles: Record<StatsCardProps['variant'], string> = {
 
 function StatsCard({ title, value, subtitle, icon: Icon, variant }: StatsCardProps) {
   return (
-    <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-5 shadow-lg">
+    <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-5 shadow-lg">
       <div className="flex items-center gap-4">
         <div className={`p-3 rounded-lg ${variantStyles[variant]}`}>
           <Icon className="h-6 w-6" aria-hidden="true" />
@@ -107,7 +107,7 @@ export function FleetMaintenanceOverview({
           {[1, 2, 3, 4].map((i) => (
             <div 
               key={i} 
-              className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-xl p-5"
+              className="pf-skeleton pf-animate-skeleton border border-pf-border rounded-lg p-5"
             >
               <div className="flex items-center gap-4">
                 <div className="w-12 h-12 bg-pf-border rounded-lg" />
@@ -125,7 +125,7 @@ export function FleetMaintenanceOverview({
 
   if (error) {
     return (
-      <div className={`bg-pf-error/10 border border-pf-error/30 rounded-xl p-6 ${className}`}>
+      <div className={`bg-pf-error/10 border border-pf-error/30 rounded-lg p-6 ${className}`}>
         <div className="flex items-center gap-3">
           <AlertCircleIcon className="h-6 w-6 text-pf-error" aria-hidden="true" />
           <div>
@@ -139,7 +139,7 @@ export function FleetMaintenanceOverview({
 
   if (!stats) {
     return (
-      <div className={`bg-pf-bg-1 border border-pf-border rounded-xl p-6 text-center ${className}`}>
+      <div className={`bg-pf-bg-1 border border-pf-border rounded-lg p-6 text-center ${className}`}>
         <PrinterIcon className="h-12 w-12 mx-auto text-pf-text-tertiary mb-3" aria-hidden="true" />
         <p className="text-pf-text-secondary">No maintenance data available</p>
       </div>
@@ -183,7 +183,7 @@ export function FleetMaintenanceOverview({
       </div>
 
       {/* Alert Severity Breakdown */}
-      <div className="bg-pf-bg-1 border border-pf-border rounded-xl p-5">
+      <div className="bg-pf-bg-1 border border-pf-border rounded-lg p-5">
         <h3 className="text-sm font-semibold text-pf-text-primary uppercase tracking-wide mb-4">
           Alert Severity Breakdown
         </h3>
