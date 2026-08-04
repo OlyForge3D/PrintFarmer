@@ -134,7 +134,20 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                             models.map((model: ModelOption) => (
                                 <label
                                     key={model.id}
-                                    className={`flex items-center gap-3 p-2 rounded-sm transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-hover-overlay'}`}
+                                    className={`flex items-center gap-3 p-2 rounded-sm transition-colors ${
+                                        // Accent tint plus an accent ring, not a surface step: no
+                                        // `--pf-bg-3` exists, and `bg-pf-bg-2` on this `bg-pf-bg-2`
+                                        // container was a literal zero-delta no-op. Dropping the
+                                        // container to `bg-pf-bg-1` would only reach 1.05:1 (matrix)
+                                        // — still invisible. The ring measures 4.33:1 (light, the
+                                        // weakest) to 13.93:1 (matrix) against the container and
+                                        // 3.58:1 to 10.92:1 against the tinted row, so the selected
+                                        // state clears SC 1.4.11 in all seven themes. Hover is
+                                        // withheld while selected, per #1088. See #1085.
+                                        selectedModelIds.includes(model.id)
+                                            ? 'bg-pf-accent-bg/15 ring-1 ring-inset ring-pf-accent'
+                                            : 'hover:bg-pf-hover-overlay'
+                                    }`}
                                 >
                                     <Checkbox
                                         checked={selectedModelIds.includes(model.id)}
@@ -151,7 +164,11 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                                     />
                                     <div className="flex-1">
                                         <div className="text-pf-text-primary font-medium">{model.name}</div>
-                                        <div className="text-sm text-pf-text-tertiary">{model.fileName}</div>
+                                        {/* Secondary, not tertiary: tertiary is already below AA on
+                                            this container (3.60:1 dark, 3.98:1 light, 4.40:1
+                                            blueprint) and the selected tint would drop it to ~3.1:1.
+                                            Secondary measures 6.27:1–11.19:1 on the tinted row. */}
+                                        <div className="text-sm text-pf-text-secondary">{model.fileName}</div>
                                     </div>
                                 </label>
                             ))

@@ -291,7 +291,12 @@ export function TableRow({
 
   const isFocused = context ? context.focusedRowIndex === assignedIndex : false;
   const selectedClass = isSelected ? 'bg-pf-accent-bg/15' : '';
-  const hoverClass = isHoverable ? 'hover:bg-pf-bg-1' : '';
+  // The hover utility is withheld while the row is selected. `bg-*` compiles to
+  // `background-color`, which replaces rather than layers, and `:hover` scores
+  // (0,1,1) against the selected class's (0,1,0) inside the same `utilities`
+  // layer — so an unconditional hover repainted a selected row and erased its
+  // highlight. Measured in chromium across all seven themes. See #1088.
+  const hoverClass = isHoverable && !isSelected ? 'hover:bg-pf-bg-1' : '';
   const focusClass = isFocused ? 'ring-2 ring-inset ring-pf-accent' : '';
   
   const handleClick = (e: React.MouseEvent<HTMLTableRowElement>) => {
