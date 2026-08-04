@@ -284,7 +284,19 @@ describe('colour utilities name a token that exists (#1023)', () => {
    *   - directional borders and dividers  `border-t-`, `divide-x-`
    *   - gradient stops                    `from-`, `via-`, `to-`
    *   - ring offset                       `ring-offset-`
-   *   - outline / shadow / accent / caret
+   *   - outline / shadow / accent / caret / placeholder / decoration
+   *
+   * `placeholder-` was added after review of #1046 found the list still short
+   * by one prefix with four live sites (FileUpload, UnifiedLoggingDashboard,
+   * PrinterSelectorModal, CascadingMenuDropdown). All four happen to name live
+   * tokens today, so nothing was dead -- but the hole was real and only shows
+   * up under mutation, which is how it was found. That is twice this list has
+   * been widened by enumeration and twice it was still incomplete afterwards;
+   * enumerating prefixes only closes the cases someone thought of. Inverting
+   * this to "any prefix followed by `-pf-`, minus an allow-list" is tracked
+   * separately in #1086, because it needs to exclude `--pf-*` custom-property
+   * *declarations* (e.g. `--pf-hover-overlay:`), which are legitimately not
+   * utilities and would otherwise all be reported dead.
    */
   function usedUtilities(): Set<string> {
     const found = new Set<string>();
@@ -300,7 +312,7 @@ describe('colour utilities name a token that exists (#1023)', () => {
         if (entry.name === 'AdminThemeSafety.test.ts') continue;
         const text = readFileSync(full, 'utf8');
         for (const m of text.matchAll(
-          /\b(?:(?:bg|text|border|ring|fill|stroke|divide|outline|shadow|accent|caret)(?:-(?:t|b|l|r|s|e|x|y|offset))?|from|via|to)-(pf-[a-z0-9-]+)/g,
+          /\b(?:(?:bg|text|border|ring|fill|stroke|divide|outline|shadow|accent|caret|placeholder|decoration)(?:-(?:t|b|l|r|s|e|x|y|offset))?|from|via|to)-(pf-[a-z0-9-]+)/g,
         )) {
           found.add(m[1]);
         }
