@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React, { useState, useMemo } from 'react';
 import { Printer, PrinterBackend, GcodeHarvestOperation } from '@/types/api';
+import { toPrinterBackend } from '@/common/utils/enumHelpers';
 // No MdiIcons used in this component
 import { CloseIcon, CheckCircleIcon } from '@/common/components/icons/MdiIcons';
 import { Input } from '@/common/components/ui/Input';
@@ -62,7 +63,7 @@ export function HarvestWizardStep1Selection({
         .map(p => p.backend)
         .filter((b): b is PrinterBackend => b !== undefined)
     );
-    return Array.from(backends).sort((a, b) => a - b);
+    return Array.from(backends).sort((a, b) => String(a).localeCompare(String(b)));
   }, [onlinePrinters]);
 
   const uniqueModels = useMemo(() => {
@@ -147,7 +148,7 @@ export function HarvestWizardStep1Selection({
                 <Select
                   id="backend-filter"
                   value={selectedBackend ?? ''}
-                  onChange={e => setSelectedBackend(e.target.value ? parseInt(e.target.value) as PrinterBackend : undefined)}
+                  onChange={e => setSelectedBackend(e.target.value ? toPrinterBackend(e.target.value) : undefined)}
                   className="w-full"
                 >
                   <option value="">All backends</option>
@@ -255,7 +256,7 @@ export function HarvestWizardStep1Selection({
               </label>
               <Select
                 value={selectedBackend ?? ''}
-                onChange={e => setSelectedBackend(e.target.value ? parseInt(e.target.value) as PrinterBackend : undefined)}
+                onChange={e => setSelectedBackend(e.target.value ? toPrinterBackend(e.target.value) : undefined)}
                 className="w-full"
                 title="Filter by backend type"
               >

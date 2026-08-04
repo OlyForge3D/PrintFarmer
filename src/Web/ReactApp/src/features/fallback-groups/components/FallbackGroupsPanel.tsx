@@ -23,7 +23,7 @@ import { ConfirmationModal } from "@/common/components/modals/ConfirmationModal"
 import { useFilamentTypes } from "@/common/hooks/useApi";
 import { usePrinterFilamentCoverage } from "@/features/filament-coverage/hooks";
 import type { ToolheadDto } from "@/types/api";
-import { ToolheadType } from "@/types/api";
+import { normalizeToolheadType } from "@/features/printers/utils/isEligibleMaintenanceToolhead";
 import {
   getErrorMessage,
   getErrorStatus,
@@ -53,11 +53,11 @@ interface FallbackGroupsPanelProps {
 function isPhysical(toolhead: ToolheadDto): boolean {
   const t = toolhead.toolheadType;
   // Backend serializes enums as strings but legacy captures may still send
-  // the numeric value; accept both. When the field is missing entirely we
-  // treat the toolhead as physical to preserve pre-#711 behavior.
+  // the numeric value; normalizeToolheadType accepts both. When the field is
+  // missing entirely we treat the toolhead as physical to preserve pre-#711
+  // behavior.
   if (t == null) return true;
-  if (typeof t === "string") return t === "Physical";
-  return t === ToolheadType.Physical;
+  return normalizeToolheadType(t) === 'Physical';
 }
 
 export function FallbackGroupsPanel({

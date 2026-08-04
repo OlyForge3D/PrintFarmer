@@ -8,13 +8,19 @@
 // ============================================================================
 
 /**
- * Status of a maintenance alert
+ * Status of a maintenance alert.
+ *
+ * Values are strings, not numbers: the API registers a bare
+ * `JsonStringEnumConverter` (see `ControllerStartup.cs`), so C# enums are
+ * serialized as their PascalCase member names (`"Active"`, not `0`).
+ * Declaring these numerically makes every `alert.status === ...` comparison
+ * silently false, which renders alert lists permanently empty.
  */
 export enum MaintenanceAlertStatus {
-  Active = 0,
-  Acknowledged = 1,
-  Resolved = 2,
-  Dismissed = 3
+  Active = 'Active',
+  Acknowledged = 'Acknowledged',
+  Resolved = 'Resolved',
+  Dismissed = 'Dismissed'
 }
 
 /**

@@ -1,10 +1,13 @@
 import { PrinterBackend, MotionType, PrinterBackendString } from '@/types/api';
 
 /**
- * Utility type for enum option used in select dropdowns
+ * Utility type for enum option used in select dropdowns.
+ *
+ * `value` is a string because the wire contract for these enums is a string
+ * (see PrinterBackend/MotionType in types/api.ts).
  */
 export interface EnumOption {
-  value: number;
+  value: string;
   label: string;
 }
 
@@ -17,8 +20,79 @@ export interface StringEnumOption {
 }
 
 /**
- * Get all PrinterBackend enum values as select options (numeric values)
- * This automatically includes all backends defined in the enum
+ * Legacy numeric encodings that may still exist in persisted client state
+ * (localStorage, cached query data) written before these enums were corrected
+ * to match the string wire contract.
+ */
+const LEGACY_PRINTER_BACKEND_BY_ORDINAL: Record<number, PrinterBackend> = {
+  0: PrinterBackend.Unknown,
+  1: PrinterBackend.Moonraker,
+  2: PrinterBackend.PrusaLink,
+  3: PrinterBackend.SDCP,
+  4: PrinterBackend.OctoPrint,
+  5: PrinterBackend.FlashForge,
+};
+
+const LEGACY_MOTION_TYPE_BY_ORDINAL: Record<number, MotionType> = {
+  0: MotionType.Cartesian,
+  1: MotionType.CoreXY,
+  2: MotionType.Delta,
+  99: MotionType.Unknown,
+};
+
+/**
+ * Coerce an unknown backend value into a PrinterBackend.
+ *
+ * Accepts the current string wire values (case-insensitively) and tolerates
+ * legacy numeric ordinals from persisted client state. Returns undefined when
+ * the value cannot be recognised, so callers can decide on a fallback.
+ */
+export function toPrinterBackend(value: unknown): PrinterBackend | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  if (typeof value === 'number') {
+    return LEGACY_PRINTER_BACKEND_BY_ORDINAL[value];
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed !== '' && Number.isInteger(Number(trimmed))) {
+      return LEGACY_PRINTER_BACKEND_BY_ORDINAL[Number(trimmed)];
+    }
+    return Object.values(PrinterBackend).find(
+      (backend) => backend.toLowerCase() === trimmed.toLowerCase()
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Coerce an unknown motion type value into a MotionType.
+ * Mirrors {@link toPrinterBackend}.
+ */
+export function toMotionType(value: unknown): MotionType | undefined {
+  if (value === null || value === undefined) return undefined;
+
+  if (typeof value === 'number') {
+    return LEGACY_MOTION_TYPE_BY_ORDINAL[value];
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed !== '' && Number.isInteger(Number(trimmed))) {
+      return LEGACY_MOTION_TYPE_BY_ORDINAL[Number(trimmed)];
+    }
+    return Object.values(MotionType).find(
+      (motionType) => motionType.toLowerCase() === trimmed.toLowerCase()
+    );
+  }
+
+  return undefined;
+}
+
+/**
+ * Get all PrinterBackend enum values as select options.
  */
 export function getPrinterBackendOptions(): EnumOption[] {
   const orderedBackends = [
@@ -29,12 +103,10 @@ export function getPrinterBackendOptions(): EnumOption[] {
     PrinterBackend.FlashForge,
   ];
 
-  return orderedBackends
-    .filter((backend) => backend !== undefined)
-    .map((backend) => ({
-      value: backend,
-      label: PrinterBackend[backend],
-    }));
+  return orderedBackends.map((backend) => ({
+    value: backend,
+    label: backend,
+  }));
 }
 
 /**
@@ -57,42 +129,37 @@ export function getPrinterBackendStringOptions(): StringEnumOption[] {
 }
 
 /**
- * Convert a PrinterBackendString to PrinterBackend (numeric enum)
+ * Convert a PrinterBackendString to PrinterBackend.
+ *
+ * The enum now matches the wire contract, so this is effectively a validating
+ * pass-through. Retained because call sites still express intent through it.
  */
-export function printerBackendStringToEnum(value: PrinterBackendString | undefined): PrinterBackend | undefined {
+export function printerBackendStringToEnum(
+  value: PrinterBackendString | undefined
+): PrinterBackend | undefined {
   if (!value) return undefined;
-  const mapping: Record<PrinterBackendString, PrinterBackend> = {
-    'Moonraker': PrinterBackend.Moonraker,
-    'PrusaLink': PrinterBackend.PrusaLink,
-    'SDCP': PrinterBackend.SDCP,
-    'OctoPrint': PrinterBackend.OctoPrint,
-    'FlashForge': PrinterBackend.FlashForge,
-  };
-  return mapping[value];
+  return toPrinterBackend(value);
 }
 
 /**
- * Convert a PrinterBackend (numeric enum) to PrinterBackendString
+ * Convert a PrinterBackend to PrinterBackendString.
+ * `Unknown` has no PrinterBackendString representation and maps to undefined.
  */
-export function printerBackendEnumToString(value: PrinterBackend | undefined): PrinterBackendString | undefined {
-  if (value === undefined) return undefined;
-  const mapping: Record<PrinterBackend, PrinterBackendString | undefined> = {
-    [PrinterBackend.Unknown]: undefined,
-    [PrinterBackend.Moonraker]: 'Moonraker',
-    [PrinterBackend.PrusaLink]: 'PrusaLink',
-    [PrinterBackend.SDCP]: 'SDCP',
-    [PrinterBackend.OctoPrint]: 'OctoPrint',
-    [PrinterBackend.FlashForge]: 'FlashForge',
-  };
-  return mapping[value];
+export function printerBackendEnumToString(
+  value: PrinterBackend | undefined
+): PrinterBackendString | undefined {
+  if (value === undefined || value === PrinterBackend.Unknown) return undefined;
+  return value as PrinterBackendString;
 }
 
 /**
- * Get the display name for a PrinterBackend enum value
+ * Get the display name for a PrinterBackend value.
+ * Tolerates legacy numeric values from persisted state.
  */
-export function getPrinterBackendName(backend: PrinterBackend | undefined): string {
-  if (backend === undefined) return '';
-  return PrinterBackend[backend] || '';
+export function getPrinterBackendName(
+  backend: PrinterBackend | string | number | undefined
+): string {
+  return toPrinterBackend(backend) ?? '';
 }
 
 /**
@@ -100,18 +167,18 @@ export function getPrinterBackendName(backend: PrinterBackend | undefined): stri
  * This automatically includes all motion types defined in the enum
  */
 export function getMotionTypeOptions(): EnumOption[] {
-  return Object.entries(MotionType)
-    .filter(([, value]) => typeof value === 'number')
-    .map(([key, value]) => ({
-      value: value as number,
-      label: key,
-    }));
+  return Object.values(MotionType).map((motionType) => ({
+    value: motionType,
+    label: motionType,
+  }));
 }
 
 /**
- * Get the display name for a MotionType enum value
+ * Get the display name for a MotionType value.
+ * Tolerates legacy numeric values from persisted state.
  */
-export function getMotionTypeName(motionType: MotionType | undefined): string {
-  if (motionType === undefined) return '';
-  return MotionType[motionType] || '';
+export function getMotionTypeName(
+  motionType: MotionType | string | number | undefined
+): string {
+  return toMotionType(motionType) ?? '';
 }

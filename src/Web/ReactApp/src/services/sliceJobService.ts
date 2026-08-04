@@ -99,6 +99,12 @@ export enum SliceJobStatus {
 }
 
 // Slicer engines
+/**
+ * Intentionally numeric. This enum has no remaining references - the wire field
+ * is typed as a raw `number` and is never compared against these members - so
+ * it is not subject to the PascalCase string wire contract that applies to the
+ * enums in `types/api.ts`. See `src/test/types/enumWireContract.test.ts`.
+ */
 export enum SlicerEngine {
   OrcaSlicer = 0,
   PrusaSlicer = 1

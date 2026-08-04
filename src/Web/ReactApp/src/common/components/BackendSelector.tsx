@@ -1,11 +1,15 @@
 import React from 'react';
 import { PrinterBackend, PrinterBackendString } from '@/types/api';
-import { getPrinterBackendOptions, getPrinterBackendStringOptions } from '@/common/utils/enumHelpers';
+import { getPrinterBackendOptions, getPrinterBackendStringOptions, toPrinterBackend } from '@/common/utils/enumHelpers';
 import { Select } from '@/common/components/ui';
 
 /**
- * Props for BackendSelector when using numeric enum values (PrinterBackend)
- * Used by physical printer editing (Printer uses numeric backend)
+ * Props for BackendSelector when the caller holds a `PrinterBackend` value.
+ * Used by physical printer editing.
+ *
+ * NOTE: `PrinterBackend` is a *string* enum matching the wire contract; the
+ * `'numeric'` discriminator name is historical. It now selects only which
+ * TypeScript type is handed back to `onChange`, not the runtime representation.
  */
 interface NumericBackendSelectorProps {
   value: PrinterBackend | undefined;
@@ -39,9 +43,10 @@ type BackendSelectorProps = NumericBackendSelectorProps | StringBackendSelectorP
  * Reusable backend selector component that automatically includes all PrinterBackend enum values.
  * When new backends are added to the enum, they will automatically appear in this dropdown.
  * 
- * Supports two modes:
- * - valueType='numeric' (default): Uses PrinterBackend numeric enum (for physical printers)
- * - valueType='string': Uses PrinterBackendString (for printer models, API compatibility)
+ * Supports two modes, which differ only in the TypeScript type handed to
+ * `onChange` - both emit PascalCase strings at runtime:
+ * - valueType='numeric' (default): hands back `PrinterBackend` (for physical printers)
+ * - valueType='string': hands back `PrinterBackendString` (for printer models)
  * 
  * Renders as a bare Select element without FormField wrapper for flexible layout.
  */
@@ -86,11 +91,13 @@ export function BackendSelector(props: BackendSelectorProps) {
     );
   }
 
-  // Numeric mode (default)
+  // Numeric mode (default).
+  // NOTE: PrinterBackend is now a string enum matching the wire contract, so this
+  // mode differs from 'string' mode only in the type it hands back to onChange.
   const { value, onChange } = props as NumericBackendSelectorProps;
-  
+
   const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newValue = e.target.value === '' ? undefined : parseInt(e.target.value, 10) as PrinterBackend;
+    const newValue = e.target.value === '' ? undefined : toPrinterBackend(e.target.value);
     onChange(newValue);
   };
 

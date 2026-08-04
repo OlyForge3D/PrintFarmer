@@ -10,7 +10,7 @@ import { usePrinterCameras } from '@/features/cameras/hooks/usePrinterCameras';
 import { Button, Input, Select, Textarea, FormField, Alert, Checkbox, Toggle, AccordionButton } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { generateUUID } from '@/utils/uuid';
-import { printerBackendStringToEnum } from '@/common/utils/enumHelpers';
+import { printerBackendStringToEnum, getMotionTypeName } from '@/common/utils/enumHelpers';
 import { useSlicer } from '@/hooks/useSlicer';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
@@ -724,8 +724,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       // Fallback to printer details (for initial load)
                       const modelMotionType = printerDetails?.modelMotionType;
                       if (modelMotionType !== undefined) {
-                        const typeNames = ['Cartesian', 'CoreXY', 'Delta', 'Unknown'];
-                        return typeNames[modelMotionType] || 'Unknown';
+                        return getMotionTypeName(modelMotionType) || 'Unknown';
                       }
                       return 'Not specified';
                     })()}

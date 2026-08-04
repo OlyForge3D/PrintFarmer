@@ -8,19 +8,21 @@ describe('enumHelpers', () => {
       const options = getPrinterBackendOptions();
 
       expect(options).toEqual([
-        { value: 1, label: 'Moonraker' },
-        { value: 2, label: 'PrusaLink' },
-        { value: 3, label: 'SDCP' },
-        { value: 4, label: 'OctoPrint' },
-        { value: 5, label: 'FlashForge' },
+        { value: 'Moonraker', label: 'Moonraker' },
+        { value: 'PrusaLink', label: 'PrusaLink' },
+        { value: 'SDCP', label: 'SDCP' },
+        { value: 'OctoPrint', label: 'OctoPrint' },
+        { value: 'FlashForge', label: 'FlashForge' },
       ]);
     });
 
-    it('should only include numeric enum values', () => {
+    // The API serializes PrinterBackend as its PascalCase member name
+    // (EnumJsonConverters.cs:57), so option values are strings, not ordinals.
+    it('should only include string enum values', () => {
       const options = getPrinterBackendOptions();
-      
+
       options.forEach(option => {
-        expect(typeof option.value).toBe('number');
+        expect(typeof option.value).toBe('string');
         expect(typeof option.label).toBe('string');
       });
     });
@@ -45,10 +47,10 @@ describe('enumHelpers', () => {
       const options = getMotionTypeOptions();
       
       expect(options).toEqual([
-        { value: 0, label: 'Cartesian' },
-        { value: 1, label: 'CoreXY' },
-        { value: 2, label: 'Delta' },
-        { value: 99, label: 'Unknown' },
+        { value: 'Cartesian', label: 'Cartesian' },
+        { value: 'CoreXY', label: 'CoreXY' },
+        { value: 'Delta', label: 'Delta' },
+        { value: 'Unknown', label: 'Unknown' },
       ]);
     });
   });

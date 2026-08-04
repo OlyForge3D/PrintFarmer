@@ -8,6 +8,7 @@ import { usePrinters } from '@/common/hooks/useApi';
 import { sortPrintersByAvailability } from '@/utils/printerSort';
 import type { PrinterGroupPrinter } from '@/types/api';
 import { PrinterBackend } from '@/types/api';
+import { getPrinterBackendName } from '@/common/utils/enumHelpers';
 
 interface PrinterAssignmentProps {
   groupId: string;
@@ -15,10 +16,7 @@ interface PrinterAssignmentProps {
 }
 
 function getBackendLabel(backend: PrinterBackend | number): string {
-  if (typeof backend === 'number') {
-    return PrinterBackend[backend] || 'Unknown';
-  }
-  return backend;
+  return getPrinterBackendName(backend) || 'Unknown';
 }
 
 export function PrinterAssignment({ groupId, assignedPrinters }: PrinterAssignmentProps) {
