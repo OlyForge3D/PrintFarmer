@@ -10,6 +10,7 @@ struct RootView: View {
     @Environment(AppRouter.self) private var router
     @Environment(ServerRegistry.self) private var serverRegistry
     @Environment(ServiceContainer.self) private var services
+    @Environment(\.scenePhase) private var scenePhase
     @State private var pendingReadyMonitor = PendingReadyMonitor()
     @State private var connectionMonitor = ConnectionMonitor()
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
@@ -17,6 +18,7 @@ struct RootView: View {
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
     @State private var staleRegistrySignOutTask: Task<Void, Never>?
+    @State private var foregroundResumeTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -84,11 +86,16 @@ struct RootView: View {
                 }
             }
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .active else { return }
+            resumeConnectivityAfterForeground()
+        }
         .onChange(of: authViewModel.isAuthenticated) { _, isAuthenticated in
             if !isAuthenticated {
                 pendingReadyMonitor.stopMonitoring()
                 connectionMonitor.stop()
                 router.pendingReadyCount = 0
+                foregroundResumeTask?.cancel()
                 disconnectTask = Task { await services.signalRService.disconnect() }
             }
         }
@@ -109,6 +116,36 @@ struct RootView: View {
             connectionMonitor.stop()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
+            foregroundResumeTask?.cancel()
+        }
+    }
+
+    /// Re-arms live connectivity when the app returns to the foreground.
+    ///
+    /// iOS suspends the app in the background: the SignalR WebSocket is torn
+    /// down by the system and the connectivity poll loop stops advancing. With
+    /// nothing observing `scenePhase`, the first thing the user saw on re-open
+    /// was whatever stale sample the monitor last took — typically a failed one,
+    /// hence the red offline banner that only a manual pull-to-refresh cleared.
+    ///
+    /// On `.active` we therefore (1) probe reachability immediately instead of
+    /// waiting out the poll interval, and (2) ask the hub to reconnect right
+    /// away rather than sitting through the remainder of a backoff sleep.
+    /// Both operations are idempotent and safe to run on every foreground.
+    @MainActor
+    private func resumeConnectivityAfterForeground() {
+        guard isShowingMainContent, !DemoMode.shared.isActive else { return }
+        foregroundResumeTask?.cancel()
+        foregroundResumeTask = Task {
+            // Probe REST first: it is a single fast request and it clears a
+            // stale offline banner without waiting on the hub handshake.
+            await connectionMonitor.refresh()
+            guard !Task.isCancelled else { return }
+            await services.signalRService.ensureConnected()
+            guard !Task.isCancelled else { return }
+            // Re-sample so the bar reflects the hub result immediately rather
+            // than on the next poll tick.
+            await connectionMonitor.refresh()
         }
     }
 
