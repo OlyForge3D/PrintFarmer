@@ -45,6 +45,24 @@ docker_image_label() {
     printf '%s' "$label_value"
 }
 
+# Resolve a pulled image to an immutable repository digest reference.
+# Usage: docker_image_digest_reference "registry.example/image:tag"
+docker_image_digest_reference() {
+    local image_name="$1"
+    local digest_reference
+
+    digest_reference=$(docker image inspect \
+        --format '{{ index .RepoDigests 0 }}' \
+        "$image_name" 2>/dev/null || true)
+
+    if [[ ! "$digest_reference" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+        print_error "Unable to resolve immutable digest for Docker image '$image_name'."
+        return 1
+    fi
+
+    printf '%s' "$digest_reference"
+}
+
 # Read the embedded OrcaSlicer version and checksum from a stopped image
 # container without executing the image or depending on its platform.
 docker_image_embedded_orcaslicer_identity() {

@@ -53,6 +53,13 @@ case "${1:-}" in
                     printf '%s\n' "$MOCK_ALLOW_STUB_LABEL"
                 fi
                 ;;
+            *RepoDigests*)
+                if [[ "${MOCK_REPO_DIGEST:-__MISSING__}" == "__MISSING__" ]]; then
+                    printf '<none>\n'
+                else
+                    printf '%s\n' "$MOCK_REPO_DIGEST"
+                fi
+                ;;
             *)
                 exit 2
                 ;;
@@ -162,6 +169,35 @@ test_matching_metadata_is_accepted() {
 
     assert_command_success \
         "run_validation '2.4.2' 'd12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd'"
+
+    pass_test
+}
+
+test_immutable_digest_reference_is_required() {
+    start_test "validated cache resolves to an immutable digest reference"
+
+    local expected_reference
+    local actual_reference
+    local output
+    local exit_code
+    expected_reference="ghcr.io/olyforge3d/orcaslicer-base@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    actual_reference=$(
+        export PATH="$MOCK_BIN:$PATH"
+        export MOCK_REPO_DIGEST="$expected_reference"
+        docker_image_digest_reference "ghcr.io/olyforge3d/orcaslicer-base:2.4.2"
+    )
+    assert_equals "$expected_reference" "$actual_reference"
+
+    set +e
+    output=$(
+        export PATH="$MOCK_BIN:$PATH"
+        unset MOCK_REPO_DIGEST
+        docker_image_digest_reference "ghcr.io/olyforge3d/orcaslicer-base:2.4.2"
+    ) 2>&1
+    exit_code=$?
+    set -e
+    assert_not_equals "0" "$exit_code" "A cache without a repository digest should be rejected"
+    assert_contains "$output" "Unable to resolve immutable digest" "Digest rejection should explain the failure"
 
     pass_test
 }
@@ -302,6 +338,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     local preseed_workflow
     local strict_workflow
     local worker_compose
+    local docker_utils
     multistage=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
     base_dockerfile=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries")
     deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
@@ -312,6 +349,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     preseed_workflow=$(cat "$REPO_ROOT/.github/workflows/appimage-preseed-uploader.yml")
     strict_workflow=$(cat "$REPO_ROOT/.github/workflows/orcaslicer-strict-build.yml")
     worker_compose=$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml")
+    docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
 
     assert_contains "$multistage" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Multistage binary layer should label its version"
     assert_contains "$multistage" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Multistage binary layer should label its checksum"
@@ -326,12 +364,21 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$deploy_script" 'ALLOW_STUB=false" --build-arg "_SKIP_ORCA_BINARY_BUILD=1' "Cached binary builds must keep embedded metadata validation enabled"
     assert_contains "$powershell_deploy_script" "Get-FileHash -Path \$resolvedAppImagePath -Algorithm SHA256" "PowerShell should verify cached AppImages"
     assert_contains "$registry_pull_script" 'validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"' "Registry cache images should be validated before retagging"
-    assert_contains "$publish_workflow" 'ACTUAL_VERSION=$(docker image inspect' "Publishing should inspect cached image metadata"
-    assert_contains "$publish_workflow" 'Refusing OrcaSlicer base image' "Publishing should fail closed on stale metadata"
+    assert_contains "$publish_workflow" 'source scripts/docker-utils.sh' "Publishing should use shared cache validation"
+    assert_contains "$publish_workflow" 'validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Publishing should fail closed on stale metadata"
+    assert_contains "$publish_workflow" 'base_image: ${{ steps.verify.outputs.base_image }}' "Publishing should export only the verified base image"
+    assert_contains "$publish_workflow" 'echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")"' "Publishing should resolve the verified image to an immutable digest"
+    assert_contains "$publish_workflow" 'FROM ${{ needs.ensure-orca-base.outputs.base_image }}' "Worker builds should consume the verified digest reference"
+    assert_not_contains "$publish_workflow" 'EMBEDDED_VERSION=$(docker run' "Publishing must not execute an untrusted cached image"
+    assert_not_contains "$publish_workflow" 'execSync(`docker run' "Publishing polls must not execute an untrusted cached image"
     assert_contains "$publish_workflow" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Published workers should launch through AppRun"
     assert_contains "$publish_workflow" 'Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256' "Published workers should expose binary attestation"
-    assert_contains "$base_workflow" 'Rejecting cached image' "Base image workflow should reject stale metadata"
-    assert_contains "$base_workflow" 'cat /opt/orcaslicer/orcaslicer.version' "Base image workflow should verify embedded version metadata"
+    assert_contains "$base_workflow" 'source scripts/docker-utils.sh' "Base image workflow should use shared cache validation"
+    assert_contains "$base_workflow" 'validate_orcaslicer_binary_image "$IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Base image workflow should reject stale metadata"
+    assert_contains "$base_workflow" 'docker_image_digest_reference "$IMAGE"' "Base image workflow should expose only an immutable cache reference"
+    assert_not_contains "$base_workflow" 'EMBEDDED_VERSION=$(docker run' "Base image workflow must not execute an untrusted cached image"
+    assert_contains "$docker_utils" 'container_id=$(docker create "$image_name" /printfarmer-metadata-inspection' "Cache attestation should inspect a stopped container"
+    assert_contains "$docker_utils" 'docker cp' "Cache attestation should copy metadata without executing the image"
     assert_contains "$base_workflow" 'sha256sum --check --strict' "Base image workflow should verify the pinned AppImage checksum"
     assert_contains "$preseed_workflow" "default: ''" "Shared Prusa/Orca workflow should not apply an Orca version to Prusa"
     assert_contains "$preseed_workflow" 'VERSION_IN="$ORCASLICER_VERSION"' "Default Orca preseed should use the repository-pinned release"
@@ -361,6 +408,7 @@ test_stable_default_and_checksum_are_pinned() {
 
 run_tests() {
     test_matching_metadata_is_accepted
+    test_immutable_digest_reference_is_required
     test_missing_version_metadata_is_rejected
     test_stale_version_metadata_is_rejected
     test_missing_checksum_metadata_is_rejected

@@ -203,8 +203,11 @@ jobs:
       id-token: write
       packages: write
     outputs:
-      base_image: ${{ steps.output.outputs.base_image }}
+      base_image: ${{ steps.verify.outputs.base_image }}
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
       - name: Log in to GHCR (for manifest check)
         uses: docker/login-action@v4
         with:
@@ -216,6 +219,7 @@ jobs:
         id: check
         run: |
           set -euo pipefail
+          source scripts/docker-utils.sh
           BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
           echo "Checking for base image: $BASE_IMAGE"
 
@@ -225,18 +229,10 @@ jobs:
             exit 0
           fi
 
-          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$BASE_IMAGE")
-          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$BASE_IMAGE")
-          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$BASE_IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version' 2>/dev/null || true)
-          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$BASE_IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256' 2>/dev/null || true)
-          if [ "$ACTUAL_VERSION" = "$ORCA_VERSION" ] &&
-             [ "$ACTUAL_SHA256" = "$ORCA_SHA256" ] &&
-             [ "$EMBEDDED_VERSION" = "$ORCA_VERSION" ] &&
-             [ "$EMBEDDED_SHA256" = "$ORCA_SHA256" ]; then
-            echo "Base image metadata verified"
+          if validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Rejecting cached base image with label version='${ACTUAL_VERSION}' sha256='${ACTUAL_SHA256}' and embedded version='${EMBEDDED_VERSION}' sha256='${EMBEDDED_SHA256}'"
+            echo "::warning::Rejecting cached base image whose attested identity does not match OrcaSlicer ${ORCA_VERSION}"
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -265,51 +261,41 @@ jobs:
             while (Date.now() - startTime < maxWait) {
               await new Promise(r => setTimeout(r, 30000)); // Wait 30s
               
-              // Check if manifest exists now
-              const { execSync } = require('child_process');
+              // Pull and attest the candidate without executing its entrypoint or shell.
+              const { execFileSync } = require('child_process');
               try {
                 const image = '${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}';
-                execSync(`docker pull ${image}`, { stdio: 'pipe' });
-                const labels = JSON.parse(execSync(
-                  `docker image inspect --format='{{ json .Config.Labels }}' ${image}`,
-                  { encoding: 'utf8' }
-                ));
-                if (labels['orcaslicer.version'] === '${{ env.ORCA_VERSION }}' &&
-                    labels['orcaslicer.sha256'] === '${{ env.ORCA_SHA256 }}' &&
-                    execSync(`docker run --rm --entrypoint /bin/sh ${image} -c 'cat /opt/orcaslicer/orcaslicer.version'`, { encoding: 'utf8' }).trim() === '${{ env.ORCA_VERSION }}' &&
-                    execSync(`docker run --rm --entrypoint /bin/sh ${image} -c 'cat /opt/orcaslicer/orcaslicer.sha256'`, { encoding: 'utf8' }).trim() === '${{ env.ORCA_SHA256 }}') {
-                  console.log('Base image is now available with matching metadata!');
-                  return;
-                }
-                console.log('Base image tag is available but its metadata is stale; still waiting...');
+                execFileSync('docker', ['pull', image], { stdio: 'pipe' });
+                execFileSync(
+                  'bash',
+                  [
+                    '-c',
+                    'set -euo pipefail; source scripts/docker-utils.sh; validate_orcaslicer_binary_image "$1" "$2" "$3"',
+                    '_',
+                    image,
+                    '${{ env.ORCA_VERSION }}',
+                    '${{ env.ORCA_SHA256 }}'
+                  ],
+                  { stdio: 'pipe' }
+                );
+                console.log('Base image is now available with matching metadata!');
+                return;
               } catch {
-                console.log('Still waiting for base image...');
+                console.log('Base image is unavailable or its attestation is stale; still waiting...');
               }
             }
             
             core.setFailed('Timed out waiting for base image');
 
       - name: Verify OrcaSlicer base image metadata
+        id: verify
         run: |
           set -euo pipefail
+          source scripts/docker-utils.sh
           BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
           docker pull "$BASE_IMAGE"
-          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$BASE_IMAGE")
-          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$BASE_IMAGE")
-          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$BASE_IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version' 2>/dev/null || true)
-          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$BASE_IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256' 2>/dev/null || true)
-          if [ "$ACTUAL_VERSION" != "$ORCA_VERSION" ] ||
-             [ "$ACTUAL_SHA256" != "$ORCA_SHA256" ] ||
-             [ "$EMBEDDED_VERSION" != "$ORCA_VERSION" ] ||
-             [ "$EMBEDDED_SHA256" != "$ORCA_SHA256" ]; then
-            echo "::error::Refusing OrcaSlicer base image with label version='${ACTUAL_VERSION}' sha256='${ACTUAL_SHA256}' and embedded version='${EMBEDDED_VERSION}' sha256='${EMBEDDED_SHA256}'"
-            exit 1
-          fi
-
-      - name: Output base image reference
-        id: output
-        run: |
-          echo "base_image=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}" >> $GITHUB_OUTPUT
+          validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"
+          echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")" >> "$GITHUB_OUTPUT"
 
   # ====================
   # JOB 4: Build native container images (api, frontend, discovery, orcaslicer-worker)

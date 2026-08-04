@@ -41,13 +41,17 @@ jobs:
       contents: read
       packages: write
     outputs:
-      image_tag: ${{ steps.meta.outputs.tags }}
+      image_tag: ${{ steps.verify.outputs.image_ref || steps.check.outputs.image_ref }}
       image_exists: ${{ steps.check.outputs.exists }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Check if image already exists
         id: check
         run: |
           set -euo pipefail
+          source scripts/docker-utils.sh
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
           echo "Checking for existing image: $IMAGE"
 
@@ -70,24 +74,13 @@ jobs:
             exit 0
           fi
 
-          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$IMAGE")
-          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$IMAGE")
-          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version' 2>/dev/null || true)
-          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256' 2>/dev/null || true)
-          if [ "$ACTUAL_VERSION" = "$ORCA_VERSION" ] &&
-             [ "$ACTUAL_SHA256" = "$ORCA_SHA256" ] &&
-             [ "$EMBEDDED_VERSION" = "$ORCA_VERSION" ] &&
-             [ "$EMBEDDED_SHA256" = "$ORCA_SHA256" ]; then
-            echo "Image metadata matches the requested OrcaSlicer release"
+          if validate_orcaslicer_binary_image "$IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"; then
             echo "exists=true" >> $GITHUB_OUTPUT
+            echo "image_ref=$(docker_image_digest_reference "$IMAGE")" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Rejecting cached image with label version='${ACTUAL_VERSION}' sha256='${ACTUAL_SHA256}' and embedded version='${EMBEDDED_VERSION}' sha256='${EMBEDDED_SHA256}'"
+            echo "::warning::Rejecting cached image whose attested identity does not match OrcaSlicer ${ORCA_VERSION}"
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Checkout
-        if: steps.check.outputs.exists != 'true' || inputs.force_rebuild == 'true'
-        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.exists != 'true' || inputs.force_rebuild == 'true'
@@ -280,19 +273,15 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Verify published image metadata
+        id: verify
         if: steps.check.outputs.exists != 'true' || inputs.force_rebuild == 'true'
         run: |
           set -euo pipefail
+          source scripts/docker-utils.sh
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/${{ env.BASE_IMAGE_NAME }}:${{ env.ORCA_VERSION }}"
           docker pull "$IMAGE"
-          ACTUAL_VERSION=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.version" }}' "$IMAGE")
-          ACTUAL_SHA256=$(docker image inspect --format '{{ index .Config.Labels "orcaslicer.sha256" }}' "$IMAGE")
-          EMBEDDED_VERSION=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.version')
-          EMBEDDED_SHA256=$(docker run --rm --entrypoint /bin/sh "$IMAGE" -c 'cat /opt/orcaslicer/orcaslicer.sha256')
-          test "$ACTUAL_VERSION" = "$ORCA_VERSION"
-          test "$ACTUAL_SHA256" = "$ORCA_SHA256"
-          test "$EMBEDDED_VERSION" = "$ORCA_VERSION"
-          test "$EMBEDDED_SHA256" = "$ORCA_SHA256"
+          validate_orcaslicer_binary_image "$IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"
+          echo "image_ref=$(docker_image_digest_reference "$IMAGE")" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         run: |
