@@ -431,7 +431,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
                   <div className="overflow-x-auto rounded-lg border border-pf-border">
                     <table className="w-full text-sm" role="grid" aria-label="Required parts">
                       <thead>
-                        <tr className="bg-pf-bg-3 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
+                        <tr className="bg-pf-bg-2 text-left text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
                           <th scope="col" className="px-3 py-2">Part</th>
                           <th scope="col" className="px-3 py-2">Category</th>
                           <th scope="col" className="px-3 py-2 text-right">Qty</th>
@@ -480,7 +480,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
                 )}
 
                 {/* Add Part Picker */}
-                <div className="space-y-3 border border-pf-border rounded-lg p-3 bg-pf-bg-3">
+                <div className="space-y-3 border border-pf-border rounded-lg p-3 bg-pf-bg-2">
                   <h4 className="text-sm font-medium text-pf-text-secondary flex items-center gap-1.5">
                     <PlusIcon className="h-4 w-4" aria-hidden="true" />
                     Add Part from Inventory

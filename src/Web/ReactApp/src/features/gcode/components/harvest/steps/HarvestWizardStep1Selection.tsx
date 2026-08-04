@@ -118,7 +118,7 @@ export function HarvestWizardStep1Selection({
     return (
       <div className="space-y-6">
         {/* Search and Filters Section - Single Row */}
-        <div className="border border-pf-border rounded-lg p-4 bg-pf-background-secondary">
+        <div className="border border-pf-border rounded-lg p-4 bg-pf-bg-1">
           <div className="flex flex-col gap-2 mb-3">
             <label className="text-xs font-medium text-pf-text-secondary uppercase tracking-wide">
               Filter Printers
@@ -232,7 +232,7 @@ export function HarvestWizardStep1Selection({
       </div>
 
       {/* Search and Filters Section - Single Row */}
-      <div className="border border-pf-border rounded-lg p-4 bg-pf-background-secondary">
+      <div className="border border-pf-border rounded-lg p-4 bg-pf-bg-1">
         <div className="flex gap-3 items-end">
           {/* Search Box */}
           <div className="flex-1 min-w-0">

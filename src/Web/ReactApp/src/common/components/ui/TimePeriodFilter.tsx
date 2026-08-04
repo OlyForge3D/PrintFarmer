@@ -55,7 +55,7 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
           className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
             !isCustom && presetDays === opt.value
               ? 'bg-pf-primary text-white'
-              : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+              : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-hover'
           }`}
           aria-pressed={!isCustom && presetDays === opt.value}
         >
@@ -70,7 +70,7 @@ export const TimePeriodFilter: React.FC<TimePeriodFilterProps> = ({
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
               isCustom
                 ? 'bg-pf-primary text-white'
-                : 'bg-pf-surface text-pf-text-secondary hover:bg-pf-hover'
+                : 'bg-pf-panel text-pf-text-secondary hover:bg-pf-hover'
             }`}
             aria-pressed={isCustom}
           >

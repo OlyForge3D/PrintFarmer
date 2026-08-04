@@ -75,7 +75,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
             variant="unstyled"
             size="sm"
             onClick={goToPreviousMonth}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-surface hover:bg-pf-hover text-pf-text-primary transition-colors"
+            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-hover text-pf-text-primary transition-colors"
             aria-label="Previous month"
           >
             ←
@@ -84,7 +84,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
             variant="unstyled"
             size="sm"
             onClick={goToToday}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-surface hover:bg-pf-hover text-pf-text-primary transition-colors"
+            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-hover text-pf-text-primary transition-colors"
           >
             Today
           </Button>
@@ -92,7 +92,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
             variant="unstyled"
             size="sm"
             onClick={goToNextMonth}
-            className="px-3 py-1.5 text-sm rounded-md bg-pf-surface hover:bg-pf-hover text-pf-text-primary transition-colors"
+            className="px-3 py-1.5 text-sm rounded-md bg-pf-panel hover:bg-pf-hover text-pf-text-primary transition-colors"
             aria-label="Next month"
           >
             →
@@ -145,7 +145,7 @@ export function MonthCalendar({ scheduledJobs, onDateClick }: MonthCalendarProps
                 'hover:bg-pf-hover',
                 today
                   ? 'border-pf-accent bg-pf-accent/10'
-                  : 'border-pf-border bg-pf-surface'
+                  : 'border-pf-border bg-pf-panel'
               )}
             >
               <span

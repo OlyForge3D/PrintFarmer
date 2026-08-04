@@ -886,7 +886,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                       
                       {/* Toolhead Details - Expandable */}
                       {expandedToolheads.has(toolhead.id!) && (
-                        <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
+                        <div className="p-4 bg-pf-bg-0 border-t border-pf-border space-y-4">
                           {/* Basic Info */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <FormField label="Name" htmlFor={`toolhead-name-${index}`}>
@@ -1052,7 +1052,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                     />
                     {formData.buddyCameraIp && (
                       <p className="mt-1 text-xs text-pf-text-secondary">
-                        RTSP URL: <code className="bg-pf-surface-secondary px-1 rounded">rtsp://{formData.buddyCameraIp}:554/live/</code>
+                        RTSP URL: <code className="bg-pf-bg-1 px-1 rounded">rtsp://{formData.buddyCameraIp}:554/live/</code>
                       </p>
                     )}
                   </FormField>

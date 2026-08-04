@@ -134,7 +134,7 @@ export const BulkTagAssignmentModal: React.FC<BulkTagAssignmentModalProps> = ({
                             models.map((model: ModelOption) => (
                                 <label
                                     key={model.id}
-                                    className={`flex items-center gap-3 p-2 rounded-sm transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-secondary'}`}
+                                    className={`flex items-center gap-3 p-2 rounded-sm transition-colors ${selectedModelIds.includes(model.id) ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-1'}`}
                                 >
                                     <Checkbox
                                         checked={selectedModelIds.includes(model.id)}

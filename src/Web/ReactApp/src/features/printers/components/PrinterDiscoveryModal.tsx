@@ -360,7 +360,7 @@ export function PrinterDiscoveryModal({ isOpen, onClose, onSuccess }: PrinterDis
                       className={`p-4 rounded-lg transition-colors border ${
                         selectedPrinters.has(printer.discoveryId)
                           ? 'bg-pf-bg-2 border-pf-border'
-                          : 'border-pf-border hover:bg-pf-bg-secondary'
+                          : 'border-pf-border hover:bg-pf-bg-2'
                       }`}
                     >
                     <div className="flex items-start justify-between">

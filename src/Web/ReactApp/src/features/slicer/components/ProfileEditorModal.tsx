@@ -198,7 +198,7 @@ export function ProfileEditorModal({
     >
       {/* Save Form (shown when Save as Custom clicked) */}
       {showSaveForm && (
-        <div className="mb-4 p-4 bg-pf-panel-secondary rounded-lg border border-pf-border">
+        <div className="mb-4 p-4 bg-pf-bg-1 rounded-lg border border-pf-border">
           <label className="block text-sm font-medium text-pf-text-primary mb-2">
             Custom Profile Name
           </label>

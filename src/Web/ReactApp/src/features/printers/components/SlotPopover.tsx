@@ -80,7 +80,7 @@ export function SlotPopover({
         align === 'start' && 'left-0',
         align === 'center' && 'left-1/2 -translate-x-1/2',
         align === 'end' && 'right-0',
-        'bg-pf-surface-elevated border border-pf-border rounded-lg shadow-lg',
+        'bg-pf-card border border-pf-border rounded-lg shadow-lg',
         showPicker ? 'w-64' : 'w-52',
         'animate-in fade-in-0 zoom-in-95 duration-150',
       )}
@@ -90,7 +90,7 @@ export function SlotPopover({
       {/* Arrow */}
       <div
         className={clsx(
-          'absolute -top-1.5 w-3 h-3 rotate-45 bg-pf-surface-elevated border-l border-t border-pf-border',
+          'absolute -top-1.5 w-3 h-3 rotate-45 bg-pf-card border-l border-t border-pf-border',
           align === 'start' && 'left-4',
           align === 'center' && 'left-1/2 -translate-x-1/2',
           align === 'end' && 'right-4',

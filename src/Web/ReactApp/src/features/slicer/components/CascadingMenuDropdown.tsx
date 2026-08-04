@@ -231,7 +231,7 @@ export function FilamentProfileDropdown({
         }}
         className={`flex items-center justify-between w-full px-3 py-2 text-sm text-left rounded-md border
           ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-pf-accent'}
-          border-pf-border bg-pf-input text-pf-text-primary
+          border-pf-border bg-pf-panel text-pf-text-primary
           ${isOpen ? 'border-pf-accent ring-1 ring-pf-accent/30' : ''}
           ${className}`}
         title={displayLabel || undefined}

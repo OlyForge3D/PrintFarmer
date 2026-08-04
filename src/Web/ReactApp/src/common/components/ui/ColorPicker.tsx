@@ -126,7 +126,7 @@ export const ColorPicker: React.FC<ColorPickerProps> = ({
         {isOpen && (
           <div
             ref={popoverRef}
-            className="absolute left-0 top-full z-50 mt-2 rounded-lg shadow-lg border border-pf-border bg-pf-surface-elevated p-2"
+            className="absolute left-0 top-full z-50 mt-2 rounded-lg shadow-lg border border-pf-border bg-pf-card p-2"
             role="dialog"
             aria-label="Color picker"
           >

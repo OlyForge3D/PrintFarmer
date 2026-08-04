@@ -725,7 +725,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                   
                   {/* Toolhead Details - Expandable */}
                   {expandedToolheads.has(toolhead.id) && (
-                    <div className="p-4 bg-pf-bg-primary border-t border-pf-border space-y-4">
+                    <div className="p-4 bg-pf-bg-0 border-t border-pf-border space-y-4">
                       {/* Identity: Name + Index + Primary */}
                       <div className="grid grid-cols-1 sm:grid-cols-[1fr_80px_auto] gap-4 items-end">
                         <FormField label="Name" htmlFor={`toolhead-name-${index}`}>

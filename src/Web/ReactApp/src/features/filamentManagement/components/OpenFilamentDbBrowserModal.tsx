@@ -377,7 +377,7 @@ export function OpenFilamentDbBrowserModal({ isOpen, onClose }: OpenFilamentDbBr
               </div>
               <div className="max-h-96 overflow-y-auto border border-pf-border rounded-lg">
                 <table className="w-full text-sm" role="grid" aria-label="Open Filament Database filaments">
-                  <thead className="sticky top-0 bg-pf-surface-elevated z-10">
+                  <thead className="sticky top-0 bg-pf-card z-10">
                     <tr>
                       <th className="px-3 py-2 text-left w-10">
                         <Checkbox

@@ -117,7 +117,7 @@ export function HarvestWizardStep3FileSelection({
             </label>
           </div>
 
-          <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-lg p-3 bg-pf-bg">
+          <div className="max-h-96 overflow-y-auto space-y-2 border border-pf-border rounded-lg p-3 bg-pf-bg-0">
             {files.map(file => (
               <label
                 key={file.id}

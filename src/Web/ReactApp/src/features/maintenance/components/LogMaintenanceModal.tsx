@@ -365,7 +365,7 @@ export function LogMaintenanceModal({
           <Input
             value={user?.username || user?.email || 'Unknown'}
             disabled
-            className="bg-pf-bg-dark/50"
+            className="bg-pf-bg-0/50"
           />
         </div>
       </form>

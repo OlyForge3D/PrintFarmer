@@ -6,7 +6,7 @@ interface SelectableRowProps extends React.HTMLAttributes<HTMLTableRowElement> {
 }
 
 export function SelectableRow({ isSelected = false, className, children, ref, ...rest }: SelectableRowProps) {
-  const classes = `${isSelected ? 'bg-pf-bg-2' : ''} hover:bg-pf-bg-secondary transition-colors ${className ?? ''}`.trim();
+  const classes = `${isSelected ? 'bg-pf-bg-2' : ''} hover:bg-pf-bg-1 transition-colors ${className ?? ''}`.trim();
 
   return (
     <tr ref={ref} className={classes} {...rest}>
