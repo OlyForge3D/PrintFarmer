@@ -1623,6 +1623,41 @@
     cursor: not-allowed;
   }
 
+  /*
+   * Ghost Button defaults.
+   *
+   * These live here, in the components layer, rather than in the `ghost` entry of
+   * `variantClasses` in `Button.tsx`, because a caller must be able to override
+   * them. Layer order beats specificity, so anything in `@layer utilities` — every
+   * Tailwind class a caller passes through `className` — displaces this block no
+   * matter how specific the selector is.
+   *
+   * As utilities they did the opposite. `[background:none]` was the `background`
+   * *shorthand*, so it reset `background-color` and `background-image` together,
+   * killing gradients as well as flat fills; and because Tailwind sorts colour
+   * utilities alphabetically it landed after every caller class and won. Measured
+   * in the built stylesheet: the ghost rule at offset 166233 against
+   * `.bg-pf-bg-0\/60` at 102730. Every background a ghost caller declared was
+   * dead, leaving `text-white` painting on the page surface — 1.07:1 measured in
+   * the light theme. `bg-transparent` is not a fix either: `.bg-transparent`
+   * (117611) still sorts after every `.bg-pf-*`.
+   *
+   * The same trap applied to the other three defaults, which is why all of them
+   * moved: `text-inherit` beat `text-[var(--pf-on-accent)]`, `border-transparent`
+   * beat `border-pf-success-bg`, and `shadow-none` beat the caller's arbitrary
+   * `shadow-[...]`. See #1087.
+   */
+  [data-pf-button][data-pf-variant='ghost'] {
+    color: inherit;
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  [data-pf-button][data-pf-variant='ghost']:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1);
+  }
+
   /**
    * Fieldset - Group of related form fields
    */

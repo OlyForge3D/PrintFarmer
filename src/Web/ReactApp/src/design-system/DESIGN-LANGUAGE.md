@@ -495,11 +495,11 @@ Why it complements the other three:
 | `--pf-text-tertiary` | `#6790b8` | Dim drafting blue (4.6:1) |
 | `--pf-text-muted` | `#4d7299` | Annotation blue (3.2:1) |
 | `--pf-text-inverse` | `#0c1a2e` | On bright accents |
-| `--pf-text-on-accent` | `#0c1a2e` | Dark text on cyan |
+| `--pf-text-on-accent` | `#07101b` | Dark text on cyan (4.67:1 on `--pf-accent-bg`) |
 | `--pf-accent` | `#38bdf8` | Cyan — blueprint line color |
 | `--pf-accent-bg` | `#0284c7` | Solid cyan button bg |
 | `--pf-accent-hover` | `#0369a1` | |
-| `--pf-accent-fg` | `#ffffff` | |
+| `--pf-accent-fg` | `#07101b` | Aliases `--pf-on-accent` |
 | `--pf-accent-2` | `#fef08a` | Drafting-pencil yellow (annotation accent) |
 | `--pf-success` | `#4ade80` | Annotation green |
 | `--pf-success-bg` | `#052e16` | |

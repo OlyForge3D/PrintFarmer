@@ -84,7 +84,7 @@ export default function HistoryFiltersBar({
               size="sm"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "cards"
-                  ? "bg-pf-accent text-white hover:bg-pf-accent"
+                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] hover:bg-pf-accent-bg"
                   : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
               title="Card view"
@@ -97,7 +97,7 @@ export default function HistoryFiltersBar({
               size="sm"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "table"
-                  ? "bg-pf-accent text-white hover:bg-pf-accent"
+                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] hover:bg-pf-accent-bg"
                   : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
               title="Table view"
