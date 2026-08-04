@@ -1636,23 +1636,53 @@
    * *shorthand* set to none, so it reset `background-color` and `background-image`
    * together, killing gradients as well as flat fills; and because Tailwind sorts
    * colour utilities alphabetically it landed after every caller class and won.
-   * Measured in the built stylesheet: the ghost rule at offset 166233 against
-   * `.bg-pf-bg-0\/60` at 102730. Every background a ghost caller declared was
-   * dead, leaving light text painting on the page surface — 1.07:1 measured in the
-   * light theme. Switching to the transparent background *utility* is not a fix
-   * either: it sorts at 117611, still after every `.bg-pf-*`. It would have
-   * rescued the gradient, since it never touches `background-image`, but it fails
-   * on flat fills and fails invisibly.
+   * Measured in the built stylesheet as it stood before #1087: the ghost rule at
+   * offset 166233 against `.bg-pf-bg-0\/60` at 102730. Both record the pre-fix
+   * build and are deliberately kept, but for different reasons: the ghost rule is
+   * no longer a utility at all, so 166233 cannot be re-derived from any current
+   * build, whereas `.bg-pf-bg-0\/60` still exists and has merely drifted — it
+   * measures 102825 today. What the pair is preserved for is the *ordering*, which
+   * is what the diagnosis rested on and which no current build can show. Every
+   * background
+   * a ghost caller declared was dead, leaving light text painting on the page
+   * surface — 1.07:1 measured in the light theme.
+   *
+   * Switching to the transparent background *utility* is not a fix either — and
+   * not for the reason it looks like. Every plain `.bg-pf-*` background-colour
+   * utility sorts *before* `.bg-transparent` and none after, so at equal
+   * specificity in the same layer the transparent utility comes last and *beats*
+   * all of them, wiping the caller's fill. That is the failure, not a loss.
+   * (State-variant forms are a separate matter: `.hover\:bg-pf-*` and friends sort
+   * into later blocks, which is its own hazard — see #1102.) The transparent
+   * utility would have rescued the gradient, since it never touches
+   * `background-image`, but it fails on flat fills and fails invisibly. No offset
+   * is quoted for it because that one is a fact about the *current* build and
+   * drifts every time the stylesheet changes.
    *
    * The same trap applied to the other three defaults, which is why all of them
    * moved: the colour utility beat the caller's arbitrary `text-[var(...)]`, the
    * border-colour utility beat `border-pf-success-bg`, and the shadow utility beat
    * the caller's arbitrary inset shadow. See #1087.
    *
-   * Do not write the removed utility class names literally in this file. Tailwind
-   * scans CSS as source, so naming a class even inside a comment is enough to make
-   * it emit the rule again — an explanation of the fix that quietly reinstates
-   * what it describes.
+   * Naming a utility class in prose can reinstate it — but only in files Tailwind
+   * treats as source. CSS is *not* one of them: Tailwind v4 excludes `.css` from
+   * automatic source detection, so a class named in this comment is inert. The
+   * hazard is real in `.tsx`, `.ts` and the like, where the scanner does read
+   * comments; see the note in `Button.test.tsx`, whose guard list is deliberately
+   * described rather than written out for exactly that reason.
+   *
+   * Bisected on the built stylesheet rather than assumed. Injecting the single
+   * class name `text-inherit` into this file leaves the build byte-identical and
+   * the rule unemitted; injecting the same bytes into a `.tsx` grows the output
+   * and emits the rule. Same injection, same class, opposite outcome — so the
+   * negative result is a real measurement, not a probe that failed to fire.
+   * `text-inherit` is the probe because it is the only one of the four defaults
+   * below that is absent from a clean build; the other three are emitted
+   * legitimately by the sibling variants.
+   *
+   * An earlier revision of this comment asserted the opposite. It shipped in
+   * #1112 and is corrected under #1120; the defect was first noted as item 2 of
+   * #1108.
    *
    * CALLER CONTRACT: the hover below is a default, and it sits in this layer, so a
    * caller that passes any `bg-*` utility overrides it in *both* states and the
