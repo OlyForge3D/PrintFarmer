@@ -243,6 +243,16 @@ public class AutoDispatchService(
 
     private sealed record QueuedJobSelection(PrintJob? NextJob, int QueueDepth);
 
+    private sealed record OccupyingJobSelection(
+        Guid PrinterId,
+        string? Name,
+        PrintJobStatus Status,
+        DateTime SortTime);
+
+    private sealed record EffectiveAutoDispatchState(
+        AutoDispatchState WorkflowState,
+        string ReportedState);
+
     /// <summary>
     /// Returns the existing DispatchState or creates a new one lazily on first write.
     /// </summary>
@@ -271,18 +281,16 @@ public class AutoDispatchService(
             return;
         }
 
-        // Guard: don't transition if the printer is actively printing
-        bool hasActiveJob = await db.PrintJobs
+        // A printer-occupying job always wins over ready-gate workflow state.
+        bool hasOccupyingJob = await db.PrintJobs
+            .WhereOccupiesPrinter()
             .AnyAsync(
-                j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting ||
-                         j.Status == PrintJobStatus.Printing ||
-                         j.Status == PrintJobStatus.Paused),
+                j => j.AssignedPrinterId == printerId,
                 ct);
 
-        if (hasActiveJob)
+        if (hasOccupyingJob)
         {
-            logger.LogDebug(ReadyGateLogPrefix + " Printer {PrinterId} has an active job — skipping PendingReady transition", printerId);
+            logger.LogDebug(ReadyGateLogPrefix + " Printer {PrinterId} has an occupying job — skipping PendingReady transition", printerId);
             return;
         }
 
@@ -361,17 +369,19 @@ public class AutoDispatchService(
         }
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
-        bool hasActiveJob = await db.PrintJobs
-            .AnyAsync(
-                j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting ||
-                         j.Status == PrintJobStatus.Printing ||
-                         j.Status == PrintJobStatus.Paused),
-                ct);
-        AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobs.QueueDepth, hasActiveJob);
-        bool hasReadyConfirmation = effectiveState == AutoDispatchState.PendingReady
-            || effectiveState == AutoDispatchState.Ready
-            || (printer.DispatchState?.BedPreConfirmed ?? false);
+        PrintJobStatus? currentJobStatus = await db.PrintJobs
+            .WhereOccupiesPrinter()
+            .Where(j => j.AssignedPrinterId == printerId)
+            .Select(j => (PrintJobStatus?)j.Status)
+            .FirstOrDefaultAsync(ct);
+        EffectiveAutoDispatchState effectiveState = ResolveEffectiveState(
+            printer,
+            queuedJobs.QueueDepth,
+            currentJobStatus);
+        bool hasReadyConfirmation = currentJobStatus?.OccupiesPrinter() != true
+            && (effectiveState.WorkflowState == AutoDispatchState.PendingReady
+                || effectiveState.WorkflowState == AutoDispatchState.Ready
+                || (printer.DispatchState?.BedPreConfirmed ?? false));
 
         if (!hasReadyConfirmation)
         {
@@ -606,18 +616,17 @@ public class AutoDispatchService(
             throw new InvalidOperationException($"Auto-dispatch is not enabled for printer {printer.Name}");
         }
 
-        // Guard: printer must be idle (not actively printing)
-        bool hasActiveJob = await db.PrintJobs
+        // Guard: printer must be physically unoccupied.
+        bool hasOccupyingJob = await db.PrintJobs
+            .WhereOccupiesPrinter()
             .AnyAsync(
-                j => j.AssignedPrinterId == printerId
-                     && (j.Status == PrintJobStatus.Starting ||
-                         j.Status == PrintJobStatus.Printing ||
-                         j.Status == PrintJobStatus.Paused),
+                j => j.AssignedPrinterId == printerId,
                 ct);
 
-        if (hasActiveJob)
+        if (hasOccupyingJob)
         {
-            throw new InvalidOperationException($"Cannot pre-clear bed while printer {printer.Name} is actively printing");
+            throw new InvalidOperationException(
+                $"Cannot pre-clear the bed while a job occupies printer {printer.Name}");
         }
 
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
@@ -740,7 +749,8 @@ public class AutoDispatchService(
     public async Task<AutoDispatchGlobalStatusDto> GetAllStatusAsync(CancellationToken ct = default)
     {
         List<Printer> printers = await db.Printers.Include(p => p.DispatchState).AsNoTracking().ToListAsync(ct);
-        Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
+        Dictionary<Guid, OccupyingJobSelection> currentJobs =
+            await GetCurrentJobsByPrinterAsync(printers.Select(p => p.Id), ct);
 
         bool globalEnabled = printers.Any(p => p.AutoDispatchEnabled);
         List<AutoDispatchStatusDto> statuses = [];
@@ -758,7 +768,7 @@ public class AutoDispatchService(
             catch (Exception ex)
             {
                 logger.LogError(ex, "Failed to build auto-dispatch status for printer {PrinterId} ({PrinterName})", printer.Id, printer.Name);
-                statuses.Add(BuildStatusDto(printer, queuedJobCount: 0, currentJobName: null));
+                statuses.Add(BuildStatusDto(printer, queuedJobCount: 0, currentJob: null));
             }
         }
 
@@ -817,7 +827,8 @@ public class AutoDispatchService(
             enabled ? "enabled" : "disabled",
             printers.Count);
 
-        Dictionary<Guid, string?> currentJobs = await GetCurrentJobNamesByPrinterAsync(printers.Select(p => p.Id), ct);
+        Dictionary<Guid, OccupyingJobSelection> currentJobs =
+            await GetCurrentJobsByPrinterAsync(printers.Select(p => p.Id), ct);
         List<AutoDispatchStatusDto> statuses = [];
         foreach (Printer printer in printers)
         {
@@ -862,15 +873,27 @@ public class AutoDispatchService(
     private static AutoDispatchStatusDto BuildStatusDto(
         Printer printer,
         int queuedJobCount,
-        string? currentJobName = null,
+        OccupyingJobSelection? currentJob = null,
         PrintJob? nextJob = null)
     {
         string now = DateTime.UtcNow.ToString("o");
-        bool hasActiveJob = !string.IsNullOrWhiteSpace(currentJobName);
-        AutoDispatchState effectiveState = ResolveEffectiveState(printer, queuedJobCount, hasActiveJob);
-        bool isReady = printer.AutoDispatchEnabled && effectiveState == AutoDispatchState.Ready;
-        var gateChecks = BuildReadyGateChecks(printer, queuedJobCount, effectiveState, now);
-        string? attentionMessage = BuildAttentionMessage(printer, queuedJobCount, effectiveState);
+        EffectiveAutoDispatchState effectiveState = ResolveEffectiveState(
+            printer,
+            queuedJobCount,
+            currentJob?.Status);
+        bool isReady = printer.AutoDispatchEnabled
+            && effectiveState.WorkflowState == AutoDispatchState.Ready;
+        var gateChecks = BuildReadyGateChecks(
+            printer,
+            queuedJobCount,
+            effectiveState.WorkflowState,
+            currentJob?.Status,
+            now);
+        string? attentionMessage = BuildAttentionMessage(
+            printer,
+            queuedJobCount,
+            effectiveState.WorkflowState,
+            currentJob?.Status);
 
         return new AutoDispatchStatusDto
         {
@@ -878,10 +901,10 @@ public class AutoDispatchService(
             PrinterName = printer.Name,
             Enabled = printer.AutoDispatchEnabled,
             IsReady = isReady,
-            CurrentJobName = currentJobName,
+            CurrentJobName = currentJob?.Name,
             QueueDepth = queuedJobCount,
             ReadyGateChecks = gateChecks,
-            State = effectiveState.ToString(),
+            State = effectiveState.ReportedState,
             BedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false,
             DispatchStateETag = printer.DispatchState?.RowVersion is { Length: > 0 } rowVersion
                 ? Convert.ToBase64String(rowVersion)
@@ -909,51 +932,72 @@ public class AutoDispatchService(
     {
         QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
 
-        string? currentJobName = await db.PrintJobs
-            .Where(j => j.AssignedPrinterId == printer.Id
-                && (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
-            .Select(j => j.Name ?? j.GcodeFile!.Name)
+        OccupyingJobSelection? currentJob = await db.PrintJobs
+            .WhereOccupiesPrinter()
+            .Where(j => j.AssignedPrinterId == printer.Id)
+            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
+            .Select(j => new OccupyingJobSelection(
+                printer.Id,
+                j.Name ?? j.GcodeFile!.Name,
+                j.Status,
+                j.ActualStartTime ?? j.QueuedAt))
             .FirstOrDefaultAsync(ct);
 
         return BuildStatusDto(
             printer,
             queuedJobs.QueueDepth,
-            currentJobName,
+            currentJob,
             queuedJobs.NextJob);
     }
 
-    private static AutoDispatchState ResolveEffectiveState(Printer printer, int queuedJobCount, bool hasActiveJob)
+    private static EffectiveAutoDispatchState ResolveEffectiveState(
+        Printer printer,
+        int queuedJobCount,
+        PrintJobStatus? currentJobStatus)
     {
+        if (currentJobStatus?.OccupiesPrinter() == true)
+        {
+            return new EffectiveAutoDispatchState(
+                AutoDispatchState.None,
+                currentJobStatus.Value.ToString());
+        }
+
         AutoDispatchState storedState = printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None;
         bool bedPreConfirmed = printer.DispatchState?.BedPreConfirmed ?? false;
 
         if (storedState == AutoDispatchState.Dismissed)
         {
-            return AutoDispatchState.None;
+            return new EffectiveAutoDispatchState(
+                AutoDispatchState.None,
+                nameof(AutoDispatchState.None));
         }
 
         if (storedState != AutoDispatchState.None)
         {
-            return storedState;
+            return new EffectiveAutoDispatchState(storedState, storedState.ToString());
         }
 
         if (!printer.AutoDispatchEnabled
             || bedPreConfirmed
             || queuedJobCount <= 0
-            || hasActiveJob
             || !printer.IsAvailable
             || printer.InMaintenance)
         {
-            return AutoDispatchState.None;
+            return new EffectiveAutoDispatchState(
+                AutoDispatchState.None,
+                nameof(AutoDispatchState.None));
         }
 
-        return AutoDispatchState.PendingReady;
+        return new EffectiveAutoDispatchState(
+            AutoDispatchState.PendingReady,
+            nameof(AutoDispatchState.PendingReady));
     }
 
     private static List<ReadyGateCheckDto> BuildReadyGateChecks(
         Printer printer,
         int queuedJobCount,
         AutoDispatchState effectiveState,
+        PrintJobStatus? currentJobStatus,
         string checkedAt)
     {
         var checks = new List<ReadyGateCheckDto>
@@ -987,13 +1031,17 @@ public class AutoDispatchService(
 
         if (printer.AutoDispatchEnabled)
         {
-            bool confirmationRequired = effectiveState == AutoDispatchState.PendingReady;
+            bool printerOccupied = currentJobStatus?.OccupiesPrinter() == true;
+            bool confirmationRequired =
+                !printerOccupied && effectiveState == AutoDispatchState.PendingReady;
             checks.Add(new ReadyGateCheckDto
             {
                 Name = "Bed Clear Confirmed",
-                Passed = !confirmationRequired,
+                Passed = !printerOccupied && !confirmationRequired,
                 Message = effectiveState switch
                 {
+                    _ when currentJobStatus == PrintJobStatus.Paused => "Paused job still occupies the printer",
+                    _ when printerOccupied => "Active job still occupies the printer",
                     AutoDispatchState.Ready => "Operator confirmed bed is clear",
                     _ when printer.DispatchState?.BedPreConfirmed is true => "Bed pre-cleared for immediate dispatch",
                     AutoDispatchState.PendingReady => "Waiting for operator to confirm bed is clear",
@@ -1009,9 +1057,10 @@ public class AutoDispatchService(
     private static string? BuildAttentionMessage(
         Printer printer,
         int queuedJobCount,
-        AutoDispatchState effectiveState)
+        AutoDispatchState effectiveState,
+        PrintJobStatus? currentJobStatus)
     {
-        if (!printer.AutoDispatchEnabled)
+        if (!printer.AutoDispatchEnabled || currentJobStatus?.OccupiesPrinter() == true)
         {
             return null;
         }
@@ -1050,17 +1099,26 @@ public class AutoDispatchService(
         return null;
     }
 
-    private async Task<Dictionary<Guid, string?>> GetCurrentJobNamesByPrinterAsync(IEnumerable<Guid> printerIds, CancellationToken ct)
+    private async Task<Dictionary<Guid, OccupyingJobSelection>> GetCurrentJobsByPrinterAsync(
+        IEnumerable<Guid> printerIds,
+        CancellationToken ct)
     {
         List<Guid> ids = printerIds.ToList();
-        return await db.PrintJobs
-            .Where(j => ids.Contains(j.AssignedPrinterId!.Value)
-                && (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
-            .GroupBy(j => j.AssignedPrinterId!.Value)
-            .ToDictionaryAsync(
-                g => g.Key,
-                g => g.OrderByDescending(j => j.ActualStartTime).Select(j => j.Name ?? j.GcodeFile!.Name).FirstOrDefault(),
-                ct);
+        List<OccupyingJobSelection> currentJobs = await db.PrintJobs
+            .WhereOccupiesPrinter()
+            .Where(j => j.AssignedPrinterId.HasValue && ids.Contains(j.AssignedPrinterId.Value))
+            .Select(j => new OccupyingJobSelection(
+                j.AssignedPrinterId!.Value,
+                j.Name ?? j.GcodeFile!.Name,
+                j.Status,
+                j.ActualStartTime ?? j.QueuedAt))
+            .ToListAsync(ct);
+
+        return currentJobs
+            .GroupBy(job => job.PrinterId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(job => job.SortTime).First());
     }
 
     private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(Guid printerId, bool includeGcodeFile, CancellationToken ct)

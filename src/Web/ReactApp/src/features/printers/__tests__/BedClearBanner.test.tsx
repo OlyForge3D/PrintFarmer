@@ -247,6 +247,20 @@ describe('BedClearBanner', () => {
     expect(screen.getByText(/1 job queued/)).toBeInTheDocument();
   });
 
+  it('renders nothing when live printer state is Paused but auto-dispatch is stale PendingReady', () => {
+    const { container } = render(
+      <BedClearBanner
+        printerId="printer-1"
+        printerName="MK4"
+        autoDispatchStatus={baseStatus}
+        printerState="Paused"
+      />,
+      { wrapper: createWrapper() },
+    );
+
+    expect(container.firstChild).toBeNull();
+  });
+
   it('renders from a failed bed-clear gate with queued work even when the gate copy is blank', () => {
     const status: AutoDispatchStatus = {
       printerId: 'printer-1',

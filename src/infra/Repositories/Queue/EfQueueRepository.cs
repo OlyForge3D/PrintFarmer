@@ -218,12 +218,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(j => j.AssignedPrinter)
             .AsSplitQuery()
             .Where(j => j.AssignedPrinterId == printerId)
-            .OrderBy(j =>
-                j.Status == PrintJobStatus.Printing ||
-                j.Status == PrintJobStatus.Starting ||
-                j.Status == PrintJobStatus.Paused
-                    ? 0
-                    : 1)
+            .OrderBy(j => PrintJobOccupancy.Statuses.Contains(j.Status) ? 0 : 1)
             .ThenByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt)
             .ToListAsync(ct);
@@ -239,11 +234,9 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     public async Task<PrintJob?> GetCurrentJobForPrinterAsync(Guid printerId, CancellationToken ct)
     {
         return await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .FirstOrDefaultAsync(
-                j => j.AssignedPrinterId == printerId &&
-                     (j.Status == PrintJobStatus.Starting ||
-                      j.Status == PrintJobStatus.Printing ||
-                      j.Status == PrintJobStatus.Paused),
+                j => j.AssignedPrinterId == printerId,
                 ct);
     }
 
@@ -311,7 +304,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
     }
 
     /// <summary>
-    /// Counts the number of active print jobs (queued, assigned, starting, or printing) that use a specific gcode file.
+    /// Counts the number of active print jobs (queued, assigned, or printer-occupying) that use a specific gcode file.
     /// Useful for determining if a gcode file is in use before deletion.
     /// </summary>
     /// <param name="gcodeFileId">The unique identifier of the gcode file</param>
@@ -323,8 +316,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Where(j => j.GcodeFileId == gcodeFileId &&
                        (j.Status == PrintJobStatus.Queued ||
                         j.Status == PrintJobStatus.Assigned ||
-                        j.Status == PrintJobStatus.Starting ||
-                        j.Status == PrintJobStatus.Printing))
+                        PrintJobOccupancy.Statuses.Contains(j.Status)))
             .CountAsync(ct);
     }
 
@@ -352,12 +344,7 @@ public class EfQueueRepository(AppDbContext db) : IQueueRepository
             .Include(j => j.AssignedPrinter)
             .AsSplitQuery()
             .Where(j => j.AssignedPrinterId != null && ids.Contains(j.AssignedPrinterId.Value))
-            .OrderBy(j =>
-                j.Status == PrintJobStatus.Printing ||
-                j.Status == PrintJobStatus.Starting ||
-                j.Status == PrintJobStatus.Paused
-                    ? 0
-                    : 1)
+            .OrderBy(j => PrintJobOccupancy.Statuses.Contains(j.Status) ? 0 : 1)
             .ThenByDescending(j => j.Priority)
             .ThenBy(j => j.QueuedAt)
             .ToListAsync(ct);

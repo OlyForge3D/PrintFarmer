@@ -1117,14 +1117,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             }
 
             return await _db.PrintJobs
+                .WhereOccupiesPrinter()
                 .Include(job => job.GcodeFile)
                 .Include(job => job.AssignedPrinter)
                 .Where(job =>
                     job.Id == attempt.PrintJobId.Value &&
-                    job.AssignedPrinterId == printerId &&
-                    (job.Status == PrintJobStatus.Starting ||
-                     job.Status == PrintJobStatus.Printing ||
-                     job.Status == PrintJobStatus.Paused))
+                    job.AssignedPrinterId == printerId)
                 .ToListAsync(ct);
         }
 
@@ -1138,13 +1136,10 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         // identify one exact job by its persisted G-code/name rather than completing every
         // active row on the printer.
         List<PrintJob> legacyCandidates = await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .Include(job => job.GcodeFile)
             .Include(job => job.AssignedPrinter)
-            .Where(job =>
-                job.AssignedPrinterId == printerId &&
-                (job.Status == PrintJobStatus.Starting ||
-                 job.Status == PrintJobStatus.Printing ||
-                 job.Status == PrintJobStatus.Paused))
+            .Where(job => job.AssignedPrinterId == printerId)
             .OrderByDescending(job => job.ActualStartTime ?? job.QueuedAt)
             .ToListAsync(ct);
         PrintJob? exactLegacy = legacyCandidates.FirstOrDefault(
@@ -1295,15 +1290,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
             await using IDbContextTransaction? transaction = _db.Database.IsRelational()
                 ? await _db.Database.BeginTransactionAsync(ct)
                 : null;
-            bool hasActiveJob = await _db.PrintJobs
+            bool hasOccupyingJob = await _db.PrintJobs
+                .WhereOccupiesPrinter()
                 .AnyAsync(
-                    job =>
-                        job.AssignedPrinterId == printerId &&
-                        (job.Status == PrintJobStatus.Starting ||
-                         job.Status == PrintJobStatus.Printing ||
-                         job.Status == PrintJobStatus.Paused),
+                    job => job.AssignedPrinterId == printerId,
                     ct);
-            if (hasActiveJob)
+            if (hasOccupyingJob)
             {
                 return false;
             }
@@ -1319,14 +1311,12 @@ public class PrintJobCompletionService : IPrintJobCompletionService
         {
             _db.ChangeTracker.Clear();
             bool winnerExists = await _db.PrintJobs
+                .WhereOccupiesPrinter()
                 .AsNoTracking()
                 .AnyAsync(
                     job =>
                         job.ActiveExternalPrinterId == printerId &&
-                        job.IsExternalPrint &&
-                        (job.Status == PrintJobStatus.Starting ||
-                         job.Status == PrintJobStatus.Printing ||
-                         job.Status == PrintJobStatus.Paused),
+                        job.IsExternalPrint,
                     ct);
             if (winnerExists)
             {

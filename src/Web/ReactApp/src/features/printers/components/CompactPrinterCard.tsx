@@ -176,7 +176,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const isPrinting = state.toLowerCase().includes('printing');
   const isPaused = state.toLowerCase().includes('paused');
   const isShutdown = state.toLowerCase().includes('shutdown') || state.toLowerCase().includes('error');
-  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
+  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus, state);
   const statusLabel = getPrinterDisplayState({
     printerState: state,
     autoDispatchState: autoDispatchStatus?.state,
@@ -219,6 +219,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               printerId={printer.id}
               printerName={printer.name}
               autoDispatchStatus={autoDispatchStatus}
+              printerState={state}
             />
           </div>
         </div>

@@ -16,9 +16,15 @@ interface BedClearBannerProps {
   printerId: string;
   printerName: string;
   autoDispatchStatus: AutoDispatchStatus;
+  printerState?: string | null;
 }
 
-export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: BedClearBannerProps) {
+export function BedClearBanner({
+  printerId,
+  printerName,
+  autoDispatchStatus,
+  printerState,
+}: BedClearBannerProps) {
   const queryClient = useQueryClient();
   const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
@@ -81,7 +87,7 @@ export function BedClearBanner({ printerId, printerName, autoDispatchStatus }: B
     }
   }, [printerId, printerName, mismatchContext, queryClient, autoDispatchStatus.nextJobETag]);
 
-  if (!requiresBedClearConfirmation(autoDispatchStatus)) return null;
+  if (!requiresBedClearConfirmation(autoDispatchStatus, printerState)) return null;
 
   const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 

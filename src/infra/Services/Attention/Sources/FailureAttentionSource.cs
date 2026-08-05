@@ -169,5 +169,5 @@ public sealed class FailureAttentionSource(
     }
 
     private static bool IsActionable(PrintJobStatus status)
-        => status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused;
+        => status.OccupiesPrinter();
 }

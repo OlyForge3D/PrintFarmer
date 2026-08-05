@@ -54,6 +54,9 @@ vi.mock('@/common/hooks/useSignalR', () => ({
   useSignalRConnection: () => ({
     isConnected: true,
   }),
+  usePrinterStatusUpdates: () => ({
+    printerStatuses: new Map(),
+  }),
 }));
 
 vi.mock('@/services/printer-signalr', () => ({
