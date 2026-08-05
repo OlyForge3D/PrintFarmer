@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi } from 'vitest';
 import { DataTable, DataTableColumn } from '../DataTable';
 
@@ -118,7 +119,8 @@ describe('DataTable', () => {
     expect(screen.getByText('Edit Item C')).toBeInTheDocument();
   });
 
-  it('should support row selection callback', () => {
+  it('should enable keyboard selection when rows are selectable', async () => {
+    const user = userEvent.setup();
     const onRowSelect = vi.fn();
 
     render(
@@ -127,13 +129,16 @@ describe('DataTable', () => {
         columns={mockColumns}
         getRowKey={(item) => item.id}
         onRowSelect={onRowSelect}
-        keyboardNavigation
       />
     );
 
     const table = screen.getByRole('table');
-    fireEvent.keyDown(table, { key: 'ArrowDown' });
-    fireEvent.keyDown(table, { key: 'Enter' });
+    expect(table).toHaveAttribute('tabIndex', '0');
+
+    await user.tab();
+    expect(table).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
   });
@@ -190,6 +195,39 @@ describe('DataTable', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit Item A' }));
+
+    expect(onEdit).toHaveBeenCalledWith(mockData[0]);
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should not select the active row when a nested action is used by keyboard', async () => {
+    const user = userEvent.setup();
+    const onRowSelect = vi.fn();
+    const onEdit = vi.fn();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+        renderActions={(item) => (
+          <button type="button" onClick={() => onEdit(item)}>
+            Edit {item.name}
+          </button>
+        )}
+      />
+    );
+
+    const table = screen.getByRole('table');
+    const editButton = screen.getByRole('button', { name: 'Edit Item A' });
+
+    await user.tab();
+    expect(table).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    await user.tab();
+    expect(editButton).toHaveFocus();
+    await user.keyboard('{Enter}');
 
     expect(onEdit).toHaveBeenCalledWith(mockData[0]);
     expect(onRowSelect).not.toHaveBeenCalled();

@@ -302,6 +302,22 @@ describe('ThemeToggle', () => {
       expect(document.activeElement).toBe(radios[1]);
     });
 
+    it('shows hover feedback on unchecked button-group labels', () => {
+      renderWithTheme(<ThemeToggle variant="buttons" />, { defaultTheme: 'dark' });
+
+      const lightLabel = screen.getByTestId('theme-option-light');
+      const lightRadio = screen.getByRole('radio', {
+        name: /Switch to light theme/i,
+      }) as HTMLInputElement;
+
+      expect(lightRadio.checked).toBe(false);
+      expect(lightLabel).toHaveClass(
+        'hover:text-pf-text-primary',
+        'hover:bg-pf-bg-2',
+      );
+      expect(lightLabel).not.toHaveClass('bg-pf-accent-bg');
+    });
+
     it('shows icons for all variants', () => {
       // Compact variant
       const { rerender } = renderWithTheme(<ThemeToggle />);

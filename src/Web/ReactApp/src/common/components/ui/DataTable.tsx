@@ -34,7 +34,7 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   /** Function to get unique key for each row */
   getRowKey: (item: T) => string | number;
-  /** Enable keyboard navigation */
+  /** Enable keyboard navigation; row selection enables it automatically */
   keyboardNavigation?: boolean;
   /** Default sort column key */
   defaultSortColumn?: string;
@@ -103,6 +103,8 @@ export function DataTable<T>({
   emptyMessage = 'No data available.',
   className,
 }: DataTableProps<T>) {
+  const keyboardNavigationEnabled = keyboardNavigation || Boolean(onRowSelect);
+
   // Internal sort state
   const [sortColumn, setSortColumn] = useState<string | null>(defaultSortColumn ?? null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(
@@ -193,7 +195,7 @@ export function DataTable<T>({
 
   return (
     <Table
-      keyboardNavigation={keyboardNavigation}
+      keyboardNavigation={keyboardNavigationEnabled}
       onRowSelect={handleRowSelect}
       onRowFocus={handleRowFocus}
       className={className}

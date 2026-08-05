@@ -116,7 +116,7 @@ function useTableKeyboardNavigation(
   }, [registeredRowCount]);
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (!enabled || rowCount === 0) return;
+    if (!enabled || rowCount === 0 || e.target !== e.currentTarget) return;
 
     switch (e.key) {
       case 'ArrowDown':
