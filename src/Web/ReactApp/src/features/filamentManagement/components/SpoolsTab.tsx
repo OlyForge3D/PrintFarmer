@@ -724,7 +724,7 @@ export function SpoolsTab() {
             <div className="text-sm">{spoolmanError}</div>
             {!spoolmanBaseUrl && (
               <div className="mt-2">
-                <a href="/settings" className="text-pf-accent hover:text-pf-accent underline">
+                <a href="/settings" className="text-pf-accent hover:no-underline underline">
                   Configure Spoolman URL in Settings
                 </a>
               </div>

@@ -141,7 +141,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
           {operation.status === GcodeHarvestStatus.Completed && hasPermission('gcode_harvest', 'read') && (
             <Link
               to={`/files?harvest=${operation.id}`}
-              className="text-sm text-pf-accent hover:text-pf-accent"
+              className="text-sm text-pf-accent hover:underline"
             >
               View Files
             </Link>
