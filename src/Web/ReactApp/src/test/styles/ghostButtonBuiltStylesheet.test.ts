@@ -359,11 +359,25 @@ function readVariantClasses(source: string): Map<string, string> {
  *
  * Colour-capable prefixes are shared with purely structural utilities
  * (`border-b-2`, `text-left`, `ring-0`), so a bare prefix match would be a
- * false positive. In this repo a colour is always either a `pf-` design token
- * or an arbitrary value, so require one of those before flagging.
+ * false positive. Require evidence the token is actually a colour: a `pf-`
+ * design token, an arbitrary value, a CSS-wide colour keyword, or a Tailwind
+ * palette shade. The last two matter because `text-white` is already used by
+ * the `success` variant, so copying it onto a bare variant is plausible and
+ * would otherwise reproduce #1102 with this guard green.
  */
 const COLOUR_CAPABLE =
   /^(?:text|border|ring|outline|divide|from|via|to|fill|stroke|accent|caret|decoration)-/;
+
+/** `white`, `black`, `transparent`, `current`, `inherit`. */
+const NAMED_COLOUR = /^(?:white|black|transparent|current|inherit)$/;
+
+/**
+ * A Tailwind palette shade such as `red-500`. Anchored on a known hue list so
+ * that structural tokens sharing the shape — `border-b-2` reduces to `b-2` —
+ * cannot match.
+ */
+const PALETTE_SHADE =
+  /^(?:slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}$/;
 
 function paintUtilities(classes: string): string[] {
   return classes
@@ -373,7 +387,14 @@ function paintUtilities(classes: string): string[] {
       const utility = token.slice(token.lastIndexOf(':') + 1);
       if (utility === 'shadow') return true;
       if (utility.startsWith('bg-') || utility.startsWith('shadow-')) return true;
-      return COLOUR_CAPABLE.test(utility) && (utility.includes('pf-') || utility.includes('['));
+      if (!COLOUR_CAPABLE.test(utility)) return false;
+      const value = utility.slice(utility.indexOf('-') + 1).split('/')[0];
+      return (
+        utility.includes('pf-') ||
+        utility.includes('[') ||
+        NAMED_COLOUR.test(value) ||
+        PALETTE_SHADE.test(value)
+      );
     });
 }
 
