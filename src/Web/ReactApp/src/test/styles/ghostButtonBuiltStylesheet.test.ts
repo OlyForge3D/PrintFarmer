@@ -385,3 +385,82 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
     expect(entries.get('link')).toContain('px-0');
   });
 });
+
+/**
+ * #1102 caller contract, second direction: a disabled control must not repaint
+ * under the pointer.
+ *
+ * A plain `hover:` utility matches on `:disabled`. Before the components-layer
+ * move, the variant's own `enabled:hover:bg-*` sat later in @layer utilities and
+ * overrode the caller, so a caller's unguarded `hover:` never actually painted
+ * and the defect was invisible. Freeing caller paint is what lets it through,
+ * which makes it this change's fallout rather than a pre-existing caller bug.
+ *
+ * Scope is deliberately the files whose paint this change unmasked. A repo-wide
+ * sweep finds 20 instances; the 16 outside this list live in files this change
+ * does not touch and are left to their owners rather than silently rewritten
+ * here. Narrow and green is a guard; broad and permanently red is noise.
+ */
+describe('Button caller contract — unmasked callers gate hover on :enabled (#1102)', () => {
+  const OWNED = [
+    'common/components/ContextMenu.tsx',
+    'features/auth/components/EmailConfirmationBanner.tsx',
+    'features/fileBrowser/components/ExplorerView.tsx',
+    'features/maintenance/components/ComponentReplacementHistory.tsx',
+    'features/models3d/components/3d/GCodeViewer3D.tsx',
+    'features/models3d/components/3d/ModelViewer3D.tsx',
+    'features/queue/components/ModelFiltersBar.tsx',
+    'features/settings/pages/SettingsShell.tsx',
+    'features/tasks/components/profile-wizard/PrinterModelSelectionStep.tsx',
+  ];
+
+  const SRC_ROOT = resolve(REACT_APP_ROOT, 'src');
+
+  /** Opening `<Button ...>` tags, so we never inspect a button's children. */
+  const openingTags = (source: string): { tag: string; line: number }[] => {
+    const out: { tag: string; line: number }[] = [];
+    const re = /<Button(\s)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(source))) {
+      const end = source.indexOf('>', m.index);
+      if (end === -1) continue;
+      out.push({
+        tag: source.slice(m.index, end),
+        line: source.slice(0, m.index).split('\n').length,
+      });
+    }
+    return out;
+  };
+
+  // `enabled:hover:` is correct; `group-hover:`/`peer-hover:` key off another
+  // element's state and say nothing about this control being disabled.
+  const unguardedHover = (tag: string) =>
+    /(?<!enabled:)(?<!group-)(?<!peer-)hover:/.test(tag);
+
+  it.each(OWNED)('%s pairs no `disabled` Button with an unguarded hover:', (rel) => {
+    const source = readFileSync(join(SRC_ROOT, rel), 'utf8');
+    const offenders = openingTags(source)
+      .filter(({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag))
+      .map(({ line }) => `${rel}:${line}`);
+
+    expect(
+      offenders,
+      'A plain `hover:` utility also matches :disabled. Now that caller paint is no ' +
+        'longer overridden by the variant, these repaint under the pointer on a control ' +
+        'the user cannot activate. Prefix the hover with `enabled:`.',
+    ).toEqual([]);
+  });
+
+  it('detects the defect it is meant to detect', () => {
+    const injected = `<Button disabled={busy} className="bg-pf-bg-1 hover:bg-pf-bg-0">x</Button>`;
+    const found = openingTags(injected).filter(
+      ({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag),
+    );
+    expect(found).toHaveLength(1);
+
+    const fixed = injected.replace('hover:', 'enabled:hover:');
+    expect(
+      openingTags(fixed).filter(({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag)),
+    ).toHaveLength(0);
+  });
+});
