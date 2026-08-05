@@ -11,7 +11,6 @@ import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { signalRService } from '@/services/harvest-signalr';
 import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 
@@ -228,20 +227,16 @@ export const GcodeFileBrowser = ({
     [onSelectionChange, selectedFileIds]
   );
 
-  const handleDownload = useCallback((file: FileItem) => {
+  const handleDownload = useCallback(async (file: FileItem) => {
     if (file.isDirectory) return;
     const gcodeFile = file.meta?.gcode as GcodeFile | undefined;
     const originalName = gcodeFile?.name || file.fileName;
-    const downloadUrl = `${getApiBaseUrl()}/gcode-files/file/${file.id}`;
-    
-    // Create a link with the original filename for download
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = originalName || 'gcode-file';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    try {
+      await apiClient.downloadGcodeFileById(file.id, originalName || 'gcode-file');
+    } catch {
+      toast.error('Failed to download G-code file');
+    }
   }, []);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; file: FileItem | null }>({

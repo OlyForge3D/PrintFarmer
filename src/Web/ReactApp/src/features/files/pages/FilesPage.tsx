@@ -551,34 +551,30 @@ export function FilesPage() {
     await fileBrowserRef.current?.refetch();
   }, []);
 
-  const handleDownloadModel = useCallback((file: FileItem) => {
+  const handleDownloadModel = useCallback(async (file: FileItem) => {
     const model = file.meta?.model3d as Model | undefined;
     if (!model) {
       return;
     }
 
-    const link = document.createElement('a');
-    link.href = `${getApiBaseUrl()}/3d-models/file/${model.id}`;
-    link.download = model.name;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      await apiClient.downloadModel3dFile(model.id, model.originalFileName || model.fileName || model.name);
+    } catch {
+      toast.error('Failed to download model');
+    }
   }, []);
 
-  const handleDownloadGcode = useCallback((file: FileItem) => {
+  const handleDownloadGcode = useCallback(async (file: FileItem) => {
     const gcode = file.meta?.gcode as GcodeFile | undefined;
     if (!gcode) {
       return;
     }
 
-    const link = document.createElement('a');
-    link.href = `${getApiBaseUrl()}/gcode-files/file/${gcode.id}`;
-    link.download = gcode.name;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    try {
+      await apiClient.downloadGcodeFileById(gcode.id, gcode.name);
+    } catch {
+      toast.error('Failed to download G-code file');
+    }
   }, []);
 
   const fetcher = useCallback(async (params: unknown, signal?: AbortSignal) => {

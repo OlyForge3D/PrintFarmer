@@ -60,7 +60,7 @@ public class MonitoringController(
     /// Returns 200 with X-Monitoring-User header on success, 401 on failure.
     /// </summary>
     [HttpGet("verify")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because reverse proxies use the monitoring cookie as the credential being verified.
     public async Task<IActionResult> VerifySessionAsync()
     {
         var cookie = Request.Cookies["pf_monitoring_session"];

@@ -611,7 +611,6 @@ public class GcodeFilesController(
     /// </summary>
     [HttpGet("download")]
     [HttpHead("download")]
-    [AllowAnonymous] // Thumbnails are served via this endpoint and img tags can't send auth headers
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult> DownloadAsync([FromQuery] string path)
@@ -644,7 +643,6 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="id">GCode file ID</param>
     /// <returns>GCode file</returns>
-    [AllowAnonymous]
     [HttpGet("file/{id:guid}")]
     [ProducesResponseType(typeof(FileContentResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -698,7 +696,7 @@ public class GcodeFilesController(
     /// <param name="id">GCode file ID</param>
     /// <returns>Thumbnail image</returns>
     [HttpGet("thumbnail/{id:guid}")]
-    [AllowAnonymous] // Allow unauthenticated access for <img> tags that can't include auth headers
+    [AllowAnonymous] // Public because print-preview image elements cannot attach bearer headers.
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetGcodeThumbnailAsync(Guid id)

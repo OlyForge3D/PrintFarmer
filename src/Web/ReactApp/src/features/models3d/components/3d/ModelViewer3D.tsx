@@ -20,6 +20,7 @@ import { DecimationPanel } from './DecimationPanel';
 import { decimateGeometry, type DecimationResult } from '../../utils/meshDecimation';
 import { exportSTL } from '../../utils/stlExporter';
 import { apiClient } from '@/services/api';
+import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { cloneThreeMfMeshesDroppedToBed } from '@/features/slicer/utils/threemf-display';
 import { parseThreeMfArchive, disposeParsedThreeMfModel, ThreeMfSecurityError } from '@/features/slicer/utils/threemf-parser';
 
@@ -45,6 +46,113 @@ interface ModelDimensions {
   depth: number;  // Y dimension in mm
   height: number; // Z dimension in mm
   volume?: number; // Approximate volume in mm³
+}
+
+function isAuthenticatedModelUrl(url: string): boolean {
+  try {
+    const apiBase = new URL(getApiBaseUrl(), window.location.origin);
+    const candidate = new URL(url, window.location.origin);
+    const apiPath = apiBase.pathname.replace(/\/$/, '');
+
+    return candidate.origin === apiBase.origin
+      && (
+        candidate.pathname.startsWith(`${apiPath}/3d-models/file/`)
+        || candidate.pathname === `${apiPath}/3d-models/download-for-viewer`
+      );
+  } catch {
+    return false;
+  }
+}
+
+async function loadModelArrayBuffer(url: string, signal: AbortSignal): Promise<ArrayBuffer> {
+  if (isAuthenticatedModelUrl(url)) {
+    const response = await apiClient.get<ArrayBuffer>(url, {
+      responseType: 'arraybuffer',
+      baseURL: '',
+      signal,
+    });
+    return response.data;
+  }
+
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Error(`Failed to load model (${response.status})`);
+  }
+
+  return response.arrayBuffer();
+}
+
+function AuthenticatedModelSource({
+  url,
+  children,
+}: {
+  url: string;
+  children: (resolvedUrl: string) => React.ReactNode;
+}) {
+  const requiresAuthentication = isAuthenticatedModelUrl(url);
+  const [loadedSource, setLoadedSource] = useState<{ source: string; objectUrl: string } | null>(null);
+  const [loadError, setLoadError] = useState<{ source: string; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!requiresAuthentication) {
+      return;
+    }
+
+    const controller = new AbortController();
+    let objectUrl: string | null = null;
+
+    void loadModelArrayBuffer(url, controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        objectUrl = window.URL.createObjectURL(new Blob([data]));
+        setLoadError(null);
+        setLoadedSource({ source: url, objectUrl });
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) {
+          setLoadError({
+            source: url,
+            message: error instanceof Error ? error.message : 'Failed to load model',
+          });
+        }
+      });
+
+    return () => {
+      controller.abort();
+      if (objectUrl) {
+        window.URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [requiresAuthentication, url]);
+
+  if (!requiresAuthentication) {
+    return <>{children(url)}</>;
+  }
+
+  if (loadError?.source === url) {
+    return (
+      <Html center>
+        <div className="max-w-xs rounded-lg border border-red-500/40 bg-pf-bg-1/95 px-3 py-2 text-xs text-red-400 shadow-lg backdrop-blur-sm">
+          {loadError.message}
+        </div>
+      </Html>
+    );
+  }
+
+  if (loadedSource?.source !== url) {
+    return (
+      <Html center>
+        <div className="rounded-lg border border-pf-border bg-pf-bg-2/90 px-4 py-2 text-sm text-pf-text-primary shadow-lg backdrop-blur-sm">
+          Loading model...
+        </div>
+      </Html>
+    );
+  }
+
+  return <>{children(loadedSource.objectUrl)}</>;
 }
 
 // View mode options
@@ -409,6 +517,7 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
 
     // Dispose previous geometry on re-run (url change)
     if (geometryRef.current) {
@@ -422,12 +531,10 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
       setFallbackUrl(null);
 
       try {
-        // url is already fully-qualified (built via getApiBaseUrl()); override baseURL
-        // to avoid Axios double-prefixing it with the instance's /api baseURL.
-        const response = await apiClient.get<ArrayBuffer>(url, { responseType: 'arraybuffer', baseURL: '' });
+        const data = await loadModelArrayBuffer(url, controller.signal);
         if (cancelled) return;
 
-        const parsed = await parseThreeMfArchive(response.data);
+        const parsed = await parseThreeMfArchive(data);
         if (cancelled) {
           disposeParsedThreeMfModel(parsed);
           return;
@@ -493,6 +600,7 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
     void load();
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [url, onDimensionsChange, onGeometryLoaded]);
 
@@ -517,7 +625,18 @@ function ThreeMFModel({ url, viewMode = 'solid', onDimensionsChange, onGeometryL
 
   // Non-security parse error — fall back to backend STL conversion
   if (fallbackUrl) {
-    return <STLModel url={fallbackUrl} viewMode={viewMode} onDimensionsChange={onDimensionsChange} onGeometryLoaded={onGeometryLoaded} />;
+    return (
+      <AuthenticatedModelSource url={fallbackUrl}>
+        {(resolvedUrl) => (
+          <STLModel
+            url={resolvedUrl}
+            viewMode={viewMode}
+            onDimensionsChange={onDimensionsChange}
+            onGeometryLoaded={onGeometryLoaded}
+          />
+        )}
+      </AuthenticatedModelSource>
+    );
   }
 
   // Loading state
@@ -1013,13 +1132,46 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
 
     switch (fileType) {
       case 'stl':
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+        return (
+          <AuthenticatedModelSource url={modelUrl}>
+            {(resolvedUrl) => (
+              <STLModel
+                url={resolvedUrl}
+                viewMode={viewMode}
+                onDimensionsChange={setModelDimensions}
+                onGeometryLoaded={handleGeometryLoaded}
+              />
+            )}
+          </AuthenticatedModelSource>
+        );
       case 'ply':
-        return <PLYModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+        return (
+          <AuthenticatedModelSource url={modelUrl}>
+            {(resolvedUrl) => (
+              <PLYModel
+                url={resolvedUrl}
+                viewMode={viewMode}
+                onDimensionsChange={setModelDimensions}
+                onGeometryLoaded={handleGeometryLoaded}
+              />
+            )}
+          </AuthenticatedModelSource>
+        );
       case '3mf':
         return <ThreeMFModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
       default:
-        return <STLModel url={modelUrl} viewMode={viewMode} onDimensionsChange={setModelDimensions} onGeometryLoaded={handleGeometryLoaded} />;
+        return (
+          <AuthenticatedModelSource url={modelUrl}>
+            {(resolvedUrl) => (
+              <STLModel
+                url={resolvedUrl}
+                viewMode={viewMode}
+                onDimensionsChange={setModelDimensions}
+                onGeometryLoaded={handleGeometryLoaded}
+              />
+            )}
+          </AuthenticatedModelSource>
+        );
     }
   };
 

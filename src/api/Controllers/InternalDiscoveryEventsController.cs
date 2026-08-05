@@ -21,7 +21,6 @@ namespace Farm.Web.Api.Controllers;
 /// fail-closed with a 401 ProblemDetails response.
 /// </remarks>
 [ApiController]
-[AllowAnonymous]
 [ApiExplorerSettings(IgnoreApi = true)]
 [Route(RouteBase)]
 public sealed class InternalDiscoveryEventsController(
@@ -45,6 +44,7 @@ public sealed class InternalDiscoveryEventsController(
 
     /// <summary>Publishes a redacted progress update for a live discovery session.</summary>
     [HttpPost("progress")]
+    [AllowAnonymous] // Public to JWT auth because trusted agents authenticate with X-Discovery-Service-Key.
     public async Task<IActionResult> ProgressAsync(
         [FromBody] InternalDiscoveryProgressDto progress,
         CancellationToken ct)
@@ -85,6 +85,7 @@ public sealed class InternalDiscoveryEventsController(
 
     /// <summary>Stores a network target server-side and publishes its redacted summary.</summary>
     [HttpPost("printer-found")]
+    [AllowAnonymous] // Public to JWT auth because trusted agents authenticate with X-Discovery-Service-Key.
     public async Task<IActionResult> PrinterFoundAsync(
         [FromBody] InternalDiscoveryPrinterFoundDto found,
         CancellationToken ct)
@@ -117,6 +118,7 @@ public sealed class InternalDiscoveryEventsController(
 
     /// <summary>Publishes a redacted completion update for a live discovery session.</summary>
     [HttpPost("completed")]
+    [AllowAnonymous] // Public to JWT auth because trusted agents authenticate with X-Discovery-Service-Key.
     public async Task<IActionResult> CompletedAsync(
         [FromBody] InternalDiscoveryCompletedDto completed,
         CancellationToken ct)

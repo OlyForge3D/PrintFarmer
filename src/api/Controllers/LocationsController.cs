@@ -31,7 +31,6 @@ public class LocationsController(
     /// <summary>
     /// Gets all printer locations (flat list).
     /// </summary>
-    [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<LocationDto>), 200)]
     [ProducesResponseType(503)]
@@ -63,7 +62,6 @@ public class LocationsController(
     /// </summary>
     /// <param name="rootId">Optional root ID to get a subtree.</param>
     /// <param name="ct">Cancellation token.</param>
-    [AllowAnonymous]
     [HttpGet("tree")]
     [ProducesResponseType(typeof(List<LocationTreeDto>), 200)]
     [ProducesResponseType(503)]
@@ -89,7 +87,6 @@ public class LocationsController(
     /// <summary>
     /// Gets a specific location by ID.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(LocationDetailsDto), 200)]
     [ProducesResponseType(404)]
@@ -120,7 +117,6 @@ public class LocationsController(
     /// <summary>
     /// Gets the ancestor chain for a location (for breadcrumbs).
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("{id}/ancestors")]
     [ProducesResponseType(typeof(List<LocationBreadcrumbDto>), 200)]
     [ProducesResponseType(503)]
@@ -146,7 +142,6 @@ public class LocationsController(
     /// <summary>
     /// Gets all descendants of a location (flat list).
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("{id}/descendants")]
     [ProducesResponseType(typeof(List<LocationDto>), 200)]
     [ProducesResponseType(503)]
@@ -343,7 +338,6 @@ public class LocationsController(
     /// Gets all printers in a location's subtree (the location itself and all descendant locations).
     /// Returns lightweight printer summaries with real-time status.
     /// </summary>
-    [AllowAnonymous]
     [HttpGet("{id}/printers/subtree")]
     [ProducesResponseType(typeof(List<LocationSubtreePrinterDto>), 200)]
     [ProducesResponseType(503)]

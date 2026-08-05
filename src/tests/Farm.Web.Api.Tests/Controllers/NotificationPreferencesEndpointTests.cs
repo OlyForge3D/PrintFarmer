@@ -26,11 +26,11 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// case-sensitivity, ProblemDetails 400 shape. These tests exercise the
 /// full request pipeline via <see cref="CustomWebApplicationFactory"/> so
 /// a regression that only surfaces at the pipeline boundary (e.g., an
-/// anonymous filter is dropped, a route template changes, a case-insensitive
+/// authorization metadata changes, a route template changes, a case-insensitive
 /// enum converter slips in) is caught here.
 ///
 /// Coverage:
-/// * Anonymous GET /api/notifications/preferences/capabilities -&gt; 200 with
+/// * Authenticated GET /api/notifications/preferences/capabilities -&gt; 200 with
 ///   camelCase payload and exactly nine PascalCase enum tokens.
 /// * Authenticated GET /api/notifications/preferences -&gt; 200 with camelCase
 ///   payload, all nine rows materialized, and defaults matching the
@@ -73,15 +73,14 @@ public sealed class NotificationPreferencesEndpointTests : IAsyncLifetime
         return Task.CompletedTask;
     }
 
-    [Fact(DisplayName = "GET /api/notifications/preferences/capabilities is anonymous and publishes exactly nine PascalCase tokens")]
-    public async Task CapabilitiesEndpoint_Anonymous_PublishesNinePascalCaseTokens()
+    [Fact(DisplayName = "Authenticated GET /api/notifications/preferences/capabilities publishes exactly nine PascalCase tokens")]
+    public async Task CapabilitiesEndpoint_Authenticated_PublishesNinePascalCaseTokens()
     {
-        // Hicks #8: real HTTP round-trip proves the route is anonymously
-        // accessible and the wire shape uses camelCase property names with
-        // PascalCase enum tokens. A future refactor that accidentally added
-        // [Authorize] or flipped the JSON naming would surface here.
-        HttpResponseMessage response = await _anonClient!.GetAsync("/api/notifications/preferences/capabilities");
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "the capabilities probe MUST remain anonymous");
+        // Hicks #8: real HTTP round-trip proves the route is authenticated
+        // and the wire shape uses camelCase property names with
+        // PascalCase enum tokens. A future JSON naming regression surfaces here.
+        HttpResponseMessage response = await _authClient!.GetAsync("/api/notifications/preferences/capabilities");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         string body = await response.Content.ReadAsStringAsync();
         using JsonDocument doc = JsonDocument.Parse(body);

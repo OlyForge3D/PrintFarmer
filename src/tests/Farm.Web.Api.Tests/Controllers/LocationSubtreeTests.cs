@@ -27,7 +27,11 @@ public class LocationSubtreeTests : IAsyncLifetime
 
     public LocationSubtreeTests()
     {
-        _factory = new CustomWebApplicationFactory();
+        _factory = new CustomWebApplicationFactory(
+            new Dictionary<string, string?>
+            {
+                ["Testing:UseTestAuthentication"] = "true",
+            });
     }
 
     public async Task InitializeAsync()

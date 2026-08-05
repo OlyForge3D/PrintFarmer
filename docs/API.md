@@ -18,6 +18,15 @@ Authorization: Bearer <token>
 
 Tokens are obtained via login and typically stored in secure HttpOnly cookies.
 
+Controller actions fail closed through a global authorization fallback policy.
+Only explicitly reviewed actions opt out, including authentication and first-run
+setup flows, health and capability probes, browser thumbnail resources, and
+compatibility routes secured by service-specific API keys.
+
+`Security:DevModeBypassAuth` can bypass authorization for safe HTTP methods only
+when the host environment is `Development`. The effective bypass state is logged
+at startup, and a configured bypass is ignored in every other environment.
+
 ## Response Format
 
 All API responses use camelCase JSON (for TypeScript compatibility):
@@ -775,7 +784,7 @@ DELETE /api/printers/{printerId}/location
 GET /api/locations
 ```
 
-**Authentication:** Not required  
+**Authentication:** Required
 **Response:**
 ```json
 [
@@ -800,7 +809,7 @@ GET /api/locations
 GET /api/locations/tree?rootId=optional-uuid
 ```
 
-**Authentication:** Not required  
+**Authentication:** Required
 **Query Parameters:**
 - `rootId` (optional, UUID) - Get subtree from specified node. Omit for full tree.
 
@@ -845,7 +854,7 @@ GET /api/locations/tree?rootId=optional-uuid
 GET /api/locations/{locationId}
 ```
 
-**Authentication:** Not required  
+**Authentication:** Required
 **Path Parameters:**
 - `locationId` (required, UUID) - Location to retrieve
 
@@ -877,7 +886,7 @@ GET /api/locations/{locationId}
 GET /api/locations/{locationId}/ancestors
 ```
 
-**Authentication:** Not required  
+**Authentication:** Required
 **Path Parameters:**
 - `locationId` (required, UUID) - Starting location
 
@@ -915,7 +924,7 @@ GET /api/locations/{locationId}/ancestors
 GET /api/locations/{locationId}/descendants
 ```
 
-**Authentication:** Not required  
+**Authentication:** Required
 **Path Parameters:**
 - `locationId` (required, UUID) - Root of subtree to retrieve
 

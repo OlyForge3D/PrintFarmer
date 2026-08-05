@@ -6,12 +6,12 @@ namespace Farm.Web.Api.Controllers;
 
 [Route("api/schema-health")]
 [ApiController]
-[AllowAnonymous] // Readiness probes need anonymous access and return only a boolean schema-ready status.
 public class SchemaHealthController(ISchemaHealthService health) : ControllerBase
 {
     private readonly ISchemaHealthService _health = health;
 
     [HttpGet("ready")]
+    [AllowAnonymous] // Public because deployment readiness probes cannot obtain application credentials.
     public async Task<IActionResult> SchemaReadyAsync(CancellationToken ct)
     {
         bool ready = await _health.IsSchemaReadyAsync(ct);

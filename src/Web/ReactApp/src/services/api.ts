@@ -2456,16 +2456,35 @@ export class ApiClient {
   }
 
   async downloadGcodeFile(filePath: string, originalName?: string): Promise<void> {
-    const response = await this.client.get(`/gcode-files/download`, {
+    const response = await this.client.get<Blob>(`/gcode-files/download`, {
       params: { path: filePath },
       responseType: "blob",
     });
 
-    // Create a download link using original filename if available
-    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const fileName = originalName || filePath.split("/").pop() || "file.gcode";
+    this.triggerBrowserDownload(response.data, fileName);
+  }
+
+  async downloadGcodeFileById(id: string, originalName: string): Promise<void> {
+    const response = await this.client.get<Blob>(`/gcode-files/file/${id}`, {
+      responseType: "blob",
+    });
+
+    this.triggerBrowserDownload(response.data, originalName || "file.gcode");
+  }
+
+  async downloadModel3dFile(id: string, originalName: string): Promise<void> {
+    const response = await this.client.get<Blob>(`/3d-models/file/${id}`, {
+      responseType: "blob",
+    });
+
+    this.triggerBrowserDownload(response.data, originalName || "model");
+  }
+
+  private triggerBrowserDownload(blob: Blob, fileName: string): void {
+    const url = window.URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    const fileName = originalName || filePath.split("/").pop() || "file.gcode";
     link.setAttribute("download", fileName);
     document.body.appendChild(link);
     link.click();

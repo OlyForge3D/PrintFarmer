@@ -211,7 +211,6 @@ public class JobSchedulingController(JobSchedulingService schedulingService, ILo
     /// Get all available timezones
     /// </summary>
     [HttpGet("timezones")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(IEnumerable<TimeZoneDto>), 200)]
     public ActionResult<IEnumerable<TimeZoneDto>> GetAvailableTimeZones()
     {

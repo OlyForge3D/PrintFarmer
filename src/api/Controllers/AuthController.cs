@@ -36,7 +36,7 @@ public class AuthController(
     private readonly Farm.Infrastructure.Services.Authentication.IApiKeyExchangeService _apiKeyExchangeService = apiKeyExchangeService;
 
     [HttpPost("login")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because callers cannot obtain an access token until they authenticate here.
     public async Task<ActionResult<AuthenticationResult>> LoginAsync([FromBody] LoginRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -59,7 +59,7 @@ public class AuthController(
     }
 
     [HttpPost("register")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because first-time users must create an account before they can authenticate.
     public async Task<ActionResult<AuthenticationResult>> RegisterAsync([FromBody] RegisterRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -105,7 +105,7 @@ public class AuthController(
     }
 
     [HttpPost("api-key/exchange")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because the API key supplied in the request is the credential being exchanged.
     [ProducesResponseType(typeof(ApiKeyExchangeResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ApiKeyExchangeResponse>> ExchangeApiKeyAsync([FromBody] ApiKeyExchangeRequest request, CancellationToken cancellationToken)
@@ -223,7 +223,7 @@ public class AuthController(
     }
 
     [HttpPost("forgot-password")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because users who forgot their password cannot authenticate before requesting a reset.
     [ProducesResponseType(typeof(ForgotPasswordResponse), StatusCodes.Status200OK)]
     public async Task<ActionResult<ForgotPasswordResponse>> ForgotPasswordAsync([FromBody] ForgotPasswordRequest request)
     {
@@ -263,7 +263,7 @@ public class AuthController(
     }
 
     [HttpPost("reset-password")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because the single-use reset token is the credential for this recovery operation.
     [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ResetPasswordResponse), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ResetPasswordResponse>> ResetPasswordAsync([FromBody] ResetPasswordRequest request)
@@ -322,7 +322,7 @@ public class AuthController(
     }
 
     [HttpPost("confirm-email")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because the confirmation token is issued before the user may have an authenticated session.
     [ProducesResponseType(typeof(ConfirmEmailResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ConfirmEmailResponse), StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ConfirmEmailResponse>> ConfirmEmailAsync([FromBody] ConfirmEmailRequest request)
@@ -471,7 +471,7 @@ public class AuthController(
     /// for the browser's <c>navigator.credentials.get()</c> call.
     /// </summary>
     [HttpPost("passkey/login/begin")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because passkey assertion options are required to start authentication.
     [ProducesResponseType(typeof(AssertionOptions), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyLoginBeginAsync(
@@ -501,7 +501,7 @@ public class AuthController(
     /// Full assertion verification against stored credentials is deferred to #354.
     /// </summary>
     [HttpPost("passkey/login/complete")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because the signed passkey assertion is the credential being verified.
     [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

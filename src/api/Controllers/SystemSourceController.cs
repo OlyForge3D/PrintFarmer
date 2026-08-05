@@ -35,7 +35,7 @@ public sealed partial class SystemSourceController(IConfiguration configuration)
     /// Returns immutable source, license, notice, and SBOM links for this build.
     /// </summary>
     /// <returns>Public corresponding-source metadata.</returns>
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because corresponding source must remain accessible to every recipient.
     [HttpGet("source")]
     [ProducesResponseType(typeof(SourceInfoResponse), StatusCodes.Status200OK)]
     public ActionResult<SourceInfoResponse> GetSource()

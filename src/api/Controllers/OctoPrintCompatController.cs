@@ -23,7 +23,6 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api")]
-[AllowAnonymous] // Uses the OctoPrint API-key filter instead of PrintFarmer bearer auth for slicer compatibility.
 [OctoPrintApiKey] // Validates API key based on OctoPrintSettings.RequireApiKey
 public class OctoPrintCompatController : ControllerBase
 {
@@ -52,6 +51,7 @@ public class OctoPrintCompatController : ControllerBase
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
+    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "OctoPrint compatibility uploads are explicitly capped at 50 MB.")]
     [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
     [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
@@ -244,6 +244,7 @@ public class OctoPrintCompatController : ControllerBase
     /// Slicers use this to verify OctoPrint compatibility
     /// </summary>
     [HttpGet("version")]
+    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
     public IActionResult GetVersion()
     {
         // API key validation handled by [OctoPrintApiKey] filter at controller level
@@ -259,6 +260,7 @@ public class OctoPrintCompatController : ControllerBase
     /// OctoPrint API: Get server status
     /// </summary>
     [HttpGet("server")]
+    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
     public IActionResult GetServer()
     {
         // API key validation handled by [OctoPrintApiKey] filter at controller level

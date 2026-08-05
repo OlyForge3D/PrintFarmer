@@ -402,7 +402,7 @@ public partial class SliceJobController(
     /// <param name="request">Claim request with worker details.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("claim")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because workers use their registry key and service identity.
     public async Task<IActionResult> ClaimAsync([FromBody] ClaimJobRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -454,7 +454,7 @@ public partial class SliceJobController(
     /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/progress")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
     public async Task<IActionResult> ReportProgressAsync(
         Guid id,
         [FromBody] SliceJobProgressUpdateRequest request,
@@ -499,7 +499,7 @@ public partial class SliceJobController(
     /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/complete")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
     public async Task<IActionResult> CompleteAsync(
         Guid id,
         [FromBody] CompleteSliceJobRequest request,
@@ -619,7 +619,7 @@ public partial class SliceJobController(
     /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/fail")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
     public async Task<IActionResult> FailAsync(
         Guid id,
         [FromBody] FailSliceJobRequest request,
@@ -670,7 +670,7 @@ public partial class SliceJobController(
     /// <param name="claimToken">The active claim incarnation.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/renew-lease")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
     public async Task<IActionResult> RenewLeaseAsync(
         Guid id,
         [FromBody] RenewLeaseRequest request,
@@ -699,7 +699,7 @@ public partial class SliceJobController(
 
     /// <summary>Downloads the model assigned to the authenticated worker for a claimed job.</summary>
     [HttpGet("{id}/model")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the worker supplies its key, identity, and claim token.
     public Task<IActionResult> DownloadWorkerModelAsync(
         Guid id,
         [FromHeader(Name = WorkerClaimHeaders.ClaimToken)] Guid claimToken,
@@ -708,7 +708,7 @@ public partial class SliceJobController(
 
     /// <summary>Downloads one model from a multi-model job assigned to the authenticated worker.</summary>
     [HttpGet("{id}/models/{modelIndex:int}")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the worker supplies its key, identity, and claim token.
     public Task<IActionResult> DownloadWorkerModelAsync(
         Guid id,
         int modelIndex,
@@ -741,47 +741,19 @@ public partial class SliceJobController(
 
         // Canonical path: bytes are resolved by stored identity through an ownership-checked
         // resolver. A caller-supplied URL is never dereferenced.
-        if (job.Model3DId is { } model3DId)
+        if (modelIndex is null && job.Model3DId is { } model3DId)
         {
-            if (_modelStorage is null)
-            {
-                return StatusCode(StatusCodes.Status503ServiceUnavailable);
-            }
-
-            ModelResolutionResult resolution = await _modelStorage.OpenAsync(model3DId, job.UserId, job.ModelSha256, ct);
-            if (!resolution.Succeeded)
-            {
-                return resolution.Failure switch
-                {
-                    ModelResolutionFailure.Forbidden => SlicerApiProblems.ResourceForbidden(this),
-                    ModelResolutionFailure.HashMismatch => Conflict(new { error = "The stored model no longer matches its recorded hash.", code = "model_hash_mismatch" }),
-                    _ => NotFound(),
-                };
-            }
-
-            ResolvedModelContent content = resolution.Content!;
-            SliceJob? authorizedAfterOpen = await _jobRepository.GetByActiveWorkerLeaseAsync(
+            return await DownloadStoredWorkerModelAsync(
                 id,
+                job,
                 worker.Id,
                 claimToken,
+                model3DId,
+                job.ModelSha256,
                 ct);
-            if (authorizedAfterOpen is null)
-            {
-#pragma warning disable IDISP007 // The resolver transfers ownership of the returned stream to this action.
-                await content.Content.DisposeAsync();
-#pragma warning restore IDISP007
-                return await GetLeaseFenceFailureAsync(id, ct);
-            }
-
-            return File(content.Content, content.ContentType, content.FileName);
         }
 
         // Legacy path for pre-existing non-calibration jobs that only recorded a storage key.
-        if (_fileStorage is null)
-        {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable);
-        }
-
         string modelUrl = job.ModelFileUrl;
         string modelFileName = job.ModelFileName;
         if (modelIndex is not null)
@@ -796,6 +768,23 @@ public partial class SliceJobController(
             modelFileName = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? modelUri)
                 ? Path.GetFileName(modelUri.LocalPath)
                 : Path.GetFileName(modelUrl);
+        }
+
+        if (TryGetStoredModelId(modelUrl, out Guid storedModelId))
+        {
+            return await DownloadStoredWorkerModelAsync(
+                id,
+                job,
+                worker.Id,
+                claimToken,
+                storedModelId,
+                expectedSha256: null,
+                ct);
+        }
+
+        if (_fileStorage is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
         }
 
         try
@@ -824,6 +813,74 @@ public partial class SliceJobController(
         }
     }
 
+    private async Task<IActionResult> DownloadStoredWorkerModelAsync(
+        Guid jobId,
+        SliceJob job,
+        Guid workerId,
+        Guid claimToken,
+        Guid model3DId,
+        string? expectedSha256,
+        CancellationToken ct)
+    {
+        if (_modelStorage is null)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        }
+
+        ModelResolutionResult resolution = await _modelStorage.OpenAsync(
+            model3DId,
+            job.UserId,
+            expectedSha256,
+            ct);
+        if (!resolution.Succeeded)
+        {
+            return resolution.Failure switch
+            {
+                ModelResolutionFailure.Forbidden => SlicerApiProblems.ResourceForbidden(this),
+                ModelResolutionFailure.HashMismatch => Conflict(new
+                {
+                    error = "The stored model no longer matches its recorded hash.",
+                    code = "model_hash_mismatch",
+                }),
+                _ => NotFound(),
+            };
+        }
+
+        ResolvedModelContent content = resolution.Content!;
+        SliceJob? authorizedAfterOpen = await _jobRepository.GetByActiveWorkerLeaseAsync(
+            jobId,
+            workerId,
+            claimToken,
+            ct);
+        if (authorizedAfterOpen is null)
+        {
+#pragma warning disable IDISP007 // The resolver transfers ownership of the returned stream to this action.
+            await content.Content.DisposeAsync();
+#pragma warning restore IDISP007
+            return await GetLeaseFenceFailureAsync(jobId, ct);
+        }
+
+        return File(content.Content, content.ContentType, content.FileName);
+    }
+
+    private static bool TryGetStoredModelId(string modelUrl, out Guid model3DId)
+    {
+        model3DId = Guid.Empty;
+        string path = Uri.TryCreate(modelUrl, UriKind.Absolute, out Uri? absoluteUri)
+            ? absoluteUri.AbsolutePath
+            : modelUrl.Split('?', 2)[0];
+        const string routeMarker = "/api/3d-models/file/";
+        int routeIndex = path.LastIndexOf(routeMarker, StringComparison.OrdinalIgnoreCase);
+        if (routeIndex < 0)
+        {
+            return false;
+        }
+
+        string candidate = path[(routeIndex + routeMarker.Length)..].Trim('/');
+        return !candidate.Contains('/')
+            && Guid.TryParse(candidate, out model3DId);
+    }
+
     /// <summary>Uploads a verified artifact for a job owned by the authenticated worker.</summary>
     /// <param name="id">The claimed job ID.</param>
     /// <param name="file">The artifact bytes.</param>
@@ -833,7 +890,7 @@ public partial class SliceJobController(
     /// <param name="sizeBytes">Byte count the worker computed over the bytes it is sending.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/artifacts")]
-    [WorkerApiKeySecurity]
+    [WorkerApiKeySecurity] // Public to JWT auth because the claimed worker supplies its key, identity, and lease.
     public async Task<IActionResult> UploadWorkerArtifactAsync(
         Guid id,
         IFormFile file,

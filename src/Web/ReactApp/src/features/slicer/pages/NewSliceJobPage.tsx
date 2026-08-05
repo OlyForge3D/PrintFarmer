@@ -1794,6 +1794,9 @@ export const NewSliceJobPage: React.FC = () => {
       userId: user?.id || '',
       printerId: undefined,
       modelFileUrl: effectiveModelFileUrl,
+      model3DId: payloadModels.modelFileUrls.length <= 1
+        ? (primaryModel?.id || selectedModelId || undefined)
+        : undefined,
       modelFileName: effectiveModelFileName,
       slicerEngine: slicerInfo.engine,
       // Issue #578 dual-engine: when the user leaves the dropdown on "Latest"

@@ -44,7 +44,6 @@ public class SpoolmanController(
     /// <response code="200">Returns probe result (success may be true/false)</response>
     [HttpPost("test")]
     [ProducesResponseType(StatusCodes.Status200OK)]
-    [AllowAnonymous]
     public async Task<IActionResult> TestAsync([FromBody] SpoolmanConfigDto? request, CancellationToken ct)
     {
         if (request is null || string.IsNullOrWhiteSpace(request.BaseUrl))
@@ -1332,7 +1331,6 @@ public class SpoolmanController(
     /// <response code="200">Returns list of discovered Spoolman instances</response>
     [HttpPost("scan-network")]
     [ProducesResponseType(typeof(IEnumerable<SpoolmanDiscoveryResult>), StatusCodes.Status200OK)]
-    [AllowAnonymous]
     public async Task<IActionResult> ScanNetworkAsync(CancellationToken ct)
     {
         try

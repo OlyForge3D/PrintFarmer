@@ -214,7 +214,6 @@ public class NotificationsController(INotificationService notificationService) :
     /// </summary>
     [HttpGet("preferences/capabilities")]
     [ProducesResponseType(typeof(NotificationPreferencesCapabilitiesDto), StatusCodes.Status200OK)]
-    [AllowAnonymous]
     public ActionResult<NotificationPreferencesCapabilitiesDto> GetPreferencesCapabilities()
     {
         // Enum members are converted to the same PascalCase value tokens the
@@ -459,7 +458,6 @@ public class NotificationsController(INotificationService notificationService) :
     /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
     /// </summary>
     [HttpGet("attention-categories")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(AttentionCategoryCatalogDto), StatusCodes.Status200OK)]
     public ActionResult<AttentionCategoryCatalogDto> GetAttentionCategories()
     {
