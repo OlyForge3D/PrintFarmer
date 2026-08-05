@@ -1,22 +1,26 @@
 /**
- * useTheme — Design System v2 hook
+ * useTheme - Design System v2 hook
  *
  * Exposes the canonical design-system themes. Wraps the full ThemeContext
  * internally so existing code using ThemeContext directly is unaffected.
  */
-import { useTheme as useThemeContext } from '@/contexts/ThemeContext';
+import { useTheme as useThemeContext, SELECTABLE_THEMES } from '@/contexts/ThemeContext';
+import type { SelectableTheme } from '@/contexts/ThemeContext';
 
-export type NewTheme = 'light' | 'dark' | 'matrix' | 'blueprint' | 'ratos' | 'voron' | 'farm';
+export type NewTheme = SelectableTheme;
 
-const NEW_THEMES: NewTheme[] = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'];
+const NEW_THEMES: readonly NewTheme[] = SELECTABLE_THEMES;
 
 function isNewTheme(t: string): t is NewTheme {
-  return NEW_THEMES.includes(t as NewTheme);
+  return (SELECTABLE_THEMES as readonly string[]).includes(t);
 }
 
 export function useTheme() {
   const ctx = useThemeContext();
 
+  // `computedTheme` already excludes 'system', and retired names are migrated
+  // on read in ThemeContext, so this guard is belt-and-braces rather than a
+  // silent coercion of a theme the user actually chose.
   const activeTheme: NewTheme = isNewTheme(ctx.computedTheme) ? ctx.computedTheme : 'dark';
 
   const setTheme = (theme: NewTheme) => ctx.setTheme(theme);

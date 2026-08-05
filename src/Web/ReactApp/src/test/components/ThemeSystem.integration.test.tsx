@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme, SELECTABLE_THEMES } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/common/components/ThemeToggle';
 
 // Mock localStorage
@@ -171,45 +171,19 @@ describe('Theme System Integration', () => {
     );
     
     const toggle = screen.getByRole('button');
-    
-    // Start: light
+    const cycle = [...SELECTABLE_THEMES, 'system'];
+
     expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: light');
-    
-    // Click 1: light -> github-dark
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: github-dark');
-    
-    // Click 2: github-dark -> printfarmer-dark
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: printfarmer-dark');
-    
-    // Click 3: printfarmer-dark -> matrix
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: matrix');
-    
-    // Click 4: matrix -> forge
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: forge');
-    
-    // Click 5: forge -> system
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: system');
-    
-    // Click 6: system -> light
-    await act(async () => {
-      fireEvent.click(toggle);
-    });
-    expect(screen.getByTestId('current-theme')).toHaveTextContent('Theme: light');
+
+    // One extra click, to prove the cycle wraps.
+    for (let i = 1; i <= cycle.length; i++) {
+      await act(async () => {
+        fireEvent.click(toggle);
+      });
+      expect(screen.getByTestId('current-theme').textContent).toBe(
+        `Theme: ${cycle[i % cycle.length]}`
+      );
+    }
   });
 
   it('dispatches theme change events', async () => {

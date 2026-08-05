@@ -1,7 +1,21 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 
-export type Theme = 'github-dark' | 'printfarmer-dark' | 'light' | 'matrix' | 'forge' | 'dark' | 'blueprint' | 'ratos' | 'voron' | 'farm' | 'system';
+/**
+ * The themes a user can actually pick. Each has a stylesheet in
+ * `src/design-system/themes/` and an entry in `ThemeSwitcher`.
+ *
+ * Keep in sync with:
+ *   - the `VALID` list in `index.html` (omitting one there causes a flash of
+ *     `dark` on load until React hydrates)
+ *   - `THEME_OPTIONS` in `src/common/components/ThemeSwitcher.tsx`
+ * `src/test/contexts/themeRegistry.test.ts` fails if these drift apart.
+ */
+export const SELECTABLE_THEMES = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'] as const;
+
+export type SelectableTheme = (typeof SELECTABLE_THEMES)[number];
+
+export type Theme = SelectableTheme | 'system';
 
 interface ThemeContextType {
   theme: Theme;
@@ -19,10 +33,29 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const THEME_STORAGE_KEY = 'pf-theme';
 const LEGACY_STORAGE_KEY = 'printfarmer-theme';
-const LEGACY_THEME_MAP: Partial<Record<string, Theme>> = {
+
+/**
+ * Themes that were removed. Their stylesheets lived in `src/styles/themes/`,
+ * which is imported into `layer(base)` while the design-system themes are
+ * unlayered — so their declarations never won the cascade and every one of
+ * them rendered byte-identical `dark`. Migrating them to `dark` preserves what
+ * users were actually seeing.
+ */
+const RETIRED_THEME_MAP: Record<string, Theme> = {
   'printfarmer-dark': 'dark',
   'github-dark': 'dark',
+  forge: 'dark',
 };
+
+function normalizeTheme(value: string | null, fallback: Theme): Theme {
+  if (!value) return fallback;
+  const retired = RETIRED_THEME_MAP[value];
+  if (retired) return retired;
+  if (value === 'system' || (SELECTABLE_THEMES as readonly string[]).includes(value)) {
+    return value as Theme;
+  }
+  return fallback;
+}
 
 export function ThemeProvider({ 
   children, 
@@ -38,14 +71,13 @@ export function ThemeProvider({
     if (storageKey === THEME_STORAGE_KEY) {
       const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
       if (legacy) {
-        const mapped = LEGACY_THEME_MAP[legacy] ?? (legacy as Theme);
+        const mapped = normalizeTheme(legacy, defaultTheme);
         localStorage.setItem(storageKey, mapped);
         localStorage.removeItem(LEGACY_STORAGE_KEY);
         return mapped;
       }
     }
-    const stored = localStorage.getItem(storageKey);
-    return (stored as Theme) || defaultTheme;
+    return normalizeTheme(localStorage.getItem(storageKey), defaultTheme);
   });
 
   // Track system preference for 'system' theme
@@ -111,13 +143,10 @@ export function ThemeProvider({
 
   // Apply theme to DOM and save to localStorage
   useEffect(() => {
-    // Apply the computed theme via data-theme attribute
-    // github-dark is the default (no attribute needed), others need explicit attribute
-    if (computedTheme === 'github-dark') {
-      document.documentElement.removeAttribute('data-theme');
-    } else {
-      document.documentElement.setAttribute('data-theme', computedTheme);
-    }
+    // Every theme is explicit. There is no "default with no attribute" case —
+    // index.html sets data-theme before first paint, so a bare :root selector
+    // would never match anyway.
+    document.documentElement.setAttribute('data-theme', computedTheme);
 
     // Apply CSS variables for accessibility
     if (accessibility.prefersReducedMotion) {
@@ -141,7 +170,7 @@ export function ThemeProvider({
 
   const toggleTheme = useCallback(() => {
     setThemeState(current => {
-    const cycle: Theme[] = ['light', 'github-dark', 'printfarmer-dark', 'matrix', 'forge', 'system'];
+      const cycle: Theme[] = [...SELECTABLE_THEMES, 'system'];
       const currentIndex = cycle.indexOf(current);
       const nextIndex = (currentIndex + 1) % cycle.length;
       return cycle[nextIndex];

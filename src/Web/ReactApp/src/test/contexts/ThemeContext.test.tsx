@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences, SELECTABLE_THEMES } from '@/contexts/ThemeContext';
+import type { Theme } from '@/contexts/ThemeContext';
 import { ReactNode } from 'react';
 
 // Mock localStorage
@@ -35,7 +36,7 @@ function TestComponent() {
       <div data-testid="reduced-motion">{prefersReducedMotion ? 'true' : 'false'}</div>
       <div data-testid="high-contrast">{prefersHighContrast ? 'true' : 'false'}</div>
       <button data-testid="set-light" onClick={() => setTheme('light')}>Set Light</button>
-      <button data-testid="set-dark" onClick={() => setTheme('github-dark')}>Set Dark</button>
+      <button data-testid="set-dark" onClick={() => setTheme('dark')}>Set Dark</button>
       <button data-testid="set-system" onClick={() => setTheme('system')}>Set System</button>
       <button data-testid="toggle-theme" onClick={toggleTheme}>Toggle</button>
     </div>
@@ -55,10 +56,10 @@ function TestHooks() {
   );
 }
 
-type ThemeType = 'github-dark' | 'printfarmer-dark' | 'light' | 'system';
+type ThemeType = Theme;
 const renderWithThemeProvider = (
   ui: ReactNode, 
-  { defaultTheme = 'github-dark' as ThemeType, storageKey = 'test-theme' }: { defaultTheme?: ThemeType, storageKey?: string } = {}
+  { defaultTheme = 'dark' as ThemeType, storageKey = 'test-theme' }: { defaultTheme?: ThemeType, storageKey?: string } = {}
 ) => {
   return render(
     <ThemeProvider defaultTheme={defaultTheme} storageKey={storageKey}>
@@ -95,8 +96,8 @@ describe('ThemeContext', () => {
     it('provides default theme values', () => {
       renderWithThemeProvider(<TestComponent />);
       
-      expect(screen.getByTestId('theme')).toHaveTextContent('github-dark');
-      expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark');
+      expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+      expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark');
       expect(screen.getByTestId('reduced-motion')).toHaveTextContent('false');
       expect(screen.getByTestId('high-contrast')).toHaveTextContent('false');
     });
@@ -117,19 +118,26 @@ describe('ThemeContext', () => {
       expect(screen.getByTestId('theme')).toHaveTextContent('light');
     });
 
-    it('ignores invalid localStorage values', () => {
-      // localStorage returns the string value, but our implementation doesn't validate
-      // so an invalid value would be stored as-is. This test should check that
-      // invalid values are handled gracefully (either ignored or defaulted)
-      // For now, the implementation accepts whatever is in localStorage, so this test
-      // validates that behavior
+    it('falls back to the default theme for unrecognised localStorage values', () => {
+      // Previously this test asserted the opposite of its own name: the value
+      // was loaded verbatim and applied as a data-theme attribute matching no
+      // stylesheet. ThemeContext now validates on read.
       localStorageMock.getItem.mockReturnValue('invalid-theme');
-      
+
       renderWithThemeProvider(<TestComponent />);
-      
-      // The component should have loaded 'invalid-theme' from localStorage
-      // (implementation doesn't validate), so we check it's been set
-      expect(screen.getByTestId('theme')).toHaveTextContent('invalid-theme');
+
+      expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+    });
+
+    it('migrates a retired theme to dark', () => {
+      // forge/github-dark/printfarmer-dark rendered as dark anyway — their
+      // stylesheets were in layer(base) and lost the cascade to the unlayered
+      // design-system themes — so this preserves what users actually saw.
+      localStorageMock.getItem.mockReturnValue('forge');
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(screen.getByTestId('theme')).toHaveTextContent('dark');
     });
 
     it('sets custom storage key', () => {
@@ -154,16 +162,16 @@ describe('ThemeContext', () => {
       expect(localStorageMock.setItem).toHaveBeenCalledWith('test-theme', 'light');
     });
 
-    it('allows setting github-dark theme', async () => {
+    it('allows setting dark theme', async () => {
       renderWithThemeProvider(<TestComponent />, { defaultTheme: 'light' });
       
       await act(async () => {
         screen.getByTestId('set-dark').click();
       });
       
-      expect(screen.getByTestId('theme')).toHaveTextContent('github-dark');
-      expect(screen.getByTestId('computed-theme')).toHaveTextContent('github-dark');
-      expect(localStorageMock.setItem).toHaveBeenCalledWith('test-theme', 'github-dark');
+      expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+      expect(screen.getByTestId('computed-theme')).toHaveTextContent('dark');
+      expect(localStorageMock.setItem).toHaveBeenCalledWith('test-theme', 'dark');
     });
 
     it('allows setting system theme', async () => {
@@ -180,98 +188,36 @@ describe('ThemeContext', () => {
   });
 
   describe('toggleTheme', () => {
-    it('toggles through themes in order: light → github-dark → printfarmer-dark → system → light', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'light' });
-      
-      // Start at light
-      expect(screen.getByTestId('theme')).toHaveTextContent('light');
-      
-      // light → github-dark
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('github-dark');
-      
-      // github-dark → printfarmer-dark
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('printfarmer-dark');
-      
-      // printfarmer-dark → matrix
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('matrix');
-      
-      // matrix → forge
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('forge');
-      
-      // forge → system
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('system');
-      
-      // system → light
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('light');
+    // Derived from SELECTABLE_THEMES rather than hardcoded. The previous
+    // version enumerated a cycle by hand and kept asserting a rotation through
+    // three themes that no longer existed.
+    const cycle: Theme[] = [...SELECTABLE_THEMES, 'system'];
+
+    it(`cycles through every selectable theme then system: ${cycle.join(' -> ')} -> ${cycle[0]}`, async () => {
+      renderWithThemeProvider(<TestComponent />, { defaultTheme: cycle[0] });
+
+      expect(screen.getByTestId('theme').textContent).toBe(cycle[0]);
+
+      // One extra step, to prove it wraps rather than stopping at the end.
+      for (let i = 1; i <= cycle.length; i++) {
+        await act(async () => {
+          screen.getByTestId('toggle-theme').click();
+        });
+        expect(screen.getByTestId('theme').textContent).toBe(cycle[i % cycle.length]);
+      }
     });
 
-    it('toggles from github-dark correctly', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'github-dark' });
-      
-      // github-dark → printfarmer-dark
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('printfarmer-dark');
-    });
+    it.each(cycle.map((from, i) => [from, cycle[(i + 1) % cycle.length]]))(
+      'toggles from %s to %s',
+      async (from, to) => {
+        renderWithThemeProvider(<TestComponent />, { defaultTheme: from });
 
-    it('toggles from printfarmer-dark to matrix', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'printfarmer-dark' });
-      
-      // printfarmer-dark → matrix
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('matrix');
-    });
-
-    it('toggles from matrix to forge', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'matrix' });
-      
-      // matrix → forge
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('forge');
-    });
-
-    it('toggles from forge to system', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'forge' });
-      
-      // forge → system
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('system');
-    });
-
-    it('toggles from system back to light', async () => {
-      renderWithThemeProvider(<TestComponent />, { defaultTheme: 'system' });
-      
-      // system → light
-      await act(async () => {
-        screen.getByTestId('toggle-theme').click();
-      });
-      expect(screen.getByTestId('theme')).toHaveTextContent('light');
-    });
+        await act(async () => {
+          screen.getByTestId('toggle-theme').click();
+        });
+        expect(screen.getByTestId('theme').textContent).toBe(to);
+      }
+    );
   });
 
   describe('system theme detection', () => {
@@ -389,17 +335,19 @@ describe('ThemeContext', () => {
       expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     });
 
-    it('removes data-theme attribute for dark theme', async () => {
+    it('sets data-theme explicitly for every theme, including dark', async () => {
+      // Dark used to be signalled by *removing* the attribute, a leftover from
+      // when github-dark was the bare-:root default. index.html now always sets
+      // data-theme before first paint, so an implicit default can never apply.
       renderWithThemeProvider(<TestComponent />, { defaultTheme: 'light' });
-      
-      // First ensure light theme sets the attribute
+
       expect(document.documentElement.getAttribute('data-theme')).toBe('light');
-      
+
       await act(async () => {
         screen.getByTestId('set-dark').click();
       });
-      
-      expect(document.documentElement.getAttribute('data-theme')).toBeNull();
+
+      expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     });
 
     it('applies reduced motion CSS variable', () => {

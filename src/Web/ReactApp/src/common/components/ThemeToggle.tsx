@@ -20,12 +20,16 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { theme, setTheme, computedTheme } = useTheme();
 
+  // Order matches SELECTABLE_THEMES in ThemeContext, so keyboard cycling here
+  // and toggleTheme() agree. themeRegistry.test.ts enforces that.
   const themes: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { value: 'light', label: 'Light', icon: SunIcon },
-    { value: 'github-dark', label: 'GitHub Dark', icon: MoonIcon },
-    { value: 'printfarmer-dark', label: 'PrintFarmer Dark', icon: MoonIcon },
+    { value: 'dark', label: 'Dark', icon: MoonIcon },
     { value: 'matrix', label: 'Matrix', icon: MatrixIcon },
-    { value: 'forge', label: 'Forge', icon: FireIcon },
+    { value: 'blueprint', label: 'Blueprint', icon: MoonIcon },
+    { value: 'ratos', label: 'RatOS', icon: MatrixIcon },
+    { value: 'voron', label: 'Voron', icon: FireIcon },
+    { value: 'farm', label: 'Farm', icon: FireIcon },
     { value: 'system', label: 'System', icon: MonitorIcon },
   ];
 

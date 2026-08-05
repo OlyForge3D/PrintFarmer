@@ -19,15 +19,22 @@
     <!-- Early theme init: prevent flash of unstyled theme -->
     <script>
       (function () {
-        var VALID = ['light', 'dark', 'matrix', 'blueprint'];
+        // Must stay in sync with SELECTABLE_THEMES in src/contexts/ThemeContext.tsx.
+        // Omitting a real theme here does not break it, but it makes that theme
+        // flash as `dark` on every load until React hydrates.
+        var VALID = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'];
+        // Themes that were removed. Their CSS never won the cascade, so they
+        // always rendered as `dark` anyway; this just makes it explicit.
+        var RETIRED = { 'github-dark': 'dark', 'printfarmer-dark': 'dark', 'forge': 'dark' };
         var stored = localStorage.getItem('pf-theme');
         // Migrate from old key
         if (!stored) {
           var legacy = localStorage.getItem('printfarmer-theme');
           if (legacy) {
-            stored = (legacy === 'printfarmer-dark' || legacy === 'github-dark') ? 'dark' : legacy;
+            stored = RETIRED[legacy] || legacy;
           }
         }
+        stored = RETIRED[stored] || stored;
         var theme = VALID.indexOf(stored) !== -1 ? stored : 'dark';
         document.documentElement.setAttribute('data-theme', theme);
       })();
