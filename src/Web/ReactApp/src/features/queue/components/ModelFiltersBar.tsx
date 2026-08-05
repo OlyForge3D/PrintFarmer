@@ -123,10 +123,10 @@ export default function ModelFiltersBar({
               className={`px-3 py-1 rounded-sm text-sm font-medium transition-colors ${
                 selectedStatuses.includes(status)
                   ? status === "queued"
-                    ? "bg-pf-info text-white"
+                    ? "bg-pf-info text-white hover:bg-pf-info/90"
                     : status === "printing"
-                      ? "bg-pf-success text-white"
-                      : "bg-pf-warning text-white"
+                      ? "bg-pf-success text-white hover:bg-pf-success/90"
+                      : "bg-pf-warning text-white hover:bg-pf-warning/90"
                   : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-1"
               } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
             >

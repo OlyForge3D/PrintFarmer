@@ -236,7 +236,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleCreateFolder}
             disabled={isBusy}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary hover:bg-pf-bg-2 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary hover:bg-pf-bg-1 justify-start"
             iconLeft={<PlusIcon className="w-4 h-4" />}
           >
             New Folder
@@ -247,7 +247,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleDeleteFolder}
             disabled={isBusy || node.path === '/'}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-error hover:bg-pf-bg-2 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-[var(--pf-on-danger)] hover:bg-pf-bg-1 justify-start"
             iconLeft={<DeleteIcon className="w-4 h-4" />}
           >
             Delete Folder
