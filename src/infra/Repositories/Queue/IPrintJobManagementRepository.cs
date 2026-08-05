@@ -103,6 +103,16 @@ public interface IPrintJobManagementRepository
     Task<List<PrintJob>> GetJobsByPrinterAsync(Guid printerId, int limit = 50, CancellationToken ct = default);
 
     /// <summary>
+    /// Get compact per-printer queue summaries (queued/printing counts and the printing job's
+    /// position) for every printer with at least one active job. Computed from a single
+    /// projected query — no <c>Include</c> of GcodeFile/AssignedPrinter and no per-printer
+    /// round trips — used to derive the compact-card "X of Y" label in bulk. Printers with no
+    /// active (Queued or Printing) job are omitted; callers should treat their absence as
+    /// "no active queue".
+    /// </summary>
+    Task<List<PrinterQueueSummary>> GetPrinterQueueSummariesAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Get jobs by status.
     /// </summary>
     Task<List<PrintJob>> GetJobsByStatusAsync(PrintJobStatus status, CancellationToken ct = default);
@@ -305,3 +315,18 @@ public record HistoryDuplicateCandidate(
     bool IsExternalPrint,
     string? ExternalJobId,
     DateTime CreatedAt);
+
+/// <summary>
+/// Compact per-printer queue summary used to derive the compact-card "X of Y" label. Only
+/// jobs with <see cref="PrintJobStatus.Queued"/> or <see cref="PrintJobStatus.Printing"/> are
+/// counted — the same active-job scope <see cref="IPrintJobManagementRepository.GetJobsByPrinterAsync"/>
+/// already uses. <see cref="PrintingPosition"/> is the 1-based rank of the printing job among
+/// this printer's active jobs when ordered by <c>QueueOrdering.OrderByPriorityDescending</c>
+/// (priority desc, then queued time, then job ID); it is <see langword="null"/> when no job is
+/// currently printing on this printer.
+/// </summary>
+public record PrinterQueueSummary(
+    Guid PrinterId,
+    int QueuedCount,
+    int PrintingCount,
+    int? PrintingPosition);

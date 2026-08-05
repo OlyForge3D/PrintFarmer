@@ -1,7 +1,9 @@
 ﻿using Farm.Api.Controllers;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -409,6 +411,144 @@ public class TagsControllerTests
             tagId, new UpdateTagDto { Name = "Alpha", ExpectedRevision = 1 }, CancellationToken.None);
 
         _ = Assert.IsType<ConflictObjectResult>(result.Result);
+    }
+
+    #endregion
+
+    #region GetObjectsTagsAsync Tests
+
+    private static TagsController CreateControllerWithAuthorization(
+        Mock<ITagService> tagServiceMock,
+        IQueueResourceAuthorizationService? resourceAuthorization)
+    {
+        var controller = new TagsController(Mock.Of<ILogger<TagsController>>(), tagServiceMock.Object, resourceAuthorization);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext()
+        };
+        return controller;
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("PrintJob")]
+    public async Task GetObjectsTagsAsync_InvalidObjectType_ReturnsBadRequest(string? objectType)
+    {
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await _controller.GetObjectsTagsAsync(objectType, CancellationToken.None);
+
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _tagServiceMock.Verify(s => s.GetObjectsTagsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GetObjectsTagsAsync_WithoutResourceAuthorization_ReturnsAllEntriesFromService()
+    {
+        var entries = new List<ObjectTagsDto>
+        {
+            new(Guid.NewGuid(), new List<TagDto> { new() { Id = Guid.NewGuid(), Name = "Red" } }),
+            new(Guid.NewGuid(), []),
+        };
+        _tagServiceMock
+            .Setup(s => s.GetObjectsTagsAsync("Printer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entries);
+
+        // The default test controller is built without a resourceAuthorization dependency
+        // (mirrors production DI resolving none registered): filtering must degrade to a
+        // pure passthrough rather than hiding every printer.
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await _controller.GetObjectsTagsAsync("Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(entries, okResult.Value);
+    }
+
+    [Fact]
+    public async Task GetObjectsTagsAsync_PrinterType_FiltersOutPrintersCallerCannotAccess()
+    {
+        Guid visiblePrinterId = Guid.NewGuid();
+        Guid hiddenPrinterId = Guid.NewGuid();
+        var entries = new List<ObjectTagsDto>
+        {
+            new(visiblePrinterId, []),
+            new(hiddenPrinterId, []),
+        };
+        _tagServiceMock
+            .Setup(s => s.GetObjectsTagsAsync("Printer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entries);
+
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), visiblePrinterId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), hiddenPrinterId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await controller.GetObjectsTagsAsync("Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        var returned = Assert.IsAssignableFrom<IEnumerable<ObjectTagsDto>>(okResult.Value).ToList();
+        ObjectTagsDto onlyEntry = Assert.Single(returned);
+        Assert.Equal(visiblePrinterId, onlyEntry.ObjectId);
+    }
+
+    [Fact]
+    public async Task GetObjectsTagsAsync_NonPrinterType_SkipsAuthorizationFiltering()
+    {
+        Guid gcodeFileId = Guid.NewGuid();
+        var entries = new List<ObjectTagsDto> { new(gcodeFileId, []) };
+        _tagServiceMock
+            .Setup(s => s.GetObjectsTagsAsync("GcodeFile", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entries);
+
+        // Even a resourceAuthorization that would deny everything must not affect
+        // GcodeFile/Model3D reads - only "Printer" carries printer-group ACLs today.
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await controller.GetObjectsTagsAsync("GcodeFile", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(entries, okResult.Value);
+        resourceAuthorization.Verify(
+            r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task GetObjectsTagsAsync_NoObjectsOfType_ReturnsOkWithEmptyList()
+    {
+        _tagServiceMock
+            .Setup(s => s.GetObjectsTagsAsync("Printer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await _controller.GetObjectsTagsAsync("Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Empty(Assert.IsAssignableFrom<IEnumerable<ObjectTagsDto>>(okResult.Value));
+    }
+
+    [Fact]
+    public async Task GetObjectsTagsAsync_WhenServiceThrows_ReturnsInternalServerError()
+    {
+        _tagServiceMock
+            .Setup(s => s.GetObjectsTagsAsync("Printer", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Database error"));
+
+        ActionResult<IEnumerable<ObjectTagsDto>> result =
+            await _controller.GetObjectsTagsAsync("Printer", CancellationToken.None);
+
+        ObjectResult statusResult = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(StatusCodes.Status500InternalServerError, statusResult.StatusCode);
     }
 
     #endregion

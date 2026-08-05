@@ -87,6 +87,19 @@ public interface ITagRepository
     Task<IReadOnlyList<Tag>> GetTagsByObjectAsync(Guid objectId, CancellationToken ct);
 
     /// <summary>
+    /// Get tags for multiple objects of the same type in a single grouped query, keyed by
+    /// object ID. Used by fleet-scoped reads (e.g. the printer grid) to replace N per-object
+    /// round trips with one query. Objects with no tags are omitted from the result map.
+    /// </summary>
+    /// <param name="objectIds">The unique identifiers of the objects to retrieve tags for.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<Tag>>> GetTagsByObjectsAsync(
+        IReadOnlyCollection<Guid> objectIds,
+        string objectType,
+        CancellationToken ct);
+
+    /// <summary>
     /// Remove all tags from an object (object-agnostic).
     /// </summary>
     /// <param name="objectId">The unique identifier of the object.</param>

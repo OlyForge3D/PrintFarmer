@@ -50,6 +50,14 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Get compact per-printer queue summaries used to derive the compact-card "X of Y" label
+    /// for every printer in one call. See <see cref="Farm.Infrastructure.Repositories.Queue.IPrintJobManagementRepository.GetPrinterQueueSummariesAsync"/>
+    /// for the exact semantics (active-job scope, ordering, and omission of idle printers).
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    Task<List<PrinterQueueSummaryDto>> GetPrinterQueueSummariesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get aggregated queue statistics
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>

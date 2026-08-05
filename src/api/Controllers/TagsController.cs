@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Exceptions;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +19,8 @@ namespace Farm.Api.Controllers;
 [Tags("Tags")]
 public class TagsController(
     ILogger<TagsController> unifiedLoggingService,
-    ITagService tagService) : ControllerBase
+    ITagService tagService,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     private readonly ILogger<TagsController> _unifiedLoggingService = unifiedLoggingService;
     private readonly ITagService _tagService = tagService;
@@ -519,6 +522,70 @@ public class TagsController(
         catch (Exception ex)
         {
             _unifiedLoggingService?.LogError(ex, "[TagsController] GetObjectTagsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve object tags" });
+        }
+    }
+
+    /// <summary>
+    /// Gets tags for every object of a given type in one grouped read, replacing N per-object
+    /// <see cref="GetObjectTagsAsync"/> calls with a single fleet-scoped query (e.g. the printer
+    /// grid no longer issues one <c>GET /api/tags/object/{id}?objectType=Printer</c> per card).
+    /// When <paramref name="objectType"/> is "Printer", entries for printers the caller cannot
+    /// access (per <see cref="PrinterGroupAccessLevel.View"/>) are filtered out so a fleet read
+    /// never leaks tags across printer-group boundaries.
+    /// </summary>
+    /// <param name="objectType">Type of object: "Model3D", "GcodeFile", or "Printer"</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>One entry per accessible object of the given type, each mapping the object ID to its tags.</returns>
+    /// <response code="200">Returns the list of object-tag mappings</response>
+    /// <response code="400">Invalid parameters</response>
+    /// <response code="401">Unauthorized</response>
+    /// <response code="500">Internal server error</response>
+    /// Keep [Authorize] from class level - authenticated users can view item tags; Printer
+    /// entries are additionally scoped to the caller's printer-group visibility below.
+    [HttpGet("objects")]
+    [ProducesResponseType(typeof(IEnumerable<ObjectTagsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<IEnumerable<ObjectTagsDto>>> GetObjectsTagsAsync(
+        [FromQuery] string? objectType,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
+            {
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
+            }
+
+            IReadOnlyList<ObjectTagsDto> tags = await _tagService.GetObjectsTagsAsync(objectType, ct);
+
+            // Only "Printer" carries printer-group ACLs; Model3D/GcodeFile have no per-caller
+            // visibility scoping today, matching GetObjectTagsAsync's existing behavior.
+            if (objectType != "Printer" || resourceAuthorization is null)
+            {
+                return Ok(tags);
+            }
+
+            var authorized = new List<ObjectTagsDto>(tags.Count);
+            foreach (ObjectTagsDto entry in tags)
+            {
+                if (await resourceAuthorization.CanAccessPrinterAsync(
+                    User,
+                    entry.ObjectId,
+                    PrinterGroupAccessLevel.View,
+                    ct))
+                {
+                    authorized.Add(entry);
+                }
+            }
+
+            return Ok(authorized);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetObjectsTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve object tags" });
         }
     }

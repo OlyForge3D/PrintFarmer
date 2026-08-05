@@ -318,6 +318,44 @@ public class TagService(
     }
 
     /// <summary>
+    /// Gets tags for every object of a given type in one grouped read (polymorphic).
+    /// Resolves the full ID set for <paramref name="objectType"/> via
+    /// <see cref="ITagRepository.GetAllObjectsOfTypeAsync"/>, then loads all of their tags with
+    /// a single call to <see cref="ITagRepository.GetTagsByObjectsAsync"/> — never one query
+    /// per object.
+    /// </summary>
+    /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile", "Printer").</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>One entry per object of the given type, each mapping the object ID to its tags.</returns>
+    public async Task<IReadOnlyList<ObjectTagsDto>> GetObjectsTagsAsync(string objectType, CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<Guid> objectIds = await _tagRepository.GetAllObjectsOfTypeAsync(objectType, ct);
+            if (objectIds.Count == 0)
+            {
+                return [];
+            }
+
+            IReadOnlyDictionary<Guid, IReadOnlyList<Tag>> tagsByObject =
+                await _tagRepository.GetTagsByObjectsAsync(objectIds, objectType, ct);
+
+            return objectIds
+                .Select(id => new ObjectTagsDto(
+                    id,
+                    tagsByObject.TryGetValue(id, out IReadOnlyList<Tag>? tags)
+                        ? tags.Select(MapToDto).ToList()
+                        : []))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Failed to get tags for objects of type {ObjectType}: {Message}", objectType, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Assign tags to an object (replaces existing tags - polymorphic).
     /// </summary>
     /// <param name="objectId">The unique identifier of the object to tag.</param>
