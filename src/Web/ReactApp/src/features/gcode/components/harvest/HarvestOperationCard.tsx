@@ -135,7 +135,7 @@ export const HarvestOperationCard: React.FC<HarvestOperationCardProps> = ({
 
         <div className="flex items-center space-x-2">
           {operation.status === GcodeHarvestStatus.Running && onViewDetails && (
-            <Button onClick={() => onViewDetails(operation)} variant="subtle" className="text-sm text-pf-accent hover:text-pf-accent">View Details</Button>
+            <Button onClick={() => onViewDetails(operation)} variant="subtle" className="text-sm text-pf-accent enabled:hover:underline">View Details</Button>
           )}
 
           {operation.status === GcodeHarvestStatus.Completed && hasPermission('gcode_harvest', 'read') && (

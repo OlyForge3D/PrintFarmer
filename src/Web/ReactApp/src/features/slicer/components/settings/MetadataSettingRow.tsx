@@ -156,7 +156,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                 if (isModified) onUpdate(field.key, origVal);
                 if (otherIsModified) onUpdate(pairedOtherKey, otherOrigVal);
               }}
-              className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors hover:bg-pf-warning/10 rounded"
+              className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
               title="Reset to original"
               aria-label={`Reset ${plateName} temperatures to original values`}
             >
@@ -250,7 +250,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                   variant="subtle"
                   type="button"
                   onClick={() => onUpdate(field.key, origVal)}
-                  className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors hover:bg-pf-warning/10 rounded shrink-0"
+                  className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded shrink-0"
                   title="Reset to original"
                   aria-label={`Reset ${meta.label} to original value`}
                 >
@@ -311,7 +311,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                 variant="subtle"
                 type="button"
                 onClick={() => onUpdate(field.key, origVal)}
-                className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors hover:bg-pf-warning/10 rounded"
+                className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
                 title="Reset to original"
                 aria-label={`Reset ${meta.label} to original value`}
               >
@@ -392,7 +392,7 @@ export const MetadataSettingRow: React.FC<MetadataSettingRowProps> = ({
                 variant="subtle"
                 type="button"
                 onClick={() => onUpdate(field.key, origVal)}
-                className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors hover:bg-pf-warning/10 rounded"
+                className="p-0.5 text-pf-warning-text transition-colors enabled:hover:bg-pf-warning/10 rounded"
                 title="Reset to original"
                 aria-label={`Reset ${meta.label} to original values`}
               >

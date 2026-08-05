@@ -574,6 +574,15 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   interface ButtonTag {
     line: number;
     className: string;
+  /**
+   * The className split into mutually exclusive alternatives, one per branch of
+   * any ternary or `&&` inside it. `className` unions every branch, which is
+   * what the paint contracts want -- a token is present in the DOM if any branch
+   * emits it. The hover contract needs the opposite: `isLast ? 'text-pf-text-primary'
+   * : 'text-pf-text-secondary hover:text-pf-text-primary'` looks self-referential
+   * only when the two branches are conflated, and is correct when they are not.
+   */
+  branches: string[];
     variants: string[];
     disableable: boolean;
     dynamicVariant: boolean;
@@ -598,6 +607,43 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     return out;
   };
 
+  /**
+   * Expands a className expression into one string per branch. Unknown shapes
+   * fall back to every literal they contain, which is the conservative answer:
+   * it can only merge branches, never invent one. The 64-alternative cap keeps
+   * a className with many independent ternaries from expanding combinatorially;
+   * past the cap it degrades to the same conflated string `className` uses.
+   */
+  const branchesOf = (node: ts.Node): string[] => {
+    const cross = (acc: string[], alts: string[], sep = ' ') => {
+      const out = acc.flatMap((a) => alts.map((b) => `${a}${sep}${b}`));
+      return out.length > 64 ? [out.join(' ')] : out;
+    };
+
+    if (ts.isParenthesizedExpression(node)) return branchesOf(node.expression);
+    if (ts.isJsxExpression(node)) return node.expression ? branchesOf(node.expression) : [''];
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
+    if (ts.isConditionalExpression(node)) {
+      return [...branchesOf(node.whenTrue), ...branchesOf(node.whenFalse)];
+    }
+    // `cond && 'x'` contributes 'x' or nothing; both are real states.
+    if (ts.isBinaryExpression(node)) return ['', ...branchesOf(node.right)];
+    if (ts.isTemplateExpression(node)) {
+      let acc = [node.head.text];
+      for (const span of node.templateSpans) {
+        acc = cross(acc, branchesOf(span.expression));
+        acc = acc.map((a) => `${a} ${span.literal.text}`);
+      }
+      return acc;
+    }
+    if (ts.isCallExpression(node)) {
+      let acc = [''];
+      for (const arg of node.arguments) acc = cross(acc, branchesOf(arg));
+      return acc;
+    }
+    return [literalsIn(node).join(' ')];
+  };
+
   const buttonTags = (source: string, fileName = 'f.tsx'): ButtonTag[] => {
     const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const out: ButtonTag[] = [];
@@ -606,6 +652,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       const tag: ButtonTag = {
         line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
         className: '',
+        branches: [],
         variants: ['primary'],
         disableable: false,
         dynamicVariant: false,
@@ -617,6 +664,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         if (name === 'disabled' || name === 'loading') tag.disableable = true;
         else if (name === 'className' && attr.initializer) {
           tag.className = literalsIn(attr.initializer).join(' ');
+        tag.branches = branchesOf(attr.initializer);
         } else if (name === 'variant' && attr.initializer) {
           const literals = literalsIn(attr.initializer);
           tag.variants = literals;
@@ -734,6 +782,117 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'variant, so it now paints and is read directly against the page surface. ' +
         'Use the semantic text token instead — it is defined in all 8 palettes.',
     ).toEqual([]);
+  });
+
+  /**
+   * SELF-REFERENTIAL HOVER (#1137, round 11).
+   *
+   * A caller on a bare variant that declares `hover:X` equal to its own resting
+   * `X` renders identically in both states. Before #1102 that was invisible:
+   * the variant's own paint outranked the caller at rest, so the user saw
+   * variant-default -> caller-colour. Once the default moved to
+   * `@layer components`, the caller wins at rest too and the hover becomes a
+   * no-op. Sixteen sites carried this shape; all sixteen predate the cluster.
+   *
+   * Measured, not argued (8 palettes, real `Button`, transitions disabled):
+   * four of the sixteen had *no* other hover token and were dead in every
+   * palette; the other twelve already carried a `hover:bg-pf-*\/10` tint and
+   * so kept feedback -- their colour token was redundant, and deleting it was
+   * a byte-identical no-op in all 8 palettes.
+   *
+   * The remedy is a hover that changes something, not a hover that restates the
+   * resting value. Note a tint in the *same hue as the text* erodes contrast:
+   * `text-pf-accent` + `enabled:hover:bg-pf-accent/10` measured 4.36 on light,
+   * below AA, which is why the accent site uses `enabled:hover:underline`
+   * (8/8 feedback, 4.99 retained) rather than a tint.
+   */
+  const hoverTokens = (className: string) => {
+    const rest = new Set<string>();
+    const hover = new Set<string>();
+    for (const token of classTokens(className)) {
+      const bare = bareUtility(token);
+      const stripped = token.replace(/!+$/, '');
+      const prefix = stripped.endsWith(bare) ? stripped.slice(0, -bare.length) : '';
+      (/(^|:)hover:/.test(prefix) ? hover : rest).add(bare);
+    }
+    return { rest, hover };
+  };
+
+  it('no unmasked-variant Button is left with a hover that changes nothing', () => {
+    const offenders = new Set<string>();
+
+    for (const file of sourceFiles(SRC_ROOT)) {
+      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+        if (!isUnmasked(tag)) continue;
+        for (const branch of tag.branches) {
+          const { rest, hover } = hoverTokens(branch);
+          const selfReferential = [...hover].filter((utility) => rest.has(utility));
+          if (selfReferential.length === 0) continue;
+          // A hover that restates the resting value is only a defect when
+          // nothing else about the hovered state differs. A selected control
+          // that holds its fill on hover while another token supplies the
+          // feedback is in contract, and flagging it would be a false positive.
+          if ([...hover].some((utility) => !rest.has(utility))) continue;
+          for (const utility of selfReferential) {
+            offenders.add(`${rel}:${tag.line} hover:${utility} restates its resting value`);
+          }
+        }
+      }
+    }
+
+    expect(
+      [...offenders],
+      'This Button has no hover token that changes anything: every hover it declares ' +
+        'restates a value it already has at rest. That was masked before #1102, when the ' +
+        'variant default outranked the caller at rest. Give it a hover that differs. ' +
+        'Prefer a contrast-neutral affordance when the text and a candidate tint share a ' +
+        'hue -- `text-pf-accent` with `hover:bg-pf-accent/10` measured 4.36 on light, below AA.',
+    ).toEqual([]);
+  });
+
+
+  it('detects a self-referential hover, and passes once it differs', () => {
+    const injected = `<Button variant="subtle" className="text-pf-error-text hover:text-pf-error-text">x</Button>`;
+    const flagged = (src: string) =>
+      buttonTags(src)
+        .filter(isUnmasked)
+        .filter((t) =>
+          t.branches.some((branch) => {
+            const { rest, hover } = hoverTokens(branch);
+            return (
+              [...hover].some((u) => rest.has(u)) && ![...hover].some((u) => !rest.has(u))
+            );
+          }),
+        );
+
+    expect(flagged(injected)).toHaveLength(1);
+    // The same shape reached through an important spelling.
+    expect(flagged(injected.replace('hover:text', 'hover:!text'))).toHaveLength(1);
+    // A hover that actually differs, and a masked variant, are both in contract.
+    expect(
+      flagged(injected.replace('hover:text-pf-error-text', 'enabled:hover:bg-pf-error/10')),
+    ).toHaveLength(0);
+    expect(flagged(injected.replace('variant="subtle"', 'variant="primary"'))).toHaveLength(0);
+    // A selected control holding its fill while another token supplies feedback.
+    expect(
+      flagged(
+        '<Button variant="ghost" className="bg-pf-accent-bg hover:bg-pf-accent-bg motion-safe:hover:-translate-y-px">x</Button>',
+      ),
+    ).toHaveLength(0);
+    // Branches are evaluated separately: this is correct code, and conflating
+    // the two arms of the ternary is what made an earlier revision flag it.
+    expect(
+      flagged(
+        '<Button variant="subtle" className={`p-0 ${isLast ? "text-pf-text-primary" : "text-pf-text-secondary hover:text-pf-text-primary"}`}>x</Button>',
+      ),
+    ).toHaveLength(0);
+    // ...but a dead hover hiding in one arm is still found.
+    expect(
+      flagged(
+        '<Button variant="subtle" className={`p-0 ${isLast ? "text-pf-error-text hover:text-pf-error-text" : "text-pf-text-secondary hover:text-pf-text-primary"}`}>x</Button>',
+      ),
+    ).toHaveLength(1);
   });
 
   // `enabled:hover:` is correct; `group-hover:`/`peer-hover:` key off another

@@ -466,7 +466,7 @@ function TaskFormModal({ isOpen, taskId, tasks, categories, cloneSource, onClose
                                   size="sm"
                                   onClick={() => setRemovingTc(tc)}
                                   aria-label={`Remove ${tc.componentName ?? 'part'}`}
-                                  className="text-pf-error-text hover:text-pf-error-text"
+                                  className="text-pf-error-text enabled:hover:bg-pf-error/10"
                                 >
                                   <DeleteIcon className="h-4 w-4" aria-hidden="true" />
                                 </Button>
@@ -811,7 +811,7 @@ export function TaskCatalogTab() {
                     size="sm"
                     onClick={() => setDeletingTask(task)}
                     aria-label={`Delete ${task.taskName}`}
-                    className="text-pf-error-text hover:text-pf-error-text"
+                    className="text-pf-error-text enabled:hover:bg-pf-error/10"
                   >
                     <DeleteIcon className="h-4 w-4" aria-hidden="true" />
                   </Button>

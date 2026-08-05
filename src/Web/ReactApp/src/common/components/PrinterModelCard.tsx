@@ -175,7 +175,7 @@ export function PrinterModelCard({
                 onClick={() => onClone(model)}
                 disabled={isLoading}
                 aria-label={`Clone ${model.name}`}
-                className="text-pf-success-text enabled:hover:text-pf-success-text enabled:hover:bg-pf-success/10"
+                className="text-pf-success-text enabled:hover:bg-pf-success/10"
               >
                 <svg
                   className="w-4 h-4"
@@ -200,7 +200,7 @@ export function PrinterModelCard({
                 onClick={() => onDelete(model)}
                 disabled={isLoading}
                 aria-label={`Delete ${model.name}`}
-                className="text-pf-error-text enabled:hover:text-pf-error-text enabled:hover:bg-pf-error/10 dark:enabled:hover:text-pf-error-text"
+                className="text-pf-error-text enabled:hover:bg-pf-error/10"
               >
                 <svg
                   className="w-4 h-4"
