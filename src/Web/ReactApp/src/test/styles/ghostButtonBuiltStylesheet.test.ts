@@ -506,7 +506,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
       for (const { tag, line } of openingTags(readFileSync(file, 'utf8'))) {
-        if (!/\bdisabled[=\s]/.test(tag) || !unguardedHover(tag)) continue;
+        if (!isDisableable(tag) || !unguardedHover(tag)) continue;
         if (!declaredVariants(tag).some((v) => UNMASKED_VARIANTS.includes(v))) continue;
         offenders.push(`${rel}:${line}`);
       }
@@ -571,16 +571,29 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   const unguardedHover = (tag: string) =>
     /(?<!enabled:)(?<!group-)(?<!peer-)hover:/.test(tag);
 
+  /**
+   * Whether the control can reach the disabled state.
+   *
+   * `Button.tsx` renders `disabled={disabled || loading}`, so `loading`
+   * disables just as surely as `disabled` does and must be treated the same.
+   * The value is optional: `<Button disabled>` is a valid trailing attribute,
+   * so the name may be followed by `=`, whitespace, `/`, `>` or end of tag.
+   * The lookbehind keeps `aria-disabled` and `data-loading` out — those are
+   * annotations, not the real prop, and do not disable anything.
+   */
+  const isDisableable = (tag: string) =>
+    /(?<![-\w])(?:disabled|loading)(?:[=\s/>]|$)/.test(tag);
+
   it('detects the defect it is meant to detect', () => {
     const injected = `<Button disabled={busy} className="bg-pf-bg-1 hover:bg-pf-bg-0">x</Button>`;
     const found = openingTags(injected).filter(
-      ({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag),
+      ({ tag }) => isDisableable(tag) && unguardedHover(tag),
     );
     expect(found).toHaveLength(1);
 
     const fixed = injected.replace('hover:', 'enabled:hover:');
     expect(
-      openingTags(fixed).filter(({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag)),
+      openingTags(fixed).filter(({ tag }) => isDisableable(tag) && unguardedHover(tag)),
     ).toHaveLength(0);
   });
 
@@ -612,9 +625,39 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     expect(
       openingTags(withArrow).filter(
-        ({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag),
+        ({ tag }) => isDisableable(tag) && unguardedHover(tag),
       ),
       'an unguarded hover behind an arrow-function prop must still be reported',
     ).toHaveLength(1);
+  });
+
+  it('treats a trailing bare `disabled` and `loading` as disableable', () => {
+    const offends = (tag: string) =>
+      openingTags(tag).filter(
+        ({ tag: t }) => isDisableable(t) && unguardedHover(t),
+      ).length;
+
+    // `disabled` last, with no value: the earlier `disabled[=\s]` predicate
+    // required a following `=` or space and so could not see this.
+    expect(
+      offends('<Button className="hover:bg-pf-bg-0" disabled>x</Button>'),
+      'a trailing valueless `disabled` still disables the control',
+    ).toBe(1);
+
+    // Button renders disabled={disabled || loading}, so loading disables too.
+    expect(
+      offends('<Button loading={busy} className="hover:bg-pf-bg-0">x</Button>'),
+      '`loading` disables the control just as `disabled` does',
+    ).toBe(1);
+
+    // ...but annotations are not the prop and disable nothing.
+    expect(
+      offends('<Button aria-disabled="true" className="hover:bg-pf-bg-0">x</Button>'),
+      '`aria-disabled` is an annotation, not the disabling prop',
+    ).toBe(0);
+    expect(
+      offends('<Button data-loading="1" className="hover:bg-pf-bg-0">x</Button>'),
+      '`data-loading` is an annotation, not the disabling prop',
+    ).toBe(0);
   });
 });
