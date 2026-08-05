@@ -223,7 +223,7 @@ function AlertItem({ alert, compact, onActionComplete }: AlertItemProps) {
                   size="sm"
                   onClick={handleDismiss}
                   disabled={!!isActioning}
-                  className="text-xs text-pf-text-tertiary hover:text-pf-text-secondary"
+                  className="text-xs text-pf-text-tertiary enabled:hover:text-pf-text-secondary"
                 >
                   {isActioning === 'dismiss' ? 'Dismissing...' : 'Dismiss'}
                 </Button>

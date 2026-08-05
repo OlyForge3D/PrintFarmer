@@ -432,7 +432,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                               size="sm"
                               onClick={() => handleDeleteFile(file.fileName)}
                               disabled={isDeleting === file.fileName}
-                              className="!p-2 !h-auto text-pf-error hover:text-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
+                              className="!p-2 !h-auto text-pf-error enabled:hover:text-pf-error disabled:opacity-50 disabled:cursor-not-allowed"
                               title={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
                               aria-label={isDeleting === file.fileName ? 'Deleting...' : 'Delete file'}
                               iconCenter={isDeleting === file.fileName ? (

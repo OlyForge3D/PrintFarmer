@@ -90,7 +90,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
             onClick={() => onDelete(node.id)}
             variant="subtle"
             size="sm"
-            className="text-pf-error hover:opacity-80"
+            className="text-pf-error enabled:hover:opacity-80"
             disabled={hasChildren}
           >
             Delete
