@@ -440,7 +440,7 @@ export function HarvestWizardModal({
                 Failed <span className="font-bold ml-1">{filesErrored}</span>
               </div>
               {selectedCount > 0 && (
-                <div className="h-7 rounded-sm bg-pf-accent border border-pf-accent text-white text-xs font-semibold flex items-center justify-center px-2">
+                <div className="h-7 rounded-sm bg-pf-accent-bg border border-pf-accent text-[var(--pf-on-accent)] text-xs font-semibold flex items-center justify-center px-2">
                   Selected <span className="font-bold ml-1">{selectedCount}</span>
                 </div>
               )}

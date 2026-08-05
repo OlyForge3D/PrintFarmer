@@ -34,7 +34,7 @@
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #f97316;
   --pf-accent-bg:    #ea580c;
-  --pf-accent-hover: #c2410c;
+  --pf-accent-hover: #f97316;
   --pf-accent-fg:    var(--pf-on-accent);
   --pf-accent-2:     #facc15;
 
@@ -109,7 +109,7 @@
 
   /* --- Buttons: Primary ----------------------------------------------------- */
   --pf-button-primary-bg:     #ea580c;
-  --pf-button-primary-hover:  #c2410c;
+  --pf-button-primary-hover:  #f97316;
   --pf-button-primary-active: #9a3412;
   --pf-button-primary-text:   var(--pf-on-accent);
   --pf-button-primary-border: transparent;

@@ -155,8 +155,30 @@ describe('Button', () => {
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');
-      expect(button.className).toContain('bg-[var(--pf-button-danger-bg)]');
-      expect(button.className).toContain('text-[var(--pf-on-danger)]');
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-danger-bg)]',
+        'enabled:hover:bg-[var(--pf-button-danger-hover)]',
+        'text-[var(--pf-on-danger)]',
+        'border-[var(--pf-button-danger-border)]',
+      );
+    });
+
+    it('uses dedicated semantic tokens for the success surface and hover state', () => {
+      render(<Button variant="success">Success</Button>);
+      const button = screen.getByRole('button', { name: 'Success' });
+
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-success-bg)]',
+        'enabled:hover:bg-[var(--pf-button-success-hover)]',
+        'text-[var(--pf-button-success-text)]',
+        'border-[var(--pf-button-success-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-success-bg',
+        'enabled:hover:bg-pf-success-hover',
+        'text-white',
+        'text-pf-success-text',
+      );
     });
   });
 
@@ -295,6 +317,71 @@ describe('Button', () => {
       const button = screen.getByRole('button', { name: 'Active' });
       expect(button).toHaveClass('bg-pf-accent-bg');
       expect(button).toHaveClass('text-[var(--pf-on-accent)]');
+    });
+  });
+
+  describe('caller paint overrides (#1102)', () => {
+    const PAINT_UTILITY = /(?:^|:)bg-|(?:^|:)text-(?:inherit|white|black|current|pf-|\[)|(?:^|:)border-(?:transparent|current|pf-|\[)|(?:^|:)shadow-/;
+    const VARIANTS = ['subtle', 'tab', 'toggle', 'link'] as const;
+
+    const variantClasses = (button: HTMLElement) =>
+      button.className
+        .split(/\s+/)
+        .filter((token) => token && token !== 'shadow-xs');
+
+    it.each(VARIANTS)('%s does not emit paint utilities', (variant) => {
+      render(<Button variant={variant}>Label</Button>);
+      const classes = variantClasses(screen.getByRole('button', { name: 'Label' }));
+
+      expect(classes.some((token) => PAINT_UTILITY.test(token))).toBe(false);
+    });
+
+    it('moves active tab paint into the components-layer hook', () => {
+      render(
+        <Button variant="tab" active>
+          Active tab
+        </Button>
+      );
+      const button = screen.getByRole('button', { name: 'Active tab' });
+
+      expect(button).toHaveAttribute('data-pf-active', 'true');
+      expect(variantClasses(button).some((token) => PAINT_UTILITY.test(token))).toBe(false);
+    });
+
+    it('does not mark inactive tabs or other variants as active', () => {
+      render(<Button variant="tab">Idle tab</Button>);
+      expect(screen.getByRole('button', { name: 'Idle tab' })).not.toHaveAttribute(
+        'data-pf-active'
+      );
+
+      render(
+        <Button variant="subtle" active>
+          Subtle
+        </Button>
+      );
+      expect(screen.getByRole('button', { name: 'Subtle' })).not.toHaveAttribute(
+        'data-pf-active'
+      );
+    });
+
+    it.each(VARIANTS)('%s keeps caller paint classes', (variant) => {
+      render(
+        <Button
+          variant={variant}
+          className="bg-pf-accent hover:bg-pf-accent/90 text-pf-error border-pf-accent shadow-md"
+        >
+          Label
+        </Button>
+      );
+      const button = screen.getByRole('button', { name: 'Label' });
+
+      expect(button).toHaveClass(
+        'bg-pf-accent',
+        'hover:bg-pf-accent/90',
+        'text-pf-error',
+        'border-pf-accent',
+        'shadow-md'
+      );
     });
   });
 });

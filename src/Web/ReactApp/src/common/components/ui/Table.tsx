@@ -54,6 +54,7 @@ export interface TableBodyProps extends React.HTMLAttributes<HTMLTableSectionEle
 export interface TableRowProps extends React.HTMLAttributes<HTMLTableRowElement> {
   children: React.ReactNode;
   isSelected?: boolean;
+  /** Explicitly opt into a row-level hover affordance. */
   isHoverable?: boolean;
   /** Row index for keyboard navigation (auto-assigned if using TableBody) */
   rowIndex?: number;
@@ -260,7 +261,7 @@ export function TableRow({
   children, 
   className = '', 
   isSelected = false, 
-  isHoverable = true,
+  isHoverable = false,
   rowIndex,
   onClick,
   ...props 

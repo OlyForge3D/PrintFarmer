@@ -138,6 +138,63 @@ describe('DataTable', () => {
     expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
   });
 
+  it('should make selectable rows hoverable and clickable', () => {
+    const onRowSelect = vi.fn();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    const rows = screen.getAllByRole('row').slice(1);
+    rows.forEach((row) => expect(row).toHaveClass('hover:bg-pf-bg-1'));
+
+    fireEvent.click(rows[1]);
+
+    expect(onRowSelect).toHaveBeenCalledWith(mockData[1], 1);
+  });
+
+  it('should keep read-only rows non-hoverable', () => {
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+      />
+    );
+
+    const rows = screen.getAllByRole('row').slice(1);
+    rows.forEach((row) => expect(row).not.toHaveClass('hover:bg-pf-bg-1'));
+  });
+
+  it('should not select a row when its action button is clicked', () => {
+    const onRowSelect = vi.fn();
+    const onEdit = vi.fn();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+        renderActions={(item) => (
+          <button type="button" onClick={() => onEdit(item)}>
+            Edit {item.name}
+          </button>
+        )}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit Item A' }));
+
+    expect(onEdit).toHaveBeenCalledWith(mockData[0]);
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
   it('should enable keyboard navigation when specified', () => {
     const { container } = render(
       <DataTable

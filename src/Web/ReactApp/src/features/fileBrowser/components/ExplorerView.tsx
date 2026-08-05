@@ -191,7 +191,7 @@ const FolderTreeItem = ({
       <div
         className={`flex items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${
           isDragOver ? 'bg-pf-accent-bg/20 border border-pf-accent' : ''
-        } ${isCurrent ? 'bg-pf-accent-bg text-white' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
+        } ${isCurrent ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
         style={{ paddingLeft: depth * 12 + 8 }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}

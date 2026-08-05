@@ -25,7 +25,7 @@
   /* --- Text ----------------------------------------------------------------- */
   --pf-text-primary:   #e6f2ff;
   --pf-text-secondary: #9ec5e8;
-  --pf-text-tertiary:  #6790b8;
+  --pf-text-tertiary:  #739dc5;
   --pf-text-muted:     #4d7299;
   --pf-text-inverse:   #0c1a2e;
   /*
@@ -43,7 +43,7 @@
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #38bdf8;
   --pf-accent-bg:    #0284c7;
-  --pf-accent-hover: #0369a1;
+  --pf-accent-hover: #0ea5e9;
   --pf-accent-fg:    var(--pf-on-accent);
   --pf-accent-2:     #fef08a;
 
@@ -118,7 +118,7 @@
 
   /* --- Buttons: Primary ----------------------------------------------------- */
   --pf-button-primary-bg:     #0284c7;
-  --pf-button-primary-hover:  #0369a1;
+  --pf-button-primary-hover:  #0ea5e9;
   --pf-button-primary-active: #025587;
   --pf-button-primary-text:   var(--pf-on-accent);
   --pf-button-primary-border: transparent;

@@ -1194,6 +1194,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 className="w-24! min-w-0"
               />
               <ControlPadButton
+                variant="success"
                 disabled={movementActionPending || !canManualMoveNow || (moveX === '' && moveY === '' && moveZ === '')}
                 onClick={async () => {
                   if (moveX !== '') await handleMove('X', Number(moveX));
@@ -1202,7 +1203,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 }}
                 title="Move to entered coordinates"
                 padSize="small"
-                className="bg-pf-success! hover:bg-pf-success-hover! text-white!"
+                className="enabled:hover:scale-105 enabled:hover:shadow-md"
               >
                 <span className="text-[10px] font-bold">GO</span>
               </ControlPadButton>

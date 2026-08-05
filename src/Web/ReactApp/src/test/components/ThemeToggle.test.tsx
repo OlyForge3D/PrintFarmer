@@ -155,8 +155,8 @@ describe('ThemeToggle', () => {
       const darkLabel = screen.getByTestId('theme-option-dark');
       const darkInput = darkLabel.querySelector('input[type="radio"]') as HTMLInputElement;
       expect(darkInput.checked).toBe(true);
-      expect(darkLabel).toHaveClass('bg-pf-accent');
-      expect(darkLabel).toHaveClass('text-white');
+      expect(darkLabel).toHaveClass('bg-pf-accent-bg');
+      expect(darkLabel).toHaveClass('text-[var(--pf-on-accent)]');
     });
 
     it('allows theme switching via buttons', () => {
@@ -167,8 +167,8 @@ describe('ThemeToggle', () => {
       fireEvent.click(lightInput);
       
       expect(lightInput.checked).toBe(true);
-      expect(lightLabel).toHaveClass('bg-pf-accent');
-      expect(lightLabel).toHaveClass('text-white');
+      expect(lightLabel).toHaveClass('bg-pf-accent-bg');
+      expect(lightLabel).toHaveClass('text-[var(--pf-on-accent)]');
     });
 
     it('shows labels when requested', () => {
@@ -276,24 +276,30 @@ describe('ThemeToggle', () => {
       renderWithTheme(<ThemeToggle />);
       
       const button = screen.getByRole('button');
-      // Ensure transitional behavior exists and either hover or active classes are present
-      expect(button.className).toMatch(/transition-all/);
-      expect(/hover:text-pf-text-primary|bg-pf-accent/.test(button.className)).toBe(true);
+      expect(button).toHaveClass(
+        'transition-all',
+        'hover:text-pf-text-primary',
+        'hover:bg-pf-bg-2',
+      );
     });
 
-    it('applies focus styles', () => {
+    it('shows a visible label focus ring for button-group radios', () => {
       renderWithTheme(<ThemeToggle variant="buttons" />);
       
-      const buttons = screen.getAllByRole('radio');
-      buttons.forEach(button => {
-        // Inputs are visually-hidden (sr-only) but should exist
-        expect(button).toHaveClass('sr-only');
-        // Visual focus styles live on the label element - accept hover or active classes
-        const label = (button as HTMLElement).closest('label');
-        expect(label).toBeTruthy();
-        const labelClass = (label as HTMLElement).className;
-        expect(/hover:text-pf-text-primary|bg-pf-accent/.test(labelClass)).toBe(true);
+      const radios = screen.getAllByRole('radio');
+      radios.forEach(radio => {
+        expect(radio).toHaveClass('sr-only');
+        expect(radio.closest('label')).toHaveClass(
+          'focus-within:ring-2',
+          'focus-within:ring-pf-accent',
+          'focus-within:ring-offset-1',
+          'focus-within:ring-offset-pf-bg-0',
+        );
       });
+
+      radios[1].focus();
+
+      expect(document.activeElement).toBe(radios[1]);
     });
 
     it('shows icons for all variants', () => {

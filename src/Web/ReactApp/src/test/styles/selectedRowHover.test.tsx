@@ -6,43 +6,23 @@ import { render, screen } from '@testing-library/react';
 import { Table, TableBody, TableRow } from '@/common/components/ui/Table';
 
 /**
- * A selected row must keep its highlight while the pointer is over it.
+ * Row hover is an explicit affordance, not a default applied to every table.
  *
- * #1088 blamed the global `table tbody tr:hover` rule in `controls.css` on a
- * specificity reading — (0,1,3) against a selected `.bg-pf-bg-2` at (0,1,0).
- * That premise is false. The global rule sits in `@layer components` and every
- * Tailwind utility sits in `@layer utilities`, and layer order beats
- * specificity, so the global rule cannot displace a selected background.
- * Verified two ways: in the built stylesheet the rule falls inside the
- * `@layer components` block while `.bg-pf-bg-2` falls inside the later
- * `@layer utilities` block (re-derive offsets per build — the asset hash and
- * the byte positions both move); and in chromium with transitions suppressed,
- * `<tr class="bg-pf-bg-2">` reads an identical computed background at rest and
- * on hover in all seven themes.
- *
- * What did erase the highlight was each row's OWN unconditional `hover:bg-*`
- * utility. That lands in the same layer as the selected class, where `:hover`
- * at (0,1,1) does outrank a plain class at (0,1,0). Chromium confirmed it:
- * `bg-pf-accent-bg/15 hover:bg-pf-bg-1` and `bg-pf-accent-bg/5 hover:bg-pf-bg-2`
- * both changed background on hover, in all seven themes.
- *
- * So the invariant this file guards is: a selectable row never carries a
- * background hover utility while it is selected. jsdom does not load the
- * stylesheet and cannot evaluate the cascade, so the render assertions check
- * the emitted class list and the source assertions check the branch shape at
- * the three call sites that are too expensive to mount. The cascade reasoning
- * that makes this invariant sufficient is the browser measurement above.
+ * #1109 removes the global `table tbody tr:hover` rule and makes `TableRow`
+ * opt in through `isHoverable`. #1088 still requires an opted-in row to
+ * withhold its hover utility while selected, because both backgrounds live in
+ * Tailwind's utility layer and the `:hover` selector would otherwise win.
  */
 
 const HOVER_BACKGROUND = /(^|[\s:])hover:bg-/;
 
-describe('selected rows keep their highlight under the pointer (#1088)', () => {
+describe('table row hover behavior (#1088, #1109)', () => {
   describe('TableRow', () => {
-    const renderRow = (isSelected: boolean) =>
+    const renderRow = (isSelected: boolean, isHoverable?: boolean) =>
       render(
         <Table>
           <TableBody>
-            <TableRow isSelected={isSelected}>
+            <TableRow isSelected={isSelected} isHoverable={isHoverable}>
               <td>cell</td>
             </TableRow>
           </TableBody>
@@ -50,18 +30,44 @@ describe('selected rows keep their highlight under the pointer (#1088)', () => {
       );
 
     it('withholds the hover background while selected', () => {
-      renderRow(true);
+      renderRow(true, true);
       const row = screen.getByRole('row');
 
       expect(row.className).toContain('bg-pf-accent-bg/15');
       expect(row.className).not.toMatch(HOVER_BACKGROUND);
     });
 
-    it('still offers a hover affordance when not selected', () => {
+    it('does not advertise interactivity by default', () => {
       renderRow(false);
       const row = screen.getByRole('row');
 
+      expect(row.className).not.toMatch(HOVER_BACKGROUND);
+    });
+
+    it('offers a hover affordance when explicitly requested', () => {
+      renderRow(false, true);
+      const row = screen.getByRole('row');
+
       expect(row.className).toMatch(HOVER_BACKGROUND);
+    });
+  });
+
+  describe('global table styles', () => {
+    const controls = readFileSync(resolve(__dirname, '../../styles/controls.css'), 'utf8');
+    const importMappingTable = readFileSync(
+      resolve(__dirname, '../../features/slicer/components/import/ImportMappingTable.tsx'),
+      'utf8',
+    );
+
+    it('does not hover every tbody row', () => {
+      expect(controls).not.toMatch(/table\s+tbody\s+tr:hover\s*\{/);
+    });
+
+    it('only hovers the optional mapping row when it has a row action', () => {
+      expect(importMappingTable).toContain("hasNote && 'cursor-pointer hover:bg-pf-bg-1'");
+      expect(importMappingTable).not.toContain(
+        "'bg-pf-bg-0 hover:bg-pf-bg-1 transition-colors'",
+      );
     });
   });
 

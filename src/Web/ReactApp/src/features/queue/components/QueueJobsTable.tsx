@@ -145,7 +145,7 @@ export function QueueJobsTable({
           </div>
           <a
             href="/files?type=gcode"
-            className="mt-4 px-4 py-2 bg-pf-accent hover:bg-pf-accent-hover text-white rounded-lg font-medium transition-colors"
+            className="mt-4 px-4 py-2 bg-pf-accent-bg hover:bg-pf-accent-hover text-[var(--pf-on-accent)] rounded-lg font-medium transition-colors"
           >
             Browse G-Code Files
           </a>

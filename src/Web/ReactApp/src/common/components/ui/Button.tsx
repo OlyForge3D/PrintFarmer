@@ -21,17 +21,19 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-[var(--pf-button-primary-bg)] enabled:hover:bg-[var(--pf-button-primary-hover)] text-[var(--pf-on-accent)] border border-[var(--pf-button-primary-border)] shadow-md font-semibold',
   secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
   danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] shadow-md font-semibold',
-  subtle: 'bg-transparent enabled:hover:bg-pf-bg-1 text-pf-text-secondary border border-transparent',
+  // Paint defaults for these variants live in the components layer so caller
+  // utilities retain precedence, including state-specific overrides.
+  subtle: 'border',
   // Ghost deliberately declares no utilities at all. Its defaults — transparent
   // surface, inherited text colour, transparent border, no shadow, and the hover
   // overlay — live in the components layer (`styles/controls.css`), keyed off
   // `[data-pf-variant='ghost']`, so that anything a caller passes through
   // `className` wins on layer order instead of losing on source order. See #1087.
   ghost: '',
-  success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
-  tab: 'bg-transparent border-b-2 border-transparent focus:ring-0 rounded-none',
-  toggle: 'bg-transparent text-pf-text-secondary enabled:hover:text-pf-text-primary border-transparent',
-  link: 'bg-transparent text-pf-accent enabled:hover:underline border-transparent px-0 py-0 shadow-none',
+  success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] shadow-md font-semibold',
+  tab: 'border-b-2 focus:ring-0 rounded-none',
+  toggle: '',
+  link: 'enabled:hover:underline px-0 py-0',
   unstyled: '' // No default styles - fully controlled by className prop
 };
 
@@ -57,12 +59,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   },
   ref
 ) {
-  // For tab variant, apply active styles
-  const tabActiveClasses = variant === 'tab' && active
-    ? 'border-pf-accent text-pf-text-primary'
-    : variant === 'tab'
-    ? 'text-pf-text-muted enabled:hover:text-pf-text-primary'
-    : '';
+  const isActiveTab = variant === 'tab' && active === true;
 
   // Link variant should not apply size padding classes
   // Unstyled variant should not apply any base styles
@@ -76,13 +73,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       ref={ref}
       data-pf-button
       data-pf-variant={variant}
+      data-pf-active={isActiveTab ? 'true' : undefined}
       className={clsx(
         applyBaseStyles &&
           'rounded-xs font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
         applyShadow && 'shadow-xs focus-visible:ring-offset-2',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],
-        tabActiveClasses,
         // center icon style when iconCenter provided
         iconCenter && 'justify-center',
         className
