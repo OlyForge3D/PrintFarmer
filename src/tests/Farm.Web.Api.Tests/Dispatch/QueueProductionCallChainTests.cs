@@ -4945,57 +4945,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task BulkReorder_Disabled_RejectsWithoutChangingPositions()
-    {
-        await using AppDbContext context = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
-        var second = new PrintJob
-        {
-            Id = Guid.NewGuid(),
-            Name = "standard-second",
-            AssignedPrinterId = fixture.PrinterId,
-            Status = PrintJobStatus.Assigned,
-            JobKind = JobKind.Standard,
-            Priority = (int)PrintJobPriority.Normal,
-            QueuePosition = 2,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow,
-        };
-        context.PrintJobs.Add(second);
-        await context.SaveChangesAsync();
-        PrintJob first = await context.PrintJobs.SingleAsync(
-            candidate => candidate.Id == fixture.JobId);
-
-        NotSupportedException exception = await Assert.ThrowsAsync<NotSupportedException>(
-            () => CreateManagementService(context).BulkReorderJobsAsync(
-                [
-                    new QueueJobReorderMove
-                    {
-                        JobId = first.Id.ToString(),
-                        NewPosition = 2,
-                        IfMatch = Convert.ToBase64String(first.RowVersion!),
-                    },
-                    new QueueJobReorderMove
-                    {
-                        JobId = second.Id.ToString(),
-                        NewPosition = 1,
-                        IfMatch = Convert.ToBase64String(second.RowVersion!),
-                    },
-                ],
-                "operator-1"));
-
-        exception.Message.Should().Contain("priority").And.Contain("queued time");
-        context.ChangeTracker.Clear();
-        Dictionary<Guid, int> positions = await context.PrintJobs
-            .Where(job => job.Id == first.Id || job.Id == second.Id)
-            .ToDictionaryAsync(job => job.Id, job => job.QueuePosition);
-        positions[first.Id].Should().Be(1);
-        positions[second.Id].Should().Be(2);
-    }
-
-    [Fact]
-    [Trait("Category", "DbHeavy")]
     public async Task ReassignJob_DestinationPositionOccupied_AllocatesUniqueTailPosition()
     {
         await using AppDbContext context = CreateContext();

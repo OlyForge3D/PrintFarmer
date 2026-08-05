@@ -2382,22 +2382,6 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
-    /// Reject manual queue reordering because priority and queued time define dispatch order.
-    /// </summary>
-    /// <param name="moves">The legacy list of job reorder moves.</param>
-    /// <param name="userId">The unique identifier of the user requesting the reorder.</param>
-    /// <param name="cancellationToken">Cancellation token for the legacy operation.</param>
-    public Task<QueueBulkOperationResultDto> BulkReorderJobsAsync(
-        List<QueueJobReorderMove> moves,
-        string userId,
-        CancellationToken cancellationToken = default)
-    {
-        return Task.FromException<QueueBulkOperationResultDto>(
-            new NotSupportedException(
-                "Manual queue reordering is disabled; jobs dispatch by priority and then queued time (FIFO)."));
-    }
-
-    /// <summary>
     /// Rerun a completed job (add it back to queue)
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job to rerun.</param>

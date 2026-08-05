@@ -313,20 +313,6 @@ public class FilamentCoverageProductionBroadcastTests
     }
 
     [Fact]
-    public async Task BulkReorderJobsAsync_Disabled_RejectsWithoutBroadcast()
-    {
-        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
-        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
-        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object);
-        Func<Task> act = async () => await service.BulkReorderJobsAsync(
-            [new QueueJobReorderMove { JobId = Guid.NewGuid().ToString(), NewPosition = 9 }],
-            "user");
-
-        await act.Should().ThrowAsync<NotSupportedException>();
-        broadcaster.VerifyNoOtherCalls();
-    }
-
-    [Fact]
     public async Task Completion_BroadcastsQueueAndConsumedSpoolWeightAfterPersistence()
     {
         string databaseName = Guid.NewGuid().ToString();

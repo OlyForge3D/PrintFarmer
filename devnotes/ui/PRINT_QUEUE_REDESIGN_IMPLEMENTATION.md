@@ -14,7 +14,7 @@
 - `IPrintQueueService.cs` - Service contract with 17 methods
   - Query methods: GetAllQueuedJobsAsync, GetPrinterQueueAsync, GetQueueStatsAsync, GetModelStatsAsync, GetQueueHistoryAsync
   - Command methods: EnqueueJobAsync, UpdateJobAsync, UpdateJobPriorityAsync, PauseJobAsync, ResumeJobAsync, CancelJobAsync
-  - Bulk operations: BulkCancelJobsAsync, BulkReorderJobsAsync
+  - Bulk operations: BulkCancelJobsAsync
   - Seeding: SeedHistoryFromPrintersAsync (Phase 2 stub)
 
 - `PrintQueueService.cs` - Full implementation (~665 lines)
@@ -989,5 +989,4 @@ Comments: ___________
 - 🔜 Duration analytics and variance metrics
 - 🔜 Completion time predictions
 - 🔜 Enhanced analytics dashboard
-
 

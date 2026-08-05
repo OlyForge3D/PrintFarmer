@@ -338,26 +338,6 @@ public class BulkCancelQueueJobsRequest
 }
 
 /// <summary>
-/// Request for bulk reorder operations
-/// </summary>
-public class BulkReorderQueueJobsRequest
-{
-    public List<QueueJobReorderMove> Moves { get; set; } = new();
-}
-
-/// <summary>
-/// Represents a single reorder move in bulk operations
-/// </summary>
-public class QueueJobReorderMove
-{
-    public string JobId { get; set; } = null!;
-
-    public int NewPosition { get; set; }
-
-    public string? IfMatch { get; set; }
-}
-
-/// <summary>
 /// Request to seed history from printer APIs.
 /// Fetches all available history - no date filtering since the backend
 /// ISupportsHistory interface doesn't support it. Deduplication prevents duplicates.

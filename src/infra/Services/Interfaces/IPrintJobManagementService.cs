@@ -260,18 +260,6 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reject manual queue reordering because priority and queued time define dispatch order.
-    /// </summary>
-    /// <param name="moves">The legacy list of reorder moves.</param>
-    /// <param name="userId">The unique identifier of the user requesting the reorder.</param>
-    /// <param name="cancellationToken">Cancellation token for the legacy operation.</param>
-    /// <exception cref="NotSupportedException">Always thrown because manual reordering is disabled.</exception>
-    Task<QueueBulkOperationResultDto> BulkReorderJobsAsync(
-        List<QueueJobReorderMove> moves,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Rerun a completed job (add it back to queue)
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>

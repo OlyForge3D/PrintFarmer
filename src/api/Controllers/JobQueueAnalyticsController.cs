@@ -617,24 +617,6 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Reject manual queue reordering because priority and queued time define dispatch order.
-    /// </summary>
-    /// <param name="request">The legacy bulk reorder request.</param>
-    [HttpPost("bulk/reorder")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public IActionResult BulkReorderJobs([FromBody] BulkReorderQueueJobsRequest request)
-    {
-        return Conflict(new ProblemDetails
-        {
-            Status = StatusCodes.Status409Conflict,
-            Title = "Manual queue reordering is disabled",
-            Detail = "Jobs dispatch by priority and then queued time (FIFO). Change a job's priority to affect dispatch order.",
-        });
-    }
-
-    /// <summary>
     /// Get detailed information about a specific job including notes and tags
     /// </summary>
     /// <param name="jobId">The ID of the job to retrieve</param>
