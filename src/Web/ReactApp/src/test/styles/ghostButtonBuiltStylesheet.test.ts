@@ -317,3 +317,71 @@ describe('built stylesheet ghost cascade (#1122)', () => {
     ).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #1102 source-level guard.
+//
+// The built-stylesheet assertions above prove the component-layer defaults sit
+// where they should. They do NOT prove the variant map stopped declaring paint
+// as a utility, because a re-added `bg-transparent` lands in @layer utilities
+// and leaves every component-layer rule untouched — the checks above stay green
+// while the defect is fully restored. This was verified by injection: adding
+// `bg-transparent` back to `subtle` left all four assertions passing even
+// though the built artifact then sorted `.bg-transparent` 19,791 bytes after
+// `.bg-pf-accent`, i.e. the original bug exactly.
+//
+// So assert the source contract directly: the bare variants own no background
+// or shadow utility in any state.
+// ---------------------------------------------------------------------------
+const BUTTON_SOURCE = resolve(REACT_APP_ROOT, 'src/common/components/ui/Button.tsx');
+const BARE_VARIANTS = ['ghost', 'subtle', 'tab', 'toggle', 'link'] as const;
+
+function readVariantClasses(source: string): Map<string, string> {
+  const start = source.indexOf('const variantClasses');
+  if (start < 0) throw new Error('variantClasses declaration not found in Button.tsx');
+  const end = source.indexOf('\n};', start);
+  if (end < 0) throw new Error('variantClasses closing brace not found in Button.tsx');
+  const block = source.slice(start, end);
+  const entries = new Map<string, string>();
+  for (const match of block.matchAll(/^\s*(\w+):\s*'([^']*)'/gm)) {
+    entries.set(match[1], match[2]);
+  }
+  return entries;
+}
+
+function paintUtilities(classes: string): string[] {
+  return classes
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((token) => {
+      const utility = token.slice(token.lastIndexOf(':') + 1);
+      return utility.startsWith('bg-') || utility.startsWith('shadow-');
+    });
+}
+
+describe('Button variant map — bare variants own no paint (#1102)', () => {
+  const entries = readVariantClasses(readFileSync(BUTTON_SOURCE, 'utf8'));
+
+  it('parses every bare variant out of the source', () => {
+    for (const variant of BARE_VARIANTS) {
+      expect(entries.has(variant), `variant '${variant}' missing from variantClasses`).toBe(true);
+    }
+  });
+
+  it.each(BARE_VARIANTS)('%s declares no background or shadow utility', (variant) => {
+    const offending = paintUtilities(entries.get(variant) ?? '');
+    expect(
+      offending,
+      `variant '${variant}' declares ${offending.join(', ')} as a utility. Utilities land in ` +
+        '@layer utilities, the same layer as caller className, so they suppress caller paint ' +
+        'on source order. Move the default into @layer components in styles/controls.css, ' +
+        "keyed off [data-pf-variant='" + variant + "'].",
+    ).toEqual([]);
+  });
+
+  it('still allows structural, non-paint utilities', () => {
+    expect(paintUtilities(entries.get('tab') ?? '')).toEqual([]);
+    expect(entries.get('tab')).toContain('border-b-2');
+    expect(entries.get('link')).toContain('px-0');
+  });
+});
