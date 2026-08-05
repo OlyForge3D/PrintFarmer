@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
@@ -381,33 +382,57 @@ const PALETTE_SHADE =
 
 /**
  * Strip Tailwind's important marker. Both spellings are live in this repo —
- * v3's leading `!bg-transparent` (5 sites) and v4's trailing `justify-start!`
- * (71 sites) — and both defeat a naive check: a leading `!` breaks
+ * v3's leading `!bg-transparent` (40+ sites) and v4's trailing `justify-start!`
+ * (71 sites) — and each defeats a *different* check: a leading `!` breaks
  * `startsWith('bg-')`, a trailing one breaks the `$`-anchored value regexes.
  *
  * An important paint utility is strictly worse than the #1102 defect it would
- * hide: `!important` in @layer utilities beats caller paint unconditionally,
- * where the original only won on source order.
+ * hide: `!important` in @layer utilities beats the @layer components default
+ * unconditionally, so it defeats the core fix itself rather than merely winning
+ * on source order.
+ *
+ * `!+` rather than `!` because `text-white!!` is accepted by the compiler.
  */
-const stripImportant = (utility: string): string => utility.replace(/^!/, '').replace(/!$/, '');
+const stripImportant = (utility: string): string => utility.replace(/^!+/, '').replace(/!+$/, '');
+
+/**
+ * Reduce a class token to its bare utility: drop every state variant, then the
+ * important marker.
+ *
+ * The variant separator must be found at bracket depth 0. A naive
+ * `lastIndexOf(':')` lands *inside* an arbitrary value — `text-[color:var(--x)]`
+ * reduces to `var(--x)]`, which matches nothing and silently reports a paint
+ * utility as safe. `Button.tsx` already ships `bg-[var(--pf-button-primary-bg)]`,
+ * so that shape is one edit away from being live.
+ */
+const bareUtility = (token: string): string => {
+  let depth = 0;
+  let cut = -1;
+  for (let i = 0; i < token.length; i += 1) {
+    const ch = token[i];
+    if (ch === '[') depth += 1;
+    else if (ch === ']') depth -= 1;
+    else if (ch === ':' && depth === 0) cut = i;
+  }
+  return stripImportant(token.slice(cut + 1));
+};
+
+const classTokens = (classes: string): string[] => classes.split(/\s+/).filter(Boolean);
 
 function paintUtilities(classes: string): string[] {
-  return classes
-    .split(/\s+/)
-    .filter(Boolean)
-    .filter((token) => {
-      const utility = stripImportant(token.slice(token.lastIndexOf(':') + 1));
-      if (utility === 'shadow') return true;
-      if (utility.startsWith('bg-') || utility.startsWith('shadow-')) return true;
-      if (!COLOUR_CAPABLE.test(utility)) return false;
-      const value = utility.slice(utility.indexOf('-') + 1).split('/')[0];
-      return (
-        utility.includes('pf-') ||
-        utility.includes('[') ||
-        NAMED_COLOUR.test(value) ||
-        PALETTE_SHADE.test(value)
-      );
-    });
+  return classTokens(classes).filter((token) => {
+    const utility = bareUtility(token);
+    if (utility === 'shadow') return true;
+    if (utility.startsWith('bg-') || utility.startsWith('shadow-')) return true;
+    if (!COLOUR_CAPABLE.test(utility)) return false;
+    const value = utility.slice(utility.indexOf('-') + 1).split('/')[0];
+    return (
+      utility.includes('pf-') ||
+      utility.includes('[') ||
+      NAMED_COLOUR.test(value) ||
+      PALETTE_SHADE.test(value)
+    );
+  });
 }
 
 describe('Button variant map — bare variants own no paint (#1102)', () => {
@@ -519,16 +544,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * Read the `variant` prop only. Matching bare quoted words anywhere in the
    * tag is wrong: `role="tab"` and `key={tab.name}` both produce a false
    * `tab` hit, which is how a genuinely `unstyled` control got miscounted as
-   * fallout during this work.
+   * fallout during this work. The AST reads the attribute by name, so the
+   * confusion is structurally impossible rather than merely guarded against.
    */
-  const declaredVariants = (tag: string): string[] => {
-    const prop = tag.match(/\svariant=(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/);
-    if (!prop) return ['primary'];
-    const literal = prop[1] ?? prop[2];
-    if (literal !== undefined) return [literal];
-    return [...(prop[3] ?? '').matchAll(/'([a-z]+)'|"([a-z]+)"/g)].map((m) => m[1] ?? m[2]);
-  };
-
   const sourceFiles = (dir: string, acc: string[] = []): string[] => {
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
@@ -539,72 +557,108 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   };
 
   /**
-   * The Button's OWN className — the `className=` at brace depth 0 of the tag.
-   * A nested `iconCenter={<Icon className="text-pf-error" />}` sits at depth >= 1
-   * and belongs to the icon, not the Button. Attributing it to the Button
-   * produced a false positive during this work, so the depth check is load
-   * bearing rather than defensive.
+   * Every `<Button>` element in a file, parsed with the TypeScript compiler.
+   *
+   * Three hand-rolled parsers preceded this one and each shipped a different
+   * tokenisation bug: a tag terminated at the first `>` inside an arrow
+   * function; a `className` reader that returned raw template text (so an
+   * interpolated `${cond ? 'text-pf-error' : ''}` arrived as `"text-pf-error`
+   * with a quote glued on and matched nothing); and a variant reader that could
+   * not tell `role="tab"` from `variant="tab"`. The compiler already answers all
+   * of these exactly, and `typescript` is already a dependency.
+   *
+   * Own-versus-nested falls out of the AST for free: `node.attributes` are the
+   * Button's own props, so `iconCenter={<Icon className="text-pf-error" />}`
+   * belongs to the icon and is never attributed to the Button.
    */
-  const ownClassName = (tag: string): string => {
-    let depth = 0;
-    let quote: string | null = null;
-    for (let i = 0; i < tag.length; i += 1) {
-      const ch = tag[i];
-      if (quote) {
-        if (ch === quote && tag[i - 1] !== '\\') quote = null;
-        continue;
-      }
-      if (ch === '"' || ch === "'" || ch === '`') {
-        quote = ch;
-        continue;
-      }
-      if (ch === '{') {
-        depth += 1;
-        continue;
-      }
-      if (ch === '}') {
-        depth -= 1;
-        continue;
-      }
-      if (depth === 0 && tag.startsWith('className=', i) && /\s/.test(tag[i - 1] ?? '')) {
-        const rest = tag.slice(i + 'className='.length);
-        const q = rest[0];
-        if (q === '"' || q === "'") {
-          const close = rest.indexOf(q, 1);
-          return close === -1 ? '' : rest.slice(1, close);
-        }
-        if (q === '{') {
-          let d = 0;
-          let out = '';
-          for (let j = 0; j < rest.length; j += 1) {
-            const c = rest[j];
-            if (c === '{') d += 1;
-            else if (c === '}') {
-              d -= 1;
-              if (d === 0) break;
-            } else if (c === '"' || c === "'" || c === '`') {
-              const close = rest.indexOf(c, j + 1);
-              if (close === -1) break;
-              out += ' ' + rest.slice(j + 1, close);
-              j = close;
-            }
-          }
-          return out;
-        }
-      }
-    }
-    return '';
+  interface ButtonTag {
+    line: number;
+    className: string;
+    variants: string[];
+    disableable: boolean;
+    dynamicVariant: boolean;
+  }
+
+  /**
+   * Every string the expression can contribute, including the literal segments
+   * of a template. `class={`a ${cond ? 'b' : 'c'}`}` yields `a`, `b`, `c` — the
+   * union of what can render, which is the right conservative reading for a
+   * guard.
+   */
+  const literalsIn = (node: ts.Node): string[] => {
+    const out: string[] = [];
+    const visit = (n: ts.Node): void => {
+      if (ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) out.push(n.text);
+      else if (ts.isTemplateHead(n) || ts.isTemplateMiddle(n) || ts.isTemplateTail(n)) out.push(n.text);
+      // The callback must return void: `ts.forEachChild` treats any truthy
+      // return as "stop", which silently drops the rest of the tree.
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
+    return out;
   };
+
+  const buttonTags = (source: string, fileName = 'f.tsx'): ButtonTag[] => {
+    const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const out: ButtonTag[] = [];
+
+    const read = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): void => {
+      const tag: ButtonTag = {
+        line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+        className: '',
+        variants: ['primary'],
+        disableable: false,
+        dynamicVariant: false,
+      };
+
+      for (const attr of node.attributes.properties) {
+        if (!ts.isJsxAttribute(attr)) continue;
+        const name = attr.name.getText(sf);
+        if (name === 'disabled' || name === 'loading') tag.disableable = true;
+        else if (name === 'className' && attr.initializer) {
+          tag.className = literalsIn(attr.initializer).join(' ');
+        } else if (name === 'variant' && attr.initializer) {
+          const literals = literalsIn(attr.initializer);
+          tag.variants = literals;
+          tag.dynamicVariant = literals.length === 0;
+        }
+      }
+
+      out.push(tag);
+    };
+
+    const visit = (node: ts.Node): void => {
+      if (
+        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        node.tagName.getText(sf) === 'Button'
+      ) {
+        read(node);
+      }
+      ts.forEachChild(node, visit);
+    };
+
+    visit(sf);
+    return out;
+  };
+
+  /**
+   * A variant this cluster unmasked. A `variant={expr}` that resolves to no
+   * literal is treated as unmasked rather than skipped: it *may* be one of the
+   * five, and a guard that silently ignores what it cannot resolve is the same
+   * false-negative shape as the parsers this replaced.
+   */
+  const isUnmasked = (tag: ButtonTag): boolean =>
+    tag.dynamicVariant || tag.variants.some((v) => UNMASKED_VARIANTS.includes(v));
 
   it('no unmasked-variant Button pairs `disabled` with an unguarded hover:', () => {
     const offenders: string[] = [];
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const { tag, line } of openingTags(readFileSync(file, 'utf8'))) {
-        if (!isDisableable(tag) || !unguardedHover(tag)) continue;
-        if (!declaredVariants(tag).some((v) => UNMASKED_VARIANTS.includes(v))) continue;
-        offenders.push(`${rel}:${line}`);
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+        if (!tag.disableable || !unguardedHover(tag.className)) continue;
+        if (!isUnmasked(tag)) continue;
+        offenders.push(`${rel}:${tag.line}`);
       }
     }
 
@@ -633,9 +687,23 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * AA. Retargeting to `--pf-error-text` lifts the worst palette to 7.52/7.82.
    *
    * `accent` is deliberately absent from the map: no palette defines
-   * `--pf-accent-text`, so there is nothing to retarget to. Its five call sites
-   * measure 4.99 worst case and pass, so they are left alone rather than
-   * pointed at a token that does not exist.
+   * `--pf-accent-text`, so there is nothing to retarget to. Its remaining call
+   * sites are left alone rather than pointed at a token that does not exist.
+   * Their worst measured rest contrast is 4.65 — light, on `bg-pf-bg-0`, the
+   * alternating-row surface at `SystemLogsContent.tsx:245`. That still passes
+   * AA, but the margin is 0.15 rather than the 0.49 an earlier revision of this
+   * comment claimed from a surface those sites do not actually sit on.
+   *
+   * The count is 6 sites / 7 tokens lexically, of which 5 are reachable at
+   * runtime: `TagInput.tsx:291` is a ternary whose accent branch is gated on
+   * the same condition that selects `variant='primary'`, so its accent spelling
+   * never coexists with the bare variant. Two reviewers reported 6 and 5 and
+   * both were right about different populations; the difference is recorded
+   * rather than resolved because a future edit to that ternary makes 6 correct.
+   *
+   * Matching is per token via `bareUtility`, not by regex over the raw string:
+   * that is what makes it see `!text-pf-error`, `text-pf-error!` and a token
+   * arriving from inside a template interpolation.
    */
   it('no unmasked-variant Button uses a fill token as its foreground', () => {
     const RETARGET: Record<string, string> = {
@@ -643,115 +711,59 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       'text-pf-warning': 'text-pf-warning-text',
       'text-pf-success': 'text-pf-success-text',
     };
-    const FILL_AS_FOREGROUND = /(?:^|\s|:)(text-pf-(?:error|warning|success))(?![-\w])/;
 
-    const offenders: string[] = [];
+    const offenders = new Set<string>();
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const { tag, line } of openingTags(readFileSync(file, 'utf8'))) {
-        if (!declaredVariants(tag).some((v) => UNMASKED_VARIANTS.includes(v))) continue;
-        const found = ownClassName(tag).match(FILL_AS_FOREGROUND);
-        if (found) offenders.push(`${rel}:${line} uses ${found[1]}, want ${RETARGET[found[1]]}`);
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+        if (!isUnmasked(tag)) continue;
+        // Every offending token, not just the first: a site typically carries
+        // both a resting and a hover spelling, and reporting one hides the other.
+        for (const utility of classTokens(tag.className).map(bareUtility)) {
+          if (utility in RETARGET) {
+            offenders.add(`${rel}:${tag.line} uses ${utility}, want ${RETARGET[utility]}`);
+          }
+        }
       }
     }
 
     expect(
-      offenders,
+      [...offenders],
       'A fill token used as `color` on a bare variant is no longer suppressed by the ' +
         'variant, so it now paints and is read directly against the page surface. ' +
         'Use the semantic text token instead — it is defined in all 8 palettes.',
     ).toEqual([]);
   });
 
-  /**
-   * Opening `<Button ...>` tags, so we never inspect a button's children.
-   *
-   * The tag terminator cannot be the first `>` after `<Button`: an arrow
-   * function in any prop (`onClick={() => …}`) contains one, which truncates the
-   * tag before `disabled` and before `className` and makes this guard silently
-   * pass on a live defect. Scan instead for the `>` at brace depth zero and
-   * outside string literals.
-   */
-  const openingTags = (source: string): { tag: string; line: number }[] => {
-    const out: { tag: string; line: number }[] = [];
-    const re = /<Button(?=[\s/>])/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(source))) {
-      let depth = 0;
-      let quote: string | null = null;
-      let end = -1;
-
-      for (let i = m.index + '<Button'.length; i < source.length; i += 1) {
-        const ch = source[i];
-
-        if (quote) {
-          if (ch === quote && source[i - 1] !== '\\') quote = null;
-          continue;
-        }
-        if (ch === '"' || ch === "'" || ch === '`') {
-          quote = ch;
-          continue;
-        }
-        if (ch === '{') depth += 1;
-        else if (ch === '}') depth -= 1;
-        else if (ch === '>' && depth === 0) {
-          end = i;
-          break;
-        }
-      }
-
-      if (end === -1) continue;
-      out.push({
-        tag: source.slice(m.index, end),
-        line: source.slice(0, m.index).split('\n').length,
-      });
-    }
-    return out;
-  };
-
   // `enabled:hover:` is correct; `group-hover:`/`peer-hover:` key off another
   // element's state and say nothing about this control being disabled.
-  const unguardedHover = (tag: string) =>
-    /(?<!enabled:)(?<!group-)(?<!peer-)hover:/.test(tag);
-
-  /**
-   * Whether the control can reach the disabled state.
-   *
-   * `Button.tsx` renders `disabled={disabled || loading}`, so `loading`
-   * disables just as surely as `disabled` does and must be treated the same.
-   * The value is optional: `<Button disabled>` is a valid trailing attribute,
-   * so the name may be followed by `=`, whitespace, `/`, `>` or end of tag.
-   * The lookbehind keeps `aria-disabled` and `data-loading` out — those are
-   * annotations, not the real prop, and do not disable anything.
-   */
-  const isDisableable = (tag: string) =>
-    /(?<![-\w])(?:disabled|loading)(?:[=\s/>]|$)/.test(tag);
+  const unguardedHover = (className: string) =>
+    classTokens(className).some((token) =>
+      /(?<!enabled:)(?<!group-)(?<!peer-)hover:/.test(token),
+    );
 
   it('detects the defect it is meant to detect', () => {
     const injected = `<Button disabled={busy} className="bg-pf-bg-1 hover:bg-pf-bg-0">x</Button>`;
-    const found = openingTags(injected).filter(
-      ({ tag }) => isDisableable(tag) && unguardedHover(tag),
-    );
-    expect(found).toHaveLength(1);
+    expect(
+      buttonTags(injected).filter((t) => t.disableable && unguardedHover(t.className)),
+    ).toHaveLength(1);
 
     const fixed = injected.replace('hover:', 'enabled:hover:');
     expect(
-      openingTags(fixed).filter(({ tag }) => isDisableable(tag) && unguardedHover(tag)),
+      buttonTags(fixed).filter((t) => t.disableable && unguardedHover(t.className)),
     ).toHaveLength(0);
   });
 
   /**
-   * Regression test for the parser itself, not for any call site.
-   *
-   * An earlier version terminated the tag at the first `>` after `<Button`. Any
-   * arrow function in a prop supplies one, so the extracted tag stopped at
-   * `<Button onClick={() =` — before `disabled` and before `className`. The
-   * guard then reported zero offenders on a file that had one, which is
-   * indistinguishable from a clean file. The shape below is the live
-   * ContextMenu.tsx one that slipped through.
+   * Regression tests for the parser itself, not for any call site. Each shape
+   * below defeated a previous hand-rolled parser and was found by a reviewer
+   * injecting a live defect, not by reading the code.
    */
   it('reads past an arrow function in a prop', () => {
+    // An earlier parser terminated the tag at the first `>` after `<Button`,
+    // which an arrow function supplies — truncating before `disabled` and
+    // `className`, so the guard passed on a file that had a defect.
     const withArrow = [
       '<Button',
       '  onClick={() => {',
@@ -762,46 +774,63 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       '>label</Button>',
     ].join('\n');
 
-    const [parsed] = openingTags(withArrow);
+    const [parsed] = buttonTags(withArrow);
     expect(parsed, 'the opening tag must be found at all').toBeDefined();
-    expect(parsed.tag, 'tag truncated before `disabled` by the `=>`').toContain('disabled=');
-    expect(parsed.tag, 'tag truncated before `className` by the `=>`').toContain('hover:bg-pf-bg-1');
+    expect(parsed.disableable, 'tag truncated before `disabled` by the `=>`').toBe(true);
+    expect(parsed.className, 'tag truncated before `className` by the `=>`').toContain(
+      'hover:bg-pf-bg-1',
+    );
+  });
 
-    expect(
-      openingTags(withArrow).filter(
-        ({ tag }) => isDisableable(tag) && unguardedHover(tag),
-      ),
-      'an unguarded hover behind an arrow-function prop must still be reported',
-    ).toHaveLength(1);
+  it('reads a className out of a template interpolation', () => {
+    // A string-scanning reader returned raw template text, so an interpolated
+    // token arrived quote-prefixed (`"text-pf-error`) and matched nothing.
+    // 18 live call sites lost className tokens this way.
+    const interpolated = [
+      '<Button variant="ghost" className={`px-2 ${',
+      "  active ? 'text-pf-error font-medium' : 'text-pf-text-secondary'",
+      '}`}>x</Button>',
+    ].join('\n');
+
+    const [parsed] = buttonTags(interpolated);
+    expect(parsed.variants).toEqual(['ghost']);
+    expect(classTokens(parsed.className).map(bareUtility)).toContain('text-pf-error');
+  });
+
+  it('ignores paint on a nested element, and sees the Button own it', () => {
+    // A child's own `color` beats inheritance in any layer, so nested icon
+    // paint is unchanged by #1102 and must not be attributed to the Button.
+    const nested =
+      '<Button variant="subtle" className="px-2" iconCenter={<Icon className="text-pf-error" />}>x</Button>';
+    expect(classTokens(buttonTags(nested)[0].className).map(bareUtility)).not.toContain(
+      'text-pf-error',
+    );
+
+    const own =
+      '<Button variant="subtle" className="px-2 text-pf-error" iconCenter={<Icon className="w-4" />}>x</Button>';
+    expect(classTokens(buttonTags(own)[0].className).map(bareUtility)).toContain('text-pf-error');
   });
 
   it('treats a trailing bare `disabled` and `loading` as disableable', () => {
-    const offends = (tag: string) =>
-      openingTags(tag).filter(
-        ({ tag: t }) => isDisableable(t) && unguardedHover(t),
-      ).length;
+    expect(buttonTags('<Button disabled className="hover:bg-pf-bg-1">x</Button>')[0].disableable).toBe(
+      true,
+    );
+    expect(buttonTags('<Button loading className="hover:bg-pf-bg-1">x</Button>')[0].disableable).toBe(
+      true,
+    );
+    // Annotations are not the real prop and disable nothing.
+    expect(
+      buttonTags('<Button aria-disabled="true" className="hover:bg-pf-bg-1">x</Button>')[0]
+        .disableable,
+    ).toBe(false);
+  });
 
-    // `disabled` last, with no value: the earlier `disabled[=\s]` predicate
-    // required a following `=` or space and so could not see this.
-    expect(
-      offends('<Button className="hover:bg-pf-bg-0" disabled>x</Button>'),
-      'a trailing valueless `disabled` still disables the control',
-    ).toBe(1);
-
-    // Button renders disabled={disabled || loading}, so loading disables too.
-    expect(
-      offends('<Button loading={busy} className="hover:bg-pf-bg-0">x</Button>'),
-      '`loading` disables the control just as `disabled` does',
-    ).toBe(1);
-
-    // ...but annotations are not the prop and disable nothing.
-    expect(
-      offends('<Button aria-disabled="true" className="hover:bg-pf-bg-0">x</Button>'),
-      '`aria-disabled` is an annotation, not the disabling prop',
-    ).toBe(0);
-    expect(
-      offends('<Button data-loading="1" className="hover:bg-pf-bg-0">x</Button>'),
-      '`data-loading` is an annotation, not the disabling prop',
-    ).toBe(0);
+  it('does not skip a Button whose variant is a non-literal expression', () => {
+    // `declaredVariants` used to return [] here, so the tag was silently
+    // dropped from both contracts. Unresolvable is treated as unmasked.
+    const dynamic = '<Button variant={closeButtonVariant} className="text-pf-error">x</Button>';
+    const [parsed] = buttonTags(dynamic);
+    expect(parsed.dynamicVariant).toBe(true);
+    expect(isUnmasked(parsed)).toBe(true);
   });
 });
