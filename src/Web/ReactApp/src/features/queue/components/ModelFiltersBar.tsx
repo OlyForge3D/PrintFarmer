@@ -122,12 +122,14 @@ export default function ModelFiltersBar({
               variant="subtle"
               className={`px-3 py-1 rounded-sm text-sm font-medium transition-colors ${
                 selectedStatuses.includes(status)
-                  ? status === "queued"
-                    ? "bg-pf-info text-white hover:bg-pf-info/90"
-                    : status === "printing"
-                      ? "bg-pf-success text-white hover:bg-pf-success/90"
-                      : "bg-pf-warning text-white hover:bg-pf-warning/90"
-                  : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-1"
+                  ? `${
+                      status === "queued"
+                        ? "bg-pf-info"
+                        : status === "printing"
+                          ? "bg-pf-success"
+                          : "bg-pf-warning"
+                    } text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]`
+                  : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary enabled:hover:bg-pf-bg-1"
               } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {status === "queued"
