@@ -3506,7 +3506,7 @@ export interface WebhookDelivery {
 
 export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
-export type AutoDispatchEffectiveState = AutoDispatchState | 'Paused';
+export type AutoDispatchEffectiveState = AutoDispatchState | 'Starting' | 'Printing' | 'Paused';
 
 export type StartBehavior = 'Manual' | 'AutoStart' | 'WaitForConfirmation';
 

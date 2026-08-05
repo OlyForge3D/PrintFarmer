@@ -955,18 +955,11 @@ public class AutoDispatchService(
         int queuedJobCount,
         PrintJobStatus? currentJobStatus)
     {
-        if (currentJobStatus == PrintJobStatus.Paused)
-        {
-            return new EffectiveAutoDispatchState(
-                AutoDispatchState.None,
-                nameof(PrintJobStatus.Paused));
-        }
-
         if (currentJobStatus?.OccupiesPrinter() == true)
         {
             return new EffectiveAutoDispatchState(
                 AutoDispatchState.None,
-                nameof(AutoDispatchState.None));
+                currentJobStatus.Value.ToString());
         }
 
         AutoDispatchState storedState = printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None;

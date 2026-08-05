@@ -175,31 +175,34 @@ describe('printerStateDisplay utils', () => {
       })).toBe('Pending Ready');
     });
 
-    it('treats Paused as authoritative over stale bed-clear gate data', () => {
-      const autoDispatchStatus: AutoDispatchStatus = {
-        printerId: 'printer-1',
-        enabled: true,
-        state: 'Paused',
-        queueDepth: 1,
-        readyGateChecks: [
-          {
-            name: 'Bed Clear Confirmed',
-            passed: false,
-            message: 'Waiting for operator to confirm bed is clear',
-            checkedAt: '2026-03-25T00:00:00Z',
-          },
-        ],
-        attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
-      };
+    it.each(['Starting', 'Printing', 'Paused'] as const)(
+      'treats %s as authoritative over stale bed-clear gate data',
+      (state) => {
+        const autoDispatchStatus: AutoDispatchStatus = {
+          printerId: 'printer-1',
+          enabled: true,
+          state,
+          queueDepth: 1,
+          readyGateChecks: [
+            {
+              name: 'Bed Clear Confirmed',
+              passed: false,
+              message: 'Waiting for operator to confirm bed is clear',
+              checkedAt: '2026-03-25T00:00:00Z',
+            },
+          ],
+          attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+        };
 
-      expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(false);
-      expect(getPrinterDisplayState({
-        printerState: 'Paused',
-        autoDispatchState: autoDispatchStatus.state,
-        autoDispatchStatus,
-        isOnline: true,
-      })).toBe('Paused');
-    });
+        expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(false);
+        expect(getPrinterDisplayState({
+          printerState: state,
+          autoDispatchState: autoDispatchStatus.state,
+          autoDispatchStatus,
+          isOnline: true,
+        })).toBe(state);
+      },
+    );
 
     it('treats a failed bed-clear gate with queued work as Pending Ready even when the gate copy is missing', () => {
       const autoDispatchStatus: AutoDispatchStatus = {

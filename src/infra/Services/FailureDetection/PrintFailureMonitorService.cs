@@ -504,12 +504,11 @@ public sealed class PrintFailureMonitorService : BackgroundService
             printer.Name,
             result.Confidence);
 
-        // Find the current active print job
-        PrintJob? currentJob = await dbContext.PrintJobs
-            .WhereOccupiesPrinter()
-            .Where(j => j.AssignedPrinterId == printer.Id)
-            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
-            .FirstOrDefaultAsync(cancellationToken);
+        // Paused jobs occupy the bed but are not eligible for another automatic pause.
+        PrintJob? currentJob = await FindAutoPausableJobAsync(
+            dbContext,
+            printer.Id,
+            cancellationToken);
         var jobContext = ResolveJobContext(_statusCache.GetStatus(printer.Id), currentJob?.Name);
 
         // Publish failure event to SignalR clients
@@ -592,6 +591,18 @@ public sealed class PrintFailureMonitorService : BackgroundService
 
         return failureEvent.AutoPaused;
     }
+
+    internal static Task<PrintJob?> FindAutoPausableJobAsync(
+        AppDbContext dbContext,
+        Guid printerId,
+        CancellationToken cancellationToken = default) =>
+        dbContext.PrintJobs
+            .Where(j =>
+                j.AssignedPrinterId == printerId
+                && (j.Status == PrintJobStatus.Printing
+                    || j.Status == PrintJobStatus.Starting))
+            .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
+            .FirstOrDefaultAsync(cancellationToken);
 
     private ObicoSettings GetCurrentSettings()
     {

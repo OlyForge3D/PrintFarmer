@@ -391,6 +391,40 @@ public sealed class AutoDispatchServiceTests : IDisposable
         status.AttentionMessage.Should().BeNull();
     }
 
+    [Theory]
+    [InlineData(PrintJobStatus.Starting)]
+    [InlineData(PrintJobStatus.Printing)]
+    public async Task GetStatusAsync_WhenPrinterHasActiveJob_ReportsOccupyingState(
+        PrintJobStatus jobStatus)
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        await _db.SaveChangesAsync();
+        await CreateJobAsync(printer, "active-job", jobStatus);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.State.Should().Be(jobStatus.ToString());
+        status.IsReady.Should().BeFalse();
+        status.CurrentJobName.Should().Be("active-job");
+        status.AttentionMessage.Should().BeNull();
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && !check.Passed
+            && check.Message == "Active job still occupies the printer");
+    }
+
     [Fact]
     public async Task MarkPreClearAsync_WhenQueuedJobExists_PopulatesReadyAttentionMessage()
     {
