@@ -174,7 +174,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
                     }`}
                   >
                     <Package className={`h-5 w-5 shrink-0 ${isSelected ? 'text-pf-accent' : 'text-pf-text-tertiary'}`} />
-                    <span className={`flex-1 text-left ${isSelected ? 'text-pf-accent font-medium' : 'text-pf-text-primary'}`}>
+                    <span className={`flex-1 text-left ${isSelected ? 'text-pf-text-primary font-medium' : 'text-pf-text-primary'}`}>
                       {model.name}
                     </span>
                   </Button>
