@@ -1186,7 +1186,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleViewModeChange}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title={`Switch to ${viewMode === 'solid' ? 'Wireframe' : viewMode === 'wireframe' ? 'X-ray' : 'Solid'} View`}
         >
           <span className="text-xs font-medium text-pf-text-primary uppercase">
@@ -1200,7 +1200,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleProjection}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title={isPerspective ? "Switch to Orthographic View" : "Switch to Perspective View"}
         >
           {isPerspective ? (
@@ -1214,7 +1214,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleRecenter}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title="Recenter View"
         >
           <RecenterIcon className="w-5 h-5 text-pf-text-primary" />

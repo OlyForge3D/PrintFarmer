@@ -169,7 +169,7 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
                     onClick={() => setSelectedModelId(model.id)}
                     className={`w-full justify-start rounded-none px-4 py-3 h-auto font-normal border-b border-pf-border/50 ${
                       isSelected
-                        ? 'bg-pf-accent/5 hover:bg-pf-accent/5 border-l-2 border-l-pf-accent'
+                        ? 'bg-pf-accent/10 hover:shadow-sm border-l-2 border-l-pf-accent'
                         : 'hover:bg-pf-bg-2'
                     }`}
                   >
