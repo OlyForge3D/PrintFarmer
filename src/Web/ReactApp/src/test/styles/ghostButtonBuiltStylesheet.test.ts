@@ -551,7 +551,14 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     for (const entry of readdirSync(dir)) {
       const full = join(dir, entry);
       if (statSync(full).isDirectory()) sourceFiles(full, acc);
-      else if (/\.(tsx|jsx)$/.test(entry)) acc.push(full);
+      // Test files are excluded from the caller contracts: their `<Button>`s are
+      // fixtures asserting class passthrough, not rendered UI, and holding a
+      // fixture to an affordance rule that exists for users is a false positive.
+      // `Button.test.tsx` deliberately renders a bare variant with a resting fill
+      // and no hover to prove the caller's classes survive verbatim.
+      else if (/\.(tsx|jsx)$/.test(entry) && !/\.(test|spec)\.(tsx|jsx)$/.test(entry)) {
+        acc.push(full);
+      }
     }
     return acc;
   };
@@ -571,6 +578,17 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * Button's own props, so `iconCenter={<Icon className="text-pf-error" />}`
    * belongs to the icon and is never attributed to the Button.
    */
+  /**
+   * One reachable state of an expression: the class string it yields, plus the
+   * ternary conditions (keyed by source text) that select it. The conditions
+   * exist so a className arm can be paired with the `variant` arm chosen by the
+   * same condition; see `branchesOf`.
+   */
+  interface Branch {
+    text: string;
+    conds: Map<string, boolean>;
+  }
+
   interface ButtonTag {
     line: number;
     className: string;
@@ -582,8 +600,10 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * : 'text-pf-text-secondary hover:text-pf-text-primary'` looks self-referential
    * only when the two branches are conflated, and is correct when they are not.
    */
-  branches: string[];
+  branches: Branch[];
     variants: string[];
+    /** The `variant` prop expanded the same way, for condition-aware pairing. */
+    variantBranches: Branch[];
     disableable: boolean;
     dynamicVariant: boolean;
   }
@@ -608,40 +628,90 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   };
 
   /**
-   * Expands a className expression into one string per branch. Unknown shapes
-   * fall back to every literal they contain, which is the conservative answer:
-   * it can only merge branches, never invent one. The 64-alternative cap keeps
-   * a className with many independent ternaries from expanding combinatorially;
-   * past the cap it degrades to the same conflated string `className` uses.
+   * Expands a className expression into one branch per reachable state. Each
+   * branch carries the ternary conditions that select it, keyed by condition
+   * source text, so a className arm can be paired with the `variant` arm chosen
+   * by the same condition. Without that pairing a site like
+   * `variant={sel ? 'primary' : 'subtle'} className={sel ? 'bg-x' : 'hover:bg-y'}`
+   * looks like a bare variant carrying `bg-x`, when in fact `bg-x` only ever
+   * coexists with `primary`, whose paint still masks it.
+   *
+   * Unknown shapes fall back to every literal they contain, which is the
+   * conservative answer: it can only merge branches, never invent one. The
+   * 64-alternative cap keeps a className with many independent ternaries from
+   * expanding combinatorially; past the cap it degrades to the same conflated
+   * string `className` uses.
    */
-  const branchesOf = (node: ts.Node): string[] => {
-    const cross = (acc: string[], alts: string[], sep = ' ') => {
-      const out = acc.flatMap((a) => alts.map((b) => `${a}${sep}${b}`));
-      return out.length > 64 ? [out.join(' ')] : out;
+  const branchesOf = (node: ts.Node): Branch[] => {
+    const merge = (a: Branch, b: Branch, sep: string): Branch | null => {
+      const conds = new Map(a.conds);
+      for (const [key, value] of b.conds) {
+        // Two arms of the same condition never coexist, so the combination is
+        // unreachable and must not be emitted as a state.
+        if (conds.has(key) && conds.get(key) !== value) return null;
+        conds.set(key, value);
+      }
+      return { text: `${a.text}${sep}${b.text}`, conds };
     };
 
+    const cross = (acc: Branch[], alts: Branch[], sep = ' ') => {
+      const out = acc.flatMap((a) => alts.map((b) => merge(a, b, sep))).filter((b) => b !== null);
+      return out.length > 64
+        ? [{ text: out.map((b) => b.text).join(' '), conds: new Map<string, boolean>() }]
+        : out;
+    };
+
+    const plain = (text: string): Branch[] => [{ text, conds: new Map() }];
+
     if (ts.isParenthesizedExpression(node)) return branchesOf(node.expression);
-    if (ts.isJsxExpression(node)) return node.expression ? branchesOf(node.expression) : [''];
-    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return [node.text];
-    if (ts.isConditionalExpression(node)) {
-      return [...branchesOf(node.whenTrue), ...branchesOf(node.whenFalse)];
+    if (ts.isJsxExpression(node)) return node.expression ? branchesOf(node.expression) : plain('');
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return plain(node.text);
     }
-    // `cond && 'x'` contributes 'x' or nothing; both are real states.
-    if (ts.isBinaryExpression(node)) return ['', ...branchesOf(node.right)];
+    if (ts.isConditionalExpression(node)) {
+      const key = node.condition.getText();
+      const tag = (branches: Branch[], value: boolean) =>
+        branches.map((b) => {
+          if (b.conds.get(key) === !value) return null;
+          const conds = new Map(b.conds);
+          conds.set(key, value);
+          return { text: b.text, conds };
+        });
+      return [
+        ...tag(branchesOf(node.whenTrue), true),
+        ...tag(branchesOf(node.whenFalse), false),
+      ].filter((b) => b !== null);
+    }
+    // `cond && 'x'` contributes 'x' or nothing; both are real states. Other
+    // binary operators are NOT alternatives of that shape: `a + b` concatenates
+    // into one class string, so both operands are present at once, and `||`/`??`
+    // select between two operands where the left one is a real candidate.
+    // Treating every operator as `&&` silently discarded the left operand, which
+    // hid a self-reference spelled `{'text-pf-accent ' + 'hover:text-pf-accent'}`.
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      if (op === ts.SyntaxKind.PlusToken) {
+        return cross(branchesOf(node.left), branchesOf(node.right), '');
+      }
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+        return [...plain(''), ...branchesOf(node.right)];
+      }
+      return [...branchesOf(node.left), ...branchesOf(node.right)];
+    }
     if (ts.isTemplateExpression(node)) {
-      let acc = [node.head.text];
+      let acc = plain(node.head.text);
       for (const span of node.templateSpans) {
         acc = cross(acc, branchesOf(span.expression));
-        acc = acc.map((a) => `${a} ${span.literal.text}`);
+        acc = acc.map((b) => ({ ...b, text: `${b.text} ${span.literal.text}` }));
       }
       return acc;
     }
     if (ts.isCallExpression(node)) {
-      let acc = [''];
+      let acc = plain('');
       for (const arg of node.arguments) acc = cross(acc, branchesOf(arg));
       return acc;
     }
-    return [literalsIn(node).join(' ')];
+    return plain(literalsIn(node).join(' '));
   };
 
   const buttonTags = (source: string, fileName = 'f.tsx'): ButtonTag[] => {
@@ -654,6 +724,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         className: '',
         branches: [],
         variants: ['primary'],
+        variantBranches: [{ text: 'primary', conds: new Map() }],
         disableable: false,
         dynamicVariant: false,
       };
@@ -668,6 +739,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         } else if (name === 'variant' && attr.initializer) {
           const literals = literalsIn(attr.initializer);
           tag.variants = literals;
+          tag.variantBranches = branchesOf(attr.initializer);
           tag.dynamicVariant = literals.length === 0;
         }
       }
@@ -697,6 +769,32 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    */
   const isUnmasked = (tag: ButtonTag): boolean =>
     tag.dynamicVariant || tag.variants.some((v) => UNMASKED_VARIANTS.includes(v));
+
+  /**
+   * The variant literals that can be selected in the state that emits this
+   * className branch. When `variant` is a ternary on the same condition as the
+   * className, only the arm chosen by that condition applies:
+   * `variant={sel ? 'primary' : 'subtle'}` with an accent fill in the `sel` arm
+   * is correct code -- the fill only ever renders under `primary`, whose own
+   * paint still masks it -- and pairing it with `subtle` is a false positive.
+   * An unresolvable `variant={expr}` yields `''`, which callers read as "may be
+   * any variant" rather than skipping the tag.
+   */
+  const variantsFor = (tag: ButtonTag, branch: Branch): string[] => {
+    const reachable = tag.variantBranches.filter((v) =>
+      [...v.conds].every(
+        ([key, value]) => !branch.conds.has(key) || branch.conds.get(key) === value,
+      ),
+    );
+    const applicable = reachable.length > 0 ? reachable : tag.variantBranches;
+    return applicable
+      .map((v) => v.text.trim())
+      .filter((v) => v === '' || UNMASKED_VARIANTS.includes(v));
+  };
+
+  /** Whether a bare variant is selected in the state that emits this branch. */
+  const isUnmaskedIn = (tag: ButtonTag, branch: Branch): boolean =>
+    variantsFor(tag, branch).length > 0;
 
   it('no unmasked-variant Button pairs `disabled` with an unguarded hover:', () => {
     const offenders: string[] = [];
@@ -795,10 +893,24 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * no-op. Sixteen sites carried this shape; all sixteen predate the cluster.
    *
    * Measured, not argued (8 palettes, real `Button`, transitions disabled):
-   * four of the sixteen had *no* other hover token and were dead in every
-   * palette; the other twelve already carried a `hover:bg-pf-*\/10` tint and
-   * so kept feedback -- their colour token was redundant, and deleting it was
-   * a byte-identical no-op in all 8 palettes.
+   * none of the sixteen was dead in every palette, and an earlier revision of
+   * this comment said they were. The components-layer default hover
+   * (`controls.css:1699` for ghost, `:1754` for subtle) is still live for any
+   * caller that passes no `bg-*`, so those sites keep a background affordance
+   * and lose only their colour signal. Ghost's default is a translucent white
+   * overlay and shows on every surface; subtle's is `--pf-bg-1` and is invisible
+   * only where the surface already equals it. The measurement that produced the
+   * false claim rendered two ghost sites as `subtle` on a `bg-pf-bg-1` surface,
+   * which is the one combination where subtle's default is inert.
+   *
+   * The shape that IS dead in every palette is a caller that paints its own
+   * background: that overrides the default hover in both states and leaves no
+   * affordance at all. Both shapes are flagged, and the message distinguishes
+   * them, because the remedies differ.
+   *
+   * Twelve of the sixteen already carried a `hover:bg-pf-*\/10` tint, so their
+   * colour token was redundant; deleting it measured byte-identical in all 8
+   * palettes.
    *
    * The remedy is a hover that changes something, not a hover that restates the
    * resting value. Note a tint in the *same hue as the text* erodes contrast:
@@ -818,23 +930,68 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     return { rest, hover };
   };
 
+  /**
+   * The single property each unmasked variant's components-layer default hover
+   * sets, read from controls.css (`ghost` :1699, `subtle` :1754, `tab` :1764,
+   * `toggle` :1786; `link` declares no hover rule at all).
+   *
+   * This is why "the caller painted its own background" is not by itself a
+   * defect. A resting `bg-*` neutralises the default only for the two variants
+   * whose default IS a background; `tab` and `toggle` hover by changing colour,
+   * so they keep their affordance under any background the caller declares.
+   * Measured: a `tab` with `bg-pf-accent/10` and no hover token still changed
+   * its foreground in 8/8 palettes, while the same shape on `ghost` changed
+   * nothing in 8/8.
+   */
+  const DEFAULT_HOVER: Record<string, 'bg' | 'text' | null> = {
+    ghost: 'bg',
+    subtle: 'bg',
+    tab: 'text',
+    toggle: 'text',
+    link: null,
+  };
+
   it('no unmasked-variant Button is left with a hover that changes nothing', () => {
     const offenders = new Set<string>();
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
       for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
-        if (!isUnmasked(tag)) continue;
         for (const branch of tag.branches) {
-          const { rest, hover } = hoverTokens(branch);
-          const selfReferential = [...hover].filter((utility) => rest.has(utility));
-          if (selfReferential.length === 0) continue;
-          // A hover that restates the resting value is only a defect when
-          // nothing else about the hovered state differs. A selected control
-          // that holds its fill on hover while another token supplies the
-          // feedback is in contract, and flagging it would be a false positive.
+          if (!isUnmaskedIn(tag, branch)) continue;
+          const { rest, hover } = hoverTokens(branch.text);
+          // A hover token that differs from the resting value is real feedback,
+          // whatever else the branch declares.
           if ([...hover].some((utility) => !rest.has(utility))) continue;
-          for (const utility of selfReferential) {
+
+          // `text-*` is overloaded: `text-sm` is a size and `text-left` an
+          // alignment. Only the palette spellings this repo uses for colour
+          // count, because only those can silence a colour default hover.
+          const declares = (kind: 'bg' | 'text') =>
+            [...rest].some((utility) =>
+              kind === 'bg'
+                ? /^bg-/.test(utility)
+                : /^text-pf-/.test(utility) || /^text-\[/.test(utility),
+            );
+          // The caller has no hover of its own, so the only affordance left is
+          // the variant default -- and the caller silences that default by
+          // declaring the same property at rest, from @layer utilities.
+          const silenced = variantsFor(tag, branch).filter((variant) => {
+            // An unresolvable `variant={expr}` could be any of the five. It is
+            // only certainly dead when the caller silences both properties;
+            // flagging it merely because `link` has no default hover would fire
+            // on every dynamic-variant Button in the tree.
+            if (variant === '') return declares('bg') && declares('text');
+            const property = DEFAULT_HOVER[variant];
+            return property === null || declares(property);
+          });
+
+          if (silenced.length > 0) {
+            offenders.add(
+              `${rel}:${tag.line} silences the ${silenced.join('/')} default hover and declares none`,
+            );
+          }
+          for (const utility of [...hover].filter((u) => rest.has(u))) {
             offenders.add(`${rel}:${tag.line} hover:${utility} restates its resting value`);
           }
         }
@@ -843,28 +1000,72 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     expect(
       [...offenders],
-      'This Button has no hover token that changes anything: every hover it declares ' +
-        'restates a value it already has at rest. That was masked before #1102, when the ' +
-        'variant default outranked the caller at rest. Give it a hover that differs. ' +
-        'Prefer a contrast-neutral affordance when the text and a candidate tint share a ' +
-        'hue -- `text-pf-accent` with `hover:bg-pf-accent/10` measured 4.36 on light, below AA.',
+      'This Button has no hover token that changes anything. Two shapes reach here. ' +
+        'A caller that declares at rest the one property its variant default hovers ' +
+        '(background for ghost/subtle, colour for tab/toggle; link has no default at ' +
+        'all) silences that default from @layer utilities and is left with no ' +
+        'affordance, so it must supply one. A caller that merely restates a colour ' +
+        'still has its variant default, but that colour token is dead and should go. ' +
+        'Prefer a contrast-neutral affordance -- a ring or an underline -- when the ' +
+        'text and a candidate tint share a hue: `text-pf-accent` with ' +
+        '`hover:bg-pf-accent/10` measured 4.36 on light, below AA.',
     ).toEqual([]);
   });
 
+  it('splits a className by operator, not by assuming every binary is `&&`', () => {
+    const initializerOf = (code: string) => {
+      const sf = ts.createSourceFile('f.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+      const statement = sf.statements[0] as ts.VariableStatement;
+      return statement.declarationList.declarations[0].initializer!;
+    };
+
+    // `a + b` is ONE class string: both operands render together. Treating it as
+    // an alternation dropped the left operand, so a self-reference split across
+    // a concatenation was invisible. Falsified at +4 bytes -> GREEN before this.
+    expect(
+      branchesOf(initializerOf('const a = "text-pf-accent " + "hover:text-pf-accent";')).map(
+        (b) => b.text,
+      ),
+    ).toEqual(['text-pf-accent hover:text-pf-accent']);
+
+    // `??` and `||` select one operand or the other, so BOTH are real states.
+    // The old code returned only the right one, which is why `x ?? ''` -- about
+    // a dozen call sites in this tree -- could hide a defect in its left arm.
+    expect(
+      branchesOf(initializerOf('const a = "text-pf-error hover:text-pf-error" ?? "";')).map(
+        (b) => b.text,
+      ),
+    ).toContain('text-pf-error hover:text-pf-error');
+  });
+
+  it('pairs a className arm with the variant arm chosen by the same condition', () => {
+    // `variant={sel ? 'primary' : 'subtle'}` -- the fill in the `sel` arm only
+    // ever renders under `primary`, whose own paint still masks it. Reading the
+    // two ternaries independently reported a bare variant carrying a fill.
+    const src =
+      "<Button variant={sel ? 'primary' : 'subtle'} " +
+      "className={sel ? 'bg-pf-accent-bg text-pf-accent' : 'hover:bg-pf-bg-2'}>x</Button>";
+    const [tag] = buttonTags(src);
+    const fill = tag.branches.find((b) => b.text.includes('bg-pf-accent-bg'));
+    expect(fill, 'the fill branch should be parsed').toBeDefined();
+    expect(isUnmaskedIn(tag, fill!)).toBe(false);
+
+    // The same site with both arms bare stays visible to the contract.
+    const bare = buttonTags(src.replace("'primary'", "'ghost'"))[0];
+    const bareFill = bare.branches.find((b) => b.text.includes('bg-pf-accent-bg'))!;
+    expect(isUnmaskedIn(bare, bareFill)).toBe(true);
+  });
 
   it('detects a self-referential hover, and passes once it differs', () => {
     const injected = `<Button variant="subtle" className="text-pf-error-text hover:text-pf-error-text">x</Button>`;
     const flagged = (src: string) =>
-      buttonTags(src)
-        .filter(isUnmasked)
-        .filter((t) =>
-          t.branches.some((branch) => {
-            const { rest, hover } = hoverTokens(branch);
-            return (
-              [...hover].some((u) => rest.has(u)) && ![...hover].some((u) => !rest.has(u))
-            );
-          }),
-        );
+      buttonTags(src).filter((t) =>
+        t.branches.some((branch) => {
+          if (!isUnmaskedIn(t, branch)) return false;
+          const { rest, hover } = hoverTokens(branch.text);
+          return [...hover].some((u) => rest.has(u)) && ![...hover].some((u) => !rest.has(u));
+        }),
+      );
 
     expect(flagged(injected)).toHaveLength(1);
     // The same shape reached through an important spelling.
