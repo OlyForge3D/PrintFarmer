@@ -410,6 +410,31 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       return acc;
     }
     if (ts.isCallExpression(node)) {
+      if (
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === 'join' &&
+        ts.isArrayLiteralExpression(node.expression.expression)
+      ) {
+        const separatorNode = node.arguments[0];
+        if (
+          separatorNode &&
+          !ts.isStringLiteral(separatorNode) &&
+          !ts.isNoSubstitutionTemplateLiteral(separatorNode)
+        ) {
+          throw new Error('className uses an array join with a dynamic separator');
+        }
+
+        const separator = separatorNode?.text ?? ',';
+        const elements = node.expression.expression.elements;
+        if (elements.length === 0) return plain('');
+
+        let acc = branchesOf(elements[0]);
+        for (const element of elements.slice(1)) {
+          acc = cross(acc, branchesOf(element), separator);
+        }
+        return acc;
+      }
+
       let acc = plain('');
       for (const arg of node.arguments) acc = cross(acc, branchesOf(arg));
       return acc;
@@ -832,6 +857,29 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         (b) => b.text,
       ),
     ).toContain('text-pf-error hover:text-pf-error');
+  });
+
+  it('expands array alternatives before applying join', () => {
+    const [tag] = buttonTags(
+      [
+        '<Button',
+        '  variant="subtle"',
+        '  className={[',
+        "    active ? 'bg-pf-bg-1' : 'bg-pf-bg-1 enabled:hover:bg-pf-bg-2',",
+        "  ].join(' ')}",
+        '/>',
+      ].join('\n'),
+      'JoinedClasses.tsx',
+    );
+
+    expect(tag.branches.map((branch) => branch.text)).toEqual([
+      'bg-pf-bg-1',
+      'bg-pf-bg-1 enabled:hover:bg-pf-bg-2',
+    ]);
+    expect(
+      tag.branches.map((branch) => silencedVariants(tag, branch)),
+      'the arm without its own hover must remain visible to the guard',
+    ).toContainEqual(['subtle']);
   });
 
   it('fails loudly past the alternative cap instead of conflating the arms', () => {
