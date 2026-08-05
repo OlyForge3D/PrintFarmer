@@ -263,7 +263,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
                   className={`p-3 border rounded-lg cursor-pointer transition-colors ${
                     selectedPrinter?.id === printer.id
                       ? 'border-pf-accent bg-pf-accent-bg/15'
-                      : 'border-pf-border hover:border-pf-border'
+                      : 'border-pf-border hover:border-pf-accent'
                   }`}
                 >
                   <div className="flex items-center justify-between">
