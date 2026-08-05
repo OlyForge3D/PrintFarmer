@@ -4945,7 +4945,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task BulkReorder_SwappedPositions_CommitsWithoutUniqueCollision()
+    public async Task BulkReorder_Disabled_RejectsWithoutChangingPositions()
     {
         await using AppDbContext context = CreateContext();
         Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
@@ -4967,35 +4967,31 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrintJob first = await context.PrintJobs.SingleAsync(
             candidate => candidate.Id == fixture.JobId);
 
-        QueueBulkOperationResultDto result = await CreateManagementService(context)
-            .BulkReorderJobsAsync(
-            [
-                new QueueJobReorderMove
-                {
-                    JobId = first.Id.ToString(),
-                    NewPosition = 2,
-                    IfMatch = Convert.ToBase64String(first.RowVersion!),
-                },
-                new QueueJobReorderMove
-                {
-                    JobId = second.Id.ToString(),
-                    NewPosition = 1,
-                    IfMatch = Convert.ToBase64String(second.RowVersion!),
-                },
-            ],
-            "operator-1");
+        NotSupportedException exception = await Assert.ThrowsAsync<NotSupportedException>(
+            () => CreateManagementService(context).BulkReorderJobsAsync(
+                [
+                    new QueueJobReorderMove
+                    {
+                        JobId = first.Id.ToString(),
+                        NewPosition = 2,
+                        IfMatch = Convert.ToBase64String(first.RowVersion!),
+                    },
+                    new QueueJobReorderMove
+                    {
+                        JobId = second.Id.ToString(),
+                        NewPosition = 1,
+                        IfMatch = Convert.ToBase64String(second.RowVersion!),
+                    },
+                ],
+                "operator-1"));
 
-        result.SuccessfulCount.Should().Be(2);
+        exception.Message.Should().Contain("priority").And.Contain("queued time");
         context.ChangeTracker.Clear();
-        List<PrintJob> ordered = await context.PrintJobs
-            .Where(job =>
-                job.AssignedPrinterId == fixture.PrinterId &&
-                (job.Status == PrintJobStatus.Queued ||
-                 job.Status == PrintJobStatus.Assigned))
-            .OrderBy(job => job.QueuePosition)
-            .ToListAsync();
-        ordered.Select(job => job.Id).Should().Equal(second.Id, first.Id);
-        ordered.Select(job => job.QueuePosition).Should().Equal(1, 2);
+        Dictionary<Guid, int> positions = await context.PrintJobs
+            .Where(job => job.Id == first.Id || job.Id == second.Id)
+            .ToDictionaryAsync(job => job.Id, job => job.QueuePosition);
+        positions[first.Id].Should().Be(1);
+        positions[second.Id].Should().Be(2);
     }
 
     [Fact]

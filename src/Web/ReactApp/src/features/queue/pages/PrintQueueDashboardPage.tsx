@@ -607,33 +607,6 @@ export function PrintQueueDashboardPage() {
     }
   };
 
-  const handleReorder = async (moves: { jobId: string; newPosition: number }[]) => {
-    const movedJobIds = moves.map((move) => move.jobId);
-    if (!confirmRefreshedIntent(movedJobIds, "reorder")) return;
-    try {
-      await apiClient.reorderQueueJobs(
-        moves.map((move) => {
-          const rowVersion = jobs.find(
-            (entry) => entry.job.id === move.jobId
-          )?.job.rowVersion;
-          if (!rowVersion) {
-            throw new Error(
-              `Job ${move.jobId} changed or has no reviewed revision. Refresh before reordering.`
-            );
-          }
-          return { ...move, rowVersion };
-        })
-      );
-      invalidateQueue();
-    } catch (err) {
-      await handleReviewedMutationFailure(
-        err,
-        movedJobIds,
-        "Failed to reorder jobs"
-      );
-    }
-  };
-
   const handleCloseJobDetailsModal = () => {
     setIsJobDetailsModalOpen(false);
     setSelectedJobId(null);
@@ -753,7 +726,6 @@ export function PrintQueueDashboardPage() {
                     onPriority={handlePriorityChange}
                     onDispatch={handleDispatchJob}
                     onSchedule={(jobId) => setScheduleModalJobId(jobId)}
-                    onReorder={handleReorder}
                     onEdit={(jobId) => {
                       setSelectedJobId(jobId);
                       setIsJobDetailsModalOpen(true);

@@ -4383,24 +4383,6 @@ export class ApiClient {
   }
 
   /**
-   * Bulk reorder print jobs in queue
-   */
-  async reorderQueueJobs(moves: {
-    jobId: string;
-    newPosition: number;
-    rowVersion: string;
-  }[]): Promise<unknown> {
-    const fencedMoves = moves.map(({ rowVersion, ...move }) => ({
-      ...move,
-      ifMatch: this.normalizeQueueJobEtagForBody(rowVersion),
-    }));
-    const response = await this.client.post(`/job-queue-analytics/bulk/reorder`, {
-      moves: fencedMoves,
-    });
-    return response.data;
-  }
-
-  /**
    * Seed history from printer APIs.
    * Fetches all available history and uses deduplication to prevent duplicates.
    * Safe to call multiple times.

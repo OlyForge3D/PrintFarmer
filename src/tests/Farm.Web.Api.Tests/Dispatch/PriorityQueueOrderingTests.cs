@@ -5,6 +5,7 @@ using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -16,7 +17,9 @@ public sealed class PriorityQueueOrderingTests
     [Fact]
     public async Task BatchDispatchAsync_QueuedPriorities_ProcessesUrgentFirstAndLowLast()
     {
-        await using AppDbContext db = CreateContext();
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
         DateTime queuedAt = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
         List<PrintJob> jobs =
         [
@@ -43,7 +46,9 @@ public sealed class PriorityQueueOrderingTests
     [Fact]
     public async Task BatchDispatchAsync_TwoUrgentJobs_ProcessesOldestQueuedJobFirst()
     {
-        await using AppDbContext db = CreateContext();
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
         DateTime queuedAt = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
         PrintJob older = CreateJob(PrintJobPriority.Urgent, queuedAt, queuePosition: 2);
         PrintJob newer = CreateJob(PrintJobPriority.Urgent, queuedAt.AddMinutes(1), queuePosition: 1);
@@ -59,7 +64,9 @@ public sealed class PriorityQueueOrderingTests
     [Fact]
     public async Task GetFilteredJobsAsync_SameJobsAsBatchDispatch_UsesIdenticalOrder()
     {
-        await using AppDbContext db = CreateContext();
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
         DateTime queuedAt = new(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc);
         List<PrintJob> jobs =
         [
@@ -81,12 +88,14 @@ public sealed class PriorityQueueOrderingTests
             displayJobs.Select(job => job.Id));
     }
 
-    private static AppDbContext CreateContext()
+    private static async Task<AppDbContext> CreateContextAsync(SqliteConnection connection)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"PriorityQueueOrdering_{Guid.NewGuid():N}")
+            .UseSqlite(connection)
             .Options;
-        return new AppDbContext(options);
+        var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        return db;
     }
 
     private static PrintJob CreateJob(
@@ -110,12 +119,23 @@ public sealed class PriorityQueueOrderingTests
 
     private static async Task SeedAsync(AppDbContext db, IReadOnlyCollection<PrintJob> jobs)
     {
-        db.DispatchSettings.Add(new DispatchSettings
+        DispatchSettings? settings = await db.DispatchSettings.SingleOrDefaultAsync();
+        if (settings is null)
         {
-            AutoDispatchEnabled = true,
-            AutoDispatchMode = AutoDispatchMode.Auto,
-            MaxConcurrentDispatches = jobs.Count,
-        });
+            db.DispatchSettings.Add(new DispatchSettings
+            {
+                AutoDispatchEnabled = true,
+                AutoDispatchMode = AutoDispatchMode.Auto,
+                MaxConcurrentDispatches = jobs.Count,
+            });
+        }
+        else
+        {
+            settings.AutoDispatchEnabled = true;
+            settings.AutoDispatchMode = AutoDispatchMode.Auto;
+            settings.MaxConcurrentDispatches = jobs.Count;
+        }
+
         db.PrintJobs.AddRange(jobs);
         await db.SaveChangesAsync();
     }

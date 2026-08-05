@@ -22,7 +22,7 @@ export const printQueueTour: TourStepDefinition[] = [
     popover: {
       title: 'Job Queue',
       description:
-        'Each row is a print job with its status, assigned printer, and priority. Drag to reorder, or use the actions menu to dispatch, pause, or cancel jobs.',
+        'Each row is a print job with its status, assigned printer, and priority. Jobs dispatch by priority and then queued time, while the actions menu lets you dispatch, pause, or cancel jobs.',
     },
   },
   {
