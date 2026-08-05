@@ -56,9 +56,14 @@ vi.mock('@/features/printers/components/PrinterFilesModal', () => ({
 }));
 
 vi.mock('@/features/printers/components/PrintProgressBar', () => ({
-  PrintProgressBar: ({ progress }: { progress?: number }) => {
+  PrintProgressBar: ({ progress, queueLabel }: { progress?: number; queueLabel?: string }) => {
     progressBarRender(progress);
-    return <div data-testid="print-progress">{progress ?? 0}</div>;
+    return (
+      <div data-testid="print-progress">
+        {progress ?? 0}
+        {queueLabel && <span>{queueLabel}</span>}
+      </div>
+    );
   },
 }));
 
@@ -271,6 +276,26 @@ describe('CompactPrinterCard memoization', () => {
     );
 
     expect(useJobQueueMock).toHaveBeenCalledWith('printer-1', { enabled: false });
+  });
+
+  it('does not render a stale queue label from cached data while queue polling is disabled', () => {
+    useJobQueueMock.mockReturnValueOnce({
+      data: [
+        { job: { id: 'job-1', status: 'Printing' } },
+        { job: { id: 'job-2', status: 'Queued' } },
+      ],
+      isLoading: false,
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ state: 'Idle', isOnline: true })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('1 of 2')).not.toBeInTheDocument();
   });
 
   it('polls the job queue for active compact cards so queue labels stay fresh', () => {

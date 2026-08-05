@@ -193,7 +193,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     const status = (j as unknown as { status?: string }).status ?? j.job?.status;
     return status === 'Printing';
   });
-  const queueLabel = activeQueueJobs.length > 1
+  const queueLabel = shouldFetchQueueLabel && activeQueueJobs.length > 1
     ? `${(printingIndex >= 0 ? printingIndex + 1 : 1)} of ${activeQueueJobs.length}`
     : undefined;
 
