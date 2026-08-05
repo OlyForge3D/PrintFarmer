@@ -379,12 +379,24 @@ const NAMED_COLOUR = /^(?:white|black|transparent|current|inherit)$/;
 const PALETTE_SHADE =
   /^(?:slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}$/;
 
+/**
+ * Strip Tailwind's important marker. Both spellings are live in this repo —
+ * v3's leading `!bg-transparent` (5 sites) and v4's trailing `justify-start!`
+ * (71 sites) — and both defeat a naive check: a leading `!` breaks
+ * `startsWith('bg-')`, a trailing one breaks the `$`-anchored value regexes.
+ *
+ * An important paint utility is strictly worse than the #1102 defect it would
+ * hide: `!important` in @layer utilities beats caller paint unconditionally,
+ * where the original only won on source order.
+ */
+const stripImportant = (utility: string): string => utility.replace(/^!/, '').replace(/!$/, '');
+
 function paintUtilities(classes: string): string[] {
   return classes
     .split(/\s+/)
     .filter(Boolean)
     .filter((token) => {
-      const utility = token.slice(token.lastIndexOf(':') + 1);
+      const utility = stripImportant(token.slice(token.lastIndexOf(':') + 1));
       if (utility === 'shadow') return true;
       if (utility.startsWith('bg-') || utility.startsWith('shadow-')) return true;
       if (!COLOUR_CAPABLE.test(utility)) return false;
@@ -444,6 +456,32 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
     expect(paintUtilities('enabled:hover:text-pf-accent')).toEqual(['enabled:hover:text-pf-accent']);
     expect(paintUtilities('dark:focus:border-pf-accent')).toEqual(['dark:focus:border-pf-accent']);
   });
+
+  /**
+   * Regression: the `$`-anchored value regexes above (NAMED_COLOUR,
+   * PALETTE_SHADE) once missed a trailing `!`, so `text-white!` passed while
+   * `text-white` failed. Both important spellings are live in this repo, and an
+   * important paint utility is worse than plain #1102 — it beats caller paint
+   * unconditionally rather than only on source order.
+   */
+  it('sees paint through both Tailwind important spellings', () => {
+    // Trailing `!` (v4) — the form that slipped past the value regexes.
+    expect(paintUtilities('text-white!')).toEqual(['text-white!']);
+    expect(paintUtilities('text-black!')).toEqual(['text-black!']);
+    expect(paintUtilities('text-red-500!')).toEqual(['text-red-500!']);
+    expect(paintUtilities('border-red-500!')).toEqual(['border-red-500!']);
+    expect(paintUtilities('ring-white!')).toEqual(['ring-white!']);
+    expect(paintUtilities('enabled:hover:text-white!')).toEqual(['enabled:hover:text-white!']);
+
+    // Leading `!` (v3) — breaks the prefix checks instead of the value regexes.
+    expect(paintUtilities('!bg-transparent')).toEqual(['!bg-transparent']);
+    expect(paintUtilities('!shadow-md')).toEqual(['!shadow-md']);
+    expect(paintUtilities('!text-pf-accent')).toEqual(['!text-pf-accent']);
+    expect(paintUtilities('dark:!border-pf-accent')).toEqual(['dark:!border-pf-accent']);
+
+    // Structural utilities stay exempt under either spelling.
+    expect(paintUtilities('!p-2 !h-auto justify-start! rounded-none!')).toEqual([]);
+  });
 });
 
 /**
@@ -500,6 +538,64 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     return acc;
   };
 
+  /**
+   * The Button's OWN className — the `className=` at brace depth 0 of the tag.
+   * A nested `iconCenter={<Icon className="text-pf-error" />}` sits at depth >= 1
+   * and belongs to the icon, not the Button. Attributing it to the Button
+   * produced a false positive during this work, so the depth check is load
+   * bearing rather than defensive.
+   */
+  const ownClassName = (tag: string): string => {
+    let depth = 0;
+    let quote: string | null = null;
+    for (let i = 0; i < tag.length; i += 1) {
+      const ch = tag[i];
+      if (quote) {
+        if (ch === quote && tag[i - 1] !== '\\') quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'" || ch === '`') {
+        quote = ch;
+        continue;
+      }
+      if (ch === '{') {
+        depth += 1;
+        continue;
+      }
+      if (ch === '}') {
+        depth -= 1;
+        continue;
+      }
+      if (depth === 0 && tag.startsWith('className=', i) && /\s/.test(tag[i - 1] ?? '')) {
+        const rest = tag.slice(i + 'className='.length);
+        const q = rest[0];
+        if (q === '"' || q === "'") {
+          const close = rest.indexOf(q, 1);
+          return close === -1 ? '' : rest.slice(1, close);
+        }
+        if (q === '{') {
+          let d = 0;
+          let out = '';
+          for (let j = 0; j < rest.length; j += 1) {
+            const c = rest[j];
+            if (c === '{') d += 1;
+            else if (c === '}') {
+              d -= 1;
+              if (d === 0) break;
+            } else if (c === '"' || c === "'" || c === '`') {
+              const close = rest.indexOf(c, j + 1);
+              if (close === -1) break;
+              out += ' ' + rest.slice(j + 1, close);
+              j = close;
+            }
+          }
+          return out;
+        }
+      }
+    }
+    return '';
+  };
+
   it('no unmasked-variant Button pairs `disabled` with an unguarded hover:', () => {
     const offenders: string[] = [];
 
@@ -517,6 +613,54 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       'A plain `hover:` utility also matches :disabled. Now that caller paint is no ' +
         'longer overridden by the variant, these repaint under the pointer on a control ' +
         'the user cannot activate. Prefix the hover with `enabled:`.',
+    ).toEqual([]);
+  });
+
+  /**
+   * #1102 caller contract, third direction: the FOREGROUND channel.
+   *
+   * Every earlier framing of this cluster — the issue, the four merged PRs and
+   * the first seven rounds of this branch — described the fallout as "caller
+   * backgrounds now paint". The same cascade governs `color`. Pre-fix, `subtle`
+   * emitted `text-pf-text-secondary` as a utility that outsorted a caller's
+   * `text-pf-error`, so the caller's colour never painted and the site looked
+   * fine. Freeing it is what makes the caller's own choice visible, and a fill
+   * token is not a text colour: `--pf-error` is tuned to be painted ON, not to
+   * be read against a page surface.
+   *
+   * Measured across all 8 palettes: `text-pf-error` on `bg-pf-panel` lands at
+   * 4.41 rest / 4.06 hover in forge, and on `bg-pf-bg-1` at 4.22 — both below
+   * AA. Retargeting to `--pf-error-text` lifts the worst palette to 7.52/7.82.
+   *
+   * `accent` is deliberately absent from the map: no palette defines
+   * `--pf-accent-text`, so there is nothing to retarget to. Its five call sites
+   * measure 4.99 worst case and pass, so they are left alone rather than
+   * pointed at a token that does not exist.
+   */
+  it('no unmasked-variant Button uses a fill token as its foreground', () => {
+    const RETARGET: Record<string, string> = {
+      'text-pf-error': 'text-pf-error-text',
+      'text-pf-warning': 'text-pf-warning-text',
+      'text-pf-success': 'text-pf-success-text',
+    };
+    const FILL_AS_FOREGROUND = /(?:^|\s|:)(text-pf-(?:error|warning|success))(?![-\w])/;
+
+    const offenders: string[] = [];
+
+    for (const file of sourceFiles(SRC_ROOT)) {
+      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
+      for (const { tag, line } of openingTags(readFileSync(file, 'utf8'))) {
+        if (!declaredVariants(tag).some((v) => UNMASKED_VARIANTS.includes(v))) continue;
+        const found = ownClassName(tag).match(FILL_AS_FOREGROUND);
+        if (found) offenders.push(`${rel}:${line} uses ${found[1]}, want ${RETARGET[found[1]]}`);
+      }
+    }
+
+    expect(
+      offenders,
+      'A fill token used as `color` on a bare variant is no longer suppressed by the ' +
+        'variant, so it now paints and is read directly against the page surface. ' +
+        'Use the semantic text token instead — it is defined in all 8 palettes.',
     ).toEqual([]);
   });
 
