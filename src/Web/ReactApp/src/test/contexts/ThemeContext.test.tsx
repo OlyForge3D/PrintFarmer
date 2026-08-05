@@ -2,8 +2,9 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences, SELECTABLE_THEMES } from '@/contexts/ThemeContext';
-import type { Theme } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme, useComputedTheme, useAccessibilityPreferences } from '@/contexts/ThemeContext';
+import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
+import type { Theme } from '@/design-system/themes/registry';
 import { ReactNode } from 'react';
 
 // Mock localStorage

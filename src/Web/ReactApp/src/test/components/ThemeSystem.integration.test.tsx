@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from '@testing-library/react';
 import { screen, fireEvent } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { ThemeProvider, useTheme, SELECTABLE_THEMES } from '@/contexts/ThemeContext';
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
+import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 import { ThemeToggle } from '@/common/components/ThemeToggle';
 
 // Mock localStorage

@@ -18,16 +18,18 @@
    `src/design-system/themes/` instead.
 
    What remains below is rule-level styling rather than tokens, so it is
-   unaffected by the layer asymmetry.
-   ============================================================================= */
+   unaffected by the layer asymmetry. There are deliberately NO custom-property
+   declarations left in this file.
 
-/* Reduced motion: the skeleton shimmer is the one animation worth killing
-   outright; the rest is handled per-component. */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --pf-skeleton-animation: none;
-  }
-}
+   A reduced-motion block declaring a `--pf-skeleton-animation` token also used
+   to sit here. It was pure indirection: its only consumers, the `pf-animate-*`
+   utilities in `index.css`, already sat inside their own reduced-motion query
+   and supplied `none` as the fallback, so the token could only ever set what
+   the fallback already gave. Measured with Chromium media emulation: all three
+   utilities resolve to `none` under `prefers-reduced-motion: reduce` with the
+   token declared, with it absent, and with the fallback inlined. Those
+   utilities now say `animation: none` outright.
+   ============================================================================= */
 
 /* =============================================================================
    Accessibility enhancements

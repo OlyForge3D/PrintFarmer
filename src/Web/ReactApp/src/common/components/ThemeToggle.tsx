@@ -2,7 +2,7 @@
 import React from 'react';
 import { SunIcon, MoonIcon, MonitorIcon, MatrixIcon, FireIcon } from '@/common/components/icons/MdiIcons';
 import { useTheme } from '@/contexts/ThemeContext';
-import type { Theme } from '@/contexts/ThemeContext';
+import type { Theme } from '@/design-system/themes/registry';
 
 interface ThemeToggleProps {
   showLabels?: boolean;

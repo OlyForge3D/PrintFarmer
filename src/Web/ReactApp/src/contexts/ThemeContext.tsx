@@ -1,21 +1,12 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 
-/**
- * The themes a user can actually pick. Each has a stylesheet in
- * `src/design-system/themes/` and an entry in `ThemeSwitcher`.
- *
- * Keep in sync with:
- *   - the `VALID` list in `index.html` (omitting one there causes a flash of
- *     `dark` on load until React hydrates)
- *   - `THEME_OPTIONS` in `src/common/components/ThemeSwitcher.tsx`
- * `src/test/contexts/themeRegistry.test.ts` fails if these drift apart.
- */
-export const SELECTABLE_THEMES = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'] as const;
-
-export type SelectableTheme = (typeof SELECTABLE_THEMES)[number];
-
-export type Theme = SelectableTheme | 'system';
+// The theme list lives in the design system, not here: this module is heavily
+// mocked in tests, and a bare vi.mock() would auto-mock the constant away.
+import { SELECTABLE_THEMES, normalizeTheme } from '@/design-system/themes/registry';
+export { SELECTABLE_THEMES, RETIRED_THEME_MAP, isSelectableTheme, normalizeTheme } from '@/design-system/themes/registry';
+export type { Theme, SelectableTheme } from '@/design-system/themes/registry';
+import type { Theme } from '@/design-system/themes/registry';
 
 interface ThemeContextType {
   theme: Theme;
@@ -33,29 +24,6 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const THEME_STORAGE_KEY = 'pf-theme';
 const LEGACY_STORAGE_KEY = 'printfarmer-theme';
-
-/**
- * Themes that were removed. Their stylesheets lived in `src/styles/themes/`,
- * which is imported into `layer(base)` while the design-system themes are
- * unlayered — so their declarations never won the cascade and every one of
- * them rendered byte-identical `dark`. Migrating them to `dark` preserves what
- * users were actually seeing.
- */
-const RETIRED_THEME_MAP: Record<string, Theme> = {
-  'printfarmer-dark': 'dark',
-  'github-dark': 'dark',
-  forge: 'dark',
-};
-
-function normalizeTheme(value: string | null, fallback: Theme): Theme {
-  if (!value) return fallback;
-  const retired = RETIRED_THEME_MAP[value];
-  if (retired) return retired;
-  if (value === 'system' || (SELECTABLE_THEMES as readonly string[]).includes(value)) {
-    return value as Theme;
-  }
-  return fallback;
-}
 
 export function ThemeProvider({ 
   children, 

@@ -15,7 +15,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { SELECTABLE_THEMES } from '@/contexts/ThemeContext';
+import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 
 const appRoot = path.resolve(__dirname, '../..', '..');
 const read = (p: string) => fs.readFileSync(path.join(appRoot, p), 'utf8');
@@ -60,7 +60,7 @@ describe('theme registry', () => {
     const retired = ['github-dark', 'printfarmer-dark', 'forge'];
     // Files allowed to name them, and why. Anything else is a resurrection.
     const allowed = new Set([
-      'src/contexts/ThemeContext.tsx',            // declares the migration map
+      'src/design-system/themes/registry.ts',     // declares the migration map
       'src/test/contexts/ThemeContext.test.tsx',  // tests the migration
       'src/test/contexts/themeRegistry.test.ts',  // this file
     ]);
