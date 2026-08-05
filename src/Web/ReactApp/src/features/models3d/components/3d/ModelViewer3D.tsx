@@ -1155,7 +1155,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleDecimation}
           variant="subtle"
           size="sm"
-          className={`${decimationActive ? 'bg-pf-accent/20 hover:bg-pf-accent/30 border-pf-accent' : 'bg-pf-bg-2/95 hover:bg-pf-bg-1 border-pf-border'} backdrop-blur-sm rounded-lg p-2 transition-colors`}
+          className={`${decimationActive ? 'bg-pf-accent/20 enabled:hover:bg-pf-accent/30 border-pf-accent' : 'bg-pf-bg-2/95 enabled:hover:bg-pf-bg-1 border-pf-border'} backdrop-blur-sm rounded-lg p-2 transition-colors`}
           title={decimationActive ? "Close Simplifier" : "Simplify Mesh"}
           disabled={!originalGeometry}
         >
