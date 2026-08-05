@@ -136,6 +136,22 @@ const THEME_OPTIONS: ThemeOption[] = [
       nav: '#22150c',
     },
   },
+  {
+    id: 'forge',
+    label: 'Forge',
+    description: 'Industrial warmth — molten copper on charred iron',
+    swatches: ['#0f0d0b', '#231f1a', '#d47e34', '#ff9f43'],
+    preview: {
+      canvas: '#0f0d0b',
+      panel: '#1a1714',
+      panelMuted: '#231f1a',
+      text: '#f5e6d3',
+      muted: '#a1907e',
+      accent: '#d47e34',
+      accentSoft: 'rgba(212,126,52,0.16)',
+      nav: '#12100e',
+    },
+  },
 ];
 
 function ThemePreview({ option }: { option: ThemeOption }) {

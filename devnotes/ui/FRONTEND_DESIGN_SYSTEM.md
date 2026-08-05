@@ -108,45 +108,45 @@ This design system is documented across three complementary guides:
 │ ├─ Props-based API                                   │
 │ └─ Integrates Layer 2 classes                        │
 ├─────────────────────────────────────────────────────┤
-│ Layer 2: CSS Utility Classes                         │
-│ ├─ `.pf-btn-primary`, `.pf-control-base`            │
-│ ├─ `.pf-focus-ring`, `.pf-validation-error`         │
+│ Layer 2: Tailwind Utilities                          │
+│ ├─ `bg-pf-accent`, `text-pf-text-primary`           │
+│ ├─ Generated from Layer 1 by the `@theme` block     │
 │ └─ Uses Layer 1 variables                            │
 ├─────────────────────────────────────────────────────┤
 │ Layer 1: CSS Custom Properties (Theme Variables)     │
 │ ├─ `--pf-bg-0`, `--pf-text-primary`                 │
 │ ├─ `--pf-button-primary-bg`, etc.                   │
-│ └─ Defined per theme file                            │
+│ └─ 142 tokens, declared per theme file               │
 └─────────────────────────────────────────────────────┘
 ```
 
 ### Key Files
 
 **Theme Variables:**
-- `src/styles/theme.css` - Main orchestrator and media queries
-- `src/styles/themes/github-dark.css` - GitHub Dark theme (default)
-- `src/styles/themes/printfarmer-dark.css` - PrintFarmer Dark theme
-- `src/styles/themes/light.css` - Light theme
+- `src/design-system/themes/registry.ts` - Single source of truth for which themes exist
+- `src/design-system/themes/base.css` - Theme-independent tokens
+- `src/design-system/themes/<theme>.css` - One file per theme, 142 tokens each
 
 **Component Styles:**
-- `src/styles/components.css` - Reusable utility classes
-- `src/styles/index.css` - Imports all stylesheets
+- `src/index.css` - Imports the themes and declares the `@theme` block
+- `src/styles/controls.css` - Control styles
+- `src/styles/theme.css` - Global `:focus-visible` rules only; declares no tokens
 
 **React Components:**
-- `src/components/ui/` - Shared UI components (Button, Input, Select, etc.)
+- `src/common/components/ui/` - Shared UI components (Button, Input, Select, etc.)
 
 ## 🎨 Available Themes
 
-| Theme | Value | Description |
-|-------|-------|-------------|
-| GitHub Dark | `github-dark` | Professional GitHub-like dark theme (default) |
-| PrintFarmer Dark | `printfarmer-dark` | Custom dark theme with warmer palette |
-| Light | `light` | Bright theme for daylight environments |
+Eight selectable themes: `dark` (default), `light`, `matrix`, `blueprint`, `ratos`,
+`voron`, `farm`, `forge`. See [Theme Architecture](./FRONTEND_THEME_ARCHITECTURE.md)
+for the full table and the cascade-layer constraint that governs where theme CSS may
+live.
 
 All themes support:
 - ✅ WCAG 2.1 AA color contrast
-- ✅ High contrast mode (`prefers-contrast: high`)
 - ✅ Reduced motion (`prefers-reduced-motion: reduce`)
+- ❌ High contrast (`prefers-contrast`) — not implemented; see issue #1125
+- ❌ Print styles — non-functional; see issue #1126
 
 ## 🔄 Common Workflows
 
@@ -161,20 +161,20 @@ All themes support:
 
 ### Add Support for New Theme
 
-1. **Create Theme File** - `src/styles/themes/my-theme.css`
-2. **Define All Variables** - Follow template in [Theme Architecture](./FRONTEND_THEME_ARCHITECTURE.md#step-1-define-theme-variables)
-3. **Import in theme.css** - Add `@import` for new theme
-4. **Add High Contrast Variant** - Per-theme overrides in media query
+1. **Create Theme File** - `src/design-system/themes/my-theme.css`
+2. **Define All 142 Variables** - Copy an existing theme so the token set stays identical
+3. **Import in `src/index.css`** - Add an `@import`, **unlayered**
+4. **Register in Four Places** - `registry.ts`, `ThemeSwitcher.tsx`, the `index.html` boot
+   script, and the import above. See [Theme Architecture](./FRONTEND_THEME_ARCHITECTURE.md#adding-a-new-theme)
 5. **Test Components** - Verify all buttons, inputs, validation states
-6. **Test Accessibility** - Contrast ratios, focus indicators, reduced motion
+6. **Measure Accessibility** - Contrast ratios in a real browser, focus indicators, reduced motion
 
 ### Make Component Theme-Aware
 
-1. **Use CSS Variables** - Replace hardcoded colors with `var(--pf-*)`
-2. **Leverage Existing Classes** - Use `.pf-control-base`, `.pf-btn-primary`, etc.
-3. **Test in All Themes** - Verify appearance in all available themes
-4. **No Component Conditionals** - Don't check theme in React; let CSS handle it
-5. **Verify Accessibility** - Check contrast and focus states
+1. **Use CSS Variables** - Replace hardcoded colors with `var(--pf-*)` or a `pf-` Tailwind utility
+2. **Test in All Themes** - Verify appearance in all eight themes
+3. **No Component Conditionals** - Don't check theme in React; let CSS handle it
+4. **Verify Accessibility** - Check contrast and focus states
 
 ## 📖 Detailed References
 

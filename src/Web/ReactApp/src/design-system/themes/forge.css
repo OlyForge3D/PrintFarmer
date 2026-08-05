@@ -1,0 +1,257 @@
+/* =============================================================================
+   PrintFarmer Forge — "Industrial Warmth"
+   Copper, amber and molten-metal aesthetic, evoking metalworking.
+   Applied to [data-theme="forge"].
+
+   Migrated from src/styles/themes/forge.css, which was imported into
+   layer(base) while the design-system themes are imported unlayered. Layer
+   order outranks specificity, so every colour token the legacy file declared
+   was defeated by dark.css's unconditional `:root` block and forge rendered
+   the dark palette.
+
+   Its *non-token* rules did paint, because an unopposed layered rule applies
+   normally -- layer order only arbitrates competing declarations. Nothing else
+   declares text-shadow on headings, so forge was dark-plus-copper-glow rather
+   than a distinct theme. That is why it is migrated here rather than deleted:
+   the palette below is the one that was always intended and never painted.
+
+   Token set is the 142-token contract shared by all design-system themes.
+   ============================================================================= */
+
+[data-theme="forge"] {
+  color-scheme: dark;
+  --pf-theme-name: 'forge';
+
+  /* --- Surfaces ------------------------------------------------------------- */
+  --pf-bg-0:       #0f0d0b;
+  --pf-bg-1:       #1a1714;
+  --pf-bg-2:       #231f1a;
+  --pf-panel:      #151210;
+  --pf-card-bg:    #1a1714;
+  --pf-sidebar-bg: #12100e;
+  --pf-modal-bg:   #201c17;
+
+  /* --- Borders -------------------------------------------------------------- */
+  --pf-border:         #3d3229;
+  --pf-border-strong:  #5c4a3a;
+  --pf-border-subtle:  #2a231d;
+  --pf-border-divider: #2f2721;
+
+  /* --- Text ----------------------------------------------------------------- */
+  --pf-text-primary:   #f5e6d3;
+  --pf-text-secondary: #c9b8a5;
+  --pf-text-tertiary:  #a1907e;
+  --pf-text-muted:     #8a7a6a;
+  --pf-text-inverse:   #0f0d0b;
+  --pf-on-accent:      #ffffff;
+  --pf-text-on-accent: var(--pf-on-accent);
+
+  /* --- Accent --------------------------------------------------------------- */
+  --pf-accent:       #d47e34;
+  --pf-accent-bg:    #8b4513;
+  --pf-accent-hover: #a0522d;
+  --pf-accent-fg:    var(--pf-on-accent);
+  --pf-accent-2:     #ff9f43;
+
+  /* --- Progress ------------------------------------------------------------- */
+  --pf-progress-track: #231f1a;
+  --pf-progress-fill:  #d47e34;
+
+  /* --- Semantic: Success ---------------------------------------------------- */
+  --pf-success:        #7cb342;
+  --pf-success-bg:     #23300f;
+  --pf-success-border: #4a5d23;
+  --pf-success-fg:     #c5e1a5;
+
+  /* --- Semantic: Warning ---------------------------------------------------- */
+  --pf-warning:        #ffb300;
+  --pf-warning-bg:     #3a2800;
+  --pf-warning-border: #7a5400;
+  --pf-warning-fg:     #ffd54f;
+
+  /* --- Semantic: Error ------------------------------------------------------ */
+  --pf-error:        #e53935;
+  --pf-error-bg:     #2a1515;
+  --pf-error-border: #5c2626;
+  --pf-error-fg:     #ff8a80;
+  --pf-on-danger:    #ff8a80;
+
+  /* --- Semantic: Info ------------------------------------------------------- */
+  --pf-info:        #ffa726;
+  --pf-info-bg:     #3a2810;
+  --pf-info-border: #7a5420;
+  --pf-info-fg:     #ffcc80;
+
+  /* --- Status: Online ------------------------------------------------------- */
+  --pf-status-online-bg:     #1a2612;
+  --pf-status-online-text:   #aed581;
+  --pf-status-online-border: #4a5d23;
+
+  /* --- Status: Offline ------------------------------------------------------ */
+  --pf-status-offline-bg:     #2a1515;
+  --pf-status-offline-text:   #ff8a80;
+  --pf-status-offline-border: #5c2626;
+
+  /* --- Status: Printing ----------------------------------------------------- */
+  --pf-status-printing-bg:     #3a2810;
+  --pf-status-printing-text:   #ffcc80;
+  --pf-status-printing-border: #8b4513;
+
+  /* --- Status: Paused ------------------------------------------------------- */
+  --pf-status-paused-bg:     #3a2800;
+  --pf-status-paused-text:   #ffd54f;
+  --pf-status-paused-border: #7a5400;
+
+  /* --- Status: Error -------------------------------------------------------- */
+  --pf-status-error-bg:     #2a1515;
+  --pf-status-error-text:   #ff8a80;
+  --pf-status-error-border: #8b2323;
+
+  /* --- Status: Idle --------------------------------------------------------- */
+  --pf-status-idle-bg:     #2a231d;
+  --pf-status-idle-text:   #c9b8a5;
+  --pf-status-idle-border: #5c4a3a;
+
+  /* --- Controls ------------------------------------------------------------- */
+  --pf-control-bg:            #12100e;
+  --pf-control-border:        #3d3229;
+  --pf-control-border-hover:  #5c4a3a;
+  --pf-control-border-focus:  #d47e34;
+  --pf-control-text:          #f5e6d3;
+  --pf-control-placeholder:   #a1907e;
+  --pf-control-disabled-bg:   #1a1714;
+  --pf-control-disabled-text: #8a7a6a;
+
+  /* --- Buttons: Primary ----------------------------------------------------- */
+  --pf-button-primary-bg:     #8b4513;
+  --pf-button-primary-hover:  #a0522d;
+  --pf-button-primary-active: #6b3410;
+  --pf-button-primary-text:   var(--pf-on-accent);
+  --pf-button-primary-border: transparent;
+
+  /* --- Buttons: Secondary --------------------------------------------------- */
+  --pf-button-secondary-bg:     transparent;
+  --pf-button-secondary-hover:  #231f1a;
+  --pf-button-secondary-active: rgba(255, 255, 255, 0.08);
+  --pf-button-secondary-text:   #f5e6d3;
+  --pf-button-secondary-border: #3d3229;
+
+  /* --- Buttons: Danger ------------------------------------------------------ */
+  --pf-button-danger-bg:     #2a1515;
+  --pf-button-danger-hover:  #3d1c1c;
+  --pf-button-danger-active: #1f0f0f;
+  --pf-button-danger-text:   var(--pf-on-danger);
+  --pf-button-danger-border: #5c2626;
+
+  /* --- Buttons: Success ----------------------------------------------------- */
+  --pf-button-success-bg:     #23300f;
+  --pf-button-success-hover:  #33461a;
+  --pf-button-success-active: #1a2409;
+  --pf-button-success-text:   #c5e1a5;
+  --pf-button-success-border: #4a5d23;
+
+  /* --- Validation ----------------------------------------------------------- */
+  --pf-validation-error-bg:       #2a1515;
+  --pf-validation-error-border:   #5c2626;
+  --pf-validation-error-text:     #ff8a80;
+  --pf-validation-success-bg:     #23300f;
+  --pf-validation-success-border: #4a5d23;
+  --pf-validation-success-text:   #c5e1a5;
+  --pf-validation-warning-bg:     #3a2800;
+  --pf-validation-warning-border: #7a5400;
+  --pf-validation-warning-text:   #ffd54f;
+
+  /* --- Feedback ------------------------------------------------------------- */
+  --pf-focus-ring:        rgba(212, 126, 52, 0.5);
+  --pf-focus-ring-offset: #0f0d0b;
+  --pf-hover-overlay:     rgba(255, 166, 77, 0.08);
+  --pf-active-overlay:    rgba(255, 166, 77, 0.15);
+  --pf-selection-bg:      #8b4513;
+  --pf-selection-text:    #ffffff;
+
+  /* --- Skeleton / Loading --------------------------------------------------- */
+  --pf-skeleton-bg:     #231f1a;
+  --pf-skeleton-bg-alt: #2f2721;
+  --pf-skeleton-accent: #5c4a3a;
+
+  /* --- Glows ---------------------------------------------------------------- */
+  --pf-glow-accent:  0 0 12px rgba(212, 126, 52, 0.25);
+  --pf-glow-success: 0 0 12px rgba(124, 179, 66, 0.20);
+  --pf-glow-warning: 0 0 12px rgba(255, 179, 0, 0.20);
+  --pf-glow-error:   0 0 12px rgba(229, 57, 53, 0.25);
+
+  /* --- Domain --------------------------------------------------------------- */
+  --pf-home-homed-bg:     #23300f;
+  --pf-home-not-homed-bg: #3a2800;
+
+  /* --- Legacy tokens (backward compatibility) ------------------------------- */
+  --pf-border-light:  #5c4a3a;
+  --pf-border-medium: #3d3229;
+  --pf-border-dark:   #2a231d;
+  --pf-border-gray:   #6b5848;
+  --pf-text-light:    #c9b8a5;
+  --pf-success-hover: #5c7a2e;
+  --pf-error-hover:   #3d1c1c;
+  --pf-error-text:    #ff8a80;
+  --pf-warning-text:  #ffd54f;
+  --pf-success-text:  #c5e1a5;
+  --pf-loading:       #ff9f43;
+  --pf-loading-border: #8b4513;
+  --pf-disabled:      #8a7a6a;
+  --pf-btn-glow:      0 0 12px rgba(255, 166, 77, 0.25);
+  --pf-link:          #ffa726;
+  /* Gradient tokens mapped to flat fallbacks (gradients deprecated per spec) */
+  --pf-gradient-primary-start:       #1a1714;
+  --pf-gradient-primary-end:         #0f0d0b;
+  --pf-gradient-secondary-start:     #231f1a;
+  --pf-gradient-secondary-end:       #1a1714;
+  --pf-gradient-success-start:       #23300f;
+  --pf-gradient-success-end:         #1a2612;
+  --pf-gradient-green-start:         #23300f;
+  --pf-gradient-green-end:           #1a2612;
+  --pf-gradient-green-active-start:  #33461a;
+  --pf-gradient-green-active-end:    #23300f;
+  --pf-gradient-gray-start:          #5c4a3a;
+  --pf-gradient-gray-end:            #3d3229;
+  --pf-gradient-gray-dark-start:     #3d3229;
+  --pf-gradient-gray-dark-end:       #2a231d;
+}
+
+/* Forge body font override — geometric industrial face.
+   Space Grotesk is already loaded for --pf-font-display, so this adds no
+   network request. */
+body[data-theme="forge"],
+html[data-theme="forge"] body {
+  font-family: var(--pf-font-display);
+}
+
+/* Molten glow on headings — like metal cooling.
+   The legacy file also overrode `input:focus` with a bespoke copper ember,
+   which bypassed the design-system focus ring. That is deliberately NOT
+   carried over: --pf-focus-ring above is copper, so the shared focus-ring
+   rule now produces the same effect through the normal token path and keeps
+   the ring's contrast guarantees. */
+[data-theme="forge"] h1,
+[data-theme="forge"] h2,
+[data-theme="forge"] h3 {
+  text-shadow: 0 0 10px rgba(212, 126, 52, 0.3), 0 0 20px rgba(212, 126, 52, 0.15);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="forge"] h1,
+  [data-theme="forge"] h2,
+  [data-theme="forge"] h3 {
+    text-shadow: none;
+  }
+}
+
+/* Ember glow on progress bars */
+[data-theme="forge"] [role='progressbar'] {
+  box-shadow: 0 0 8px rgba(255, 159, 67, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="forge"] [role='progressbar'] {
+    box-shadow: none;
+  }
+}

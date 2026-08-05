@@ -69,13 +69,17 @@ sed -i '' 's/text-gray-400/text-pf-text-secondary/g' path/to/file.tsx
 
 ## Verification
 After making changes:
-1. Switch between all three themes (GitHub Dark, PrintFarmer Dark, Light)
+1. Switch between all eight themes (dark, light, matrix, blueprint, ratos, voron, farm, forge)
 2. Verify colors update correctly on theme change
-3. Check contrast ratios remain accessible (4.5:1 for text, 3:1 for large text)
+3. Check contrast ratios remain accessible (4.5:1 for text, 3:1 for large text) — measure
+   computed values in a real browser, not declared hex in source
 
 ## Theme Files Reference
-- `src/Web/ReactApp/src/styles/theme.css` — Main theme entry point
-- `src/Web/ReactApp/src/styles/themes/github-dark.css`
-- `src/Web/ReactApp/src/styles/themes/printfarmer-dark.css`
-- `src/Web/ReactApp/src/styles/themes/light.css`
-- `src/Web/ReactApp/tailwind.config.js` — Token class definitions
+- `src/Web/ReactApp/src/design-system/themes/registry.ts` — Single source of truth for which themes exist
+- `src/Web/ReactApp/src/design-system/themes/base.css` — Theme-independent tokens
+- `src/Web/ReactApp/src/design-system/themes/<theme>.css` — One file per theme, 142 tokens each
+- `src/Web/ReactApp/src/index.css` — Imports the themes and declares the `@theme` block
+
+Do not add `--pf-*` tokens under `src/styles/` — `index.css` imports that tree into
+`layer(base)` while themes are imported unlayered, so those tokens can never win the
+cascade. A test enforces this.

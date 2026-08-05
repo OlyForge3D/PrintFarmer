@@ -2,7 +2,7 @@
 import React from 'react';
 import { SunIcon, MoonIcon, MonitorIcon, MatrixIcon, FireIcon } from '@/common/components/icons/MdiIcons';
 import { useTheme } from '@/contexts/ThemeContext';
-import type { Theme } from '@/contexts/ThemeContext';
+import type { Theme } from '@/design-system/themes/registry';
 
 interface ThemeToggleProps {
   showLabels?: boolean;
@@ -20,11 +20,17 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { theme, setTheme, computedTheme } = useTheme();
 
+  // Order matches SELECTABLE_THEMES in design-system/themes/registry.ts, so
+  // keyboard cycling here and toggleTheme() agree, with 'system' appended last.
+  // themeRegistry.test.ts enforces both the membership and the order.
   const themes: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { value: 'light', label: 'Light', icon: SunIcon },
-    { value: 'github-dark', label: 'GitHub Dark', icon: MoonIcon },
-    { value: 'printfarmer-dark', label: 'PrintFarmer Dark', icon: MoonIcon },
+    { value: 'dark', label: 'Dark', icon: MoonIcon },
     { value: 'matrix', label: 'Matrix', icon: MatrixIcon },
+    { value: 'blueprint', label: 'Blueprint', icon: MoonIcon },
+    { value: 'ratos', label: 'RatOS', icon: MatrixIcon },
+    { value: 'voron', label: 'Voron', icon: FireIcon },
+    { value: 'farm', label: 'Farm', icon: FireIcon },
     { value: 'forge', label: 'Forge', icon: FireIcon },
     { value: 'system', label: 'System', icon: MonitorIcon },
   ];

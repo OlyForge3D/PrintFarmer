@@ -2,427 +2,166 @@
 
 ## Overview
 
-The PrintFarmer theme system provides **comprehensive, theme-aware styling** for all UI controls through a three-layer architecture:
+PrintFarmer ships eight selectable themes. Every colour in the app resolves through a
+`--pf-*` CSS custom property, and each theme is one stylesheet that declares the full
+token set. Components never hardcode colours; they consume tokens, either directly via
+`var(--pf-…)` or through the Tailwind utilities generated from them (`bg-pf-accent`,
+`text-pf-text-primary`, …).
 
-1. **Theme Variables** - CSS custom properties defined per theme
-2. **Component Utilities** - Reusable CSS classes for controls
-3. **Component Integration** - React components using the system
+## The cascade-layer asymmetry (read this first)
 
-## Layer 1: Theme Variables
-
-### Theme Files
-- `src/styles/theme.css` - Main theme system orchestrator
-- `src/styles/themes/github-dark.css` - GitHub Dark (default) theme colors
-- `src/styles/themes/printfarmer-dark.css` - PrintFarmer Dark theme colors
-
-### Variable Categories
-
-#### Background Colors
-- `--pf-bg-0` - Main page background
-- `--pf-bg-1` - Secondary background (cards, modals)
-- `--pf-bg-2` - Tertiary background (nested containers)
-- `--pf-panel` - Panel-specific background
-
-#### Text Colors
-- `--pf-text-primary` - Primary text (high contrast)
-- `--pf-text-secondary` - Secondary text (medium contrast)
-- `--pf-text-tertiary` - Tertiary text (low contrast)
-- `--pf-text-muted` - Muted/disabled text
-- `--pf-text-light` - Light text for dark backgrounds
-
-#### Border Colors
-- `--pf-border` - Main border color
-- `--pf-border-light` - Light borders
-- `--pf-border-medium` - Medium borders
-- `--pf-border-dark` - Dark borders
-
-#### Control Styling Variables (NEW)
-**Input/Select/Textarea Controls:**
-- `--pf-control-bg` - Input background color
-- `--pf-control-border` - Input border default state
-- `--pf-control-border-hover` - Input border on hover
-- `--pf-control-border-focus` - Input border on focus
-- `--pf-control-text` - Input text color
-- `--pf-control-placeholder` - Placeholder text color
-- `--pf-control-disabled-bg` - Disabled background
-- `--pf-control-disabled-text` - Disabled text color
-
-**Focus Ring:**
-- `--pf-control-focus-ring` - Focus ring color (with alpha)
-- `--pf-control-focus-ring-offset` - Focus ring offset background
-- `--pf-control-focus-ring-width` - Focus ring width (default: 2px)
-
-**Button States:**
-- `--pf-button-primary-bg/hover/active` - Primary button states
-- `--pf-button-secondary-bg/hover/active` - Secondary button states
-- `--pf-button-danger-bg/hover/active` - Danger button states
-- `--pf-button-*-text` - Button text colors
-- `--pf-button-*-border` - Button border colors
-
-**Validation States:**
-- `--pf-validation-error-bg/border/text` - Error styling
-- `--pf-validation-success-border/text` - Success styling
-
-#### Status & Semantic Colors
-- `--pf-status-online-*` - Online status colors
-- `--pf-status-offline-*` - Offline status colors
-- `--pf-error`, `--pf-warning`, `--pf-success` - Semantic colors
-- `--pf-accent`, `--pf-link` - Brand/link colors
-
-#### Gradient Colors
-- `--pf-gradient-primary-*` - Primary gradients
-- `--pf-gradient-secondary-*` - Secondary gradients
-- `--pf-gradient-success-*` - Success gradients
-- `--pf-gradient-gray-*` - Gray gradients
-
-#### Other States
-- `--pf-loading` - Loading color
-- `--pf-disabled` - Disabled state color
-- `--pf-focus-ring` - Focus ring color
-- `--pf-skeleton-bg/bg-alt/accent` - Skeleton animation colors
-
-## Layer 2: Component Utilities
-
-File: `src/styles/components.css`
-
-### Control Base Classes
-
-**`.pf-control-base`** - Base styling for all input-like controls
-```css
-/* Provides: background, border, text color, focus ring, placeholder, disabled states */
-```
-
-### Validation State Classes
-
-**`.pf-control-error`** - Error state styling (red border + light red background)
-**`.pf-control-success`** - Success state styling (green border)
-
-### Button Variant Classes
-
-**`.pf-btn-primary`** - Primary button styling
-- Bold text, shadow on hover, active state
-
-**`.pf-btn-secondary`** - Secondary button styling
-- Medium weight, subtle hover effect
-
-**`.pf-btn-danger`** - Danger button styling
-- Bold text, red background, shadow on hover
-
-### Focus Ring Utilities
-
-**`.pf-focus-ring`** - Simple focus ring (no offset)
-**`.pf-focus-ring-offset`** - Focus ring with 4px offset background
-
-### State Utilities
-
-**`.pf-disabled`** - Disabled state (opacity, cursor, pointer-events)
-
-## Layer 3: Component Integration
-
-### Existing Components Using Variables
-
-**Button.tsx:**
-```typescript
-primary: 'bg-pf-accent-bg hover:bg-pf-accent-hover text-white border border-pf-accent-bg'
-secondary: 'bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light'
-danger: 'bg-pf-error hover:bg-pf-error-hover text-white border border-pf-error-border'
-success: 'bg-pf-success-bg hover:bg-pf-success-hover text-white border border-pf-success'
-```
-
-**Input.tsx:**
-```typescript
-'border rounded p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border'
-'focus:outline-none focus:ring-2 focus:ring-pf-accent'
-'invalid && border-pf-error focus:ring-pf-error'
-```
-
-**Radio.tsx:**
-```typescript
-'w-4 h-4 border-pf-border bg-pf-bg-0 text-pf-accent'
-'focus:ring-2 focus:ring-pf-accent'
-```
-
-## Adding New Theme-Aware Controls
-
-### Step 1: Define Theme Variables
-Add variables to both theme files:
-```css
-[data-theme="github-dark"] {
-  --pf-mycontrol-bg: #color;
-  --pf-mycontrol-border: #color;
-  --pf-mycontrol-hover: #color;
-}
-
-[data-theme="printfarmer-dark"] {
-  --pf-mycontrol-bg: #color;
-  --pf-mycontrol-border: #color;
-  --pf-mycontrol-hover: #color;
-}
-```
-
-### Step 2: Create Utility Class (Optional)
-If reusing across multiple components:
-```css
-.pf-mycontrol {
-  background-color: var(--pf-mycontrol-bg);
-  border: 1px solid var(--pf-mycontrol-border);
-}
-
-.pf-mycontrol:hover {
-  background-color: var(--pf-mycontrol-hover);
-}
-```
-
-### Step 3: Use in Component
-```typescript
-<input 
-  className="pf-control-base"
-  // or
-  className="border-pf-border bg-pf-control-bg text-pf-text-primary"
-/>
-```
-
-## Theme Switching
-
-The theme system uses the `data-theme` attribute:
-
-```html
-<html data-theme="github-dark">   <!-- GitHub Dark (default) -->
-<html data-theme="printfarmer-dark">  <!-- PrintFarmer Dark -->
-<html data-theme="light">         <!-- Light (future) -->
-```
-
-Change theme via JavaScript:
-```javascript
-document.documentElement.setAttribute('data-theme', 'printfarmer-dark');
-```
-
-## Adding a New Theme
-
-1. Create `src/styles/themes/my-theme.css` with all required variables
-2. Import in `src/styles/theme.css`
-3. Follow the variable naming convention (`--pf-*`)
-4. Include all control variables for consistency
-5. Test with all components (buttons, inputs, validation states)
-
-## Best Practices
-
-✅ **DO:**
-- Use CSS variables for all colors
-- Define variables in theme files, never hardcode colors in components
-- Create utility classes for reusable patterns
-- Use semantic variable names (`--pf-button-primary-hover` not `--pf-blue-700`)
-- Test with both dark and light themes
-- Update BOTH theme files when adding new variables
-
-❌ **DON'T:**
-- Hardcode colors in component className strings
-- Use Tailwind's hardcoded color names (e.g., `bg-blue-700`)
-- Create different component styles for different themes
-- Forget to update both theme files
-
-## Testing Theme Colors
-
-Use browser DevTools:
-```javascript
-// Check current theme
-getComputedStyle(document.documentElement).getPropertyValue('--pf-text-primary')
-
-// Switch theme
-document.documentElement.setAttribute('data-theme', 'printfarmer-dark')
-
-// Inspect controls in both themes to verify color consistency
-```
-
-## Current Theme Coverage
-
-- ✅ **GitHub Dark Theme** (default)
-- ✅ **PrintFarmer Dark Theme**  
-- ✅ **Light Theme** (NEW)
-- ✅ Button variants (primary, secondary, danger, success, subtle, tab, toggle)
-- ✅ Input/Select/Textarea controls
-- ✅ Focus ring states
-- ✅ Validation states (error, success)
-- ✅ Text colors (primary, secondary, muted)
-- ✅ Background colors (bg-0, bg-1, bg-2)
-- ✅ Border colors (all variants)
-- ✅ Status colors (online, offline)
-- ✅ Accent colors and links
-- ✅ Skeleton/loading states
-- ✅ **High Contrast Mode** (NEW) - Accessibility support
-- ✅ **Reduced Motion Support** (NEW) - Respects user preferences
-
-## Accessibility Features
-
-### High Contrast Mode
-
-Automatically activates when user enables high contrast in OS settings (Windows, macOS, Linux).
+`src/index.css` imports the two stylesheet families differently, and the difference is
+load-bearing:
 
 ```css
-/* Automatic activation */
-@media (prefers-contrast: high) {
-  /* Maximum contrast colors applied per theme */
-}
+@import './styles/theme.css' layer(base);        /* layered   */
+@import './design-system/themes/dark.css';       /* unlayered */
 ```
 
-**Per-Theme High Contrast:**
-- **Dark Themes**: White text on dark backgrounds, bright accent colors
-- **Light Theme**: Black text on light backgrounds, bright complementary colors
-
-Meets WCAG AAA color contrast requirements (7:1 ratio for normal text).
-
-### Reduced Motion Support
-
-Automatically respects user's motion preferences for accessibility.
+Cascade layers are resolved **before** specificity. An unlayered declaration beats a
+layered one no matter how specific the layered selector is. `dark.css` opens with
 
 ```css
-/* Automatic activation */
-@media (prefers-reduced-motion: reduce) {
-  /* All animations/transitions disabled */
-  /* Visual feedback (hover, focus, active) preserved */
-}
+:root,
+[data-theme="dark"] { … }
 ```
 
-**Benefits:**
-- Users with vestibular disorders can use interface safely
-- Smooth scrolling disabled if requested
-- Skeleton shimmer animations removed
-- Focus rings remain visible for keyboard navigation
-- Button state changes still work
+and that `:root` matches unconditionally, under every theme. So **any `--pf-*` token
+declared under `src/styles/` is dead** — it will always lose to the design-system
+themes.
 
-## Theme Usage Guide
+This is not hypothetical. Three themes (`forge`, `github-dark`, `printfarmer-dark`)
+lived under `src/styles/themes/` and none of their palettes ever painted; selecting
+`forge` rendered the `dark` palette. Nothing failed — not the build, not lint, not the
+type checker.
 
-### Switching Themes Programmatically
+**The subtle half:** layer order only arbitrates *competing* declarations. A layered
+rule that nothing competes with applies normally. `forge` also declared
+`[data-theme="forge"] h1 { text-shadow: … }`, and since no other rule sets `text-shadow`
+on headings, that *did* paint. So the legacy themes were not uniformly dead, which is
+exactly why the problem survived several passes of inspection.
 
-```javascript
-// Set theme
-document.documentElement.setAttribute('data-theme', 'light');
+Two consequences for anyone working here:
 
-// Get current theme
-const theme = document.documentElement.getAttribute('data-theme');
+1. Put theme tokens **only** in `src/design-system/themes/`. `themeRegistry.test.ts`
+   fails if a `[data-theme=…]` selector appears anywhere under `src/styles/`.
+2. Do not conclude a rule is dead from its layer alone. Check whether anything actually
+   competes with it, and prefer measuring the built stylesheet in a browser over reading
+   source.
 
-// Detect system preference
-const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-if (prefersDark) {
-  document.documentElement.setAttribute('data-theme', 'github-dark');
-}
+## Where things live
+
+| Path | Role |
+|---|---|
+| `src/design-system/themes/registry.ts` | **Single source of truth** — `SELECTABLE_THEMES`, `normalizeTheme`, `RETIRED_THEME_MAP` |
+| `src/design-system/themes/base.css` | Theme-independent tokens: fonts, spacing, radii, z-index |
+| `src/design-system/themes/<theme>.css` | One file per theme; declares the 142 `--pf-*` tokens |
+| `src/index.css` | Imports the themes (unlayered) and the `@theme` block that turns tokens into Tailwind utilities |
+| `src/contexts/ThemeContext.tsx` | Owns the `data-theme` attribute and persistence |
+| `src/common/components/ThemeSwitcher.tsx` | The theme picker rendered in settings |
+| `index.html` | Pre-paint boot script that applies the stored theme before React hydrates |
+| `src/styles/theme.css` | Global `:focus-visible` rules only. Declares no tokens, by design |
+
+## The token contract
+
+Every theme declares **the same 142 tokens** — same names, no more, no fewer.
+`themeRegistry.test.ts` enforces this by diffing each theme's token set against a
+reference theme.
+
+This matters because custom properties cascade. A theme that omits a token does not
+error; it silently inherits whatever was set previously, which usually means the
+previous theme's value. Legacy `forge` declared 97 of the 142 and was missing
+`--pf-text-inverse` and `--pf-on-accent` among others — the tokens that make text
+readable on solid status and accent surfaces.
+
+Broad groups: surfaces, borders, text, accent, progress, the four semantic families
+(success / warning / error / info), six status families, controls, four button
+variants, validation, feedback (focus ring, overlays, selection), skeleton, glows,
+domain-specific, and a block of legacy aliases kept for backward compatibility.
+
+## Theme switching
+
+`ThemeContext` is the only thing that should write `data-theme`:
+
+```tsx
+const { theme, setTheme, computedTheme } = useTheme();
+setTheme('forge');
 ```
 
-### Available Themes
+- `theme` is the stored preference and may be `'system'`.
+- `computedTheme` is the theme actually rendering, with `'system'` resolved against
+  `prefers-color-scheme`.
+- Every theme has an explicit `data-theme` value. There is no "remove the attribute to
+  get the default" behaviour — relying on a bare `:root` default is what made the
+  retired themes so hard to see.
 
-| Theme | Value | Best For |
-|-------|-------|----------|
-| GitHub Dark | `github-dark` | Default, professional, GitHub-like |
-| PrintFarmer Dark | `printfarmer-dark` | Custom dark theme, warmer palette |
-| Light | `light` | Bright environments, paper-like feel |
+`normalizeTheme` runs on read, so a stored value that is unknown, or names a retired
+theme, resolves to something renderable instead of leaving the app in an undefined
+state.
 
-### Testing with Different Preferences
+## Adding a new theme
 
-```javascript
-// Test high contrast mode
-window.matchMedia('(prefers-contrast: high)').addEventListener('change', (e) => {
-  console.log('High contrast:', e.matches);
-});
+A theme must appear in **four** places. Miss one and the failure is quiet:
 
-// Test reduced motion preference
-window.matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', (e) => {
-  console.log('Reduced motion:', e.matches);
-});
+1. `src/design-system/themes/<id>.css` — copy an existing theme and restyle it, so the
+   token set stays identical.
+2. `@import` it in `src/index.css`, **unlayered**.
+3. Add its id to `SELECTABLE_THEMES` in `registry.ts`.
+4. Add an entry to `THEME_OPTIONS` in `ThemeSwitcher.tsx`, and to `VALID` in the
+   `index.html` boot script.
 
-// Test color scheme preference
-window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
-  console.log('System theme:', e.matches ? 'dark' : 'light');
-});
-```
+Omitting the boot-script entry does not break the theme — it makes it flash `dark` on
+every page load until React hydrates, which is easy to miss and annoying to diagnose.
+That happened to `ratos`, `voron` and `farm`.
 
-## Creating Custom Themes
+`themeRegistry.test.ts` checks all of these agree, and additionally that no two themes
+share a core palette.
 
-### Template for New Theme
+### Theme-specific visual effects
 
-```css
-/* src/styles/themes/my-theme.css */
+Themes may add rule-level styling beyond tokens — `matrix` has a mono body face, a
+phosphor heading glow and CRT scanlines; `forge` has a copper heading glow and ember
+progress bars. Keep these in the theme's own stylesheet, scope them with
+`[data-theme="<id>"]`, and guard decorative effects with
+`@media (prefers-reduced-motion: reduce)`.
 
-[data-theme="my-theme"] {
-  /* Backgrounds */
-  --pf-bg-0: #color;
-  --pf-bg-1: #color;
-  --pf-bg-2: #color;
-  --pf-panel: #color;
+Prefer expressing an effect through a token when one exists. `forge`'s original
+`input:focus` override was dropped during migration because setting `--pf-focus-ring`
+produces the same copper ring through the shared focus-ring rule, without bypassing its
+contrast guarantees.
 
-  /* Borders */
-  --pf-border: #color;
-  --pf-border-light: #color;
-  --pf-border-medium: #color;
+## Accessibility
 
-  /* Text */
-  --pf-text-primary: #color;
-  --pf-text-secondary: #color;
-  --pf-text-muted: #color;
+**Focus.** `src/styles/theme.css` provides a baseline `*:focus-visible` outline and a
+two-tone ring for interactive elements, built from `--pf-focus-ring` and
+`--pf-focus-ring-offset` so it reads against both the control and the surface behind it.
 
-  /* Accents & Status */
-  --pf-accent: #color;
-  --pf-accent-bg: #color;
-  --pf-success: #color;
-  --pf-error: #color;
+**Contrast.** Themes are expected to meet WCAG AA (4.5:1) for text on its intended
+surface. Measure it; do not eyeball it. Resolve tokens in a real browser against the
+built stylesheet rather than computing from source hex, so `var()` indirection and the
+cascade are exercised for real.
 
-  /* Control Variables */
-  --pf-control-bg: #color;
-  --pf-control-border: #color;
-  --pf-control-text: #color;
+**Reduced motion.** Honoured via `@media (prefers-reduced-motion: reduce)`.
 
-  /* Button States */
-  --pf-button-primary-bg: #color;
-  --pf-button-primary-hover: #color;
-  --pf-button-secondary-bg: #color;
-  --pf-button-danger-bg: #color;
+**Not currently supported:**
 
-  /* Validation */
-  --pf-validation-error-border: #color;
-  --pf-validation-success-border: #color;
+- **High contrast** — no theme implements `prefers-contrast`. A block that appeared to
+  provide it was measurably inert. Tracked in issue #1125.
+- **Print** — print styling is non-functional for the same layer reason. Tracked in
+  issue #1126.
 
-  color-scheme: dark; /* or light */
-}
-```
+## Verifying theme changes
 
-### Steps to Add Theme
+Source inspection is unreliable here; the failure modes are all invisible ones. Useful
+techniques:
 
-1. Create `src/styles/themes/my-theme.css` with all variables
-2. Import in `src/styles/theme.css`: `@import './themes/my-theme.css';`
-3. Add high contrast variant in theme.css media query
-4. Add to theme selector UI (e.g., ThemeSelector component)
-5. Test with all components in all states
-6. Verify accessibility (contrast ratios, focus indicators)
-
-## Future Enhancements
-
-- [x] **High contrast mode support** - IMPLEMENTED
-  - Per-theme high contrast overrides
-  - WCAG AAA compliant contrast ratios
-  - Activated via `prefers-contrast: high` media query
-  
-- [x] **Light theme variables** - IMPLEMENTED
-  - Complete light theme with all CSS variables
-  - Proper contrast on light backgrounds
-  - All control states (input, button, validation)
-  - Usage: `<html data-theme="light">`
-
-- [x] **Theme animation preferences** - IMPLEMENTED
-  - Respects `prefers-reduced-motion` media query
-  - Disables transitions/animations for accessibility
-  - Preserves visual feedback (hover, focus, active states)
-
-- [ ] **Custom theme builder UI** - Future
-  - Interactive theme color picker
-  - Live preview as user adjusts colors
-  - Export/import theme configurations
-
-- [ ] **Per-component theme overrides** - Future
-  - Allow specific components to override theme variables
-  - Useful for special cases (premium features, warnings, etc.)
-  - Scoped CSS variables per component
-
-- [ ] **Automatic contrast checking** - Future
-  - Build-time contrast ratio validation
-  - Runtime accessibility audit
-  - Suggest color adjustments for WCAG compliance
+- Set `data-theme` in a real browser against the built `dist` and read
+  `getComputedStyle`. Compare themes against each other, and compare a branch build
+  against a base build.
+- Compare **computed** values, not declared ones — the whole class of bug in this
+  subsystem is declarations that never take effect.
+- Custom properties are not the whole story. Diff the **selector set** of the built
+  stylesheet too, or rule-level effects will slip past unnoticed.
+- Beware that Tailwind's scanner reads comments and any file in the project tree,
+  including scratch scripts — naming a class in prose can re-emit it into the build and
+  invalidate the measurement. Keep measurement harnesses outside the scanned tree.

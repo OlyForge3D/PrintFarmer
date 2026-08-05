@@ -1,302 +1,57 @@
 /* =============================================================================
-   PrintFarmer Theme System - CSS Custom Properties
+   PrintFarmer - global accessibility rules
+   =============================================================================
+
+   Colour tokens are NOT defined here. Every `--pf-*` token lives in
+   `src/design-system/themes/`, which `src/index.css` imports *unlayered* so it
+   wins the cascade. This file is imported into `layer(base)`.
+
+   THAT ASYMMETRY IS LOAD-BEARING, and it is why this file used to be mostly
+   dead code. An unlayered `:root` beats a layered `[data-theme="x"]` no matter
+   how specific the layered selector is - layer order is resolved before
+   specificity. So anything declaring a `--pf-*` token here can never take
+   effect while the design-system themes are unlayered.
+
+   Five theme files and a `:root:not([data-theme])` block used to sit here.
+   Their colour tokens were all inert, but note the precise scope of that
+   claim: layer order only arbitrates *competing* declarations. `forge` and
+   `matrix` also carried plain rules such as `[data-theme="forge"] h3 {
+   text-shadow }`, which nothing else declared, and those applied normally.
+   `matrix`'s were already duplicated in its design-system theme; `forge`'s
+   were not, which is why forge moved to `src/design-system/themes/forge.css`
+   rather than being deleted.
+
+   Do not reintroduce token declarations in this file. Add them to a theme in
+   `src/design-system/themes/` instead. Equally, do not assume a rule here is
+   dead just because it sits in the losing layer - check whether anything
+   actually competes with it.
+
+   What remains below is rule-level styling rather than tokens, so it is
+   unaffected by the layer asymmetry. There are deliberately NO custom-property
+   declarations left in this file.
+
+   A reduced-motion block declaring a `--pf-skeleton-animation` token also used
+   to sit here. It was pure indirection: its only consumers, the `pf-animate-*`
+   utilities in `index.css`, already sat inside their own reduced-motion query
+   and supplied `none` as the fallback, so the token could only ever set what
+   the fallback already gave. Measured with Chromium media emulation: all three
+   utilities resolve to `none` under `prefers-reduced-motion: reduce` with the
+   token declared, with it absent, and with the fallback inlined. Those
+   utilities now say `animation: none` outright.
    ============================================================================= */
-
-/* Import individual theme files */
-@import './themes/github-dark.css';
-@import './themes/printfarmer-dark.css';
-@import './themes/light.css';
-@import './themes/matrix.css';
-@import './themes/forge.css';
-
-/* Import component styling library */
-@import './components.css';
-
-/* Default theme (GitHub Dark) - applied when no data-theme attribute is set */
-/* Use :not([data-theme]) to allow data-theme attribute to override */
-:root:not([data-theme]) {
-  /* Color system metadata */
-  --pf-theme-name: 'github-dark';
-  
-  /* Primary background colors - GitHub Dark */
-  --pf-bg-0: #0d1117;           /* Main page background (GitHub canvas default) */
-  --pf-bg-1: #161b22;           /* Secondary background (cards/forms - GitHub canvas subtle) */
-  --pf-bg-2: #21262d;           /* Tertiary background (GitHub canvas inset) */
-  --pf-panel: #161b22;          /* Panel background */
-  --pf-card-bg: #161b22;        /* Card background */
-  --pf-sidebar-bg: #161b22;     /* Sidebar background */
-  
-  /* Button glow effect */
-  --pf-btn-glow: 0 0 8px rgba(132, 255, 116, 0.15), 0 1px 2px rgba(0, 0, 0, 0.2);
-  
-  /* Border and divider colors - GitHub Dark */
-  --pf-border: #30363d;         /* Main border color (GitHub border default) */
-  --pf-border-light: #484f58;   /* Light border (GitHub border muted) */
-  --pf-border-medium: #30363d;  /* Medium border */
-  --pf-border-dark: #21262d;    /* Dark border */
-  --pf-border-gray: #6e7681;    /* Gray border */
-  
-  /* Text colors - GitHub Dark */
-  --pf-text-primary: #c9d1d9;   /* Primary text (GitHub fg default) */
-  --pf-text-secondary: #8b949e; /* Secondary text (GitHub fg muted) */
-  --pf-text-tertiary: #6e7681;  /* Tertiary text/muted (GitHub fg subtle) */
-  --pf-text-light: #c9d1d9;     /* Light text */
-  --pf-text-muted: #8b949e;     /* Muted text */
-  
-  /* Accent and brand colors - GitHub Dark */
-  --pf-accent: #58a6ff;         /* Bright accent for text (GitHub accent fg) */
-  --pf-accent-bg: #0969da;      /* Dark accent for button backgrounds (GitHub accent emphasis) */
-  --pf-accent-2: #58a6ff;       /* Blue accent */
-  --pf-success: #3fb950;        /* Success green (GitHub success fg) */
-  --pf-success-bg: #238636;     /* Green button background (GitHub btn primary bg) */
-  --pf-success-hover: #2ea043;  /* Success hover state (GitHub btn primary hover bg) */
-  --pf-link: #58a6ff;           /* Links (GitHub accent fg) */
-  
-  /* Semantic status colors - GitHub Dark */
-  --pf-status-online-bg: #0d1117;
-  --pf-status-online-text: #3fb950;
-  --pf-status-online-border: #238636;
-  --pf-status-offline-bg: #0d1117;
-  --pf-status-offline-text: #f85149;
-  --pf-status-offline-border: #da3633;
-  
-  /* Error and warning colors - GitHub Dark */
-  --pf-error: #f85149;          /* Danger red (GitHub danger fg) */
-  --pf-error-bg: #0d1117;
-  --pf-error-text: #f85149;
-  --pf-error-border: #da3633;
-  --pf-warning: #d29922;        /* Warning yellow (GitHub attention fg) */
-  --pf-warning-text: #d29922;
-  
-  /* Loading and disabled states */
-  --pf-loading: #58a6ff;
-  --pf-loading-border: #0969da;
-  --pf-disabled: #6e7681;
-  
-  /* Gradient colors - GitHub Dark inspired */
-  --pf-gradient-primary-start: #161b22;
-  --pf-gradient-primary-end: #0d1117;
-  --pf-gradient-secondary-start: #21262d;
-  --pf-gradient-secondary-end: #161b22;
-  --pf-gradient-success-start: #1a6b2f;
-  --pf-gradient-success-end: #238636;
-  --pf-gradient-green-start: #238636;
-  --pf-gradient-green-end: #1a6b2f;
-  --pf-gradient-green-active-start: #2ea043;
-  --pf-gradient-green-active-end: #1a7f37;
-  --pf-gradient-gray-start: #6e7681;
-  --pf-gradient-gray-end: #484f58;
-  --pf-gradient-gray-dark-start: #484f58;
-  --pf-gradient-gray-dark-end: #30363d;
-  
-  /* Focus and interaction states - GitHub Dark */
-  --pf-focus-ring: rgba(88, 166, 255, 0.5);
-  --pf-focus-ring-offset: #0d1117;
-  --pf-hover-overlay: rgba(177, 186, 196, 0.12);
-  --pf-active-overlay: rgba(177, 186, 196, 0.2);
-
-  /* Skeleton / shimmer surfaces - GitHub Dark */
-  --pf-skeleton-bg: #21262d;
-  --pf-skeleton-bg-alt: #30363d;
-  --pf-skeleton-accent: #484f58;
-  --pf-focus-outline: var(--pf-accent);
-
-  /* Home buttons (axis homed state) */
-  --pf-home-homed-bg: #2096f3;
-  --pf-home-not-homed-bg: #fb8c00;
-  color-scheme: dark;
-}
-
-/* Light theme variant (for future implementation) */
-[data-theme="light"] {
-  --pf-theme-name: 'light';
-  
-  /* Light theme colors (inverted contrast) */
-  --pf-bg-0: #ffffff;
-  --pf-bg-1: #f8fafc;
-  --pf-bg-2: #f1f5f9;
-  --pf-panel: #f8fafc;
-  
-  --pf-border: #e2e8f0;
-  --pf-border-light: #cbd5e1;
-  --pf-border-medium: #94a3b8;
-  --pf-border-dark: #64748b;
-  --pf-border-gray: #94a3b8;
-  
-  --pf-text-primary: #1e293b;
-  --pf-text-secondary: #475569;
-  --pf-text-tertiary: #64748b;
-  --pf-text-light: #475569;
-  --pf-text-muted: #64748b;
-  
-  --pf-accent: #059669;
-  --pf-accent-2: #1d4ed8;
-  --pf-success: #059669;
-  --pf-success-hover: #047857;
-  --pf-link: #1d4ed8;
-  
-  --pf-status-online-bg: #d1fae5;
-  --pf-status-online-text: #064e3b;
-  --pf-status-online-border: #065f46;
-  --pf-status-offline-bg: #fee2e2;
-  --pf-status-offline-text: #7f1d1d;
-  --pf-status-offline-border: #fca5a5;
-  
-  --pf-error: #dc2626;
-  --pf-error-bg: #fee2e2;
-  --pf-error-text: #7f1d1d;
-  --pf-error-border: #fca5a5;
-  --pf-warning: #d97706;
-  --pf-warning-text: #92400e;
-  
-  --pf-loading: #3b82f6;
-  --pf-loading-border: #1d4ed8;
-  --pf-disabled: #94a3b8;
-  
-  --pf-gradient-primary-start: #f8fafc;
-  --pf-gradient-primary-end: #f1f5f9;
-  --pf-gradient-secondary-start: #e2e8f0;
-  --pf-gradient-secondary-end: #cbd5e1;
-  --pf-gradient-success-start: #d1fae5;
-  --pf-gradient-success-end: #a7f3d0;
-  --pf-gradient-green-start: #bbf7d0;
-  --pf-gradient-green-end: #86efac;
-  --pf-gradient-green-active-start: #86efac;
-  --pf-gradient-green-active-end: #4ade80;
-  --pf-gradient-gray-start: #e2e8f0;
-  --pf-gradient-gray-end: #cbd5e1;
-  --pf-gradient-gray-dark-start: #cbd5e1;
-  --pf-gradient-gray-dark-end: #94a3b8;
-  
-  --pf-focus-ring: rgba(37, 99, 235, 0.5);
-  --pf-focus-ring-offset: #ffffff;
-  --pf-hover-overlay: rgba(0, 0, 0, 0.05);
-  --pf-active-overlay: rgba(0, 0, 0, 0.1);
-
-  --pf-skeleton-bg: #e2e8f0;
-  --pf-skeleton-bg-alt: #f1f5f9;
-  --pf-skeleton-accent: #cbd5e1;
-  --pf-focus-outline: var(--pf-accent-2);
-
-  /* Home buttons (axis homed state) */
-  --pf-home-homed-bg: #2096f3;
-  --pf-home-not-homed-bg: #fb8c00;
-  color-scheme: light;
-}
-
-/* High contrast mode (accessibility enhancement) */
-@media (prefers-contrast: high) {
-  :root:not([data-theme]),
-  [data-theme="github-dark"] {
-    /* Maximum contrast for dark theme */
-    --pf-text-primary: #ffffff;
-    --pf-text-secondary: #e5e7eb;
-    --pf-border: #ffffff;
-    --pf-border-light: #d1d5db;
-    --pf-button-primary-bg: #00ff00;   /* Bright green */
-    --pf-button-primary-hover: #00cc00;
-    --pf-button-secondary-bg: #333333; /* Darker gray */
-    --pf-button-secondary-text: #ffffff;
-    --pf-error: #ff0000;               /* Bright red */
-    --pf-validation-error-border: #ff0000;
-    --pf-skeleton-bg: #1a1a1a;
-    --pf-skeleton-bg-alt: #333333;
-    --pf-skeleton-accent: #666666;
-  }
-  
-  [data-theme="printfarmer-dark"] {
-    /* Maximum contrast for PrintFarmer dark */
-    --pf-text-primary: #ffffff;
-    --pf-text-secondary: #e5e7eb;
-    --pf-border: #ffffff;
-    --pf-border-light: #d1d5db;
-    --pf-button-primary-bg: #00ff00;   /* Bright green */
-    --pf-button-primary-hover: #00cc00;
-    --pf-button-secondary-bg: #2d2d2d; /* Darker background */
-    --pf-button-secondary-text: #ffffff;
-    --pf-error: #ff0000;               /* Bright red */
-    --pf-validation-error-border: #ff0000;
-    --pf-skeleton-bg: #1a1a1a;
-    --pf-skeleton-bg-alt: #333333;
-    --pf-skeleton-accent: #666666;
-  }
-  
-  [data-theme="light"] {
-    /* Maximum contrast for light theme */
-    --pf-text-primary: #000000;
-    --pf-text-secondary: #1a1a1a;
-    --pf-border: #000000;
-    --pf-border-light: #333333;
-    --pf-button-primary-bg: #00cc00;   /* Bright green */
-    --pf-button-primary-hover: #009900;
-    --pf-button-secondary-bg: #e5e5e5; /* Lighter gray */
-    --pf-button-secondary-text: #000000;
-    --pf-error: #cc0000;               /* Dark red */
-    --pf-validation-error-border: #cc0000;
-    --pf-skeleton-bg: #f5f5f5;
-    --pf-skeleton-bg-alt: #eeeeee;
-    --pf-skeleton-accent: #cccccc;
-  }
-  
-  [data-theme="matrix"] {
-    /* Maximum contrast for Matrix theme */
-    --pf-text-primary: #00ff41;        /* Bright phosphor green */
-    --pf-text-secondary: #33ff66;
-    --pf-border: #00ff41;
-    --pf-border-light: #66ff99;
-    --pf-button-primary-bg: #00cc33;   /* Bright green */
-    --pf-button-primary-hover: #009926;
-    --pf-button-secondary-bg: #003311; /* Darker green */
-    --pf-button-secondary-text: #00ff41;
-    --pf-error: #ff0000;               /* Bright red */
-    --pf-validation-error-border: #ff0000;
-    --pf-skeleton-bg: #001a0a;
-    --pf-skeleton-bg-alt: #003311;
-    --pf-skeleton-accent: #004d1a;
-  }
-  
-  [data-theme="forge"] {
-    /* Maximum contrast for Forge theme */
-    --pf-text-primary: #ffffff;
-    --pf-text-secondary: #fff5e6;
-    --pf-border: #ffa64d;
-    --pf-border-light: #ffcc99;
-    --pf-button-primary-bg: #cc6600;   /* Bright copper */
-    --pf-button-primary-hover: #994d00;
-    --pf-button-secondary-bg: #331a00; /* Darker brown */
-    --pf-button-secondary-text: #ffffff;
-    --pf-error: #ff3300;               /* Fire red */
-    --pf-validation-error-border: #ff3300;
-    --pf-skeleton-bg: #1a0d00;
-    --pf-skeleton-bg-alt: #331a00;
-    --pf-skeleton-accent: #4d2600;
-  }
-}
-
-/* Reduced motion preference */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    /* Disable transitions for users who prefer reduced motion */
-    --pf-transition-duration: 0ms;
-  /* Provide a static experience for skeletons */
-  --pf-skeleton-animation: none;
-  }
-}
-
-/* Note: Dark theme is the default. System preference detection is handled by ThemeContext.
-   Users can manually select light theme if desired. */
 
 /* =============================================================================
-   Accessibility Enhancements
+   Accessibility enhancements
    ============================================================================= */
 
-/* Ensure focus rings are always visible */
+/* Baseline focus ring for anything not covered by a component style. */
 *:focus-visible {
   outline: 2px solid var(--pf-accent-2);
   outline-offset: 2px;
 }
 
-/* Improve focus visibility for interactive elements */
+/* Interactive elements get a two-tone ring so it reads against both the
+   control and the surface behind it. */
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -305,48 +60,4 @@ textarea:focus-visible,
 [role="tab"]:focus-visible,
 [tabindex]:focus-visible {
   box-shadow: 0 0 0 2px var(--pf-focus-ring-offset), 0 0 0 4px var(--pf-focus-ring);
-}
-
-/* Skip to main content link for screen readers */
-.skip-link {
-  position: absolute;
-  top: -40px;
-  left: 6px;
-  background: var(--pf-accent);
-  color: white;
-  padding: 8px;
-  border-radius: 4px;
-  text-decoration: none;
-  z-index: 1000;
-  transition: top 0.3s;
-}
-
-.skip-link:focus {
-  top: 6px;
-}
-
-/* =============================================================================
-   CSS Custom Property Utilities
-   ============================================================================= */
-
-/* Utility classes that use CSS custom properties */
-.theme-aware-bg-primary { background-color: var(--pf-bg-0); }
-.theme-aware-bg-secondary { background-color: var(--pf-bg-1); }
-.theme-aware-text-primary { color: var(--pf-text-primary); }
-.theme-aware-text-secondary { color: var(--pf-text-secondary); }
-.theme-aware-border { border-color: var(--pf-border); }
-.theme-aware-accent { color: var(--pf-accent); }
-.theme-aware-accent-bg { background-color: var(--pf-accent); }
-
-/* Print styles */
-@media print {
-  :root {
-    /* Use high contrast colors for printing */
-    --pf-bg-0: #ffffff;
-    --pf-bg-1: #ffffff;
-    --pf-bg-2: #ffffff;
-    --pf-text-primary: #000000;
-    --pf-text-secondary: #333333;
-    --pf-border: #000000;
-  }
 }
