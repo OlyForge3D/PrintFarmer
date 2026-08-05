@@ -142,4 +142,14 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
         // Assert - should parse without exceptions
         _ = JsonDocument.Parse(content);
     }
+
+    [Fact]
+    public async Task UploadFile_AnonymousWithoutApiKey_ReturnsUnauthorized()
+    {
+        using var content = new MultipartFormDataContent();
+
+        HttpResponseMessage response = await _client.PostAsync("/api/files/local", content);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
 }

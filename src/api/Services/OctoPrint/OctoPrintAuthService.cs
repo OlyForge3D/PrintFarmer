@@ -9,7 +9,11 @@ namespace Farm.Web.Api.Services.OctoPrint;
 
 public interface IOctoPrintAuthService
 {
-    Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null);
+    Task<bool> ValidateApiKeyAsync(
+        string? apiKey,
+        Guid? targetPrinterId = null,
+        Guid? userId = null,
+        bool requireValidKey = false);
 }
 
 public class OctoPrintAuthService(
@@ -23,13 +27,17 @@ public class OctoPrintAuthService(
     private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _apiKeyRepo = apiKeyRepo;
     private readonly IConfiguration _config = config;
 
-    public async Task<bool> ValidateApiKeyAsync(string? apiKey, Guid? targetPrinterId = null, Guid? userId = null)
+    public async Task<bool> ValidateApiKeyAsync(
+        string? apiKey,
+        Guid? targetPrinterId = null,
+        Guid? userId = null,
+        bool requireValidKey = false)
     {
         // Read settings from database on each request so changes take effect immediately
         var settings = _settingsService.Get<OctoPrintSettings>();
 
         // If RequireApiKey is false, accept any (or null) apiKey.
-        if (!settings.RequireApiKey)
+        if (!requireValidKey && !settings.RequireApiKey)
         {
             _logger.LogDebug("OctoPrint API key validation disabled in settings.");
             return true;

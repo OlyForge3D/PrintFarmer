@@ -23,7 +23,6 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api")]
-[OctoPrintApiKey] // Validates API key based on OctoPrintSettings.RequireApiKey
 public class OctoPrintCompatController : ControllerBase
 {
     private readonly ILogger<OctoPrintCompatController> _logger;
@@ -51,7 +50,8 @@ public class OctoPrintCompatController : ControllerBase
 
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
-    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
+    [AllowAnonymous] // Public to JWT auth because anonymous OctoPrint clients must provide a valid X-Api-Key.
+    [OctoPrintApiKey(RequireValidKeyForAnonymous = true)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "OctoPrint compatibility uploads are explicitly capped at 50 MB.")]
     [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
     [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
@@ -80,7 +80,7 @@ public class OctoPrintCompatController : ControllerBase
             "OctoPrint upload request: ContentType={ContentType}, ContentLength={ContentLength}, print={Print}, select={Select}, printerId={PrinterId}",
             Request.ContentType, Request.ContentLength, print, select, printerId);
 
-        // API key validation handled by [OctoPrintApiKey] filter at controller level
+        // API key validation is handled by the action's [OctoPrintApiKey] filter.
 
         // Rate limiting: key by apiKey if present otherwise by remote IP
         var apiKey = Request.Headers["X-Api-Key"].ToString();
@@ -244,10 +244,11 @@ public class OctoPrintCompatController : ControllerBase
     /// Slicers use this to verify OctoPrint compatibility
     /// </summary>
     [HttpGet("version")]
-    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
+    [AllowAnonymous] // Public so slicers can verify OctoPrint compatibility before an API key is configured.
+    [OctoPrintApiKey]
     public IActionResult GetVersion()
     {
-        // API key validation handled by [OctoPrintApiKey] filter at controller level
+        // API key validation is handled by the action's [OctoPrintApiKey] filter.
         return Ok(new
         {
             api = "0.1",
@@ -260,7 +261,8 @@ public class OctoPrintCompatController : ControllerBase
     /// OctoPrint API: Get server status
     /// </summary>
     [HttpGet("server")]
-    [AllowAnonymous] // Public to JWT auth because OctoPrint clients authenticate with X-Api-Key.
+    [AllowAnonymous] // Public so slicers can inspect compatibility status before an API key is configured.
+    [OctoPrintApiKey]
     public IActionResult GetServer()
     {
         // API key validation handled by [OctoPrintApiKey] filter at controller level

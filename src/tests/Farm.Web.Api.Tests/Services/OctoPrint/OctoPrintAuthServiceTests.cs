@@ -48,6 +48,20 @@ public class OctoPrintAuthServiceTests
     }
 
     [Fact]
+    public async Task ValidateApiKeyAsync_RequiredForAnonymous_RejectsMissingKeyWhenSettingDisabled()
+    {
+        using AppDbContext ctx = CreateInMemoryContext();
+        var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = false });
+        var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
+        IConfigurationRoot config = new ConfigurationBuilder().Build();
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+
+        bool ok = await svc.ValidateApiKeyAsync(null, requireValidKey: true);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
     public async Task ValidateApiKeyAsync_GlobalKeyWorks()
     {
         using AppDbContext ctx = CreateInMemoryContext();

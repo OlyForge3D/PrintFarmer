@@ -3,7 +3,7 @@
 namespace Farm.Web.Api.Authorization;
 
 /// <summary>
-/// Authorization handler that bypasses authentication for GET requests when DevModeBypassAuth is enabled.
+/// Authorization handler that bypasses authorization requirements for safe requests when DevModeBypassAuth is enabled.
 /// This allows easier debugging in development while maintaining full security in production.
 /// </summary>
 /// <remarks>
@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Authorization;
 /// - Set Security:DevModeBypassAuth=true in appsettings.Development.json to enable
 /// - The setting is ignored unless the host environment is Development
 ///
-/// Only GET requests are bypassed - all mutations (POST, PUT, DELETE, PATCH) still require auth.
+/// Only GET, HEAD, and OPTIONS requests are bypassed - all mutations still require authorization.
 /// </remarks>
 public class DevModeAuthorizationHandler : IAuthorizationHandler
 {

@@ -165,6 +165,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // Fetch Spoolman settings from backend on mount (pre-populate from deployment config)
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     apiClient.getSettings<import("@/types/SpoolmanSettings").SpoolmanSettings>('Spoolman')
       .then(settings => {
         if (settings?.baseUrl) {
@@ -175,7 +177,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       .catch(() => {
         // Silently fail - user can configure manually
       });
-  }, []);
+  }, [isAuthenticated]);
 
   // Network scanning for Spoolman discovery
   const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();

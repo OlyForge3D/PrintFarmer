@@ -42,11 +42,11 @@ public sealed class AnonymousEndpointArchitectureTests
             ["Farm.Web.Api.Controllers.FilaManController.GetPrintersAsync [api/filaman/printers]"] =
                 "GET /api/filaman/printers - supplies minimal selector metadata to unprovisioned firmware.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.UploadFileAsync [api/files/local]"] =
-                "POST /api/files/local - authenticates OctoPrint clients with X-Api-Key.",
+                "POST /api/files/local - requires either an authenticated user or a valid X-Api-Key.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetVersion [api/version]"] =
-                "GET /api/version - authenticates OctoPrint clients with X-Api-Key.",
+                "GET /api/version - exposes non-sensitive compatibility metadata before key configuration.",
             ["Farm.Web.Api.Controllers.OctoPrintCompatController.GetServer [api/server]"] =
-                "GET /api/server - authenticates OctoPrint clients with X-Api-Key.",
+                "GET /api/server - exposes non-sensitive compatibility status before key configuration.",
             ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.ProgressAsync [api/internal/discovery/events/progress]"] =
                 "POST /api/internal/discovery/events/progress - authenticates discovery agents with the shared discovery key.",
             ["Farm.Web.Api.Controllers.InternalDiscoveryEventsController.PrinterFoundAsync [api/internal/discovery/events/printer-found]"] =

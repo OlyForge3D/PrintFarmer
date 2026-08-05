@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SetupWizard } from '../SetupWizard';
 
 const {
+  mockAuthState,
   mockCreateInitialAdmin,
   mockGetSettings,
   mockGetSetupStatus,
@@ -11,6 +12,7 @@ const {
   mockScanNetwork,
   mockTestSpoolmanConnection,
 } = vi.hoisted(() => ({
+  mockAuthState: { isAuthenticated: false },
   mockCreateInitialAdmin: vi.fn(),
   mockGetSettings: vi.fn(),
   mockGetSetupStatus: vi.fn(),
@@ -20,7 +22,7 @@ const {
 }));
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
-  useAuth: () => ({ isAuthenticated: false, login: mockLogin }),
+  useAuth: () => ({ isAuthenticated: mockAuthState.isAuthenticated, login: mockLogin }),
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
@@ -63,6 +65,7 @@ vi.mock('@/services/api', () => ({
 describe('SetupWizard authentication ordering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAuthState.isAuthenticated = false;
     mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
     mockGetSettings.mockImplementation((key: string) => Promise.resolve(
       key === 'NetworkDiscovery'
@@ -78,7 +81,10 @@ describe('SetupWizard authentication ordering', () => {
         : {}
     ));
     mockCreateInitialAdmin.mockResolvedValue({ success: true, token: 'bootstrap-token' });
-    mockLogin.mockResolvedValue(true);
+    mockLogin.mockImplementation(async () => {
+      mockAuthState.isAuthenticated = true;
+      return true;
+    });
     mockScanNetwork.mockResolvedValue(undefined);
     mockTestSpoolmanConnection.mockResolvedValue({ success: true, version: '0.22.1' });
   });
@@ -87,6 +93,7 @@ describe('SetupWizard authentication ordering', () => {
     render(<SetupWizard onComplete={vi.fn()} />);
 
     await screen.findByText('Initial configuration wizard');
+    expect(mockGetSettings).not.toHaveBeenCalledWith('Spoolman');
     fireEvent.change(screen.getByLabelText(/First Name/, { selector: 'input' }), { target: { value: 'Ada' } });
     fireEvent.change(screen.getByLabelText(/Last Name/, { selector: 'input' }), { target: { value: 'Lovelace' } });
     fireEvent.change(screen.getByLabelText(/Username/, { selector: 'input' }), { target: { value: 'admin' } });
@@ -100,6 +107,8 @@ describe('SetupWizard authentication ordering', () => {
     expect(mockCreateInitialAdmin).toHaveBeenCalledTimes(1);
     expect(mockLogin).toHaveBeenCalledWith({ username: 'admin', password: 'password123' });
     expect(mockCreateInitialAdmin.mock.invocationCallOrder[0]).toBeLessThan(mockLogin.mock.invocationCallOrder[0]);
+    await waitFor(() => expect(mockGetSettings).toHaveBeenCalledWith('Spoolman'));
+    expect(mockLogin.mock.invocationCallOrder[0]).toBeLessThan(mockGetSettings.mock.invocationCallOrder.at(-1)!);
 
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     await screen.findByText('Spoolman Integration', { selector: 'h2' });
