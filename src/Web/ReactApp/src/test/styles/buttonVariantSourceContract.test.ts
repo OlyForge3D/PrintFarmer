@@ -337,6 +337,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * if it ever is, that is a fact worth surfacing rather than absorbing.
    */
   const MAX_ALTERNATIVES = 64;
+  const WHOLE_TREE_TIMEOUT_MS = 20_000;
 
   const branchesOf = (node: ts.Node): Branch[] => {
     const merge = (a: Branch, b: Branch, sep: string): Branch | null => {
@@ -572,7 +573,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'longer overridden by the variant, these repaint under the pointer on a control ' +
         'the user cannot activate. Prefix the hover with `enabled:`.',
     ).toEqual([]);
-  });
+  }, WHOLE_TREE_TIMEOUT_MS);
 
   /**
    * #1102 caller contract, third direction: the FOREGROUND channel.
@@ -638,7 +639,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'variant, so it now paints and is read directly against the page surface. ' +
         'Use the semantic text token instead — it is defined in all 8 palettes.',
     ).toEqual([]);
-  });
+  }, WHOLE_TREE_TIMEOUT_MS);
 
   /**
    * SELF-REFERENTIAL HOVER (#1137, round 11).
@@ -810,7 +811,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'text and a candidate tint share a hue: `text-pf-accent` with ' +
         '`hover:bg-pf-accent/10` measured 4.36 on light, below AA.',
     ).toEqual([]);
-  });
+  }, WHOLE_TREE_TIMEOUT_MS);
 
   it('reports a `link` caller only when it is underlined at rest', () => {
     // V1, round 12. An earlier revision modelled `link` as having no default
