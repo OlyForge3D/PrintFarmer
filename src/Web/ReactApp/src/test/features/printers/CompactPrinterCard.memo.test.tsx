@@ -9,6 +9,7 @@ import {
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 
 const progressBarRender = vi.hoisted(() => vi.fn());
+const useJobQueueMock = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: [], isLoading: false }),
@@ -16,7 +17,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
-  useJobQueue: () => ({ data: [], isLoading: false }),
+  useJobQueue: useJobQueueMock,
 }));
 
 vi.mock('@/services/api', () => ({
@@ -158,6 +159,7 @@ function createCapabilities(
 describe('CompactPrinterCard memoization', () => {
   beforeEach(() => {
     progressBarRender.mockClear();
+    useJobQueueMock.mockClear();
   });
 
   it('skips rendering when parent recreates unchanged printer props with stable callbacks', () => {
@@ -257,6 +259,30 @@ describe('CompactPrinterCard memoization', () => {
 
     expect(screen.getByTestId('print-progress')).toHaveTextContent('11');
     expect(progressBarRender).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poll the job queue for idle compact cards', () => {
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ state: 'Idle', isOnline: true })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(useJobQueueMock).toHaveBeenCalledWith('printer-1', { enabled: false });
+  });
+
+  it('polls the job queue for active compact cards so queue labels stay fresh', () => {
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ state: 'Printing', isOnline: true })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(useJobQueueMock).toHaveBeenCalledWith('printer-1', { enabled: true });
   });
 
   it('rerenders when only onEdit changes while all other props stay equal', () => {

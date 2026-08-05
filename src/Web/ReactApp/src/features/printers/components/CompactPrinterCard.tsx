@@ -141,16 +141,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
 
-  // Per-printer job queue for "X of Y" indicator
-  const { data: printerQueue = [] } = useJobQueue(printer.id);
-  const activeQueueJobs = printerQueue.filter(
-    (j) => {
-      // Analytics endpoint returns flat objects with status at top level
-      const status = (j as unknown as { status?: string }).status ?? j.job?.status;
-      return status === 'Queued' || status === 'Printing' || status === 'Dispatched';
-    }
-  );
-
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.enabled ?? false);
     try {
@@ -183,6 +173,20 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     autoDispatchStatus,
     isOnline,
   });
+  const shouldFetchQueueLabel = isOnline && (isPrinting || isPaused);
+
+  // Per-printer job queue for "X of Y" indicator. Idle/offline cards never show
+  // an active queue label, so avoid polling their queues every 30 seconds.
+  const { data: printerQueue = [] } = useJobQueue(printer.id, {
+    enabled: shouldFetchQueueLabel,
+  });
+  const activeQueueJobs = printerQueue.filter(
+    (j) => {
+      // Analytics endpoint returns flat objects with status at top level
+      const status = (j as unknown as { status?: string }).status ?? j.job?.status;
+      return status === 'Queued' || status === 'Printing' || status === 'Dispatched';
+    }
+  );
 
   // Queue label: "1 of 3" when printing with more jobs queued
   const printingIndex = activeQueueJobs.findIndex(j => {
