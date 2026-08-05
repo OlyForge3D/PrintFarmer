@@ -131,3 +131,10 @@ Process learning: a fully-green suite again hid nothing critical here, but the w
   - **Lesson**: When your own prior finding is restated by an author, re-verify the restatement against the source rather than just recognizing your own words.
   - **Rigor**: Always name the strongest counter-argument to your own APPROVE to maintain high standard of critique.
   - **Process Lesson**: A 3-cycle gate on a 4-line comment held up because each rejection caught a genuinely false technical claim, one of which originated with the panel itself (Bishop's ~562ms/~32ms figure). Panels must treat their own measurements as unverified evidence.
+
+### 2026-08-05 — Issue #1102 review gate (REJECT)
+
+- **Verdict:** ❌ REJECT.
+- **Key finding:** The cascade fix is valid, but `ModelFiltersBar` selected pills fail contrast and need on-branch correction.
+- **Process note:** The branch stayed byte-identical to `c7f7e574f`; no PR was opened.
+
