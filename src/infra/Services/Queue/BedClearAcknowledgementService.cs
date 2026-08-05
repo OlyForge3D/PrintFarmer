@@ -231,14 +231,12 @@ public sealed class BedClearAcknowledgementService(
 
         // Database state cannot be overridden by a stale idle telemetry snapshot.
         bool hasDatabaseActiveJob = await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .AsNoTracking()
             .AnyAsync(
                 candidate =>
                 candidate.AssignedPrinterId == request.PrinterId &&
-                candidate.Id != request.JobId &&
-                (candidate.Status == PrintJobStatus.Starting ||
-                 candidate.Status == PrintJobStatus.Printing ||
-                 candidate.Status == PrintJobStatus.Paused), ct);
+                candidate.Id != request.JobId, ct);
         if (hasDatabaseActiveJob)
         {
             return new AcknowledgeBedClearResult(

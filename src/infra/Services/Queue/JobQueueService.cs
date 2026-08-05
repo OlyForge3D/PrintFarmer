@@ -170,7 +170,7 @@ public class JobQueueService : IJobQueueService
                 : [];
 
             int queuedCount = allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned);
-            PrintJob? currentJob = allJobs.FirstOrDefault(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting);
+            PrintJob? currentJob = allJobs.FirstOrDefault(j => j.Status.OccupiesPrinter());
 
             // Get primary toolhead info (first toolhead or the one marked as primary)
             Toolhead? primaryToolhead = printer.Toolheads?.FirstOrDefault(t => t.IsPrimary)
@@ -1193,7 +1193,7 @@ public class JobQueueService : IJobQueueService
                     "Use the dispatch or bed-clear acknowledgement endpoints so the shared claim guards apply.");
             }
 
-            if (job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused)
+            if (job.Status.OccupiesPrinter())
             {
                 throw new ValidationException(
                     $"Job is currently {job.Status}; use the cancel or abort endpoints instead of a generic update.");

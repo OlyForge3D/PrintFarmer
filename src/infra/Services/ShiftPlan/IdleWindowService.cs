@@ -142,10 +142,7 @@ public sealed class IdleWindowService : IIdleWindowService
 
             // Fix 1: If the printer has ANY active job (Starting/Printing/Paused),
             // it is not idle right now — emit no window.
-            bool hasActiveJob = assigned.Any(j =>
-                j.Status == PrintJobStatus.Starting
-                || j.Status == PrintJobStatus.Printing
-                || j.Status == PrintJobStatus.Paused);
+            bool hasActiveJob = assigned.Any(j => j.Status.OccupiesPrinter());
 
             if (hasActiveJob)
             {

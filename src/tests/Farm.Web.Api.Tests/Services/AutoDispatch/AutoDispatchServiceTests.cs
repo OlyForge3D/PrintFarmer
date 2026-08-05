@@ -68,6 +68,29 @@ public sealed class AutoDispatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task MarkPreClearAsync_WhenPrinterHasPausedJob_RejectsBedPreClear()
+    {
+        Printer printer = await CreatePrinterAsync();
+        await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchTrigger: dispatchTrigger.Object);
+
+        Func<Task> act = async () => _ = await service.MarkPreClearAsync(printer.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        (await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id))
+            .DispatchState.Should().BeNull();
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
     public async Task TransitionToPendingReadyAsync_WhenQueuedJobsExistAndBedIsNotPreCleared_SetsPendingReadyAndBroadcastsStatus()
     {
         Printer printer = await CreatePrinterAsync();
@@ -103,6 +126,37 @@ public sealed class AutoDispatchServiceTests : IDisposable
                 It.IsAny<CancellationToken>()),
             Times.Once);
         webhookService.Verify(service => service.Enqueue("printer.autodispatch_pending", It.IsAny<object>()), Times.Once);
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TransitionToPendingReadyAsync_WhenPrinterHasPausedJob_RemainsNotReady()
+    {
+        Printer printer = await CreatePrinterAsync();
+        await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
+        Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        Mock<IWebhookService> webhookService = new();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            webhookService: webhookService.Object,
+            dispatchTrigger: dispatchTrigger.Object);
+
+        await service.TransitionToPendingReadyAsync(printer.Id);
+
+        (await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id))
+            .DispatchState.Should().BeNull();
+        clientProxy.Verify(
+            proxy => proxy.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        webhookService.Verify(service => service.Enqueue(It.IsAny<string>(), It.IsAny<object>()), Times.Never);
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
     }
 
@@ -145,6 +199,45 @@ public sealed class AutoDispatchServiceTests : IDisposable
                 It.IsAny<CancellationToken>()),
             Times.Once);
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkReadyAsync_WhenPrinterHasPausedJob_RejectsStaleReadyConfirmation()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+            BedPreConfirmed = true,
+        };
+        await _db.SaveChangesAsync();
+        await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, clientProxy) = CreateHubContextMockWithProxy();
+        Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchTrigger: dispatchTrigger.Object);
+
+        Func<Task> act = async () => _ = await service.MarkReadyAsync(printer.Id);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+        Printer persistedPrinter = await _db.Printers
+            .Include(p => p.DispatchState)
+            .SingleAsync(p => p.Id == printer.Id);
+        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.PendingReady);
+        persistedPrinter.DispatchState.BedPreConfirmed.Should().BeTrue();
+        clientProxy.Verify(
+            proxy => proxy.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]
@@ -239,6 +332,66 @@ public sealed class AutoDispatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetStatusAsync_WhenPrinterHasPausedJob_ReportsPausedWithoutClearBedPrompt()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+            BedPreConfirmed = true,
+        };
+        await _db.SaveChangesAsync();
+        await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.State.Should().Be(nameof(PrintJobStatus.Paused));
+        status.IsReady.Should().BeFalse();
+        status.CurrentJobName.Should().Be("paused-job");
+        status.AttentionMessage.Should().BeNull();
+        status.ReadyGateChecks.Should().Contain(check =>
+            check.Name == "Bed Clear Confirmed"
+            && !check.Passed
+            && check.Message == "Paused job still occupies the printer");
+    }
+
+    [Fact]
+    public async Task GetAllStatusAsync_WhenPrinterHasPausedJob_ReportsPrinterBusy()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.Ready,
+        };
+        await _db.SaveChangesAsync();
+        await CreateJobAsync(printer, "paused-job", PrintJobStatus.Paused);
+        await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        AutoDispatchGlobalStatusDto result = await service.GetAllStatusAsync();
+
+        AutoDispatchStatusDto status = result.Printers.Should().ContainSingle().Subject;
+        status.State.Should().Be(nameof(PrintJobStatus.Paused));
+        status.IsReady.Should().BeFalse();
+        status.CurrentJobName.Should().Be("paused-job");
+        status.AttentionMessage.Should().BeNull();
+    }
+
+    [Fact]
     public async Task MarkPreClearAsync_WhenQueuedJobExists_PopulatesReadyAttentionMessage()
     {
         Printer printer = await CreatePrinterAsync();
@@ -312,14 +465,21 @@ public sealed class AutoDispatchServiceTests : IDisposable
         return printer;
     }
 
-    private async Task<PrintJob> CreateQueuedJobAsync(Printer printer, string name, int queuePosition)
+    private Task<PrintJob> CreateQueuedJobAsync(Printer printer, string name, int queuePosition) =>
+        CreateJobAsync(printer, name, PrintJobStatus.Queued, queuePosition);
+
+    private async Task<PrintJob> CreateJobAsync(
+        Printer printer,
+        string name,
+        PrintJobStatus status,
+        int queuePosition = 0)
     {
         PrintJob job = new()
         {
             Id = Guid.NewGuid(),
             Name = name,
             AssignedPrinterId = printer.Id,
-            Status = PrintJobStatus.Queued,
+            Status = status,
             Priority = 0,
             QueuePosition = queuePosition,
             CreatedAt = DateTime.UtcNow,

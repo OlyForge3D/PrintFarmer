@@ -188,12 +188,10 @@ public sealed class PrintFailureMonitorService : BackgroundService
             List<PrintJob> activeJobs = configuredPrinterIds.Count == 0
                 ? []
                 : await dbContext.PrintJobs
+                    .WhereOccupiesPrinter()
                     .Where(j =>
                         j.AssignedPrinterId.HasValue
-                        && configuredPrinterIds.Contains(j.AssignedPrinterId.Value)
-                        && (j.Status == PrintJobStatus.Starting ||
-                            j.Status == PrintJobStatus.Printing ||
-                            j.Status == PrintJobStatus.Paused))
+                        && configuredPrinterIds.Contains(j.AssignedPrinterId.Value))
                     .ToListAsync(cancellationToken);
             Dictionary<Guid, ActivePrintWindow> activeJobsByPrinter = activeJobs
                 .GroupBy(j => j.AssignedPrinterId!.Value)
@@ -508,9 +506,8 @@ public sealed class PrintFailureMonitorService : BackgroundService
 
         // Find the current active print job
         PrintJob? currentJob = await dbContext.PrintJobs
-            .Where(j =>
-                j.AssignedPrinterId == printer.Id &&
-                (j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting))
+            .WhereOccupiesPrinter()
+            .Where(j => j.AssignedPrinterId == printer.Id)
             .OrderByDescending(j => j.ActualStartTime ?? j.QueuedAt)
             .FirstOrDefaultAsync(cancellationToken);
         var jobContext = ResolveJobContext(_statusCache.GetStatus(printer.Id), currentJob?.Name);

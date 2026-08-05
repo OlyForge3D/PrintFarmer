@@ -145,14 +145,12 @@ public sealed class DispatchClaimService(
         }
 
         bool hasDatabaseActiveJob = await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .AsNoTracking()
             .AnyAsync(
                 candidate =>
                     candidate.AssignedPrinterId == request.PrinterId &&
-                    candidate.Id != request.JobId &&
-                    (candidate.Status == PrintJobStatus.Starting ||
-                     candidate.Status == PrintJobStatus.Printing ||
-                     candidate.Status == PrintJobStatus.Paused),
+                    candidate.Id != request.JobId,
                 ct);
         if (hasDatabaseActiveJob)
         {
@@ -547,13 +545,10 @@ public sealed class DispatchClaimService(
         }
 
         bool hasDatabaseActiveJob = await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .AsNoTracking()
             .AnyAsync(
-                candidate =>
-                    candidate.AssignedPrinterId == request.PrinterId &&
-                    (candidate.Status == PrintJobStatus.Starting ||
-                     candidate.Status == PrintJobStatus.Printing ||
-                     candidate.Status == PrintJobStatus.Paused),
+                candidate => candidate.AssignedPrinterId == request.PrinterId,
                 ct);
         if (hasDatabaseActiveJob)
         {
