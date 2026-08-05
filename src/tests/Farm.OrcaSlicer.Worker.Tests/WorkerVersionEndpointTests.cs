@@ -73,6 +73,7 @@ public sealed class WorkerVersionEndpointTests : IDisposable
             _ = builder.ConfigureAppConfiguration((_, configuration) =>
                 configuration.AddInMemoryCollection(new Dictionary<string, string?>
                 {
+                    ["WorkerAuth:SharedKey"] = "test-registration-key",
                     ["Worker:EngineVersion"] = ConfiguredEngineVersion,
                     ["Worker:VerifyBinaryVersion"] = "true",
                     ["Worker:WorkingDirectory"] = workingDirectory,

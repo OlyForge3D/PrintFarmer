@@ -232,21 +232,7 @@ describe("QueueJobsTable Component", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
-  it("should render drag handles for reordering", () => {
-    const mockHandlers = {
-      onPause: vi.fn(),
-      onResume: vi.fn(),
-      onCancel: vi.fn(),
-      onPriority: vi.fn(),
-    };
-
-    render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
-
-    const dragHandles = screen.getAllByLabelText("Drag to reorder");
-    expect(dragHandles.length).toBe(mockJobs.length);
-  });
-
-  it("should render rows as draggable", () => {
+  it("does not expose manual reorder controls", () => {
     const mockHandlers = {
       onPause: vi.fn(),
       onResume: vi.fn(),
@@ -256,11 +242,8 @@ describe("QueueJobsTable Component", () => {
 
     const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
 
-    const rows = container.querySelectorAll('tbody[draggable="true"]');
-    expect(rows.length).toBe(mockJobs.length);
-    rows.forEach((row) => {
-      expect(row).toHaveAttribute("draggable", "true");
-    });
+    expect(screen.queryByLabelText("Drag to reorder")).not.toBeInTheDocument();
+    expect(container.querySelector("tbody[draggable]")).not.toBeInTheDocument();
   });
 
   it("should fall back to the live printer-side thumbnail when the job has no gcode thumbnail", () => {
@@ -416,7 +399,7 @@ describe("QueueJobsTable Component", () => {
 
     // The secondary (detail) row lives in the same <tbody> as the primary row;
     // clicking a detail chip must still open edit (handlers live on the <tbody>).
-    const firstBody = container.querySelector('tbody[draggable="true"]');
+    const firstBody = container.querySelector("tbody");
     const detailRow = firstBody?.querySelectorAll("tr")[1];
     expect(detailRow).toBeTruthy();
     fireEvent.click(detailRow as Element);
@@ -436,7 +419,7 @@ describe("QueueJobsTable Component", () => {
     };
 
     const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
-    const firstBody = container.querySelector('tbody[draggable="true"]') as Element;
+    const firstBody = container.querySelector("tbody") as Element;
 
     // Enter on the row itself opens edit.
     fireEvent.keyDown(firstBody, { key: "Enter" });
@@ -449,39 +432,6 @@ describe("QueueJobsTable Component", () => {
     expect(onEdit).not.toHaveBeenCalled();
   });
 
-  it("should not throw on drag start and applies drag opacity via rAF", () => {
-    const mockHandlers = {
-      onPause: vi.fn(),
-      onResume: vi.fn(),
-      onCancel: vi.fn(),
-      onPriority: vi.fn(),
-    };
-
-    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
-    const firstBody = container.querySelector('tbody[draggable="true"]') as HTMLElement;
-
-    // Capture the rAF callback and run it AFTER dispatch, mirroring the real frame
-    // timing where React has already nulled a non-captured currentTarget.
-    let rafCallback: FrameRequestCallback | null = null;
-    const rafSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((cb: FrameRequestCallback) => {
-        rafCallback = cb;
-        return 0;
-      });
-
-    expect(() =>
-      fireEvent.dragStart(firstBody, {
-        dataTransfer: { setData: vi.fn(), effectAllowed: "" },
-      }),
-    ).not.toThrow();
-
-    expect(rafCallback).not.toBeNull();
-    expect(() => rafCallback?.(0)).not.toThrow();
-    expect(firstBody.style.opacity).toBe("0.4");
-
-    rafSpy.mockRestore();
-  });
 });
 
 // ---------------------------------------------------------------------------

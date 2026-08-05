@@ -117,12 +117,6 @@ export const jobQueueService = {
     return apiClient.bulkCancelJobs(request);
   },
 
-  async reorderQueueJobs(
-    moves: { jobId: string; newPosition: number; rowVersion: string }[]
-  ): Promise<unknown> {
-    return apiClient.reorderQueueJobs(moves);
-  },
-
   // ── History & Seeding ─────────────────────────────────────────────────
 
   async seedHistory(printerIds?: string[]): Promise<void> {

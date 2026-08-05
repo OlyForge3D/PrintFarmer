@@ -617,67 +617,6 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
-    /// Reorder multiple print jobs in queue
-    /// </summary>
-    /// <param name="request">The bulk reorder request containing job moves</param>
-    /// <param name="cancellationToken">Cancellation token for async operation</param>
-    [HttpPost("bulk/reorder")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
-    [ProducesResponseType(typeof(QueueBulkOperationResultDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-    public async Task<IActionResult> BulkReorderJobsAsync(
-        [FromBody] BulkReorderQueueJobsRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        try
-        {
-            if (request?.Moves == null || request.Moves.Count == 0)
-            {
-                return BadRequest(new { error = "Moves list is required and cannot be empty" });
-            }
-
-            if (request.Moves.Any(move => move.NewPosition < 1) ||
-                request.Moves.GroupBy(move => move.JobId).Any(group => group.Count() > 1) ||
-                request.Moves.GroupBy(move => move.NewPosition).Any(group => group.Count() > 1))
-            {
-                return BadRequest(new
-                {
-                    error = "Each job and target position may appear once, and every queue position must be positive.",
-                });
-            }
-
-            foreach (QueueJobReorderMove move in request.Moves)
-            {
-                if (await CheckJobPreconditionAsync(
-                        move.JobId,
-                        cancellationToken,
-                        move.IfMatch) is { } precondition)
-                {
-                    return precondition;
-                }
-            }
-
-            string userId = QueueActorIdentity.Resolve(User);
-            QueueBulkOperationResultDto result = await _printJobManagementService.BulkReorderJobsAsync(request.Moves, userId, cancellationToken);
-
-            return Ok(result);
-        }
-        catch (Exception ex) when (ex is QueuePreconditionRequiredException or
-                                       QueueRevisionConflictException or
-                                       DbUpdateConcurrencyException)
-        {
-            return MapRevisionException(ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error in bulk reorder operation");
-            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to reorder jobs" });
-        }
-    }
-
-    /// <summary>
     /// Get detailed information about a specific job including notes and tags
     /// </summary>
     /// <param name="jobId">The ID of the job to retrieve</param>
