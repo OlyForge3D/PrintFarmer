@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -349,13 +349,31 @@ function readVariantClasses(source: string): Map<string, string> {
   return entries;
 }
 
+/**
+ * Utilities that paint a property the component-layer default owns.
+ *
+ * The built base rule declares `color`, `box-shadow`, `background-color` and
+ * `border-color`, so a re-add of any of those four reproduces #1102 — not just
+ * a background. Matching `bg-`/`shadow-` alone left `text-pf-*`, `border-pf-*`
+ * and `ring-pf-*` able to suppress caller paint with the guard still green.
+ *
+ * Colour-capable prefixes are shared with purely structural utilities
+ * (`border-b-2`, `text-left`, `ring-0`), so a bare prefix match would be a
+ * false positive. In this repo a colour is always either a `pf-` design token
+ * or an arbitrary value, so require one of those before flagging.
+ */
+const COLOUR_CAPABLE =
+  /^(?:text|border|ring|outline|divide|from|via|to|fill|stroke|accent|caret|decoration)-/;
+
 function paintUtilities(classes: string): string[] {
   return classes
     .split(/\s+/)
     .filter(Boolean)
     .filter((token) => {
       const utility = token.slice(token.lastIndexOf(':') + 1);
-      return utility.startsWith('bg-') || utility.startsWith('shadow-');
+      if (utility === 'shadow') return true;
+      if (utility.startsWith('bg-') || utility.startsWith('shadow-')) return true;
+      return COLOUR_CAPABLE.test(utility) && (utility.includes('pf-') || utility.includes('['));
     });
 }
 
@@ -368,7 +386,7 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
     }
   });
 
-  it.each(BARE_VARIANTS)('%s declares no background or shadow utility', (variant) => {
+  it.each(BARE_VARIANTS)('%s declares no paint utility in any state', (variant) => {
     const offending = paintUtilities(entries.get(variant) ?? '');
     expect(
       offending,
@@ -383,6 +401,27 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
     expect(paintUtilities(entries.get('tab') ?? '')).toEqual([]);
     expect(entries.get('tab')).toContain('border-b-2');
     expect(entries.get('link')).toContain('px-0');
+
+    // Structural utilities that share a colour-capable prefix must not trip it.
+    expect(
+      paintUtilities('border border-b-2 ring-0 px-0 text-left text-sm underline rounded-none'),
+    ).toEqual([]);
+  });
+
+  it('flags every property the component-layer default owns, in any state', () => {
+    // background-color, box-shadow, color, border-color — plus prefix forms.
+    expect(paintUtilities('bg-pf-accent')).toEqual(['bg-pf-accent']);
+    expect(paintUtilities('shadow')).toEqual(['shadow']);
+    expect(paintUtilities('shadow-xs')).toEqual(['shadow-xs']);
+    expect(paintUtilities('text-pf-accent')).toEqual(['text-pf-accent']);
+    expect(paintUtilities('border-pf-accent')).toEqual(['border-pf-accent']);
+    expect(paintUtilities('border-l-pf-accent')).toEqual(['border-l-pf-accent']);
+    expect(paintUtilities('ring-pf-accent')).toEqual(['ring-pf-accent']);
+    expect(paintUtilities('text-[var(--pf-text-inverse)]')).toEqual([
+      'text-[var(--pf-text-inverse)]',
+    ]);
+    expect(paintUtilities('enabled:hover:text-pf-accent')).toEqual(['enabled:hover:text-pf-accent']);
+    expect(paintUtilities('dark:focus:border-pf-accent')).toEqual(['dark:focus:border-pf-accent']);
   });
 });
 
@@ -396,33 +435,107 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
  * and the defect was invisible. Freeing caller paint is what lets it through,
  * which makes it this change's fallout rather than a pre-existing caller bug.
  *
- * Scope is deliberately the files whose paint this change unmasked. A repo-wide
- * sweep finds 20 instances; the 16 outside this list live in files this change
- * does not touch and are left to their owners rather than silently rewritten
- * here. Narrow and green is a guard; broad and permanently red is noise.
+ * Scope is every call site this cluster unmasked, found by walking the tree
+ * rather than by listing files. An earlier version enumerated nine files by
+ * hand; a repo-wide sweep then found ten more offending sites in files that
+ * list did not mention, so the list was not a deliberate scope boundary — it
+ * was the limit of what had been looked at.
+ *
+ * `unstyled` is deliberately excluded. It declares no paint and has no
+ * components-layer default, so its callers were always in full control and
+ * nothing about them changed here. Its unguarded hovers are pre-existing and
+ * belong to their owners.
  */
 describe('Button caller contract — unmasked callers gate hover on :enabled (#1102)', () => {
-  const OWNED = [
-    'common/components/ContextMenu.tsx',
-    'features/auth/components/EmailConfirmationBanner.tsx',
-    'features/fileBrowser/components/ExplorerView.tsx',
-    'features/maintenance/components/ComponentReplacementHistory.tsx',
-    'features/models3d/components/3d/GCodeViewer3D.tsx',
-    'features/models3d/components/3d/ModelViewer3D.tsx',
-    'features/queue/components/ModelFiltersBar.tsx',
-    'features/settings/pages/SettingsShell.tsx',
-    'features/tasks/components/profile-wizard/PrinterModelSelectionStep.tsx',
-  ];
-
   const SRC_ROOT = resolve(REACT_APP_ROOT, 'src');
 
-  /** Opening `<Button ...>` tags, so we never inspect a button's children. */
+  /**
+   * Variants whose paint this cluster moved into the components layer, and
+   * whose callers are therefore newly able to paint. `unstyled` is not one of
+   * them — see the note above.
+   */
+  const UNMASKED_VARIANTS = ['ghost', 'subtle', 'tab', 'toggle', 'link'];
+
+  /**
+   * Read the `variant` prop only. Matching bare quoted words anywhere in the
+   * tag is wrong: `role="tab"` and `key={tab.name}` both produce a false
+   * `tab` hit, which is how a genuinely `unstyled` control got miscounted as
+   * fallout during this work.
+   */
+  const declaredVariants = (tag: string): string[] => {
+    const prop = tag.match(/\svariant=(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/);
+    if (!prop) return ['primary'];
+    const literal = prop[1] ?? prop[2];
+    if (literal !== undefined) return [literal];
+    return [...(prop[3] ?? '').matchAll(/'([a-z]+)'|"([a-z]+)"/g)].map((m) => m[1] ?? m[2]);
+  };
+
+  const sourceFiles = (dir: string, acc: string[] = []): string[] => {
+    for (const entry of readdirSync(dir)) {
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) sourceFiles(full, acc);
+      else if (/\.(tsx|jsx)$/.test(entry)) acc.push(full);
+    }
+    return acc;
+  };
+
+  it('no unmasked-variant Button pairs `disabled` with an unguarded hover:', () => {
+    const offenders: string[] = [];
+
+    for (const file of sourceFiles(SRC_ROOT)) {
+      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
+      for (const { tag, line } of openingTags(readFileSync(file, 'utf8'))) {
+        if (!/\bdisabled[=\s]/.test(tag) || !unguardedHover(tag)) continue;
+        if (!declaredVariants(tag).some((v) => UNMASKED_VARIANTS.includes(v))) continue;
+        offenders.push(`${rel}:${line}`);
+      }
+    }
+
+    expect(
+      offenders,
+      'A plain `hover:` utility also matches :disabled. Now that caller paint is no ' +
+        'longer overridden by the variant, these repaint under the pointer on a control ' +
+        'the user cannot activate. Prefix the hover with `enabled:`.',
+    ).toEqual([]);
+  });
+
+  /**
+   * Opening `<Button ...>` tags, so we never inspect a button's children.
+   *
+   * The tag terminator cannot be the first `>` after `<Button`: an arrow
+   * function in any prop (`onClick={() => …}`) contains one, which truncates the
+   * tag before `disabled` and before `className` and makes this guard silently
+   * pass on a live defect. Scan instead for the `>` at brace depth zero and
+   * outside string literals.
+   */
   const openingTags = (source: string): { tag: string; line: number }[] => {
     const out: { tag: string; line: number }[] = [];
-    const re = /<Button(\s)/g;
+    const re = /<Button(?=[\s/>])/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(source))) {
-      const end = source.indexOf('>', m.index);
+      let depth = 0;
+      let quote: string | null = null;
+      let end = -1;
+
+      for (let i = m.index + '<Button'.length; i < source.length; i += 1) {
+        const ch = source[i];
+
+        if (quote) {
+          if (ch === quote && source[i - 1] !== '\\') quote = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') {
+          quote = ch;
+          continue;
+        }
+        if (ch === '{') depth += 1;
+        else if (ch === '}') depth -= 1;
+        else if (ch === '>' && depth === 0) {
+          end = i;
+          break;
+        }
+      }
+
       if (end === -1) continue;
       out.push({
         tag: source.slice(m.index, end),
@@ -437,20 +550,6 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   const unguardedHover = (tag: string) =>
     /(?<!enabled:)(?<!group-)(?<!peer-)hover:/.test(tag);
 
-  it.each(OWNED)('%s pairs no `disabled` Button with an unguarded hover:', (rel) => {
-    const source = readFileSync(join(SRC_ROOT, rel), 'utf8');
-    const offenders = openingTags(source)
-      .filter(({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag))
-      .map(({ line }) => `${rel}:${line}`);
-
-    expect(
-      offenders,
-      'A plain `hover:` utility also matches :disabled. Now that caller paint is no ' +
-        'longer overridden by the variant, these repaint under the pointer on a control ' +
-        'the user cannot activate. Prefix the hover with `enabled:`.',
-    ).toEqual([]);
-  });
-
   it('detects the defect it is meant to detect', () => {
     const injected = `<Button disabled={busy} className="bg-pf-bg-1 hover:bg-pf-bg-0">x</Button>`;
     const found = openingTags(injected).filter(
@@ -462,5 +561,39 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     expect(
       openingTags(fixed).filter(({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag)),
     ).toHaveLength(0);
+  });
+
+  /**
+   * Regression test for the parser itself, not for any call site.
+   *
+   * An earlier version terminated the tag at the first `>` after `<Button`. Any
+   * arrow function in a prop supplies one, so the extracted tag stopped at
+   * `<Button onClick={() =` — before `disabled` and before `className`. The
+   * guard then reported zero offenders on a file that had one, which is
+   * indistinguishable from a clean file. The shape below is the live
+   * ContextMenu.tsx one that slipped through.
+   */
+  it('reads past an arrow function in a prop', () => {
+    const withArrow = [
+      '<Button',
+      '  onClick={() => {',
+      '    actionItem.onClick();',
+      '  }}',
+      '  disabled={actionItem.disabled}',
+      '  className="rounded-none hover:bg-pf-bg-1"',
+      '>label</Button>',
+    ].join('\n');
+
+    const [parsed] = openingTags(withArrow);
+    expect(parsed, 'the opening tag must be found at all').toBeDefined();
+    expect(parsed.tag, 'tag truncated before `disabled` by the `=>`').toContain('disabled=');
+    expect(parsed.tag, 'tag truncated before `className` by the `=>`').toContain('hover:bg-pf-bg-1');
+
+    expect(
+      openingTags(withArrow).filter(
+        ({ tag }) => /\bdisabled[=\s]/.test(tag) && unguardedHover(tag),
+      ),
+      'an unguarded hover behind an arrow-function prop must still be reported',
+    ).toHaveLength(1);
   });
 });
