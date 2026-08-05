@@ -348,3 +348,21 @@ their own fix**.
 2. **Technical Accuracy Verified**: The panel confirmed that the corrected text is accurate. Sharpest test applied: a post-reset re-import DOES fire fetchModule with `cached:true` (`vite/dist/node/module-runner.js:1083,1086`), the server returns 304 (`:1094`), and the round-trip duration IS added to `transformTime` (`vitest cli-api.B7PN_QUv.js:7296-7299`) — so "transform" is affected by the re-import. But the re-evaluation itself runs in `directRequest` (`module-runner.js:1101-1146`) inside test execution, outside both the timed fetch RPC and the collect phase. Therefore, "neither number measures this re-evaluation" is true of the evaluation cost.
 3. **Other Claims Validated**: "resets every non-mock evaluated module" is accurate (per `vitest utils.DvEY5TfP.js:22-35` which exempts Vitest internals, not only mocks). The quoted "pay the full transform cost on every run" is faithful to the removed lines. The diff is exactly one file / one commit whose parent is the base (clean rebase, nothing dropped or duplicated), and concurrent work remains intact.
 4. **Acceptable Maintainer Shorthand**: The panel declined to overrule the author's declared deviation (using "transform cache" rather than `transformResult`), ruling it as acceptable maintainer shorthand.
+
+---
+## Decision: Squad State Bridge Root-Path Loss (#1130)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-08-04T20:34:00.249-07:00 |
+| **Agent** | Squad (Coordinator) |
+| **Requested by** | Jeff Papiez |
+| **Status** | INCIDENT / ACTION REQUIRED |
+
+## Core Findings
+
+1. **State writes are misrouted**: The current filesystem-backed `squad_state` bridge resolves some keys into repo-root paths such as `decisions/inbox/` instead of the tracked `.squad/` tree. The writes report success but are invisible to other worktrees.
+2. **The misroute is silently ignored**: Root `decisions/`, `agents/`, `orchestration-log/`, and `log/` paths are covered by `.gitignore`, so `git status` does not expose the lost records.
+3. **Canonical locations**: Accepted decisions belong in `.squad/decisions.md`; pending proposals and coordination drop-box entries belong in `.squad/decisions/inbox/`. Repo-root state paths are invalid and must not be treated as durable.
+4. **Interim operating rule**: Until #1130 is fixed and verified, accepted decisions must be written directly to the tracked `.squad/decisions.md` path and checked with `git check-ignore`/`git status`; do not rely on `squad_state` for decision durability.
+5. **Recovery boundary**: Do not move or delete stranded files while their owning sessions are active. Recovery and migration must be deliberate, owned, and verified through #1130/#1131.
