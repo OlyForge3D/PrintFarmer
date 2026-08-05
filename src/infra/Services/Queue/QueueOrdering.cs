@@ -7,14 +7,14 @@ namespace Farm.Infrastructure.Services.Queue;
 /// batch and ready-head query (issue #900, defect 12).
 ///
 /// Semantics: higher <see cref="PrintJob.Priority"/> runs first
-/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>), then queue position, then FIFO by
-/// queued timestamp, then job id as a total-order tiebreak so results are deterministic
-/// across providers and processes.
+/// (<c>Urgent(3) → High(2) → Normal(1) → Low(0)</c>), then FIFO by queued timestamp,
+/// then job id as a total-order tiebreak so results are deterministic across providers
+/// and processes.
 /// </summary>
 public static class QueueOrdering
 {
     /// <summary>
-    /// Orders jobs by descending priority, then queue position, then queued time, then id.
+    /// Orders jobs by descending priority, then queued time, then id.
     /// Every ready-head / auto-dispatch / batch query MUST use this selector so operators
     /// never see one ordering in the UI and a different one during dispatch.
     /// </summary>
@@ -26,7 +26,6 @@ public static class QueueOrdering
 
         return jobs
             .OrderByDescending(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .ThenBy(j => j.Id);
     }
@@ -42,7 +41,6 @@ public static class QueueOrdering
 
         return jobs
             .OrderByDescending(j => j.Priority)
-            .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .ThenBy(j => j.Id);
     }
