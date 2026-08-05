@@ -155,11 +155,25 @@ describe('Button', () => {
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');
+      expect(button).toHaveAttribute('data-pf-variant', 'danger');
+    });
+
+    it('uses dedicated semantic tokens for the danger surface and hover state', () => {
+      render(<Button variant="danger">Danger</Button>);
+      const button = screen.getByRole('button', { name: 'Danger' });
+
       expect(button).toHaveClass(
         'bg-[var(--pf-button-danger-bg)]',
         'enabled:hover:bg-[var(--pf-button-danger-hover)]',
         'text-[var(--pf-on-danger)]',
         'border-[var(--pf-button-danger-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-error',
+        'enabled:hover:bg-pf-error-hover',
+        'text-[var(--pf-text-inverse)]',
+        'hover:opacity-90',
+        'active:opacity-75',
       );
     });
 
