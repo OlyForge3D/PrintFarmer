@@ -931,9 +931,13 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   };
 
   /**
-   * The single property each unmasked variant's components-layer default hover
-   * sets, read from controls.css (`ghost` :1699, `subtle` :1754, `tab` :1764,
-   * `toggle` :1786; `link` declares no hover rule at all).
+   * The single property each unmasked variant's default hover sets, and whether
+   * a caller can silence it.
+   *
+   * Four of the five default from the COMPONENTS layer in controls.css (`ghost`
+   * :1699, `subtle` :1754, `tab` :1764, `toggle` :1786). Those are silenceable:
+   * any caller utility declaring the same property at rest displaces them on
+   * layer order, which is the whole of #1102.
    *
    * This is why "the caller painted its own background" is not by itself a
    * defect. A resting `bg-*` neutralises the default only for the two variants
@@ -942,13 +946,67 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * Measured: a `tab` with `bg-pf-accent/10` and no hover token still changed
    * its foreground in 8/8 palettes, while the same shape on `ghost` changed
    * nothing in 8/8.
+   *
+   * `link` is the exception, and it is NOT "no default hover" -- an earlier
+   * revision of this table said that, and it was false. `link` ships
+   * `enabled:hover:underline` from the VARIANT MAP in Button.tsx, so its default
+   * is a text-decoration rather than a colour or a fill.
+   *
+   * It is silenced by a different mechanism from the other four. Those lose to a
+   * caller utility on LAYER ORDER. `link`'s hover sits in the same layer as the
+   * caller and sorts after it, so no caller class can displace it -- but a caller
+   * that is ALREADY underlined at rest makes the hover a no-op by VALUE
+   * EQUALITY. Measured on the real Button across 8 palettes:
+   *   text-pf-accent                  -> decoration changed 8/8 (affordance intact)
+   *   text-pf-accent no-underline     -> decoration changed 8/8 (hover still wins)
+   *   text-pf-text-tertiary underline -> decoration changed 0/8 (dead)
+   * The last is the live MeasurementOverlay.tsx:48 shape, which survives only
+   * because it also changes colour on hover.
    */
-  const DEFAULT_HOVER: Record<string, 'bg' | 'text' | null> = {
+  const DEFAULT_HOVER: Record<string, 'bg' | 'text' | 'deco'> = {
     ghost: 'bg',
     subtle: 'bg',
     tab: 'text',
     toggle: 'text',
-    link: null,
+    link: 'deco',
+  };
+
+  /**
+   * The variants a branch leaves with no affordance at all: it declares no hover
+   * of its own, and it silences its variant's default hover by declaring that
+   * default's property at rest, from @layer utilities.
+   *
+   * Extracted so the regression tests exercise this decision directly rather
+   * than a proxy for it. Asserting on the DEFAULT_HOVER table alone stayed green
+   * when the `link` model was deliberately reverted, which is exactly the
+   * "gate cannot see the problem" ambiguity these tests exist to remove.
+   */
+  const silencedVariants = (tag: ButtonTag, branch: Branch): string[] => {
+    const { rest, hover } = hoverTokens(branch.text);
+    // A hover token that differs from the resting value is real feedback,
+    // whatever else the branch declares.
+    if ([...hover].some((utility) => !rest.has(utility))) return [];
+
+    // `text-*` is overloaded: `text-sm` is a size and `text-left` an
+    // alignment. Only the palette spellings this repo uses for colour
+    // count, because only those can silence a colour default hover.
+    const declares = (kind: 'bg' | 'text' | 'deco') =>
+      [...rest].some((utility) =>
+        kind === 'bg'
+          ? /^bg-/.test(utility)
+          : kind === 'deco'
+            ? utility === 'underline'
+            : /^text-pf-/.test(utility) || /^text-\[/.test(utility),
+      );
+
+    return variantsFor(tag, branch).filter((variant) => {
+      // An unresolvable `variant={expr}` could be any of the five. It is
+      // only certainly dead when the caller silences every property the
+      // five default-hover on, since a resolvable variant would silence
+      // just one of them.
+      if (variant === '') return declares('bg') && declares('text') && declares('deco');
+      return declares(DEFAULT_HOVER[variant]);
+    });
   };
 
   it('no unmasked-variant Button is left with a hover that changes nothing', () => {
@@ -963,28 +1021,10 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
           // A hover token that differs from the resting value is real feedback,
           // whatever else the branch declares.
           if ([...hover].some((utility) => !rest.has(utility))) continue;
-
-          // `text-*` is overloaded: `text-sm` is a size and `text-left` an
-          // alignment. Only the palette spellings this repo uses for colour
-          // count, because only those can silence a colour default hover.
-          const declares = (kind: 'bg' | 'text') =>
-            [...rest].some((utility) =>
-              kind === 'bg'
-                ? /^bg-/.test(utility)
-                : /^text-pf-/.test(utility) || /^text-\[/.test(utility),
-            );
           // The caller has no hover of its own, so the only affordance left is
           // the variant default -- and the caller silences that default by
           // declaring the same property at rest, from @layer utilities.
-          const silenced = variantsFor(tag, branch).filter((variant) => {
-            // An unresolvable `variant={expr}` could be any of the five. It is
-            // only certainly dead when the caller silences both properties;
-            // flagging it merely because `link` has no default hover would fire
-            // on every dynamic-variant Button in the tree.
-            if (variant === '') return declares('bg') && declares('text');
-            const property = DEFAULT_HOVER[variant];
-            return property === null || declares(property);
-          });
+          const silenced = silencedVariants(tag, branch);
 
           if (silenced.length > 0) {
             offenders.add(
@@ -1002,9 +1042,11 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       [...offenders],
       'This Button has no hover token that changes anything. Two shapes reach here. ' +
         'A caller that declares at rest the one property its variant default hovers ' +
-        '(background for ghost/subtle, colour for tab/toggle; link has no default at ' +
-        'all) silences that default from @layer utilities and is left with no ' +
-        'affordance, so it must supply one. A caller that merely restates a colour ' +
+      '(background for ghost/subtle, colour for tab/toggle) silences that default ' +
+      'from @layer utilities and is left with no affordance, so it must supply one. ' +
+        '`link` is reported only when the caller is already underlined at rest, ' +
+        'which makes its `enabled:hover:underline` a no-op by value equality. ' +
+        'A caller that merely restates a colour ' +
         'still has its variant default, but that colour token is dead and should go. ' +
         'Prefer a contrast-neutral affordance -- a ring or an underline -- when the ' +
         'text and a candidate tint share a hue: `text-pf-accent` with ' +
@@ -1012,7 +1054,41 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     ).toEqual([]);
   });
 
-  it('splits a className by operator, not by assuming every binary is `&&`', () => {
+  it('reports a `link` caller only when it is underlined at rest', () => {
+    // V1, round 12. An earlier revision modelled `link` as having no default
+    // hover, so the predicate returned true unconditionally and idiomatic,
+    // correct code was reported as dead. `link` in fact ships
+    // `enabled:hover:underline` from the variant map.
+    //
+    // Measured on the real Button across 8 palettes -- see DEFAULT_HOVER.
+    const [tag] = buttonTags('<Button variant="link" className="text-pf-accent">Docs</Button>');
+    expect(isUnmaskedIn(tag, tag.branches[0]), '`link` is a bare variant').toBe(true);
+    expect(silencedVariants(tag, tag.branches[0]), 'correct link code must not be reported').toEqual(
+      [],
+    );
+
+    // A resting `no-underline` does NOT silence it: the hover sorts after the
+    // plain utility in the same layer, so the underline still wins. 8/8.
+    const [tag2] = buttonTags(
+      '<Button variant="link" className="text-pf-accent no-underline">Docs</Button>',
+    );
+    expect(silencedVariants(tag2, tag2.branches[0])).toEqual([]);
+
+    // A resting `underline` DOES silence it, by value equality rather than by
+    // cascade -- the hover sets the value the element already has. Measured 0/8.
+    const [tag3] = buttonTags(
+      '<Button variant="link" className="text-pf-accent underline">Docs</Button>',
+    );
+    expect(silencedVariants(tag3, tag3.branches[0])).toEqual(['link']);
+
+    // The contrast: `subtle`'s default lives in the components layer, so it is
+    // silenced by layer order instead. Without this the test would pass on a
+    // guard that reports nothing at all.
+    const [tag4] = buttonTags('<Button variant="subtle" className="bg-pf-accent-bg">Docs</Button>');
+    expect(silencedVariants(tag4, tag4.branches[0])).toEqual(['subtle']);
+  });
+
+  it('splits a className by operator, not by assuming every binary is `&&`', () => {
     const initializerOf = (code: string) => {
       const sf = ts.createSourceFile('f.tsx', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
       const statement = sf.statements[0] as ts.VariableStatement;
