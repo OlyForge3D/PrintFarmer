@@ -135,6 +135,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
       - name: Install shellcheck
         run: |
           sudo apt-get update -qq
@@ -173,6 +178,9 @@ jobs:
 
       - name: Test release tag-trigger policy
         run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
+
+      - name: Test Squad state-root containment
+        run: node --test scripts/ci/tests/test-squad-state-root.mjs
 
       # Full dependency-license validation requires restored NuGet assets
       # (project.assets.json under src/**/obj/). Without a restore the
