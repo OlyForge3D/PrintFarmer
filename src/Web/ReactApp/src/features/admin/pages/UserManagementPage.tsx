@@ -425,7 +425,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                         variant="subtle"
                         size="sm"
                         onClick={() => setUserToDelete(user)}
-                        className="!p-2 !h-auto hover:text-pf-error"
+                        className="!p-2 !h-auto hover:text-pf-error-text"
                         title="Delete user"
                       >
                         <DeleteIcon className="h-4 w-4" />

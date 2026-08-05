@@ -157,7 +157,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
                   variant="subtle"
                   type="button"
                   onClick={onReset}
-                  className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors hover:bg-pf-warning/10 rounded shrink-0"
+                  className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors hover:bg-pf-warning/10 rounded shrink-0"
                   title={`Reset to original: ${formatOriginalValue(originalValue)}`}
                   aria-label={`Reset ${label} to original value`}
                 >
@@ -207,7 +207,7 @@ export const SettingRow: React.FC<SettingRowProps> = (props) => {
               variant="subtle"
               type="button"
               onClick={onReset}
-              className="p-0 text-pf-warning hover:text-pf-warning transition-colors
+              className="p-0 text-pf-warning-text hover:text-pf-warning-text transition-colors
                          hover:bg-pf-warning/10 rounded"
               title={`Reset to original: ${formatOriginalValue(originalValue)}`}
               aria-label={`Reset ${label} to original value`}
@@ -867,7 +867,7 @@ export const CompactSettingRow: React.FC<CompactSettingRowProps> = (props) => {
             variant="subtle"
             type="button"
             onClick={onReset}
-            className="p-0.5 text-pf-warning hover:text-pf-warning transition-colors
+            className="p-0.5 text-pf-warning-text hover:text-pf-warning-text transition-colors
                        hover:bg-pf-warning/10 rounded"
             title={`Reset to original: ${formatOriginalValue(originalValue)}`}
             aria-label={`Reset ${label} to original value`}

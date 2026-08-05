@@ -242,7 +242,7 @@ export function ComponentModelCard<T extends ComponentModelCardData>({
                 onClick={() => onDelete(model)}
                 disabled={isLoading}
                 aria-label={`Delete ${model.name}`}
-                className="text-pf-error enabled:hover:text-pf-error enabled:hover:bg-pf-error/10 dark:enabled:hover:text-pf-error"
+                className="text-pf-error-text enabled:hover:text-pf-error-text enabled:hover:bg-pf-error/10 dark:enabled:hover:text-pf-error-text"
               >
                 <svg
                   className="w-4 h-4"
