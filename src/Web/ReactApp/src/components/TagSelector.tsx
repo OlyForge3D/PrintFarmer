@@ -170,7 +170,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
               <Button
                 onClick={() => createTagMutation.mutate(searchTerm)}
                 disabled={createTagMutation.isPending}
-                className="w-full text-left px-3 py-2 hover:bg-pf-bg-2 transition-colors flex items-center gap-2"
+                className="w-full text-left px-3 py-2 enabled:hover:bg-pf-bg-2 transition-colors flex items-center gap-2"
                 variant="subtle"
                 iconLeft={<PlusIcon className="w-4 h-4 text-pf-accent" />}
               >

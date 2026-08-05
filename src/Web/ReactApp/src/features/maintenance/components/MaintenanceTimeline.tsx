@@ -150,7 +150,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
       className={`
         flex items-start gap-3 p-3 rounded-lg border transition-colors
         ${task.isOverdue 
-          ? 'bg-pf-error/10 border-pf-error/30 hover:bg-pf-error/10' 
+          ? 'bg-pf-error/10 border-pf-error/30 hover:bg-pf-error/20'
           : 'bg-pf-bg-1 border-pf-border hover:bg-pf-border/30'
         }
       `}

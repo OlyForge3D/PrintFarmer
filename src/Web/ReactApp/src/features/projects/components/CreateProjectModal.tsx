@@ -605,7 +605,7 @@ export const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                             variant="subtle"
                             size="sm"
                             onClick={() => removeFile(file.gcodeFileId)}
-                            className="p-1! text-pf-text-tertiary hover:text-pf-error"
+                            className="p-1! text-pf-text-tertiary hover:text-pf-error-text"
                             title={`Remove ${fileName}`}
                           >
                             <DeleteIcon className="w-4 h-4" />

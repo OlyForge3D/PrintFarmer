@@ -84,7 +84,7 @@ export default function HistoryFiltersBar({
               size="sm"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "cards"
-                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] hover:bg-pf-accent-bg"
+                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
                   : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
               title="Card view"
@@ -97,7 +97,7 @@ export default function HistoryFiltersBar({
               size="sm"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "table"
-                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] hover:bg-pf-accent-bg"
+                  ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
                   : "bg-pf-bg-0 text-pf-text-secondary hover:bg-pf-bg-2"
               }`}
               title="Table view"
@@ -148,10 +148,10 @@ export default function HistoryFiltersBar({
                     className={`px-2 py-1 text-xs font-medium ${
                       selectedStatuses.includes(status)
                         ? status === "completed"
-                          ? "bg-pf-success text-[var(--pf-text-inverse)]"
+                          ? "bg-pf-success text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]"
                           : status === "failed"
-                          ? "bg-pf-error text-[var(--pf-text-inverse)]"
-                          : "bg-pf-warning text-[var(--pf-text-inverse)]"
+                          ? "bg-pf-error text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]"
+                          : "bg-pf-warning text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]"
                         : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
                     } ${selectedStatuses.includes(status) ? "enabled:hover:scale-105 enabled:hover:shadow-sm" : ""}`}
                   >

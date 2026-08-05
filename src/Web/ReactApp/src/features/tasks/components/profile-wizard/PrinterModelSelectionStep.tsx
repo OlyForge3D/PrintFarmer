@@ -169,12 +169,12 @@ export const PrinterModelSelectionStep: React.FC<PrinterModelSelectionStepProps>
                     onClick={() => setSelectedModelId(model.id)}
                     className={`w-full justify-start rounded-none px-4 py-3 h-auto font-normal border-b border-pf-border/50 ${
                       isSelected
-                        ? 'bg-pf-accent/10 border-l-2 border-l-pf-accent'
-                        : 'hover:bg-pf-bg-2'
+                        ? 'bg-pf-accent/10 enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-pf-accent border-l-2 border-l-pf-accent'
+                        : 'enabled:hover:bg-pf-bg-2'
                     }`}
                   >
                     <Package className={`h-5 w-5 shrink-0 ${isSelected ? 'text-pf-accent' : 'text-pf-text-tertiary'}`} />
-                    <span className={`flex-1 text-left ${isSelected ? 'text-pf-accent font-medium' : 'text-pf-text-primary'}`}>
+                    <span className={`flex-1 text-left ${isSelected ? 'text-pf-text-primary font-medium' : 'text-pf-text-primary'}`}>
                       {model.name}
                     </span>
                   </Button>

@@ -21,8 +21,9 @@ const variantClasses: Record<ButtonVariant, string> = {
   primary: 'bg-[var(--pf-button-primary-bg)] enabled:hover:bg-[var(--pf-button-primary-hover)] text-[var(--pf-on-accent)] border border-[var(--pf-button-primary-border)] shadow-md font-semibold',
   secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
   danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] shadow-md font-semibold',
-  // Paint defaults for these variants live in the components layer so caller
-  // utilities retain precedence, including state-specific overrides.
+  // `subtle` declares only the border *width*. Its paint — surface, hover overlay,
+  // text colour and border colour — lives in the components layer, for the same
+  // reason as ghost below. See #1102.
   subtle: 'border',
   // Ghost deliberately declares no utilities at all. Its defaults — transparent
   // surface, inherited text colour, transparent border, no shadow, and the hover
@@ -31,6 +32,8 @@ const variantClasses: Record<ButtonVariant, string> = {
   // `className` wins on layer order instead of losing on source order. See #1087.
   ghost: '',
   success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] shadow-md font-semibold',
+  // tab/toggle/link keep only their structural utilities; their paint lives in the
+  // components layer alongside subtle's and ghost's. See #1102.
   tab: 'border-b-2 focus:ring-0 rounded-none',
   toggle: '',
   link: 'enabled:hover:underline px-0 py-0',
@@ -59,6 +62,11 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   },
   ref
 ) {
+  // The tab variant's idle/active paint used to be emitted here as utilities,
+  // which put it in `@layer utilities` alongside caller classes where it won on
+  // source order — the #1102 defect. Colour and the active underline now live in
+  // `@layer components` (styles/controls.css) keyed off `data-pf-variant` and
+  // `data-pf-active`; only the active-state hook is emitted from here.
   const isActiveTab = variant === 'tab' && active === true;
 
   // Link variant should not apply size padding classes
@@ -73,7 +81,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       ref={ref}
       data-pf-button
       data-pf-variant={variant}
-      data-pf-active={isActiveTab ? 'true' : undefined}
+      data-pf-active={isActiveTab ? '' : undefined}
       className={clsx(
         applyBaseStyles &&
           'rounded-xs font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',

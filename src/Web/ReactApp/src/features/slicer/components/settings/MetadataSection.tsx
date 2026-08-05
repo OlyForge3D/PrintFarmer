@@ -114,8 +114,8 @@ const CompoundRow: React.FC<CompoundRowProps> = ({
             type="button"
             onClick={handleReset}
             disabled={disabled}
-            className="p-0 text-pf-warning hover:text-pf-warning transition-colors
-                       hover:bg-pf-warning/10 rounded"
+            className="p-0 text-pf-warning-text transition-colors
+                       enabled:hover:bg-pf-warning/10 rounded"
             title="Reset to original values"
             aria-label={`Reset ${label} to original values`}
           >

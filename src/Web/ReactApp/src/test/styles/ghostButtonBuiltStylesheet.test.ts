@@ -116,6 +116,49 @@ function findGhostRules(css: string): CssRule[] {
   }));
 }
 
+// #1102 moved the paint defaults of these four variants into @layer components for
+// the same reason ghost's live there. The declarations differ per variant and are
+// not worth pinning, but the property that makes the fix work — the base rule
+// exists and sits inside the components layer, below every caller utility — is the
+// same one, and is invisible to a className assertion.
+const PAINTED_VARIANTS = ['subtle', 'tab', 'toggle', 'link'] as const;
+
+// Matches only the base rule: requiring `]` then `{` excludes the `:hover` and
+// `[data-pf-active]` rules, which are layered by the same block anyway.
+function variantSelector(variant: string): RegExp {
+  return new RegExp(
+    `\\[data-pf-button\\]\\[data-pf-variant=(?:"${variant}"|'${variant}'|${variant})\\]\\s*\\{[^{}]*\\}`,
+    'g',
+  );
+}
+
+function validateVariantLayering(css: string): string[] {
+  const violations: string[] = [];
+  const componentBlocks = findLayerBlocks(css, 'components');
+
+  for (const variant of PAINTED_VARIANTS) {
+    const rules = [...css.matchAll(variantSelector(variant))];
+
+    if (rules.length === 0) {
+      violations.push(`expected a built ${variant} base rule; found none`);
+      continue;
+    }
+
+    for (const rule of rules) {
+      const isInComponents = componentBlocks.some(
+        (block) => rule.index > block.openBrace && rule.index < block.closeBrace,
+      );
+      if (!isInComponents) {
+        violations.push(
+          `${variant} base rule at built stylesheet offset ${rule.index} is outside @layer components`,
+        );
+      }
+    }
+  }
+
+  return violations;
+}
+
 function validateGhostCascade(css: string): string[] {
   const violations: string[] = [];
   const layerOrder = findLayerOrder(css);
@@ -242,6 +285,34 @@ describe('built stylesheet ghost cascade (#1122)', () => {
     const violations = validateGhostCascade(mutant);
     expect(
       violations.some((violation) => violation.includes('outside @layer components')),
+      violations.join('\n'),
+    ).toBe(true);
+  });
+
+  it('keeps the subtle, tab, toggle and link paint defaults below caller utilities', () => {
+    const violations = validateVariantLayering(builtCss);
+
+    expect(violations, violations.join('\n')).toEqual([]);
+  });
+
+  it('detects an unlayered subtle paint rule in the built artifact', () => {
+    const leakedRule =
+      "[data-pf-button][data-pf-variant='subtle']{background-color:#0000;border-color:#0000}";
+    const mutant = `${builtCss}${leakedRule}`;
+    const byteDelta = Buffer.byteLength(mutant) - Buffer.byteLength(builtCss);
+
+    expect(
+      byteDelta,
+      `falsification injection must change the built artifact; delta was ${byteDelta} bytes`,
+    ).toBe(Buffer.byteLength(leakedRule));
+
+    const violations = validateVariantLayering(mutant);
+    expect(
+      violations.some(
+        (violation) =>
+          violation.startsWith('subtle base rule') &&
+          violation.includes('outside @layer components'),
+      ),
       violations.join('\n'),
     ).toBe(true);
   });

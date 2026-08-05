@@ -518,7 +518,7 @@ export function PartsInventoryTab() {
                   <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setCloneSource(null); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
                     <EditIcon className="h-4 w-4" />
                   </Button>
-                  <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error">
+                  <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error-text">
                     <DeleteIcon className="h-4 w-4" />
                   </Button>
                 </div>
@@ -574,7 +574,7 @@ export function PartsInventoryTab() {
                         <Button variant="subtle" size="sm" onClick={() => { setEditingComponent(comp); setCloneSource(null); setIsFormOpen(true); }} aria-label={`Edit ${comp.name}`}>
                           <EditIcon className="h-3.5 w-3.5" />
                         </Button>
-                        <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error">
+                        <Button variant="subtle" size="sm" onClick={() => setDeletingComponent(comp)} aria-label={`Delete ${comp.name}`} className="hover:text-pf-error-text">
                           <DeleteIcon className="h-3.5 w-3.5" />
                         </Button>
                       </div>

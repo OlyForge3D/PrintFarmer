@@ -41,7 +41,7 @@ export function QueueViewModeSelector({ value, onChange }: QueueViewModeSelector
               "focus-visible:relative focus-visible:z-10",
               "motion-safe:hover:-translate-y-px",
               isActive
-                ? "bg-pf-accent-bg text-[var(--pf-on-accent)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] hover:bg-pf-accent-bg"
+                ? "bg-pf-accent-bg text-[var(--pf-on-accent)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.16)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
                 : "bg-pf-bg-0/60 text-pf-text-secondary hover:bg-pf-bg-2",
             )}
             aria-pressed={isActive}

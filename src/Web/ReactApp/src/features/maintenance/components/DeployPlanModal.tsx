@@ -507,7 +507,7 @@ export function DeployPlanModal({ isOpen, plan, onClose }: DeployPlanModalProps)
                       size="sm"
                       onClick={() => setUndeploying(d)}
                       aria-label={`Undeploy from ${d.printerName}${d.toolheadName ? ` (${d.toolheadName})` : ''}`}
-                      className="hover:text-pf-error shrink-0"
+                      className="hover:text-pf-error-text shrink-0"
                     >
                       <DeleteIcon className="h-4 w-4" />
                     </Button>
