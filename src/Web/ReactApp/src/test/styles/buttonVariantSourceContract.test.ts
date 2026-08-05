@@ -325,11 +325,19 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * coexists with `primary`, whose paint still masks it.
    *
    * Unknown shapes fall back to every literal they contain, which is the
-   * conservative answer: it can only merge branches, never invent one. The
-   * 64-alternative cap keeps a className with many independent ternaries from
-   * expanding combinatorially; past the cap it degrades to the same conflated
-   * string `className` uses.
+   * conservative answer: it can only merge branches, never invent one.
+   *
+   * The alternative cap keeps a className with many independent ternaries from
+   * expanding combinatorially. It *throws* rather than degrading to a conflated
+   * string: conflation is not conservative here, because a dead hover in one arm
+   * hiding behind a working hover in another is exactly the defect this guard
+   * exists to catch. A silent false negative there would make the guard green for
+   * the reason it should be red. Measured maximum across the repo is 8
+   * alternatives over 464 Button call sites, so the cap has never been reached;
+   * if it ever is, that is a fact worth surfacing rather than absorbing.
    */
+  const MAX_ALTERNATIVES = 64;
+
   const branchesOf = (node: ts.Node): Branch[] => {
     const merge = (a: Branch, b: Branch, sep: string): Branch | null => {
       const conds = new Map(a.conds);
@@ -344,9 +352,16 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     const cross = (acc: Branch[], alts: Branch[], sep = ' ') => {
       const out = acc.flatMap((a) => alts.map((b) => merge(a, b, sep))).filter((b) => b !== null);
-      return out.length > 64
-        ? [{ text: out.map((b) => b.text).join(' '), conds: new Map<string, boolean>() }]
-        : out;
+      if (out.length > MAX_ALTERNATIVES) {
+        throw new Error(
+          `className expands to ${out.length} mutually exclusive alternatives, past the ` +
+            `${MAX_ALTERNATIVES} cap. The only way to continue is to conflate the arms, which ` +
+            `would let a dead hover in one arm hide behind a working hover in another -- the ` +
+            `exact defect this guard exists to catch. Failing loudly instead. Split the ` +
+            `className, or raise MAX_ALTERNATIVES if the expansion is genuinely needed.`,
+        );
+      }
+      return out;
     };
 
     const plain = (text: string): Branch[] => [{ text, conds: new Map() }];
@@ -407,6 +422,23 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     const out: ButtonTag[] = [];
 
     const read = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): void => {
+      /**
+       * The cap in `branchesOf` throws rather than conflating arms. Rethrow with
+       * the site attached: a bare "past the 64 cap" tells you the guard tripped
+       * but not where, and a failure you cannot locate is barely better than one
+       * you cannot see.
+       */
+      const expand = (initializer: ts.Node, attribute: string, line: number): Branch[] => {
+        try {
+          return branchesOf(initializer);
+        } catch (error) {
+          throw new Error(
+            `${fileName}:${line} \`${attribute}\` -- ${(error as Error).message}`,
+            { cause: error },
+          );
+        }
+      };
+
       const tag: ButtonTag = {
         line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
         className: '',
@@ -423,11 +455,11 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         if (name === 'disabled' || name === 'loading') tag.disableable = true;
         else if (name === 'className' && attr.initializer) {
           tag.className = literalsIn(attr.initializer).join(' ');
-        tag.branches = branchesOf(attr.initializer);
+          tag.branches = expand(attr.initializer, 'className', tag.line);
         } else if (name === 'variant' && attr.initializer) {
           const literals = literalsIn(attr.initializer);
           tag.variants = literals;
-          tag.variantBranches = branchesOf(attr.initializer);
+          tag.variantBranches = expand(attr.initializer, 'variant', tag.line);
           tag.dynamicVariant = literals.length === 0;
         }
       }
@@ -800,6 +832,28 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         (b) => b.text,
       ),
     ).toContain('text-pf-error hover:text-pf-error');
+  });
+
+  it('fails loudly past the alternative cap instead of conflating the arms', () => {
+    // Seven independent ternaries expand to 2^7 = 128 alternatives, past the
+    // 64 cap. The previous behaviour joined them into one string, which is the
+    // one degradation this guard cannot afford: a dead hover in one arm would
+    // hide behind a working hover in another and the site would read clean.
+    const ternary = (n: number) => `(c${n} ? "a${n}" : "b${n}")`;
+    const src =
+      `<Button className={${Array.from({ length: 7 }, (_, i) => ternary(i)).join(' + " " + ')}} />`;
+
+    expect(() => buttonTags(src, 'Pathological.tsx')).toThrow(/past the 64 cap/);
+    // The failure must name the site, not just the condition.
+    expect(() => buttonTags(src, 'Pathological.tsx')).toThrow(
+      /Pathological\.tsx:1 `className`/,
+    );
+
+    // Control: one fewer ternary is 64 alternatives, at the cap and not past it,
+    // so it must still parse. Without this the test would also pass if the cap
+    // threw unconditionally.
+    const ok = `<Button className={${Array.from({ length: 6 }, (_, i) => ternary(i)).join(' + " " + ')}} />`;
+    expect(buttonTags(ok, 'Ok.tsx')[0].branches).toHaveLength(64);
   });
 
   it('pairs a className arm with the variant arm chosen by the same condition', () => {
