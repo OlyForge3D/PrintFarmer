@@ -153,7 +153,7 @@ layout_diff.txt
 
 # Quarantine misplaced Squad outputs. The state-root CI regression fails if
 # Squad writes here; keep stranded active-session records out of staging until
-# they can be inventoried and recovered deliberately.
+# they can be inventoried and recovered deliberately under #1135.
 /decisions/
 /decisions.md
 /agents/

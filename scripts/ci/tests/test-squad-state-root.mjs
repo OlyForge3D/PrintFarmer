@@ -41,14 +41,20 @@ async function loadSquadStateServer() {
   assert.equal(server.command, 'npx');
   assert.deepEqual(
     server.args,
-    ['-y', '@bradygaster/squad-cli@0.11.0', 'state-mcp'],
-    'the regression must exercise the repository-pinned Squad CLI integration',
+    [
+      '-y',
+      '--package=@bradygaster/squad-cli@0.11.0',
+      '--package=@bradygaster/squad-sdk@0.11.0',
+      'squad',
+      'state-mcp',
+    ],
+    'the regression must exercise the repository-pinned Squad CLI and SDK integration',
   );
 
   return server;
 }
 
-function startMcpServer(server, cwd) {
+function startMcpServer(server, cwd, ambientEnv = {}) {
   const isWindows = process.platform === 'win32';
   const command = isWindows ? (process.env.ComSpec ?? 'cmd.exe') : server.command;
   const commandArgs = isWindows
@@ -59,9 +65,11 @@ function startMcpServer(server, cwd) {
     detached: !isWindows,
     env: {
       ...process.env,
+      ...ambientEnv,
       ...server.env,
       NO_UPDATE_NOTIFIER: '1',
       SQUAD_NO_PERSONAL: '1',
+      SQUAD_TEAM_ROOT: cwd,
       npm_config_loglevel: 'error',
       npm_config_update_notifier: 'false',
     },
@@ -166,6 +174,15 @@ function startMcpServer(server, cwd) {
 
     const exitPromise = once(child, 'exit');
     child.stdin.end();
+    const killProcessGroup = (signal) => {
+      try {
+        process.kill(-child.pid, signal);
+      } catch (error) {
+        if (error?.code !== 'ESRCH') {
+          throw error;
+        }
+      }
+    };
 
     if (isWindows) {
       const script = [
@@ -209,7 +226,7 @@ function startMcpServer(server, cwd) {
         `failed to terminate the Squad state MCP process tree\n${terminationError}`,
       );
     } else {
-      process.kill(-child.pid, 'SIGTERM');
+      killProcessGroup('SIGTERM');
     }
 
     const exited = await Promise.race([
@@ -217,7 +234,7 @@ function startMcpServer(server, cwd) {
       delay(3_000).then(() => false),
     ]);
     if (!exited && !isWindows) {
-      process.kill(-child.pid, 'SIGKILL');
+      killProcessGroup('SIGKILL');
       await exitPromise;
     } else if (!exited) {
       assert.fail('Squad state MCP process tree did not terminate');
@@ -231,19 +248,33 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
   timeout: requestTimeoutMs + 10_000,
 }, async () => {
   const fixtureRoot = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-squad-state-'));
+  const decoyRoot = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-squad-decoy-'));
   const squadDir = path.join(fixtureRoot, '.squad');
+  const decoySquadDir = path.join(decoyRoot, '.squad');
+  const absoluteEscapePath = path.join(
+    os.tmpdir(),
+    `${path.basename(fixtureRoot)}-absolute-escape.md`,
+  );
   let client;
 
   try {
     await mkdir(squadDir, { recursive: true });
+    await mkdir(decoySquadDir, { recursive: true });
     await copyFile(
       path.join(repositoryRoot, '.squad', 'config.json'),
       path.join(squadDir, 'config.json'),
     );
+    await copyFile(
+      path.join(repositoryRoot, '.squad', 'config.json'),
+      path.join(decoySquadDir, 'config.json'),
+    );
     await writeFile(path.join(squadDir, 'team.md'), '## Members\n', 'utf8');
+    await writeFile(path.join(decoySquadDir, 'team.md'), '## Members\n', 'utf8');
 
     const server = await loadSquadStateServer();
-    client = startMcpServer(server, fixtureRoot);
+    client = startMcpServer(server, fixtureRoot, {
+      SQUAD_TEAM_ROOT: decoyRoot,
+    });
 
     const initialize = await client.request('initialize', {
       protocolVersion: '2024-11-05',
@@ -300,25 +331,61 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
       await readFile(path.join(squadDir, stateKey), 'utf8'),
       stateContent,
     );
-
-    const escapeResponse = await client.request('tools/call', {
-      name: 'squad_state_write',
-      arguments: {
-        key: 'decisions/inbox/../../../outside.md',
-        content: 'must not escape\n',
-      },
-    });
-
-    assert.equal(escapeResponse.error, undefined);
     assert.equal(
-      escapeResponse.result?.isError,
-      true,
-      'an escaping state key must be surfaced as an MCP tool error',
+      await exists(path.join(decoySquadDir, 'decisions')),
+      false,
+      'ambient SQUAD_TEAM_ROOT must not redirect fixture writes',
     );
-    assert.equal(await exists(path.join(fixtureRoot, 'outside.md')), false);
-    assert.equal(await exists(path.join(squadDir, 'outside.md')), false);
+
+    const escapeCases = [
+      {
+        key: 'decisions/inbox/../../../outside-relative.md',
+        paths: [
+          path.join(fixtureRoot, 'outside-relative.md'),
+          path.join(squadDir, 'outside-relative.md'),
+        ],
+      },
+      {
+        key: 'decisions\\inbox\\..\\..\\..\\outside-backslash.md',
+        paths: [
+          path.join(fixtureRoot, 'outside-backslash.md'),
+          path.join(squadDir, 'outside-backslash.md'),
+        ],
+      },
+      {
+        key: absoluteEscapePath,
+        paths: [absoluteEscapePath],
+      },
+    ];
+
+    for (const escapeCase of escapeCases) {
+      const escapeResponse = await client.request('tools/call', {
+        name: 'squad_state_write',
+        arguments: {
+          key: escapeCase.key,
+          content: 'must not escape\n',
+        },
+      });
+
+      assert.equal(escapeResponse.error, undefined);
+      assert.equal(
+        escapeResponse.result?.isError,
+        true,
+        `escaping state key must be surfaced as an MCP tool error: ${escapeCase.key}`,
+      );
+      for (const escapedPath of escapeCase.paths) {
+        assert.equal(await exists(escapedPath), false);
+      }
+    }
   } finally {
-    await client?.close();
-    await rm(fixtureRoot, { recursive: true, force: true });
+    try {
+      await client?.close();
+    } finally {
+      await Promise.all([
+        rm(fixtureRoot, { recursive: true, force: true }),
+        rm(decoyRoot, { recursive: true, force: true }),
+        rm(absoluteEscapePath, { force: true }),
+      ]);
+    }
   }
 });
