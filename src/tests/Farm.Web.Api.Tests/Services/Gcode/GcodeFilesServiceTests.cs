@@ -49,7 +49,7 @@ public class GcodeFilesServiceTests
     {
         var mock = new Mock<IStoredFileOperationsService>(MockBehavior.Loose);
         mock.Setup(s => s.BuildGcodeThumbnailUrl(It.IsAny<Guid>()))
-            .Returns<Guid>(fileId => $"/api/gcode/thumbnail/{fileId}");
+            .Returns<Guid>(fileId => $"/api/gcode-files/thumbnail/{fileId}");
         mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
             .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
         mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))
@@ -273,7 +273,7 @@ public class GcodeFilesServiceTests
         firstFile.IsDirectory.Should().BeFalse();
         firstFile.FileName.Should().Be("model1.gcode");
         firstFile.Path.Should().Be("/jobs/model1.gcode");  // Virtual path constructed from folder path + filename
-        firstFile.ThumbnailUrl.Should().Be("/api/gcode-files/download?path=thumbs%2Fmodel1.png");
+        firstFile.ThumbnailUrl.Should().Be($"/api/gcode-files/thumbnail/{dbFiles[0].Id}");
 
         GcodeFileEntryDto secondFile = response.Files[1];
         secondFile.IsDirectory.Should().BeFalse();

@@ -67,7 +67,7 @@ public interface IStoredFileOperationsService
 
     /// <summary>
     /// Builds the thumbnail URL for a GCode file.
-    /// Format: /api/gcode/thumbnail/{id}
+    /// Format: /api/gcode-files/thumbnail/{id}
     /// </summary>
     /// <param name="gcodeFileId">The GCode file ID.</param>
     /// <returns>The URL for the GCode file's thumbnail.</returns>

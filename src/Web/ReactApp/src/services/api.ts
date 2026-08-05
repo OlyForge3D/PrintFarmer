@@ -3571,8 +3571,8 @@ export class ApiClient {
   /**
    * Test Spoolman connection
    */
-  async testSpoolmanConnection(): Promise<Record<string, unknown>> {
-    const response = await this.client.post('/spoolman/test');
+  async testSpoolmanConnection(baseUrl: string): Promise<Record<string, unknown>> {
+    const response = await this.client.post('/spoolman/test', { baseUrl });
     return response.data;
   }
 
