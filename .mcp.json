@@ -27,7 +27,9 @@
         "squad",
         "state-mcp"
       ],
-      "env": {},
+      "env": {
+        "SQUAD_TEAM_ROOT": "${workspaceFolder}"
+      },
       "tools": [
         "*"
       ]

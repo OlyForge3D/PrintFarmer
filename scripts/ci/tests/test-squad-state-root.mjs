@@ -50,6 +50,11 @@ async function loadSquadStateServer() {
     ],
     'the regression must exercise the repository-pinned Squad CLI and SDK integration',
   );
+  assert.deepEqual(
+    server.env,
+    { SQUAD_TEAM_ROOT: '${workspaceFolder}' },
+    'the repository MCP integration must override ambient Squad roots',
+  );
 
   return server;
 }
@@ -60,16 +65,21 @@ function startMcpServer(server, cwd, ambientEnv = {}) {
   const commandArgs = isWindows
     ? ['/d', '/s', '/c', [server.command, ...server.args].join(' ')]
     : server.args;
+  const resolvedServerEnv = Object.fromEntries(
+    Object.entries(server.env ?? {}).map(([key, value]) => [
+      key,
+      value.replaceAll('${workspaceFolder}', cwd),
+    ]),
+  );
   const child = spawn(command, commandArgs, {
     cwd,
     detached: !isWindows,
     env: {
       ...process.env,
       ...ambientEnv,
-      ...server.env,
+      ...resolvedServerEnv,
       NO_UPDATE_NOTIFIER: '1',
       SQUAD_NO_PERSONAL: '1',
-      SQUAD_TEAM_ROOT: cwd,
       npm_config_loglevel: 'error',
       npm_config_update_notifier: 'false',
     },
