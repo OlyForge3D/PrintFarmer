@@ -99,13 +99,20 @@ export function PrintersPage() {
   
   const deletePrinterMutation = useDeletePrinter();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
+  const displayPrinterStateById = useMemo(
+    () => new Map(displayPrinters.map((printer) => [printer.id, printer.state])),
+    [displayPrinters],
+  );
   const pendingPrinterIds = useMemo(
     () => new Set(
       ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[])
-        .filter((status) => requiresBedClearConfirmation(status))
+        .filter((status) => requiresBedClearConfirmation(
+          status,
+          displayPrinterStateById.get(status.printerId),
+        ))
         .map((status) => status.printerId)
     ),
-    [allAutoDispatchStatuses]
+    [allAutoDispatchStatuses, displayPrinterStateById]
   );
   const [searchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>(() => {

@@ -215,7 +215,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
   });
 
   it.each(['Starting', 'Printing', 'Paused'] as const)(
-    'shows %s without a bed-clear banner when stale gate data is red',
+    'shows live %s without a bed-clear banner when auto-dispatch is stale PendingReady',
     async (state) => {
       const printer = makePrinter({ state });
       vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
@@ -226,7 +226,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
             enabled: true,
             isReady: false,
             queueDepth: 1,
-            state,
+            state: 'PendingReady',
             bedPreConfirmed: false,
             readyGateChecks: [
               {

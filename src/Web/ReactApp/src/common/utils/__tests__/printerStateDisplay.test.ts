@@ -176,12 +176,12 @@ describe('printerStateDisplay utils', () => {
     });
 
     it.each(['Starting', 'Printing', 'Paused'] as const)(
-      'treats %s as authoritative over stale bed-clear gate data',
-      (state) => {
+      'treats live %s as authoritative over stale PendingReady data',
+      (printerState) => {
         const autoDispatchStatus: AutoDispatchStatus = {
           printerId: 'printer-1',
           enabled: true,
-          state,
+          state: 'PendingReady',
           queueDepth: 1,
           readyGateChecks: [
             {
@@ -194,13 +194,13 @@ describe('printerStateDisplay utils', () => {
           attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
         };
 
-        expect(requiresBedClearConfirmation(autoDispatchStatus)).toBe(false);
+        expect(requiresBedClearConfirmation(autoDispatchStatus, printerState)).toBe(false);
         expect(getPrinterDisplayState({
-          printerState: state,
+          printerState,
           autoDispatchState: autoDispatchStatus.state,
           autoDispatchStatus,
           isOnline: true,
-        })).toBe(state);
+        })).toBe(printerState);
       },
     );
 

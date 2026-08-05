@@ -109,7 +109,7 @@ export function PrinterTableView({
     autoDispatchStatus?: AutoDispatchStatus,
   ) => {
     if (!isOnline) return 'text-pf-text-tertiary';
-    if (requiresBedClearConfirmation(autoDispatchStatus)) return 'text-pf-warning';
+    if (requiresBedClearConfirmation(autoDispatchStatus, state)) return 'text-pf-warning';
     
     switch (state?.toLowerCase()) {
       case 'printing':
@@ -253,7 +253,7 @@ export function PrinterTableView({
             {printers.map((printer, index) => {
               const displayPrinter = displayPrinters[index];
               const autoDispatchStatus = autoDispatchStatusByPrinterId.get(printer.id);
-               const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
+               const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus, displayPrinter.state);
                const statusLabel = getPrinterDisplayState({
                  printerState: displayPrinter.state,
                  autoDispatchState: autoDispatchStatus?.state,

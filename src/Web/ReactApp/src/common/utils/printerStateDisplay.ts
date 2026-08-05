@@ -105,14 +105,18 @@ function isWaitingForBedClearConfirmationText(value: string | undefined | null):
  * rendering a stale Pending Ready overlay.
  *
  * @param status - Auto-dispatch status row from the bulk or per-printer endpoint
+ * @param printerState - Live printer state, when available
  * @returns True when the operator must clear the bed before queued work can resume
  */
-export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefined | null): boolean {
+export function requiresBedClearConfirmation(
+  status: AutoDispatchStatus | undefined | null,
+  printerState?: string | undefined | null,
+): boolean {
   if (!status) {
     return false;
   }
 
-  if (isPrinterOccupyingState(status.state)) {
+  if (isPrinterOccupyingState(printerState) || isPrinterOccupyingState(status.state)) {
     return false;
   }
 
@@ -166,7 +170,7 @@ export function getPrinterDisplayState(options: {
     enabled: true,
     queueDepth: 0,
     state: autoDispatchState as AutoDispatchStatus['state'],
-  } : undefined))) {
+  } : undefined), printerState)) {
     return 'Pending Ready';
   }
 
