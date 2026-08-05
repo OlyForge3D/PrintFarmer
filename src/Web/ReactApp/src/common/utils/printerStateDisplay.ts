@@ -106,6 +106,10 @@ export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefi
     return false;
   }
 
+  if (normalizeStatusText(status.state) === 'paused') {
+    return false;
+  }
+
   if (isPendingReadyState(status.state)) {
     return true;
   }
