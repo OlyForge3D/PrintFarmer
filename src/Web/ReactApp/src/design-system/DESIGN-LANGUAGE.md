@@ -1135,8 +1135,8 @@ The Phase 2 implementer should be aware of these deltas between the existing the
 2. **Token rename**. Existing tokens like `--pf-text-light` (ambiguous) collapse into `--pf-text-secondary`. The migration map will be authored alongside Phase 2 to keep diffs surgical.
 3. **Gradients deprecated**. The 14 `--pf-gradient-*` tokens are removed. Cards and buttons go to flat color. (They look inconsistent across themes anyway.) Where depth is needed, use `--pf-shadow-*` instead.
 4. **New tokens**. `--pf-space-*`, `--pf-radius-*`, `--pf-shadow-*`, `--pf-duration-*`, `--pf-ease-*`, `--pf-z-*`, `--pf-glow-*`, `--pf-modal-bg`, status triples for `printing`/`paused`/`error`/`idle`, `--pf-text-inverse`, `--pf-text-on-accent`, `--pf-accent-fg`, `--pf-selection-*`, `--pf-validation-warning-*`, and the full `info` semantic group are all new.
-5. **`forge` and `github-dark` themes**. Both are out of the supported set. Forge can stay as an undocumented "extra" theme during transition; `github-dark` is replaced by `printfarmer-dark` as the default and should be deleted.
-6. **Default theme**. Currently the default (`:root:not([data-theme])`) is `github-dark`. The new default is `printfarmer-dark`.
+5. **`forge` and `github-dark` themes**. ✅ Resolved. `github-dark` and `printfarmer-dark` were removed and now migrate to `dark`; both had been rendering the `dark` palette anyway, since their stylesheets sat in a cascade layer they could never win from. `forge` was migrated into `src/design-system/themes/forge.css` as a first-class supported theme with the full token contract — unlike the other two it carried real visual identity (heading and progress glows) that did render.
+6. **Default theme**. ✅ Resolved. The default is `dark`. There is no bare-`:root` default any more — `index.html` always sets an explicit `data-theme`, which is what made the old default so hard to reason about.
 
 ---
 

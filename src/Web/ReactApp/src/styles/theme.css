@@ -12,10 +12,19 @@
    specificity. So anything declaring a `--pf-*` token here can never take
    effect while the design-system themes are unlayered.
 
-   Five theme files and a `:root:not([data-theme])` block used to sit here and
-   were, measurably, inert: selecting `forge` rendered byte-identical `dark`.
+   Five theme files and a `:root:not([data-theme])` block used to sit here.
+   Their colour tokens were all inert, but note the precise scope of that
+   claim: layer order only arbitrates *competing* declarations. `forge` and
+   `matrix` also carried plain rules such as `[data-theme="forge"] h3 {
+   text-shadow }`, which nothing else declared, and those applied normally.
+   `matrix`'s were already duplicated in its design-system theme; `forge`'s
+   were not, which is why forge moved to `src/design-system/themes/forge.css`
+   rather than being deleted.
+
    Do not reintroduce token declarations in this file. Add them to a theme in
-   `src/design-system/themes/` instead.
+   `src/design-system/themes/` instead. Equally, do not assume a rule here is
+   dead just because it sits in the losing layer - check whether anything
+   actually competes with it.
 
    What remains below is rule-level styling rather than tokens, so it is
    unaffected by the layer asymmetry. There are deliberately NO custom-property

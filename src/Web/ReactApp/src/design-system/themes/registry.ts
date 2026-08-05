@@ -25,6 +25,7 @@ export const SELECTABLE_THEMES = [
   'ratos',
   'voron',
   'farm',
+  'forge',
 ] as const;
 
 export type SelectableTheme = (typeof SELECTABLE_THEMES)[number];
@@ -35,14 +36,22 @@ export type Theme = SelectableTheme | 'system';
 /**
  * Themes that were removed. Their stylesheets lived in `src/styles/themes/`,
  * which `index.css` imports into `layer(base)` while the design-system themes
- * are imported unlayered — so their declarations never won the cascade and
- * every one of them rendered byte-identical `dark`. Mapping them to `dark`
- * preserves what those users were actually seeing.
+ * are imported unlayered — so their colour tokens never won the cascade and
+ * both rendered the `dark` palette.
+ *
+ * They were not quite byte-identical to `dark`: each design-system theme also
+ * carries an `html[data-theme="<id>"] body` display font, and no such rule
+ * matched these names, so they fell back to the base face. Mapping them to
+ * `dark` therefore restores the display font those users should have had.
+ *
+ * `forge` is deliberately NOT here. Its non-token rules — a copper glow on
+ * headings and progress bars — faced no competing declaration, and an
+ * unopposed layered rule applies normally, so forge really did render
+ * differently. It has been migrated to `src/design-system/themes/forge.css`.
  */
 export const RETIRED_THEME_MAP: Record<string, Theme> = {
   'printfarmer-dark': 'dark',
   'github-dark': 'dark',
-  forge: 'dark',
 };
 
 export function isSelectableTheme(value: string): value is SelectableTheme {

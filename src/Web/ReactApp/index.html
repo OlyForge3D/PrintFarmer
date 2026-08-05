@@ -19,13 +19,15 @@
     <!-- Early theme init: prevent flash of unstyled theme -->
     <script>
       (function () {
-        // Must stay in sync with SELECTABLE_THEMES in src/contexts/ThemeContext.tsx.
-        // Omitting a real theme here does not break it, but it makes that theme
-        // flash as `dark` on every load until React hydrates.
-        var VALID = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm'];
-        // Themes that were removed. Their CSS never won the cascade, so they
-        // always rendered as `dark` anyway; this just makes it explicit.
-        var RETIRED = { 'github-dark': 'dark', 'printfarmer-dark': 'dark', 'forge': 'dark' };
+        // Must stay in sync with SELECTABLE_THEMES in
+        // src/design-system/themes/registry.ts. Omitting a real theme here does
+        // not break it, but it makes that theme flash as `dark` on every load
+        // until React hydrates.
+        var VALID = ['light', 'dark', 'matrix', 'blueprint', 'ratos', 'voron', 'farm', 'forge'];
+        // Themes that were removed. Their colour tokens never won the cascade,
+        // so they already rendered the `dark` palette; this just makes it
+        // explicit, and restores the display font they were missing.
+        var RETIRED = { 'github-dark': 'dark', 'printfarmer-dark': 'dark' };
         var stored = localStorage.getItem('pf-theme');
         // Migrate from old key
         if (!stored) {

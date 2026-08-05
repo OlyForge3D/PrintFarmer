@@ -27,13 +27,14 @@ Comprehensive guide to the complete design system with unified documentation:
 The PrintFarmer app has a **three-layer design system** ensuring consistency and ease of maintenance:
 
 **Layer 1: CSS Custom Properties (Theme Variables)**
-- `src/styles/theme.css` - Main orchestrator
-- `src/styles/themes/github-dark.css`, `printfarmer-dark.css`, `light.css` - Per-theme variables
-- 40+ color variables per theme
+- `src/design-system/themes/base.css` - Theme-independent tokens (fonts, spacing, z-index)
+- `src/design-system/themes/<theme>.css` - Per-theme variables, one file per selectable theme
+- 142 `--pf-*` tokens per theme, identical key set across all of them
+- `src/design-system/themes/registry.ts` - The single source of truth for which themes exist
 
 **Layer 2: CSS Utility Classes**
-- `src/styles/components.css` - Reusable component classes (`.pf-control-base`, `.pf-btn-primary`, etc.)
-- `src/styles/controls.css` - Legacy control styles (being migrated)
+- `src/styles/controls.css` - Control styles
+- Tailwind utilities generated from the `--pf-*` tokens (e.g. `bg-pf-accent`)
 
 **Layer 3: React Components**
 - `src/components/ui/` - Button, Input, Select, Card, Modal, and more
@@ -105,10 +106,10 @@ Read: [`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)
 - `CONTROLS_GUIDE.md` - Legacy control styling
 
 **Source Code:**
-- `src/styles/theme.css` - Theme system orchestrator
-- `src/styles/themes/` - Per-theme CSS variable definitions
-- `src/styles/components.css` - Reusable CSS utility classes
-- `src/styles/controls.css` - Legacy control styles
+- `src/design-system/themes/` - Per-theme CSS variable definitions, one file per theme
+- `src/design-system/themes/registry.ts` - Which themes exist; everything else derives from it
+- `src/styles/theme.css` - Global focus-visible rules only (no tokens; see the file header)
+- `src/styles/controls.css` - Control styles
 - `src/components/ui/` - React component implementations
 
 ---

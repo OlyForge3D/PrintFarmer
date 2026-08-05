@@ -39,8 +39,9 @@ Layer 1: CSS Custom Properties   (--pf-bg-0, --pf-accent, etc.)
 
 **Key Files:**
 - `src/Web/ReactApp/src/common/components/ui/` — React components (Button, Input, Card, etc.)
-- `src/Web/ReactApp/src/styles/theme.css` — CSS variable orchestrator and default (GitHub Dark) theme
-- `src/Web/ReactApp/src/styles/themes/*.css` — Theme variant definitions (printfarmer-dark, light)
+- `src/Web/ReactApp/src/design-system/themes/*.css` — One file per selectable theme; each declares the same 142 `--pf-*` tokens
+- `src/Web/ReactApp/src/design-system/themes/registry.ts` — The single source of truth for which themes exist
+- `src/Web/ReactApp/src/styles/theme.css` — Global `:focus-visible` rules only; deliberately declares no tokens (see the file header for why)
 - `src/Web/ReactApp/src/index.css` — Global styles, `@theme` block for design tokens, and custom utilities
 
 ---
@@ -180,36 +181,37 @@ All design tokens use the `pf-` prefix and are managed through CSS custom proper
 
 ## Available Themes
 
-### 1. GitHub Dark (Default)
-**Identifier**: No `data-theme` attribute or `data-theme="github-dark"`
-**Description**: GitHub's official dark theme colors, based on GitHub.com UI
-**Best for**: Developers familiar with GitHub, minimal contrast issues
-**Key Colors**: Blues (#58a6ff), Greens (#3fb950), Reds (#f85149)
+Eight selectable themes, each with a stylesheet in `src/design-system/themes/`.
+`SELECTABLE_THEMES` in `src/design-system/themes/registry.ts` is authoritative;
+`src/test/contexts/themeRegistry.test.ts` fails if this list, the boot script in
+`index.html`, the `ThemeSwitcher` options, or the stylesheets drift apart.
 
-### 2. PrintFarmer Dark
-**Identifier**: `data-theme="printfarmer-dark"`
-**Description**: Custom dark theme with adjusted contrast for better readability
-**Best for**: Extended viewing sessions, print-heavy workflows
-**Key Colors**: Greens (#10b981), Blues (#1d4ed8), Reds (#dc2626)
+| Theme | Identifier | Character |
+|---|---|---|
+| Dark (default) | `dark` | Mission Control — cool slate-navy, precision-teal accent |
+| Light | `light` | High-contrast light theme for daylight environments |
+| Matrix | `matrix` | Phosphor green on black, mono body face, CRT scanlines |
+| Blueprint | `blueprint` | Drafting-table blue with a mono face |
+| RatOS | `ratos` | RatOS-inspired |
+| Voron | `voron` | Industrial red-on-black precision engineering |
+| Farm | `farm` | Harvest — warm autumn palette |
+| Forge | `forge` | Industrial warmth — molten copper on charred iron |
 
-### 3. Light
-**Identifier**: `data-theme="light"`
-**Description**: High-contrast light theme for daylight environments
-**Best for**: Daytime use, accessibility, paper-like appearance
-**Key Colors**: Blues (#059669), Greens (#047857), Reds (#dc2626)
+`github-dark` and `printfarmer-dark` were removed. Their stylesheets lived in
+`src/styles/themes/`, which `index.css` imports into `layer(base)` while the
+design-system themes are imported unlayered — and layer order is resolved before
+specificity, so their tokens never won the cascade and both rendered the `dark`
+palette. Stored preferences for them migrate to `dark`.
 
 **Switching Themes:**
 ```jsx
-// Set theme globally (applies to entire app)
-document.documentElement.setAttribute('data-theme', 'light');
-
-// Remove theme attribute to revert to default (GitHub Dark)
-document.documentElement.removeAttribute('data-theme');
-
-// In React with ThemeContext (if implemented)
 const { setTheme } = useTheme();
-setTheme('printfarmer-dark');
+setTheme('forge');
 ```
+
+Setting `data-theme` by hand is not supported — `ThemeContext` owns the attribute
+and will overwrite it. Every theme has an explicit `data-theme` value; there is no
+"remove the attribute to get the default" behaviour.
 
 ---
 

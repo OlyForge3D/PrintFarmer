@@ -10,6 +10,7 @@
 @import './design-system/themes/ratos.css';
 @import './design-system/themes/voron.css';
 @import './design-system/themes/farm.css';
+@import './design-system/themes/forge.css';
 
 @theme {
   /* PrintFarmer Colors — primary backgrounds */

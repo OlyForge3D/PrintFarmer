@@ -224,6 +224,21 @@ html[data-theme="matrix"] body {
   }
 }
 
+/* Phosphor glow on progress bars.
+   Carried over from the legacy src/styles/themes/matrix.css. Its colour tokens
+   were inert (see the header of src/styles/theme.css), but this rule faced no
+   competing declaration and did paint, so dropping it would have quietly
+   regressed a live theme. */
+[data-theme="matrix"] [role='progressbar'] {
+  box-shadow: 0 0 8px rgba(0, 255, 65, 0.3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="matrix"] [role='progressbar'] {
+    box-shadow: none;
+  }
+}
+
 /* CRT scanlines (opt-in via .matrix-scanlines on body/root) */
 @media (prefers-reduced-motion: no-preference) {
   .matrix-scanlines::before {

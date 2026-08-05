@@ -20,8 +20,9 @@ export function ThemeToggle({
 }: ThemeToggleProps) {
   const { theme, setTheme, computedTheme } = useTheme();
 
-  // Order matches SELECTABLE_THEMES in ThemeContext, so keyboard cycling here
-  // and toggleTheme() agree. themeRegistry.test.ts enforces that.
+  // Order matches SELECTABLE_THEMES in design-system/themes/registry.ts, so
+  // keyboard cycling here and toggleTheme() agree, with 'system' appended last.
+  // themeRegistry.test.ts enforces both the membership and the order.
   const themes: { value: Theme; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { value: 'light', label: 'Light', icon: SunIcon },
     { value: 'dark', label: 'Dark', icon: MoonIcon },
@@ -30,6 +31,7 @@ export function ThemeToggle({
     { value: 'ratos', label: 'RatOS', icon: MatrixIcon },
     { value: 'voron', label: 'Voron', icon: FireIcon },
     { value: 'farm', label: 'Farm', icon: FireIcon },
+    { value: 'forge', label: 'Forge', icon: FireIcon },
     { value: 'system', label: 'System', icon: MonitorIcon },
   ];
 

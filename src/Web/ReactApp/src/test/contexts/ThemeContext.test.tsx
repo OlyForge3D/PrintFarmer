@@ -131,14 +131,26 @@ describe('ThemeContext', () => {
     });
 
     it('migrates a retired theme to dark', () => {
-      // forge/github-dark/printfarmer-dark rendered as dark anyway — their
+      // github-dark/printfarmer-dark rendered the dark palette anyway — their
       // stylesheets were in layer(base) and lost the cascade to the unlayered
-      // design-system themes — so this preserves what users actually saw.
-      localStorageMock.getItem.mockReturnValue('forge');
+      // design-system themes — so this preserves what users actually saw, and
+      // additionally restores the display font no rule was matching for them.
+      localStorageMock.getItem.mockReturnValue('github-dark');
 
       renderWithThemeProvider(<TestComponent />);
 
       expect(screen.getByTestId('theme')).toHaveTextContent('dark');
+    });
+
+    it('keeps forge, which was migrated rather than retired', () => {
+      // forge's colour tokens were inert like the others, but its plain rules
+      // (heading and progress-bar glow) faced no competing declaration and did
+      // paint. It is a real theme and now has a design-system stylesheet.
+      localStorageMock.getItem.mockReturnValue('forge');
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(screen.getByTestId('theme')).toHaveTextContent('forge');
     });
 
     it('sets custom storage key', () => {
