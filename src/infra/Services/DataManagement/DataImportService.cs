@@ -139,7 +139,7 @@ public class DataImportService : IDataImportService
             response.Errors.AddRange(catalogResult.Errors);
             response.Warnings.AddRange(catalogResult.Warnings);
 
-            if (!catalogResult.Success)
+            if (!catalogResult.Success && mode == ImportMode.Replace)
             {
                 response.Success = false;
             }

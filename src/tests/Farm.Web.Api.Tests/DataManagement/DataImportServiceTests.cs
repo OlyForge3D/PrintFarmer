@@ -296,4 +296,55 @@ public class DataImportServiceTests
         manufacturers.Should().HaveCount(2); // 1 existing + 1 from backup
         manufacturers.Should().Contain(m => m.Name == "New Manufacturer From Backup");
     }
+
+    [Fact]
+    public async Task ImportFullBackupAsync_MergeMode_WhenCatalogHasErrors_ContinuesImportingLocationsAndPrinters()
+    {
+        var manufacturer = new Manufacturer { Id = Guid.NewGuid(), Name = "Existing Manufacturer" };
+        var model = new PrinterModel
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing Model",
+            ManufacturerId = manufacturer.Id,
+        };
+        _ = _context.Manufacturers.Add(manufacturer);
+        _ = _context.PrinterModels.Add(model);
+        await _context.SaveChangesAsync();
+
+        var backup = new FullBackupExportDto
+        {
+            Catalog = new CatalogExportDto
+            {
+                PrinterModels =
+                [
+                    new PrinterModelExportDto
+                    {
+                        Name = "Invalid Model",
+                        ManufacturerName = "Missing Manufacturer",
+                    },
+                ],
+            },
+            Locations =
+            [
+                new LocationExportDto { Name = "Merged Location" },
+            ],
+            Printers =
+            [
+                new PrinterExportDto
+                {
+                    Name = "Merged Printer",
+                    ServerUrl = "http://merged-printer",
+                    ModelName = model.Name,
+                    LocationName = "Merged Location",
+                },
+            ],
+        };
+
+        ImportResponseDto result = await _importService.ImportFullBackupAsync(backup, ImportMode.Merge);
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().Contain(error => error.Contains("Missing Manufacturer"));
+        (await _context.Locations.Select(location => location.Name).ToListAsync()).Should().Contain("Merged Location");
+        (await _context.Printers.Select(printer => printer.Name).ToListAsync()).Should().Contain("Merged Printer");
+    }
 }
