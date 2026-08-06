@@ -219,6 +219,40 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DownloadForViewer_WithMultiHopRelativeDirectorySymlinks_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsideDirectory = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"symlink-directory-{Guid.NewGuid():N}");
+        string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
+        string outsidePath = Path.Combine(outsideDirectory, outsideFileName);
+        string secondLinkPath = Path.Combine(modelsPath, $"second-link-{Guid.NewGuid():N}");
+        string firstLinkPath = Path.Combine(modelsPath, $"first-link-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDirectory);
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        _ = Directory.CreateSymbolicLink(
+            secondLinkPath,
+            Path.GetRelativePath(modelsPath, outsideDirectory));
+        _ = Directory.CreateSymbolicLink(firstLinkPath, Path.GetFileName(secondLinkPath));
+
+        try
+        {
+            string requestedPath = Path.Combine(Path.GetFileName(firstLinkPath), outsideFileName);
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(requestedPath));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            Directory.Delete(firstLinkPath);
+            Directory.Delete(secondLinkPath);
+            Directory.Delete(outsideDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetModelFile_WithInvalidModel_Returns200AndFileContent()
     {
         // Arrange - Create INVALID model with physical file
