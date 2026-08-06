@@ -9,22 +9,28 @@ public sealed class JobWorkDirectoryTests : IDisposable
     private readonly string _workingDirectory =
         Path.Combine(Path.GetTempPath(), $"printfarmer-job-work-{Guid.NewGuid():N}");
 
-    [Fact(DisplayName = "A new claim removes stale output from an earlier attempt")]
-    public void PrepareJobWorkDirectory_ExistingAttempt_RemovesStaleOutput()
+    [Fact(DisplayName = "Overlapping claims use isolated work directories")]
+    public void PrepareJobWorkDirectory_OverlappingClaims_DoNotDeleteOtherAttempt()
     {
         Guid jobId = Guid.NewGuid();
-        string jobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
-        _ = Directory.CreateDirectory(Path.Combine(jobDirectory, "output"));
-        File.WriteAllText(Path.Combine(jobDirectory, ".printfarmer-recovery.json"), "{}");
-        File.WriteAllText(Path.Combine(jobDirectory, "output", "stale.gcode"), "stale");
-
-        string prepared = OrcaSlicingPipelineService.PrepareJobWorkDirectory(
+        Guid firstClaimToken = Guid.NewGuid();
+        Guid secondClaimToken = Guid.NewGuid();
+        string firstAttempt = OrcaSlicingPipelineService.PrepareJobWorkDirectory(
             _workingDirectory,
-            jobId);
+            jobId,
+            firstClaimToken);
+        File.WriteAllText(Path.Combine(firstAttempt, ".printfarmer-recovery.json"), "{}");
+        File.WriteAllText(Path.Combine(firstAttempt, "stale.gcode"), "stale");
 
-        _ = prepared.Should().Be(jobDirectory);
-        _ = Directory.Exists(prepared).Should().BeTrue();
-        _ = Directory.EnumerateFileSystemEntries(prepared).Should().BeEmpty();
+        string secondAttempt = OrcaSlicingPipelineService.PrepareJobWorkDirectory(
+            _workingDirectory,
+            jobId,
+            secondClaimToken);
+
+        _ = firstAttempt.Should().NotBe(secondAttempt);
+        _ = File.Exists(Path.Combine(firstAttempt, "stale.gcode")).Should().BeTrue();
+        _ = Directory.Exists(secondAttempt).Should().BeTrue();
+        _ = Directory.EnumerateFileSystemEntries(secondAttempt).Should().BeEmpty();
     }
 
     public void Dispose()

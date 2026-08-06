@@ -125,7 +125,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     public async Task<SlicingResult> ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(job);
-        string jobWorkDir = PrepareJobWorkDirectory(_workingDirectory, job.Id);
+        string jobWorkDir = PrepareJobWorkDirectory(
+            _workingDirectory,
+            job.Id,
+            job.ClaimToken);
         bool preserveResultForUpload = false;
         try
         {
@@ -200,16 +203,27 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    internal static string PrepareJobWorkDirectory(string workingDirectory, Guid jobId)
+    internal static string PrepareJobWorkDirectory(
+        string workingDirectory,
+        Guid jobId,
+        Guid claimToken)
     {
-        string jobWorkDirectory = Path.Combine(workingDirectory, jobId.ToString());
-        if (Directory.Exists(jobWorkDirectory))
+        if (claimToken == Guid.Empty)
         {
-            Directory.Delete(jobWorkDirectory, recursive: true);
+            throw new ArgumentException("A claim token is required.", nameof(claimToken));
         }
 
-        _ = Directory.CreateDirectory(jobWorkDirectory);
-        return jobWorkDirectory;
+        string attemptWorkDirectory = Path.Combine(
+            workingDirectory,
+            jobId.ToString(),
+            claimToken.ToString());
+        if (Directory.Exists(attemptWorkDirectory))
+        {
+            Directory.Delete(attemptWorkDirectory, recursive: true);
+        }
+
+        _ = Directory.CreateDirectory(attemptWorkDirectory);
+        return attemptWorkDirectory;
     }
 
     internal void PopulateResultMetadata(SlicingResult result, DistributedSlicingJob job, int modelCount)

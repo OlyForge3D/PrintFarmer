@@ -1080,9 +1080,9 @@ public abstract class HttpJobPollerService(
     }
 
     /// <summary>
-    /// Resolves the per-job working directory that owns a pipeline result.
+    /// Resolves the lease-attempt working directory that owns a pipeline result.
     /// </summary>
-    /// <param name="jobId">The job identifier, which names its working directory.</param>
+    /// <param name="jobId">The job identifier, which names the parent working directory.</param>
     /// <param name="result">The pipeline result, when the pipeline produced one.</param>
     /// <param name="directory">The resolved directory when the method returns true.</param>
     /// <returns><see langword="true"/> when a job-owned directory was resolved.</returns>
@@ -1097,13 +1097,19 @@ public abstract class HttpJobPollerService(
         string? candidate = Path.GetDirectoryName(NormalizeLocalPath(resultUri));
         while (!string.IsNullOrEmpty(candidate))
         {
-            if (string.Equals(Path.GetFileName(candidate), jobId.ToString(), StringComparison.Ordinal))
+            string? parent = Path.GetDirectoryName(candidate);
+            if (!string.IsNullOrEmpty(parent) &&
+                string.Equals(Path.GetFileName(parent), jobId.ToString(), StringComparison.Ordinal))
             {
-                directory = candidate;
+                // Current workers isolate attempts under {jobId}/{claimToken}. Legacy workers wrote
+                // directly under {jobId}/output, so retain compatibility when cleaning old results.
+                directory = Guid.TryParse(Path.GetFileName(candidate), out _)
+                    ? candidate
+                    : parent;
                 return Directory.Exists(directory);
             }
 
-            candidate = Path.GetDirectoryName(candidate);
+            candidate = parent;
         }
 
         return false;
