@@ -5,8 +5,10 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Spoolman;
@@ -86,10 +88,12 @@ public sealed class AutoDispatchServiceTests : IDisposable
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        Mock<IWebhookService> webhookService = new();
         AutoDispatchService service = new(
             _db,
             hubContext.Object,
             NullLogger<AutoDispatchService>.Instance,
+            webhookService: webhookService.Object,
             dispatchTrigger: dispatchTrigger.Object);
 
         AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
@@ -98,6 +102,11 @@ public sealed class AutoDispatchServiceTests : IDisposable
         status.State.Should().Be(nameof(AutoDispatchState.PendingReady));
         dispatchTrigger.Verify(
             trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()),
+            Times.Never);
+        webhookService.Verify(
+            service => service.Enqueue(
+                "printer.bed_pre_confirmed",
+                It.IsAny<object>()),
             Times.Never);
     }
 
@@ -213,16 +222,27 @@ public sealed class AutoDispatchServiceTests : IDisposable
         spoolmanService
             .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
+        Mock<IJobDispatchService> jobDispatchService = new();
+        jobDispatchService
+            .Setup(service => service.DispatchReviewedJobAsync(
+                queuedJob.Id,
+                printer.Id,
+                QueueActorIdentity.AutoDispatch,
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AcceptedDispatch(queuedJob.Id, printer.Id));
         AutoDispatchService service = new(
             _db,
             hubContext.Object,
             NullLogger<AutoDispatchService>.Instance,
             spoolmanService: spoolmanService.Object,
-            dispatchTrigger: dispatchTrigger.Object);
+            dispatchTrigger: dispatchTrigger.Object,
+            jobDispatchService: jobDispatchService.Object);
 
         AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
 
-        result.Status.State.Should().Be(nameof(AutoDispatchState.Ready));
         result.NextJob.Should().NotBeNull();
         result.NextJob!.Id.Should().Be(queuedJob.Id);
         result.FilamentCheck.Should().NotBeNull();
@@ -231,20 +251,14 @@ public sealed class AutoDispatchServiceTests : IDisposable
         result.DispatchInitiated.Should().BeTrue();
         result.RequiresFilamentOverride.Should().BeFalse();
 
-        Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
-        persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
-
         clientProxy.Verify(
             proxy => proxy.SendCoreAsync(
                 "autodispatchstatechanged",
-                It.Is<object?[]>(args => MatchesStatusEvent(
-                    args,
-                    printer.Id,
-                    nameof(AutoDispatchState.Ready),
-                    1)),
+                It.IsAny<object?[]>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
-        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
+        jobDispatchService.VerifyAll();
     }
 
     [Fact]
@@ -321,7 +335,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
         const string actorSubject = "8a196a30-022e-4c5f-92e6-dc13677b5bf6";
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+            .Setup(service => service.DispatchReviewedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 actorSubject,
@@ -350,12 +364,14 @@ public sealed class AutoDispatchServiceTests : IDisposable
             dispatchTrigger: dispatchTrigger.Object,
             jobDispatchService: jobDispatchService.Object);
 
+        AutoDispatchReadyResult challenge = await service.MarkReadyAsync(printer.Id);
         AutoDispatchReadyResult result = await service.MarkReadyAsync(
             printer.Id,
             printer.DispatchState.RowVersion ?? [],
             confirmFilamentOverride: true,
             actorSubject: actorSubject,
-            expectedOverrideJobVersion: queuedJob.RowVersion);
+            expectedOverrideJobVersion: queuedJob.RowVersion,
+            expectedFilamentCheckVersion: Convert.FromBase64String(challenge.FilamentCheckETag!));
 
         result.DispatchInitiated.Should().BeTrue();
         result.RequiresFilamentOverride.Should().BeFalse();
@@ -423,7 +439,7 @@ public sealed class AutoDispatchServiceTests : IDisposable
         const string actorSubject = "operator-unknown";
         Mock<IJobDispatchService> jobDispatchService = new();
         jobDispatchService
-            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+            .Setup(service => service.DispatchReviewedJobAsync(
                 queuedJob.Id,
                 printer.Id,
                 actorSubject,
@@ -450,17 +466,81 @@ public sealed class AutoDispatchServiceTests : IDisposable
             NullLogger<AutoDispatchService>.Instance,
             jobDispatchService: jobDispatchService.Object);
 
+        AutoDispatchReadyResult challenge = await service.MarkReadyAsync(printer.Id);
         AutoDispatchReadyResult result = await service.MarkReadyAsync(
             printer.Id,
             printer.DispatchState.RowVersion ?? [],
             confirmFilamentOverride: true,
             actorSubject,
-            queuedJob.RowVersion);
+            queuedJob.RowVersion,
+            Convert.FromBase64String(challenge.FilamentCheckETag!));
 
         result.DispatchInitiated.Should().BeTrue();
         result.FilamentOverrideApplied.Should().BeTrue();
         result.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
         jobDispatchService.VerifyAll();
+    }
+
+    [Fact]
+    public async Task MarkReadyAsync_WhenFilamentReasonChanges_RequiresReviewOfNewReason()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        printer.CurrentSpoolId = 42;
+        await _db.SaveChangesAsync();
+        PrintJob queuedJob = await CreateQueuedJobAsync(
+            printer,
+            "changed-filament-job",
+            queuePosition: 1);
+        queuedJob.RequiredMaterialType = "PETG";
+        queuedJob.EstimatedFilamentUsage = 100;
+        await _db.SaveChangesAsync();
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .SetupSequence(service => service.GetSpoolByIdAsync(
+                42,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Spoolman unavailable"))
+            .ReturnsAsync(new SpoolmanSpoolDto(
+                42,
+                "PLA spool",
+                "PLA",
+                500,
+                null,
+                false));
+        Mock<IJobDispatchService> jobDispatchService = new(MockBehavior.Strict);
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolmanService.Object,
+            jobDispatchService: jobDispatchService.Object);
+
+        AutoDispatchReadyResult initialChallenge = await service.MarkReadyAsync(printer.Id);
+        AutoDispatchReadyResult changedChallenge = await service.MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState.RowVersion ?? [],
+            confirmFilamentOverride: true,
+            actorSubject: "operator-changed-reason",
+            expectedOverrideJobVersion: queuedJob.RowVersion,
+            expectedFilamentCheckVersion: Convert.FromBase64String(
+                initialChallenge.FilamentCheckETag!));
+
+        changedChallenge.DispatchInitiated.Should().BeFalse();
+        changedChallenge.FilamentCheckChanged.Should().BeTrue();
+        changedChallenge.RequiresFilamentOverride.Should().BeTrue();
+        changedChallenge.FilamentCheck!.Outcome.Should().Be(
+            FilamentCheckOutcome.Incompatible);
+        changedChallenge.FilamentCheck.Message.Should().Be(
+            "Material mismatch: loaded PLA, job requires PETG");
+        changedChallenge.FilamentCheckETag.Should().NotBe(
+            initialChallenge.FilamentCheckETag);
+        jobDispatchService.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -502,6 +582,20 @@ public sealed class AutoDispatchServiceTests : IDisposable
             "Filament verification failed because Spoolman could not be reached.");
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
     }
+
+    private static Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto AcceptedDispatch(
+        Guid jobId,
+        Guid printerId) =>
+        new()
+        {
+            Id = jobId.ToString(),
+            AssignedPrinterId = printerId.ToString(),
+            Status = nameof(PrintJobStatus.Printing),
+            DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+            {
+                Outcome = DispatchAttemptOutcome.Accepted,
+            },
+        };
 
     [Fact]
     public async Task MarkReadyAsync_WhenPrinterHasPausedJob_RejectsStaleReadyConfirmation()

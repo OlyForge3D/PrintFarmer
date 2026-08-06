@@ -4918,7 +4918,8 @@ export class ApiClient {
     printerId: string,
     dispatchStateETag: string,
     confirmFilamentOverride = false,
-    overrideJobETag?: string | null
+    overrideJobETag?: string | null,
+    filamentCheckETag?: string | null
   ): Promise<AutoDispatchReadyResult> {
     const etag = this.autoDispatchIfMatch(dispatchStateETag);
     const overrideQuery = confirmFilamentOverride
@@ -4936,6 +4937,10 @@ export class ApiClient {
                   overrideJobETag,
                   "The reviewed filament override job"
                 ),
+                "X-Filament-Check-If-Match": this.reviewedEtag(
+                  filamentCheckETag,
+                  "The reviewed filament check"
+                ),
               }
             : {}),
         },
@@ -4945,7 +4950,10 @@ export class ApiClient {
     if (
       response.status === 409 &&
       (
-        response.data?.requiresFilamentOverride !== true ||
+        (
+          response.data?.requiresFilamentOverride !== true &&
+          response.data?.filamentCheckChanged !== true
+        ) ||
         typeof response.data?.status !== "object" ||
         response.data?.status === null
       )

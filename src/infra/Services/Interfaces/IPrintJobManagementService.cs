@@ -195,6 +195,18 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Dispatches an exact ready-gate-reviewed job while enforcing the reviewed
+    /// dispatch-state revision and an optional one-use filament override.
+    /// </summary>
+    Task<QueuedPrintJobDto> DispatchReviewedJobAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Dispatches an exact reviewed job with an explicit one-use filament override.
     /// </summary>
     Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(

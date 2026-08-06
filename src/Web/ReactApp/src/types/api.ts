@@ -3572,6 +3572,8 @@ export interface AutoDispatchReadyResult {
   dispatchInitiated?: boolean;
   requiresFilamentOverride?: boolean;
   filamentOverrideApplied?: boolean;
+  filamentCheckETag?: string | null;
+  filamentCheckChanged?: boolean;
 }
 
 export type BedClearAcknowledgementResult =

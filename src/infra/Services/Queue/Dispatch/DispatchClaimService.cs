@@ -375,7 +375,7 @@ public sealed class DispatchClaimService(
 
         dispatchState.ActiveJobId = request.JobId;
         dispatchState.ActiveDispatchAttemptId = attempt.Id;
-        if (request.FilamentOverride is not null)
+        if (request.StartPathKind is "ReadyConfirmation" or "FilamentOverride")
         {
             dispatchState.AutoDispatchState = AutoDispatchState.None;
             dispatchState.BedPreConfirmed = false;

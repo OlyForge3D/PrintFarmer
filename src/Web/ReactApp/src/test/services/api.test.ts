@@ -408,7 +408,8 @@ describe("ApiClient", () => {
         "printer-1",
         "dispatch-etag",
         true,
-        "job-etag"
+        "job-etag",
+        "filament-check-etag"
       );
 
       expect(mockPost).toHaveBeenCalledWith(
@@ -418,6 +419,7 @@ describe("ApiClient", () => {
           headers: {
             "If-Match": '"dispatch-etag"',
             "X-Job-If-Match": '"job-etag"',
+            "X-Filament-Check-If-Match": '"filament-check-etag"',
           },
         })
       );
@@ -439,7 +441,8 @@ describe("ApiClient", () => {
           "printer-1",
           "dispatch-etag",
           true,
-          "job-etag"
+          "job-etag",
+          "filament-check-etag"
         )
       ).rejects.toMatchObject({
         statusCode: 409,

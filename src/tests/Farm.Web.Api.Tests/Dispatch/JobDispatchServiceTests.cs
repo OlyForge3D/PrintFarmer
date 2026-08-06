@@ -207,7 +207,7 @@ public sealed class JobDispatchServiceTests : IDisposable
 
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
-            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+            .Setup(service => service.DispatchReviewedJobAsync(
                 _jobId.ToString(),
                 "operator",
                 It.IsAny<string>(),
@@ -221,10 +221,17 @@ public sealed class JobDispatchServiceTests : IDisposable
                 Status = nameof(PrintJobStatus.Printing),
             });
         Mock<IFilamentCoverageBroadcaster> broadcaster = Broadcaster();
+        Mock<IDispatchScorer> scorer = new(MockBehavior.Strict);
+        scorer
+            .Setup(service => service.ScorePrintersForJobAsync(
+                _jobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Score(materialMatchFailure: true)]);
         JobDispatchService service = CreateService(
             management,
             broadcaster,
-            SpoolmanWithFilament(73));
+            SpoolmanWithFilament(73),
+            scorer);
 
         QueuedPrintJobDto result =
             await service.DispatchJobWithFilamentOverrideAsync(
@@ -240,6 +247,55 @@ public sealed class JobDispatchServiceTests : IDisposable
         (await _db.PrintJobs.SingleAsync(job => job.Id == _jobId))
             .AssignedPrinterId.Should().Be(_printerId);
         management.VerifyAll();
+    }
+
+    [Fact]
+    public async Task DispatchJobWithFilamentOverrideAsync_NonFilamentHardGateFails_DoesNotDispatch()
+    {
+        var dispatchState = new PrinterDispatchState
+        {
+            PrinterId = _printerId,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        _db.PrinterDispatchStates.Add(dispatchState);
+        await _db.SaveChangesAsync();
+        PrintJob reviewedJob = await _db.PrintJobs.SingleAsync(job => job.Id == _jobId);
+        var authorization = new FilamentOverrideAuthorization(
+            "Incompatible",
+            "Material mismatch: loaded PLA, job requires PETG",
+            "PLA",
+            "PETG",
+            500,
+            100);
+        Mock<IDispatchScorer> scorer = new(MockBehavior.Strict);
+        scorer
+            .Setup(service => service.ScorePrintersForJobAsync(
+                _jobId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Score(materialMatchFailure: true, nonFilamentFailure: true)]);
+        Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
+        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
+        JobDispatchService service = CreateService(
+            management,
+            broadcaster,
+            SpoolmanWithFilament(73),
+            scorer);
+
+        Func<Task> act = () => service.DispatchJobWithFilamentOverrideAsync(
+            _jobId,
+            _printerId,
+            "operator",
+            Convert.ToBase64String(reviewedJob.RowVersion ?? []),
+            dispatchState.RowVersion ?? [],
+            authorization);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*enclosure*");
+        management.VerifyNoOtherCalls();
+        broadcaster.VerifyNoOtherCalls();
+        _db.ChangeTracker.Clear();
+        (await _db.PrintJobs.SingleAsync(job => job.Id == _jobId))
+            .AssignedPrinterId.Should().BeNull();
     }
 
     [Fact]
@@ -396,14 +452,51 @@ public sealed class JobDispatchServiceTests : IDisposable
         return spoolman;
     }
 
-    private DispatchScore Score(bool eliminated = false)
-        => new(
+    private DispatchScore Score(
+        bool eliminated = false,
+        bool materialMatchFailure = false,
+        bool nonFilamentFailure = false)
+    {
+        Dictionary<string, FactorScore> breakdown = [];
+        List<string> reasons = [];
+        if (materialMatchFailure)
+        {
+            breakdown["MaterialMatch"] = new(
+                "Material Match",
+                0,
+                100,
+                0,
+                true,
+                "Material mismatch");
+            reasons.Add("Material mismatch");
+        }
+
+        if (nonFilamentFailure)
+        {
+            breakdown["Enclosure"] = new(
+                "Enclosure",
+                0,
+                80,
+                0,
+                true,
+                "Printer lacks required enclosure");
+            reasons.Add("Printer lacks required enclosure");
+        }
+
+        bool isEliminated = eliminated || materialMatchFailure || nonFilamentFailure;
+        if (eliminated && reasons.Count == 0)
+        {
+            reasons.Add("Printer unavailable");
+        }
+
+        return new(
             _printerId,
             "Dispatch Printer",
-            90,
-            new Dictionary<string, FactorScore>(),
-            eliminated,
-            eliminated ? ["Printer unavailable"] : []);
+            isEliminated ? 0 : 90,
+            breakdown,
+            isEliminated,
+            reasons);
+    }
 
     private void SeedDispatchData()
     {

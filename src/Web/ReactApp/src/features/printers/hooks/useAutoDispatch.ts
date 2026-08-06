@@ -114,6 +114,7 @@ export type ConfirmBedClearVariables =
       status: AutoDispatchStatus;
       confirmFilamentOverride: true;
       overrideJobETag: string;
+      filamentCheckETag: string;
     };
 
 function getReviewedStatus(variables: ConfirmBedClearVariables): AutoDispatchStatus {
@@ -322,7 +323,8 @@ export function useConfirmBedClear() {
                 status.printerId,
                 dispatchStateETag,
                 true,
-                variables.overrideJobETag
+                variables.overrideJobETag,
+                variables.filamentCheckETag
               )
             : await apiClient.confirmAutoDispatchReady(
                 status.printerId,
@@ -391,10 +393,18 @@ export function useAutoDispatchReadyFlow(
       return;
     }
 
-    const dispatchInitiated =
-      result.dispatchInitiated ?? result.status.state === 'Ready';
+    const dispatchInitiated = result.dispatchInitiated === true;
     if (result.requiresFilamentOverride && !dispatchInitiated) {
-      setChallenge({ status, printerName, result });
+      setChallenge({ status: result.status, printerName, result });
+      return;
+    }
+
+    if (result.filamentCheckChanged) {
+      setChallenge(null);
+      toast.warning(
+        'Filament conditions changed after review. Check the current details and confirm again.',
+        { duration: 8000 }
+      );
       return;
     }
 
@@ -445,6 +455,7 @@ export function useAutoDispatchReadyFlow(
         challenge.result.nextJob?.jobETag ??
         challenge.status.nextJobETag ??
         '',
+      filamentCheckETag: challenge.result.filamentCheckETag ?? '',
     });
     if (response.kind === 'standard') {
       handleStandardResult(
@@ -511,11 +522,18 @@ export function usePreClearBed() {
         status.printerId,
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       ),
-    onSuccess: (_data, status) => {
+    onSuccess: (result, status) => {
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
-      toast.success('Bed pre-cleared — ready for immediate dispatch');
+      if (result.bedPreConfirmed) {
+        toast.success('Bed pre-cleared — ready for immediate dispatch');
+      } else {
+        toast.warning(
+          result.attentionMessage ??
+            'Bed pre-clear stopped because the queued job needs filament confirmation.'
+        );
+      }
     },
     onError: (error) =>
       handleMutationError(qc, error, 'Failed to pre-clear bed'),

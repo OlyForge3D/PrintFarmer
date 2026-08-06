@@ -55,10 +55,9 @@ public class AutoDispatchController(
     }
 
     /// <summary>
-    /// Mark the printer as ready (bed is clear). Returns the next queued job
-    /// and filament pre-flight check result. If auto-dispatch is in Auto mode,
-    /// the job is dispatched by the background service; the dispatch endpoint
-    /// is idempotent so a redundant client call is harmless.
+    /// Confirm that the bed is clear and attempt to dispatch the exact reviewed
+    /// queue-head job. Filament incompatibility or unknown data returns a
+    /// confirmation challenge instead of dispatching.
     /// </summary>
     [HttpPost("{printerId:guid}/ready")]
     [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
@@ -73,7 +72,8 @@ public class AutoDispatchController(
         Guid printerId,
         CancellationToken ct,
         [FromQuery] bool confirmFilamentOverride = false,
-        [FromHeader(Name = "X-Job-If-Match")] string? jobIfMatch = null)
+        [FromHeader(Name = "X-Job-If-Match")] string? jobIfMatch = null,
+        [FromHeader(Name = "X-Filament-Check-If-Match")] string? filamentCheckIfMatch = null)
     {
         if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
         {
@@ -101,11 +101,25 @@ public class AutoDispatchController(
                 });
         }
 
+        if (confirmFilamentOverride && string.IsNullOrWhiteSpace(filamentCheckIfMatch))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "X-Filament-Check-If-Match is required to confirm a filament override.",
+                });
+        }
+
         try
         {
             byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
             byte[]? expectedOverrideJob = confirmFilamentOverride
                 ? DecodeEtag(jobIfMatch!)
+                : null;
+            byte[]? expectedFilamentCheck = confirmFilamentOverride
+                ? DecodeEtag(filamentCheckIfMatch!)
                 : null;
             string actorSubject = QueueActorIdentity.Resolve(User);
             var result = await autoDispatchService.MarkReadyAsync(
@@ -114,10 +128,19 @@ public class AutoDispatchController(
                 confirmFilamentOverride,
                 actorSubject,
                 expectedOverrideJob,
+                expectedFilamentCheck,
                 ct);
-            return result.RequiresFilamentOverride
+            return result.RequiresFilamentOverride || result.FilamentCheckChanged
                 ? Conflict(result)
                 : Ok(result);
+        }
+        catch (FormatException)
+        {
+            return BadRequest(new
+            {
+                error = "invalid_etag",
+                detail = "One or more revision headers are not valid base-64 ETags.",
+            });
         }
         catch (QueueRevisionConflictException)
         {

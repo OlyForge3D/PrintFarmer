@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { AutoDispatchReadyResult, AutoDispatchStatus } from '@/types/api';
@@ -11,6 +11,7 @@ vi.mock('@/services/api', () => ({
     confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
     cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
+    preClearAutoDispatchBed: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -76,6 +77,7 @@ vi.mock('@/features/printers/components/FilamentOverrideModal', () => ({
 import { BedClearBanner } from '../components/BedClearBanner';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
+import { usePreClearBed } from '@/features/printers/hooks/useAutoDispatch';
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -176,6 +178,7 @@ const readyResultMaterialMismatch: AutoDispatchReadyResult = {
   },
   dispatchInitiated: false,
   requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
 };
 
 const readyResultInsufficientFilament: AutoDispatchReadyResult = {
@@ -201,6 +204,7 @@ const readyResultInsufficientFilament: AutoDispatchReadyResult = {
   },
   dispatchInitiated: false,
   requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
 };
 
 const readyResultUnknownFilament: AutoDispatchReadyResult = {
@@ -226,6 +230,7 @@ const readyResultUnknownFilament: AutoDispatchReadyResult = {
   },
   dispatchInitiated: false,
   requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
 };
 
 const readyResultOverrideDispatched: AutoDispatchReadyResult = {
@@ -497,9 +502,10 @@ describe('BedClearBanner', () => {
       expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
         2,
         'printer-1',
-        'dispatch-v1',
+        'dispatch-v2',
         true,
         'job-v1',
+        'filament-check-v1',
       );
     });
     await waitFor(() => {
@@ -507,6 +513,46 @@ describe('BedClearBanner', () => {
         'Dispatching "part.gcode" to MK4 (filament override confirmed)',
       );
     });
+  });
+
+  it('shows a changed filament reason before accepting a retry', async () => {
+    const changedChallenge: AutoDispatchReadyResult = {
+      ...readyResultMaterialMismatch,
+      filamentCheckETag: 'filament-check-v2',
+      filamentCheckChanged: true,
+      filamentCheck: {
+        ...readyResultMaterialMismatch.filamentCheck!,
+        message: 'Only 20g remaining, job requires 100g',
+      },
+    };
+    vi.mocked(apiClient.confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultUnknownFilament)
+      .mockResolvedValueOnce(changedChallenge);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+
+    await waitFor(() => {
+      expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
+        2,
+        'printer-1',
+        'dispatch-v1',
+        true,
+        'job-v1',
+        'filament-check-v1',
+      );
+      expect(screen.getByTestId('filament-warning')).toHaveTextContent(
+        'Only 20g remaining, job requires 100g',
+      );
+    });
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('closes modal when user cancels material mismatch', async () => {
@@ -616,5 +662,25 @@ describe('BedClearBanner', () => {
     );
     const alert = screen.getByRole('alert');
     expect(alert).toHaveAttribute('aria-label', 'Bed clear confirmation required');
+  });
+
+  it('does not announce successful pre-clear when filament confirmation blocks it', async () => {
+    vi.mocked(apiClient.preClearAutoDispatchBed).mockResolvedValueOnce({
+      ...baseStatus,
+      bedPreConfirmed: false,
+      attentionMessage: 'Filament confirmation is required before dispatch.',
+    });
+    const { result } = renderHook(() => usePreClearBed(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(baseStatus);
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Filament confirmation is required before dispatch.',
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

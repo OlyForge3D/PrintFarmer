@@ -1103,6 +1103,22 @@ public class PrintJobManagementService(
             cancellationToken);
 
     /// <inheritdoc />
+    public async Task<QueuedPrintJobDto> DispatchReviewedJobAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            cancellationToken);
+
+    /// <inheritdoc />
     public async Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
         string jobId,
         string userId,
@@ -1206,12 +1222,17 @@ public class PrintJobManagementService(
                     "IDispatchClaimService is required for dispatch. This service must be registered in the DI container.");
             }
 
+            string startPathKind = filamentOverride is not null
+                ? "FilamentOverride"
+                : expectedDispatchStateRowVersion is not null
+                    ? "ReadyConfirmation"
+                    : "Manual";
             DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
                 new DispatchClaimRequest(
                     Guid.Parse(jobId),
                     job.AssignedPrinterId.Value,
                     userId,
-                    filamentOverride is null ? "Manual" : "FilamentOverride",
+                    startPathKind,
                     null,
                     expectedJobRowVersion,
                     expectedDispatchStateRowVersion,

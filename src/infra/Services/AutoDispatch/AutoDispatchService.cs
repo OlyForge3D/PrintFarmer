@@ -1,4 +1,7 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
@@ -43,6 +46,15 @@ public interface IAutoDispatchService
         bool confirmFilamentOverride,
         string actorSubject,
         byte[]? expectedOverrideJobVersion,
+        CancellationToken ct = default);
+
+    Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        bool confirmFilamentOverride,
+        string actorSubject,
+        byte[]? expectedOverrideJobVersion,
+        byte[]? expectedFilamentCheckVersion,
         CancellationToken ct = default);
 
     /// <summary>
@@ -153,6 +165,16 @@ public class AutoDispatchReadyResult
     /// Gets or sets a value indicating whether this request applied an explicit filament override.
     /// </summary>
     public bool FilamentOverrideApplied { get; set; }
+
+    /// <summary>
+    /// Opaque revision of the exact filament outcome and details shown to the operator.
+    /// </summary>
+    public string? FilamentCheckETag { get; set; }
+
+    /// <summary>
+    /// Indicates that filament conditions changed after the operator reviewed the warning.
+    /// </summary>
+    public bool FilamentCheckChanged { get; set; }
 }
 
 public class NextJobDto
@@ -405,6 +427,7 @@ public class AutoDispatchService(
             confirmFilamentOverride: false,
             QueueActorIdentity.AutoDispatch,
             expectedOverrideJobVersion: null,
+            expectedFilamentCheckVersion: null,
             ct);
 
     public Task<AutoDispatchReadyResult> MarkReadyAsync(
@@ -417,6 +440,7 @@ public class AutoDispatchService(
             confirmFilamentOverride: false,
             QueueActorIdentity.AutoDispatch,
             expectedOverrideJobVersion: null,
+            expectedFilamentCheckVersion: null,
             ct);
 
     public Task<AutoDispatchReadyResult> MarkReadyAsync(
@@ -426,12 +450,30 @@ public class AutoDispatchService(
         string actorSubject,
         byte[]? expectedOverrideJobVersion,
         CancellationToken ct = default) =>
+        MarkReadyAsync(
+            printerId,
+            expectedDispatchStateVersion,
+            confirmFilamentOverride,
+            actorSubject,
+            expectedOverrideJobVersion,
+            expectedFilamentCheckVersion: null,
+            ct);
+
+    public Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        bool confirmFilamentOverride,
+        string actorSubject,
+        byte[]? expectedOverrideJobVersion,
+        byte[]? expectedFilamentCheckVersion,
+        CancellationToken ct = default) =>
         MarkReadyCoreAsync(
             printerId,
             expectedDispatchStateVersion,
             confirmFilamentOverride,
             actorSubject,
             expectedOverrideJobVersion,
+            expectedFilamentCheckVersion,
             ct);
 
     private async Task<AutoDispatchReadyResult> MarkReadyCoreAsync(
@@ -440,6 +482,7 @@ public class AutoDispatchService(
         bool confirmFilamentOverride,
         string actorSubject,
         byte[]? expectedOverrideJobVersion,
+        byte[]? expectedFilamentCheckVersion,
         CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
@@ -538,6 +581,33 @@ public class AutoDispatchService(
         };
         bool filamentOverrideRequired =
             filamentCheck.Outcome != FilamentCheckOutcome.Compatible;
+        byte[] filamentCheckVersion = ComputeFilamentCheckVersion(filamentCheck);
+        string filamentCheckETag = Convert.ToBase64String(filamentCheckVersion);
+
+        if (confirmFilamentOverride &&
+            (expectedFilamentCheckVersion is null ||
+             !CryptographicOperations.FixedTimeEquals(
+                 expectedFilamentCheckVersion,
+                 filamentCheckVersion)))
+        {
+            AutoDispatchStatusDto changedStatus = await BuildStatusDtoAsync(printer, ct);
+            logger.LogInformation(
+                ReadyGateLogPrefix + " Filament conditions changed before confirmation for printer {PrinterId}, job {JobId}; requiring review of {Outcome}: {FilamentCheckMessage}",
+                printerId,
+                nextJob.Id,
+                filamentCheck.Outcome,
+                filamentCheck.Message);
+            return new AutoDispatchReadyResult
+            {
+                Status = changedStatus,
+                NextJob = nextJobDto,
+                FilamentCheck = filamentCheck,
+                FilamentCheckETag = filamentCheckETag,
+                DispatchInitiated = false,
+                RequiresFilamentOverride = filamentOverrideRequired,
+                FilamentCheckChanged = true,
+            };
+        }
 
         if (filamentOverrideRequired && !confirmFilamentOverride)
         {
@@ -554,19 +624,21 @@ public class AutoDispatchService(
                 Status = blockedStatus,
                 NextJob = nextJobDto,
                 FilamentCheck = filamentCheck,
+                FilamentCheckETag = filamentCheckETag,
                 DispatchInitiated = false,
                 RequiresFilamentOverride = true,
             };
         }
 
+        if (jobDispatchService is null)
+        {
+            throw new InvalidOperationException(
+                "Exact-job ready dispatch is unavailable.");
+        }
+
+        FilamentOverrideAuthorization? authorization = null;
         if (filamentOverrideRequired)
         {
-            if (jobDispatchService is null || expectedOverrideJobVersion is null)
-            {
-                throw new InvalidOperationException(
-                    "Exact-job filament override dispatch is unavailable.");
-            }
-
             logger.LogWarning(
                 ReadyGateLogPrefix + " Operator {ActorSubject} explicitly overrode {Outcome} filament check for printer {PrinterId}, job {JobId}: {FilamentCheckMessage}",
                 actorSubject,
@@ -575,69 +647,52 @@ public class AutoDispatchService(
                 nextJob.Id,
                 filamentCheck.Message);
 
-            var authorization = new FilamentOverrideAuthorization(
+            authorization = new FilamentOverrideAuthorization(
                 filamentCheck.Outcome.ToString(),
                 filamentCheck.Message ?? "Filament compatibility could not be verified.",
                 filamentCheck.LoadedMaterial,
                 filamentCheck.RequiredMaterial,
                 filamentCheck.RemainingWeightG,
                 filamentCheck.RequiredWeightG);
-            byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
-                throw new InvalidOperationException(
-                    "The reviewed dispatch-state revision is required for a filament override.");
-            var dispatched = await jobDispatchService.DispatchJobWithFilamentOverrideAsync(
-                nextJob.Id,
-                printerId,
-                actorSubject,
-                Convert.ToBase64String(expectedOverrideJobVersion),
-                reviewedDispatchStateVersion,
-                authorization,
-                ct);
-            if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
-            {
-                string outcome =
-                    dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
-                throw new InvalidOperationException(
-                    $"The filament override dispatch was not accepted by the printer (outcome: {outcome}).");
-            }
-
-            AutoDispatchStatusDto dispatchedStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
-                .SendAsync(AutoDispatchStateChangedEventName, dispatchedStatus, ct);
-
-            return new AutoDispatchReadyResult
-            {
-                Status = dispatchedStatus,
-                NextJob = nextJobDto,
-                FilamentCheck = filamentCheck,
-                DispatchInitiated = true,
-                FilamentOverrideApplied = true,
-            };
         }
 
-        // Transition to Ready state
-        PrinterDispatchState dsReady = EnsureDispatchState(printer);
-        dsReady.AutoDispatchState = AutoDispatchState.Ready;
-        dsReady.BedPreConfirmed = false;
-        await db.SaveChangesAsync(ct);
+        byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
+            printer.DispatchState?.RowVersion ??
+            throw new InvalidOperationException(
+                "The reviewed dispatch-state revision is required for ready dispatch.");
+        string reviewedJobETag = Convert.ToBase64String(
+            filamentOverrideRequired
+                ? expectedOverrideJobVersion!
+                : nextJob.RowVersion ??
+                  throw new InvalidOperationException(
+                      "The reviewed job revision is required for ready dispatch."));
+        var dispatched = await jobDispatchService.DispatchReviewedJobAsync(
+            nextJob.Id,
+            printerId,
+            actorSubject,
+            reviewedJobETag,
+            reviewedDispatchStateVersion,
+            authorization,
+            ct);
+        if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
+        {
+            string outcome =
+                dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
+            throw new InvalidOperationException(
+                $"The ready dispatch was not accepted by the printer (outcome: {outcome}).");
+        }
 
-        var status = await BuildStatusDtoAsync(printer, ct);
-        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
-
-        logger.LogInformation(
-            ReadyGateLogPrefix + " Printer {PrinterId} marked Ready. Next job: {JobName} (filament sufficient: {Sufficient})",
-            printerId, nextJob.Name ?? nextJob.GcodeFile?.Name, filamentCheck.Sufficient);
-
-        // Notify auto-dispatch that this printer is ready — triggers immediate dispatch
-        dispatchTrigger?.NotifyJobQueued(printerId);
-
+        AutoDispatchStatusDto status = await BuildStatusDtoAsync(printer, ct);
+        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+            .SendAsync(AutoDispatchStateChangedEventName, status, ct);
         return new AutoDispatchReadyResult
         {
             Status = status,
             NextJob = nextJobDto,
             FilamentCheck = filamentCheck,
+            FilamentCheckETag = filamentCheckETag,
             DispatchInitiated = true,
-            FilamentOverrideApplied = filamentOverrideRequired,
+            FilamentOverrideApplied = authorization is not null,
         };
     }
 
@@ -860,8 +915,6 @@ public class AutoDispatchService(
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
-
         if (queuedJobs.QueueDepth > 0 && !requiresFilamentConfirmation)
         {
             // A pre-cleared idle printer just became eligible for immediate dispatch.
@@ -871,9 +924,28 @@ public class AutoDispatchService(
         var status = await BuildStatusDtoAsync(printer, ct);
         await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
-        webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
+        if (!requiresFilamentConfirmation)
+        {
+            logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
+            webhookService?.Enqueue("printer.bed_pre_confirmed", new { printerId, printerName = printer.Name });
+        }
 
         return status;
+    }
+
+    private static byte[] ComputeFilamentCheckVersion(FilamentCheckResult check)
+    {
+        string canonical = string.Join(
+            "\u001f",
+            ((int)check.Outcome).ToString(CultureInfo.InvariantCulture),
+            check.Sufficient ? "1" : "0",
+            check.MaterialMismatch ? "1" : "0",
+            check.LoadedMaterial ?? string.Empty,
+            check.RequiredMaterial ?? string.Empty,
+            check.RemainingWeightG?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty,
+            check.RequiredWeightG?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty,
+            check.Message ?? string.Empty);
+        return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
     }
 
     public async Task<AutoDispatchStatusDto> GetStatusAsync(Guid printerId, CancellationToken ct = default)

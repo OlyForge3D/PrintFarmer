@@ -207,6 +207,24 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
         readyResult.RequiresFilamentOverride.Should().BeTrue();
         readyResult.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
         readyResult.FilamentCheck.Message.Should().Be("No spool is assigned to the printer.");
+        readyResult.FilamentCheckETag.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task MarkReady_WithMalformedRevisionHeader_ReturnsBadRequest()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "malformed-etag-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+        using HttpRequestMessage readyRequest = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/ready");
+        readyRequest.Headers.TryAddWithoutValidation("If-Match", "\"not-base64!\"");
+
+        HttpResponseMessage response = await _client!.SendAsync(readyRequest);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("base-64 encoded ETag");
     }
 
     private async Task<Printer> CreateTestPrinterAsync(string name)
