@@ -171,4 +171,74 @@ describe('useFailureDetectionAlert hoisted store (#1146 item 3)', () => {
     });
     expect(card.result.current.event).toBeNull();
   });
+
+  it('ignores a failure event for a printer with no mounted listener (no timer scheduled, no state resurrected later)', () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+    // Only printer-a is watched; printer-unobserved has no mounted card.
+    renderHook(() => useFailureDetectionAlert('printer-a'));
+
+    emit(makeEvent({ printerId: 'printer-unobserved' }));
+
+    // No timer was scheduled for the unobserved event.
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+
+    // A card mounting afterward for that same printer must not see a stale
+    // alert resurrected from the ignored event.
+    const late = renderHook(() => useFailureDetectionAlert('printer-unobserved'));
+    expect(late.result.current.event).toBeNull();
+    expect(late.result.current.recentEvents).toHaveLength(0);
+
+    setTimeoutSpy.mockRestore();
+  });
+
+  it("clears a printer's expiry timer and alert entry immediately once its last listener unmounts, instead of waiting out the 60s expiry", () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const card = renderHook(() => useFailureDetectionAlert('printer-a'));
+    emit(makeEvent({ printerId: 'printer-a' }));
+    expect(card.result.current.event).not.toBeNull();
+    clearTimeoutSpy.mockClear();
+
+    card.unmount();
+
+    // The pending 60s expiry timer was torn down early, not left to fire on
+    // its own after nothing is listening anymore.
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+
+    // A brand-new mount for the same printer must not resurrect the stale
+    // alert that existed before the last listener left.
+    const remount = renderHook(() => useFailureDetectionAlert('printer-a'));
+    expect(remount.result.current.event).toBeNull();
+    expect(remount.result.current.recentEvents).toHaveLength(0);
+
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it('defensively clears every remaining timer and alert entry once the final subscriber across the whole store unmounts', () => {
+    vi.useFakeTimers();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const cardA = renderHook(() => useFailureDetectionAlert('printer-a'));
+    const cardB = renderHook(() => useFailureDetectionAlert('printer-b'));
+    emit(makeEvent({ printerId: 'printer-a' }));
+    emit(makeEvent({ printerId: 'printer-b' }));
+    clearTimeoutSpy.mockClear();
+
+    cardA.unmount();
+    // printer-b is still mounted/listened, so only printer-a's timer clears.
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(1);
+
+    cardB.unmount();
+    // The final subscriber anywhere just left — the defensive full-store
+    // clear runs (a no-op for printer-b's already-cleared-by-itself timer,
+    // but proves nothing was left dangling).
+    expect(hoisted.listeners).toHaveLength(0);
+
+    const freshA = renderHook(() => useFailureDetectionAlert('printer-a'));
+    const freshB = renderHook(() => useFailureDetectionAlert('printer-b'));
+    expect(freshA.result.current.event).toBeNull();
+    expect(freshB.result.current.event).toBeNull();
+
+    clearTimeoutSpy.mockRestore();
+  });
 });

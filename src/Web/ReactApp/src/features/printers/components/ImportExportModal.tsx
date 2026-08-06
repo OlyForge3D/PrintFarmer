@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import Tabs from '@/common/components/ui/Tabs';
@@ -47,6 +47,34 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
+  // Tracks the *current* import's SignalR progress unsubscribe and
+  // completion-poll interval in refs (not local closure consts) so every
+  // exit path — natural completion, Cancel, Close Anyway, unmount, or a
+  // route change while an import is in flight — can tear them down. #1146
+  // item 10 made this modal conditionally mounted (unmounted entirely when
+  // closed) instead of always-mounted-with-`isOpen`-toggling; a `setInterval`
+  // and a SignalR subscription are plain browser/service resources, not
+  // tied to React's lifecycle, so without this they would keep running (and
+  // the SignalR callback would keep calling `setState` on an unmounted
+  // component) after the modal itself is gone.
+  const importUnsubscribeRef = useRef<(() => void) | undefined>(undefined);
+  const importCompletionIntervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  const disposeImportWatchers = useCallback(() => {
+    if (importCompletionIntervalRef.current !== undefined) {
+      clearInterval(importCompletionIntervalRef.current);
+      importCompletionIntervalRef.current = undefined;
+    }
+    if (importUnsubscribeRef.current) {
+      importUnsubscribeRef.current();
+      importUnsubscribeRef.current = undefined;
+    }
+  }, []);
+
+  // Belt-and-suspenders: dispose on unmount / route change even if none of
+  // the explicit close/cancel handlers below ran first.
+  useEffect(() => disposeImportWatchers, [disposeImportWatchers]);
+
   const countPrintersInFile = async (f: File) => {
     try {
       // Clone the file using slice() to avoid consuming the original stream
@@ -70,7 +98,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   const startImport = async (file: File) => {
     const count = await countPrintersInFile(file);
     if (count === 0) return toast.error('No printers found in file');
-    
+
+    // Defensive: a stray previous import's watchers should never still be
+    // running when a new one starts.
+    disposeImportWatchers();
+
     setFileName(file.name);
     setTotalCount(count);
     setIsImporting(true);
@@ -94,7 +126,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
       // Subscribe to events BEFORE triggering the import
       if (window.PrintFarmerDebug?.import) console.log('[Import] Subscribing to import progress events...');
-      const unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
+      importUnsubscribeRef.current = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
         if (window.PrintFarmerDebug?.import) console.log('[Import] Received progress update:', progress);
 
         setProgressItems(prevItems => {
@@ -115,11 +147,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       });
 
       // Setup completion monitor
-      const checkCompletion = setInterval(() => {
+      importCompletionIntervalRef.current = setInterval(() => {
         setProgressItems(prevItems => {
           if (prevItems.length > 0 && prevItems.every(item => item.status !== 'Pending')) {
-            clearInterval(checkCompletion);
-            unsubscribe();
+            disposeImportWatchers();
             setIsImportComplete(true);
             // Refresh printer count so Export tab shows updated count
             queryClient.invalidateQueries({ queryKey: ['printers'] });
@@ -179,6 +210,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const doClose = () => {
+    disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);
@@ -187,6 +219,7 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const handleImportComplete = () => {
+    disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);

@@ -20,6 +20,7 @@ const failureDetectionPollingEnabledMock = vi.hoisted(() => vi.fn(() => false));
 const usePrinterFailureDetectionStatusMock = vi.hoisted(() =>
   vi.fn(() => ({ printerStatus: undefined, data: undefined, isLoading: false }))
 );
+const taggingModalRenderMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: [], isLoading: false }),
@@ -108,7 +109,10 @@ vi.mock('@/features/printers/components/BedClearBanner', () => ({
 }));
 
 vi.mock('@/components/TaggingModal', () => ({
-  TaggingModal: () => null,
+  TaggingModal: (props: Record<string, unknown>) => {
+    taggingModalRenderMock(props);
+    return null;
+  },
 }));
 
 vi.mock('sonner', () => ({
@@ -184,6 +188,7 @@ describe('CompactPrinterCard memoization', () => {
     failureDetectionPollingEnabledMock.mockReturnValue(false);
     usePrinterFailureDetectionStatusMock.mockClear();
     usePrinterFailureDetectionStatusMock.mockReturnValue({ printerStatus: undefined, data: undefined, isLoading: false });
+    taggingModalRenderMock.mockClear();
   });
 
   it('skips rendering when parent recreates unchanged printer props with stable callbacks', () => {
@@ -299,12 +304,17 @@ describe('CompactPrinterCard memoization', () => {
     expect(queueSummaryFromFleetMock).toHaveBeenCalledWith('printer-1');
   });
 
-  it('does not render a queue label for an idle printer even if the fleet summary has one (prevents stale labels)', () => {
-    // The fleet endpoint omits idle printers entirely, but this guards the
-    // display-side predicate directly: even if a summary entry existed for
-    // this printer id (e.g. queued-but-not-dispatched jobs while blocked on
-    // a bed-clear confirmation), an Idle/non-printing card must never show a
-    // stray position label — matching the pre-fleet UI exactly.
+  it('renders the "X of Y" queue label for an Idle printer when the authoritative fleet summary reports queue depth (Dallas item-9: no online/printing display gate)', () => {
+    // Regression test: an earlier revision gated *display* behind
+    // `isOnline && (isPrinting || isPaused)`, which suppressed this label for
+    // an Idle printer that is legitimately queued (e.g. blocked on a
+    // bed-clear confirmation, or simply not yet dispatched). The fleet
+    // summary is itself the authoritative "does this printer have active
+    // queue depth" signal — a printer absent from the fleet response already
+    // renders no label (see the empty-tag-style test above), so no
+    // additional online/printing gate is needed, matching
+    // origin/development's pre-fleet behavior of showing the label for any
+    // printer state as long as queue depth > 1.
     queueSummaryFromFleetMock.mockReturnValue({
       data: { printerId: 'printer-1', queuedCount: 2, printingCount: 0, printingPosition: null },
       isPending: false,
@@ -320,7 +330,7 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    expect(screen.queryByText('1 of 2')).not.toBeInTheDocument();
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
   });
 
   it('renders the "X of Y" queue label for an active printer from the fleet summary', () => {
@@ -396,10 +406,50 @@ describe('CompactPrinterCard memoization', () => {
     expect(screen.queryByText('Production')).not.toBeInTheDocument();
   });
 
-  it('renders the "X of Y" queue label for a Paused printer, not just Printing (#1146 item 9 gating)', () => {
-    // canShowQueueLabel = isOnline && (isPrinting || isPaused). Only the
-    // Idle (false) and Printing (true) branches were previously exercised;
-    // this proves the Paused branch of the OR is also wired correctly.
+  it('threads the fleet tags-fleet pending flag into TaggingModal as tagsLoading (true) — this card renders TaggingModal unconditionally, so the modal must know when initialTags is not resolved yet', () => {
+    printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: true, isError: false, error: null });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(taggingModalRenderMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ tagsLoading: true, initialTags: [] }),
+    );
+  });
+
+  it('threads the fleet tags-fleet pending flag into TaggingModal as tagsLoading (false) once tags resolve', () => {
+    printerTagsFromFleetMock.mockReturnValue({
+      data: [{ id: 'tag-1', name: 'Production' }],
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(taggingModalRenderMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        tagsLoading: false,
+        initialTags: [{ id: 'tag-1', name: 'Production' }],
+      }),
+    );
+  });
+
+  it('renders the "X of Y" queue label for a Paused printer, not just Printing', () => {
+    // The label derives purely from the fleet summary's active-job total, so
+    // it must render identically regardless of which non-idle printer state
+    // the card is currently in.
     queueSummaryFromFleetMock.mockReturnValue({
       data: { printerId: 'printer-1', queuedCount: 1, printingCount: 1, printingPosition: 1 },
       isPending: false,
@@ -418,10 +468,15 @@ describe('CompactPrinterCard memoization', () => {
     expect(screen.getByText('1 of 2')).toBeInTheDocument();
   });
 
-  it('never renders a queue label for an offline printer even while its last-known state string says Printing', () => {
-    // canShowQueueLabel requires isOnline; an offline printer must never
-    // show a stray position label just because its stale `state` field
-    // still reads "Printing" from before it dropped offline.
+  it('renders the "X of Y" queue label for an Offline printer with a stale last-known state string (authoritative summary overrides local staleness)', () => {
+    // Regression test (Dallas item-9 / origin/development parity): the
+    // display predicate must not reintroduce an `isOnline` (or any other
+    // locally-cached printer field) check. The fleet queue-summary endpoint
+    // is the authoritative source of truth for queue depth; a printer's own
+    // `isOnline`/`state` fields can be momentarily stale (e.g. a dropped
+    // SignalR connection) without the backend's queue state having changed,
+    // so gating the label on those local fields would hide genuinely correct
+    // information behind unrelated staleness.
     queueSummaryFromFleetMock.mockReturnValue({
       data: { printerId: 'printer-1', queuedCount: 1, printingCount: 1, printingPosition: 1 },
       isPending: false,
@@ -437,7 +492,7 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    expect(screen.queryByText('1 of 2')).not.toBeInTheDocument();
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
   });
 
   it('threads the fleet-wide failure-detection polling gate through as this printer\'s own enabled flag (true)', () => {

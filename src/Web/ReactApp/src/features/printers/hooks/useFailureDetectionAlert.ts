@@ -18,6 +18,11 @@
  *  - Each `useFailureDetectionAlert(printerId)` call is a thin, per-printer
  *    reader of the shared store, preserving the previous hook's public
  *    signature and dismissal/expiry semantics exactly.
+ *  - Events for a printer with no mounted listener are ignored outright (no
+ *    entry stored, no timer scheduled) and a printer's entry/timer is
+ *    cleared immediately once its last listener leaves, so the store never
+ *    retains state or timers nothing is observing. The 60s expiry lifetime
+ *    for an *actively observed* alert is unchanged.
  */
 import { useCallback, useSyncExternalStore } from 'react';
 import { printerSignalRService } from '@/services/printer-signalr';
@@ -67,8 +72,30 @@ function clearPrinterEvent(printerId: string): void {
   notify(printerId);
 }
 
+/** Drop a printer's alert entry and expiry timer entirely (no listener left to observe them). */
+function clearPrinterAlertState(printerId: string): void {
+  clearExpiryTimer(printerId);
+  alertsByPrinterId.delete(printerId);
+}
+
+/** Full store teardown: every timer, alert entry, and listener set. */
+function clearAllStoreState(): void {
+  expiryTimersByPrinterId.forEach((timer) => clearTimeout(timer));
+  expiryTimersByPrinterId.clear();
+  alertsByPrinterId.clear();
+  listenersByPrinterId.clear();
+}
+
 function handleFailureDetected(nextEvent: FailureDetectionEvent): void {
   const { printerId } = nextEvent;
+  // Ignore events for printers nobody is currently watching (e.g. filtered
+  // out of the current grid view, or no card mounted at all). Storing state
+  // and scheduling a 60s expiry timer for a printer with no mounted listener
+  // would just retain unobserved state/timers until they eventually expire
+  // on their own, with no UI ever reading them in the meantime.
+  const listeners = listenersByPrinterId.get(printerId);
+  if (!listeners || listeners.size === 0) return;
+
   clearExpiryTimer(printerId);
 
   const current = getAlertState(printerId);
@@ -108,11 +135,23 @@ function subscribe(printerId: string, listener: Listener): () => void {
     listeners.delete(listener);
     if (listeners.size === 0) {
       listenersByPrinterId.delete(printerId);
+      // No listener is left to observe this printer's alert — clear its
+      // expiry timer and stored entry immediately instead of letting them
+      // linger (up to ALERT_LIFETIME_MS) with nothing left to notify.
+      clearPrinterAlertState(printerId);
     }
     subscriberCount -= 1;
-    if (subscriberCount <= 0 && signalRUnsubscribe) {
-      signalRUnsubscribe();
-      signalRUnsubscribe = undefined;
+    if (subscriberCount <= 0) {
+      if (signalRUnsubscribe) {
+        signalRUnsubscribe();
+        signalRUnsubscribe = undefined;
+      }
+      // Defensive: the last consumer anywhere just unmounted. Every
+      // per-printer branch above should already be empty, but clear
+      // everything explicitly so no stray timer or entry can survive
+      // between "nobody is mounted" and the next fresh subscriber.
+      clearAllStoreState();
+      subscriberCount = 0;
     }
   };
 }
@@ -123,10 +162,7 @@ export function __resetFailureDetectionAlertStoreForTests(): void {
     signalRUnsubscribe();
     signalRUnsubscribe = undefined;
   }
-  expiryTimersByPrinterId.forEach((timer) => clearTimeout(timer));
-  expiryTimersByPrinterId.clear();
-  alertsByPrinterId.clear();
-  listenersByPrinterId.clear();
+  clearAllStoreState();
   subscriberCount = 0;
 }
 

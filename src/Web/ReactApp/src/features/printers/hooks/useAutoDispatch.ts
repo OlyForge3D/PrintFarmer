@@ -7,6 +7,7 @@ import {
   mutationErrorMessage,
   mutationErrorStatus,
 } from '@/common/utils/mutationError';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 import type {
   AutoDispatchGlobalStatus,
   AutoDispatchReadyResult,
@@ -136,6 +137,7 @@ async function handleMutationError(
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: KEYS.all }),
       queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
       queryClient.refetchQueries({
         queryKey: KEYS.allStatuses,
         exact: true,
@@ -340,6 +342,9 @@ export function useConfirmBedClear() {
       qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       qc.invalidateQueries({ queryKey: ['job-queue'] });
+      // Confirming bed-clear dispatches the next queued job, changing that
+      // printer's (and potentially others') "X of Y" queue-summary label.
+      qc.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     },
     onError: (error) =>
       handleMutationError(qc, error, 'Failed to acknowledge the clear bed'),

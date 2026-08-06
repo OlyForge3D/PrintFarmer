@@ -13,6 +13,21 @@ interface TaggingModalProps {
   initialTags?: TagOption[];
   isOpen: boolean;
   onClose: () => void;
+  /**
+   * True while the caller's own tag source is still resolving `initialTags`
+   * for the first time (e.g. an async fleet-batched query that hasn't
+   * hydrated yet). Consumers whose tags are already loaded synchronously
+   * (file/model lists) can omit this.
+   *
+   * Some consumers (e.g. `CompactPrinterCard`) keep this modal mounted the
+   * whole time and only toggle `isOpen`, rather than mounting it fresh on
+   * every open. Without this flag, a card that renders before its tags have
+   * hydrated would seed `selectedTags` from `[]`; saving from that state
+   * would then diff against the (by-then-resolved) `initialTags` and issue
+   * "remove" calls for every real tag the object already has. This prevents
+   * that by blocking Save until the source has resolved at least once.
+   */
+  tagsLoading?: boolean;
 }
 
 /**
@@ -24,11 +39,40 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
   objectType,
   initialTags = [],
   isOpen,
-  onClose
+  onClose,
+  tagsLoading = false,
 }) => {
   const [selectedTags, setSelectedTags] = useState<TagOption[]>(initialTags);
   const [error, setError] = useState<string | null>(null);
   const queryClient = useQueryClient();
+
+  // Tracks which object id the current `selectedTags` selection was last
+  // resolved for (or `null` while closed / still waiting on `tagsLoading`).
+  // Some consumers keep this modal mounted across opens (`isOpen` merely
+  // toggles visibility) instead of mounting a fresh instance per open, so
+  // `useState(initialTags)`'s initial value only ever applies once, on the
+  // very first mount — often before an async tag source has hydrated.
+  //
+  // Re-seeding `selectedTags` here — during render, comparing against the
+  // previous key, per React's documented "adjusting state when a prop
+  // changes" pattern (https://react.dev/learn/you-might-not-need-an-effect),
+  // rather than inside a `useEffect` — fixes three things at once: (1) late
+  // hydration — once the source resolves while still closed or right as it
+  // opens, the very next render that's open+resolved reads the real tags
+  // instead of the stale `[]` the state started with, with no stale frame in
+  // between; (2) reopen after an abandoned edit — Cancel (or simply closing)
+  // doesn't persist the in-progress selection, so reopening always starts
+  // from the true current tags rather than whatever was left over from a
+  // discarded session; (3) a different object being tagged through the same
+  // mounted instance.
+  const resolvedSelectionKey = isOpen && !tagsLoading ? objectId : null;
+  const [lastResolvedSelectionKey, setLastResolvedSelectionKey] = useState<string | null>(null);
+  if (resolvedSelectionKey !== lastResolvedSelectionKey) {
+    setLastResolvedSelectionKey(resolvedSelectionKey);
+    if (resolvedSelectionKey !== null) {
+      setSelectedTags(initialTags);
+    }
+  }
 
   // Mutation for saving tags
   const saveMutation = useMutation({
@@ -88,19 +132,25 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
 
   if (!isOpen) return null;
 
-  const isLoading = saveMutation.isPending;
+  const isSaveMutating = saveMutation.isPending;
+  // Block Save until the caller's tag source has resolved at least once —
+  // saving from a `selectedTags` seeded off an unresolved (possibly empty)
+  // `initialTags` is exactly the data-loss path this component now guards
+  // against via the resync logic above; this is the belt-and-suspenders
+  // backstop for the narrow window before that logic has anything to sync.
+  const isSaveDisabled = isSaveMutating || tagsLoading;
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
       title={`Tag ${objectType === 'GcodeFile' ? 'G-Code File' : objectType === 'Model3D' ? 'Model File' : objectType}`}
-      isDisabled={isLoading}
+      isDisabled={isSaveMutating}
       footer={
         <div className="flex gap-2 w-full">
           <Button
             onClick={onClose}
-            disabled={isLoading}
+            disabled={isSaveMutating}
             variant="secondary"
             className="flex-1"
           >
@@ -108,11 +158,11 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
           </Button>
           <Button
             onClick={() => saveMutation.mutate(selectedTags)}
-            disabled={isLoading}
+            disabled={isSaveDisabled}
             variant="primary"
             className="flex-1"
           >
-            {isLoading ? 'Saving...' : 'Save Tags'}
+            {isSaveMutating ? 'Saving...' : tagsLoading ? 'Loading tags…' : 'Save Tags'}
           </Button>
         </div>
       }
@@ -128,7 +178,7 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
       <TagSelector
         selectedTags={selectedTags}
         onTagsChange={setSelectedTags}
-        isSaving={isLoading}
+        isSaving={isSaveMutating}
         placeholder={`Search tags for this ${objectType === 'GcodeFile' ? 'gcode file' : objectType.toLowerCase()}...`}
       />
     </Modal>

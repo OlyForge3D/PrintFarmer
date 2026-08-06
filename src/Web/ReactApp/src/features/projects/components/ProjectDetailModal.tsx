@@ -11,6 +11,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { projectService } from '@/services/projectService';
 import { apiClient } from '@/services/api';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 import type { 
   PrintProjectDetailDto,
   PrintProjectFileDto,
@@ -108,6 +109,7 @@ export const ProjectDetailModal: React.FC<ProjectDetailModalProps> = ({
       onUpdate();
       queryClient.invalidateQueries({ queryKey: ['projects'] });
       queryClient.invalidateQueries({ queryKey: ['job-queue'] });
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     },
   });
 

@@ -131,8 +131,12 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   );
   // Batched fleet tag read (#1146 item 1): shares one `GET /api/tags/objects`
   // request across every card instead of this card issuing its own
-  // `GET /api/tags/object/{id}` call.
-  const { data: printerTags = [] } = usePrinterTagsFromFleet(printer.id);
+  // `GET /api/tags/object/{id}` call. `isPending` is threaded into
+  // `TaggingModal` as `tagsLoading` — this card renders `TaggingModal`
+  // unconditionally (only `isOpen` toggles), so the modal can mount before
+  // this fleet query has hydrated and must know not to seed its selection
+  // (or allow Save) from an unresolved, possibly-empty tag list.
+  const { data: printerTags = [], isPending: printerTagsLoading } = usePrinterTagsFromFleet(printer.id);
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
@@ -171,15 +175,6 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     autoDispatchStatus,
     isOnline,
   });
-  // Queue-position labels only ever show while a printer is online and
-  // actively printing or paused — same rule the compact card always used.
-  // With the fleet queue-summary endpoint (#1146 item 9), this no longer
-  // gates *polling* (the shared summary query always runs once for the
-  // whole grid); it now only gates *display*, so an idle printer with
-  // pre-queued-but-not-yet-dispatched jobs (e.g. blocked on a bed-clear
-  // confirmation) still never shows a stray position label.
-  const canShowQueueLabel = isOnline && (isPrinting || isPaused);
-
   // Batched fleet queue-summary read (#1146 item 9): replaces the per-card
   // `useJobQueue(printer.id)` poll. Printers with no active job are simply
   // absent from the fleet response, so "no summary" already means "nothing
@@ -188,7 +183,16 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
   const totalActiveQueueJobs = queueSummary
     ? queueSummary.queuedCount + queueSummary.printingCount
     : 0;
-  const queueLabel = canShowQueueLabel && totalActiveQueueJobs > 1
+  // "X of Y" is derived *only* from the authoritative fleet summary total
+  // (Dallas item-9 decision), matching origin/development's pre-fleet
+  // behavior: the backend counts a printer's not-yet-dispatched queued jobs
+  // as "active" even while it reports Idle (e.g. blocked on a bed-clear
+  // confirmation) or Offline, and that queue depth is genuinely useful
+  // information for those printers too. Reintroducing an
+  // `isOnline && (isPrinting || isPaused)` display gate here was the
+  // regression: it suppressed the label for legitimately-queued idle/offline
+  // printers that the pre-fleet UI always showed it for.
+  const queueLabel = totalActiveQueueJobs > 1
     ? `${queueSummary?.printingPosition ?? 1} of ${totalActiveQueueJobs}`
     : undefined;
 
@@ -586,6 +590,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         initialTags={printerTags}
         isOpen={showTagModal}
         onClose={() => setShowTagModal(false)}
+        tagsLoading={printerTagsLoading}
       />
       {/* end card body */}
     </article>

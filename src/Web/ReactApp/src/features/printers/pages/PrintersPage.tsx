@@ -418,7 +418,7 @@ export function PrintersPage() {
                 {hasPermission('printers', 'admin') && discoveryAvailable && (
                   <Button
                     variant="secondary"
-                    aria-label="Trigger network discovery to find printers on local network"
+                    aria-label="Discover Printers on the local network"
                     onClick={() => setShowDiscovery(true)}
                     onMouseEnter={() => PrinterDiscoveryModal.preload()}
                     onFocus={() => PrinterDiscoveryModal.preload()}

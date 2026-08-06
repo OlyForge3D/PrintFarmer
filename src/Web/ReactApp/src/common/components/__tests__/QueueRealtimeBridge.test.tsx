@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueueRealtimeBridge } from '../QueueRealtimeBridge';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -102,6 +103,10 @@ describe('QueueRealtimeBridge', () => {
     );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
+    // Canonical fleet queue-summary key (#1146 item 9): every compact
+    // printer card's "X of Y" label shares this key, so a connection-driven
+    // authoritative refresh must refresh it too, not just job-queue/queue-jobs/queue-stats.
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey });
 
     mocks.getQueueSubscriptionResources.mockResolvedValue({
       printerIds: ['new-printer'],
@@ -119,6 +124,27 @@ describe('QueueRealtimeBridge', () => {
     );
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
     expect(invalidate).toHaveBeenCalledWith({ queryKey: ['queue-stats'] });
+  });
+
+  it('invalidates the canonical fleet queue-summary key on a realtime queue event, in addition to the connection/resources-changed paths', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <QueueRealtimeBridge />
+      </QueryClientProvider>
+    );
+
+    // A queue event (job dispatched/completed/etc.) is a distinct trigger
+    // from the initial connection and the resources-changed hint — it must
+    // independently refresh the fleet queue-summary key too.
+    mocks.emitQueueEvent({ printerId: 'assigned-printer', jobId: 'job-1' });
+
+    await waitFor(() =>
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey })
+    );
   });
 
   it('runs a trailing snapshot when B commits after in-flight snapshot A reads resources', async () => {

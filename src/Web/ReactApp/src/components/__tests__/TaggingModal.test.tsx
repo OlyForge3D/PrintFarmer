@@ -32,12 +32,24 @@ vi.mock('@/components/TagSelector', () => ({
     selectedTags: Array<{ id: string; name: string }>;
     onTagsChange: (tags: Array<{ id: string; name: string }>) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() => onTagsChange([...selectedTags, { id: 'tag-new', name: 'New Tag' }])}
-    >
-      add-new-tag
-    </button>
+    <div>
+      <span data-testid="selected-tags">{selectedTags.map((t) => t.id).join(',')}</span>
+      <button
+        type="button"
+        onClick={() => onTagsChange([...selectedTags, { id: 'tag-new', name: 'New Tag' }])}
+      >
+        add-new-tag
+      </button>
+      {selectedTags.map((tag) => (
+        <button
+          key={tag.id}
+          type="button"
+          onClick={() => onTagsChange(selectedTags.filter((t) => t.id !== tag.id))}
+        >
+          remove-{tag.id}
+        </button>
+      ))}
+    </div>
   ),
 }));
 
@@ -143,5 +155,134 @@ describe('TaggingModal — printer tag fleet invalidation (#1146 item 1)', () =>
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(hoisted.assignTagToObject).not.toHaveBeenCalled();
     expect(hoisted.removeTagFromObject).not.toHaveBeenCalled();
+  });
+});
+
+describe('TaggingModal — selection resync on open/hydrate (late-hydration data-loss fix)', () => {
+  beforeEach(() => {
+    hoisted.assignTagToObject.mockClear();
+    hoisted.removeTagFromObject.mockClear();
+  });
+
+  it('does not remove any existing tags when Save is clicked immediately after opening with already-resolved tags (core regression guard)', async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderModal(client, { initialTags: [{ id: 'tag-existing', name: 'Existing' }] });
+
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('tag-existing');
+
+    await user.click(screen.getByRole('button', { name: 'Save Tags' }));
+
+    await waitFor(() => expect(hoisted.assignTagToObject).not.toHaveBeenCalled());
+    expect(hoisted.removeTagFromObject).not.toHaveBeenCalled();
+  });
+
+  it('reseeds the selection once an async tag source hydrates from [] to existing tags while the modal stays mounted and open (rerender [] -> existing tags)', async () => {
+    // Mirrors CompactPrinterCard: the modal is mounted before its
+    // `usePrinterTagsFromFleet` fleet query resolves, so `initialTags` starts
+    // as `[]` and `tagsLoading` starts `true`.
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <TaggingModal
+          objectId="printer-1"
+          objectType="Printer"
+          initialTags={[]}
+          isOpen
+          onClose={vi.fn()}
+          tagsLoading
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('');
+    // Save is disabled while the source hasn't resolved — the caller can't
+    // submit a selection seeded from an unresolved (possibly empty) source.
+    expect(screen.getByRole('button', { name: 'Loading tags…' })).toBeDisabled();
+
+    // The fleet tags query resolves while the modal is still open.
+    rerender(
+      <QueryClientProvider client={client}>
+        <TaggingModal
+          objectId="printer-1"
+          objectType="Printer"
+          initialTags={[{ id: 'tag-existing', name: 'Existing' }]}
+          isOpen
+          onClose={vi.fn()}
+          tagsLoading={false}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('tag-existing');
+
+    await user.click(screen.getByRole('button', { name: 'Save Tags' }));
+
+    // Saving now must not diff against the stale `[]` the state started
+    // with — it must not issue a "remove" for the tag that just hydrated in.
+    await waitFor(() => expect(hoisted.assignTagToObject).not.toHaveBeenCalled());
+    expect(hoisted.removeTagFromObject).not.toHaveBeenCalled();
+  });
+
+  it('supports both adding a new tag and removing an existing one in the same save (add/remove)', async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderModal(client, { initialTags: [{ id: 'tag-existing', name: 'Existing' }] });
+
+    await user.click(screen.getByRole('button', { name: 'remove-tag-existing' }));
+    await user.click(screen.getByRole('button', { name: 'add-new-tag' }));
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('tag-new');
+
+    await user.click(screen.getByRole('button', { name: 'Save Tags' }));
+
+    await waitFor(() => expect(hoisted.assignTagToObject).toHaveBeenCalledWith('printer-1', 'tag-new', 'Printer'));
+    expect(hoisted.removeTagFromObject).toHaveBeenCalledWith('printer-1', 'tag-existing', 'Printer');
+  });
+
+  it('discards an abandoned in-progress edit and reseeds from the true current tags on reopen', async () => {
+    const user = userEvent.setup();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onClose = vi.fn();
+    const props = {
+      objectId: 'printer-1',
+      objectType: 'Printer' as const,
+      initialTags: [{ id: 'tag-existing', name: 'Existing' }],
+      onClose,
+    };
+
+    const { rerender } = render(
+      <QueryClientProvider client={client}>
+        <TaggingModal {...props} isOpen />
+      </QueryClientProvider>,
+    );
+
+    // Start (but never save) an edit.
+    await user.click(screen.getByRole('button', { name: 'add-new-tag' }));
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('tag-existing,tag-new');
+
+    // Cancel closes without sending anything to the API...
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(hoisted.assignTagToObject).not.toHaveBeenCalled();
+    expect(hoisted.removeTagFromObject).not.toHaveBeenCalled();
+
+    // ...the parent reacts by flipping isOpen to false (modal stays mounted)...
+    rerender(
+      <QueryClientProvider client={client}>
+        <TaggingModal {...props} isOpen={false} />
+      </QueryClientProvider>,
+    );
+
+    // ...and the user reopens it later. The abandoned "tag-new" addition
+    // must not resurface — the selection reflects the true current tags.
+    rerender(
+      <QueryClientProvider client={client}>
+        <TaggingModal {...props} isOpen />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByTestId('selected-tags')).toHaveTextContent('tag-existing');
+    expect(screen.queryByRole('button', { name: 'remove-tag-new' })).not.toBeInTheDocument();
   });
 });

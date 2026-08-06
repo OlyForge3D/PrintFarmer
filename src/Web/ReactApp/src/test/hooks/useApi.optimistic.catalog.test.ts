@@ -6,7 +6,8 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys, useCancelPrintQueueJob, useCreateManufacturer, useCreateModel, useDeletePrintQueueJob, useQueuePrintJob } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import { PrinterModelDto, QueuedPrintJobWithFileMetaDto } from '@/types/api';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
+import { PrinterModelDto, QueuedPrintJobWithFileMetaDto, JobQueuePrintJob } from '@/types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -262,6 +263,60 @@ describe('optimistic job cancel/delete', () => {
     await waitFor(() => {
       const after = client.getQueryData<QueuedPrintJobWithFileMetaDto[]>(queryKeys.jobQueue());
       expect(after?.some(j => j.job.id === 'job-del-err')).toBe(true);
+    });
+  });
+
+  describe('canonical fleet queue-summary key invalidation (#1146 item 9)', () => {
+    it('useQueuePrintJob invalidates the fleet queue-summary key on success', async () => {
+      const client = createClient();
+      const wrapper = wrapperFactory(client);
+      const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+      vi.spyOn(apiClient, 'queuePrintJob').mockResolvedValue({} as JobQueuePrintJob);
+
+      const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
+      await act(async () => {
+        result.current.mutate({ printerId: 'p1', gcodeFileId: 'f1' });
+      });
+
+      await waitFor(() =>
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey }),
+      );
+    });
+
+    it('useCancelPrintQueueJob invalidates the fleet queue-summary key on settle', async () => {
+      const client = createClient();
+      const wrapper = wrapperFactory(client);
+      const job = createMockJob('job-cancel-summary');
+      seedJobs(client, [job]);
+      const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+      vi.spyOn(apiClient, 'cancelPrintQueueJob').mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useCancelPrintQueueJob(), { wrapper });
+      await act(async () => {
+        result.current.mutate({ jobId: 'job-cancel-summary', reviewedRowVersion: 'reviewed-etag' });
+      });
+
+      await waitFor(() =>
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey }),
+      );
+    });
+
+    it('useDeletePrintQueueJob invalidates the fleet queue-summary key on settle', async () => {
+      const client = createClient();
+      const wrapper = wrapperFactory(client);
+      const job = createMockJob('job-delete-summary');
+      seedJobs(client, [job]);
+      const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
+      vi.spyOn(apiClient, 'deletePrintQueueJob').mockResolvedValue(undefined);
+
+      const { result } = renderHook(() => useDeletePrintQueueJob(), { wrapper });
+      await act(async () => {
+        result.current.mutate({ jobId: 'job-delete-summary', reviewedRowVersion: 'reviewed-etag' });
+      });
+
+      await waitFor(() =>
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey }),
+      );
     });
   });
 });
