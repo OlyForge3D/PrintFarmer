@@ -11,6 +11,7 @@ obj/
 *.userosscache
 *.sln.docstates
 .vs/
+.volumes/
 
 # Node
 node_modules/
