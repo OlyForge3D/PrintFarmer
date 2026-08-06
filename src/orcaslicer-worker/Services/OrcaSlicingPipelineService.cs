@@ -125,8 +125,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     public async Task<SlicingResult> ProcessJobAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(job);
-        string jobWorkDir = Path.Combine(_workingDirectory, job.Id.ToString());
-        _ = Directory.CreateDirectory(jobWorkDir);
+        string jobWorkDir = PrepareJobWorkDirectory(
+            _workingDirectory,
+            job.Id,
+            job.ClaimToken);
         bool preserveResultForUpload = false;
         try
         {
@@ -199,6 +201,29 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 _logger.LogWarning(ex, "Failed cleanup {JobWorkDir}", jobWorkDir);
             }
         }
+    }
+
+    internal static string PrepareJobWorkDirectory(
+        string workingDirectory,
+        Guid jobId,
+        Guid claimToken)
+    {
+        if (claimToken == Guid.Empty)
+        {
+            throw new ArgumentException("A claim token is required.", nameof(claimToken));
+        }
+
+        string attemptWorkDirectory = Path.Combine(
+            workingDirectory,
+            jobId.ToString(),
+            claimToken.ToString());
+        if (Directory.Exists(attemptWorkDirectory))
+        {
+            Directory.Delete(attemptWorkDirectory, recursive: true);
+        }
+
+        _ = Directory.CreateDirectory(attemptWorkDirectory);
+        return attemptWorkDirectory;
     }
 
     internal void PopulateResultMetadata(SlicingResult result, DistributedSlicingJob job, int modelCount)
@@ -1196,7 +1221,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
     }
 
-    #pragma warning disable CA2101, SYSLIB1054 // libc open requires a UTF-8 char*; LibraryImport requires unsafe blocks.
+#pragma warning disable CA2101, SYSLIB1054 // libc open requires a UTF-8 char*; LibraryImport requires unsafe blocks.
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     [DllImport("libc", EntryPoint = "open", SetLastError = true)]
     private static extern int OpenFileDescriptor(
@@ -1213,7 +1238,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     [DllImport("libc", EntryPoint = "close", SetLastError = true)]
     private static extern int CloseFileDescriptor(int fileDescriptor);
-    #pragma warning restore CA2101, SYSLIB1054
+#pragma warning restore CA2101, SYSLIB1054
 
     private static async Task<GcodeMetadata> ExtractGcodeMetadataAsync(string gcodeFilePath, CancellationToken cancellationToken)
     {

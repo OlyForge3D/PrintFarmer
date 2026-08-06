@@ -12,6 +12,9 @@ public sealed class ArtifactValidationException : Exception
     /// <summary>Stable reason code for an artifact whose declared digest did not match.</summary>
     public const string HashMismatch = "artifact_hash_mismatch";
 
+    /// <summary>Stable reason code for an artifact without a valid declared SHA-256 digest.</summary>
+    public const string InvalidHash = "artifact_hash_invalid";
+
     /// <summary>Stable reason code for an artifact whose declared size did not match.</summary>
     public const string SizeMismatch = "artifact_size_mismatch";
 

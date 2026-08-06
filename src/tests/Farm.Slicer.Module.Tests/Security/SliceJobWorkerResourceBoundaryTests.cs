@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Slicer.Module.Contracts;
@@ -461,10 +462,14 @@ public sealed class SliceJobWorkerResourceBoundaryTests : IAsyncLifetime
 
     private static MultipartFormDataContent CreateGcodeUpload()
     {
+        byte[] bytes = Encoding.UTF8.GetBytes("; generated gcode");
         var content = new MultipartFormDataContent();
-        var file = new ByteArrayContent(Encoding.UTF8.GetBytes("; generated gcode"));
+        var file = new ByteArrayContent(bytes);
         file.Headers.ContentType = new MediaTypeHeaderValue("text/x.gcode");
         content.Add(file, "file", "result.gcode");
+        content.Add(new StringContent("gcode"), "kind");
+        content.Add(new StringContent(Convert.ToHexString(SHA256.HashData(bytes))), "sha256");
+        content.Add(new StringContent(bytes.LongLength.ToString(System.Globalization.CultureInfo.InvariantCulture)), "sizeBytes");
         return content;
     }
 }

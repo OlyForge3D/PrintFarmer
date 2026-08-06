@@ -266,6 +266,28 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
             .Should().BeFalse("bytes that fail verification must never become an artifact");
     }
 
+    [Theory(DisplayName = "An artifact without a valid declared digest is rejected")]
+    [InlineData("")]
+    [InlineData("not-a-sha256")]
+    [InlineData("0123456789abcdef")]
+    public async Task ArtifactWithoutValidDigest_IsRejected(string declaredSha256)
+    {
+        await QueueJobAsync();
+        WorkerSliceJobResponse claimed = await ClaimSuccessfullyAsync(_firstWorker);
+
+        byte[] bytes = Encoding.UTF8.GetBytes("; produced gcode\nG28\n");
+        using HttpRequestMessage message = CreateArtifactUpload(claimed, bytes, declaredSha256);
+        HttpResponseMessage response = await _firstWorker.SendAsync(message);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = (await ReadProblemCodeAsync(response)).Should().Be("artifact_hash_invalid");
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = (await db.Artifacts.AsNoTracking().AnyAsync(artifact => artifact.JobId == claimed.Id))
+            .Should().BeFalse("an unverifiable upload must never become an artifact");
+    }
+
     [Fact(DisplayName = "An artifact whose declared digest matches is accepted")]
     public async Task ArtifactWithMatchingDigest_IsAccepted()
     {
