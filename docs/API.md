@@ -186,9 +186,11 @@ same-origin paths and never disclose internal service addresses.
   `X-Worker-Fence`. A wrong worker or job returns `403`; an expired lease,
   replaced lease token or stale fencing token returns `409` with
   `lease_expired`, `lease_conflict` or `stale_fencing_token`.
-- Artifact uploads declare `kind`, `sha256` and `sizeBytes`. A mismatch returns
-  `400` `artifact_hash_mismatch` or `artifact_size_mismatch` and no artifact
-  row is created.
+- Artifact uploads must declare `kind`, a 64-character hexadecimal `sha256`,
+  and `sizeBytes`. A missing or malformed digest returns `400`
+  `artifact_hash_invalid`; a content mismatch returns `400`
+  `artifact_hash_mismatch` or `artifact_size_mismatch`. No rejected upload
+  creates an artifact row.
 - Completion returns the canonical authenticated download route
   `/api/artifacts/{artifactId}`. It verifies profile digests against native
   profiles delivered with the claim, or records all three worker-computed

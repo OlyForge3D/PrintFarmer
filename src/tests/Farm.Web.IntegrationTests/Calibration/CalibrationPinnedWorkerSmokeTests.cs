@@ -208,7 +208,26 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
         _ = status.FinalArtifactId!.Value.Should().NotBe(status.SourceArtifactId!.Value);
         _ = status.GcodeFileId.Should().NotBeNull();
 
-        // 8. The verified artifact is downloadable over the authenticated route and its bytes are the
+        // 8. The real worker upload exists in server-side artifact storage with matching worker and
+        //    server digests and a non-zero byte count.
+        using (IServiceScope sourceScope = _api.ListeningServices.CreateScope())
+        {
+            IArtifactsService artifacts =
+                sourceScope.ServiceProvider.GetRequiredService<IArtifactsService>();
+            (Artifact artifact, string fullPath)? source =
+                await artifacts.GetWithPathAsync(status.SourceArtifactId!.Value, cancellationToken);
+            _ = source.Should().NotBeNull();
+            _ = File.Exists(source!.Value.fullPath).Should().BeTrue();
+            _ = source.Value.artifact.SizeBytes.Should().BeGreaterThan(0);
+            _ = source.Value.artifact.DeclaredSha256.Should().Be(source.Value.artifact.Sha256);
+            byte[] sourceBytes = await File.ReadAllBytesAsync(
+                source.Value.fullPath,
+                cancellationToken);
+            _ = Convert.ToHexString(SHA256.HashData(sourceBytes))
+                .Should().Be(source.Value.artifact.Sha256);
+        }
+
+        // 9. The verified artifact is downloadable over the authenticated route and its bytes are the
         //    bytes that were promoted into the immutable G-code library.
         byte[] artifactBytes = await DownloadArtifactAsync(
             caller,
