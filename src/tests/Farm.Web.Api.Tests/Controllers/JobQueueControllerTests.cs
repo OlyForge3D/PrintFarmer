@@ -236,6 +236,28 @@ public class JobQueueControllerTests
         Assert.Equal(StatusCodes.Status412PreconditionFailed, response.StatusCode);
     }
 
+    [Fact]
+    public async Task SyncOrphanedJobsAsync_AuthenticatedCaller_PassesActorSubject()
+    {
+        string actorSubject = QueueActorIdentity.Resolve(_controller.User);
+        _printJobCompletionServiceMock
+            .Setup(service => service.SyncOrphanedPrintingJobsAsync(
+                It.IsAny<Func<Guid, string?>>(),
+                actorSubject,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(0);
+
+        IActionResult result = await _controller.SyncOrphanedJobsAsync();
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        _printJobCompletionServiceMock.Verify(
+            service => service.SyncOrphanedPrintingJobsAsync(
+                It.IsAny<Func<Guid, string?>>(),
+                actorSubject,
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private JobQueueController CreateController(
         AppDbContext db,
         IQueueResourceAuthorizationService authorization)

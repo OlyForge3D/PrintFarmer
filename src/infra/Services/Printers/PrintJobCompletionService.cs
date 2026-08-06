@@ -725,8 +725,14 @@ public class PrintJobCompletionService : IPrintJobCompletionService
     }
 
     /// <inheritdoc />
-    public async Task<int> SyncOrphanedPrintingJobsAsync(Func<Guid, string?> printerStateLookup, CancellationToken ct = default)
+    public async Task<int> SyncOrphanedPrintingJobsAsync(
+        Func<Guid, string?> printerStateLookup,
+        string actorSubject,
+        CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(printerStateLookup);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actorSubject);
+
         _logger.LogDebug("[PrintJobCompletionService] Running orphaned job reconciliation...");
 
         // Generic cached-state reconciliation is safe only for jobs whose backend
@@ -910,6 +916,32 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     "[PrintJobCompletionService] Job {JobId} still actively printing on printer {PrinterId}",
                     job.Id,
                     printerId);
+            }
+
+            if (job.Status is PrintJobStatus.Completed or PrintJobStatus.Failed)
+            {
+                string reasonCode = job.Status == PrintJobStatus.Completed
+                    ? "orphan_sync_completed"
+                    : "orphan_sync_failed";
+                _ = QueueAuditWriter.Add(
+                    _db,
+                    actorSubject,
+                    QueueAuditOperations.Reconciliation,
+                    QueueAuditOutcomes.Success,
+                    nameof(PrintJob),
+                    resourceId: job.Id,
+                    printerId: printerId,
+                    printJobId: job.Id,
+                    dispatchAttemptId: activeAttempt.Id,
+                    reasonCode: reasonCode,
+                    jobRowVersion: job.RowVersion,
+                    detail: new
+                    {
+                        source = "orphan_sync",
+                        observedPrinterState = currentPrinterState,
+                        fromState = PrintJobStatus.Printing.ToString(),
+                        toState = job.Status.ToString(),
+                    });
             }
         }
 

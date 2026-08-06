@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.Startup;
@@ -66,6 +67,7 @@ public class OrphanedJobSyncStartupService : BackgroundService
 
             int syncedCount = await completionService.SyncOrphanedPrintingJobsAsync(
                 LookupPrinterState,
+                QueueActorIdentity.Scheduler,
                 ct);
 
             if (syncedCount > 0)

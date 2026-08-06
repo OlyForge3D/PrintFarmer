@@ -18,6 +18,7 @@ public sealed class QueueAuthorizationTests : IAsyncLifetime
     public static TheoryData<HttpMethod, string, string> ProtectedRouteCases => new()
     {
         { HttpMethod.Get, "/api/job-queue", PrintFarmerPermissions.Queue.Read },
+        { HttpMethod.Get, $"/api/job-queue/{Guid.NewGuid()}", PrintFarmerPermissions.Queue.Read },
         { HttpMethod.Put, $"/api/job-queue/{Guid.NewGuid()}", PrintFarmerPermissions.Queue.Write },
         { HttpMethod.Post, $"/api/job-queue/{Guid.NewGuid()}/dispatch", PrintFarmerPermissions.Queue.Start },
         { HttpMethod.Post, $"/api/job-queue/{Guid.NewGuid()}/cancel", PrintFarmerPermissions.Queue.Cancel },
@@ -26,17 +27,28 @@ public sealed class QueueAuthorizationTests : IAsyncLifetime
         { HttpMethod.Get, "/api/dispatch-settings", PrintFarmerPermissions.DispatchSettings.Manage },
     };
 
+    public static TheoryData<HttpMethod, string> AnonymousRouteCases => new()
+    {
+        { HttpMethod.Get, "/api/job-queue" },
+        { HttpMethod.Get, $"/api/job-queue/{Guid.NewGuid()}" },
+        { HttpMethod.Post, "/api/job-queue/sync-orphaned" },
+    };
+
     public Task InitializeAsync() => Task.CompletedTask;
 
     public async Task DisposeAsync() => await _factory.DisposeAsync();
 
-    [Fact]
-    public async Task QueueRead_AnonymousCaller_ReturnsAuthenticationRequired()
+    [Theory]
+    [MemberData(nameof(AnonymousRouteCases))]
+    public async Task ProtectedQueueRoute_AnonymousCaller_ReturnsAuthenticationRequired(
+        HttpMethod method,
+        string route)
     {
         using HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-Anonymous", "true");
+        using HttpRequestMessage request = CreateRequest(method, route);
 
-        HttpResponseMessage response = await client.GetAsync("/api/job-queue");
+        HttpResponseMessage response = await client.SendAsync(request);
         string body = await response.Content.ReadAsStringAsync();
 
         _ = response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, body);
