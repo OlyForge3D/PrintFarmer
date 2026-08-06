@@ -109,6 +109,42 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         _ = Directory.Exists(jobDirectory).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "A terminal acknowledgement removes an empty current claim parent")]
+    public async Task TerminalAcknowledgement_CurrentClaimAttempt_RemovesEmptyJobParent()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
+        string outputDirectory = Path.Combine(attemptDirectory, "output");
+        _ = Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
+        await poller.RunAsync(jobId, attemptDirectory);
+
+        _ = Directory.Exists(jobParent).Should().BeFalse(
+            "the current claim attempt was terminally acknowledged and no sibling attempt remains");
+    }
+
+    [Fact(DisplayName = "A terminal acknowledgement retains a job parent with a sibling attempt")]
+    public async Task TerminalAcknowledgement_CurrentClaimAttempt_PreservesSiblingParent()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
+        _ = Directory.CreateDirectory(Path.Combine(attemptDirectory, "output"));
+        await File.WriteAllTextAsync(
+            Path.Combine(attemptDirectory, "output", "result.gcode"),
+            "; produced gcode\nG28\n");
+        _ = Directory.CreateDirectory(Path.Combine(jobParent, Guid.NewGuid().ToString()));
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
+        await poller.RunAsync(jobId, attemptDirectory);
+
+        _ = Directory.Exists(jobParent).Should().BeTrue(
+            "a sibling recovery attempt remains under the job parent");
+    }
+
     [Fact(DisplayName = "A terminal acknowledgement supersedes an old recovery marker")]
     public async Task RecoveryMarker_TerminalAcknowledgement_RemovesWorkDirectory()
     {

@@ -1,4 +1,5 @@
 ﻿using Farm.OrcaSlicer.Worker.Services;
+using Farm.Slicer.Worker.Core;
 using FluentAssertions;
 using Xunit;
 
@@ -31,6 +32,40 @@ public sealed class JobWorkDirectoryTests : IDisposable
         _ = File.Exists(Path.Combine(firstAttempt, "stale.gcode")).Should().BeTrue();
         _ = Directory.Exists(secondAttempt).Should().BeTrue();
         _ = Directory.EnumerateFileSystemEntries(secondAttempt).Should().BeEmpty();
+    }
+
+    [Fact(DisplayName = "Expired recovery cleanup preserves active and recent attempts")]
+    public void CleanupRecoveryDirectories_QuotaExceeded_PreservesActiveAndRecentAttempts()
+    {
+        Guid activeJobId = Guid.NewGuid();
+        Guid oldJobId = Guid.NewGuid();
+        Guid recentJobId = Guid.NewGuid();
+        string activeAttempt = CreateRecoveryAttempt(activeJobId, "active", DateTime.UtcNow.AddDays(-10), 32);
+        string oldAttempt = CreateRecoveryAttempt(oldJobId, "old", DateTime.UtcNow.AddDays(-10), 32);
+        string recentAttempt = CreateRecoveryAttempt(recentJobId, "recent", DateTime.UtcNow.AddMinutes(-5), 32);
+
+        System.Reflection.MethodInfo cleanupMethod = typeof(HttpJobPollerService).GetMethod(
+            "CleanupRecoveryDirectories",
+            System.Reflection.BindingFlags.Static |
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("CleanupRecoveryDirectories is missing.");
+        IReadOnlyList<string> deleted = (IReadOnlyList<string>)cleanupMethod.Invoke(
+            null,
+            [_workingDirectory, DateTime.UtcNow, TimeSpan.FromHours(1), 32L, activeJobId])!;
+
+        _ = deleted.Should().Contain(oldAttempt);
+        _ = Directory.Exists(activeAttempt).Should().BeTrue();
+        _ = Directory.Exists(recentAttempt).Should().BeTrue();
+    }
+
+    private string CreateRecoveryAttempt(Guid jobId, string name, DateTime markerTimeUtc, int payloadSize)
+    {
+        string attempt = Path.Combine(_workingDirectory, jobId.ToString(), name);
+        _ = Directory.CreateDirectory(attempt);
+        File.WriteAllText(Path.Combine(attempt, ".printfarmer-recovery.json"), "{}");
+        File.WriteAllBytes(Path.Combine(attempt, "result.gcode"), new byte[payloadSize]);
+        File.SetLastWriteTimeUtc(Path.Combine(attempt, ".printfarmer-recovery.json"), markerTimeUtc);
+        return attempt;
     }
 
     public void Dispose()

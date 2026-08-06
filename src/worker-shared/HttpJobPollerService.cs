@@ -65,6 +65,8 @@ public abstract class HttpJobPollerService(
     /// Marker file that claims ownership of a job's local work after an ambiguous outcome.
     /// </summary>
     private const string RecoveryMarkerFileName = ".printfarmer-recovery.json";
+    private const long DefaultRecoveryMaxBytes = 1L * 1024 * 1024 * 1024;
+    private const double DefaultRecoveryMinimumAgeHours = 24;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -222,6 +224,7 @@ public abstract class HttpJobPollerService(
         _workerState.SetJobLease(
             job.Id,
             new WorkerJobLease(job.LeaseToken, job.LeaseFence, job.ClaimToken));
+        TryCleanupConfiguredRecoveryDirectories(job.Id);
 
         using CancellationTokenSource jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         CancellationToken jobToken = jobCts.Token;
@@ -1060,11 +1063,165 @@ public abstract class HttpJobPollerService(
         try
         {
             Directory.Delete(directory, recursive: true);
+            TryDeleteEmptyJobParent(directory, jobId);
+            string? workingDirectory = Path.GetDirectoryName(Path.GetDirectoryName(directory));
+            if (!string.IsNullOrEmpty(workingDirectory))
+            {
+                TryCleanupRecoveryDirectories(workingDirectory, jobId);
+            }
         }
         catch (Exception exception)
         {
             _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
         }
+    }
+
+    private void TryDeleteEmptyJobParent(string attemptDirectory, Guid jobId)
+    {
+        string? jobDirectory = Path.GetDirectoryName(attemptDirectory);
+        if (string.IsNullOrEmpty(jobDirectory) ||
+            !string.Equals(Path.GetFileName(jobDirectory), jobId.ToString(), StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            if (!Directory.EnumerateFileSystemEntries(jobDirectory).Any())
+            {
+                Directory.Delete(jobDirectory);
+            }
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "Retained job work parent {JobDirectory} because it was not empty or unavailable", jobDirectory);
+        }
+    }
+
+    private void TryCleanupRecoveryDirectories(string workingDirectory, Guid activeJobId)
+    {
+        int leaseDurationSeconds = int.TryParse(
+            _configuration["Worker:LeaseDurationSeconds"],
+            out int configuredLeaseDurationSeconds)
+            ? Math.Max(configuredLeaseDurationSeconds, 1)
+            : 300;
+        double configuredMinimumAgeHours = double.TryParse(
+            _configuration["Worker:RecoveryMinimumAgeHours"],
+            out double parsedMinimumAgeHours)
+            ? Math.Max(parsedMinimumAgeHours, 0)
+            : DefaultRecoveryMinimumAgeHours;
+        TimeSpan minimumAge = TimeSpan.FromSeconds(
+            Math.Max(
+                configuredMinimumAgeHours * 3600,
+                leaseDurationSeconds + 3600));
+        long maxBytes = long.TryParse(
+            _configuration["Worker:RecoveryMaxBytes"],
+            out long configuredMaxBytes)
+            ? Math.Max(configuredMaxBytes, 0)
+            : DefaultRecoveryMaxBytes;
+
+        IReadOnlyList<string> deleted = CleanupRecoveryDirectories(
+            workingDirectory,
+            DateTime.UtcNow,
+            minimumAge,
+            maxBytes,
+            activeJobId);
+        if (deleted.Count > 0)
+        {
+            _logger.LogWarning(
+                "Removed {RecoveryDirectoryCount} expired recovery directories under {WorkingDirectory} to enforce the {RecoveryMaxBytes} byte recovery quota",
+                deleted.Count,
+                workingDirectory,
+                maxBytes);
+        }
+    }
+
+    private void TryCleanupConfiguredRecoveryDirectories(Guid activeJobId)
+    {
+        string? workingDirectory = _configuration["Worker:WorkingDirectory"];
+        if (!string.IsNullOrWhiteSpace(workingDirectory))
+        {
+            TryCleanupRecoveryDirectories(workingDirectory, activeJobId);
+        }
+    }
+
+    /// <summary>
+    /// Removes only old, marked recovery attempts when the bounded recovery quota is exceeded.
+    /// Recent attempts remain untouched because their remote lease may still be valid.
+    /// </summary>
+    internal static IReadOnlyList<string> CleanupRecoveryDirectories(
+        string workingDirectory,
+        DateTime utcNow,
+        TimeSpan minimumAge,
+        long maxBytes,
+        Guid? activeJobId = null)
+    {
+        if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory) || maxBytes < 0)
+        {
+            return [];
+        }
+
+        List<(string Path, Guid JobId, DateTime LastWriteUtc, long Size)> recoveryDirectories = [];
+        foreach (string jobDirectory in Directory.EnumerateDirectories(workingDirectory))
+        {
+            if (!Guid.TryParse(Path.GetFileName(jobDirectory), out Guid jobId))
+            {
+                continue;
+            }
+
+            try
+            {
+                IEnumerable<string> candidates = Directory.EnumerateDirectories(jobDirectory)
+                    .Where(directory => File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
+                if (File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)))
+                {
+                    candidates = candidates.Append(jobDirectory);
+                }
+
+                foreach (string candidate in candidates)
+                {
+                    DateTime lastWriteUtc = File.GetLastWriteTimeUtc(Path.Combine(candidate, RecoveryMarkerFileName));
+                    long size = Directory.EnumerateFiles(candidate, "*", SearchOption.AllDirectories)
+                        .Sum(file => new FileInfo(file).Length);
+                    recoveryDirectories.Add((candidate, jobId, lastWriteUtc, size));
+                }
+            }
+            catch (Exception)
+            {
+                // Treat inaccessible or concurrently changing recovery data as active and retain it.
+            }
+        }
+
+        long totalBytes = recoveryDirectories.Sum(directory => directory.Size);
+        if (totalBytes <= maxBytes)
+        {
+            return [];
+        }
+
+        List<string> deleted = [];
+        foreach ((string path, Guid jobId, DateTime lastWriteUtc, long size) in recoveryDirectories
+            .OrderBy(directory => directory.LastWriteUtc))
+        {
+            if (totalBytes <= maxBytes ||
+                (activeJobId.HasValue && jobId == activeJobId.Value) ||
+                utcNow - lastWriteUtc < minimumAge)
+            {
+                continue;
+            }
+
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                totalBytes -= size;
+                deleted.Add(path);
+            }
+            catch (Exception)
+            {
+                // A concurrent worker may own or remove this directory; leave it in place.
+            }
+        }
+
+        return deleted;
     }
 
     private void TryDeleteFile(Guid jobId, string filePath)

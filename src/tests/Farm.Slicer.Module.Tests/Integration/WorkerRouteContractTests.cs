@@ -18,10 +18,12 @@ public sealed class WorkerRouteContractTests
 {
     /// <summary>
     /// The exact route templates the worker composes, taken from the literal interpolated
-    /// strings in <c>HttpJobPollerService.cs</c> and <c>HttpProgressReporter.cs</c>
-    /// (worker-shared project), with route parameters normalized to their ASP.NET Core
-    /// placeholder form so they can be matched against <see cref="ControllerActionDescriptor"/>
-    /// attribute route templates.
+    /// strings in <c>HttpJobPollerService.cs</c>, <c>HttpProgressReporter.cs</c>, and
+    /// <c>OrcaSlicingPipelineService.cs</c> (worker projects). This list intentionally includes
+    /// the model-download requests, which are issued by the slicing pipeline rather than the
+    /// poller's job mutation methods. Route parameters are normalized to their ASP.NET Core
+    /// placeholder form so they can be matched against
+    /// <see cref="ControllerActionDescriptor"/> attribute route templates.
     /// </summary>
     private static readonly IReadOnlyList<(string Method, string Template)> WorkerInvokedRoutes =
     [
@@ -31,6 +33,8 @@ public sealed class WorkerRouteContractTests
         ("POST", "api/slice/{id}/fail"),
         ("POST", "api/slice/{id}/complete"),
         ("POST", "api/slice/{id}/artifacts"),
+        ("GET", "api/slice/{id}/model"),
+        ("GET", "api/slice/{id}/models/{modelIndex}"),
     ];
 
     [Fact(DisplayName = "Every worker-invoked route resolves to a real API action")]
