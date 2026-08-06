@@ -1,7 +1,10 @@
 ﻿using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
+using Farm.Slicer.Module.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit.Abstractions;
 
 namespace Farm.Slicer.Module.Tests.Integration;
@@ -106,12 +109,18 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = midStatus!.ProgressPercent.Should().Be(50);
         _ = midStatus.ProgressMessage.Should().Be("Slicing in progress (50%).");
 
-        // 6. Upload a mock G-code artifact
+        // 6. Upload a verified G-code artifact
         byte[] gcodeBytes = Encoding.UTF8.GetBytes("; G28\n; G1 X0 Y0 Z0.3\n; Mock G-code output");
+        string gcodeSha256 = Convert.ToHexString(SHA256.HashData(gcodeBytes));
         using var gcodeContent = new MultipartFormDataContent();
         var fileContent = new ByteArrayContent(gcodeBytes);
         fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
         gcodeContent.Add(fileContent, "file", "cube.gcode");
+        gcodeContent.Add(new StringContent("gcode"), "kind");
+        gcodeContent.Add(new StringContent(gcodeSha256), "sha256");
+        gcodeContent.Add(
+            new StringContent(gcodeBytes.LongLength.ToString(CultureInfo.InvariantCulture)),
+            "sizeBytes");
 
         HttpResponseMessage uploadResp =
             await _workerClient.PostAsync($"/api/slice/{submitted.JobId}/artifacts", gcodeContent);
@@ -119,9 +128,25 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         ArtifactUploadResponse? uploadedArtifact = await uploadResp.Content.ReadFromJsonAsync<ArtifactUploadResponse>();
         _ = uploadedArtifact.Should().NotBeNull();
         _ = uploadedArtifact!.Id.Should().NotBe(Guid.Empty);
+        _ = uploadedArtifact.SizeBytes.Should().BeGreaterThan(0);
         _output.WriteLine($"Artifact uploaded: {uploadedArtifact.Id}");
 
-        // 7. Complete the job with the artifact
+        // 7. Verify the real server-side artifact bytes and digest.
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            IArtifactsService artifacts = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
+            (Artifact artifact, string fullPath)? stored =
+                await artifacts.GetWithPathAsync(uploadedArtifact.Id, default);
+            _ = stored.Should().NotBeNull();
+            _ = File.Exists(stored!.Value.fullPath).Should().BeTrue();
+            byte[] storedBytes = await File.ReadAllBytesAsync(stored.Value.fullPath);
+            _ = storedBytes.Should().Equal(gcodeBytes);
+            _ = stored.Value.artifact.SizeBytes.Should().Be(gcodeBytes.LongLength);
+            _ = stored.Value.artifact.Sha256.Should().Be(gcodeSha256);
+            _ = stored.Value.artifact.DeclaredSha256.Should().Be(gcodeSha256);
+        }
+
+        // 8. Complete the job with the artifact
         var completeReq = new CompleteSliceJobRequest
         {
             PrimaryArtifactId = uploadedArtifact.Id,
@@ -139,7 +164,7 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = completed.FilamentUsedGrams.Should().Be(25.5m);
         _output.WriteLine("Job completed successfully");
 
-        // 8. Verify final job status is Completed
+        // 9. Verify final job status is Completed
         HttpResponseMessage finalStatusResp = await _workerClient.GetAsync($"/api/slice/{submitted.JobId}");
         _ = finalStatusResp.StatusCode.Should().Be(HttpStatusCode.OK);
         SliceJobStatusResponse? finalStatus = await finalStatusResp.Content.ReadFromJsonAsync<SliceJobStatusResponse>();
@@ -151,7 +176,7 @@ public class SlicePipelineE2ETests(ITestOutputHelper output) : IAsyncLifetime
         _ = finalStatus.ArtifactsRoute.Should().Be($"/api/artifacts/job/{submitted.JobId}");
         _output.WriteLine($"Final status verified: {finalStatus.Status}");
 
-        // 9. Verify artifacts are accessible via list endpoint
+        // 10. Verify artifacts are accessible via list endpoint
         HttpResponseMessage artifactListResp = await _workerClient.GetAsync($"/api/artifacts/job/{submitted.JobId}");
         _ = artifactListResp.StatusCode.Should().Be(HttpStatusCode.OK);
         string artifactListBody = await artifactListResp.Content.ReadAsStringAsync();

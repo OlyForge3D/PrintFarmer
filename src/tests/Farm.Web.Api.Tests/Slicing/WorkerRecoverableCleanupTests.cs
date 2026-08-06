@@ -46,6 +46,23 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         _ = poller.FailureReported.Should().BeTrue("the worker must durably report its failure");
     }
 
+    [Fact(DisplayName = "A failed artifact upload is reported and preserves recoverable work")]
+    public async Task FailedArtifactUpload_ReportsFailureAndPreservesWorkDirectory()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobDirectory = CreateJobOutput(jobId);
+        RecordingPoller poller = CreatePoller(
+            completionStatus: HttpStatusCode.OK,
+            artifactStatus: HttpStatusCode.BadGateway);
+
+        await poller.RunAsync(jobId, jobDirectory);
+
+        _ = Directory.Exists(jobDirectory).Should().BeTrue();
+        _ = File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
+        _ = poller.FailureReported.Should().BeTrue("upload failures must become durable job failures");
+        _ = poller.FailureReason.Should().Contain("Failed to upload G-code artifact");
+    }
+
     [Fact(DisplayName = "A terminal acknowledgement discards the job directory")]
     public async Task TerminalAcknowledgement_RemovesWorkDirectory()
     {
@@ -55,6 +72,8 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         await poller.RunAsync(jobId, jobDirectory);
 
+        _ = poller.WorkDirectoryExistedAtUpload.Should().BeTrue(
+            "the produced artifact must remain available until upload completes");
         _ = Directory.Exists(jobDirectory).Should().BeFalse();
     }
 
@@ -98,9 +117,11 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         return jobDirectory;
     }
 
-    private static RecordingPoller CreatePoller(HttpStatusCode completionStatus)
+    private static RecordingPoller CreatePoller(
+        HttpStatusCode completionStatus,
+        HttpStatusCode artifactStatus = HttpStatusCode.Created)
     {
-        StubHandler handler = new(completionStatus);
+        StubHandler handler = new(completionStatus, artifactStatus);
         ServiceCollection services = new();
         _ = services.AddSingleton<IHttpClientFactory>(new StubHttpClientFactory(handler));
         ServiceProvider provider = services.BuildServiceProvider();
@@ -138,9 +159,14 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         public bool FailureReported => handler.FailureReported;
 
+        public string? FailureReason => handler.FailureReason;
+
+        public bool WorkDirectoryExistedAtUpload => handler.WorkDirectoryExistedAtUpload;
+
         public async Task RunAsync(Guid jobId, string jobDirectory)
         {
             _jobDirectory = jobDirectory;
+            handler.ExpectedJobDirectory = jobDirectory;
             using HttpClient client = new(handler, disposeHandler: false)
             {
                 BaseAddress = new Uri("http://localhost"),
@@ -186,11 +212,19 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
     }
 
-    private sealed class StubHandler(HttpStatusCode completionStatus) : HttpMessageHandler
+    private sealed class StubHandler(
+        HttpStatusCode completionStatus,
+        HttpStatusCode artifactStatus) : HttpMessageHandler
     {
         public bool FailureReported { get; private set; }
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        public string? FailureReason { get; private set; }
+
+        public string? ExpectedJobDirectory { get; set; }
+
+        public bool WorkDirectoryExistedAtUpload { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
@@ -198,26 +232,40 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
             if (path.EndsWith("/artifacts", StringComparison.Ordinal))
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Created)
+                WorkDirectoryExistedAtUpload =
+                    ExpectedJobDirectory is not null && Directory.Exists(ExpectedJobDirectory);
+                return new HttpResponseMessage(artifactStatus)
                 {
-                    Content = new StringContent($$"""{"id":"{{Guid.NewGuid()}}"}""", Encoding.UTF8, "application/json"),
-                });
+                    Content = artifactStatus == HttpStatusCode.Created
+                        ? new StringContent(
+                            $$"""{"id":"{{Guid.NewGuid()}}"}""",
+                            Encoding.UTF8,
+                            "application/json")
+                        : new StringContent("artifact storage unavailable", Encoding.UTF8, "text/plain"),
+                };
             }
 
             if (path.EndsWith("/complete", StringComparison.Ordinal))
             {
-                return Task.FromResult(new HttpResponseMessage(completionStatus)
+                return new HttpResponseMessage(completionStatus)
                 {
                     Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-                });
+                };
             }
 
             if (path.EndsWith("/fail", StringComparison.Ordinal))
             {
                 FailureReported = true;
+                string body = request.Content is null
+                    ? string.Empty
+                    : await request.Content.ReadAsStringAsync(cancellationToken);
+                FailureReason = System.Text.Json.JsonDocument.Parse(body)
+                    .RootElement
+                    .GetProperty("errorMessage")
+                    .GetString();
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
         }
     }
 }

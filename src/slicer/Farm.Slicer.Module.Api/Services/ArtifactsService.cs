@@ -81,13 +81,14 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         CancellationToken ct)
     {
         ValidateUpload(file, kind, declaredSizeBytes, requireVerification: true);
+        string normalizedSha256 = NormalizeRequiredHash(declaredSha256);
         return await PersistAsync(
             file,
             jobId,
             workerId,
             claimToken: null,
             kind,
-            NormalizeHash(declaredSha256),
+            normalizedSha256,
             requireActiveLease: false,
             ct)
             ?? throw new InvalidOperationException("The artifact could not be persisted.");
@@ -105,13 +106,14 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         CancellationToken ct)
     {
         ValidateUpload(file, kind, declaredSizeBytes, requireVerification: true);
+        string normalizedSha256 = NormalizeRequiredHash(declaredSha256);
         return await PersistAsync(
             file,
             jobId,
             workerId,
             claimToken,
             kind,
-            NormalizeHash(declaredSha256),
+            normalizedSha256,
             requireActiveLease: true,
             ct);
     }
@@ -277,10 +279,25 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         }
     }
 
-    private static string? NormalizeHash(string? hash) =>
-        string.IsNullOrWhiteSpace(hash)
-            ? null
-            : hash.Trim().Replace("-", string.Empty, StringComparison.Ordinal);
+    private static string NormalizeRequiredHash(string? hash)
+    {
+        if (string.IsNullOrWhiteSpace(hash))
+        {
+            throw new ArtifactValidationException(
+                ArtifactValidationException.InvalidHash,
+                "A SHA-256 digest is required for a verified artifact upload.");
+        }
+
+        string normalized = hash.Trim().Replace("-", string.Empty, StringComparison.Ordinal);
+        if (normalized.Length != 64 || normalized.Any(character => !Uri.IsHexDigit(character)))
+        {
+            throw new ArtifactValidationException(
+                ArtifactValidationException.InvalidHash,
+                "The declared artifact digest must be a 64-character hexadecimal SHA-256 value.");
+        }
+
+        return normalized;
+    }
 
     private static void TryDeleteQuietly(string fullPath)
     {
