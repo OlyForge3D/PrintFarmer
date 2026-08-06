@@ -346,7 +346,7 @@ public abstract class HttpJobPollerService(
             terminalAcknowledgement = true;
             _logger.LogInformation("Job {JobId} completed successfully with {ArtifactIdsCount} artifacts", job.Id, artifactIds.Count);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
             if (Volatile.Read(ref leaseLost) == 1)
             {
@@ -358,13 +358,24 @@ public abstract class HttpJobPollerService(
                     job.Id);
                 TryWriteRecoveryMarker(job.Id, result, "lease_lost");
             }
+            else if (ct.IsCancellationRequested)
+            {
+                _logger.LogWarning("Job {JobId} cancelled during worker shutdown", job.Id);
+                TryWriteRecoveryMarker(job.Id, result, "cancelled");
+            }
             else
             {
-                _logger.LogWarning("Job {JobId} cancelled", job.Id);
-
-                // Job will timeout and be reassigned by the API's error recovery system. The local work
-                // is kept and marked so a later run cannot mistake it for reclaimable scratch space.
-                TryWriteRecoveryMarker(job.Id, result, "cancelled");
+                _logger.LogError(ex, "Job {JobId} timed out: {Message}", job.Id, ex.Message);
+                terminalAcknowledgement = await TryReportFailureAsync(
+                    httpClient,
+                    job.Id,
+                    job.ClaimToken,
+                    $"Artifact upload or job completion timed out: {ex.Message}",
+                    ct);
+                if (!terminalAcknowledgement)
+                {
+                    TryWriteRecoveryMarker(job.Id, result, "timeout");
+                }
             }
         }
         catch (Exception ex)
@@ -382,12 +393,19 @@ public abstract class HttpJobPollerService(
             else
             {
                 // Report failure to the API so the job doesn't sit in Processing until lease expires
-                await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
+                terminalAcknowledgement =
+                    await TryReportFailureAsync(httpClient, job.Id, job.ClaimToken, ex.Message, ct);
             }
 
-            // The outcome is ambiguous from the worker's point of view, so the local work is kept
-            // and marked for recovery instead of being deleted.
-            TryWriteRecoveryMarker(job.Id, result, Volatile.Read(ref leaseLost) == 1 ? "lease_lost" : ex.GetType().Name);
+            if (!terminalAcknowledgement)
+            {
+                // The outcome is ambiguous from the worker's point of view, so the local work is kept
+                // and marked for recovery instead of being deleted.
+                TryWriteRecoveryMarker(
+                    job.Id,
+                    result,
+                    Volatile.Read(ref leaseLost) == 1 ? "lease_lost" : ex.GetType().Name);
+            }
         }
         finally
         {
@@ -612,7 +630,7 @@ public abstract class HttpJobPollerService(
         }
     }
 
-    private async Task TryReportFailureAsync(
+    private async Task<bool> TryReportFailureAsync(
         HttpClient client,
         Guid jobId,
         Guid claimToken,
@@ -633,12 +651,22 @@ public abstract class HttpJobPollerService(
             using HttpResponseMessage resp = await client.SendAsync(request, ct);
             if (!resp.IsSuccessStatusCode)
             {
-                _logger.LogDebug("Fail report for job {JobId} returned {RespStatusCode}", jobId, resp.StatusCode);
+                _logger.LogError(
+                    "Fail report for job {JobId} returned {RespStatusCode}; local work will be retained for recovery",
+                    jobId,
+                    resp.StatusCode);
+                return false;
             }
+
+            return true;
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to report failure for job {JobId}", jobId);
+            _logger.LogError(
+                ex,
+                "Failed to report failure for job {JobId}; local work will be retained for recovery",
+                jobId);
+            return false;
         }
     }
 
@@ -1026,15 +1054,6 @@ public abstract class HttpJobPollerService(
                 TryDeleteFile(jobId, NormalizeLocalPath(fileUri));
             }
 
-            return;
-        }
-
-        // A recovery marker means another owner is responsible for these bytes; never delete them.
-        if (File.Exists(Path.Combine(directory, RecoveryMarkerFileName)))
-        {
-            _logger.LogInformation(
-                "Retained work directory for job {JobId} because a recovery marker is present",
-                jobId);
             return;
         }
 

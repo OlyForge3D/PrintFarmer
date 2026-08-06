@@ -32,8 +32,8 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         }
     }
 
-    [Fact(DisplayName = "A failed completion leaves the job directory and writes a recovery marker")]
-    public async Task FailedCompletion_PreservesWorkDirectoryAndWritesRecoveryMarker()
+    [Fact(DisplayName = "A durably reported completion failure discards the job directory")]
+    public async Task FailedCompletion_DurableFailureAcknowledged_RemovesWorkDirectory()
     {
         Guid jobId = Guid.NewGuid();
         string jobDirectory = CreateJobOutput(jobId);
@@ -41,13 +41,13 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         await poller.RunAsync(jobId, jobDirectory);
 
-        _ = Directory.Exists(jobDirectory).Should().BeTrue("recoverable work must survive an unconfirmed outcome");
-        _ = File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
         _ = poller.FailureReported.Should().BeTrue("the worker must durably report its failure");
+        _ = Directory.Exists(jobDirectory).Should().BeFalse(
+            "a terminal failure acknowledgement makes stale same-job output unsafe to retain");
     }
 
-    [Fact(DisplayName = "A failed artifact upload is reported and preserves recoverable work")]
-    public async Task FailedArtifactUpload_ReportsFailureAndPreservesWorkDirectory()
+    [Fact(DisplayName = "A failed artifact upload is durably reported and cleaned")]
+    public async Task FailedArtifactUpload_DurableFailureAcknowledged_RemovesWorkDirectory()
     {
         Guid jobId = Guid.NewGuid();
         string jobDirectory = CreateJobOutput(jobId);
@@ -57,10 +57,42 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         await poller.RunAsync(jobId, jobDirectory);
 
-        _ = Directory.Exists(jobDirectory).Should().BeTrue();
-        _ = File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
         _ = poller.FailureReported.Should().BeTrue("upload failures must become durable job failures");
         _ = poller.FailureReason.Should().Contain("Failed to upload G-code artifact");
+        _ = Directory.Exists(jobDirectory).Should().BeFalse();
+    }
+
+    [Fact(DisplayName = "An unacknowledged failure preserves recoverable local work")]
+    public async Task FailedArtifactUpload_FailureReportRejected_PreservesWorkDirectory()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobDirectory = CreateJobOutput(jobId);
+        RecordingPoller poller = CreatePoller(
+            completionStatus: HttpStatusCode.OK,
+            artifactStatus: HttpStatusCode.BadGateway,
+            failureStatus: HttpStatusCode.ServiceUnavailable);
+
+        await poller.RunAsync(jobId, jobDirectory);
+
+        _ = poller.FailureReported.Should().BeTrue();
+        _ = Directory.Exists(jobDirectory).Should().BeTrue();
+        _ = File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "An artifact upload timeout is durably reported and cleaned")]
+    public async Task ArtifactUploadTimeout_DurableFailureAcknowledged_RemovesWorkDirectory()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobDirectory = CreateJobOutput(jobId);
+        RecordingPoller poller = CreatePoller(
+            completionStatus: HttpStatusCode.OK,
+            artifactTimeout: true);
+
+        await poller.RunAsync(jobId, jobDirectory);
+
+        _ = poller.FailureReported.Should().BeTrue();
+        _ = poller.FailureReason.Should().Contain("timed out");
+        _ = Directory.Exists(jobDirectory).Should().BeFalse();
     }
 
     [Fact(DisplayName = "A terminal acknowledgement discards the job directory")]
@@ -77,8 +109,8 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         _ = Directory.Exists(jobDirectory).Should().BeFalse();
     }
 
-    [Fact(DisplayName = "A directory owned by a recovery marker is never deleted")]
-    public async Task RecoveryMarker_BlocksCleanup()
+    [Fact(DisplayName = "A terminal acknowledgement supersedes an old recovery marker")]
+    public async Task RecoveryMarker_TerminalAcknowledgement_RemovesWorkDirectory()
     {
         Guid jobId = Guid.NewGuid();
         string jobDirectory = CreateJobOutput(jobId);
@@ -87,7 +119,8 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         await poller.RunAsync(jobId, jobDirectory);
 
-        _ = Directory.Exists(jobDirectory).Should().BeTrue();
+        _ = Directory.Exists(jobDirectory).Should().BeFalse(
+            "a current terminal acknowledgement makes every prior attempt safe to discard");
     }
 
     [Fact(DisplayName = "Native profiles are rejected when a delivered document fails its digest")]
@@ -119,9 +152,15 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
     private static RecordingPoller CreatePoller(
         HttpStatusCode completionStatus,
-        HttpStatusCode artifactStatus = HttpStatusCode.Created)
+        HttpStatusCode artifactStatus = HttpStatusCode.Created,
+        HttpStatusCode failureStatus = HttpStatusCode.NoContent,
+        bool artifactTimeout = false)
     {
-        StubHandler handler = new(completionStatus, artifactStatus);
+        StubHandler handler = new(
+            completionStatus,
+            artifactStatus,
+            failureStatus,
+            artifactTimeout);
         ServiceCollection services = new();
         _ = services.AddSingleton<IHttpClientFactory>(new StubHttpClientFactory(handler));
         ServiceProvider provider = services.BuildServiceProvider();
@@ -214,7 +253,9 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
     private sealed class StubHandler(
         HttpStatusCode completionStatus,
-        HttpStatusCode artifactStatus) : HttpMessageHandler
+        HttpStatusCode artifactStatus,
+        HttpStatusCode failureStatus,
+        bool artifactTimeout) : HttpMessageHandler
     {
         public bool FailureReported { get; private set; }
 
@@ -234,6 +275,11 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
             {
                 WorkDirectoryExistedAtUpload =
                     ExpectedJobDirectory is not null && Directory.Exists(ExpectedJobDirectory);
+                if (artifactTimeout)
+                {
+                    throw new TaskCanceledException("artifact upload timed out");
+                }
+
                 return new HttpResponseMessage(artifactStatus)
                 {
                     Content = artifactStatus == HttpStatusCode.Created
@@ -263,6 +309,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
                     .RootElement
                     .GetProperty("errorMessage")
                     .GetString();
+                return new HttpResponseMessage(failureStatus);
             }
 
             return new HttpResponseMessage(HttpStatusCode.NoContent);
