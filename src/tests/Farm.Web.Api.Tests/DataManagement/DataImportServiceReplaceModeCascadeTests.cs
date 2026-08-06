@@ -47,6 +47,7 @@ public sealed class DataImportServiceReplaceModeCascadeTests
         (await act.PrinterModels.Select(model => model.Name).ToListAsync()).Should().Equal("Replacement Model");
         (await act.GcodeFiles.SingleAsync()).PrinterModelId.Should().BeNull();
         (await act.PrintJobStatistics.SingleAsync()).PrinterModelId.Should().BeNull();
+        (await act.CalibrationProjects.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -78,6 +79,7 @@ public sealed class DataImportServiceReplaceModeCascadeTests
         (await assert.Locations.Select(location => location.Name).ToListAsync()).Should().Equal("Existing Location");
         (await assert.Manufacturers.Select(manufacturer => manufacturer.Name).ToListAsync()).Should().Equal("Existing Manufacturer");
         (await assert.PrinterModels.Select(model => model.Name).ToListAsync()).Should().Equal("Existing Model");
+        (await assert.CalibrationProjects.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -263,6 +265,7 @@ public sealed class DataImportServiceReplaceModeCascadeTests
         Guid locationId = Guid.NewGuid();
         Guid folderId = Guid.NewGuid();
         Guid printJobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
         _ = seed.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Existing Manufacturer" });
         _ = seed.PrinterModels.Add(new PrinterModel
         {
@@ -280,12 +283,28 @@ public sealed class DataImportServiceReplaceModeCascadeTests
         });
         _ = seed.Printers.Add(new Printer
         {
-            Id = Guid.NewGuid(),
+            Id = printerId,
             Name = "Existing Printer",
             ServerUrl = "http://existing-printer",
             ManufacturerId = manufacturerId,
             ModelId = modelId,
             LocationId = locationId,
+        });
+        _ = seed.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = Guid.NewGuid(),
+            PrinterId = printerId,
+            Name = "Existing calibration",
+            FilamentProvider = "local",
+            FilamentProductId = "PLA",
+            FilamentProductName = "PLA",
+            FilamentMaterial = "PLA",
+            CreateRequestId = Guid.NewGuid().ToString(),
+            CreatedBySubject = "test",
+            UpdatedBySubject = "test",
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
         });
         _ = seed.Set<FolderNode>().Add(new FolderNode
         {
