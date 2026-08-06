@@ -678,6 +678,94 @@ public sealed class AutoDispatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task MarkReadyAsync_WhenClaimFilamentChanges_ReturnsCurrentJobRevision()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        printer.CurrentSpoolId = 42;
+        await _db.SaveChangesAsync();
+        PrintJob queuedJob = await CreateQueuedJobAsync(
+            printer,
+            "claim-changed-filament-job",
+            queuePosition: 1);
+        queuedJob.RequiredMaterialType = "PETG";
+        queuedJob.EstimatedFilamentUsage = 100;
+        await _db.SaveChangesAsync();
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(
+                42,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(
+                42,
+                "PLA spool",
+                "PLA",
+                500,
+                null,
+                false));
+        FilamentCheckResult changedCheck = new()
+        {
+            Outcome = FilamentCheckOutcome.Incompatible,
+            Sufficient = false,
+            RemainingWeightG = 20,
+            RequiredWeightG = 100,
+            LoadedMaterial = "PLA",
+            RequiredMaterial = "PETG",
+            MaterialMismatch = true,
+            Message = "Only 20g remaining, job requires 100g",
+        };
+        byte[] changedCheckVersion =
+            FilamentPreflightEvaluator.ComputeVersion(changedCheck);
+        Mock<IJobDispatchService> jobDispatchService = new();
+        jobDispatchService
+            .Setup(service => service.DispatchReviewedJobAsync(
+                queuedJob.Id,
+                printer.Id,
+                "operator-claim-change",
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.IsAny<FilamentOverrideAuthorization>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                queuedJob.Priority++;
+                _db.SaveChanges();
+            })
+            .ThrowsAsync(new FilamentCheckChangedException(
+                changedCheck,
+                changedCheckVersion));
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolmanService.Object,
+            jobDispatchService: jobDispatchService.Object);
+
+        AutoDispatchReadyResult initialChallenge =
+            await service.MarkReadyAsync(printer.Id);
+        string reviewedJobETag = initialChallenge.NextJob!.JobETag!;
+        AutoDispatchReadyResult changedChallenge = await service.MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState.RowVersion ?? [],
+            confirmFilamentOverride: true,
+            actorSubject: "operator-claim-change",
+            expectedOverrideJobVersion: Convert.FromBase64String(reviewedJobETag),
+            expectedFilamentCheckVersion: Convert.FromBase64String(
+                initialChallenge.FilamentCheckETag!));
+
+        changedChallenge.FilamentCheckChanged.Should().BeTrue();
+        changedChallenge.NextJob!.JobETag.Should().Be(
+            changedChallenge.Status.NextJobETag);
+        changedChallenge.NextJob.JobETag.Should().NotBe(reviewedJobETag);
+        jobDispatchService.VerifyAll();
+    }
+
+    [Fact]
     public async Task MarkReadyAsync_WhenSpoolmanThrows_ReturnsUnknownAndDoesNotDispatch()
     {
         Printer printer = await CreatePrinterAsync();

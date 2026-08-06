@@ -787,6 +787,9 @@ public class AutoDispatchService(
                 .SingleAsync(candidate => candidate.Id == printerId, ct);
             AutoDispatchStatusDto changedStatus =
                 await BuildStatusDtoAsync(currentPrinter, ct);
+            nextJobDto.JobETag = changedStatus.NextJobId == nextJob.Id
+                ? changedStatus.NextJobETag
+                : null;
             return new AutoDispatchReadyResult
             {
                 Status = changedStatus,
