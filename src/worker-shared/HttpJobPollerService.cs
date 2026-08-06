@@ -435,6 +435,7 @@ public abstract class HttpJobPollerService(
                 TryCleanupLocalResult(job.Id, result);
             }
 
+            _workerState.ClearJobWorkDirectory(job.Id);
             _workerState.ClearJobLease(job.Id);
             _workerState.DecrementActiveJobs();
         }
@@ -1064,8 +1065,8 @@ public abstract class HttpJobPollerService(
         {
             Directory.Delete(directory, recursive: true);
             TryDeleteEmptyJobParent(directory, jobId);
-            string? workingDirectory = Path.GetDirectoryName(Path.GetDirectoryName(directory));
-            if (!string.IsNullOrEmpty(workingDirectory))
+            string? workingDirectory = _configuration["Worker:WorkingDirectory"];
+            if (!string.IsNullOrWhiteSpace(workingDirectory))
             {
                 TryCleanupRecoveryDirectories(workingDirectory, jobId);
             }
@@ -1125,7 +1126,8 @@ public abstract class HttpJobPollerService(
             DateTime.UtcNow,
             minimumAge,
             maxBytes,
-            activeJobId);
+            activeJobId,
+            _workerState.GetActiveJobWorkDirectories());
         if (deleted.Count > 0)
         {
             _logger.LogWarning(
@@ -1164,7 +1166,8 @@ public abstract class HttpJobPollerService(
         DateTime utcNow,
         TimeSpan minimumAge,
         long maxBytes,
-        Guid? activeJobId = null)
+        Guid? activeJobId = null,
+        IReadOnlyCollection<string>? activeAttemptDirectories = null)
     {
         if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory) || maxBytes < 0)
         {
@@ -1184,7 +1187,9 @@ public abstract class HttpJobPollerService(
                 try
                 {
                     IEnumerable<string> candidates = Directory.EnumerateDirectories(jobDirectory)
-                        .Where(directory => File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
+                        .Where(directory =>
+                            Guid.TryParse(Path.GetFileName(directory), out _)
+                            || File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
                     if (File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)))
                     {
                         candidates = candidates.Append(jobDirectory);
@@ -1192,7 +1197,10 @@ public abstract class HttpJobPollerService(
 
                     foreach (string candidate in candidates)
                     {
-                        DateTime lastWriteUtc = File.GetLastWriteTimeUtc(Path.Combine(candidate, RecoveryMarkerFileName));
+                        string markerPath = Path.Combine(candidate, RecoveryMarkerFileName);
+                        DateTime lastWriteUtc = File.Exists(markerPath)
+                            ? File.GetLastWriteTimeUtc(markerPath)
+                            : Directory.GetLastWriteTimeUtc(candidate);
                         long size = Directory.EnumerateFiles(candidate, "*", SearchOption.AllDirectories)
                             .Sum(file => new FileInfo(file).Length);
                         recoveryDirectories.Add((candidate, jobId, lastWriteUtc, size));
@@ -1222,6 +1230,7 @@ public abstract class HttpJobPollerService(
         {
             if (totalBytes <= maxBytes ||
                 (activeJobId.HasValue && jobId == activeJobId.Value) ||
+                IsActiveAttempt(path, activeAttemptDirectories) ||
                 utcNow - lastWriteUtc < minimumAge)
             {
                 continue;
@@ -1240,6 +1249,24 @@ public abstract class HttpJobPollerService(
         }
 
         return deleted;
+    }
+
+    private static bool IsActiveAttempt(
+        string path,
+        IReadOnlyCollection<string>? activeAttemptDirectories)
+    {
+        if (activeAttemptDirectories is null)
+        {
+            return false;
+        }
+
+        string fullPath = Path.GetFullPath(path)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return activeAttemptDirectories.Any(activePath =>
+            string.Equals(
+                fullPath,
+                Path.GetFullPath(activePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase));
     }
 
     private void TryDeleteFile(Guid jobId, string filePath)

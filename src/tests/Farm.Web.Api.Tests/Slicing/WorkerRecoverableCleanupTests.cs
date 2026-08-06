@@ -159,6 +159,50 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
             "a current terminal acknowledgement makes every prior attempt safe to discard");
     }
 
+    [Fact(DisplayName = "Legacy terminal cleanup never scans outside the configured working directory")]
+    public async Task LegacyTerminalCleanup_DoesNotEnumerateParentOfConfiguredWorkingDirectory()
+    {
+        Guid jobId = Guid.NewGuid();
+        string configuredJobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
+        string configuredOutputDirectory = Path.Combine(configuredJobDirectory, "output");
+        _ = Directory.CreateDirectory(configuredOutputDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(configuredOutputDirectory, "result.gcode"),
+            "; produced gcode\nG28\n");
+
+        string outsideRecoveryDirectory = Path.Combine(
+            Path.GetDirectoryName(_workingDirectory)!,
+            Guid.NewGuid().ToString(),
+            Guid.NewGuid().ToString());
+        _ = Directory.CreateDirectory(outsideRecoveryDirectory);
+        await File.WriteAllTextAsync(Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName), "{}");
+        File.SetLastWriteTimeUtc(
+            Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName),
+            DateTime.UtcNow.AddDays(-10));
+        await File.WriteAllBytesAsync(Path.Combine(outsideRecoveryDirectory, "old.gcode"), new byte[32]);
+
+        try
+        {
+            RecordingPoller poller = CreatePoller(
+                HttpStatusCode.OK,
+                workingDirectory: _workingDirectory,
+                recoveryMinimumAgeHours: 1,
+                recoveryMaxBytes: 1);
+            await poller.RunAsync(jobId, configuredJobDirectory);
+
+            _ = Directory.Exists(outsideRecoveryDirectory).Should().BeTrue(
+                "recovery cleanup must remain rooted at Worker:WorkingDirectory");
+        }
+        finally
+        {
+            string? outsideJobDirectory = Path.GetDirectoryName(outsideRecoveryDirectory);
+            if (outsideJobDirectory is not null && Directory.Exists(outsideJobDirectory))
+            {
+                Directory.Delete(outsideJobDirectory, recursive: true);
+            }
+        }
+    }
+
     [Fact(DisplayName = "Native profiles are rejected when a delivered document fails its digest")]
     public void NativeProfiles_RejectTamperedDocuments()
     {
@@ -190,7 +234,10 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         HttpStatusCode completionStatus,
         HttpStatusCode artifactStatus = HttpStatusCode.Created,
         HttpStatusCode failureStatus = HttpStatusCode.NoContent,
-        bool artifactTimeout = false)
+        bool artifactTimeout = false,
+        string? workingDirectory = null,
+        double? recoveryMinimumAgeHours = null,
+        long? recoveryMaxBytes = null)
     {
         StubHandler handler = new(
             completionStatus,
@@ -206,11 +253,27 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         WorkerStateService workerState = new();
         workerState.SetRegisteredService(Guid.NewGuid(), "test-worker-api-key");
 
+        Dictionary<string, string?> settings = new();
+        if (workingDirectory is not null)
+        {
+            settings["Worker:WorkingDirectory"] = workingDirectory;
+        }
+
+        if (recoveryMinimumAgeHours.HasValue)
+        {
+            settings["Worker:RecoveryMinimumAgeHours"] = recoveryMinimumAgeHours.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (recoveryMaxBytes.HasValue)
+        {
+            settings["Worker:RecoveryMaxBytes"] = recoveryMaxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         return new RecordingPoller(
             provider.GetRequiredService<IHttpClientFactory>(),
             provider,
             workerState,
-            new ConfigurationBuilder().AddInMemoryCollection().Build(),
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
             handler);
     }
 

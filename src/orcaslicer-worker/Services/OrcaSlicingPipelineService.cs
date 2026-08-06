@@ -129,6 +129,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             _workingDirectory,
             job.Id,
             job.ClaimToken);
+        _workerState.SetJobWorkDirectory(job.Id, jobWorkDir);
         bool preserveResultForUpload = false;
         try
         {

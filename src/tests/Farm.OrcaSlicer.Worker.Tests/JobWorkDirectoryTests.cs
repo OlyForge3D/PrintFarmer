@@ -51,20 +51,52 @@ public sealed class JobWorkDirectoryTests : IDisposable
             ?? throw new InvalidOperationException("CleanupRecoveryDirectories is missing.");
         IReadOnlyList<string> deleted = (IReadOnlyList<string>)cleanupMethod.Invoke(
             null,
-            [_workingDirectory, DateTime.UtcNow, TimeSpan.FromHours(1), 32L, activeJobId])!;
+            [_workingDirectory, DateTime.UtcNow, TimeSpan.FromHours(1), 32L, activeJobId, null])!;
 
         _ = deleted.Should().Contain(oldAttempt);
         _ = Directory.Exists(activeAttempt).Should().BeTrue();
         _ = Directory.Exists(recentAttempt).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "Unmarked orphan attempts are quota-cleaned while active attempts are retained")]
+    public void CleanupRecoveryDirectories_OrphanAttemptWithoutMarker_IsCleaned()
+    {
+        Guid orphanJobId = Guid.NewGuid();
+        Guid activeJobId = Guid.NewGuid();
+        string orphanAttempt = CreateAttempt(orphanJobId, Guid.NewGuid().ToString(), DateTime.UtcNow.AddDays(-10), 32, marker: false);
+        string activeAttempt = CreateAttempt(activeJobId, Guid.NewGuid().ToString(), DateTime.UtcNow.AddDays(-10), 32, marker: false);
+
+        System.Reflection.MethodInfo cleanupMethod = typeof(HttpJobPollerService).GetMethod(
+            "CleanupRecoveryDirectories",
+            System.Reflection.BindingFlags.Static |
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("CleanupRecoveryDirectories is missing.");
+        IReadOnlyList<string> deleted = (IReadOnlyList<string>)cleanupMethod.Invoke(
+            null,
+            [_workingDirectory, DateTime.UtcNow, TimeSpan.FromHours(1), 32L, null, new[] { activeAttempt }])!;
+
+        _ = deleted.Should().Contain(orphanAttempt);
+        _ = Directory.Exists(activeAttempt).Should().BeTrue();
+    }
+
     private string CreateRecoveryAttempt(Guid jobId, string name, DateTime markerTimeUtc, int payloadSize)
+        => CreateAttempt(jobId, name, markerTimeUtc, payloadSize, marker: true);
+
+    private string CreateAttempt(Guid jobId, string name, DateTime lastWriteUtc, int payloadSize, bool marker)
     {
         string attempt = Path.Combine(_workingDirectory, jobId.ToString(), name);
         _ = Directory.CreateDirectory(attempt);
-        File.WriteAllText(Path.Combine(attempt, ".printfarmer-recovery.json"), "{}");
+        if (marker)
+        {
+            File.WriteAllText(Path.Combine(attempt, ".printfarmer-recovery.json"), "{}");
+        }
         File.WriteAllBytes(Path.Combine(attempt, "result.gcode"), new byte[payloadSize]);
-        File.SetLastWriteTimeUtc(Path.Combine(attempt, ".printfarmer-recovery.json"), markerTimeUtc);
+        File.SetLastWriteTimeUtc(
+            marker
+                ? Path.Combine(attempt, ".printfarmer-recovery.json")
+                : Path.Combine(attempt, "result.gcode"),
+            lastWriteUtc);
+        Directory.SetLastWriteTimeUtc(attempt, lastWriteUtc);
         return attempt;
     }
 
