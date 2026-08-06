@@ -95,6 +95,7 @@ public class DataImportService : IDataImportService
             response.Success = false;
             response.Errors.Add($"Critical error during import: {ex.Message}");
             _logger.LogError(ex, "[DataImport] Critical error during catalog import: {Message}", ex.Message);
+            _context.ChangeTracker.Clear();
         }
 
         return response;
@@ -107,9 +108,21 @@ public class DataImportService : IDataImportService
 
         ImportResponseDto response = new() { Success = true };
         ImportStatistics stats = new();
+        IDbContextTransaction? replaceTransaction = null;
 
         try
         {
+            if (mode == ImportMode.Replace)
+            {
+                replaceTransaction = _context.Database.IsRelational()
+                    ? await _context.Database.BeginTransactionAsync(ct)
+                    : null;
+
+                await DeleteAllPrintersAsync(ct);
+                await DeleteAllLocationsAsync(ct);
+                response.Warnings.Add("All existing printers and locations have been deleted as per Replace mode");
+            }
+
             // First import catalog
             ImportResponseDto catalogResult = await ImportCatalogAsync(backup.Catalog, mode, ct);
 
@@ -126,17 +139,16 @@ public class DataImportService : IDataImportService
             response.Errors.AddRange(catalogResult.Errors);
             response.Warnings.AddRange(catalogResult.Warnings);
 
-            // If Replace mode, delete all existing locations and printers first
-            if (mode == ImportMode.Replace)
+            if (!catalogResult.Success)
             {
-                await DeleteAllPrintersAsync(ct);
-                await DeleteAllLocationsAsync(ct);
-                response.Warnings.Add("All existing printers and locations have been deleted as per Replace mode");
+                response.Success = false;
             }
-
-            // Import locations and printers
-            stats.LocationsImported = await ImportLocationsAsync(backup.Locations, mode, response.Errors, ct);
-            stats.PrintersImported = await ImportPrintersAsync(backup.Printers, mode, response.Errors, ct);
+            else
+            {
+                // Import locations and printers
+                stats.LocationsImported = await ImportLocationsAsync(backup.Locations, mode, response.Errors, ct);
+                stats.PrintersImported = await ImportPrintersAsync(backup.Printers, mode, response.Errors, ct);
+            }
 
             stats.TotalItemsImported = stats.ManufacturersImported + stats.FilamentTypesImported +
                                        stats.PrinterModelsImported + stats.HotendsImported +
@@ -154,15 +166,50 @@ public class DataImportService : IDataImportService
                 response.Success = false;
                 _logger.LogWarning("[DataImport] Import completed with {Count} errors", response.Errors.Count);
             }
+
+            if (replaceTransaction is not null)
+            {
+                if (response.Success)
+                {
+                    await replaceTransaction.CommitAsync(ct);
+                }
+                else
+                {
+                    await replaceTransaction.RollbackAsync(CancellationToken.None);
+                    _context.ChangeTracker.Clear();
+                }
+            }
         }
         catch (Exception ex)
         {
+            if (replaceTransaction is not null)
+            {
+                try
+                {
+                    await replaceTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch (Exception rollbackException)
+                {
+                    _logger.LogError(
+                        rollbackException,
+                        "[DataImport] Failed to roll back full backup Replace transaction");
+                }
+            }
+
+            _context.ChangeTracker.Clear();
             sw.Stop();
             stats.Duration = sw.Elapsed;
             response.Statistics = stats;
             response.Success = false;
             response.Errors.Add($"Critical error during import: {ex.Message}");
             _logger.LogError(ex, "[DataImport] Critical error during full backup import: {Message}", ex.Message);
+        }
+        finally
+        {
+            if (replaceTransaction is not null)
+            {
+                await replaceTransaction.DisposeAsync();
+            }
         }
 
         return response;
@@ -723,6 +770,16 @@ public class DataImportService : IDataImportService
     private async Task DeleteAllCatalogDataAsync(CancellationToken ct)
     {
         _logger.LogWarning("[DataImport] Deleting all catalog data (Replace mode)");
+
+        List<GcodeFile> modelGcodeFiles = await _context.GcodeFiles
+            .Where(file => file.PrinterModelId != null)
+            .ToListAsync(ct);
+        modelGcodeFiles.ForEach(file => file.PrinterModelId = null);
+
+        List<PrintJobStatistics> modelStatistics = await _context.PrintJobStatistics
+            .Where(statistics => statistics.PrinterModelId != null)
+            .ToListAsync(ct);
+        modelStatistics.ForEach(statistics => statistics.PrinterModelId = null);
 
         // Delete in reverse order of dependencies
         // Note: PrinterModel-FilamentType relationship is handled via EF Core skip navigation (implicit join table)
