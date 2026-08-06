@@ -5,6 +5,7 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Queue.Dispatch;
@@ -15,8 +16,9 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// </summary>
 public class BatchDispatchService(
     IDispatchScorer scorer,
-    IJobDispatchService dispatchService,
     AppDbContext db,
+    IServiceScopeFactory scopeFactory,
+    DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
     ILogger<BatchDispatchService> logger) : IBatchDispatchService
 {
@@ -106,42 +108,21 @@ public class BatchDispatchService(
     private async Task<BatchDispatchResult> DispatchBestFitAsync(
         List<PrintJob> jobs, string userId, DispatchSettings settings, CancellationToken ct)
     {
-        BatchDispatchResult result = new();
-
-        foreach (PrintJob job in jobs)
-        {
-            if (result.DispatchedCount >= settings.MaxConcurrentDispatches)
+        return await DispatchJobsAsync(
+            jobs,
+            userId,
+            settings,
+            async (job, cancellationToken) =>
             {
-                result.Results.Add(new BatchDispatchItemResult
-                {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = $"Max concurrent dispatches ({settings.MaxConcurrentDispatches}) reached",
-                });
-                result.SkippedCount++;
-                continue;
-            }
-
-            BatchDispatchItemResult itemResult = await TryDispatchJobAsync(job, null, userId, settings, ct);
-            result.Results.Add(itemResult);
-
-            switch (itemResult.Status)
-            {
-                case "Dispatched":
-                    result.DispatchedCount++;
-                    break;
-                case "Failed":
-                case "Unknown":
-                    result.FailedCount++;
-                    break;
-                default:
-                    result.SkippedCount++;
-                    break;
-            }
-        }
-
-        return result;
+                List<DispatchScore> scores =
+                    await scorer.ScorePrintersForJobAsync(job.Id, cancellationToken);
+                return TryClaimCandidate(scores
+                    .Where(candidate =>
+                        !candidate.Eliminated
+                        && candidate.TotalScore >= settings.MinimumScoreThreshold)
+                    .OrderByDescending(candidate => candidate.TotalScore));
+            },
+            ct);
     }
 
     /// <summary>
@@ -150,9 +131,6 @@ public class BatchDispatchService(
     private async Task<BatchDispatchResult> DispatchRoundRobinAsync(
         List<PrintJob> jobs, string userId, DispatchSettings settings, CancellationToken ct)
     {
-        BatchDispatchResult result = new();
-
-        // Build a pool of eligible printers (enabled, available, not in maintenance)
         List<Printer> allPrinters = await db.Printers
             .AsNoTracking()
             .Where(p => p.IsEnabled && p.IsAvailable && !p.InMaintenance)
@@ -160,80 +138,35 @@ public class BatchDispatchService(
 
         if (allPrinters.Count == 0)
         {
-            foreach (PrintJob job in jobs)
-            {
-                result.Results.Add(new BatchDispatchItemResult
-                {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = "No available printers",
-                });
-                result.SkippedCount++;
-            }
-
-            return result;
+            return CreateSkippedResult(jobs, "No available printers");
         }
 
         int printerIndex = 0;
-        foreach (PrintJob job in jobs)
-        {
-            if (result.DispatchedCount >= settings.MaxConcurrentDispatches)
+        return await DispatchJobsAsync(
+            jobs,
+            userId,
+            settings,
+            async (job, cancellationToken) =>
             {
-                result.Results.Add(new BatchDispatchItemResult
+                List<DispatchScore> scores =
+                    await scorer.ScorePrintersForJobAsync(job.Id, cancellationToken);
+                List<DispatchScore> eligible = scores
+                    .Where(candidate =>
+                        !candidate.Eliminated
+                        && candidate.TotalScore >= settings.MinimumScoreThreshold)
+                    .ToList();
+                if (eligible.Count == 0)
                 {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = $"Max concurrent dispatches ({settings.MaxConcurrentDispatches}) reached",
-                });
-                result.SkippedCount++;
-                continue;
-            }
+                    return null;
+                }
 
-            // Score all printers for this job, then pick from eligible ones in round-robin order
-            List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-            List<DispatchScore> eligible = scores
-                .Where(s => !s.Eliminated && s.TotalScore >= settings.MinimumScoreThreshold)
-                .ToList();
-
-            if (eligible.Count == 0)
-            {
-                result.Results.Add(new BatchDispatchItemResult
-                {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = "No eligible printers above minimum score threshold",
-                });
-                result.SkippedCount++;
-                continue;
-            }
-
-            // Round-robin: pick the next eligible printer in rotation
-            int idx = printerIndex % eligible.Count;
-            DispatchScore chosen = eligible[idx];
-            printerIndex++;
-
-            BatchDispatchItemResult itemResult = await TryDispatchJobAsync(job, chosen.PrinterId, userId, settings, ct);
-            result.Results.Add(itemResult);
-
-            switch (itemResult.Status)
-            {
-                case "Dispatched":
-                    result.DispatchedCount++;
-                    break;
-                case "Failed":
-                case "Unknown":
-                    result.FailedCount++;
-                    break;
-                default:
-                    result.SkippedCount++;
-                    break;
-            }
-        }
-
-        return result;
+                int startIndex = printerIndex++ % eligible.Count;
+                IEnumerable<DispatchScore> rotated = eligible
+                    .Skip(startIndex)
+                    .Concat(eligible.Take(startIndex));
+                return TryClaimCandidate(rotated);
+            },
+            ct);
     }
 
     /// <summary>
@@ -242,12 +175,6 @@ public class BatchDispatchService(
     private async Task<BatchDispatchResult> DispatchLeastBusyAsync(
         List<PrintJob> jobs, string userId, DispatchSettings settings, CancellationToken ct)
     {
-        BatchDispatchResult result = new();
-
-        // Track in-flight assignments during this batch to adjust queue depths
-        Dictionary<Guid, int> batchAssignments = [];
-
-        // Query queue depths once before the loop to avoid N+1 DB queries
         Dictionary<Guid, int> queueDepths = await db.PrintJobs
             .Where(j => j.AssignedPrinterId != null
                 && j.Status != PrintJobStatus.Completed
@@ -256,129 +183,119 @@ public class BatchDispatchService(
             .GroupBy(j => j.AssignedPrinterId!.Value)
             .ToDictionaryAsync(g => g.Key, g => g.Count(), ct);
 
-        foreach (PrintJob job in jobs)
+        return await DispatchJobsAsync(
+            jobs,
+            userId,
+            settings,
+            async (job, cancellationToken) =>
+            {
+                List<DispatchScore> scores =
+                    await scorer.ScorePrintersForJobAsync(job.Id, cancellationToken);
+                IEnumerable<DispatchScore> ordered = scores
+                    .Where(candidate =>
+                        !candidate.Eliminated
+                        && candidate.TotalScore >= settings.MinimumScoreThreshold)
+                    .OrderBy(candidate =>
+                        queueDepths.GetValueOrDefault(candidate.PrinterId, 0))
+                    .ThenByDescending(candidate => candidate.TotalScore);
+                return TryClaimCandidate(ordered);
+            },
+            ct);
+    }
+
+    /// <summary>
+    /// Selects and starts independent dispatches, preserving result order.
+    /// </summary>
+    private async Task<BatchDispatchResult> DispatchJobsAsync(
+        List<PrintJob> jobs,
+        string userId,
+        DispatchSettings settings,
+        Func<PrintJob, CancellationToken, Task<ClaimedCandidate?>> selectCandidate,
+        CancellationToken ct)
+    {
+        var planned = new List<(int Index, PrintJob Job, ClaimedCandidate Candidate)>();
+        var resultsByIndex = new Dictionary<int, BatchDispatchItemResult>();
+        try
         {
-            if (result.DispatchedCount >= settings.MaxConcurrentDispatches)
+            for (int index = 0; index < jobs.Count; index++)
             {
-                result.Results.Add(new BatchDispatchItemResult
+                PrintJob job = jobs[index];
+                ClaimedCandidate? candidate = await selectCandidate(job, ct);
+                if (candidate is null)
                 {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = $"Max concurrent dispatches ({settings.MaxConcurrentDispatches}) reached",
-                });
-                result.SkippedCount++;
-                continue;
+                    resultsByIndex[index] = CreateSkippedItem(
+                        job,
+                        "No eligible unclaimed printers above minimum score threshold");
+                    continue;
+                }
+
+                planned.Add((index, job, candidate));
+            }
+        }
+        catch
+        {
+            foreach ((_, _, ClaimedCandidate candidate) in planned)
+            {
+                concurrencyCoordinator.ReleasePrinter(candidate.Score.PrinterId);
             }
 
-            List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-            List<DispatchScore> eligible = scores
-                .Where(s => !s.Eliminated && s.TotalScore >= settings.MinimumScoreThreshold)
-                .ToList();
+            throw;
+        }
 
-            if (eligible.Count == 0)
-            {
-                result.Results.Add(new BatchDispatchItemResult
-                {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = "No eligible printers above minimum score threshold",
-                });
-                result.SkippedCount++;
-                continue;
-            }
+        List<Task<BatchDispatchItemResult>> pendingTasks = planned
+            .Select(item => DispatchClaimedJobAsync(
+                item.Job,
+                item.Candidate,
+                userId,
+                settings,
+                ct))
+            .ToList();
+        BatchDispatchItemResult[] completed =
+            await Task.WhenAll(pendingTasks);
+        for (int completedIndex = 0; completedIndex < completed.Length; completedIndex++)
+        {
+            resultsByIndex[planned[completedIndex].Index] = completed[completedIndex];
+        }
 
-            // Pick the eligible printer with lowest effective queue depth
-            DispatchScore? chosen = eligible
-                .OrderBy(s =>
-                {
-                    int dbDepth = queueDepths.GetValueOrDefault(s.PrinterId, 0);
-                    int batchDepth = batchAssignments.GetValueOrDefault(s.PrinterId, 0);
-                    return dbDepth + batchDepth;
-                })
-                .ThenByDescending(s => s.TotalScore)
-                .FirstOrDefault();
-
-            if (chosen is null)
-            {
-                result.Results.Add(new BatchDispatchItemResult
-                {
-                    JobId = job.Id,
-                    JobName = job.Name ?? "Unknown",
-                    Status = "Skipped",
-                    Reason = "No eligible printers found",
-                });
-                result.SkippedCount++;
-                continue;
-            }
-
-            BatchDispatchItemResult itemResult = await TryDispatchJobAsync(job, chosen.PrinterId, userId, settings, ct);
-            result.Results.Add(itemResult);
-
-            switch (itemResult.Status)
-            {
-                case "Dispatched":
-                    result.DispatchedCount++;
-                    batchAssignments[chosen.PrinterId] = batchAssignments.GetValueOrDefault(chosen.PrinterId, 0) + 1;
-                    break;
-                case "Failed":
-                case "Unknown":
-                    result.FailedCount++;
-                    break;
-                default:
-                    result.SkippedCount++;
-                    break;
-            }
+        BatchDispatchResult result = new();
+        foreach (BatchDispatchItemResult itemResult in resultsByIndex
+            .OrderBy(pair => pair.Key)
+            .Select(pair => pair.Value))
+        {
+            AddResult(result, itemResult);
         }
 
         return result;
     }
 
     /// <summary>
-    /// Attempts to dispatch a single job to a specific printer (or best-fit if printerId is null).
+    /// Runs upload/start work under shared global capacity and a held printer claim.
     /// </summary>
-    private async Task<BatchDispatchItemResult> TryDispatchJobAsync(
-        PrintJob job, Guid? targetPrinterId, string userId, DispatchSettings settings, CancellationToken ct)
+    private async Task<BatchDispatchItemResult> DispatchClaimedJobAsync(
+        PrintJob job,
+        ClaimedCandidate candidate,
+        string userId,
+        DispatchSettings settings,
+        CancellationToken ct)
     {
         try
         {
-            Guid printerId;
-            double score;
-
-            if (targetPrinterId.HasValue)
-            {
-                printerId = targetPrinterId.Value;
-                List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-                DispatchScore? printerScore = scores.FirstOrDefault(s => s.PrinterId == printerId);
-                score = printerScore?.TotalScore ?? 0;
-            }
-            else
-            {
-                // BestFit: pick the top-scoring non-eliminated printer
-                List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(job.Id, ct);
-                DispatchScore? bestCandidate = scores
-                    .Where(s => !s.Eliminated && s.TotalScore >= settings.MinimumScoreThreshold)
-                    .OrderByDescending(s => s.TotalScore)
-                    .FirstOrDefault();
-
-                if (bestCandidate is null)
-                {
-                    return new BatchDispatchItemResult
-                    {
-                        JobId = job.Id,
-                        JobName = job.Name ?? "Unknown",
-                        Status = "Skipped",
-                        Reason = "No eligible printers above minimum score threshold",
-                    };
-                }
-
-                printerId = bestCandidate.PrinterId;
-                score = bestCandidate.TotalScore;
-            }
-
+            using DispatchCapacityLease capacityLease =
+                await concurrencyCoordinator.AcquireCapacityAsync(
+                    settings.MaxConcurrentDispatches,
+                    ct);
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            IJobDispatchService dispatchService =
+                scope.ServiceProvider.GetRequiredService<IJobDispatchService>();
+            AppDbContext dispatchDb =
+                scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
-                await dispatchService.DispatchJobAsync(job.Id, printerId, userId, ct);
+                await dispatchService.DispatchJobAsync(
+                    job.Id,
+                    candidate.Score.PrinterId,
+                    userId,
+                    candidate.Score,
+                    ct);
 
             DispatchAttemptOutcome? outcome = dispatched.DispatchResult?.Outcome;
             if (outcome != DispatchAttemptOutcome.Accepted)
@@ -387,25 +304,29 @@ public class BatchDispatchService(
                 {
                     JobId = job.Id,
                     JobName = job.Name ?? "Unknown",
-                    PrinterId = printerId,
-                    Score = score,
+                    PrinterId = candidate.Score.PrinterId,
+                    Score = candidate.Score.TotalScore,
                     Status = outcome == DispatchAttemptOutcome.Unknown ? "Unknown" : "Failed",
                     Reason = dispatched.DispatchResult?.ErrorCode ?? "Dispatch was not accepted by the backend.",
                 };
             }
 
-            Printer? printer = await db.Printers.AsNoTracking()
-                .FirstOrDefaultAsync(p => p.Id == printerId, ct);
+            Printer? printer = await dispatchDb.Printers.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == candidate.Score.PrinterId, ct);
 
             return new BatchDispatchItemResult
             {
                 JobId = job.Id,
                 JobName = job.Name ?? "Unknown",
                 Status = "Dispatched",
-                PrinterId = printerId,
-                PrinterName = printer?.Name ?? printerId.ToString(),
-                Score = score,
+                PrinterId = candidate.Score.PrinterId,
+                PrinterName = printer?.Name ?? candidate.Score.PrinterId.ToString(),
+                Score = candidate.Score.TotalScore,
             };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -418,7 +339,71 @@ public class BatchDispatchService(
                 Reason = ex.Message,
             };
         }
+        finally
+        {
+            concurrencyCoordinator.ReleasePrinter(candidate.Score.PrinterId);
+        }
     }
+
+    private ClaimedCandidate? TryClaimCandidate(
+        IEnumerable<DispatchScore> candidates)
+    {
+        foreach (DispatchScore candidate in candidates)
+        {
+            if (concurrencyCoordinator.TryClaimPrinter(candidate.PrinterId))
+            {
+                return new ClaimedCandidate(candidate);
+            }
+        }
+
+        return null;
+    }
+
+    private static BatchDispatchResult CreateSkippedResult(
+        IEnumerable<PrintJob> jobs,
+        string reason)
+    {
+        BatchDispatchResult result = new();
+        foreach (PrintJob job in jobs)
+        {
+            AddResult(result, CreateSkippedItem(job, reason));
+        }
+
+        return result;
+    }
+
+    private static BatchDispatchItemResult CreateSkippedItem(
+        PrintJob job,
+        string reason) =>
+        new()
+        {
+            JobId = job.Id,
+            JobName = job.Name ?? "Unknown",
+            Status = "Skipped",
+            Reason = reason,
+        };
+
+    private static void AddResult(
+        BatchDispatchResult result,
+        BatchDispatchItemResult itemResult)
+    {
+        result.Results.Add(itemResult);
+        switch (itemResult.Status)
+        {
+            case "Dispatched":
+                result.DispatchedCount++;
+                break;
+            case "Failed":
+            case "Unknown":
+                result.FailedCount++;
+                break;
+            default:
+                result.SkippedCount++;
+                break;
+        }
+    }
+
+    private sealed record ClaimedCandidate(DispatchScore Score);
 
     public async Task<DispatchQueueStatusDto> GetQueueStatusAsync(CancellationToken ct = default)
     {
