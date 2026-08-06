@@ -152,7 +152,7 @@ chown $USER:$USER .deploy-config
 
 ### Essential
 - `ARCHITECTURE` - `monolithic` or `microservices`
-- `DB_PROVIDER` - `Postgres` or `SqlServer`
+- `DB_PROVIDER` - `postgres` or `sqlserver`
 - `DB_PASSWORD` - Database password
 - `NETWORK_MODE` - `bridge` or `host`
 - `HTTP_PORT` - Frontend port (default: 8080)
@@ -276,7 +276,7 @@ docker compose down
 
 # Edit config
 nano .deploy-config
-# Change: DB_PROVIDER=SqlServer → DB_PROVIDER=Postgres
+# Change: DB_PROVIDER=sqlserver → DB_PROVIDER=postgres
 
 # Redeploy
 ./scripts/deploy-docker.sh --non-interactive

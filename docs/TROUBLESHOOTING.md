@@ -97,7 +97,7 @@ Solutions to common issues in PrintFarmer.
    # SQL Server
    sqlcmd -S localhost -U sa -P <password>
    
-   # MySQL
+   # Unsupported in the current release: MySQL
    mysql -h localhost -u root -p
    ```
 

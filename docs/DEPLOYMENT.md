@@ -63,7 +63,7 @@ chmod +x scripts/deploy-docker.sh
 
 # Non-interactive (supply config via environment)
 ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 \
-DB_PROVIDER=sqlite ./scripts/deploy-docker.sh --non-interactive
+DB_PROVIDER=postgres ./scripts/deploy-docker.sh --non-interactive
 ```
 
 The script will:

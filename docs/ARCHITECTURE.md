@@ -34,7 +34,7 @@ PrintFarmer uses a **two-tier client-server architecture** with real-time commun
 ├────────────────────────────────────────┤
 │      Multi-Database Support            │
 │  SQLite • PostgreSQL                   │
-│  SQL Server • MySQL                    │
+│  SQL Server                            │
 └────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ Repositories (Data access)
      ↓
 Entity Framework Core (ORM)
      ↓
-Database (SQLite/PostgreSQL/SQL Server/MySQL)
+Database (SQLite/PostgreSQL/SQL Server)
 ```
 
 ### Key Components

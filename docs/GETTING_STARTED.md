@@ -120,9 +120,12 @@ DB_PROVIDER=postgres DB_CONNECTION_STRING="Host=localhost;Database=printfarmer;U
 # SQL Server
 DB_PROVIDER=sqlserver DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;User Id=sa;Password=YourPassword123" dotnet run --project ./api/Farm.Web.Api.csproj
 
-# MySQL
+# Unsupported: MySQL (the following command is rejected)
 DB_PROVIDER=mysql DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Uid=root;Pwd=password" dotnet run --project ./api/Farm.Web.Api.csproj
 ```
+
+MySQL remains unavailable until provider-correct application and slicer
+migration assemblies are shipped.
 
 ## Common Tasks
 
