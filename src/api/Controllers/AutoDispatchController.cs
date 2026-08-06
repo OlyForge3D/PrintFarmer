@@ -64,9 +64,16 @@ public class AutoDispatchController(
     [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<AutoDispatchReadyResult>> MarkReadyAsync(Guid printerId, CancellationToken ct)
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
+    public async Task<ActionResult<AutoDispatchReadyResult>> MarkReadyAsync(
+        Guid printerId,
+        CancellationToken ct,
+        [FromQuery] bool confirmFilamentOverride = false,
+        [FromHeader(Name = "X-Job-If-Match")] string? jobIfMatch = null)
     {
         if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
         {
@@ -83,14 +90,42 @@ public class AutoDispatchController(
             return NotFound();
         }
 
+        if (confirmFilamentOverride && string.IsNullOrWhiteSpace(jobIfMatch))
+        {
+            return StatusCode(
+                StatusCodes.Status428PreconditionRequired,
+                new
+                {
+                    error = "precondition_required",
+                    detail = "X-Job-If-Match is required to confirm a filament override.",
+                });
+        }
+
+        if (confirmFilamentOverride &&
+            await CheckQueueHeadPreconditionAsync(printerId, jobIfMatch, ct) is { } jobPrecondition)
+        {
+            return jobPrecondition;
+        }
+
         try
         {
             byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
+            byte[]? expectedOverrideJob = confirmFilamentOverride
+                ? DecodeEtag(jobIfMatch!)
+                : null;
+            string actorSubject = confirmFilamentOverride
+                ? QueueActorIdentity.Resolve(User)
+                : QueueActorIdentity.AutoDispatch;
             var result = await autoDispatchService.MarkReadyAsync(
                 printerId,
                 expectedDispatch,
+                confirmFilamentOverride,
+                actorSubject,
+                expectedOverrideJob,
                 ct);
-            return Ok(result);
+            return result.RequiresFilamentOverride
+                ? Conflict(result)
+                : Ok(result);
         }
         catch (DbUpdateConcurrencyException)
         {

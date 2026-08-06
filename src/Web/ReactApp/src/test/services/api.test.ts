@@ -375,9 +375,52 @@ describe("ApiClient", () => {
       expect(mockPost).toHaveBeenCalledWith(
         "/auto-dispatch/printer-1/ready",
         undefined,
-        { headers: { "If-Match": '"dispatch-etag"' } }
+        expect.objectContaining({
+          headers: { "If-Match": '"dispatch-etag"' },
+          validateStatus: expect.any(Function),
+        })
       );
+      const config = mockPost.mock.calls[0]?.[2];
+      expect(config.validateStatus(200)).toBe(true);
+      expect(config.validateStatus(409)).toBe(true);
+      expect(config.validateStatus(500)).toBe(false);
       expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should make filament override confirmation explicit in the ready request", async () => {
+      const mockResponse = {
+        data: {
+          status: {
+            printerId: "printer-1",
+            enabled: true,
+            state: "Ready",
+            queueDepth: 1,
+          },
+          dispatchInitiated: true,
+          filamentOverrideApplied: true,
+        },
+      };
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await apiClient.confirmAutoDispatchReady(
+        "printer-1",
+        "dispatch-etag",
+        true,
+        "job-etag"
+      );
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/ready?confirmFilamentOverride=true",
+        undefined,
+        expect.objectContaining({
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Job-If-Match": '"job-etag"',
+          },
+        })
+      );
     });
 
     it("should expose confirmAutoDispatchReady instead of the removed markPrinterReady alias", () => {

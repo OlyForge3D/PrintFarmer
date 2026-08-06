@@ -108,7 +108,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MarkReadyAsync_WhenPrinterIsPendingReadyWithQueuedJob_TransitionsToReadyAndNotifiesDispatchTrigger()
+    public async Task MarkReadyAsync_WhenFilamentIsUnknownAndOverrideIsConfirmed_TransitionsToReadyAndNotifiesDispatchTrigger()
     {
         Printer printer = await CreatePrinterAsync();
         printer.DispatchState = new PrinterDispatchState { PrinterId = printer.Id, AutoDispatchState = AutoDispatchState.PendingReady };
@@ -124,13 +124,21 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
             NullLogger<AutoDispatchService>.Instance,
             dispatchTrigger: dispatchTrigger.Object);
 
-        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState.RowVersion ?? [],
+            confirmFilamentOverride: true,
+            actorSubject: "32e94992-fc1b-46dc-83d8-25ae8782985a",
+            expectedOverrideJobVersion: queuedJob.RowVersion);
 
         result.Status.State.Should().Be(nameof(AutoDispatchState.Ready));
         result.NextJob.Should().NotBeNull();
         result.NextJob!.Id.Should().Be(queuedJob.Id);
         result.FilamentCheck.Should().NotBeNull();
-        result.FilamentCheck!.Sufficient.Should().BeTrue();
+        result.FilamentCheck!.Sufficient.Should().BeFalse();
+        result.FilamentCheck.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
+        result.FilamentOverrideApplied.Should().BeTrue();
+        result.DispatchInitiated.Should().BeTrue();
 
         Printer persistedPrinter = await _db.Printers.Include(p => p.DispatchState).SingleAsync(p => p.Id == printer.Id);
         persistedPrinter.DispatchState!.AutoDispatchState.Should().Be(AutoDispatchState.Ready);
@@ -165,7 +173,12 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
             NullLogger<AutoDispatchService>.Instance,
             dispatchTrigger: dispatchTrigger.Object);
 
-        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState.RowVersion ?? [],
+            confirmFilamentOverride: true,
+            actorSubject: "32e94992-fc1b-46dc-83d8-25ae8782985a",
+            expectedOverrideJobVersion: queuedJob.RowVersion);
 
         result.Status.State.Should().Be(nameof(AutoDispatchState.Ready));
         result.Status.BedPreConfirmed.Should().BeFalse();

@@ -114,6 +114,15 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         request.Headers.TryAddWithoutValidation(
             "If-Match",
             $"\"{status.DispatchStateETag}\"");
+        if (action.Contains(
+                "confirmFilamentOverride=true",
+                StringComparison.Ordinal))
+        {
+            request.Headers.TryAddWithoutValidation(
+                "X-Job-If-Match",
+                $"\"{status.NextJobETag}\"");
+        }
+
         return await _client.SendAsync(request);
     }
 
@@ -332,7 +341,7 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
 
         HttpResponseMessage readyResponse = await PostWithDispatchEtagAsync(
             printer.Id,
-            "ready");
+            "ready?confirmFilamentOverride=true");
         readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
         AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
@@ -340,6 +349,7 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
         readyResult!.Status.State.Should().Be("Ready");
         readyResult.Status.BedPreConfirmed.Should().BeFalse();
         readyResult.NextJob.Should().NotBeNull();
+        readyResult.FilamentOverrideApplied.Should().BeTrue();
     }
 
     private async Task CreateQueuedJobAsync(Guid printerId, string name, int queuePosition)

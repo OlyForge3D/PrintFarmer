@@ -163,16 +163,52 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
 
         using HttpRequestMessage readyRequest = new(
             HttpMethod.Post,
-            $"{CurrentRouteBase}/{printer.Id}/ready");
+            $"{CurrentRouteBase}/{printer.Id}/ready?confirmFilamentOverride=true");
         readyRequest.Headers.TryAddWithoutValidation(
             "If-Match",
             $"\"{status.DispatchStateETag}\"");
+        readyRequest.Headers.TryAddWithoutValidation(
+            "X-Job-If-Match",
+            $"\"{status.NextJobETag}\"");
         HttpResponseMessage readyResponse = await _client.SendAsync(readyRequest);
 
         readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
         readyResult.Should().NotBeNull();
         readyResult!.Status.State.Should().Be("Ready");
+        readyResult.FilamentOverrideApplied.Should().BeTrue();
+        readyResult.DispatchInitiated.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MarkReady_WhenFilamentDataIsUnknown_ReturnsConflictWithoutDispatch()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "unknown-filament-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
+            $"{CurrentRouteBase}/{printer.Id}/status");
+        statusResponse.EnsureSuccessStatusCode();
+        AutoDispatchStatusDto status =
+            (await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions))!;
+        using HttpRequestMessage readyRequest = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/ready");
+        readyRequest.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+
+        HttpResponseMessage readyResponse = await _client.SendAsync(readyRequest);
+
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        AutoDispatchReadyResult? readyResult =
+            await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
+        readyResult.Should().NotBeNull();
+        readyResult!.Status.State.Should().Be("PendingReady");
+        readyResult.DispatchInitiated.Should().BeFalse();
+        readyResult.RequiresFilamentOverride.Should().BeTrue();
+        readyResult.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
+        readyResult.FilamentCheck.Message.Should().Be("No spool is assigned to the printer.");
     }
 
     private async Task<Printer> CreateTestPrinterAsync(string name)

@@ -37,6 +37,14 @@ public interface IAutoDispatchService
         byte[] expectedDispatchStateVersion,
         CancellationToken ct = default);
 
+    Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        bool confirmFilamentOverride,
+        string actorSubject,
+        byte[]? expectedOverrideJobVersion,
+        CancellationToken ct = default);
+
     /// <summary>
     /// Skips the next queued job (cancels it) and remains in PendingReady state
     /// if more jobs are queued, or transitions to None if the queue is empty.
@@ -130,6 +138,21 @@ public class AutoDispatchReadyResult
     /// Result of the filament pre-flight check.
     /// </summary>
     public FilamentCheckResult? FilamentCheck { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the server initiated dispatch for the next job.
+    /// </summary>
+    public bool DispatchInitiated { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether explicit filament override confirmation is required.
+    /// </summary>
+    public bool RequiresFilamentOverride { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this request applied an explicit filament override.
+    /// </summary>
+    public bool FilamentOverrideApplied { get; set; }
 }
 
 public class NextJobDto
@@ -154,6 +177,8 @@ public class NextJobDto
 
 public class FilamentCheckResult
 {
+    public FilamentCheckOutcome Outcome { get; set; }
+
     public bool Sufficient { get; set; }
 
     public double? RemainingWeightG { get; set; }
@@ -167,6 +192,13 @@ public class FilamentCheckResult
     public bool MaterialMismatch { get; set; }
 
     public string? Message { get; set; }
+}
+
+public enum FilamentCheckOutcome
+{
+    Unknown = 0,
+    Incompatible = 1,
+    Compatible = 2,
 }
 
 public class AutoDispatchStatusDto
@@ -342,17 +374,47 @@ public class AutoDispatchService(
     public Task<AutoDispatchReadyResult> MarkReadyAsync(
         Guid printerId,
         CancellationToken ct = default) =>
-        MarkReadyCoreAsync(printerId, expectedDispatchStateVersion: null, ct);
+        MarkReadyCoreAsync(
+            printerId,
+            expectedDispatchStateVersion: null,
+            confirmFilamentOverride: false,
+            QueueActorIdentity.AutoDispatch,
+            expectedOverrideJobVersion: null,
+            ct);
 
     public Task<AutoDispatchReadyResult> MarkReadyAsync(
         Guid printerId,
         byte[] expectedDispatchStateVersion,
         CancellationToken ct = default) =>
-        MarkReadyCoreAsync(printerId, expectedDispatchStateVersion, ct);
+        MarkReadyCoreAsync(
+            printerId,
+            expectedDispatchStateVersion,
+            confirmFilamentOverride: false,
+            QueueActorIdentity.AutoDispatch,
+            expectedOverrideJobVersion: null,
+            ct);
+
+    public Task<AutoDispatchReadyResult> MarkReadyAsync(
+        Guid printerId,
+        byte[] expectedDispatchStateVersion,
+        bool confirmFilamentOverride,
+        string actorSubject,
+        byte[]? expectedOverrideJobVersion,
+        CancellationToken ct = default) =>
+        MarkReadyCoreAsync(
+            printerId,
+            expectedDispatchStateVersion,
+            confirmFilamentOverride,
+            actorSubject,
+            expectedOverrideJobVersion,
+            ct);
 
     private async Task<AutoDispatchReadyResult> MarkReadyCoreAsync(
         Guid printerId,
         byte[]? expectedDispatchStateVersion,
+        bool confirmFilamentOverride,
+        string actorSubject,
+        byte[]? expectedOverrideJobVersion,
         CancellationToken ct)
     {
         Printer? printer = await db.Printers.Include(p => p.DispatchState).FirstOrDefaultAsync(p => p.Id == printerId, ct);
@@ -405,7 +467,12 @@ public class AutoDispatchService(
             {
                 Status = emptyStatus,
                 NextJob = null,
-                FilamentCheck = new FilamentCheckResult { Sufficient = true, Message = "No queued jobs remaining" },
+                FilamentCheck = new FilamentCheckResult
+                {
+                    Outcome = FilamentCheckOutcome.Compatible,
+                    Sufficient = true,
+                    Message = "No queued jobs remaining",
+                },
             };
         }
 
@@ -415,8 +482,66 @@ public class AutoDispatchService(
                 "Calibration jobs require the exact-job acknowledge-bed-clear-and-start endpoint.");
         }
 
+        if (confirmFilamentOverride &&
+            (expectedOverrideJobVersion is null ||
+             nextJob.RowVersion is null ||
+             !expectedOverrideJobVersion.SequenceEqual(nextJob.RowVersion)))
+        {
+            throw new DbUpdateConcurrencyException(
+                "The reviewed queue head changed before the filament override was confirmed.");
+        }
+
         // Perform filament pre-flight check
         FilamentCheckResult filamentCheck = await CheckFilamentAsync(printer, nextJob, ct);
+        NextJobDto nextJobDto = new()
+        {
+            Id = nextJob.Id,
+            Name = nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown",
+            EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
+            RequiredMaterialType = nextJob.RequiredMaterialType,
+            EstimatedPrintTime = nextJob.EstimatedPrintTime,
+            JobKind = (
+                nextJob.JobKind ??
+                Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
+            JobETag = nextJob.RowVersion is { Length: > 0 }
+                ? Convert.ToBase64String(nextJob.RowVersion)
+                : null,
+            ExpectedPrinterConfigRevision =
+                nextJob.PinnedPrinterConfigRevision,
+        };
+        bool filamentOverrideRequired =
+            filamentCheck.Outcome != FilamentCheckOutcome.Compatible;
+
+        if (filamentOverrideRequired && !confirmFilamentOverride)
+        {
+            AutoDispatchStatusDto blockedStatus = await BuildStatusDtoAsync(printer, ct);
+            logger.LogInformation(
+                ReadyGateLogPrefix + " Dispatch blocked for printer {PrinterId}, job {JobId}: filament check {Outcome}: {FilamentCheckMessage}",
+                printerId,
+                nextJob.Id,
+                filamentCheck.Outcome,
+                filamentCheck.Message);
+
+            return new AutoDispatchReadyResult
+            {
+                Status = blockedStatus,
+                NextJob = nextJobDto,
+                FilamentCheck = filamentCheck,
+                DispatchInitiated = false,
+                RequiresFilamentOverride = true,
+            };
+        }
+
+        if (filamentOverrideRequired)
+        {
+            logger.LogWarning(
+                ReadyGateLogPrefix + " Operator {ActorSubject} explicitly overrode {Outcome} filament check for printer {PrinterId}, job {JobId}: {FilamentCheckMessage}",
+                actorSubject,
+                filamentCheck.Outcome,
+                printerId,
+                nextJob.Id,
+                filamentCheck.Message);
+        }
 
         // Transition to Ready state
         PrinterDispatchState dsReady = EnsureDispatchState(printer);
@@ -437,23 +562,10 @@ public class AutoDispatchService(
         return new AutoDispatchReadyResult
         {
             Status = status,
-            NextJob = new NextJobDto
-            {
-                Id = nextJob.Id,
-                Name = nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown",
-                EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
-                RequiredMaterialType = nextJob.RequiredMaterialType,
-                EstimatedPrintTime = nextJob.EstimatedPrintTime,
-                JobKind = (
-                    nextJob.JobKind ??
-                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
-                JobETag = nextJob.RowVersion is { Length: > 0 }
-                    ? Convert.ToBase64String(nextJob.RowVersion)
-                    : null,
-                ExpectedPrinterConfigRevision =
-                    nextJob.PinnedPrinterConfigRevision,
-            },
+            NextJob = nextJobDto,
             FilamentCheck = filamentCheck,
+            DispatchInitiated = true,
+            FilamentOverrideApplied = filamentOverrideRequired,
         };
     }
 
@@ -1176,13 +1288,17 @@ public class AutoDispatchService(
             RequiredMaterial = nextJob.RequiredMaterialType,
         };
 
-        // If no spool is loaded or Spoolman is not configured, skip the check
-        if (printer.CurrentSpoolId is null || spoolmanService is null)
+        if (printer.CurrentSpoolId is null)
         {
-            result.Sufficient = true;
-            result.Message = printer.CurrentSpoolId is null
-                ? "No spool loaded — filament check skipped"
-                : "Spoolman not configured — filament check skipped";
+            result.Outcome = FilamentCheckOutcome.Unknown;
+            result.Message = "No spool is assigned to the printer.";
+            return result;
+        }
+
+        if (spoolmanService is null)
+        {
+            result.Outcome = FilamentCheckOutcome.Unknown;
+            result.Message = "Spoolman is unavailable, so the assigned spool could not be verified.";
             return result;
         }
 
@@ -1191,49 +1307,65 @@ public class AutoDispatchService(
             var spool = await spoolmanService.GetSpoolByIdAsync(printer.CurrentSpoolId.Value, ct);
             if (spool is null)
             {
-                result.Sufficient = true;
-                result.Message = "Spool data not available — filament check skipped";
+                result.Outcome = FilamentCheckOutcome.Unknown;
+                result.Message = $"Spool {printer.CurrentSpoolId.Value} data is unavailable.";
                 return result;
             }
 
             result.RemainingWeightG = spool.RemainingWeightG;
             result.LoadedMaterial = spool.Material;
 
-            // Check material type mismatch
-            if (!string.IsNullOrEmpty(nextJob.RequiredMaterialType)
-                && !string.IsNullOrEmpty(spool.Material)
-                && !string.Equals(nextJob.RequiredMaterialType, spool.Material, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(nextJob.RequiredMaterialType))
             {
+                result.Outcome = FilamentCheckOutcome.Unknown;
+                result.Message = "The queued job does not specify a required filament material.";
+                return result;
+            }
+
+            if (string.IsNullOrWhiteSpace(spool.Material))
+            {
+                result.Outcome = FilamentCheckOutcome.Unknown;
+                result.Message = "The assigned spool does not specify a filament material.";
+                return result;
+            }
+
+            if (!string.Equals(nextJob.RequiredMaterialType, spool.Material, StringComparison.OrdinalIgnoreCase))
+            {
+                result.Outcome = FilamentCheckOutcome.Incompatible;
                 result.MaterialMismatch = true;
-                result.Sufficient = false;
                 result.Message = $"Material mismatch: loaded {spool.Material}, job requires {nextJob.RequiredMaterialType}";
                 return result;
             }
 
-            // Check remaining filament weight
-            if (nextJob.EstimatedFilamentUsage.HasValue && spool.RemainingWeightG.HasValue)
+            if (!nextJob.EstimatedFilamentUsage.HasValue)
             {
-                result.Sufficient = spool.RemainingWeightG.Value >= nextJob.EstimatedFilamentUsage.Value;
-                if (!result.Sufficient)
-                {
-                    result.Message = $"Insufficient filament: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required";
-                }
-                else
-                {
-                    result.Message = $"Filament OK: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required";
-                }
+                result.Outcome = FilamentCheckOutcome.Unknown;
+                result.Message = "The queued job does not include an estimated filament requirement.";
+                return result;
             }
-            else
+
+            if (!spool.RemainingWeightG.HasValue)
             {
-                result.Sufficient = true;
-                result.Message = "Filament weight data incomplete — check skipped";
+                result.Outcome = FilamentCheckOutcome.Unknown;
+                result.Message = "The assigned spool does not include a remaining filament weight.";
+                return result;
             }
+
+            result.Sufficient =
+                spool.RemainingWeightG.Value >= nextJob.EstimatedFilamentUsage.Value;
+            result.Outcome = result.Sufficient
+                ? FilamentCheckOutcome.Compatible
+                : FilamentCheckOutcome.Incompatible;
+            result.Message = result.Sufficient
+                ? $"Filament OK: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required"
+                : $"Insufficient filament: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required";
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, ReadyGateLogPrefix + " Filament check failed for printer {PrinterId}", printer.Id);
-            result.Sufficient = true;
-            result.Message = "Filament check failed — proceeding anyway";
+            result.Outcome = FilamentCheckOutcome.Unknown;
+            result.Sufficient = false;
+            result.Message = "Filament verification failed because Spoolman could not be reached.";
         }
 
         return result;

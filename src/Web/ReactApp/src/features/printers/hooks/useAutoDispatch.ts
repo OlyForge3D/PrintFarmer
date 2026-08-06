@@ -108,6 +108,18 @@ export type ConfirmBedClearResult =
       >;
     };
 
+export type ConfirmBedClearVariables =
+  | AutoDispatchStatus
+  | {
+      status: AutoDispatchStatus;
+      confirmFilamentOverride: true;
+      overrideJobETag: string;
+    };
+
+function getReviewedStatus(variables: ConfirmBedClearVariables): AutoDispatchStatus {
+  return 'status' in variables ? variables.status : variables;
+}
+
 function reviewedMutationError(
   statusCode: number,
   detail: string | undefined
@@ -294,7 +306,10 @@ export function useSetAllAutoDispatchEnabled() {
 export function useConfirmBedClear() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (status: AutoDispatchStatus): Promise<ConfirmBedClearResult> => {
+    mutationFn: async (variables: ConfirmBedClearVariables): Promise<ConfirmBedClearResult> => {
+      const status = getReviewedStatus(variables);
+      const confirmFilamentOverride =
+        'status' in variables && variables.confirmFilamentOverride;
       const dispatchStateETag = requireStatusEtag(
         status.dispatchStateETag,
         'Dispatch-state ETag'
@@ -302,10 +317,17 @@ export function useConfirmBedClear() {
       if (status.nextJobKind !== 'FilamentCalibration') {
         return {
           kind: 'standard',
-          result: await apiClient.confirmAutoDispatchReady(
-            status.printerId,
-            dispatchStateETag
-          ),
+          result: confirmFilamentOverride
+            ? await apiClient.confirmAutoDispatchReady(
+                status.printerId,
+                dispatchStateETag,
+                true,
+                variables.overrideJobETag
+              )
+            : await apiClient.confirmAutoDispatchReady(
+                status.printerId,
+                dispatchStateETag
+              ),
         };
       }
       const jobId = status.nextJobId;
@@ -332,7 +354,8 @@ export function useConfirmBedClear() {
         result,
       };
     },
-    onSuccess: (data, status) => {
+    onSuccess: (data, variables) => {
+      const status = getReviewedStatus(variables);
       if (data.kind === 'standard') {
         syncAutoDispatchCaches(qc, data.result.status);
       }

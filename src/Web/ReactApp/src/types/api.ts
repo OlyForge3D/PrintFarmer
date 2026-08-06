@@ -3555,6 +3555,7 @@ export interface AutoDispatchNextJob {
 }
 
 export interface FilamentCheckResult {
+  outcome?: 'Compatible' | 'Incompatible' | 'Unknown';
   sufficient: boolean;
   remainingWeightG?: number;
   requiredWeightG?: number;
@@ -3568,6 +3569,9 @@ export interface AutoDispatchReadyResult {
   status: AutoDispatchStatus;
   nextJob?: AutoDispatchNextJob;
   filamentCheck?: FilamentCheckResult;
+  dispatchInitiated?: boolean;
+  requiresFilamentOverride?: boolean;
+  filamentOverrideApplied?: boolean;
 }
 
 export type BedClearAcknowledgementResult =

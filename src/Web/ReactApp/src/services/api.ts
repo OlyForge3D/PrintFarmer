@@ -4916,13 +4916,31 @@ export class ApiClient {
 
   async confirmAutoDispatchReady(
     printerId: string,
-    dispatchStateETag: string
+    dispatchStateETag: string,
+    confirmFilamentOverride = false,
+    overrideJobETag?: string | null
   ): Promise<AutoDispatchReadyResult> {
     const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const overrideQuery = confirmFilamentOverride
+      ? "?confirmFilamentOverride=true"
+      : "";
     const response = await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready`,
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready${overrideQuery}`,
       undefined,
-      { headers: { "If-Match": etag } }
+      {
+        headers: {
+          "If-Match": etag,
+          ...(confirmFilamentOverride
+            ? {
+                "X-Job-If-Match": this.reviewedEtag(
+                  overrideJobETag,
+                  "The reviewed filament override job"
+                ),
+              }
+            : {}),
+        },
+        validateStatus: (status) => status === 200 || status === 409,
+      }
     );
     return response.data;
   }
