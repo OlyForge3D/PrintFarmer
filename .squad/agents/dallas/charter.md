@@ -35,8 +35,9 @@
 
 ## Model
 
-- **Preferred:** auto
-- **Rationale:** Coordinator selects the best model based on task type — cost first unless writing code
+- **Preferred:** `claude-opus-5`
+- **Reasoning effort:** `max`
+- **Rationale:** Claude Opus 5 with maximum reasoning for architecture, system design, and cross-domain technical decisions
 - **Fallback:** Standard chain — the coordinator handles fallback automatically
 
 ## Collaboration

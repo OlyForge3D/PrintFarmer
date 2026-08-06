@@ -45,7 +45,7 @@
 
 ## Machine-Local Execution Policy (this worktree)
 
-On this machine, Gorman uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+On this machine, Gorman uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
 
 ## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
 

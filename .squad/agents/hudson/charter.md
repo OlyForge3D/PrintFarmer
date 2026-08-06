@@ -35,7 +35,7 @@
 
 ## Machine-Local Execution Policy (this worktree)
 
-On this machine, Hudson uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
+On this machine, Hudson uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Work continues until implementation is verified and mandatory review gates pass. Unavoidable platform/provider hard limits still apply.
 
 ## Boundaries
 - Owns all SwiftUI view code in PFarm-Ios

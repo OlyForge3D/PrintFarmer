@@ -5,7 +5,8 @@
     "role": "Lead",
     "created_at": "2026-03-06T18:43:00Z",
     "legacy_named": false,
-    "status": "active"
+    "status": "active",
+    "model": "claude-opus-5"
   },
   {
     "persistent_name": "Ripley",
@@ -13,7 +14,8 @@
     "role": "Frontend Dev",
     "created_at": "2026-03-06T18:43:00Z",
     "legacy_named": false,
-    "status": "active"
+    "status": "active",
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Lambert",
@@ -21,7 +23,8 @@
     "role": "Backend Dev",
     "created_at": "2026-03-06T18:43:00Z",
     "legacy_named": false,
-    "status": "active"
+    "status": "active",
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Kane",
@@ -53,7 +56,8 @@
     "role": "DevOps & Deployment Engineer",
     "created_at": "2026-03-06T18:53:00Z",
     "legacy_named": false,
-    "status": "active"
+    "status": "active",
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Newt",
@@ -97,7 +101,8 @@
     "created_at": "2026-05-20T00:00:00Z",
     "legacy_named": false,
     "status": "active",
-    "note": "Migrated from PFarm-Ios squad (was Ripley)"
+    "note": "Migrated from PFarm-Ios squad (was Ripley)",
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Gorman",
@@ -106,7 +111,8 @@
     "created_at": "2026-05-20T00:00:00Z",
     "legacy_named": false,
     "status": "active",
-    "note": "Migrated from PFarm-Ios squad (was Lambert)"
+    "note": "Migrated from PFarm-Ios squad (was Lambert)",
+    "model": "gpt-5.6-sol"
   },
   {
     "persistent_name": "Drake",
