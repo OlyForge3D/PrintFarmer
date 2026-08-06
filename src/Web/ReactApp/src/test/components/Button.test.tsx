@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Button } from '@/common/components/ui/Button';
+import { Button, type ButtonVariant } from '@/common/components/ui/Button';
+
+const FORBIDDEN_PAINT_PATTERNS: Array<[string, RegExp]> = [
+  ['background shorthand', /\[background:/],
+  ['background-color utility', /(?:^|\s|:)bg-/],
+  ['colour utility', /(?:^|\s|:)text-(?:inherit|white|black|current|pf-|\[)/],
+  ['border-colour utility', /(?:^|\s|:)border-(?:transparent|current|pf-|\[)/],
+  ['box-shadow utility', /(?:^|\s|:)shadow-/]
+];
 
 describe('Button', () => {
   describe('iconCenter prop', () => {
@@ -293,19 +301,11 @@ describe('Button', () => {
   // A unit test cannot observe the cascade, but it can observe the precondition:
   // ghost must contribute no paint utility of its own.
   describe('ghost variant does not emit paint utilities (#1087)', () => {
-    const FORBIDDEN: Array<[string, RegExp]> = [
-      ['background shorthand', /\[background:/],
-      ['background-color utility', /(?:^|\s|:)bg-/],
-      ['colour utility', /(?:^|\s|:)text-(?:inherit|white|black|current|pf-|\[)/],
-      ['border-colour utility', /(?:^|\s|:)border-(?:transparent|current|pf-|\[)/],
-      ['box-shadow utility', /(?:^|\s|:)shadow-/]
-    ];
-
     it('contributes no background, colour, border-colour or shadow class', () => {
       render(<Button variant="ghost">Ghost</Button>);
       const className = screen.getByRole('button', { name: 'Ghost' }).className;
 
-      for (const [label, pattern] of FORBIDDEN) {
+      for (const [label, pattern] of FORBIDDEN_PAINT_PATTERNS) {
         expect(
           pattern.test(className),
           `ghost variant emitted a ${label} (${className}); it would defeat caller ` +
@@ -355,14 +355,6 @@ describe('Button', () => {
   // it can observe the precondition: these variants must contribute no paint
   // utility of their own, in any state.
   describe('subtle, tab, toggle and link emit no paint utilities (#1102)', () => {
-    const FORBIDDEN: Array<[string, RegExp]> = [
-      ['background shorthand', /\[background:/],
-      ['background-color utility', /(?:^|\s|:)bg-/],
-      ['colour utility', /(?:^|\s|:)text-(?:inherit|white|black|current|pf-|\[)/],
-      ['border-colour utility', /(?:^|\s|:)border-(?:transparent|current|pf-|\[)/],
-      ['box-shadow utility', /(?:^|\s|:)shadow-/]
-    ];
-
     const VARIANTS = ['subtle', 'tab', 'toggle', 'link'] as const;
 
     // The shared base string contributes one box-shadow utility of its own —
@@ -374,14 +366,14 @@ describe('Button', () => {
     // That base shadow is a base-level concern affecting all opted-in variants,
     // not the four this issue is about, so it is filtered rather than silently
     // widening #1102. Tracked separately as #1127.
-    const BASE_SHADOW_VARIANTS = new Set(['subtle', 'tab', 'toggle']);
+    const BASE_SHADOW_VARIANTS = new Set<ButtonVariant>(['subtle', 'tab', 'toggle']);
 
     // Exactly one box-shadow utility comes from the base, so exactly one is
     // dropped. `clsx` does not deduplicate — that is the very property that
     // makes #1102 possible — so a variant that declares the same utility shows
     // up as a second occurrence. Filtering every occurrence would swallow it
     // and blind this guard to the variants most likely to regress.
-    const variantContributed = (variant: string, className: string) => {
+    const variantContributed = (variant: ButtonVariant, className: string) => {
       const tokens = className.split(/\s+/).filter(Boolean);
       if (!BASE_SHADOW_VARIANTS.has(variant)) return tokens;
 
@@ -400,7 +392,7 @@ describe('Button', () => {
           screen.getByRole('button', { name: 'Label' }).className
         );
 
-        for (const [label, pattern] of FORBIDDEN) {
+        for (const [label, pattern] of FORBIDDEN_PAINT_PATTERNS) {
           const offender = tokens.find((token) => pattern.test(token));
           expect(
             offender,
@@ -420,7 +412,7 @@ describe('Button', () => {
     it.each([...BASE_SHADOW_VARIANTS])(
       '%s really does receive the base shadow the filter assumes, exactly once',
       (variant) => {
-        render(<Button variant={variant as never}>Label</Button>);
+        render(<Button variant={variant}>Label</Button>);
         const shadows = screen
           .getByRole('button', { name: 'Label' })
           .className.split(/\s+/)
@@ -454,9 +446,7 @@ describe('Button', () => {
       const className = screen.getByRole('button', { name: 'Label' }).className;
 
       for (const token of className.split(/\s+/).filter(Boolean)) {
-        const stateScoped = /^(?:enabled:|hover:|focus:|active:|disabled:|group-hover:)+/.exec(
-          token
-        );
+        const stateScoped = /^(?:[a-z0-9-]+:)+/.exec(token);
         if (!stateScoped) continue;
         const utility = token.slice(stateScoped[0].length);
         expect(
@@ -482,7 +472,7 @@ describe('Button', () => {
       expect(button).toHaveAttribute('data-pf-active');
 
       const tokens = variantContributed('tab', button.className);
-      for (const [label, pattern] of FORBIDDEN) {
+      for (const [label, pattern] of FORBIDDEN_PAINT_PATTERNS) {
         const offender = tokens.find((token) => pattern.test(token));
         expect(
           offender,

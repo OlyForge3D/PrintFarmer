@@ -1,0 +1,5 @@
+### 2026-08-05T01-11-38: REJECT a762d6efe in #1102 pre-PR gate round 1
+**By:** Hicks
+**What:** REJECT a762d6efe in #1102 pre-PR gate round 1
+**References:** Issue #1102, commit a762d6efe4c9b8bf32e037e3574267aeda2a0966, src/Web/ReactApp/src/features/fileBrowser/components/ExplorerView.tsx:232-250, src/Web/ReactApp/src/test/components/Button.test.tsx:332-343
+**Why:** Reviewed a762d6efe against 9c1d7e4b9. Two blocking findings: (1) ExplorerView.tsx:232-250 missed the New Folder caller. Its hover:bg-pf-bg-2 now equals the bg-pf-bg-2 menu parent, eliminating hover feedback; provided pre/post CSS snapshots reproduce the regression in light and dark, while the Delete Folder sibling was corrected to hover:bg-pf-bg-1. (2) Button.test.tsx:332-343 BASE_CONTRIBUTED removes every shadow-xs token irrespective of origin. A link-variant shadow-xs regression is therefore silently filtered even though link receives no base shadow; in-memory falsification reproduced the miss. Claim C and the safety portion of H are contradicted. No PR should open until revised and re-reviewed.

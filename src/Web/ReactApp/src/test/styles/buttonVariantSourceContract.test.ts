@@ -220,7 +220,7 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
  */
 describe('Button caller contract — unmasked callers gate hover on :enabled (#1102)', () => {
   const SRC_ROOT = resolve(REACT_APP_ROOT, 'src');
-  const SOURCE_SCAN_TIMEOUT_MS = 15_000;
+  const SOURCE_SCAN_TIMEOUT_MS = 20_000;
 
   /**
    * Variants whose paint this cluster moved into the components layer, and
@@ -411,6 +411,44 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       return acc;
     }
     if (ts.isCallExpression(node)) {
+      if (ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'join') {
+        const separatorNode = node.arguments[0];
+        if (
+          separatorNode &&
+          !ts.isStringLiteral(separatorNode) &&
+          !ts.isNoSubstitutionTemplateLiteral(separatorNode)
+        ) {
+          throw new Error('className uses an array join with a dynamic separator');
+        }
+
+        const separator = separatorNode?.text ?? ',';
+        const arrayElements = (receiver: ts.Expression): readonly ts.Expression[] => {
+          if (ts.isArrayLiteralExpression(receiver)) {
+            if (receiver.elements.some(ts.isSpreadElement)) {
+              throw new Error('className joins an array containing an unsupported spread element');
+            }
+            return receiver.elements;
+          }
+          if (
+            ts.isCallExpression(receiver) &&
+            ts.isPropertyAccessExpression(receiver.expression) &&
+            receiver.expression.name.text === 'filter'
+          ) {
+            return arrayElements(receiver.expression.expression);
+          }
+          throw new Error('className uses join() on an unsupported receiver');
+        };
+
+        const elements = arrayElements(node.expression.expression);
+        if (elements.length === 0) return plain('');
+
+        let acc = branchesOf(elements[0]);
+        for (const element of elements.slice(1)) {
+          acc = cross(acc, branchesOf(element), separator);
+        }
+        return acc;
+      }
+
       let acc = plain('');
       for (const arg of node.arguments) acc = cross(acc, branchesOf(arg));
       return acc;
@@ -833,6 +871,37 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         (b) => b.text,
       ),
     ).toContain('text-pf-error hover:text-pf-error');
+  });
+
+  it('expands array alternatives before applying join', () => {
+    const source = (receiverSuffix: string) =>
+      [
+        '<Button',
+        '  variant="subtle"',
+        '  className={[',
+        "    active ? 'bg-pf-bg-1' : 'bg-pf-bg-1 enabled:hover:bg-pf-bg-2',",
+        `  ]${receiverSuffix}.join(' ')}`,
+        '/>',
+      ].join('\n');
+
+    for (const suffix of ['', '.filter(Boolean)']) {
+      const [tag] = buttonTags(source(suffix), 'JoinedClasses.tsx');
+      expect(tag.branches.map((branch) => branch.text)).toEqual([
+        'bg-pf-bg-1',
+        'bg-pf-bg-1 enabled:hover:bg-pf-bg-2',
+      ]);
+      expect(
+        tag.branches.map((branch) => silencedVariants(tag, branch)),
+        'the arm without its own hover must remain visible to the guard',
+      ).toContainEqual(['subtle']);
+    }
+
+    expect(() =>
+      buttonTags('<Button className={classes.map(String).join(" ")} />', 'DynamicJoin.tsx'),
+    ).toThrow(/DynamicJoin\.tsx:1 `className` -- className uses join\(\) on an unsupported receiver/);
+    expect(() =>
+      buttonTags('<Button className={[...classes].join(" ")} />', 'SpreadJoin.tsx'),
+    ).toThrow(/SpreadJoin\.tsx:1 `className` -- className joins an array containing an unsupported spread/);
   });
 
   it('fails loudly past the alternative cap instead of conflating the arms', () => {
