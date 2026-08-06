@@ -129,7 +129,9 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 requiredMaterial: nil,
                 materialMismatch: false,
                 message: nil
-            )
+            ),
+            dispatchInitiated: true,
+            dispatchOutcome: "Accepted"
         )
         mockAutoDispatchService.readyResultToReturn = readyResult
         mockAutoDispatchService.statusToReturn = readyResult.status
