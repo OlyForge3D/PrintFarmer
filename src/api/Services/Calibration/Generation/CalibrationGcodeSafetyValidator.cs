@@ -1,4 +1,5 @@
 ﻿using System.Globalization;
+using Farm.Infrastructure.PrinterCalibration;
 
 namespace Farm.Web.Api.Services.Calibration.Generation;
 
@@ -67,8 +68,13 @@ public interface ICalibrationGcodeSafetyValidator
 }
 
 /// <summary>Default <see cref="ICalibrationGcodeSafetyValidator"/>.</summary>
-public sealed class CalibrationGcodeSafetyValidator : ICalibrationGcodeSafetyValidator
+public sealed class CalibrationGcodeSafetyValidator(
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
+    : ICalibrationGcodeSafetyValidator
 {
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <summary>Absolute pressure advance ceiling accepted in any emitted program.</summary>
     public const decimal AbsolutePressureAdvanceCeiling = 2.0m;
 
@@ -133,12 +139,15 @@ public sealed class CalibrationGcodeSafetyValidator : ICalibrationGcodeSafetyVal
                 DateTime.SpecifyKind(request.ObservedAtUtc, DateTimeKind.Utc)));
     }
 
-    private static void ValidateProvenance(
+    private void ValidateProvenance(
         CalibrationGcodeSafetyRequest request,
         CalibrationSpecificationDocument document,
         List<CalibrationGenerationProblem> problems)
     {
-        CalibrationSupportedTupleValidator.Validate(document.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            document.Compatibility,
+            problems,
+            _compatibilityPolicy);
 
         if (!string.Equals(
             request.Manifest.FirmwareFamily,
@@ -235,7 +244,7 @@ public sealed class CalibrationGcodeSafetyValidator : ICalibrationGcodeSafetyVal
             problems.Add(new(
                 CalibrationGenerationProblemCodes.SlicerVersionUnsupported,
                 "manifest.slicerVersion",
-                "The manifest declares a slicer version that is not the pinned upstream version."));
+                "The manifest slicer version does not match the exact version recorded by the specification."));
         }
 
         if (string.IsNullOrWhiteSpace(request.Manifest.SlicerContainerDigest))

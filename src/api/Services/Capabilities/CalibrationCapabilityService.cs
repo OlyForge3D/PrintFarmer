@@ -32,7 +32,9 @@ public interface ICalibrationCapabilityService
 public sealed class CalibrationCapabilityService(
     IConfiguration configuration,
     IServiceProvider serviceProvider,
-    ILogger<CalibrationCapabilityService> logger) : ICalibrationCapabilityService
+    ILogger<CalibrationCapabilityService> logger,
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
+    : ICalibrationCapabilityService
 {
     private static readonly TimeSpan WorkerHeartbeatFreshness = TimeSpan.FromMinutes(2);
 
@@ -40,20 +42,8 @@ public sealed class CalibrationCapabilityService(
     public const string MinimumSupportedApiContractVersion = "1.0";
     public const string CalibrationApiVersion = CalibrationContractConstants.ApiVersion;
     public const string CalibrationSchemaVersion = CalibrationContractConstants.SchemaVersion;
-    public const string UpstreamOrcaSlicerVersion = CalibrationContractConstants.SlicerVersion;
     public const string UpstreamOrcaSlicerCapability =
         CalibrationContractConstants.UpstreamSlicerCapability;
-
-    private static readonly IReadOnlyList<SlicerEngineCapabilityDto> SlicerEngines =
-    [
-        new()
-        {
-            Type = CalibrationContractConstants.SlicerEngine,
-            Version = UpstreamOrcaSlicerVersion,
-            Distribution = CalibrationContractConstants.SlicerDistribution,
-            Supported = true,
-        },
-    ];
 
     private static readonly IReadOnlyDictionary<string, string> SafeRoutes =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -106,6 +96,8 @@ public sealed class CalibrationCapabilityService(
         new CalibrationBlobStorageOptions();
 
     private readonly ILogger<CalibrationCapabilityService> _logger = logger;
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
 
     /// <inheritdoc/>
     public async Task<PlatformCapabilitiesDto> GetCapabilitiesAsync(
@@ -138,7 +130,7 @@ public sealed class CalibrationCapabilityService(
         bool artifactPromotionOperational = promotionCapability?.Operational == true;
 
         // Calibration slicing stays false until the whole hop is provable: an operational slicing
-        // path plus a healthy worker that attests the pinned upstream build identity and an
+        // path plus a healthy worker that attests an allow-listed upstream build identity and an
         // ownership-checked model resolver that can serve the bytes.
         bool modelStorageResolvable = _serviceProvider.GetService<IModelStorageResolver>() is not null;
         bool calibrationSlicingOperational =
@@ -221,7 +213,15 @@ public sealed class CalibrationCapabilityService(
             IdempotentModelUploadEnabled = modelFilesEnabled,
             ModelThumbnailReplacementEnabled = modelFilesEnabled,
             PlatformNote = GetPlatformNote(modelFilesEnabled),
-            SupportedSlicerEngines = SlicerEngines,
+            SupportedSlicerEngines = _compatibilityPolicy.SupportedVersions
+                .Select(version => new SlicerEngineCapabilityDto
+                {
+                    Type = CalibrationContractConstants.SlicerEngine,
+                    Version = version,
+                    Distribution = CalibrationContractConstants.SlicerDistribution,
+                    Supported = true,
+                })
+                .ToArray(),
             Calibration = new CalibrationFeatureCapabilitiesDto
             {
                 ContextImplemented = true,
@@ -241,7 +241,9 @@ public sealed class CalibrationCapabilityService(
                 Available = workerHealth.HealthyCount > 0,
                 HealthyCount = workerHealth.HealthyCount,
                 AvailableSlots = workerHealth.AvailableSlots,
-                RequiredVersion = UpstreamOrcaSlicerVersion,
+                RequiredVersion = _compatibilityPolicy.RequiredVersion,
+                SupportedVersions = _compatibilityPolicy.SupportedVersions,
+                ObservedVersions = workerHealth.ObservedVersions,
                 Distribution = "upstream",
             },
             UnavailableReasons = unavailableReasons,
@@ -284,7 +286,7 @@ public sealed class CalibrationCapabilityService(
 
             string[] compatibleServiceIds = services
                 .Where(service =>
-                    CalibrationContractConstants.IsSupportedSlicerVersion(service.Version) &&
+                    _compatibilityPolicy.IsSupported(service.Version) &&
                     CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson))
                 .Select(service => service.Id.ToString())
                 .ToArray();
@@ -315,16 +317,28 @@ public sealed class CalibrationCapabilityService(
 
             int pinnedIdentityCount = services
                 .Where(service =>
-                    CalibrationContractConstants.IsSupportedSlicerVersion(service.Version) &&
+                    _compatibilityPolicy.IsSupported(service.Version) &&
                     AttestsPinnedSlicerIdentity(service.CapabilitiesJson))
                 .Count(service => compatibleServiceIds.Contains(service.Id.ToString()));
+
+            string[] observedVersions = services
+                .Where(service =>
+                    CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson))
+                .Select(service => service.Version)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Select(version => version!)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
 
             return new WorkerHealthSnapshot(
                 RegistryAvailable: true,
                 HealthyCount: compatibleWorkers.Count,
                 AvailableSlots: compatibleWorkers.Sum(worker => Math.Max(0, worker.AvailableSlots)),
                 CredentialedWorkerCount: credentialedWorkerCount,
-                PinnedIdentityCount: compatibleWorkers.Count == 0 ? 0 : pinnedIdentityCount);
+                PinnedIdentityCount: compatibleWorkers.Count == 0 ? 0 : pinnedIdentityCount,
+                ObservedVersions: observedVersions,
+                HasSupportedVersion: observedVersions.Any(_compatibilityPolicy.IsSupported));
         }
         catch (DbException exception)
         {
@@ -380,7 +394,7 @@ public sealed class CalibrationCapabilityService(
         value.ValueKind == JsonValueKind.String &&
         !string.IsNullOrWhiteSpace(value.GetString());
 
-    private static List<CapabilityUnavailableReasonDto> BuildUnavailableReasons(
+    private List<CapabilityUnavailableReasonDto> BuildUnavailableReasons(
         bool slicingEnabled,
         bool workerAuthenticationConfigured,
         bool slicingOperational,
@@ -429,14 +443,23 @@ public sealed class CalibrationCapabilityService(
         }
         else if (!slicingOperational)
         {
+            bool unsupportedVersion =
+                workerHealth.ObservedVersions.Count > 0 &&
+                !workerHealth.HasSupportedVersion;
             reasons.Add(new()
             {
                 Feature = "slicing",
-                Code = workerHealth.HealthyCount == 0
-                    ? "compatible_worker_unavailable"
+                Code = unsupportedVersion
+                    ? CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                    : workerHealth.HealthyCount == 0
+                        ? "compatible_worker_unavailable"
                     : "slicing_path_unavailable",
-                Message = workerHealth.HealthyCount == 0
-                    ? $"No healthy upstream OrcaSlicer {UpstreamOrcaSlicerVersion} worker is available."
+                Message = unsupportedVersion
+                    ? BuildUnsupportedVersionMessage(
+                        workerHealth.ObservedVersions,
+                        _compatibilityPolicy.SupportedVersions)
+                    : workerHealth.HealthyCount == 0
+                        ? $"No healthy upstream OrcaSlicer worker matches the configured allow-list ({string.Join(", ", _compatibilityPolicy.SupportedVersions)})."
                     : "The complete slicer-to-artifact path is not currently usable.",
             });
         }
@@ -453,16 +476,28 @@ public sealed class CalibrationCapabilityService(
 
         if (generationCapability?.Operational != true)
         {
+            string message =
+                generationCapability?.UnavailableCode ==
+                CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                    ? BuildUnsupportedVersionMessage(
+                        generationCapability.ObservedWorkerVersions,
+                        generationCapability.SupportedSlicerVersions)
+                    : "Calibration generation requires the deterministic core, authorized model storage, the canonical slice path, an allow-listed attested worker, operational promotion, a durable orchestration store and a healthy recovery loop.";
             reasons.Add(new()
             {
                 Feature = "calibrationGeneration",
                 Code = generationCapability?.UnavailableCode ?? "generation_dependency_unavailable",
-                Message = "Calibration generation requires the deterministic core, authorized model storage, the canonical slice path, a pinned attested worker, operational promotion, a durable orchestration store and a healthy recovery loop.",
+                Message = message,
             });
         }
 
         return reasons;
     }
+
+    private static string BuildUnsupportedVersionMessage(
+        IReadOnlyList<string> observedVersions,
+        IReadOnlyList<string> supportedVersions) =>
+        $"Observed upstream OrcaSlicer version(s) {string.Join(", ", observedVersions)}; configured supported version(s): {string.Join(", ", supportedVersions)}.";
 
     /// <summary>
     /// Asks the generation probe whether every production hop of the durable saga is usable here.
@@ -588,11 +623,15 @@ public sealed class CalibrationCapabilityService(
         bool RegistryAvailable,
         int HealthyCount,
         int AvailableSlots,
-        int CredentialedWorkerCount = 0,
-        int PinnedIdentityCount = 0)
+        int CredentialedWorkerCount,
+        int PinnedIdentityCount,
+        IReadOnlyList<string> ObservedVersions,
+        bool HasSupportedVersion)
     {
-        public static WorkerHealthSnapshot Disabled { get; } = new(false, 0, 0);
+        public static WorkerHealthSnapshot Disabled { get; } =
+            new(false, 0, 0, 0, 0, [], false);
 
-        public static WorkerHealthSnapshot Unavailable { get; } = new(false, 0, 0);
+        public static WorkerHealthSnapshot Unavailable { get; } =
+            new(false, 0, 0, 0, 0, [], false);
     }
 }

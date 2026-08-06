@@ -23,9 +23,6 @@ public static class CalibrationSupportedTuple
     /// <summary>The only supported slicer distribution.</summary>
     public const string SlicerDistribution = CalibrationContractConstants.SlicerDistribution;
 
-    /// <summary>The pinned upstream slicer version.</summary>
-    public const string SlicerVersion = CalibrationContractConstants.SlicerVersion;
-
     /// <summary>The only supported native profile format.</summary>
     public const string ProfileFormat = CalibrationContractConstants.ProfileFormat;
 }
@@ -37,7 +34,7 @@ public static class CalibrationSupportedTuple
 /// <param name="GcodeDialect">G-code dialect reported by the authoritative printer snapshot.</param>
 /// <param name="SlicerEngine">Slicer engine recorded on the authoritative snapshot.</param>
 /// <param name="SlicerDistribution">Slicer distribution recorded on the authoritative snapshot.</param>
-/// <param name="SlicerVersion">Pinned slicer version recorded on the authoritative snapshot.</param>
+/// <param name="SlicerVersion">Exact slicer version recorded on the authoritative snapshot.</param>
 /// <param name="SlicerContainerDigest">Authoritative container digest of the pinned slicer image.</param>
 /// <param name="SlicerBinarySha256">Authoritative digest of the pinned slicer binary.</param>
 /// <param name="ProfileFormat">Native profile format recorded on the authoritative snapshot.</param>

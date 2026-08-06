@@ -170,6 +170,45 @@ public sealed class CalibrationGenerationCapabilityTests : IAsyncLifetime
 
         _ = capability.PinnedWorkerAvailable.Should().BeFalse();
         _ = capability.Operational.Should().BeFalse();
+        _ = capability.UnavailableCode.Should()
+            .Be(CalibrationGenerationProblemCodes.SlicerVersionUnsupported);
+        _ = capability.ObservedWorkerVersions.Should().Equal("2.2.0");
+        _ = capability.SupportedSlicerVersions.Should()
+            .Equal(CalibrationContractConstants.SlicerVersion);
+    }
+
+    [Fact(DisplayName = "A configured non-default slicer version is eligible and preserves provenance")]
+    public async Task GetCapabilityAsync_WithConfiguredNonDefaultVersion_IsOperational()
+    {
+        const string supportedNonDefaultVersion = "2.5.0";
+        Guid workerId = await _harness.AddAttestedWorkerAsync(
+            version: supportedNonDefaultVersion);
+
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            SupportedSlicerVersions =
+            [
+                CalibrationContractConstants.SlicerVersion,
+                supportedNonDefaultVersion,
+            ],
+        };
+        ICalibrationGenerationCapabilityProbe probe = _harness.CreateCapabilityProbe(options);
+
+        CalibrationGenerationCapabilityDto capability =
+            await probe.GetCapabilityAsync(CancellationToken.None);
+        CalibrationPinnedSlicerIdentity? identity =
+            await probe.FindPinnedWorkerAsync(CancellationToken.None);
+
+        _ = capability.Operational.Should().BeTrue(capability.UnavailableCode);
+        _ = capability.SupportedSlicerVersions.Should()
+            .Contain(supportedNonDefaultVersion);
+        _ = capability.ObservedWorkerVersions.Should()
+            .Contain(supportedNonDefaultVersion);
+        _ = identity.Should().NotBeNull();
+        _ = identity!.Version.Should().Be(supportedNonDefaultVersion);
+        _ = identity.WorkerId.Should().Be(workerId);
+        _ = identity.ContainerDigest.Should().Be(CalibrationGenerationHarness.ContainerDigest);
+        _ = identity.BinarySha256.Should().Be(CalibrationGenerationHarness.BinaryDigest);
     }
 
     [Fact(DisplayName = "Generation stays false while slicing is disabled for the deployment")]

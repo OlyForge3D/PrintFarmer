@@ -240,6 +240,13 @@ builder.Services.AddValidatorsFromAssemblyContaining<Program>();
 
 // Feature services (OctoPrint, File Management, Print Jobs, Maintenance, SPA)
 builder.Services.AddPrintFarmerFeatureServices(builder.Configuration, builder.Environment);
+builder.Services.AddSingleton(
+    new Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy(
+        builder.Configuration
+            .GetSection(
+                Farm.Infrastructure.PrinterCalibration.CalibrationSlicerCompatibilityPolicy
+                    .ConfigurationKey)
+            .Get<string[]>()));
 builder.Services.AddScoped<ICalibrationCapabilityService, CalibrationCapabilityService>();
 builder.Services.AddScoped<
     Farm.Web.Api.Services.Calibration.IPrinterCalibrationContextService,

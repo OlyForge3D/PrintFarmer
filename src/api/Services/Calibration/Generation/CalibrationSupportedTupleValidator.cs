@@ -16,9 +16,11 @@ public static class CalibrationSupportedTupleValidator
     /// <summary>Appends a problem for every tuple element that is not an exact match.</summary>
     /// <param name="identity">The authoritative compatibility identity.</param>
     /// <param name="problems">The problem list to append to.</param>
+    /// <param name="compatibilityPolicy">Configured upstream OrcaSlicer allow-list.</param>
     public static void Validate(
         CalibrationCompatibilityIdentity identity,
-        List<CalibrationGenerationProblem> problems)
+        List<CalibrationGenerationProblem> problems,
+        CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
     {
         ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(problems);
@@ -67,12 +69,14 @@ public static class CalibrationSupportedTupleValidator
                 "Calibration generation supports only the upstream OrcaSlicer distribution."));
         }
 
-        if (!CalibrationContractConstants.IsSupportedSlicerVersion(identity.SlicerVersion))
+        CalibrationSlicerCompatibilityPolicy policy =
+            compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+        if (!policy.IsSupported(identity.SlicerVersion))
         {
             problems.Add(new(
                 CalibrationGenerationProblemCodes.SlicerVersionUnsupported,
                 "context.compatibility.slicerVersion",
-                "Calibration generation supports only the pinned upstream OrcaSlicer version."));
+                $"OrcaSlicer version '{identity.SlicerVersion ?? "unknown"}' is unsupported; configured versions: {string.Join(", ", policy.SupportedVersions)}."));
         }
 
         if (string.IsNullOrWhiteSpace(identity.SlicerContainerDigest))
@@ -105,11 +109,14 @@ public static class CalibrationSupportedTupleValidator
 
     /// <summary>Determines whether an identity is an exact match for the supported tuple.</summary>
     /// <param name="identity">The authoritative compatibility identity.</param>
+    /// <param name="compatibilityPolicy">Configured upstream OrcaSlicer allow-list.</param>
     /// <returns><see langword="true"/> when every element matches exactly.</returns>
-    public static bool IsSupported(CalibrationCompatibilityIdentity identity)
+    public static bool IsSupported(
+        CalibrationCompatibilityIdentity identity,
+        CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
     {
         List<CalibrationGenerationProblem> problems = [];
-        Validate(identity, problems);
+        Validate(identity, problems, compatibilityPolicy);
         return problems.Count == 0;
     }
 }

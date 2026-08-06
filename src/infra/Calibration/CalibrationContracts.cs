@@ -16,10 +16,6 @@ public static class CalibrationContractConstants
     public const string ProfileFormat = "orca-json";
     public const string UpstreamSlicerCapability = "orcaslicer-upstream";
 
-    public static bool IsSupportedSlicerVersion(string? version) =>
-        string.Equals(version, SlicerVersion, StringComparison.Ordinal) ||
-        (version?.StartsWith($"{SlicerVersion}+", StringComparison.Ordinal) ?? false);
-
     public static bool AttestsUpstreamSlicer(string? capabilitiesJson)
     {
         if (string.IsNullOrWhiteSpace(capabilitiesJson))

@@ -152,9 +152,15 @@ public interface ICalibrationProfilePatchExporter
 
 /// <summary>Default <see cref="ICalibrationProfilePatchExporter"/>.</summary>
 /// <param name="projectService">The authoritative calibration project service.</param>
-public sealed class CalibrationProfilePatchExporter(ICalibrationProjectService projectService)
+/// <param name="compatibilityPolicy">Configured upstream OrcaSlicer allow-list.</param>
+public sealed class CalibrationProfilePatchExporter(
+    ICalibrationProjectService projectService,
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
     : ICalibrationProfilePatchExporter
 {
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <summary>The patch schema version emitted by this build.</summary>
     public const string PatchSchemaVersion = "1.0";
 
@@ -189,7 +195,10 @@ public sealed class CalibrationProfilePatchExporter(ICalibrationProjectService p
 
         CalibrationSpecificationDocument document = specification.Document;
         List<CalibrationGenerationProblem> problems = [];
-        CalibrationSupportedTupleValidator.Validate(document.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            document.Compatibility,
+            problems,
+            _compatibilityPolicy);
 
         (string profileType, string nativeKey) = MapParameter(selection.Parameter, problems);
         ValidateRange(selection, document, problems);

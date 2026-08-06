@@ -532,14 +532,25 @@ public sealed class CalibrationGenerationSaga(
             await _capabilityProbe.FindPinnedWorkerAsync(cancellationToken);
         if (pinned is null)
         {
+            CalibrationGenerationCapabilityDto capability =
+                await _capabilityProbe.GetCapabilityAsync(cancellationToken);
+            bool unsupportedVersion =
+                capability.UnavailableCode ==
+                CalibrationGenerationProblemCodes.SlicerVersionUnsupported;
+            string unavailableCode = unsupportedVersion
+                ? CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                : CalibrationGenerationProblemCodes.PinnedWorkerUnavailable;
+            string unavailableMessage = unsupportedVersion
+                ? $"Observed upstream OrcaSlicer version(s) {string.Join(", ", capability.ObservedWorkerVersions)}; configured supported version(s): {string.Join(", ", capability.SupportedSlicerVersions)}."
+                : "No registered worker attests an allow-listed upstream slicer build identity.";
             await ScheduleRetryAsync(
                 orchestration,
-                CalibrationGenerationProblemCodes.PinnedWorkerUnavailable,
+                unavailableCode,
                 [
                     new(
-                        CalibrationGenerationProblemCodes.PinnedWorkerUnavailable,
+                        unavailableCode,
                         "worker",
-                        "No registered worker attests the pinned upstream slicer build identity."),
+                        unavailableMessage),
                 ],
                 cancellationToken);
             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));

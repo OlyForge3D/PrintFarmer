@@ -32,7 +32,7 @@ public sealed record CalibrationGenerationCapabilityDto
     /// <summary>Whether slicer artifacts are readable and writable from this process.</summary>
     public required bool ArtifactSourceRoutable { get; init; }
 
-    /// <summary>Whether a registered worker attests the pinned upstream slicer identity.</summary>
+    /// <summary>Whether a registered worker attests an allow-listed upstream slicer identity.</summary>
     public required bool PinnedWorkerAvailable { get; init; }
 
     /// <summary>Whether the artifact promotion hop reports itself operational.</summary>
@@ -46,6 +46,12 @@ public sealed record CalibrationGenerationCapabilityDto
 
     /// <summary>Stable machine-readable reason when generation is unavailable.</summary>
     public string? UnavailableCode { get; init; }
+
+    /// <summary>Fresh upstream OrcaSlicer versions observed in the worker registry.</summary>
+    public IReadOnlyList<string> ObservedWorkerVersions { get; init; } = [];
+
+    /// <summary>Configured bounded allow-list used for compatibility.</summary>
+    public IReadOnlyList<string> SupportedSlicerVersions { get; init; } = [];
 }
 
 /// <summary>
@@ -58,7 +64,7 @@ public interface ICalibrationGenerationCapabilityProbe
     /// <returns>The per-hop capability snapshot.</returns>
     Task<CalibrationGenerationCapabilityDto> GetCapabilityAsync(CancellationToken cancellationToken);
 
-    /// <summary>Finds a registered worker that attests the pinned upstream slicer identity.</summary>
+    /// <summary>Finds a registered worker that attests an allow-listed upstream slicer identity.</summary>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The attested identity, or <see langword="null"/> when none is eligible.</returns>
     Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(CancellationToken cancellationToken);
@@ -105,7 +111,9 @@ public sealed class CalibrationGenerationCapabilityProbe(
     IConfiguration configuration,
     IServiceProvider serviceProvider,
     CalibrationGenerationRecoveryState recoveryState,
-    ILogger<CalibrationGenerationCapabilityProbe> logger) : ICalibrationGenerationCapabilityProbe
+    ILogger<CalibrationGenerationCapabilityProbe> logger,
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
+    : ICalibrationGenerationCapabilityProbe
 {
     private static readonly TimeSpan WorkerHeartbeatFreshness = TimeSpan.FromMinutes(2);
 
@@ -121,6 +129,9 @@ public sealed class CalibrationGenerationCapabilityProbe(
     private readonly ILogger<CalibrationGenerationCapabilityProbe> _logger =
         logger ?? throw new ArgumentNullException(nameof(logger));
 
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <inheritdoc/>
     public async Task<CalibrationGenerationCapabilityDto> GetCapabilityAsync(
         CancellationToken cancellationToken)
@@ -129,7 +140,9 @@ public sealed class CalibrationGenerationCapabilityProbe(
         bool modelStorage = await IsModelStorageRoutableAsync(cancellationToken);
         bool sliceSubmission = await IsSliceSubmissionRoutableAsync(cancellationToken);
         bool artifactSource = await IsArtifactSourceRoutableAsync(cancellationToken);
-        CalibrationPinnedSlicerIdentity? pinned = await FindPinnedWorkerAsync(cancellationToken);
+        WorkerCompatibilitySnapshot workerCompatibility =
+            await FindWorkerCompatibilityAsync(cancellationToken);
+        CalibrationPinnedSlicerIdentity? pinned = workerCompatibility.PinnedIdentity;
         bool promotion = await IsPromotionOperationalAsync(cancellationToken);
         bool orchestrationStore = await IsOrchestrationStoreAvailableAsync(cancellationToken);
         bool recoveryHealthy = _recoveryState.IsHealthy;
@@ -155,7 +168,10 @@ public sealed class CalibrationGenerationCapabilityProbe(
                         : !artifactSource
                             ? "artifact_source_unroutable"
                             : pinned is null
-                                ? CalibrationGenerationProblemCodes.PinnedWorkerUnavailable
+                                ? workerCompatibility.HasObservedVersions &&
+                                  !workerCompatibility.HasSupportedVersion
+                                    ? CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                                    : CalibrationGenerationProblemCodes.PinnedWorkerUnavailable
                                 : !promotion
                                     ? CalibrationGenerationProblemCodes.PromotionUnavailable
                                     : !orchestrationStore
@@ -179,23 +195,29 @@ public sealed class CalibrationGenerationCapabilityProbe(
             OrchestrationStoreAvailable = orchestrationStore,
             RecoveryHealthy = recoveryHealthy,
             UnavailableCode = unavailableCode,
+            ObservedWorkerVersions = workerCompatibility.ObservedVersions,
+            SupportedSlicerVersions = _compatibilityPolicy.SupportedVersions,
         };
     }
 
     /// <inheritdoc/>
     public async Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(
+        CancellationToken cancellationToken) =>
+        (await FindWorkerCompatibilityAsync(cancellationToken)).PinnedIdentity;
+
+    private async Task<WorkerCompatibilitySnapshot> FindWorkerCompatibilityAsync(
         CancellationToken cancellationToken)
     {
         if (!_configuration.GetValue("Slicer:Enabled", false))
         {
-            return null;
+            return WorkerCompatibilitySnapshot.Empty;
         }
 
         IDbContextFactory<SlicerDbContext>? factory =
             _serviceProvider.GetService<IDbContextFactory<SlicerDbContext>>();
         if (factory is null)
         {
-            return null;
+            return WorkerCompatibilitySnapshot.Empty;
         }
 
         try
@@ -214,20 +236,32 @@ public sealed class CalibrationGenerationCapabilityProbe(
                     service.CapabilitiesJson))
                 .ToListAsync(cancellationToken);
 
+            string[] observedVersions = services
+                .Where(service =>
+                    CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson))
+                .Select(service => service.Version)
+                .Where(version => !string.IsNullOrWhiteSpace(version))
+                .Select(version => version!)
+                .Distinct(StringComparer.Ordinal)
+                .Order(StringComparer.Ordinal)
+                .ToArray();
+            bool hasSupportedVersion =
+                observedVersions.Any(_compatibilityPolicy.IsSupported);
+
             string[] eligibleServiceIds = services
                 .Where(service =>
-                    CalibrationContractConstants.IsSupportedSlicerVersion(service.Version) &&
+                    _compatibilityPolicy.IsSupported(service.Version) &&
                     CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson) &&
                     CalibrationSlicerAttestation.TryRead(service.CapabilitiesJson, out _, out _))
                 .Select(service => service.Id.ToString())
                 .ToArray();
             if (eligibleServiceIds.Length == 0)
             {
-                return null;
+                return new(null, observedVersions, hasSupportedVersion);
             }
 
             // Identity/attestation selection answers "is there a worker in good standing that attests
-            // the pinned upstream slicer identity", not "is there free capacity right now". A worker
+            // an allow-listed upstream slicer identity", not "is there free capacity right now". A worker
             // claiming and actively running the very job this probe is being asked about is healthy,
             // online, authenticated and correctly attested; it must stay pinned-available while busy.
             // Whether a *new* attempt can be scheduled onto it is a queue/claim concern handled where
@@ -264,22 +298,25 @@ public sealed class CalibrationGenerationCapabilityProbe(
                     continue;
                 }
 
-                return new CalibrationPinnedSlicerIdentity(
-                    CalibrationContractConstants.SlicerVersion,
-                    CalibrationContractConstants.SlicerDistribution,
-                    containerDigest,
-                    binarySha256,
-                    worker.Id);
+                return new(
+                    new CalibrationPinnedSlicerIdentity(
+                        service.Version!,
+                        CalibrationContractConstants.SlicerDistribution,
+                        containerDigest,
+                        binarySha256,
+                        worker.Id),
+                    observedVersions,
+                    hasSupportedVersion);
             }
 
-            return null;
+            return new(null, observedVersions, hasSupportedVersion);
         }
         catch (Exception exception) when (exception is DbException or InvalidOperationException)
         {
             _logger.LogWarning(
                 "Calibration generation could not evaluate worker attestation ({ExceptionType})",
                 exception.GetType().Name);
-            return null;
+            return WorkerCompatibilitySnapshot.Empty;
         }
     }
 
@@ -413,4 +450,14 @@ public sealed class CalibrationGenerationCapabilityProbe(
     private sealed record ServiceAttestation(Guid Id, string? Version, string? CapabilitiesJson);
 
     private sealed record WorkerAttestation(Guid Id, string ServiceId, string? CapabilitiesJson);
+
+    private sealed record WorkerCompatibilitySnapshot(
+        CalibrationPinnedSlicerIdentity? PinnedIdentity,
+        IReadOnlyList<string> ObservedVersions,
+        bool HasSupportedVersion)
+    {
+        public static WorkerCompatibilitySnapshot Empty { get; } = new(null, [], false);
+
+        public bool HasObservedVersions => ObservedVersions.Count > 0;
+    }
 }

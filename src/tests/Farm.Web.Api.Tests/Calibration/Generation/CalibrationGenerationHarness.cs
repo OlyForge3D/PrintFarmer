@@ -590,11 +590,14 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         }
 
         ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationSlicerCompatibilityPolicy compatibilityPolicy =
+            new(options.SupportedSlicerVersions);
         return new CalibrationGenerationCapabilityProbe(
             BuildConfiguration(options),
             provider,
             RecoveryState,
-            NullLogger<CalibrationGenerationCapabilityProbe>.Instance);
+            NullLogger<CalibrationGenerationCapabilityProbe>.Instance,
+            compatibilityPolicy);
     }
 
     private static ICalibrationProjectService CreateProjectService(AppDbContext core) =>
@@ -699,6 +702,10 @@ internal sealed record CalibrationGenerationHarnessOptions
 
     /// <summary>Deployment topology reported by configuration.</summary>
     public string DeploymentMode { get; init; } = "monolith";
+
+    /// <summary>Configured bounded upstream OrcaSlicer version allow-list.</summary>
+    public IReadOnlyList<string> SupportedSlicerVersions { get; init; } =
+        [CalibrationContractConstants.SlicerVersion];
 
     /// <summary>
     /// The plan compiler the saga is built with, or <see langword="null"/> for the production one.

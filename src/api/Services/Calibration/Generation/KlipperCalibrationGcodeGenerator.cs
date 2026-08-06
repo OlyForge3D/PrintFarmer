@@ -1,5 +1,6 @@
 ﻿using System.Globalization;
 using System.Text;
+using Farm.Infrastructure.PrinterCalibration;
 
 namespace Farm.Web.Api.Services.Calibration.Generation;
 
@@ -10,8 +11,13 @@ namespace Farm.Web.Api.Services.Calibration.Generation;
 /// ever appends <c>\n</c>. The generator therefore produces byte-identical output for identical inputs
 /// on any host, in any locale.
 /// </remarks>
-public sealed class KlipperCalibrationGcodeGenerator : IKlipperCalibrationGcodeGenerator
+public sealed class KlipperCalibrationGcodeGenerator(
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
+    : IKlipperCalibrationGcodeGenerator
 {
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <summary>Wall loops printed per calibration layer.</summary>
     public const int WallLoops = 2;
 
@@ -45,7 +51,10 @@ public sealed class KlipperCalibrationGcodeGenerator : IKlipperCalibrationGcodeG
                 "The plan was compiled from a different specification."));
         }
 
-        CalibrationSupportedTupleValidator.Validate(document.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            document.Compatibility,
+            problems,
+            _compatibilityPolicy);
         VerifyFootprintPlacement(document, problems);
         if (problems.Count > 0)
         {

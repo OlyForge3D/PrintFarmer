@@ -138,13 +138,17 @@ caller-specific permissions:
     "healthyCount": 0,
     "availableSlots": 0,
     "engine": "OrcaSlicer",
-    "requiredVersion": "2.4.2"
+    "requiredVersion": "2.4.2",
+    "supportedVersions": ["2.4.2", "2.5.0"],
+    "observedVersions": ["2.6.0"],
+    "versionPolicy": "allow-list",
+    "distribution": "upstream"
   },
   "unavailableReasons": [
     {
       "feature": "slicing",
-      "code": "compatible_worker_unavailable",
-      "message": "No healthy upstream OrcaSlicer 2.4.2 worker is available."
+      "code": "slicer_version_unsupported",
+      "message": "Observed upstream OrcaSlicer version(s) 2.6.0; configured supported version(s): 2.4.2, 2.5.0."
     }
   ]
 }
@@ -153,8 +157,12 @@ caller-specific permissions:
 `slicingConfigured` means slicing is enabled in configuration and the worker
 registry holds at least one enabled worker with a registry-issued credential.
 `slicingOperational` additionally requires reachable slicer persistence,
-artifact storage, and a fresh enabled upstream OrcaSlicer `2.4.2` worker with
-available capacity. Calibration context is operational when the caller can
+artifact storage, and a fresh enabled upstream OrcaSlicer worker whose version
+appears in the bounded `Calibration:SupportedSlicerVersions` allow-list and
+which has available capacity. `requiredVersion` retains the first configured
+version for older clients. `supportedVersions` reports the complete policy,
+`observedVersions` reports fresh upstream worker versions, and `versionPolicy`
+is `allow-list`. Calibration context is operational when the caller can
 reach the local upstream OrcaSlicer profile resolver. The monolith advertises
 and serves that context; a split API without a caller-reachable resolver
 advertises it as non-operational and returns
@@ -490,12 +498,25 @@ scope deliberately does not invent slicer queue semantics.
 The flag is true only when **every** production hop was resolved and answered a
 real probe in this process: the deterministic generation core, authorized stored
 model resolution, the canonical slice submission path, readable and writable
-artifacts, a registered online worker that attests upstream OrcaSlicer `2.4.2`
-with both a container digest and a binary digest, an operational promotion hop, a
-responsive durable orchestration store and a healthy recovery loop. A registered
-type, a configuration switch or a test double is never accepted as evidence. When
-the flag is false, `unavailableReasons` carries a `calibrationGeneration` entry
-with the stable code of the first missing hop. A split deployment stays false with
+artifacts, a registered online worker that attests an upstream OrcaSlicer version
+listed in `Calibration:SupportedSlicerVersions` with both a container digest and
+a binary digest, an operational promotion hop, a responsive durable orchestration
+store and a healthy recovery loop. The allow-list defaults to the build's current
+upstream version, accepts at most 32 numeric `major.minor.patch` entries, and can
+be supplied through normal configuration providers without recompiling.
+
+A registered type, a configuration switch or a test double is never accepted as
+evidence. Configuration changes only the compatibility policy; the worker,
+heartbeat, upstream-distribution attestation, and exact digest requirements stay
+mandatory. Generated artifacts continue recording the observed slicer version,
+container digest, and binary SHA-256 as exact provenance.
+
+When the flag is false, `unavailableReasons` carries a
+`calibrationGeneration` entry with the stable code of the first missing hop.
+`slicer_version_unsupported` is distinct from `pinned_worker_unavailable`: its
+message names both `observedVersions` and `supportedVersions`, while
+`pinned_worker_unavailable` means no otherwise eligible worker supplied the
+required identity and digest attestation. A split deployment stays false with
 `split_routing_unavailable` until real HTTP routing adapters for the model,
 artifact and promotion hops are present and probe healthy.
 
@@ -519,8 +540,8 @@ Printer Calibration eligibility is strictly conjunctive:
 
 - firmware family is explicitly `Klipper`;
 - G-code dialect is explicitly `Klipper`;
-- slicer engine is `OrcaSlicer`, distribution is `upstream`, and the pinned
-  version and profile format are compatible;
+- slicer engine is `OrcaSlicer`, distribution is `upstream`, and the version is
+  in the configured bounded allow-list with a compatible profile format;
 - firmware detection source, detector version, confidence, verification, and
   observation are present and fresh;
 - bed geometry, physical toolhead/nozzle limits, material, motion, thermal,

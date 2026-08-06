@@ -37,7 +37,8 @@ public sealed class PrinterCalibrationContextService(
     IBackendCapabilityFactory capabilityFactory,
     IConfiguration configuration,
     TimeProvider timeProvider,
-    ICalibrationProfileResolver? profileResolver = null)
+    ICalibrationProfileResolver? profileResolver = null,
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
     : IPrinterCalibrationContextService
 {
     private const double NumericTolerance = 0.001;
@@ -51,6 +52,8 @@ public sealed class PrinterCalibrationContextService(
         Math.Max(1, configuration.GetValue("Calibration:HardwareMetadataStaleAfterSeconds", 2_592_000));
 
     private readonly TimeProvider _timeProvider = timeProvider;
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
 
     public async Task<CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>>> GetCandidatesAsync(
         CalibrationProfileAccessScope profileAccessScope,
@@ -161,7 +164,7 @@ public sealed class PrinterCalibrationContextService(
             CalibrationContractConstants.SchemaVersion,
             CalibrationContractConstants.SlicerEngine,
             CalibrationContractConstants.SlicerDistribution,
-            CalibrationContractConstants.SlicerVersion,
+            _compatibilityPolicy.RequiredVersion,
             methods);
 
         object hashInput = new
@@ -702,17 +705,16 @@ public sealed class PrinterCalibrationContextService(
                 missingInputs,
                 "profile_version_missing",
                 $"{field}.slicerVersion",
-                "The selected profile has no pinned slicer version.");
+                "The selected profile has no explicit slicer version.");
         }
-        else if (!CalibrationContractConstants.IsSupportedSlicerVersion(
-            profile.SlicerVersion))
+        else if (!_compatibilityPolicy.IsSupported(profile.SlicerVersion))
         {
             Reject(
                 reasons,
                 missingInputs,
                 "profile_version_mismatch",
                 $"{field}.slicerVersion",
-                "The profile version does not match the pinned supported OrcaSlicer version.");
+                $"The profile version is not in the configured OrcaSlicer allow-list ({string.Join(", ", _compatibilityPolicy.SupportedVersions)}).");
         }
 
         if (string.IsNullOrWhiteSpace(profile.ProfileFormat))
@@ -1101,7 +1103,7 @@ public sealed class PrinterCalibrationContextService(
         }
     }
 
-    private static void ValidateSlicerIdentity(
+    private void ValidateSlicerIdentity(
         Printer printer,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
@@ -1122,14 +1124,25 @@ public sealed class PrinterCalibrationContextService(
             "slicer.distribution",
             reasons,
             missingInputs);
-        ValidateIdentityValue(
-            printer.CalibrationSlicerVersion,
-            CalibrationContractConstants.SlicerVersion,
-            "slicer_version_missing",
-            "slicer_version_unsupported",
-            "slicer.version",
-            reasons,
-            missingInputs);
+        if (string.IsNullOrWhiteSpace(printer.CalibrationSlicerVersion))
+        {
+            RejectMissing(
+                reasons,
+                missingInputs,
+                "slicer_version_missing",
+                "slicer.version",
+                "slicer.version is required.");
+        }
+        else if (!_compatibilityPolicy.IsSupported(printer.CalibrationSlicerVersion))
+        {
+            Reject(
+                reasons,
+                missingInputs,
+                "slicer_version_unsupported",
+                "slicer.version",
+                $"slicer.version must be in the configured allow-list ({string.Join(", ", _compatibilityPolicy.SupportedVersions)}).");
+        }
+
         ValidateIdentityValue(
             printer.CalibrationProfileFormat,
             CalibrationContractConstants.ProfileFormat,

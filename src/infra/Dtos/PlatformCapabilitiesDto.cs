@@ -191,6 +191,12 @@ public sealed record CompatibleWorkerCapabilityDto
 
     public string RequiredVersion { get; init; } = string.Empty;
 
+    public IReadOnlyList<string> SupportedVersions { get; init; } = [];
+
+    public IReadOnlyList<string> ObservedVersions { get; init; } = [];
+
+    public string VersionPolicy { get; init; } = "allow-list";
+
     public string Distribution { get; init; } = string.Empty;
 }
 
