@@ -1062,8 +1062,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     /// <returns>Tuple of (file bytes, safe filename) if found, otherwise null</returns>
     /// <remarks>
     /// This method serves both model files and thumbnails using path-based lookups.
-    /// Path validation is performed internally to prevent directory traversal attacks.
-    /// Paths are normalized and validated to ensure they stay within the model storage directory.
+    /// Lexical and physical path validation ensure traversal, absolute paths, and filesystem links
+    /// cannot escape the configured model storage directory.
     /// </remarks>
     public async Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct)
     {
@@ -1072,42 +1072,101 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             return null;
         }
 
+        if (Path.IsPathRooted(path))
+        {
+            throw new ArgumentException("The model path must be relative to the configured storage root.", nameof(path));
+        }
+
+        string storageRoot = GetFullPathForDownload(_storagePathService.GetModelUploadDirectory(), nameof(path));
+        string requestedPath = GetFullPathForDownload(Path.Combine(storageRoot, path), nameof(path));
+        if (!IsWithinStorageRoot(storageRoot, requestedPath))
+        {
+            _logger.LogWarning("[Download] Path traversal attempt blocked");
+            throw new ArgumentException("The model path escapes the configured storage root.", nameof(path));
+        }
+
+        if (!_fileSystem.FileExists(requestedPath))
+        {
+            _logger.LogWarning("[Download] File not found: {ResolvedPath}", requestedPath);
+            return null;
+        }
+
+        string physicalStorageRoot = ResolvePhysicalPath(storageRoot);
+        string physicalRequestedPath = ResolvePhysicalPath(requestedPath);
+        if (!IsWithinStorageRoot(physicalStorageRoot, physicalRequestedPath))
+        {
+            _logger.LogWarning("[Download] Filesystem link escape attempt blocked");
+            throw new UnauthorizedAccessException("The resolved model path is outside the configured storage root.");
+        }
+
         try
         {
-            // Normalize path and validate it's within storage directory
-            string modelsDir = _storagePathService.GetModelUploadDirectory();
-            string normalizedPath = Path.GetFullPath(path);
-            string normalizedStorageDir = Path.GetFullPath(modelsDir);
-
-            // Construct full path
-            string fullPath = Path.Combine(normalizedStorageDir, path);
-            string resolvedPath = Path.GetFullPath(fullPath);
-
-            // Security check: ensure resolved path is within storage directory
-            if (!resolvedPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
-            {
-                _logger.LogWarning("[Download] Path traversal attempt blocked: {Path}", path);
-                return null;
-            }
-
-            // Check file exists
-            if (!_fileSystem.FileExists(resolvedPath))
-            {
-                _logger.LogWarning("[Download] File not found: {ResolvedPath}", resolvedPath);
-                return null;
-            }
-
-            // Read file bytes
-            byte[] bytes = await _fileSystem.ReadAllBytesAsync(resolvedPath);
-            string fileName = Path.GetFileName(resolvedPath);
+            byte[] bytes = await _fileSystem.ReadAllBytesAsync(physicalRequestedPath);
+            string fileName = Path.GetFileName(requestedPath);
 
             return (bytes, fileName);
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
-            _logger.LogError("[Download] Error reading file {Path}: {Message}", path, ex.Message);
+            _logger.LogError(ex, "[Download] Error reading model file");
             return null;
         }
+    }
+
+    private static string GetFullPathForDownload(string path, string parameterName)
+    {
+        try
+        {
+            return Path.GetFullPath(path);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new ArgumentException("The model path is invalid.", parameterName, ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            throw new ArgumentException("The model path is invalid.", parameterName, ex);
+        }
+        catch (PathTooLongException ex)
+        {
+            throw new ArgumentException("The model path is invalid.", parameterName, ex);
+        }
+    }
+
+    private static bool IsWithinStorageRoot(string storageRoot, string candidatePath)
+    {
+        string relativePath = Path.GetRelativePath(storageRoot, candidatePath);
+        return !relativePath.Equals("..", StringComparison.Ordinal)
+            && !relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+            && !relativePath.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal)
+            && !Path.IsPathFullyQualified(relativePath);
+    }
+
+    private static string ResolvePhysicalPath(string path)
+    {
+        string fullPath = Path.GetFullPath(path);
+        string rootPath = Path.GetPathRoot(fullPath)
+            ?? throw new ArgumentException("The model path does not have a filesystem root.", nameof(path));
+        string currentPath = rootPath;
+        string[] segments = fullPath[rootPath.Length..]
+            .Split(
+                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (string segment in segments)
+        {
+            currentPath = Path.Combine(currentPath, segment);
+            FileSystemInfo entry = Directory.Exists(currentPath)
+                ? new DirectoryInfo(currentPath)
+                : new FileInfo(currentPath);
+            FileSystemInfo? resolvedLink = entry.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolvedLink is not null)
+            {
+                currentPath = Path.GetFullPath(resolvedLink.FullName);
+            }
+        }
+
+        return Path.GetFullPath(currentPath);
     }
 
     #region Move Operations
