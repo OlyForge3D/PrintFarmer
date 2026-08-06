@@ -54,9 +54,13 @@ public interface IPrintJobCompletionService
     /// A function that returns the current printer state for a given printer ID.
     /// Returns null if the printer state is unknown or offline.
     /// </param>
+    /// <param name="actorSubject">Authenticated operator or trusted system subject invoking reconciliation.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The number of jobs that were synchronized.</returns>
-    Task<int> SyncOrphanedPrintingJobsAsync(Func<Guid, string?> printerStateLookup, CancellationToken ct = default);
+    Task<int> SyncOrphanedPrintingJobsAsync(
+        Func<Guid, string?> printerStateLookup,
+        string actorSubject,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Ensures a print job record exists for a printer that has transitioned to "Printing" state.

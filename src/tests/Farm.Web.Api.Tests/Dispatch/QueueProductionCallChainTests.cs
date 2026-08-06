@@ -4235,7 +4235,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await using AppDbContext syncContext = CreateContext();
         int synced = await CreateCompletionService(syncContext)
-            .SyncOrphanedPrintingJobsAsync(_ => "idle");
+            .SyncOrphanedPrintingJobsAsync(_ => "idle", QueueActorIdentity.Scheduler);
 
         synced.Should().Be(0);
         await using AppDbContext verify = CreateContext();
@@ -4245,6 +4245,55 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             candidate => candidate.PrinterId == fixture.PrinterId);
         job.Status.Should().Be(PrintJobStatus.Starting);
         state.ActiveDispatchAttemptId.Should().Be(claim.Attempt.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OrphanSync_AcceptedPrintingJob_AuditsInvokingActor()
+    {
+        string actorSubject = Guid.NewGuid().ToString();
+        await using AppDbContext seed = CreateContext();
+        Fixture fixture = await SeedCalibrationAsync(seed, withAck: true);
+        DispatchClaimService claimService = CreateClaim(
+            seed,
+            DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId));
+        DispatchClaimResult claim = await claimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator-1",
+                "Manual",
+                fixture.AckKey,
+                null,
+                null));
+        claim.Success.Should().BeTrue(claim.ErrorDetail);
+        await claimService.RecordBackendAcceptedAsync(
+            claim.Attempt!.Id,
+            claim.Attempt.BackendFileName);
+
+        seed.ChangeTracker.Clear();
+        PrintJob printingJob = await seed.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        printingJob.ActualStartTime = DateTime.UtcNow.AddMinutes(-10);
+        printingJob.UpdatedAt = printingJob.ActualStartTime.Value;
+        await seed.SaveChangesAsync();
+
+        await using AppDbContext syncContext = CreateContext();
+        int synced = await CreateCompletionService(syncContext)
+            .SyncOrphanedPrintingJobsAsync(_ => "idle", actorSubject);
+
+        synced.Should().Be(1);
+        await using AppDbContext verify = CreateContext();
+        PrintJob completedJob = await verify.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        completedJob.Status.Should().Be(PrintJobStatus.Completed);
+        QueueOperationAudit audit = await verify.QueueOperationAudits.SingleAsync(
+            candidate =>
+                candidate.PrintJobId == fixture.JobId &&
+                candidate.Operation == QueueAuditOperations.Reconciliation &&
+                candidate.ReasonCode == "orphan_sync_completed");
+        audit.ActorSubject.Should().Be(actorSubject);
+        audit.Outcome.Should().Be(QueueAuditOutcomes.Success);
     }
 
     // =========================================================================

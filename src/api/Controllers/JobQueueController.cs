@@ -835,7 +835,10 @@ public class JobQueueController(
     {
         try
         {
-            logger.LogInformation("[JobQueueController] Manual sync of orphaned jobs requested");
+            string actorSubject = GetActorSubject();
+            logger.LogInformation(
+                "[JobQueueController] Manual sync of orphaned jobs requested by {ActorSubject}",
+                actorSubject);
 
             // Create a lookup function that gets printer state from cache
             string? LookupPrinterState(Guid printerId)
@@ -846,9 +849,17 @@ public class JobQueueController(
 
             int syncedCount = await printJobCompletionService.SyncOrphanedPrintingJobsAsync(
                 LookupPrinterState,
+                actorSubject,
                 CancellationToken.None);
 
             return Ok(new { syncedCount, message = $"Synchronized {syncedCount} orphaned job(s)" });
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Unable to resolve the authenticated actor for orphaned job synchronization");
+            return StatusCode(
+                StatusCodes.Status403Forbidden,
+                new { error = "Unable to verify the authenticated queue actor." });
         }
         catch (Exception ex)
         {
