@@ -224,7 +224,6 @@ public abstract class HttpJobPollerService(
         _workerState.SetJobLease(
             job.Id,
             new WorkerJobLease(job.LeaseToken, job.LeaseFence, job.ClaimToken));
-        TryCleanupConfiguredRecoveryDirectories(job.Id);
 
         using CancellationTokenSource jobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         CancellationToken jobToken = jobCts.Token;
@@ -232,6 +231,7 @@ public abstract class HttpJobPollerService(
         try
         {
             using IServiceScope scope = _serviceProvider.CreateScope();
+            TryCleanupConfiguredRecoveryDirectories(job.Id);
 
             // Emit initial progress (0%)
             await TrySendProgressAsync(
@@ -1141,7 +1141,17 @@ public abstract class HttpJobPollerService(
         string? workingDirectory = _configuration["Worker:WorkingDirectory"];
         if (!string.IsNullOrWhiteSpace(workingDirectory))
         {
-            TryCleanupRecoveryDirectories(workingDirectory, activeJobId);
+            try
+            {
+                TryCleanupRecoveryDirectories(workingDirectory, activeJobId);
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(
+                    exception,
+                    "Recovery cleanup was skipped for {WorkingDirectory}; job lifecycle will continue",
+                    workingDirectory);
+            }
         }
     }
 
@@ -1162,34 +1172,42 @@ public abstract class HttpJobPollerService(
         }
 
         List<(string Path, Guid JobId, DateTime LastWriteUtc, long Size)> recoveryDirectories = [];
-        foreach (string jobDirectory in Directory.EnumerateDirectories(workingDirectory))
+        try
         {
-            if (!Guid.TryParse(Path.GetFileName(jobDirectory), out Guid jobId))
+            foreach (string jobDirectory in Directory.EnumerateDirectories(workingDirectory))
             {
-                continue;
-            }
-
-            try
-            {
-                IEnumerable<string> candidates = Directory.EnumerateDirectories(jobDirectory)
-                    .Where(directory => File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
-                if (File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)))
+                if (!Guid.TryParse(Path.GetFileName(jobDirectory), out Guid jobId))
                 {
-                    candidates = candidates.Append(jobDirectory);
+                    continue;
                 }
 
-                foreach (string candidate in candidates)
+                try
                 {
-                    DateTime lastWriteUtc = File.GetLastWriteTimeUtc(Path.Combine(candidate, RecoveryMarkerFileName));
-                    long size = Directory.EnumerateFiles(candidate, "*", SearchOption.AllDirectories)
-                        .Sum(file => new FileInfo(file).Length);
-                    recoveryDirectories.Add((candidate, jobId, lastWriteUtc, size));
+                    IEnumerable<string> candidates = Directory.EnumerateDirectories(jobDirectory)
+                        .Where(directory => File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
+                    if (File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)))
+                    {
+                        candidates = candidates.Append(jobDirectory);
+                    }
+
+                    foreach (string candidate in candidates)
+                    {
+                        DateTime lastWriteUtc = File.GetLastWriteTimeUtc(Path.Combine(candidate, RecoveryMarkerFileName));
+                        long size = Directory.EnumerateFiles(candidate, "*", SearchOption.AllDirectories)
+                            .Sum(file => new FileInfo(file).Length);
+                        recoveryDirectories.Add((candidate, jobId, lastWriteUtc, size));
+                    }
+                }
+                catch (Exception)
+                {
+                    // Treat inaccessible or concurrently changing recovery data as active and retain it.
                 }
             }
-            catch (Exception)
-            {
-                // Treat inaccessible or concurrently changing recovery data as active and retain it.
-            }
+        }
+        catch (Exception)
+        {
+            // Treat an inaccessible recovery root as active and retain all local work.
+            return [];
         }
 
         long totalBytes = recoveryDirectories.Sum(directory => directory.Size);
