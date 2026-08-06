@@ -1,5 +1,6 @@
 import React from 'react';
 import clsx from 'clsx';
+import { hasRadiusOverride } from '@/common/components/ui/radius-classes';
 
 // Main Card container
 export interface CardProps {
@@ -31,7 +32,8 @@ export const Card: React.FC<CardProps> & {
   return (
     <div
       className={clsx(
-        'bg-pf-panel border border-pf-border rounded-lg overflow-hidden',
+        'bg-pf-panel border border-pf-border overflow-hidden',
+        !hasRadiusOverride(className) && 'rounded-lg',
         isInteractive && 'transition-all duration-200',
         hoverable && 'hover:border-pf-accent/50 hover:shadow-md',
         onClick && 'cursor-pointer',

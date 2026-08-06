@@ -1,5 +1,6 @@
 import React from 'react';
 import clsx from 'clsx';
+import { hasRadiusOverride } from '@/common/components/ui/radius-classes';
 
 export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'error' | 'info';
 export type BadgeSize = 'sm' | 'md';
@@ -51,35 +52,6 @@ const dotVariantClasses: Record<BadgeVariant, string> = {
   error: 'bg-pf-error',
   info: 'bg-pf-accent',
 };
-
-/**
- * True when `className` sets a border radius **unconditionally**.
- *
- * `clsx` concatenates, it does not merge, so a caller-supplied radius and the
- * default would both land on the element and the winner would be decided by
- * Tailwind's emission order rather than by intent. That order is
- * `full → lg → md → sm → xs`, so `rounded-xs` beats everything: once this
- * component defaulted to `rounded-xs`, a caller asking for `rounded-full`
- * silently got a 2px square. Standing down when the caller has an opinion makes
- * the override mean what it says, without pulling in `tailwind-merge`.
- *
- * Variant-prefixed radii (`md:rounded-md`, `hover:rounded-sm`) deliberately do
- * NOT count. They only bind inside their condition, so standing down for them
- * would leave the badge with no radius at all outside it — a guaranteed defect,
- * traded for a merely possible one. Keeping the default is safe in both
- * directions: Tailwind emits variants after the base utilities they shadow, so
- * the conditional still wins where it applies.
- *
- * Both `rounded*` utilities and the arbitrary-property form
- * (`[border-radius:12px]`) are recognised.
- *
- * The same trap exists on `Button` and `Card`, which hardcode their radii; left
- * alone here because it is pre-existing rather than introduced by this work, and
- * `Card` standing down changes rendering at ~67 call sites. Tracked in #1063.
- */
-const hasRadiusOverride = (className?: string): boolean =>
-  className !== undefined &&
-  /(?:^|\s)!?(?:rounded(?:-\S+)?|\[border-radius:[^\]\s]+\])!?(?:\s|$)/.test(className);
 
 export const Badge: React.FC<BadgeProps> = ({
   children,

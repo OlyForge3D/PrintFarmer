@@ -116,10 +116,10 @@ Industrial design rejects soft, rounded "friendly" corners. PrintFarmer's radii 
 | Token | Value | Use |
 |---|---|---|
 | `--pf-radius-none` | 0 | Full-bleed surfaces, dividers |
-| `--pf-radius-xs` | 2px | Badges, status pills, count badges |
-| `--pf-radius-sm` | 4px | Buttons, inputs, selects, small controls, colour swatches |
-| `--pf-radius-md` | 6px | Cards, panels, modals |
-| `--pf-radius-lg` | 8px | Hero cards, large containers |
+| `--pf-radius-xs` | 2px | Canonical buttons, badges, status pills, count badges |
+| `--pf-radius-sm` | 4px | Inputs, selects, small controls, colour swatches |
+| `--pf-radius-md` | 6px | Panels, modals |
+| `--pf-radius-lg` | 8px | Canonical cards, hero cards, large containers |
 | `--pf-radius-full` | 9999px | Avatars, circular icon buttons, dots, tag chips, progress bars, toggle tracks |
 
 **Rule**: never exceed `--pf-radius-lg` for rectangular surfaces. Fully-rounded is reserved for
@@ -565,9 +565,12 @@ Structural specifications for the canonical components. Visual values come from 
 
 ### Buttons
 
-- **Variants**: `primary`, `secondary`, `danger`, `success`, `subtle`, `ghost`, `link`.
+- **Variants**: `primary`, `secondary`, `danger`, `success`, `subtle`, `ghost`, `tab`, `toggle`, `link`, `unstyled`.
 - **Sizes**: `sm = 28px` height, `md = 36px` height, `lg = 44px` height. `lg` is the minimum mobile touch target.
-- **Radius**: `--pf-radius-sm` (4px).
+- **Radius**: the canonical `Button` defaults to `--pf-radius-xs` (2px). `tab` defaults to
+  `--pf-radius-none`; `unstyled` contributes no radius or other base styling. An unconditional
+  caller radius replaces the primitive default, while conditional radii retain the default
+  outside their condition.
 - **Padding**: `sm = px-3`, `md = px-4`, `lg = px-6`.
 - **Icon support**: `iconLeft`, `iconRight`, `iconCenter` (icon-only). Gap between icon and text is `8px`.
 - **States**: idle / hover (subtle bg shift + `--pf-shadow-sm`) / active (no shift, depressed look) / focus-visible (2px ring `--pf-focus-ring` with 2px offset) / disabled (`opacity: 0.5`, no pointer events) / loading (replace icon with spinner, retain width).
@@ -588,7 +591,8 @@ Structural specifications for the canonical components. Visual values come from 
 
 - Background: `--pf-card-bg`.
 - Border: `1px solid --pf-border`.
-- Radius: `--pf-radius-md` (6px).
+- Radius: the canonical `Card` defaults to `--pf-radius-lg` (8px). An unconditional caller radius
+  replaces that default, while conditional radii retain it outside their condition.
 - Padding: `p-4` compact, `p-6` comfortable.
 - Shadow: `--pf-shadow-xs` at rest, `--pf-shadow-sm` on hover (only for interactive cards).
 - Sub-regions: `Card.Header` (border-bottom), `Card.Body` (flex content), `Card.Footer` (border-top, justify-end actions).
