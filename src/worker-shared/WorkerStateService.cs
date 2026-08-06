@@ -7,6 +7,7 @@ public class WorkerStateService : IWorkerStateService
 
     /// <summary>Leases currently held by this worker, keyed by job.</summary>
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, WorkerJobLease> _leases = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, string> _jobWorkDirectories = new();
 
     public WorkerState GetWorkerState()
     {
@@ -77,6 +78,19 @@ public class WorkerStateService : IWorkerStateService
 
     /// <inheritdoc/>
     public bool TryGetJobLease(Guid jobId, out WorkerJobLease lease) => _leases.TryGetValue(jobId, out lease);
+
+    public void SetJobWorkDirectory(Guid jobId, string directory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(directory);
+        _jobWorkDirectories[jobId] = directory;
+    }
+
+    public bool TryGetJobWorkDirectory(Guid jobId, out string directory) =>
+        _jobWorkDirectories.TryGetValue(jobId, out directory!);
+
+    public void ClearJobWorkDirectory(Guid jobId) => _jobWorkDirectories.TryRemove(jobId, out _);
+
+    public IReadOnlyCollection<string> GetActiveJobWorkDirectories() => _jobWorkDirectories.Values.ToArray();
 
     /// <inheritdoc/>
     public void ClearJobLease(Guid jobId) => _leases.TryRemove(jobId, out _);

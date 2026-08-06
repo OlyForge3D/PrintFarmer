@@ -37,6 +37,18 @@ public interface IWorkerStateService
     /// <returns><see langword="true"/> when this worker holds a lease for the job.</returns>
     bool TryGetJobLease(Guid jobId, out WorkerJobLease lease);
 
+    /// <summary>Records the local work directory currently owned by a job attempt.</summary>
+    void SetJobWorkDirectory(Guid jobId, string directory);
+
+    /// <summary>Reads the local work directory recorded for a job.</summary>
+    bool TryGetJobWorkDirectory(Guid jobId, out string directory);
+
+    /// <summary>Releases the local work directory recorded for a job.</summary>
+    void ClearJobWorkDirectory(Guid jobId);
+
+    /// <summary>Returns local work directories owned by currently running job attempts.</summary>
+    IReadOnlyCollection<string> GetActiveJobWorkDirectories();
+
     /// <summary>Releases the lease held for a job.</summary>
     /// <param name="jobId">The job whose lease is finished.</param>
     void ClearJobLease(Guid jobId);

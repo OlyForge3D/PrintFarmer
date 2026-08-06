@@ -109,6 +109,41 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         _ = Directory.Exists(jobDirectory).Should().BeFalse();
     }
 
+    [Fact(DisplayName = "A terminal acknowledgement removes an empty current claim parent")]
+    public async Task TerminalAcknowledgement_CurrentClaimAttempt_RemovesEmptyJobParent()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
+        string outputDirectory = Path.Combine(attemptDirectory, "output");
+        _ = Directory.CreateDirectory(outputDirectory);
+        await File.WriteAllTextAsync(Path.Combine(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
+        await poller.RunAsync(jobId, attemptDirectory);
+
+        _ = Directory.Exists(jobParent).Should().BeFalse(
+            "the current claim attempt was terminally acknowledged and no sibling attempt remains");
+    }
+
+    [Fact(DisplayName = "A terminal acknowledgement retains a job parent with a sibling attempt")]
+    public async Task TerminalAcknowledgement_CurrentClaimAttempt_PreservesSiblingParent()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
+        _ = Directory.CreateDirectory(Path.Combine(attemptDirectory, "output"));
+        await File.WriteAllTextAsync(
+            Path.Combine(attemptDirectory, "output", "result.gcode"),
+            "; produced gcode\nG28\n");
+        _ = Directory.CreateDirectory(Path.Combine(jobParent, Guid.NewGuid().ToString()));
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
+        await poller.RunAsync(jobId, attemptDirectory);
+
+        _ = Directory.Exists(jobParent).Should().BeTrue(
+            "a sibling recovery attempt remains under the job parent");
+    }
     [Fact(DisplayName = "A terminal acknowledgement supersedes an old recovery marker")]
     public async Task RecoveryMarker_TerminalAcknowledgement_RemovesWorkDirectory()
     {
@@ -121,6 +156,73 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         _ = Directory.Exists(jobDirectory).Should().BeFalse(
             "a current terminal acknowledgement makes every prior attempt safe to discard");
+    }
+
+    [Fact(DisplayName = "Legacy terminal cleanup never scans outside the configured working directory")]
+    public async Task LegacyTerminalCleanup_DoesNotEnumerateParentOfConfiguredWorkingDirectory()
+    {
+        Guid jobId = Guid.NewGuid();
+        string configuredJobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
+        string configuredOutputDirectory = Path.Combine(configuredJobDirectory, "output");
+        _ = Directory.CreateDirectory(configuredOutputDirectory);
+        await File.WriteAllTextAsync(
+            Path.Combine(configuredOutputDirectory, "result.gcode"),
+            "; produced gcode\nG28\n");
+
+        string outsideRecoveryDirectory = Path.Combine(
+            Path.GetDirectoryName(_workingDirectory)!,
+            Guid.NewGuid().ToString(),
+            Guid.NewGuid().ToString());
+        _ = Directory.CreateDirectory(outsideRecoveryDirectory);
+        await File.WriteAllTextAsync(Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName), "{}");
+        File.SetLastWriteTimeUtc(
+            Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName),
+            DateTime.UtcNow.AddDays(-10));
+        await File.WriteAllBytesAsync(Path.Combine(outsideRecoveryDirectory, "old.gcode"), new byte[32]);
+
+        try
+        {
+            RecordingPoller poller = CreatePoller(
+                HttpStatusCode.OK,
+                workingDirectory: _workingDirectory,
+                recoveryMinimumAgeHours: 1,
+                recoveryMaxBytes: 1);
+            await poller.RunAsync(jobId, configuredJobDirectory);
+
+            _ = Directory.Exists(outsideRecoveryDirectory).Should().BeTrue(
+                "recovery cleanup must remain rooted at Worker:WorkingDirectory");
+        }
+        finally
+        {
+            string? outsideJobDirectory = Path.GetDirectoryName(outsideRecoveryDirectory);
+            if (outsideJobDirectory is not null && Directory.Exists(outsideJobDirectory))
+            {
+                Directory.Delete(outsideJobDirectory, recursive: true);
+            }
+        }
+    }
+
+    [Fact(DisplayName = "Terminal cleanup rejects a result URI outside the configured attempt")]
+    public async Task TerminalCleanup_OutsideRootResultUri_IsRetained()
+    {
+        Guid jobId = Guid.NewGuid();
+        string insideJobDirectory = CreateJobOutput(jobId);
+        string outsideAttempt = Path.Combine(
+            Path.GetDirectoryName(_workingDirectory)!,
+            "outside",
+            jobId.ToString(),
+            Guid.NewGuid().ToString(),
+            "output");
+        _ = Directory.CreateDirectory(outsideAttempt);
+        string outsideResult = Path.Combine(outsideAttempt, "result.gcode");
+        await File.WriteAllTextAsync(outsideResult, "; outside\nG28\n");
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK, workingDirectory: _workingDirectory);
+        poller.ResultFilePathOverride = outsideResult;
+        await poller.RunAsync(jobId, insideJobDirectory);
+
+        _ = File.Exists(outsideResult).Should().BeTrue(
+            "terminal cleanup must not recursively delete a result outside the configured attempt");
     }
 
     [Fact(DisplayName = "Native profiles are rejected when a delivered document fails its digest")]
@@ -154,7 +256,10 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         HttpStatusCode completionStatus,
         HttpStatusCode artifactStatus = HttpStatusCode.Created,
         HttpStatusCode failureStatus = HttpStatusCode.NoContent,
-        bool artifactTimeout = false)
+        bool artifactTimeout = false,
+        string? workingDirectory = null,
+        double? recoveryMinimumAgeHours = null,
+        long? recoveryMaxBytes = null)
     {
         StubHandler handler = new(
             completionStatus,
@@ -170,43 +275,73 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         WorkerStateService workerState = new();
         workerState.SetRegisteredService(Guid.NewGuid(), "test-worker-api-key");
 
+        Dictionary<string, string?> settings = new();
+        if (workingDirectory is not null)
+        {
+            settings["Worker:WorkingDirectory"] = workingDirectory;
+        }
+
+        if (recoveryMinimumAgeHours.HasValue)
+        {
+            settings["Worker:RecoveryMinimumAgeHours"] = recoveryMinimumAgeHours.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (recoveryMaxBytes.HasValue)
+        {
+            settings["Worker:RecoveryMaxBytes"] = recoveryMaxBytes.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
         return new RecordingPoller(
             provider.GetRequiredService<IHttpClientFactory>(),
             provider,
             workerState,
-            new ConfigurationBuilder().AddInMemoryCollection().Build(),
+            new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
             handler);
     }
 
     /// <summary>
     /// Drives <see cref="HttpJobPollerService"/>'s job lifecycle for a single synthetic job.
     /// </summary>
-    private sealed class RecordingPoller(
-        IHttpClientFactory httpClientFactory,
-        IServiceProvider serviceProvider,
-        IWorkerStateService workerState,
-        IConfiguration configuration,
-        StubHandler handler)
-        : HttpJobPollerService(
-            httpClientFactory,
-            serviceProvider,
-            NullLogger<HttpJobPollerService>.Instance,
-            workerState,
-            configuration)
+    private sealed class RecordingPoller : HttpJobPollerService
     {
+        private readonly IConfiguration _configuration;
+        private readonly StubHandler _handler;
+        private readonly IWorkerStateService _workerState;
         private string _jobDirectory = string.Empty;
 
-        public bool FailureReported => handler.FailureReported;
+        public RecordingPoller(
+            IHttpClientFactory httpClientFactory,
+            IServiceProvider serviceProvider,
+            IWorkerStateService workerState,
+            IConfiguration configuration,
+            StubHandler handler)
+            : base(
+                httpClientFactory,
+                serviceProvider,
+                NullLogger<HttpJobPollerService>.Instance,
+                workerState,
+                configuration)
+        {
+            _configuration = configuration;
+            _handler = handler;
+            _workerState = workerState;
+        }
 
-        public string? FailureReason => handler.FailureReason;
+        public bool FailureReported => _handler.FailureReported;
 
-        public bool WorkDirectoryExistedAtUpload => handler.WorkDirectoryExistedAtUpload;
+        public string? FailureReason => _handler.FailureReason;
+
+        public bool WorkDirectoryExistedAtUpload => _handler.WorkDirectoryExistedAtUpload;
+
+        public string? ResultFilePathOverride { get; set; }
 
         public async Task RunAsync(Guid jobId, string jobDirectory)
         {
             _jobDirectory = jobDirectory;
-            handler.ExpectedJobDirectory = jobDirectory;
-            using HttpClient client = new(handler, disposeHandler: false)
+            _configuration["Worker:WorkingDirectory"] ??= Path.GetDirectoryName(jobDirectory);
+            _workerState.SetJobWorkDirectory(jobId, jobDirectory);
+            _handler.ExpectedJobDirectory = jobDirectory;
+            using HttpClient client = new(_handler, disposeHandler: false)
             {
                 BaseAddress = new Uri("http://localhost"),
             };
@@ -230,7 +365,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
             Task.FromResult(new SlicingResult
             {
                 Success = true,
-                ResultFileUrl = new Uri(Path.GetFullPath(Path.Combine(_jobDirectory, "output", "result.gcode"))),
+                ResultFileUrl = new Uri(Path.GetFullPath(ResultFilePathOverride ?? Path.Combine(_jobDirectory, "output", "result.gcode"))),
                 OutputFileSizeBytes = 32,
             });
 

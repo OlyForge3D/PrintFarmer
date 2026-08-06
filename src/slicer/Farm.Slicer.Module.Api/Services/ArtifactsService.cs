@@ -271,6 +271,14 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                 "The artifact media type is not accepted for this artifact kind.");
         }
 
+        if (requireVerification &&
+            (!declaredSizeBytes.HasValue || declaredSizeBytes.Value < 0))
+        {
+            throw new ArtifactValidationException(
+                ArtifactValidationException.SizeMismatch,
+                "A valid declared artifact size is required for a verified upload.");
+        }
+
         if (declaredSizeBytes.HasValue && declaredSizeBytes.Value != file.Length)
         {
             throw new ArtifactValidationException(
