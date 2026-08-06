@@ -108,7 +108,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
           <div
             role="option"
             id={`${id || 'color-family'}-opt-0`}
-            className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${activeIdx === 0 ? 'bg-pf-accent-bg text-white' : 'hover:bg-pf-bg-2'} ${value === '' ? 'font-medium' : ''}`}
+            className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${activeIdx === 0 ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : 'hover:bg-pf-bg-2'} ${value === '' ? 'font-medium' : ''}`}
             onMouseEnter={() => setActiveIdx(0)}
             onMouseDown={e => e.preventDefault()}
             onClick={() => commit('')}
@@ -126,7 +126,7 @@ export function ColorFamilySelect({ value, onChange, options, placeholder = 'All
                 key={fam}
                 role="option"
                 id={`${id || 'color-family'}-opt-${idx}`}
-                className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${active ? 'bg-pf-accent-bg text-white' : 'hover:bg-pf-bg-2'} ${selected && !active ? 'font-medium' : ''}`}
+                className={`flex items-center gap-2 px-2 py-1 text-sm cursor-pointer select-none ${active ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : 'hover:bg-pf-bg-2'} ${selected && !active ? 'font-medium' : ''}`}
                 onMouseEnter={() => setActiveIdx(idx)}
                 onMouseDown={e => e.preventDefault()}
                 onClick={() => commit(fam)}

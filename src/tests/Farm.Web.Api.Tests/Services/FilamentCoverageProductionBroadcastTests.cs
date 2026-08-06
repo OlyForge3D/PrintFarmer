@@ -313,32 +313,6 @@ public class FilamentCoverageProductionBroadcastTests
     }
 
     [Fact]
-    public async Task BulkReorderJobsAsync_ReorderOnly_DoesNotBroadcast()
-    {
-        string databaseName = Guid.NewGuid().ToString();
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(databaseName)
-            .Options;
-        PrintJob job = Job(Guid.NewGuid());
-        await using (AppDbContext seed = new(options))
-        {
-            seed.PrintJobs.Add(job);
-            await seed.SaveChangesAsync();
-        }
-        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
-        Mock<IFilamentCoverageBroadcaster> broadcaster = new(MockBehavior.Strict);
-        await using AppDbContext db = new(options);
-        PrintJobManagementService service = QueueService(repository.Object, broadcaster.Object, appDbContext: db);
-
-        QueueBulkOperationResultDto result = await service.BulkReorderJobsAsync(
-            [new QueueJobReorderMove { JobId = job.Id.ToString(), NewPosition = 9 }],
-            "user");
-
-        result.SuccessfulCount.Should().Be(1);
-        broadcaster.VerifyNoOtherCalls();
-    }
-
-    [Fact]
     public async Task Completion_BroadcastsQueueAndConsumedSpoolWeightAfterPersistence()
     {
         string databaseName = Guid.NewGuid().ToString();

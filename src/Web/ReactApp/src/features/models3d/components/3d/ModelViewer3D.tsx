@@ -1307,7 +1307,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleDecimation}
           variant="subtle"
           size="sm"
-          className={`${decimationActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          className={`${decimationActive ? 'bg-pf-accent/20 enabled:hover:bg-pf-accent/30 border-pf-accent' : 'bg-pf-bg-2/95 enabled:hover:bg-pf-bg-1 border-pf-border'} backdrop-blur-sm rounded-lg p-2 transition-colors`}
           title={decimationActive ? "Close Simplifier" : "Simplify Mesh"}
           disabled={!originalGeometry}
         >
@@ -1318,7 +1318,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleMeasurement}
           variant="subtle"
           size="sm"
-          className={`${measurementActive ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          className={`${measurementActive ? 'bg-pf-accent/20 hover:bg-pf-accent/30 border-pf-accent' : 'bg-pf-bg-2/95 hover:bg-pf-bg-1 border-pf-border'} backdrop-blur-sm rounded-lg p-2 transition-colors`}
           title={measurementActive ? "Disable Measurement" : "Measure Distance"}
         >
           <RulerIcon className="w-5 h-5 text-pf-text-primary" />
@@ -1328,7 +1328,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleGrid}
           variant="subtle"
           size="sm"
-          className={`${isGridVisible ? 'bg-pf-accent/20 border-pf-accent' : 'bg-pf-bg-2/95 border-pf-border'} backdrop-blur-sm hover:bg-pf-bg-2 rounded-lg p-2 transition-colors`}
+          className={`${isGridVisible ? 'bg-pf-accent/20 hover:bg-pf-accent/30 border-pf-accent' : 'bg-pf-bg-2/95 hover:bg-pf-bg-1 border-pf-border'} backdrop-blur-sm rounded-lg p-2 transition-colors`}
           title={isGridVisible ? "Hide Grid" : "Show Grid"}
         >
           <span className="text-xs font-medium text-pf-text-primary">📐</span>
@@ -1338,7 +1338,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleViewModeChange}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title={`Switch to ${viewMode === 'solid' ? 'Wireframe' : viewMode === 'wireframe' ? 'X-ray' : 'Solid'} View`}
         >
           <span className="text-xs font-medium text-pf-text-primary uppercase">
@@ -1352,7 +1352,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleToggleProjection}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title={isPerspective ? "Switch to Orthographic View" : "Switch to Perspective View"}
         >
           {isPerspective ? (
@@ -1366,7 +1366,7 @@ export const ModelViewer: React.FC<ModelViewerProps> = ({
           onClick={handleRecenter}
           variant="subtle"
           size="sm"
-          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-2 border border-pf-border rounded-lg p-2 transition-colors"
+          className="bg-pf-bg-2/95 backdrop-blur-sm hover:bg-pf-bg-1 border border-pf-border rounded-lg p-2 transition-colors"
           title="Recenter View"
         >
           <RecenterIcon className="w-5 h-5 text-pf-text-primary" />

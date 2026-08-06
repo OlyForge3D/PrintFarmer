@@ -1,8 +1,7 @@
 import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
-import { useState, useRef, useCallback } from "react";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import type { DispatchUploadProgressDto } from "@/types/api";
-import { Download, GripVertical, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
+import { Download, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
 import { FilamentCoverageBadge } from "@/features/filament-coverage/components/FilamentCoverageBadge";
@@ -76,7 +75,6 @@ export interface QueueJobsTableProps {
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
   onSchedule?: (jobId: string) => void;
-  onReorder?: (moves: { jobId: string; newPosition: number }[]) => void;
 }
 
 export function QueueJobsTable({
@@ -95,74 +93,11 @@ export function QueueJobsTable({
   onEdit,
   onDispatch,
   onSchedule,
-  onReorder,
 }: QueueJobsTableProps) {
-  const [dragIndex, setDragIndex] = useState<number | null>(null);
-  const [dropIndex, setDropIndex] = useState<number | null>(null);
-  const dragCounter = useRef(0);
   const { data: fleetCoverage } = useFleetFilamentCoverage();
   const coverageByPrinterId = new Map(
     (fleetCoverage?.printers ?? []).map((p) => [p.printerId, p]),
   );
-
-  const handleDragStart = useCallback((e: React.DragEvent<HTMLTableSectionElement>, index: number) => {
-    setDragIndex(index);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(index));
-    const node = e.currentTarget as HTMLElement;
-    requestAnimationFrame(() => {
-      node.style.opacity = "0.4";
-    });
-  }, []);
-
-  const handleDragEnd = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
-    (e.currentTarget as HTMLElement).style.opacity = "1";
-    setDragIndex(null);
-    setDropIndex(null);
-    dragCounter.current = 0;
-  }, []);
-
-  const handleDragEnter = useCallback((e: React.DragEvent<HTMLTableSectionElement>, index: number) => {
-    e.preventDefault();
-    dragCounter.current++;
-    setDropIndex(index);
-  }, []);
-
-  const handleDragLeave = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
-    e.preventDefault();
-    dragCounter.current--;
-    if (dragCounter.current === 0) {
-      setDropIndex(null);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent<HTMLTableSectionElement>) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent<HTMLTableSectionElement>, targetIndex: number) => {
-    e.preventDefault();
-    dragCounter.current = 0;
-    setDropIndex(null);
-
-    if (dragIndex === null || dragIndex === targetIndex) {
-      setDragIndex(null);
-      return;
-    }
-
-    const reordered = [...jobs];
-    const [moved] = reordered.splice(dragIndex, 1);
-    reordered.splice(targetIndex, 0, moved);
-
-    const moves = reordered.map((j, i) => ({
-      jobId: j.job.id,
-      newPosition: i + 1,
-    }));
-
-    setDragIndex(null);
-    onReorder?.(moves);
-  }, [dragIndex, jobs, onReorder]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -210,7 +145,7 @@ export function QueueJobsTable({
           </div>
           <a
             href="/files?type=gcode"
-            className="mt-4 px-4 py-2 bg-pf-accent hover:bg-pf-accent-hover text-white rounded-lg font-medium transition-colors"
+            className="mt-4 px-4 py-2 bg-pf-accent-bg hover:bg-pf-accent-hover text-[var(--pf-on-accent)] rounded-lg font-medium transition-colors"
           >
             Browse G-Code Files
           </a>
@@ -224,7 +159,6 @@ export function QueueJobsTable({
       <div className="overflow-x-auto">
         <table className="w-full table-fixed text-sm" aria-label="Print job queue">
           <colgroup>
-            <col className="w-10" />
             <col className="w-14" />
             <col />
             <col className="w-20" />
@@ -236,7 +170,6 @@ export function QueueJobsTable({
           </colgroup>
           <thead>
             <tr className="bg-pf-bg-2 border-b border-pf-border text-xs font-medium text-pf-text-primary text-left">
-              <th scope="col" className="px-2 py-2.5 font-medium"><span className="sr-only">Reorder</span></th>
               <th scope="col" className="px-2 py-2.5 font-medium"><span className="sr-only">Thumbnail</span></th>
               <th scope="col" className="px-2 py-2.5 font-medium">File</th>
               <th scope="col" className="px-2 py-2.5 font-medium text-center">Status</th>
@@ -311,13 +244,11 @@ export function QueueJobsTable({
           return `Uploading ${dispatchProgress.percentage}%...`;
         })();
 
-        const isDragTarget = dropIndex === index && dragIndex !== index;
         const isLastJob = index === jobs.length - 1;
 
         return (
           <tbody
             key={jobId}
-            draggable
             aria-label={`Print job: ${fileName}${deadlineState === "overdue" ? ", overdue deadline" : deadlineState === "due-soon" ? ", due soon" : ""}`}
             tabIndex={0}
             onClick={() => onEdit?.(jobId)}
@@ -328,33 +259,14 @@ export function QueueJobsTable({
                 onEdit?.(jobId);
               }
             }}
-            onDragStart={(e) => handleDragStart(e, index)}
-            onDragEnd={handleDragEnd}
-            onDragEnter={(e) => handleDragEnter(e, index)}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={(e) => handleDrop(e, index)}
             className={clsx(
               "transition-colors cursor-pointer hover:bg-pf-bg-2/50",
               deadlineState === "due-soon" && "bg-pf-warning/5",
               deadlineState === "overdue" && "bg-pf-error/10",
             )}
           >
-            {/* Row 1 — Primary: drag, thumbnail, file name, status, printer, copies, priority, actions */}
-            <tr
-              className={clsx("align-middle", isDragTarget && "border-t-2 border-t-pf-accent")}
-            >
-              {/* Drag handle */}
-              <td className="px-2 pt-2.5 pb-1 align-middle">
-                <div
-                  className="flex items-center justify-center cursor-grab active:cursor-grabbing text-pf-text-tertiary hover:text-pf-text-secondary"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label="Drag to reorder"
-                >
-                  <GripVertical className="h-4 w-4" aria-hidden="true" />
-                </div>
-              </td>
-
+            {/* Row 1 — Primary: thumbnail, file name, status, printer, copies, priority, actions */}
+            <tr className="align-middle">
               {/* Thumbnail */}
               <td className="px-2 pt-2.5 pb-1 align-middle">
                 <div className="flex items-center justify-center">
@@ -586,7 +498,6 @@ export function QueueJobsTable({
 
             {/* Row 2 — Secondary: detail chips with supplementary info */}
             <tr className={clsx(!isLastJob && "border-b border-pf-border")}>
-              <td aria-hidden="true" />
               <td aria-hidden="true" />
               <td colSpan={7} className="px-2 pr-4 pb-2.5 pt-0.5">
                 <div className="flex items-center gap-x-4 gap-y-1 flex-wrap">

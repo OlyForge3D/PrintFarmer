@@ -4945,61 +4945,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task BulkReorder_SwappedPositions_CommitsWithoutUniqueCollision()
-    {
-        await using AppDbContext context = CreateContext();
-        Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
-        var second = new PrintJob
-        {
-            Id = Guid.NewGuid(),
-            Name = "standard-second",
-            AssignedPrinterId = fixture.PrinterId,
-            Status = PrintJobStatus.Assigned,
-            JobKind = JobKind.Standard,
-            Priority = (int)PrintJobPriority.Normal,
-            QueuePosition = 2,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            QueuedAt = DateTime.UtcNow,
-        };
-        context.PrintJobs.Add(second);
-        await context.SaveChangesAsync();
-        PrintJob first = await context.PrintJobs.SingleAsync(
-            candidate => candidate.Id == fixture.JobId);
-
-        QueueBulkOperationResultDto result = await CreateManagementService(context)
-            .BulkReorderJobsAsync(
-            [
-                new QueueJobReorderMove
-                {
-                    JobId = first.Id.ToString(),
-                    NewPosition = 2,
-                    IfMatch = Convert.ToBase64String(first.RowVersion!),
-                },
-                new QueueJobReorderMove
-                {
-                    JobId = second.Id.ToString(),
-                    NewPosition = 1,
-                    IfMatch = Convert.ToBase64String(second.RowVersion!),
-                },
-            ],
-            "operator-1");
-
-        result.SuccessfulCount.Should().Be(2);
-        context.ChangeTracker.Clear();
-        List<PrintJob> ordered = await context.PrintJobs
-            .Where(job =>
-                job.AssignedPrinterId == fixture.PrinterId &&
-                (job.Status == PrintJobStatus.Queued ||
-                 job.Status == PrintJobStatus.Assigned))
-            .OrderBy(job => job.QueuePosition)
-            .ToListAsync();
-        ordered.Select(job => job.Id).Should().Equal(second.Id, first.Id);
-        ordered.Select(job => job.QueuePosition).Should().Equal(1, 2);
-    }
-
-    [Fact]
-    [Trait("Category", "DbHeavy")]
     public async Task ReassignJob_DestinationPositionOccupied_AllocatesUniqueTailPosition()
     {
         await using AppDbContext context = CreateContext();

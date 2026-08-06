@@ -70,7 +70,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
           {/* Printer count. `px-3 py-1` makes this a text-width pill, not a
               circle, so it takes the status-pill radius like every other count
               badge rather than claiming a circular waiver it cannot honour. */}
-          <span className="inline-flex items-center justify-center px-3 py-1 rounded-xs text-sm font-medium bg-pf-accent-bg text-white">
+          <span className="inline-flex items-center justify-center px-3 py-1 rounded-xs text-sm font-medium bg-pf-accent-bg text-[var(--pf-on-accent)]">
             {node.printerCount}
           </span>
           {node.totalPrinterCount > node.printerCount && (
@@ -90,7 +90,7 @@ const TreeRowView: React.FC<TreeRowViewProps> = ({
             onClick={() => onDelete(node.id)}
             variant="subtle"
             size="sm"
-            className="text-pf-error hover:opacity-80"
+            className="text-pf-error-text enabled:hover:underline"
             disabled={hasChildren}
           >
             Delete

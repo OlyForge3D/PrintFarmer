@@ -54,7 +54,7 @@ export function EmailConfirmationBanner() {
               variant="subtle"
               onClick={handleResend}
               disabled={sending}
-              className="flex items-center justify-center bg-pf-bg-1 hover:bg-pf-border text-pf-warning"
+              className="flex items-center justify-center bg-pf-bg-1 enabled:hover:bg-pf-bg-0 text-pf-warning-text"
               iconLeft={sending ? <RefreshIcon className="h-4 w-4" /> : <EmailIcon className="h-4 w-4" />}
             >
               {sending ? 'Sending...' : 'Resend Email'}

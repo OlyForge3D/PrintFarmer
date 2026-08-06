@@ -34,7 +34,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
 import { PlatformBanner } from '@/common/components/PlatformBanner';
-import { useSignalRConnection } from '@/common/hooks/useSignalR';
+import { usePrinterStatusUpdates, useSignalRConnection } from '@/common/hooks/useSignalR';
 import { Fragment, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAllAutoDispatchStatuses } from '@/features/printers/hooks/useAutoDispatch';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
@@ -330,10 +330,13 @@ export function Layout() {
 
   const navigate = useNavigate();
   const { data: allAutoDispatchStatuses } = useAllAutoDispatchStatuses();
+  const { printerStatuses } = usePrinterStatusUpdates();
   const nfcPairingSession = useNfcPairingSession();
   const pendingAttentionCount = useMemo(
-    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter((status) => requiresBedClearConfirmation(status)).length,
-    [allAutoDispatchStatuses]
+    () => ((allAutoDispatchStatuses ?? []) as AutoDispatchStatus[]).filter((status) =>
+      requiresBedClearConfirmation(status, printerStatuses.get(status.printerId)?.state)
+    ).length,
+    [allAutoDispatchStatuses, printerStatuses]
   );
   const location = useLocation();
 

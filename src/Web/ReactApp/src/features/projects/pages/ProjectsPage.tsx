@@ -373,7 +373,7 @@ const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick, onDelete })
  variant="subtle"
  size="sm"
  onClick={onDelete}
- className="!p-1 opacity-50 hover:opacity-100 hover:text-pf-error"
+ className="!p-1 opacity-50 hover:opacity-100 hover:text-pf-error-text"
  title="Delete project"
  >
  <DeleteIcon className="w-4 h-4" />

@@ -1,6 +1,7 @@
 ﻿using System.IO;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Repositories.Queue;
@@ -125,15 +126,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             // Include all "active" statuses in default view:
             // - Queued: waiting in queue
             // - Assigned: assigned to printer but not yet started
-            // - Starting: dispatch initiated, connecting to printer
-            // - Printing: actively printing
-            // - Paused: temporarily paused by user
+            // - Printer-occupying: starting, printing, or paused
             query = query.Where(pj =>
                 pj.Status == PrintJobStatus.Queued ||
                 pj.Status == PrintJobStatus.Assigned ||
-                pj.Status == PrintJobStatus.Starting ||
-                pj.Status == PrintJobStatus.Printing ||
-                pj.Status == PrintJobStatus.Paused);
+                PrintJobOccupancy.Statuses.Contains(pj.Status));
         }
 
         // Filter by printer model
@@ -185,9 +182,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
                 .ThenByDescending(pj => pj.DeadlineAtUtc)
                 .ThenByDescending(pj => pj.Priority)
                 .ThenBy(pj => pj.QueuePosition),
-            _ => query
-                .OrderByDescending(pj => pj.Priority)
-                .ThenBy(pj => pj.QueuePosition)
+            _ => query.OrderByPriorityDescending()
         };
 
         return await query
@@ -204,8 +199,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
                 .ThenInclude(p => p!.Model)
             .Where(pj => pj.AssignedPrinterId == printerId &&
                 (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
-            .OrderByDescending(pj => pj.Priority)
-            .ThenBy(pj => pj.QueuePosition)
+            .OrderByPriorityDescending()
             .Take(limit)
             .ToListAsync(ct);
     }

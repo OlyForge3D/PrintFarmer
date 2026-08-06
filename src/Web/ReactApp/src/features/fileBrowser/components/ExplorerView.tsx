@@ -191,7 +191,7 @@ const FolderTreeItem = ({
       <div
         className={`flex items-center gap-2 rounded px-2 py-1 text-sm transition-colors ${
           isDragOver ? 'bg-pf-accent-bg/20 border border-pf-accent' : ''
-        } ${isCurrent ? 'bg-pf-accent-bg text-white' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
+        } ${isCurrent ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : !isDragOver ? 'hover:bg-pf-bg-2 text-pf-text-primary' : ''}`}
         style={{ paddingLeft: depth * 12 + 8 }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -236,7 +236,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleCreateFolder}
             disabled={isBusy}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary hover:bg-pf-bg-2 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-pf-text-primary enabled:hover:bg-pf-bg-1 justify-start"
             iconLeft={<PlusIcon className="w-4 h-4" />}
           >
             New Folder
@@ -247,7 +247,7 @@ const FolderTreeItem = ({
             size="sm"
             onClick={handleDeleteFolder}
             disabled={isBusy || node.path === '/'}
-            className="w-full px-3 py-1.5 text-sm text-left text-pf-error hover:bg-pf-bg-2 justify-start"
+            className="w-full px-3 py-1.5 text-sm text-left text-[var(--pf-on-danger)] enabled:hover:bg-pf-bg-1 justify-start"
             iconLeft={<DeleteIcon className="w-4 h-4" />}
           >
             Delete Folder

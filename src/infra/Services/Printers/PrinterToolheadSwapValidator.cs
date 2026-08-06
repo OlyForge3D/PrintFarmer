@@ -28,14 +28,12 @@ public class PrinterToolheadSwapValidator(
     /// </summary>
     internal const int MaxToolheadIndex = 16;
 
-    private static readonly PrintJobStatus[] ActiveOrPendingStatuses = new[]
-    {
-        PrintJobStatus.Starting,
-        PrintJobStatus.Printing,
-        PrintJobStatus.Paused,
+    private static readonly PrintJobStatus[] ActiveOrPendingStatuses =
+    [
+        .. PrintJobOccupancy.Statuses,
         PrintJobStatus.Assigned,
         PrintJobStatus.Queued,
-    };
+    ];
 
     /// <inheritdoc />
     public async Task<SwapValidationResult> ValidateAsync(
@@ -81,7 +79,7 @@ public class PrinterToolheadSwapValidator(
             .Include(j => j.GcodeFile)
             .AsNoTracking()
             .Where(j => j.AssignedPrinterId == printerId && ActiveOrPendingStatuses.Contains(j.Status))
-            .OrderBy(j => j.Status == PrintJobStatus.Printing || j.Status == PrintJobStatus.Starting || j.Status == PrintJobStatus.Paused ? 0 : 1)
+            .OrderBy(j => PrintJobOccupancy.Statuses.Contains(j.Status) ? 0 : 1)
             .ThenBy(j => j.QueuePosition)
             .ThenBy(j => j.QueuedAt)
             .ToListAsync(ct)

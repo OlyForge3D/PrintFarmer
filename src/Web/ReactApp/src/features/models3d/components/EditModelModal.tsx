@@ -717,7 +717,7 @@ export function EditModelModal({ model, isOpen, onClose, onSuccess, isCloneMode 
                           e.stopPropagation();
                           handleRemoveToolhead(toolhead.id);
                         }}
-                        className="p-1 text-pf-text-secondary hover:text-pf-error"
+                        className="p-1 text-pf-text-secondary hover:text-pf-error-text"
                         title="Remove toolhead"
                       />
                     }

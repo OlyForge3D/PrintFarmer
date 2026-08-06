@@ -248,7 +248,6 @@ public record JobQueuePrintJobDto(
 | PUT | `/jobs/{jobId}` | Update details (notes, material, nozzle) |
 | PUT | `/jobs/{jobId}/notes` | Update job notes only |
 | POST | `/bulk/cancel` | Cancel multiple jobs |
-| POST | `/bulk/reorder` | Reorder multiple jobs |
 | POST | `/history/seed` | Load historical jobs from printers |
 
 #### Data Models

@@ -1214,9 +1214,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             bool activeExternal =
                 entry.Entity.IsExternalPrint &&
                 entry.Entity.AssignedPrinterId.HasValue &&
-                entry.Entity.Status is PrintJobStatus.Starting or
-                    PrintJobStatus.Printing or
-                    PrintJobStatus.Paused;
+                entry.Entity.Status.OccupiesPrinter();
             entry.Entity.ActiveExternalPrinterId = activeExternal
                 ? entry.Entity.AssignedPrinterId
                 : null;

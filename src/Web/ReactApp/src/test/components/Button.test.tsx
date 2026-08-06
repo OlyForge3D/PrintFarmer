@@ -155,8 +155,44 @@ describe('Button', () => {
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');
-      expect(button.className).toContain('bg-[var(--pf-button-danger-bg)]');
-      expect(button.className).toContain('text-[var(--pf-on-danger)]');
+      expect(button).toHaveAttribute('data-pf-variant', 'danger');
+    });
+
+    it('uses dedicated semantic tokens for the danger surface and hover state', () => {
+      render(<Button variant="danger">Danger</Button>);
+      const button = screen.getByRole('button', { name: 'Danger' });
+
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-danger-bg)]',
+        'enabled:hover:bg-[var(--pf-button-danger-hover)]',
+        'text-[var(--pf-on-danger)]',
+        'border-[var(--pf-button-danger-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-error',
+        'enabled:hover:bg-pf-error-hover',
+        'text-[var(--pf-text-inverse)]',
+        'hover:opacity-90',
+        'active:opacity-75',
+      );
+    });
+
+    it('uses dedicated semantic tokens for the success surface and hover state', () => {
+      render(<Button variant="success">Success</Button>);
+      const button = screen.getByRole('button', { name: 'Success' });
+
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-success-bg)]',
+        'enabled:hover:bg-[var(--pf-button-success-hover)]',
+        'text-[var(--pf-button-success-text)]',
+        'border-[var(--pf-button-success-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-success-bg',
+        'enabled:hover:bg-pf-success-hover',
+        'text-white',
+        'text-pf-success-text',
+      );
     });
   });
 
@@ -295,6 +331,200 @@ describe('Button', () => {
       const button = screen.getByRole('button', { name: 'Active' });
       expect(button).toHaveClass('bg-pf-accent-bg');
       expect(button).toHaveClass('text-[var(--pf-on-accent)]');
+    });
+  });
+
+  // Regression guard for #1102 — the same defect as #1087, in the four variants
+  // that were left behind when ghost was fixed. Each declared its surface as
+  // Tailwind utilities (transparent background, a secondary text colour, a
+  // transparent border colour, and — worse — an `enabled:hover:` background).
+  // Those live in `@layer utilities` next to everything a caller passes via
+  // `className`, so they were decided by raw stylesheet source order and won:
+  // Tailwind v4 sorts colour utilities alphabetically, which puts the
+  // transparent background after every plain palette background, and puts the
+  // `enabled:hover:` variant after plain `hover:`. Caller fills AND caller
+  // hovers were both suppressed. Defaults now live in `@layer components`
+  // (`styles/controls.css`) keyed off `[data-pf-variant]`, where layer order
+  // beats specificity and source order in every state at once.
+  //
+  // As in the ghost block above, the forbidden class names are described rather
+  // than written out: Tailwind scans this file as source, so naming a utility
+  // even inside a comment re-emits its rule.
+  //
+  // A unit test cannot observe the cascade — that gap is tracked as #1122 — but
+  // it can observe the precondition: these variants must contribute no paint
+  // utility of their own, in any state.
+  describe('subtle, tab, toggle and link emit no paint utilities (#1102)', () => {
+    const FORBIDDEN: Array<[string, RegExp]> = [
+      ['background shorthand', /\[background:/],
+      ['background-color utility', /(?:^|\s|:)bg-/],
+      ['colour utility', /(?:^|\s|:)text-(?:inherit|white|black|current|pf-|\[)/],
+      ['border-colour utility', /(?:^|\s|:)border-(?:transparent|current|pf-|\[)/],
+      ['box-shadow utility', /(?:^|\s|:)shadow-/]
+    ];
+
+    const VARIANTS = ['subtle', 'tab', 'toggle', 'link'] as const;
+
+    // The shared base string contributes one box-shadow utility of its own —
+    // but only to variants that opt in. `applyShadow` in Button.tsx excludes
+    // ghost, link and unstyled, so filtering the token unconditionally would
+    // blind this guard to a real shadow utility declared by `link`. The set
+    // below must track `applyShadow`.
+    //
+    // That base shadow is a base-level concern affecting all opted-in variants,
+    // not the four this issue is about, so it is filtered rather than silently
+    // widening #1102. Tracked separately as #1127.
+    const BASE_SHADOW_VARIANTS = new Set(['subtle', 'tab', 'toggle']);
+
+    // Exactly one box-shadow utility comes from the base, so exactly one is
+    // dropped. `clsx` does not deduplicate — that is the very property that
+    // makes #1102 possible — so a variant that declares the same utility shows
+    // up as a second occurrence. Filtering every occurrence would swallow it
+    // and blind this guard to the variants most likely to regress.
+    const variantContributed = (variant: string, className: string) => {
+      const tokens = className.split(/\s+/).filter(Boolean);
+      if (!BASE_SHADOW_VARIANTS.has(variant)) return tokens;
+
+      const baseShadow = tokens.indexOf('shadow-xs');
+      return baseShadow === -1
+        ? tokens
+        : [...tokens.slice(0, baseShadow), ...tokens.slice(baseShadow + 1)];
+    };
+
+    it.each(VARIANTS)(
+      '%s contributes no background, colour, border-colour or shadow class',
+      (variant) => {
+        render(<Button variant={variant}>Label</Button>);
+        const tokens = variantContributed(
+          variant,
+          screen.getByRole('button', { name: 'Label' }).className
+        );
+
+        for (const [label, pattern] of FORBIDDEN) {
+          const offender = tokens.find((token) => pattern.test(token));
+          expect(
+            offender,
+            `${variant} variant emitted a ${label} ("${offender}"); it would defeat ` +
+              'caller classes on source order — see #1102'
+          ).toBeUndefined();
+        }
+      }
+    );
+
+    // Keeps BASE_SHADOW_VARIANTS honest in both directions: if the base stops
+    // giving these variants a shadow the filter becomes a silent no-op, and if
+    // it starts giving `link` one the filter would need to grow. Either drift
+    // reopens the hole this filter could otherwise hide. The count is asserted
+    // exactly, because the filter drops precisely one occurrence: were the base
+    // to contribute two, one would leak through and read as variant-declared.
+    it.each([...BASE_SHADOW_VARIANTS])(
+      '%s really does receive the base shadow the filter assumes, exactly once',
+      (variant) => {
+        render(<Button variant={variant as never}>Label</Button>);
+        const shadows = screen
+          .getByRole('button', { name: 'Label' })
+          .className.split(/\s+/)
+          .filter((token) => token === 'shadow-xs');
+
+        expect(shadows).toHaveLength(1);
+      }
+    );
+
+    it('link receives no base shadow, so nothing is filtered for it', () => {
+      render(<Button variant="link">Label</Button>);
+      expect(
+        screen.getByRole('button', { name: 'Label' }).className.split(/\s+/)
+      ).not.toContain('shadow-xs');
+      expect(BASE_SHADOW_VARIANTS.has('link')).toBe(false);
+    });
+
+    it.each(VARIANTS)('%s exposes its variant to the components layer', (variant) => {
+      render(<Button variant={variant}>Label</Button>);
+      expect(screen.getByRole('button', { name: 'Label' })).toHaveAttribute(
+        'data-pf-variant',
+        variant
+      );
+    });
+
+    // The hover half of #1102: a state-scoped paint utility is just as fatal as
+    // a resting one, and is easier to miss because it only shows up under a
+    // state prefix.
+    it.each(VARIANTS)('%s declares no state-scoped paint utility', (variant) => {
+      render(<Button variant={variant}>Label</Button>);
+      const className = screen.getByRole('button', { name: 'Label' }).className;
+
+      for (const token of className.split(/\s+/).filter(Boolean)) {
+        const stateScoped = /^(?:enabled:|hover:|focus:|active:|disabled:|group-hover:)+/.exec(
+          token
+        );
+        if (!stateScoped) continue;
+        const utility = token.slice(stateScoped[0].length);
+        expect(
+          /^(?:bg-|text-(?:inherit|white|black|current|pf-|\[)|border-(?:transparent|current|pf-|\[)|shadow-)/.test(
+            utility
+          ),
+          `${variant} variant emitted the state-scoped paint utility "${token}"; ` +
+            'state-prefixed utilities sort after their unprefixed form, so it ' +
+            'would defeat a caller hover — see #1102'
+        ).toBe(false);
+      }
+    });
+
+    // The active tab exposes a hook instead of paint utilities, so the
+    // components layer can style it without competing with caller classes.
+    it('marks the active tab with data-pf-active and no paint utility', () => {
+      render(
+        <Button variant="tab" active>
+          Active tab
+        </Button>
+      );
+      const button = screen.getByRole('button', { name: 'Active tab' });
+      expect(button).toHaveAttribute('data-pf-active');
+
+      const tokens = variantContributed('tab', button.className);
+      for (const [label, pattern] of FORBIDDEN) {
+        const offender = tokens.find((token) => pattern.test(token));
+        expect(
+          offender,
+          `active tab emitted a ${label} ("${offender}") — see #1102`
+        ).toBeUndefined();
+      }
+    });
+
+    it('does not mark inactive tabs, or any other variant, as active', () => {
+      render(<Button variant="tab">Idle tab</Button>);
+      expect(screen.getByRole('button', { name: 'Idle tab' })).not.toHaveAttribute(
+        'data-pf-active'
+      );
+
+      render(
+        <Button variant="subtle" active>
+          Subtle
+        </Button>
+      );
+      expect(screen.getByRole('button', { name: 'Subtle' })).not.toHaveAttribute(
+        'data-pf-active'
+      );
+    });
+
+    it.each(VARIANTS)('%s preserves caller paint classes verbatim', (variant) => {
+      render(
+        <Button
+          variant={variant}
+          className="bg-pf-accent hover:bg-pf-accent/90 text-pf-error border-pf-accent shadow-md"
+        >
+          Label
+        </Button>
+      );
+      const button = screen.getByRole('button', { name: 'Label' });
+
+      expect(button).toHaveClass(
+        'bg-pf-accent',
+        'hover:bg-pf-accent/90',
+        'text-pf-error',
+        'border-pf-accent',
+        'shadow-md'
+      );
     });
   });
 });

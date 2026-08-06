@@ -221,9 +221,7 @@ public sealed class AutoDispatchBackgroundService(
                 && (p.DispatchState.AutoDispatchState == AutoDispatchState.Ready || p.DispatchState.BedPreConfirmed)
                 && !db.PrintJobs.Any(j =>
                     j.AssignedPrinterId == p.Id
-                    && (j.Status == PrintJobStatus.Starting ||
-                        j.Status == PrintJobStatus.Printing ||
-                        j.Status == PrintJobStatus.Paused))
+                    && PrintJobOccupancy.Statuses.Contains(j.Status))
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
                     && j.QueuedAt <= startupAt
@@ -387,16 +385,13 @@ public sealed class AutoDispatchBackgroundService(
             return DispatchPlan.NoWork;
         }
 
-        bool hasActiveJob = await db.PrintJobs.AnyAsync(
-            job => job.AssignedPrinterId == printerId
-                && (job.Status == PrintJobStatus.Starting ||
-                    job.Status == PrintJobStatus.Printing ||
-                    job.Status == PrintJobStatus.Paused),
-            ct);
-        if (hasActiveJob)
+        bool hasOccupyingJob = await db.PrintJobs
+            .WhereOccupiesPrinter()
+            .AnyAsync(job => job.AssignedPrinterId == printerId, ct);
+        if (hasOccupyingJob)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} has an active job — aborting",
+                "[AutoDispatch] Printer {PrinterId} has an occupying job — aborting",
                 printerId);
             return DispatchPlan.NoWork;
         }

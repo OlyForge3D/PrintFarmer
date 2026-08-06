@@ -918,21 +918,6 @@ describe("ApiClient", () => {
           expect(mockGet).not.toHaveBeenCalled();
         });
 
-        it("strips header quotes from bulk reorder body tokens", async () => {
-          const mockGet = vi.fn();
-          const mockPost = vi.fn().mockResolvedValue({ data: {} });
-          (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
-          (apiClient as unknown as { client: { post: typeof mockPost } }).client.post = mockPost;
-
-          await apiClient.reorderQueueJobs([
-            { jobId: "job-a", newPosition: 2, rowVersion: '"etag-swap"' },
-          ]);
-
-          expect(mockPost).toHaveBeenCalledWith("/job-queue-analytics/bulk/reorder", {
-            moves: [{ jobId: "job-a", newPosition: 2, ifMatch: "etag-swap" }],
-          });
-          expect(mockGet).not.toHaveBeenCalled();
-        });
       });
     });
   });

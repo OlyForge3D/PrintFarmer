@@ -125,13 +125,10 @@ public sealed class PrinterPhysicalActuationService(
         }
 
         bool hasActiveJob = await _db.PrintJobs
+            .WhereOccupiesPrinter()
             .AsNoTracking()
             .AnyAsync(
-                job =>
-                    job.AssignedPrinterId == printerId &&
-                    (job.Status == PrintJobStatus.Starting ||
-                     job.Status == PrintJobStatus.Printing ||
-                     job.Status == PrintJobStatus.Paused),
+                job => job.AssignedPrinterId == printerId,
                 ct);
         if (hasActiveJob || state.ActiveDispatchAttemptId.HasValue || state.ActiveJobId.HasValue)
         {
@@ -391,11 +388,8 @@ public sealed class PrinterPhysicalActuationService(
                 candidate => candidate.Id == state.ActiveJobId.Value,
                 ct)
             : await _db.PrintJobs
-                .Where(job =>
-                    job.AssignedPrinterId == printerId &&
-                    (job.Status == PrintJobStatus.Starting ||
-                     job.Status == PrintJobStatus.Printing ||
-                     job.Status == PrintJobStatus.Paused))
+                .WhereOccupiesPrinter()
+                .Where(job => job.AssignedPrinterId == printerId)
                 .OrderBy(job => job.ActualStartTime)
                 .ThenBy(job => job.Id)
                 .FirstOrDefaultAsync(ct);

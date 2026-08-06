@@ -878,7 +878,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                               e.stopPropagation();
                               handleRemoveToolhead(toolhead.id!);
                             }}
-                            className="p-1 text-pf-text-secondary hover:text-pf-error"
+                            className="p-1 text-pf-text-secondary hover:text-pf-error-text"
                             title="Remove toolhead"
                           />
                         }

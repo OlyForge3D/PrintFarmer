@@ -164,7 +164,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     autoDispatchStatus,
     isOnline,
   });
-  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus);
+  const isPendingReady = requiresBedClearConfirmation(autoDispatchStatus, state);
   const support = getPrinterSupport(backendCapabilities);
 
   const canPauseOrResumeNow = canPauseOrResume({ isOnline, isEnabled, isPrinting, isPaused, support });
@@ -596,6 +596,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             printerId={printer.id}
             printerName={printer.name ?? 'Printer'}
             autoDispatchStatus={autoDispatchStatus}
+            printerState={state}
           />
         </div>
       )}

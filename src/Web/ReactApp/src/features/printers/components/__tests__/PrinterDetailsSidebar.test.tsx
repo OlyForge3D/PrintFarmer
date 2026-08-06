@@ -183,6 +183,35 @@ describe('PrinterDetailsSidebar', () => {
     expect(shell).not.toHaveClass('lg:max-h-[calc(100dvh-5rem)]');
   });
 
+  it('uses the dedicated success action contract for move-to', () => {
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        backendCapabilities={capabilities()}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    const moveToButton = screen.getByTitle('Move to entered coordinates');
+    expect(moveToButton).toHaveAttribute('data-pf-variant', 'success');
+    expect(moveToButton).toHaveClass(
+      'bg-[var(--pf-button-success-bg)]',
+      'enabled:hover:bg-[var(--pf-button-success-hover)]',
+      'text-[var(--pf-button-success-text)]',
+      'border-[var(--pf-button-success-border)]',
+      'enabled:hover:scale-105',
+      'enabled:hover:shadow-md',
+    );
+    expect(moveToButton).not.toHaveClass(
+      'bg-pf-success!',
+      'text-[var(--pf-text-inverse)]!',
+      'hover:bg-pf-success!',
+      'hover:bg-pf-success-hover!',
+    );
+  });
+
   it('does not retry printer statistics query on client errors', () => {
     render(
       <PrinterDetailsSidebar

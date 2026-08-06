@@ -453,7 +453,7 @@ function TaskRow({ task, onEdit, onDelete }: TaskRowProps) {
         <Button variant="subtle" size="sm" onClick={onEdit} aria-label={`Edit ${task.taskName}`}>
           <EditIcon className="h-3.5 w-3.5" />
         </Button>
-        <Button variant="subtle" size="sm" onClick={onDelete} aria-label={`Delete ${task.taskName}`} className="hover:text-pf-error">
+        <Button variant="subtle" size="sm" onClick={onDelete} aria-label={`Delete ${task.taskName}`} className="hover:text-pf-error-text">
           <DeleteIcon className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -557,7 +557,7 @@ function PlanRow({ plan, isExpanded, onToggle, onEditPlan, onDeletePlan, onClone
           <Button variant="subtle" size="sm" onClick={onEditPlan} aria-label={`Edit plan ${plan.name}`}>
             <EditIcon className="h-4 w-4" />
           </Button>
-          <Button variant="subtle" size="sm" onClick={onDeletePlan} aria-label={`Delete plan ${plan.name}`} className="hover:text-pf-error">
+          <Button variant="subtle" size="sm" onClick={onDeletePlan} aria-label={`Delete plan ${plan.name}`} className="hover:text-pf-error-text">
             <DeleteIcon className="h-4 w-4" />
           </Button>
         </div>

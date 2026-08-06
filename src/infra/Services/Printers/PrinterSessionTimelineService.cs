@@ -331,7 +331,7 @@ public sealed class PrinterSessionTimelineService(AppDbContext dbContext) : IPri
     /// Identifies active job states that should remain open-ended.
     /// </summary>
     private static bool IsActiveStatus(PrintJobStatus status)
-        => status is PrintJobStatus.Assigned or PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused;
+        => status == PrintJobStatus.Assigned || status.OccupiesPrinter();
 
     /// <summary>
     /// Normalizes the take value into the supported bounds.

@@ -195,7 +195,26 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             NullLogger<AutoDispatchBackgroundService>.Instance);
     }
 
-    private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1)
+    private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1) =>
+        SeedJob(
+            name,
+            PrintJobStatus.Queued,
+            assignedPrinterId: null,
+            priority: priority,
+            queuePosition: queuePosition);
+
+    private PrintJob SeedAssignedJob(
+        Guid printerId,
+        string name,
+        PrintJobStatus status) =>
+        SeedJob(name, status, printerId, priority: 0, queuePosition: 0);
+
+    private PrintJob SeedJob(
+        string name,
+        PrintJobStatus status,
+        Guid? assignedPrinterId,
+        int priority,
+        int queuePosition)
     {
         Guid gcodeFileId = Guid.NewGuid();
         var gcodeFile = new GcodeFile
@@ -216,8 +235,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             Name = name,
             GcodeFileId = gcodeFileId,
             GcodeFile = gcodeFile,
-            Status = PrintJobStatus.Queued,
-            AssignedPrinterId = null,
+            Status = status,
+            AssignedPrinterId = assignedPrinterId,
             Priority = priority,
             QueuePosition = queuePosition,
 
@@ -324,6 +343,32 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _dispatchServiceMock.Verify(
             d => d.DispatchJobAsync(job.Id, printerId, "system:auto-dispatch", It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
+    public async Task OnStartup_ReadyPrinterWithPausedJob_DoesNotQueueDispatchIntent()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (Printer printer, Guid printerId) = SeedPrinter(name: "Startup Paused Printer");
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.Ready,
+        };
+        _db.SaveChanges();
+        _ = SeedAssignedJob(printerId, "paused-job", PrintJobStatus.Paused);
+        _ = SeedQueuedJob("queued-behind-paused-job");
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService();
+
+        await svc.ReconcileStartupEligiblePrintersAsync(cts.Token);
+
+        _trigger.IntentStateCount.Should().Be(0);
+        _scorerMock.VerifyNoOtherCalls();
+        _dispatchServiceMock.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -630,6 +675,35 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _scorerMock.Verify(
             s => s.ScorePrintersForJobAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Category", "Integration")]
+    [Trait("Phase", "2")]
+    public async Task OnPrinterIdle_PrintPausedBeforeDispatch_DoesNotStartSecondJob()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (_, Guid printerId) = SeedPrinter();
+        PrintJob activeJob = SeedAssignedJob(
+            printerId,
+            "print-to-pause",
+            PrintJobStatus.Printing);
+        activeJob.Status = PrintJobStatus.Paused;
+        _db.SaveChanges();
+        PrintJob queuedJob = SeedQueuedJob("must-remain-queued");
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService svc = CreateService();
+
+        await svc.ProcessPrinterIdleAsync(printerId, skipIdleThreshold: true, cts.Token);
+
+        _db.Entry(activeJob).Reload();
+        _db.Entry(queuedJob).Reload();
+        activeJob.Status.Should().Be(PrintJobStatus.Paused);
+        queuedJob.Status.Should().Be(PrintJobStatus.Queued);
+        _scorerMock.VerifyNoOtherCalls();
+        _dispatchServiceMock.VerifyNoOtherCalls();
     }
 
     [Fact]

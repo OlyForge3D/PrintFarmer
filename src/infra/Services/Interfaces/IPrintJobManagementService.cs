@@ -260,17 +260,6 @@ public interface IPrintJobManagementService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reorder multiple jobs in queue
-    /// </summary>
-    /// <param name="moves">List of reorder moves to apply.</param>
-    /// <param name="userId">The unique identifier of the user.</param>
-    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
-    Task<QueueBulkOperationResultDto> BulkReorderJobsAsync(
-        List<QueueJobReorderMove> moves,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Rerun a completed job (add it back to queue)
     /// </summary>
     /// <param name="jobId">The unique identifier of the print job.</param>
