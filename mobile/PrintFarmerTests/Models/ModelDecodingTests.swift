@@ -249,7 +249,7 @@ final class ModelDecodingTests: XCTestCase {
         XCTAssertEqual(job.gcodeFileName, "benchy.gcode")
         XCTAssertEqual(job.name, "benchy.gcode")
         XCTAssertEqual(job.status, .printing)
-        XCTAssertEqual(job.priority, 1)
+        XCTAssertEqual(job.priority, .normal)
         XCTAssertEqual(job.queuePosition, 1)
         XCTAssertEqual(job.assignedPrinterName, "Prusa MK4")
         XCTAssertNil(job.harvestedAt, "harvestedAt is absent from the JSON and must decode as nil")
@@ -321,7 +321,7 @@ final class ModelDecodingTests: XCTestCase {
 
         XCTAssertEqual(job.gcodeFileName, "phone_case.gcode")
         XCTAssertEqual(job.status, .queued)
-        XCTAssertEqual(job.priority, 2)
+        XCTAssertEqual(job.priority, .high)
         XCTAssertNil(job.assignedPrinterId)
         XCTAssertNil(job.actualStartTime)
         XCTAssertNil(job.estimatedPrintTime)
@@ -891,7 +891,7 @@ final class ModelDecodingTests: XCTestCase {
         {
             "id": "990e8400-e29b-41d4-a716-446655440004",
             "status": "Completed",
-            "priority": 1,
+            "priority": "Normal",
             "queuePosition": 1,
             "gcodeFileName": "test.gcode",
             "assignedPrinterName": "",

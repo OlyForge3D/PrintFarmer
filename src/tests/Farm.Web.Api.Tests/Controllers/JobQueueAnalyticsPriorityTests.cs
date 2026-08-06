@@ -163,7 +163,7 @@ public class JobQueueAnalyticsPriorityTests
         {
             HttpContext = httpContext,
         };
-        controller.Request.Headers.IfMatch = Convert.ToBase64String(job.RowVersion!);
+        controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String(job.RowVersion!)}\"";
         return controller;
     }
 

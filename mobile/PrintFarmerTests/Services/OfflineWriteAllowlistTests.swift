@@ -306,7 +306,7 @@ final class OfflineWriteAllowlistTests: XCTestCase {
     private func makeJob() -> PrintJob {
         PrintJob(
             id: UUID(), rowVersion: nil, dispatchStateRowVersion: nil,
-            status: .completed, priority: 1, queuePosition: 0,
+            status: .completed, priority: .normal, queuePosition: 0,
             gcodeFileId: nil, gcodeFileName: "part.gcode",
             assignedPrinterId: nil, assignedPrinterName: nil,
             createdAt: .now, updatedAt: .now, actualStartTime: nil, actualEndTime: nil,
