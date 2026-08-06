@@ -46,6 +46,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     private const long MaxClientThumbnailBytes = 10 * 1024 * 1024;
     private const int MaxClientThumbnailDimension = 4_096;
     private const long MaxClientThumbnailPixels = 16_000_000;
+    private const int MaxSymbolicLinkDepth = 64;
 
     private static readonly byte[] PngSignature = [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];
 
@@ -1144,29 +1145,62 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
     private static string ResolvePhysicalPath(string path)
     {
-        string fullPath = Path.GetFullPath(path);
-        string rootPath = Path.GetPathRoot(fullPath)
-            ?? throw new ArgumentException("The model path does not have a filesystem root.", nameof(path));
-        string currentPath = rootPath;
-        string[] segments = fullPath[rootPath.Length..]
-            .Split(
-                [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-                StringSplitOptions.RemoveEmptyEntries);
+        string pendingPath = Path.GetFullPath(path);
+        StringComparer pathComparer = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        HashSet<string> visitedLinks = new(pathComparer);
+        int linkDepth = 0;
 
-        foreach (string segment in segments)
+        while (true)
         {
-            currentPath = Path.Combine(currentPath, segment);
-            FileSystemInfo entry = Directory.Exists(currentPath)
-                ? new DirectoryInfo(currentPath)
-                : new FileInfo(currentPath);
-            FileSystemInfo? resolvedLink = entry.ResolveLinkTarget(returnFinalTarget: true);
-            if (resolvedLink is not null)
+            string rootPath = Path.GetPathRoot(pendingPath)
+                ?? throw new ArgumentException(
+                    "The model path does not have a filesystem root.",
+                    nameof(path));
+            string currentPath = rootPath;
+            string[] segments = pendingPath[rootPath.Length..]
+                .Split(
+                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                    StringSplitOptions.RemoveEmptyEntries);
+            bool linkResolved = false;
+
+            for (int index = 0; index < segments.Length; index++)
             {
-                currentPath = Path.GetFullPath(resolvedLink.FullName);
+                currentPath = Path.Combine(currentPath, segments[index]);
+                FileSystemInfo entry = Directory.Exists(currentPath)
+                    ? new DirectoryInfo(currentPath)
+                    : new FileInfo(currentPath);
+                FileSystemInfo? linkTarget = entry.ResolveLinkTarget(returnFinalTarget: false);
+                if (linkTarget is null)
+                {
+                    continue;
+                }
+
+                string linkPath = Path.GetFullPath(currentPath);
+                if (!visitedLinks.Add(linkPath) || ++linkDepth > MaxSymbolicLinkDepth)
+                {
+                    throw new UnauthorizedAccessException(
+                        "The model path contains a filesystem link cycle or exceeds the link depth limit.");
+                }
+
+                string targetPath = Path.GetFullPath(linkTarget.FullName);
+                if (index + 1 < segments.Length)
+                {
+                    targetPath = Path.GetFullPath(
+                        Path.Combine(targetPath, Path.Combine(segments[(index + 1)..])));
+                }
+
+                pendingPath = targetPath;
+                linkResolved = true;
+                break;
+            }
+
+            if (!linkResolved)
+            {
+                return Path.GetFullPath(currentPath);
             }
         }
-
-        return Path.GetFullPath(currentPath);
     }
 
     #region Move Operations

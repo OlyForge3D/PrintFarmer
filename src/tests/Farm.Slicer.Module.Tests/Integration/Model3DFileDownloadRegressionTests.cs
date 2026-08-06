@@ -253,6 +253,43 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DownloadForViewer_WithLinkTargetContainingIntermediateSymlink_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsideDirectory = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"intermediate-target-{Guid.NewGuid():N}");
+        string outsideInnerDirectory = Path.Combine(outsideDirectory, "inner");
+        string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
+        string outsidePath = Path.Combine(outsideInnerDirectory, outsideFileName);
+        string nestedLinkPath = Path.Combine(modelsPath, $"nested-{Guid.NewGuid():N}");
+        string bridgeLinkPath = Path.Combine(modelsPath, $"bridge-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideInnerDirectory);
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        _ = Directory.CreateSymbolicLink(
+            nestedLinkPath,
+            Path.GetRelativePath(modelsPath, outsideDirectory));
+        _ = Directory.CreateSymbolicLink(
+            bridgeLinkPath,
+            Path.Combine(Path.GetFileName(nestedLinkPath), "inner"));
+
+        try
+        {
+            string requestedPath = Path.Combine(Path.GetFileName(bridgeLinkPath), outsideFileName);
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(requestedPath));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            Directory.Delete(bridgeLinkPath);
+            Directory.Delete(nestedLinkPath);
+            Directory.Delete(outsideDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task GetModelFile_WithInvalidModel_Returns200AndFileContent()
     {
         // Arrange - Create INVALID model with physical file
