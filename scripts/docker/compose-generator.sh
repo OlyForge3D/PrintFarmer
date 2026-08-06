@@ -1087,6 +1087,12 @@ main() {
             log_error "For local development without Docker, SQLite is still available"
             return 1
             ;;
+        mysql)
+            log_error "MySQL is not supported for Docker deployments in this release"
+            log_error "Migration-safe upgrades require provider-specific AppDbContext and SlicerDbContext migration assemblies"
+            log_error "Use --db-provider postgres (default) or --db-provider sqlserver"
+            return 1
+            ;;
         *)
             log_error "Invalid database provider: $DB_PROVIDER"
             log_error "Valid options: postgres (default), sqlserver"

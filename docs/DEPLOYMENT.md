@@ -164,17 +164,23 @@ never a user-facing API credential.
 
 ## Database Configuration
 
-PrintFarmer supports multiple database providers:
+The current release supports this migration-safe database provider matrix:
 
-- **SQLite** (default): File-based, no setup required
-- **PostgreSQL**: Advanced open-source database
-- **SQL Server**: Enterprise database
-- **MySQL**: Popular open-source database
+| Provider | Native/local deployment | Docker Compose deployment | Migration-safe upgrades |
+|---|---|---|---|
+| SQLite | Supported for local, non-Docker use | Not supported | Supported |
+| PostgreSQL | Supported | Supported | Supported |
+| SQL Server | Supported | Supported | Supported |
+| MySQL | Not supported for this release | Not supported | Not supported |
 
-Set `DB_PROVIDER` environment variable during deployment:
+Docker Compose generation requires PostgreSQL or SQL Server:
+
 ```bash
-export DB_PROVIDER=postgresql  # or sqlserver, mysql, sqlite
+export DB_PROVIDER=postgres  # or sqlserver
 ```
+
+The canonical Compose templates exist only for these two server providers.
+Requests for `mysql` or `sqlite` are rejected before a Compose file is written.
 
 ### Migration-safe upgrades
 
@@ -267,9 +273,10 @@ blob root together; the hosted reconciliation service retries pending
 two-phase deletes and removes orphaned blobs recorded during failed metadata
 writes.
 
-The migration-safe contract in this release does not include MySQL. Do not
-upgrade an existing MySQL deployment to this release until a provider-correct
-MySQL migration assembly is available.
+The migration-safe contract in this release does not include MySQL because
+provider-correct migration assemblies are unavailable for both `AppDbContext`
+and `SlicerDbContext`. Do not create or upgrade a MySQL deployment with this
+release.
 
 ## Network Configuration
 

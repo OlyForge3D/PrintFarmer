@@ -14,6 +14,7 @@ source "$SCRIPT_DIR/test-framework.sh"
 
 # Test configuration
 TEST_TEMP_DIR=""
+readonly -a SUPPORTED_DATABASE_PROVIDERS=("postgres" "sqlserver")
 
 setup() {
     setup_test_environment
@@ -358,9 +359,7 @@ test_database_provider_config() {
 test_all_database_providers() {
     start_test "all database providers"
     
-    local providers=("postgres" "sqlserver")
-    
-    for provider in "${providers[@]}"; do
+    for provider in "${SUPPORTED_DATABASE_PROVIDERS[@]}"; do
         local temp_provider_dir="$TEST_TEMP_DIR/test-$provider"
         mkdir -p "$temp_provider_dir"
         
@@ -756,9 +755,7 @@ test_generated_compose_file_is_valid_yaml() {
     
     # Generate for all supported database providers
     # This ensures database service YAML is properly formatted for all supported combinations
-    local providers=("postgres" "sqlserver")
-    
-    for provider in "${providers[@]}"; do
+    for provider in "${SUPPORTED_DATABASE_PROVIDERS[@]}"; do
         local test_subdir="$TEST_TEMP_DIR/test-${provider}"
         assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $test_subdir" "Should generate compose with $provider database"
         
@@ -893,7 +890,8 @@ test_invalid_database_provider() {
     local mysql_exit_code=0
     mysql_output=$("$COMPOSE_GENERATOR" --db-provider mysql --output-dir "$mysql_output_dir" 2>&1) || mysql_exit_code=$?
     assert_equals "1" "$mysql_exit_code" "MySQL should be rejected as an unsupported database provider"
-    assert_contains "$mysql_output" "Invalid database provider: mysql" "MySQL rejection should explain the unsupported provider"
+    assert_contains "$mysql_output" "MySQL is not supported for Docker deployments in this release" "MySQL rejection should explain the unsupported migration-safe provider contract"
+    assert_contains "$mysql_output" "provider-specific AppDbContext and SlicerDbContext migration assemblies" "MySQL rejection should explain the migration safety requirement"
     assert_file_not_exists "$mysql_output_dir/docker-compose.yml" "Rejected MySQL generation must not create a compose file"
     
     pass_test
@@ -1013,7 +1011,7 @@ test_no_unresolved_environment_variables() {
     cd "$TEST_TEMP_DIR"
     
     # Test with all supported database providers
-    for provider in postgres sqlserver; do
+    for provider in "${SUPPORTED_DATABASE_PROVIDERS[@]}"; do
         assert_command_success "$COMPOSE_GENERATOR --db-provider $provider --output-dir $TEST_TEMP_DIR/test-vars-$provider"
         
         local compose_file="$TEST_TEMP_DIR/test-vars-$provider/docker-compose.yml"

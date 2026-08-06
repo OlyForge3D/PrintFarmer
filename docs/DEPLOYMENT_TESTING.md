@@ -95,7 +95,7 @@ bash tests/test-user-scenario-complete.sh
 ✅ **Database Providers**:
 - PostgreSQL (default)
 - SQL Server
-- MySQL
+- MySQL rejection (unsupported without provider-correct migration assemblies)
 
 ✅ **Addon Stacks**:
 - Monitoring (Prometheus, Grafana, ELK)
@@ -324,7 +324,8 @@ When reporting test failures, include:
 
 **Issue**: Monolithic `docker-compose.databases.yml` caused AWK extraction to include dangling `volumes:` keys
 
-**Solution**: Created separate database provider templates (postgres, sqlserver, mysql)
+**Solution**: Created separate database provider templates for the supported
+PostgreSQL and SQL Server providers.
 
 **Result**: ✅ All architectures now pass validation without duplicate volumes
 
