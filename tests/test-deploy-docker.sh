@@ -86,6 +86,8 @@ test_help_output() {
     
     assert_contains "$output" "PrintFarmer Docker Deployment Script" "Help should contain script title"
     assert_contains "$output" "USAGE:" "Help should contain usage section"
+    assert_contains "$output" "--rebuild-orcaslicer" "Help should document the clean OrcaSlicer rebuild control"
+    assert_contains "$output" "ORCA_FORCE_REBUILD=1" "Help should document the rebuild environment variable"
     assert_not_contains "$output" "--architecture" "Help should not mention removed architecture option"
     
     pass_test

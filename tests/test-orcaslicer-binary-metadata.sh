@@ -12,11 +12,14 @@ source "$REPO_ROOT/scripts/docker-utils.sh"
 
 TEST_TEMP_DIR=""
 MOCK_BIN=""
+DOCKER_COMMAND_LOG=""
 
 setup() {
     TEST_TEMP_DIR=$(create_test_temp_dir)
     MOCK_BIN="$TEST_TEMP_DIR/bin"
+    DOCKER_COMMAND_LOG="$TEST_TEMP_DIR/docker-commands.log"
     mkdir -p "$MOCK_BIN"
+    : > "$DOCKER_COMMAND_LOG"
 
     cat > "$MOCK_BIN/docker" <<'EOF'
 #!/bin/bash
@@ -24,41 +27,51 @@ set -euo pipefail
 
 case "${1:-}" in
     image)
-        if [[ "${2:-}" != "inspect" || "${MOCK_IMAGE_EXISTS:-true}" != "true" ]]; then
-            exit 1
-        fi
-        if [[ "${3:-}" != "--format" ]]; then
-            printf '{}\n'
-            exit 0
-        fi
-        case "${4:-}" in
-            *orcaslicer.version*)
-                if [[ "${MOCK_VERSION_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-                    printf '<no value>\n'
-                else
-                    printf '%s\n' "$MOCK_VERSION_LABEL"
+        case "${2:-}" in
+            inspect)
+                if [[ "${MOCK_IMAGE_EXISTS:-true}" != "true" ]]; then
+                    exit 1
                 fi
+                if [[ "${3:-}" != "--format" ]]; then
+                    printf '{}\n'
+                    exit 0
+                fi
+                case "${4:-}" in
+                    *orcaslicer.version*)
+                        if [[ "${MOCK_VERSION_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                            printf '<no value>\n'
+                        else
+                            printf '%s\n' "$MOCK_VERSION_LABEL"
+                        fi
+                        ;;
+                    *orcaslicer.sha256*)
+                        if [[ "${MOCK_SHA_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                            printf '<no value>\n'
+                        else
+                            printf '%s\n' "$MOCK_SHA_LABEL"
+                        fi
+                        ;;
+                    *orcaslicer.allow_stub*)
+                        if [[ "${MOCK_ALLOW_STUB_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
+                            printf '<no value>\n'
+                        else
+                            printf '%s\n' "$MOCK_ALLOW_STUB_LABEL"
+                        fi
+                        ;;
+                    *RepoDigests*)
+                        if [[ "${MOCK_REPO_DIGEST:-__MISSING__}" == "__MISSING__" ]]; then
+                            printf '<none>\n'
+                        else
+                            printf '%s\n' "$MOCK_REPO_DIGEST"
+                        fi
+                        ;;
+                    *)
+                        exit 2
+                        ;;
+                esac
                 ;;
-            *orcaslicer.sha256*)
-                if [[ "${MOCK_SHA_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-                    printf '<no value>\n'
-                else
-                    printf '%s\n' "$MOCK_SHA_LABEL"
-                fi
-                ;;
-            *orcaslicer.allow_stub*)
-                if [[ "${MOCK_ALLOW_STUB_LABEL:-__MISSING__}" == "__MISSING__" ]]; then
-                    printf '<no value>\n'
-                else
-                    printf '%s\n' "$MOCK_ALLOW_STUB_LABEL"
-                fi
-                ;;
-            *RepoDigests*)
-                if [[ "${MOCK_REPO_DIGEST:-__MISSING__}" == "__MISSING__" ]]; then
-                    printf '<none>\n'
-                else
-                    printf '%s\n' "$MOCK_REPO_DIGEST"
-                fi
+            ls)
+                printf '%s\n' "${MOCK_IMAGE_LIST:-}"
                 ;;
             *)
                 exit 2
@@ -88,6 +101,9 @@ case "${1:-}" in
         esac
         ;;
     rm)
+        ;;
+    rmi)
+        printf '%s\n' "$*" >> "${DOCKER_COMMAND_LOG:?}"
         ;;
     *)
         exit 2
@@ -432,6 +448,54 @@ test_stable_default_and_checksum_are_pinned() {
     pass_test
 }
 
+test_local_orcaslicer_tags_are_recoverable() {
+    start_test "only local OrcaSlicer binary tags are recoverable"
+
+    assert_command_success "is_local_orcaslicer_binaries_image 'orcaslicer-binaries:2.4.2'"
+    assert_command_success "is_local_orcaslicer_binaries_image 'orcaslicer-binaries:latest'"
+    assert_command_failure "is_local_orcaslicer_binaries_image 'ghcr.io/olyforge3d/orcaslicer-binaries:2.4.2'"
+    assert_command_failure "is_local_orcaslicer_binaries_image 'olyforge3d/orcaslicer-binaries:2.4.2'"
+    assert_command_failure "is_local_orcaslicer_binaries_image 'orcaslicer-binaries@sha256:d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd'"
+
+    pass_test
+}
+
+test_matching_local_orcaslicer_tags_are_removed() {
+    start_test "matching local OrcaSlicer binary tags are removed"
+
+    : > "$DOCKER_COMMAND_LOG"
+    (
+        export PATH="$MOCK_BIN:$PATH"
+        export DOCKER_COMMAND_LOG
+        export MOCK_IMAGE_LIST=$'orcaslicer-binaries:2.4.2\norcaslicer-binaries:latest\nghcr.io/olyforge3d/orcaslicer-binaries:2.4.2\nprintfarmer-api:latest'
+        remove_local_orcaslicer_binaries_tags
+    )
+
+    local docker_commands
+    docker_commands=$(cat "$DOCKER_COMMAND_LOG")
+    assert_contains "$docker_commands" "rmi -f orcaslicer-binaries:2.4.2 orcaslicer-binaries:latest" "Cleanup should force-remove matching local tags"
+    assert_not_contains "$docker_commands" "ghcr.io" "Cleanup must not remove registry-qualified images"
+    assert_not_contains "$docker_commands" "printfarmer-api" "Cleanup must not remove unrelated images"
+
+    pass_test
+}
+
+test_deploy_recovery_controls_are_fail_closed() {
+    start_test "deploy recovery controls preserve external image attestation"
+
+    local deploy_script
+    deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
+
+    assert_contains "$deploy_script" 'ORCA_FORCE_REBUILD="${ORCA_FORCE_REBUILD:-0}"' "Environment control should default to disabled"
+    assert_contains "$deploy_script" '--rebuild-orcaslicer)' "CLI should expose an OrcaSlicer rebuild flag"
+    assert_contains "$deploy_script" 'ORCA_BUILD_CMD+=(--no-cache)' "Recovered binary layers should rebuild without cache"
+    assert_contains "$deploy_script" 'remove_local_orcaslicer_binaries_tags' "Recovery should remove stale local tags"
+    assert_contains "$deploy_script" "Registry-qualified ORCA_ASSET_IMAGE does not attest" "External image mismatches should fail closed"
+    assert_contains "$deploy_script" "Update the pinned image, unset ORCA_ASSET_IMAGE" "External failures should provide actionable remediation"
+
+    pass_test
+}
+
 run_tests() {
     test_matching_metadata_is_accepted
     test_immutable_digest_reference_is_required
@@ -447,6 +511,9 @@ run_tests() {
     test_stale_embedded_checksum_is_rejected
     test_build_and_deploy_paths_enforce_metadata
     test_stable_default_and_checksum_are_pinned
+    test_local_orcaslicer_tags_are_recoverable
+    test_matching_local_orcaslicer_tags_are_removed
+    test_deploy_recovery_controls_are_fail_closed
 }
 
 setup

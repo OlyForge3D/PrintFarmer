@@ -165,6 +165,36 @@ validate_orcaslicer_binary_image() {
     print_success "Verified cached OrcaSlicer image '$image_name' (version $actual_version, labels and embedded metadata matched)"
 }
 
+# Only repository-local OrcaSlicer binary tags are safe to delete and rebuild.
+# Registry paths, digests, and other repositories remain operator-owned.
+is_local_orcaslicer_binaries_image() {
+    local image_name="$1"
+
+    [[ "$image_name" =~ ^orcaslicer-binaries:[^/[:space:]@]+$ ]]
+}
+
+# Remove every local tag for the OrcaSlicer binary cache so a subsequent
+# no-cache build cannot retain a stale `latest` or version alias.
+remove_local_orcaslicer_binaries_tags() {
+    local image_name
+    local -a matching_images=()
+
+    while IFS= read -r image_name; do
+        if is_local_orcaslicer_binaries_image "$image_name"; then
+            matching_images+=("$image_name")
+        fi
+    done < <(docker image ls \
+        --filter "reference=orcaslicer-binaries:*" \
+        --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)
+
+    if (( ${#matching_images[@]} == 0 )); then
+        return 0
+    fi
+
+    print_warning "Removing stale local OrcaSlicer binary cache tags: ${matching_images[*]}"
+    docker rmi -f "${matching_images[@]}"
+}
+
 # Audit log helper (if not already defined)
 if ! declare -F audit_log > /dev/null 2>&1; then
     DEPLOY_AUDIT_LOG=${DEPLOY_AUDIT_LOG:-"./.docker-ops-audit.log"}
