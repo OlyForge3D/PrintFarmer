@@ -15,7 +15,7 @@
     Output directory (default: repository root)
 
 .PARAMETER DbProvider
-    Database provider (sqlite|postgres|sqlserver, default: postgres)
+    Database provider (postgres|sqlserver, default: postgres)
 
 .PARAMETER IncludeMonitoring
     Include monitoring stack
@@ -59,7 +59,6 @@ param(
 # Normalize and validate database provider names (matching bash script behavior)
 $DbProvider = $DbProvider.ToLower()
 switch -Regex ($DbProvider) {
-    '^(sqlite|sqlite3)$' { $DbProvider = "sqlite"; break }
     '^(postgres|postgresql|pgsql)$' { $DbProvider = "postgres"; break }
     '^(sqlserver|mssql|sql-server)$' { $DbProvider = "sqlserver"; break }
     '^(sqlite|sqlite3)$' {
@@ -183,7 +182,7 @@ try {
 
 # CRITICAL: Remove environment variables for unselected database providers
 # This prevents Docker warnings about unused variables (e.g., MYSQL_ROOT_PASSWORD when using PostgreSQL)
-if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
+if ($Architecture -eq "microservices") {
     Write-Info "Removing environment variables for unselected database providers..."
     
     $ComposeContent = Get-Content -Path $ComposeFile -Raw
@@ -257,43 +256,38 @@ if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
 if ($Architecture -eq "microservices") {
     Write-Info "Configuring database provider: $DbProvider"
 
-    # For SQLite, skip database service (it's file-based, not containerized)
-    if ($DbProvider -eq "sqlite") {
-        Write-Info "SQLite is file-based; no container database service needed"
-    } else {
-        # Read the base compose file as text
-        $ComposeContent = Get-Content -Path $ComposeFile -Raw
+    # Read the base compose file as text
+    $ComposeContent = Get-Content -Path $ComposeFile -Raw
 
-        # Get database template based on provider
-        $DbTemplate = switch ($DbProvider) {
-            "postgres" { Join-Path $TemplatesDir "docker-compose.database.postgres.yml" }
-            "sqlserver" { Join-Path $TemplatesDir "docker-compose.database.sqlserver.yml" }
-        }
-
-        if (-not (Test-Path $DbTemplate)) {
-            Write-ErrorMsg "Database template not found: $DbTemplate"
-            exit 1
-        }
-
-        # Read database configuration
-        $DbConfig = Get-Content -Path $DbTemplate -Raw
-
-        # Simple replacement: replace the ##DATABASE_SERVICE## marker or similar
-        # Look for common markers in the compose file
-        if ($ComposeContent -match '##DATABASE_SERVICE##|services:.*?db:' -or $ComposeContent -match 'postgres:' -or $ComposeContent -match 'sqlserver:') {
-            Write-Info "Updating database service configuration..."
-
-            # Extract just the service definition from the database template
-            # For now, we'll use a simple approach: append if not found
-            if (-not ($ComposeContent -match 'db:|database:|postgres:|sqlserver:')) {
-                # Simple append to services section - this is a limitation without full YAML parsing
-                Write-Warning "Database configuration requires manual YAML merging"
-                Write-Info "Using basic text replacement approach..."
-            }
-        }
-
-        Write-Success "Database service configured for $DbProvider"
+    # Get database template based on provider
+    $DbTemplate = switch ($DbProvider) {
+        "postgres" { Join-Path $TemplatesDir "docker-compose.database.postgres.yml" }
+        "sqlserver" { Join-Path $TemplatesDir "docker-compose.database.sqlserver.yml" }
     }
+
+    if (-not (Test-Path $DbTemplate)) {
+        Write-ErrorMsg "Database template not found: $DbTemplate"
+        exit 1
+    }
+
+    # Read database configuration
+    $DbConfig = Get-Content -Path $DbTemplate -Raw
+
+    # Simple replacement: replace the ##DATABASE_SERVICE## marker or similar
+    # Look for common markers in the compose file
+    if ($ComposeContent -match '##DATABASE_SERVICE##|services:.*?db:' -or $ComposeContent -match 'postgres:' -or $ComposeContent -match 'sqlserver:') {
+        Write-Info "Updating database service configuration..."
+
+        # Extract just the service definition from the database template
+        # For now, we'll use a simple approach: append if not found
+        if (-not ($ComposeContent -match 'db:|database:|postgres:|sqlserver:')) {
+            # Simple append to services section - this is a limitation without full YAML parsing
+            Write-Warning "Database configuration requires manual YAML merging"
+            Write-Info "Using basic text replacement approach..."
+        }
+    }
+
+    Write-Success "Database service configured for $DbProvider"
 }
 
 # Merge addon services if requested

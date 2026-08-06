@@ -528,6 +528,7 @@ DB_PROVIDER=$DbProvider
             Write-Info "Generated random SQL Server SA password"
         }
         "mysql" {
+            throw "MySQL is not supported for Docker deployments in this release. Use PostgreSQL or SQL Server."
             $MysqlPassword = New-RandomPassword
             $MysqlRootPassword = New-RandomPassword
             $MysqlPort = 3306
@@ -544,6 +545,7 @@ DB_PROVIDER=$DbProvider
             Write-Info "Generated random MySQL passwords"
         }
         "sqlite" {
+            throw "SQLite is not supported for Docker deployments. Use PostgreSQL or SQL Server."
             $EnvContent += "`n# SQLite Configuration"
             $ConnectionString = "Data Source=/data/farm.db"
             Write-Info "SQLite configured (file-based database)"
@@ -1298,7 +1300,7 @@ function Choose-Architecture {
         Write-Host "   - Single container with API + Web frontend" -ForegroundColor White
         Write-Host "   - Simpler configuration and networking" -ForegroundColor White
         Write-Host "   - Good for most deployments" -ForegroundColor White
-        Write-Host "   - Uses SQLite database by default" -ForegroundColor White
+        Write-Host "   - Uses PostgreSQL by default" -ForegroundColor White
         Write-Host ""
         Write-Host "2. Microservices (Advanced)" -ForegroundColor Green
         Write-Host "   - Separate containers for API, Web, Database" -ForegroundColor White
@@ -1341,19 +1343,18 @@ function Choose-DatabaseProvider {
     param([hashtable]$Config, [string]$Architecture = 'monolithic', [switch]$Quiet = $false)
     
     if ($Quiet) {
-        # Non-interactive mode - use default from config or architecture default
+        # Non-interactive mode - use a supported configured provider or PostgreSQL.
         if ($Config['DB_PROVIDER']) {
-            if ($Config['DB_PROVIDER'] -eq 'mysql') {
-                throw "MySQL is not supported for Docker deployments in this release. Use PostgreSQL or SQL Server."
+            switch ($Config['DB_PROVIDER']) {
+                'postgres' { return 'postgresql' }
+                'postgresql' { return 'postgresql' }
+                'sqlserver' { return 'sqlserver' }
+                default {
+                    throw "Unsupported Docker database provider '$($Config['DB_PROVIDER'])'. Use PostgreSQL or SQL Server."
+                }
             }
-            return $Config['DB_PROVIDER']
         }
-        # Default to sqlite for monolithic, postgresql for microservices
-        if ($Architecture -eq 'microservices') {
-            return 'postgresql'
-        } else {
-            return 'sqlite'
-        }
+        return 'postgresql'
     }
     
     Write-Header "Database Configuration"
@@ -1361,41 +1362,35 @@ function Choose-DatabaseProvider {
     Write-Host ""
     Write-Host "Select your database provider:" -ForegroundColor Cyan
     Write-Host ""
-    Write-Host "1. SQLite (File-based)" -ForegroundColor Green
-    Write-Host "   - Simple, no setup required" -ForegroundColor White
-    Write-Host "   - Good for single-machine deployments" -ForegroundColor White
-    Write-Host ""
-    Write-Host "2. PostgreSQL" -ForegroundColor Green
+    Write-Host "1. PostgreSQL" -ForegroundColor Green
     Write-Host "   - Advanced, high-performance" -ForegroundColor White
-    Write-Host "   - Recommended for microservices" -ForegroundColor Yellow
+    Write-Host "   - Recommended default" -ForegroundColor Yellow
     Write-Host "   - Requires container or external server" -ForegroundColor White
     Write-Host ""
-    Write-Host "3. SQL Server" -ForegroundColor Green
+    Write-Host "2. SQL Server" -ForegroundColor Green
     Write-Host "   - Enterprise database" -ForegroundColor White
     Write-Host "   - Requires container or external server" -ForegroundColor White
     Write-Host ""
-    # Default to SQLite for monolithic, PostgreSQL for microservices
-    $defaultChoice = if ($Architecture -eq 'microservices') { '2' } else { '1' }
+    $defaultChoice = '1'
     $default = if ($Config['DB_PROVIDER']) { 
         switch ($Config['DB_PROVIDER']) {
-            'sqlite' { '1' }
-            'postgresql' { '2' }
-            'sqlserver' { '3' }
+            'postgres' { '1' }
+            'postgresql' { '1' }
+            'sqlserver' { '2' }
             default { $defaultChoice }
         }
     } else { $defaultChoice }
-    $choice = Read-Host "Choose database provider [1-3] (default: $default)"
+    $choice = Read-Host "Choose database provider [1-2] (default: $default)"
     
     if ([string]::IsNullOrWhiteSpace($choice)) {
         $choice = $default
     }
     
     switch ($choice) {
-        '1' { return 'sqlite' }
-        '2' { return 'postgresql' }
-        '3' { return 'sqlserver' }
+        '1' { return 'postgresql' }
+        '2' { return 'sqlserver' }
         default {
-            Write-ErrorMsg "Invalid choice. Please select 1-3."
+            Write-ErrorMsg "Invalid choice. Please select 1-2."
             return Choose-DatabaseProvider -Config $Config
         }
     }

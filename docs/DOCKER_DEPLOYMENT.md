@@ -59,10 +59,13 @@ Dynamically generates `docker-compose.yml` from reusable YAML templates based on
 - Copies required Dockerfiles to output directory
 
 **Input Options:**
-- `--db-provider` - postgres | sqlserver | mysql | sqlite
+- `--db-provider` - postgres | sqlserver
 - `--enable-orca-worker` - yes | no (enable distributed slicing)
 - `--include-monitoring`, `--include-telemetry`, `--include-discovery` - optional services
 - `--output-dir` - where to write generated files
+
+MySQL and SQLite are rejected because the current Docker release supports
+migration-safe Compose deployments only for PostgreSQL and SQL Server.
 
 **Output Files:**
 - `docker-compose.yml` - Generated Compose configuration
@@ -290,9 +293,9 @@ nano .env.monolithic
 
 **Key settings in .env.monolithic:**
 ```bash
-# Database provider (sqlite, postgres, sqlserver, mysql)
-DB_PROVIDER=sqlite
-ConnectionStrings__Default=Data Source=/data/farm.db
+# Database provider (postgres or sqlserver)
+DB_PROVIDER=postgres
+ConnectionStrings__Default=Host=database;Database=printfarmer;Username=postgres;Password=change-me
 
 # Network discovery settings
 ALLOW_LOCAL_NETWORK=true
@@ -369,15 +372,8 @@ open http://localhost:8080
 
 ## Database Providers
 
-PrintFarmer supports multiple database backends:
-
-### SQLite (Default - Simplest)
-```bash
-DB_PROVIDER=sqlite
-ConnectionStrings__Default=Data Source=/data/farm.db
-```
-- **Pros:** No additional setup, good for single-instance deployments
-- **Cons:** Not suitable for multiple containers or high concurrency
+Docker deployments support two migration-safe database backends. SQLite
+remains available for native local development, not Docker Compose.
 
 ### PostgreSQL (Recommended for Production)
 ```bash
@@ -395,15 +391,19 @@ ConnectionStrings__Default=Server=sqlserver;Database=printfarmer;User Id=sa;Pass
 - **Pros:** Enterprise features, excellent tooling
 - **Cons:** Larger resource requirements, licensing considerations
 
-### MySQL
+### Unsupported providers
+
+MySQL is not supported in this release because provider-correct migration
+assemblies are unavailable for both application database contexts. The
+following configuration is rejected before a Compose file is written:
+
 ```bash
 DB_PROVIDER=mysql
 ConnectionStrings__Default=Server=mysql;Database=printfarmer;User=root;Password=your_password;
 ```
-- **Pros:** Widely supported, good performance
-- **Cons:** Some compatibility considerations
-
-**Important:** All database providers use the unified `ConnectionStrings__Default` environment variable. The connection string format varies based on the selected provider.
+**Important:** Both supported database providers use the unified
+`ConnectionStrings__Default` environment variable. The connection string
+format varies based on the selected provider.
 
 ## Network Configuration
 
@@ -520,7 +520,6 @@ This causes the deploy script to force-disable worker flags and set worker count
 ### Database Containers (Optional)
 - **PostgreSQL:** postgres:15-alpine
 - **SQL Server:** mcr.microsoft.com/mssql/server:2022-latest
-- **MySQL:** mysql:8.0
 
 ## Data Persistence & Storage
 
@@ -541,8 +540,8 @@ All storage is configurable via environment variables with sensible defaults und
 | **G-code Files** | `EXTERNAL_GCODE_PATH` | `~/.printfarmer/gcode/` | Uploaded & sliced G-code files | ✅ | ✅ |
 | **3D Models** | `EXTERNAL_MODELS_PATH` | `~/.printfarmer/models/` | Uploaded 3D model files | ✅ | ✅ |
 | **Slicer Profiles** | `EXTERNAL_PROFILES_PATH` | `~/.printfarmer/slicer-profiles/` | OrcaSlicer/PrusaSlicer profiles | ✅ | ✅ |
-| **Application Data** | `EXTERNAL_APP_DATA_PATH` | `~/.printfarmer/data/` | SQLite database (monolithic) | ✅ | ❌ |
-| **Database** | `EXTERNAL_DATABASE_PATH` | `~/.printfarmer/database/` | PostgreSQL/MySQL/SQL Server data | ❌ | ✅ |
+| **Application Data** | `EXTERNAL_APP_DATA_PATH` | `~/.printfarmer/data/` | Application state | ✅ | ❌ |
+| **Database** | `EXTERNAL_DATABASE_PATH` | `~/.printfarmer/database/` | PostgreSQL/SQL Server data | ✅ | ✅ |
 
 ### Volume Mounts in Docker Compose
 
@@ -612,7 +611,7 @@ EXTERNAL_MODELS_PATH=/mnt/storage/models \
 ls -lah ~/.printfarmer/
 
 # Expected output:
-# data/                 - Application data (SQLite database)
+# data/                 - Application data
 # gcode/                - G-code files from uploads/slicing
 # models/               - 3D model uploads
 # slicer-profiles/      - OrcaSlicer/PrusaSlicer profile data
@@ -772,9 +771,6 @@ NON_INTERACTIVE=1 ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WO
 
 ### Database Management
 ```bash
-# Backup database (SQLite)
-docker compose exec api cp /data/farm.db /data/backup.db
-
 # Access database container (PostgreSQL)
 docker compose exec postgres psql -U postgres -d printfarmer
 
@@ -1094,7 +1090,7 @@ PrintFarmer supports deployment on ARM64 platforms including Raspberry Pi 4 and 
 - ✅ **API server** — Full functionality including all printer backends (Moonraker, PrusaLink, OctoPrint, SDCP, FlashForge)
 - ✅ **React frontend** — Full UI served via Nginx
 - ✅ **Printer discovery** — Network scanning and auto-detection
-- ✅ **Database** — SQLite (default) and PostgreSQL
+- ✅ **Database** — PostgreSQL
 - ✅ **SignalR** — Real-time printer status updates
 - ✅ **Spoolman integration** — Filament tracking
 - ✅ **G-code file management** — Upload, storage, and printing
