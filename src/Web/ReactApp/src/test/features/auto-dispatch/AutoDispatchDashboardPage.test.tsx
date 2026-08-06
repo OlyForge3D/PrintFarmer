@@ -8,7 +8,7 @@ import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDi
 // Mock the auto-dispatch hooks
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
   useAutoDispatchGlobalStatus: vi.fn(),
-  useConfirmBedClear: vi.fn(),
+  useAutoDispatchReadyFlow: vi.fn(),
   useSkipNextJob: vi.fn(),
   useCancelAutoDispatch: vi.fn(),
   useSetAutoDispatchEnabled: vi.fn(),
@@ -19,7 +19,7 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 // Dynamic import after mocks
 const {
   useAutoDispatchGlobalStatus,
-  useConfirmBedClear,
+  useAutoDispatchReadyFlow,
   useSkipNextJob,
   useCancelAutoDispatch,
   useSetAutoDispatchEnabled,
@@ -85,9 +85,15 @@ describe('AutoDispatchDashboardPage', () => {
     printers: [mockPrinterStatus],
   };
 
-  const mockMarkReadyMutation = {
-    mutate: vi.fn(),
-    isPending: false,
+  const mockConfirmReady = vi.fn().mockResolvedValue(undefined);
+  const mockConfirmFilamentOverride = vi.fn().mockResolvedValue(undefined);
+  const mockCancelFilamentOverride = vi.fn();
+  const mockReadyFlow = {
+    challenge: null,
+    confirmation: { isPending: false },
+    confirmReady: mockConfirmReady,
+    confirmFilamentOverride: mockConfirmFilamentOverride,
+    cancelFilamentOverride: mockCancelFilamentOverride,
   };
 
   const mockSkipMutation = {
@@ -118,7 +124,9 @@ describe('AutoDispatchDashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    vi.mocked(useConfirmBedClear).mockReturnValue(mockMarkReadyMutation as ReturnType<typeof useConfirmBedClear>);
+    vi.mocked(useAutoDispatchReadyFlow).mockReturnValue(
+      mockReadyFlow as ReturnType<typeof useAutoDispatchReadyFlow>
+    );
     vi.mocked(useSkipNextJob).mockReturnValue(mockSkipMutation as ReturnType<typeof useSkipNextJob>);
     vi.mocked(useCancelAutoDispatch).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelAutoDispatch>);
     vi.mocked(useSetAutoDispatchEnabled).mockReturnValue(mockSetEnabledMutation as ReturnType<typeof useSetAutoDispatchEnabled>);
@@ -265,7 +273,53 @@ describe('AutoDispatchDashboardPage', () => {
     const markReadyButton = screen.getByText('Mark Ready');
     await user.click(markReadyButton);
 
-    expect(mockMarkReadyMutation.mutate).toHaveBeenCalledWith(mockPrinterStatus);
+    expect(mockConfirmReady).toHaveBeenCalledWith(mockPrinterStatus, 'Printer 1');
+  });
+
+  it('shows and confirms a filament challenge on the dashboard', async () => {
+    const user = userEvent.setup();
+    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+      data: mockGlobalStatus,
+      isLoading: false,
+      error: null,
+    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    vi.mocked(useAutoDispatchReadyFlow).mockReturnValue({
+      ...mockReadyFlow,
+      challenge: {
+        status: mockPrinterStatus,
+        printerName: 'Printer 1',
+        result: {
+          status: mockPrinterStatus,
+          nextJob: {
+            id: 'job-1',
+            name: 'PETG part',
+            jobKind: 'Standard',
+            jobETag: 'job-v1',
+          },
+          dispatchInitiated: false,
+          requiresFilamentOverride: true,
+          filamentOverrideApplied: false,
+          filamentCheck: {
+            outcome: 'Incompatible',
+            sufficient: false,
+            materialMismatch: true,
+            loadedMaterial: 'PLA',
+            requiredMaterial: 'PETG',
+            message: 'Material mismatch: loaded PLA, job requires PETG',
+          },
+        },
+      },
+    } as ReturnType<typeof useAutoDispatchReadyFlow>);
+
+    render(
+      <TestWrapper>
+        <AutoDispatchDashboardPage />
+      </TestWrapper>
+    );
+
+    expect(screen.getByText('Material mismatch: loaded PLA, job requires PETG')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirm and Dispatch Anyway' }));
+    expect(mockConfirmFilamentOverride).toHaveBeenCalledOnce();
   });
 
   it('skip button calls skip mutation', async () => {

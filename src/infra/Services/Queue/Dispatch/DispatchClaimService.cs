@@ -2,6 +2,8 @@
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoDispatch;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -22,7 +24,8 @@ public sealed class DispatchClaimService(
     ILogger<DispatchClaimService> logger,
     IPrinterTelemetryFreshnessPolicy telemetryFreshnessPolicy,
     IStoredGcodeIntegrityVerifier? integrityVerifier = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null) : IDispatchClaimService
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    ISpoolmanService? spoolmanService = null) : IDispatchClaimService
 {
     private static readonly HashSet<string> ExplicitIdleStates = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -44,6 +47,8 @@ public sealed class DispatchClaimService(
     private readonly IStoredGcodeIntegrityVerifier? _integrityVerifier = integrityVerifier;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
         resourceAuthorization;
+
+    private readonly ISpoolmanService? _spoolmanService = spoolmanService;
 
     /// <inheritdoc />
     public async Task<DispatchClaimResult> AcquireClaimAsync(
@@ -117,6 +122,39 @@ public sealed class DispatchClaimService(
                 "The printer dispatch state has changed since the request was prepared. Re-fetch and retry.",
                 job.RowVersion,
                 dispatchState.RowVersion);
+        }
+
+        bool fenceReviewedFilamentEvidence = false;
+        if (request.FilamentOverride is { } filamentReview)
+        {
+            FilamentCheckResult currentCheck =
+                await FilamentPreflightEvaluator.CheckAsync(
+                    printer,
+                    job,
+                    _spoolmanService,
+                    _logger,
+                    ct);
+            byte[] currentVersion =
+                FilamentPreflightEvaluator.ComputeVersion(currentCheck);
+            bool printerRevisionChanged =
+                printer.RowVersion is null ||
+                !filamentReview.PrinterRowVersion.SequenceEqual(
+                    printer.RowVersion);
+            bool filamentEvidenceChanged =
+                !CryptographicOperations.FixedTimeEquals(
+                    filamentReview.FilamentCheckVersion,
+                    currentVersion);
+            if (printerRevisionChanged || filamentEvidenceChanged)
+            {
+                return DispatchClaimResult.FilamentCheckChanged(
+                    "The printer spool assignment or filament evidence changed. Review the current filament warning before dispatching.",
+                    currentCheck,
+                    currentVersion,
+                    job.RowVersion,
+                    dispatchState.RowVersion);
+            }
+
+            fenceReviewedFilamentEvidence = true;
         }
 
         DispatchClaimResult? printerGate = EvaluatePrinterGates(printer, dispatchState, request.PrinterId);
@@ -280,7 +318,8 @@ public sealed class DispatchClaimService(
         }
 
         DispatchClaimResult? filamentGate = DispatchSafetyGates.EvaluateFilament(job, printer);
-        if (filamentGate is not null)
+        if (filamentGate is not null &&
+            request.FilamentOverride?.OverrideApproved != true)
         {
             await WriteDeniedAuditAsync(request, filamentGate, job, dispatchState, ct);
             return filamentGate;
@@ -300,6 +339,17 @@ public sealed class DispatchClaimService(
         {
             job.BlockedReasonCode = null;
             job.BlockedReasonJson = null;
+        }
+
+        if (fenceReviewedFilamentEvidence)
+        {
+            FilamentOverrideAuthorization review = request.FilamentOverride!;
+            _db.Entry(printer)
+                .Property(candidate => candidate.RowVersion)
+                .OriginalValue = review.PrinterRowVersion;
+            _db.Entry(printer)
+                .Property(candidate => candidate.CurrentSpoolId)
+                .IsModified = true;
         }
 
         int attemptNumber = await _db.QueueDispatchAttempts
@@ -375,6 +425,12 @@ public sealed class DispatchClaimService(
 
         dispatchState.ActiveJobId = request.JobId;
         dispatchState.ActiveDispatchAttemptId = attempt.Id;
+        if (request.StartPathKind is "ReadyConfirmation" or "FilamentOverride")
+        {
+            dispatchState.AutoDispatchState = AutoDispatchState.None;
+            dispatchState.BedPreConfirmed = false;
+        }
+
         if (bedClearCommand is not null)
         {
             bedClearCommand.Status = BedClearCommandStatus.Claimed;
@@ -423,6 +479,33 @@ public sealed class DispatchClaimService(
                 backendCommandId = attempt.BackendCommandId,
                 acknowledgementConsumed = consumesAcknowledgement,
             });
+
+        if (request.FilamentOverride is { OverrideApproved: true } filamentOverride)
+        {
+            _ = QueueAuditWriter.Add(
+               _db,
+               request.ActorSubject,
+               QueueAuditOperations.SafetyOverride,
+               QueueAuditOutcomes.Success,
+               nameof(PrintJob),
+               resourceId: request.JobId,
+               printerId: request.PrinterId,
+               printJobId: request.JobId,
+               dispatchAttemptId: attempt.Id,
+               reasonCode: "filament_override",
+               jobRowVersion: job.RowVersion,
+               dispatchStateRowVersion: dispatchState.RowVersion,
+               detail: new
+               {
+                   outcome = filamentOverride.Outcome,
+                   reason = filamentOverride.Reason,
+                   filamentOverride.LoadedMaterial,
+                   filamentOverride.RequiredMaterial,
+                   filamentOverride.RemainingWeightG,
+                   filamentOverride.RequiredWeightG,
+                   authoritativeGate = filamentGate?.ErrorCode,
+               });
+        }
 
         try
         {
@@ -475,6 +558,46 @@ public sealed class DispatchClaimService(
                 .Where(candidate => candidate.PrinterId == request.PrinterId)
                 .Select(candidate => candidate.RowVersion)
                 .SingleOrDefaultAsync(ct);
+            bool jobRevisionStillMatches =
+                request.ExpectedJobRowVersion is not { Length: > 0 } ||
+                request.ExpectedJobRowVersion.SequenceEqual(
+                    currentJobRevision ?? []);
+            bool dispatchRevisionStillMatches =
+                request.ExpectedDispatchStateRowVersion is not { Length: > 0 } ||
+                request.ExpectedDispatchStateRowVersion.SequenceEqual(
+                    currentDispatchRevision ?? []);
+            if (fenceReviewedFilamentEvidence &&
+                jobRevisionStillMatches &&
+                dispatchRevisionStillMatches)
+            {
+                Printer? currentPrinter = await _db.Printers
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.Id == request.PrinterId,
+                        ct);
+                PrintJob? currentJob = await _db.PrintJobs
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.Id == request.JobId,
+                        ct);
+                if (currentPrinter is not null && currentJob is not null)
+                {
+                    FilamentCheckResult currentCheck =
+                        await FilamentPreflightEvaluator.CheckAsync(
+                            currentPrinter,
+                            currentJob,
+                            _spoolmanService,
+                            _logger,
+                            ct);
+                    return DispatchClaimResult.FilamentCheckChanged(
+                        "The printer spool assignment changed while dispatch was being claimed. Review the current filament warning before retrying.",
+                        currentCheck,
+                        FilamentPreflightEvaluator.ComputeVersion(currentCheck),
+                        currentJobRevision,
+                        currentDispatchRevision);
+                }
+            }
+
             return DispatchClaimResult.PreconditionFailed(
                 "concurrency_conflict",
                 "A concurrent operation modified the job or dispatch state. Retry with the latest ETag.",

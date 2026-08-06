@@ -1,9 +1,8 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 import type { AutoDispatchReadyResult, AutoDispatchStatus } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
@@ -12,7 +11,7 @@ vi.mock('@/services/api', () => ({
     confirmAutoDispatchReady: vi.fn().mockResolvedValue({}),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
     cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
-    dispatchJobToPrinter: vi.fn().mockResolvedValue({}),
+    preClearAutoDispatchBed: vi.fn().mockResolvedValue({}),
   },
 }));
 
@@ -52,22 +51,22 @@ vi.mock('@/common/hooks/useApi', () => ({
   },
 }));
 
-// Mock SpoolValidationModal to render testable buttons
-vi.mock('@/features/queue/components/SpoolValidationModal', () => ({
-  SpoolValidationModal: (props: {
+vi.mock('@/features/printers/components/FilamentOverrideModal', () => ({
+  FilamentOverrideModal: (props: {
     isOpen: boolean;
-    onClose: () => void;
-    onProceed: (jobId: string) => void;
-    context: { jobId: string; jobName: string } | null;
+    onCancel: () => void;
+    onConfirm: () => void;
+    filamentCheck: { message?: string; outcome?: string } | null;
   }) => {
-    if (!props.isOpen || !props.context) return null;
+    if (!props.isOpen || !props.filamentCheck) return null;
     return (
-      <div data-testid="spool-validation-modal">
-        <span data-testid="modal-job-name">{props.context.jobName}</span>
-        <button data-testid="print-anyway-btn" onClick={() => props.onProceed(props.context!.jobId)}>
-          Print Anyway
+      <div data-testid="filament-override-modal">
+        <span data-testid="filament-warning">{props.filamentCheck.message}</span>
+        <span data-testid="filament-outcome">{props.filamentCheck.outcome}</span>
+        <button data-testid="print-anyway-btn" onClick={props.onConfirm}>
+          Confirm and Dispatch Anyway
         </button>
-        <button data-testid="cancel-modal-btn" onClick={props.onClose}>
+        <button data-testid="cancel-modal-btn" onClick={props.onCancel}>
           Cancel
         </button>
       </div>
@@ -78,6 +77,7 @@ vi.mock('@/features/queue/components/SpoolValidationModal', () => ({
 import { BedClearBanner } from '../components/BedClearBanner';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
+import { usePreClearBed } from '@/features/printers/hooks/useAutoDispatch';
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -116,7 +116,12 @@ const readyResultWithJob: AutoDispatchReadyResult = {
     jobETag: 'job-v1',
     estimatedFilamentUsageG: 10,
   },
-  filamentCheck: { sufficient: true, materialMismatch: false },
+  filamentCheck: {
+    outcome: 'Compatible',
+    sufficient: true,
+    materialMismatch: false,
+  },
+  dispatchInitiated: true,
 };
 
 const readyResultNoJob: AutoDispatchReadyResult = {
@@ -152,7 +157,7 @@ const readyResultMaterialMismatch: AutoDispatchReadyResult = {
   status: {
     printerId: 'printer-1',
     enabled: true,
-    state: 'Ready',
+    state: 'PendingReady',
     queueDepth: 1,
     dispatchStateETag: 'dispatch-v2',
     printerETag: 'printer-v1',
@@ -164,18 +169,23 @@ const readyResultMaterialMismatch: AutoDispatchReadyResult = {
     jobETag: 'job-v1',
   },
   filamentCheck: {
-    sufficient: true,
+    outcome: 'Incompatible',
+    sufficient: false,
     materialMismatch: true,
     loadedMaterial: 'PLA',
     requiredMaterial: 'PETG',
+    message: 'Material mismatch: loaded PLA, job requires PETG',
   },
+  dispatchInitiated: false,
+  requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
 };
 
 const readyResultInsufficientFilament: AutoDispatchReadyResult = {
   status: {
     printerId: 'printer-1',
     enabled: true,
-    state: 'Ready',
+    state: 'PendingReady',
     queueDepth: 1,
     dispatchStateETag: 'dispatch-v2',
     printerETag: 'printer-v1',
@@ -187,10 +197,62 @@ const readyResultInsufficientFilament: AutoDispatchReadyResult = {
     jobETag: 'job-v1',
   },
   filamentCheck: {
+    outcome: 'Incompatible',
     sufficient: false,
     materialMismatch: false,
     message: 'Only 50g remaining, job requires 200g',
   },
+  dispatchInitiated: false,
+  requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
+};
+
+const readyResultUnknownFilament: AutoDispatchReadyResult = {
+  status: {
+    printerId: 'printer-1',
+    enabled: true,
+    state: 'PendingReady',
+    queueDepth: 1,
+    dispatchStateETag: 'dispatch-v1',
+    printerETag: 'printer-v1',
+  },
+  nextJob: {
+    id: 'job-4',
+    name: 'unknown-filament.gcode',
+    jobKind: 'Standard',
+    jobETag: 'job-v1',
+  },
+  filamentCheck: {
+    outcome: 'Unknown',
+    sufficient: false,
+    materialMismatch: false,
+    message: 'Spoolman is unavailable, so the assigned spool could not be verified.',
+  },
+  dispatchInitiated: false,
+  requiresFilamentOverride: true,
+  filamentCheckETag: 'filament-check-v1',
+};
+
+const readyResultOverrideDispatched: AutoDispatchReadyResult = {
+  ...readyResultMaterialMismatch,
+  status: {
+    ...readyResultMaterialMismatch.status,
+    state: 'Ready',
+    dispatchStateETag: 'dispatch-v2',
+  },
+  dispatchInitiated: true,
+  requiresFilamentOverride: false,
+  filamentOverrideApplied: true,
+};
+
+const readyResultOverrideReconciliationPending: AutoDispatchReadyResult = {
+  ...readyResultOverrideDispatched,
+  status: {
+    ...readyResultOverrideDispatched.status,
+    state: 'PendingReady',
+  },
+  dispatchOutcome: 'Unknown',
+  dispatchReconciliationPending: true,
 };
 
 describe('BedClearBanner', () => {
@@ -415,7 +477,7 @@ describe('BedClearBanner', () => {
     });
   });
 
-  it('shows SpoolValidationModal on material mismatch instead of toast', async () => {
+  it('shows the server mismatch in an explicit override modal without claiming dispatch', async () => {
     vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
@@ -423,64 +485,109 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('modal-job-name')).toHaveTextContent('part.gcode');
-    // Should NOT show a toast warning
+    expect(screen.getByTestId('filament-warning')).toHaveTextContent(
+      'Material mismatch: loaded PLA, job requires PETG',
+    );
+    expect(screen.getByTestId('filament-outcome')).toHaveTextContent('Incompatible');
+    expect(toast.success).not.toHaveBeenCalled();
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
-  it('dispatches job when user clicks Print Anyway on material mismatch', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
-    vi.mocked(apiClient.dispatchJobToPrinter).mockResolvedValueOnce({} as never);
+  it('retries with an explicit server override and only reports dispatch after acceptance', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultMaterialMismatch)
+      .mockResolvedValueOnce(readyResultOverrideDispatched);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
       { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTestId('print-anyway-btn'));
     await waitFor(() => {
-      expect(apiClient.dispatchJobToPrinter).toHaveBeenCalledWith(
-        'job-2',
+      expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
+        2,
         'printer-1',
+        'dispatch-v2',
+        true,
         'job-v1',
+        'filament-check-v1',
       );
     });
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith(
-        expect.stringContaining('material override'),
+        'Dispatching "part.gcode" to MK4 (filament override confirmed)',
       );
     });
   });
 
-  it('invalidates the canonical fleet queue-summary key (alongside job-queue/queue-jobs) when a stale material-override dispatch is rejected', async () => {
-    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
-    vi.mocked(apiClient.dispatchJobToPrinter).mockRejectedValueOnce(
-      Object.assign(new Error('The reviewed job changed.'), { statusCode: 412 }),
-    );
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    });
-    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+  it('reports reconciliation pending without claiming dispatch was rejected', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultMaterialMismatch)
+      .mockResolvedValueOnce(readyResultOverrideReconciliationPending);
     render(
-      <QueryClientProvider client={queryClient}>
-        <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />
-      </QueryClientProvider>,
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
     });
+
     fireEvent.click(screen.getByTestId('print-anyway-btn'));
 
-    await waitFor(() =>
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey }),
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Dispatch submitted for "part.gcode" to MK4; awaiting printer reconciliation.',
+        { duration: 8000 },
+      );
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('shows a changed filament reason before accepting a retry', async () => {
+    const changedChallenge: AutoDispatchReadyResult = {
+      ...readyResultMaterialMismatch,
+      filamentCheckETag: 'filament-check-v2',
+      filamentCheckChanged: true,
+      filamentCheck: {
+        ...readyResultMaterialMismatch.filamentCheck!,
+        message: 'Only 20g remaining, job requires 100g',
+      },
+    };
+    vi.mocked(apiClient.confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultUnknownFilament)
+      .mockResolvedValueOnce(changedChallenge);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
     );
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['job-queue'] });
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+
+    await waitFor(() => {
+      expect(apiClient.confirmAutoDispatchReady).toHaveBeenNthCalledWith(
+        2,
+        'printer-1',
+        'dispatch-v1',
+        true,
+        'job-v1',
+        'filament-check-v1',
+      );
+      expect(screen.getByTestId('filament-warning')).toHaveTextContent(
+        'Only 20g remaining, job requires 100g',
+      );
+    });
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('closes modal when user cancels material mismatch', async () => {
@@ -491,15 +598,15 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTestId('cancel-modal-btn'));
     await waitFor(() => {
-      expect(screen.queryByTestId('spool-validation-modal')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('filament-override-modal')).not.toBeInTheDocument();
     });
   });
 
-  it('warns on insufficient filament without dispatching', async () => {
+  it('requires explicit confirmation for known insufficient filament', async () => {
     vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultInsufficientFilament);
     render(
       <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
@@ -507,11 +614,31 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(toast.warning).toHaveBeenCalledWith(
-        'Only 50g remaining, job requires 200g',
-        expect.objectContaining({ duration: 8000 }),
-      );
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('filament-warning')).toHaveTextContent(
+      'Only 50g remaining, job requires 200g',
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit confirmation when filament data is unknown', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultUnknownFilament);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('filament-outcome')).toHaveTextContent('Unknown');
+    expect(screen.getByTestId('filament-warning')).toHaveTextContent(
+      'Spoolman is unavailable, so the assigned spool could not be verified.',
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('calls skip endpoint when Skip button is clicked', async () => {
@@ -559,7 +686,7 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to confirm bed clear');
+      expect(toast.error).toHaveBeenCalledWith('Network error');
     });
   });
 
@@ -570,5 +697,25 @@ describe('BedClearBanner', () => {
     );
     const alert = screen.getByRole('alert');
     expect(alert).toHaveAttribute('aria-label', 'Bed clear confirmation required');
+  });
+
+  it('does not announce successful pre-clear when filament confirmation blocks it', async () => {
+    vi.mocked(apiClient.preClearAutoDispatchBed).mockResolvedValueOnce({
+      ...baseStatus,
+      bedPreConfirmed: false,
+      attentionMessage: 'Filament confirmation is required before dispatch.',
+    });
+    const { result } = renderHook(() => usePreClearBed(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync(baseStatus);
+    });
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Filament confirmation is required before dispatch.',
+    );
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });

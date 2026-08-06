@@ -60,12 +60,29 @@ final class DemoAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
                                         bedPreConfirmed: false, attentionMessage: nil)
         let nextJob = AutoDispatchNextJob(id: DemoData.job5ID, name: "raspberry_pi_case.gcode",
                                           estimatedFilamentUsageG: 35.0, requiredMaterialType: "PLA",
-                                          estimatedPrintTime: 8100)
+                                          estimatedPrintTime: "02:15:00")
         let filamentCheck = FilamentCheckResult(sufficient: true, remainingWeightG: 750.0,
                                                 requiredWeightG: 35.0, loadedMaterial: "PLA",
                                                 requiredMaterial: "PLA", materialMismatch: false,
                                                 message: "Sufficient filament available")
-        return AutoDispatchReadyResult(status: status, nextJob: nextJob, filamentCheck: filamentCheck)
+        return AutoDispatchReadyResult(
+            status: status,
+            nextJob: nextJob,
+            filamentCheck: filamentCheck,
+            dispatchInitiated: true,
+            dispatchOutcome: "Accepted"
+        )
+    }
+
+    func confirmFilamentOverride(
+        challenge: AutoDispatchReadyResult
+    ) async throws -> AutoDispatchReadyResult {
+        var result = challenge
+        result.dispatchInitiated = true
+        result.requiresFilamentOverride = false
+        result.filamentOverrideApplied = true
+        result.dispatchOutcome = "Accepted"
+        return result
     }
 
     func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {

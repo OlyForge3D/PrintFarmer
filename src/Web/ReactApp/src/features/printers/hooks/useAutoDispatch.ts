@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { QueryClient, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { apiClient } from '@/services/api';
@@ -108,6 +108,19 @@ export type ConfirmBedClearResult =
         { kind: 'accepted' | 'replayed' }
       >;
     };
+
+export type ConfirmBedClearVariables =
+  | AutoDispatchStatus
+  | {
+      status: AutoDispatchStatus;
+      confirmFilamentOverride: true;
+      overrideJobETag: string;
+      filamentCheckETag: string;
+    };
+
+function getReviewedStatus(variables: ConfirmBedClearVariables): AutoDispatchStatus {
+  return 'status' in variables ? variables.status : variables;
+}
 
 function reviewedMutationError(
   statusCode: number,
@@ -296,7 +309,10 @@ export function useSetAllAutoDispatchEnabled() {
 export function useConfirmBedClear() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (status: AutoDispatchStatus): Promise<ConfirmBedClearResult> => {
+    mutationFn: async (variables: ConfirmBedClearVariables): Promise<ConfirmBedClearResult> => {
+      const status = getReviewedStatus(variables);
+      const confirmFilamentOverride =
+        'status' in variables && variables.confirmFilamentOverride;
       const dispatchStateETag = requireStatusEtag(
         status.dispatchStateETag,
         'Dispatch-state ETag'
@@ -304,10 +320,18 @@ export function useConfirmBedClear() {
       if (status.nextJobKind !== 'FilamentCalibration') {
         return {
           kind: 'standard',
-          result: await apiClient.confirmAutoDispatchReady(
-            status.printerId,
-            dispatchStateETag
-          ),
+          result: confirmFilamentOverride
+            ? await apiClient.confirmAutoDispatchReady(
+                status.printerId,
+                dispatchStateETag,
+                true,
+                variables.overrideJobETag,
+                variables.filamentCheckETag
+              )
+            : await apiClient.confirmAutoDispatchReady(
+                status.printerId,
+                dispatchStateETag
+              ),
         };
       }
       const jobId = status.nextJobId;
@@ -334,7 +358,8 @@ export function useConfirmBedClear() {
         result,
       };
     },
-    onSuccess: (data, status) => {
+    onSuccess: (data, variables) => {
+      const status = getReviewedStatus(variables);
       if (data.kind === 'standard') {
         syncAutoDispatchCaches(qc, data.result.status);
       }
@@ -349,6 +374,119 @@ export function useConfirmBedClear() {
     onError: (error) =>
       handleMutationError(qc, error, 'Failed to acknowledge the clear bed'),
   });
+}
+
+interface FilamentOverrideChallenge {
+  status: AutoDispatchStatus;
+  printerName: string;
+  result: AutoDispatchReadyResult;
+}
+
+export function useAutoDispatchReadyFlow(
+  onDispatchInitiated?: (result: AutoDispatchReadyResult) => void
+) {
+  const confirmation = useConfirmBedClear();
+  const [challenge, setChallenge] = useState<FilamentOverrideChallenge | null>(null);
+
+  const handleStandardResult = (
+    result: AutoDispatchReadyResult,
+    status: AutoDispatchStatus,
+    printerName: string
+  ) => {
+    if (!result.nextJob) {
+      toast.success(`Bed clear confirmed for ${printerName} — no jobs queued`);
+      return;
+    }
+
+    const dispatchInitiated = result.dispatchInitiated === true;
+    if (result.requiresFilamentOverride && !dispatchInitiated) {
+      setChallenge({ status: result.status, printerName, result });
+      return;
+    }
+
+    if (result.filamentCheckChanged) {
+      setChallenge(null);
+      toast.warning(
+        'Filament conditions changed after review. Check the current details and confirm again.',
+        { duration: 8000 }
+      );
+      return;
+    }
+
+    if (!dispatchInitiated) {
+      toast.warning(
+        `Job was not dispatched: ${
+          result.filamentCheck?.message ?? 'the server did not initiate dispatch'
+        }`,
+        { duration: 8000 }
+      );
+      return;
+    }
+
+    setChallenge(null);
+    if (result.dispatchReconciliationPending) {
+      toast.warning(
+        `Dispatch submitted for "${result.nextJob.name}" to ${printerName}; awaiting printer reconciliation.`,
+        { duration: 8000 }
+      );
+      onDispatchInitiated?.(result);
+      return;
+    }
+
+    toast.success(
+      result.filamentOverrideApplied
+        ? `Dispatching "${result.nextJob.name}" to ${printerName} (filament override confirmed)`
+        : `Dispatching "${result.nextJob.name}" to ${printerName}`
+    );
+    onDispatchInitiated?.(result);
+  };
+
+  const confirmReady = async (
+    status: AutoDispatchStatus,
+    printerName: string
+  ) => {
+    const response = await confirmation.mutateAsync(status);
+    if (response.kind === 'calibration') {
+      const jobName = status.nextJobName ?? 'Calibration job';
+      toast.success(
+        response.result.kind === 'accepted'
+          ? `Dispatching "${jobName}" to ${printerName}`
+          : `Calibration dispatch for "${jobName}" was already accepted`
+      );
+      return;
+    }
+
+    handleStandardResult(response.result, status, printerName);
+  };
+
+  const confirmFilamentOverride = async () => {
+    if (!challenge) return;
+
+    const response = await confirmation.mutateAsync({
+      status: challenge.status,
+      confirmFilamentOverride: true,
+      overrideJobETag:
+        challenge.result.nextJob?.jobETag ??
+        challenge.status.nextJobETag ??
+        '',
+      filamentCheckETag: challenge.result.filamentCheckETag ?? '',
+    });
+    if (response.kind === 'standard') {
+      handleStandardResult(
+        response.result,
+        challenge.status,
+        challenge.printerName
+      );
+    }
+  };
+
+  return {
+    challenge,
+    confirmation,
+    confirmReady,
+    confirmFilamentOverride,
+    cancelFilamentOverride: () => setChallenge(null),
+  };
 }
 
 export function useSkipNextJob() {
@@ -398,11 +536,18 @@ export function usePreClearBed() {
         status.printerId,
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       ),
-    onSuccess: (_data, status) => {
+    onSuccess: (result, status) => {
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
-      toast.success('Bed pre-cleared — ready for immediate dispatch');
+      if (result.bedPreConfirmed) {
+        toast.success('Bed pre-cleared — ready for immediate dispatch');
+      } else {
+        toast.warning(
+          result.attentionMessage ??
+            'Bed pre-clear stopped because the queued job needs filament confirmation.'
+        );
+      }
     },
     onError: (error) =>
       handleMutationError(qc, error, 'Failed to pre-clear bed'),

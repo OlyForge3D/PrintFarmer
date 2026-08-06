@@ -31,6 +31,7 @@ final class AutoDispatchServiceTests: XCTestCase {
         let result = try await service.markReady(status: status)
 
         XCTAssertEqual(result.acknowledgementOutcome, .accepted)
+        XCTAssertTrue(result.dispatchInitiated)
         let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
         XCTAssertEqual(
             request.url?.path,
@@ -124,6 +125,91 @@ final class AutoDispatchServiceTests: XCTestCase {
         }
     }
 
+    func testStandardReadyDecodesFilamentChallenge() async throws {
+        mockAPIClient.stubResponse(
+            json: readyResultJSON(
+                statusCode: 409,
+                requiresOverride: true,
+                changed: false
+            ),
+            statusCode: 409
+        )
+
+        let result = try await service.markReady(status: standardStatus())
+
+        XCTAssertTrue(result.requiresFilamentOverride)
+        XCTAssertEqual(result.filamentCheck?.outcome, "Incompatible")
+        XCTAssertEqual(
+            result.filamentCheck?.message,
+            "Material mismatch: loaded PLA, job requires PETG"
+        )
+        XCTAssertEqual(result.filamentCheckETag, "filament-v1")
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.url?.path, "/api/auto-dispatch/\(printerId)/ready")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"dispatch-v1\"")
+    }
+
+    func testStandardOverrideSendsReviewedHeadersAndAcceptsReconciliationPending() async throws {
+        mockAPIClient.stubResponse(
+            json: readyResultJSON(
+                statusCode: 202,
+                requiresOverride: false,
+                changed: false,
+                reconciliationPending: true
+            ),
+            statusCode: 202
+        )
+        let challenge = try JSONDecoder().decode(
+            AutoDispatchReadyResult.self,
+            from: Data(
+                readyResultJSON(
+                    statusCode: 409,
+                    requiresOverride: true,
+                    changed: false
+                ).utf8
+            )
+        )
+
+        let result = try await service.confirmFilamentOverride(challenge: challenge)
+
+        XCTAssertTrue(result.dispatchInitiated)
+        XCTAssertTrue(result.dispatchReconciliationPending)
+        XCTAssertEqual(result.dispatchOutcome, "Unknown")
+        let request = try XCTUnwrap(mockAPIClient.capturedRequests.last)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "If-Match"), "\"dispatch-v1\"")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Job-If-Match"), "\"job-v1\"")
+        XCTAssertEqual(
+            request.value(forHTTPHeaderField: "X-Filament-Check-If-Match"),
+            "\"filament-v1\""
+        )
+    }
+
+    func testStandardOverrideReturnsChangedFilamentChallenge() async throws {
+        mockAPIClient.stubResponse(
+            json: readyResultJSON(
+                statusCode: 409,
+                requiresOverride: true,
+                changed: true
+            ),
+            statusCode: 409
+        )
+        let challenge = try JSONDecoder().decode(
+            AutoDispatchReadyResult.self,
+            from: Data(
+                readyResultJSON(
+                    statusCode: 409,
+                    requiresOverride: true,
+                    changed: false
+                ).utf8
+            )
+        )
+
+        let result = try await service.confirmFilamentOverride(challenge: challenge)
+
+        XCTAssertTrue(result.filamentCheckChanged)
+        XCTAssertTrue(result.requiresFilamentOverride)
+    }
+
     private func assertFailure(
         statusCode: Int,
         expectedDescription: String,
@@ -179,5 +265,80 @@ final class AutoDispatchServiceTests: XCTestCase {
             nextJobKind: "FilamentCalibration",
             nextJobPrinterConfigRevision: 9
         )
+    }
+
+    private func standardStatus() -> AutoDispatchStatus {
+        AutoDispatchStatus(
+            printerId: printerId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady",
+            dispatchStateETag: "dispatch-v1",
+            nextJobId: jobId,
+            nextJobName: "Standard print",
+            nextJobETag: "job-v1",
+            nextJobKind: "Standard"
+        )
+    }
+
+    private func readyResultJSON(
+        statusCode: Int,
+        requiresOverride: Bool,
+        changed: Bool,
+        reconciliationPending: Bool = false
+    ) -> String {
+        let dispatchInitiated = statusCode == 202
+        return """
+        {
+          "status": {
+            "printerId": "\(printerId)",
+            "printerName": "Printer",
+            "enabled": true,
+            "isReady": false,
+            "currentJobName": null,
+            "queueDepth": 1,
+            "readyGateChecks": [],
+            "lastActivity": null,
+            "state": "PendingReady",
+            "bedPreConfirmed": false,
+            "dispatchStateETag": "dispatch-v1",
+            "printerETag": null,
+            "nextJobId": "\(jobId)",
+            "nextJobName": "Standard print",
+            "nextJobETag": "job-v1",
+            "nextJobKind": "Standard",
+            "nextJobPrinterConfigRevision": null,
+            "attentionMessage": null
+          },
+          "nextJob": {
+            "id": "\(jobId)",
+            "name": "Standard print",
+            "estimatedFilamentUsageG": 100,
+            "requiredMaterialType": "PETG",
+            "estimatedPrintTime": "01:00:00",
+            "jobKind": "Standard",
+            "jobETag": "job-v1",
+            "expectedPrinterConfigRevision": null
+          },
+          "filamentCheck": {
+            "outcome": "Incompatible",
+            "sufficient": false,
+            "remainingWeightG": 500,
+            "requiredWeightG": 100,
+            "loadedMaterial": "PLA",
+            "requiredMaterial": "PETG",
+            "materialMismatch": true,
+            "message": "Material mismatch: loaded PLA, job requires PETG"
+          },
+          "dispatchInitiated": \(dispatchInitiated),
+          "requiresFilamentOverride": \(requiresOverride),
+          "filamentOverrideApplied": false,
+          "filamentCheckETag": "filament-v1",
+          "filamentCheckChanged": \(changed),
+          "dispatchOutcome": \(reconciliationPending ? "\"Unknown\"" : "null"),
+          "dispatchReconciliationPending": \(reconciliationPending),
+          "acknowledgementOutcome": null
+        }
+        """
     }
 }

@@ -1,17 +1,13 @@
-import React, { useState, useCallback } from 'react';
+import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
+import { useAutoDispatchReadyFlow, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
 import { queryKeys } from '@/common/hooks/useApi';
-import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { toast } from 'sonner';
-import { SpoolValidationModal } from '@/features/queue/components/SpoolValidationModal';
-import { apiClient } from '@/services/api';
-import type { SpoolValidationContext } from '@/features/queue/utils/spoolValidation';
 import type { AutoDispatchStatus, AutoDispatchReadyResult, Printer } from '@/types/api';
-import { mutationErrorStatus } from '@/common/utils/mutationError';
+import { FilamentOverrideModal } from '@/features/printers/components/FilamentOverrideModal';
 
 interface BedClearBannerProps {
   printerId: string;
@@ -27,71 +23,8 @@ export function BedClearBanner({
   printerState,
 }: BedClearBannerProps) {
   const queryClient = useQueryClient();
-  const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
-  const [mismatchContext, setMismatchContext] = useState<SpoolValidationContext | null>(null);
-
-  const handleMismatchProceed = useCallback(async (jobId: string) => {
-    try {
-      if (!autoDispatchStatus.nextJobETag) {
-        throw new Error('The reviewed job revision is unavailable.');
-      }
-      const dispatch = await apiClient.dispatchJobToPrinter(
-        jobId,
-        printerId,
-        autoDispatchStatus.nextJobETag
-      );
-      if (dispatch.kind === 'stale') {
-        throw Object.assign(
-          new Error(
-            'The reviewed job changed. Refresh and confirm the override again.'
-          ),
-          { statusCode: 412 }
-        );
-      }
-      if (dispatch.kind === 'conflict' || dispatch.kind === 'unavailable') {
-        throw new Error(
-          dispatch.detail ??
-            `${dispatch.errorCode}: Dispatch was not accepted.`
-        );
-      }
-      const jobName = mismatchContext?.jobName ?? 'Job';
-      toast.success(
-        dispatch.kind === 'reconciliation'
-          ? `Dispatching "${jobName}" to ${printerName}; reconciliation is in progress`
-          : `Dispatching "${jobName}" to ${printerName} (material override)`
-      );
-      setMismatchContext(null);
-
-      // Optimistic UI update
-      const optimisticUpdate = (printer: Printer): Printer =>
-        printer.id === printerId
-          ? { ...printer, state: 'Starting...', jobName, progress: 0 }
-          : printer;
-
-      queryClient.setQueryData<Printer[]>(queryKeys.printers, (old) => old?.map(optimisticUpdate));
-      queryClient.setQueryData<Printer>(queryKeys.printer(printerId), (old) =>
-        old ? optimisticUpdate(old) : undefined,
-      );
-    } catch (err) {
-      const status = mutationErrorStatus(err);
-      if (status === 412 || status === 428) {
-        setMismatchContext(null);
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
-          queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
-          queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
-          queryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),
-        ]);
-      }
-      toast.error(`Failed to dispatch: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  }, [printerId, printerName, mismatchContext, queryClient, autoDispatchStatus.nextJobETag]);
-
-  if (!requiresBedClearConfirmation(autoDispatchStatus, printerState)) return null;
-
-  const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
   const applyOptimisticUpdate = (result: AutoDispatchReadyResult) => {
     if (!result.nextJob) return;
@@ -105,64 +38,25 @@ export function BedClearBanner({
       old ? optimisticUpdate(old) : undefined,
     );
   };
+  const readyFlow = useAutoDispatchReadyFlow(applyOptimisticUpdate);
+
+  if (!requiresBedClearConfirmation(autoDispatchStatus, printerState)) return null;
+
+  const isAnyPending = readyFlow.confirmation.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
   const handleConfirm = async () => {
     try {
-      const confirmation = await confirmBedClear.mutateAsync(autoDispatchStatus);
-      if (confirmation.kind === 'calibration') {
-        const result = confirmation.result;
-        const jobName = autoDispatchStatus.nextJobName ?? 'Calibration job';
-        toast.success(
-          result.kind === 'accepted'
-            ? `Dispatching "${jobName}" to ${printerName}`
-            : `Calibration dispatch for "${jobName}" was already accepted`
-        );
-        return;
-      }
-
-      const result = confirmation.result;
-
-      if (!result.nextJob) {
-        toast.success(`Bed clear confirmed for ${printerName} — no jobs queued`);
-        return;
-      }
-
-      if (result.filamentCheck?.materialMismatch) {
-        const reviewedPrinterRowVersion =
-          result.status.printerETag ?? autoDispatchStatus.printerETag;
-        if (!reviewedPrinterRowVersion) {
-          toast.error(
-            'Printer revision unavailable. Refresh before selecting a spool.'
-          );
-          return;
-        }
-        setMismatchContext({
-          jobId: result.nextJob.id,
-          jobName: result.nextJob.name,
-          requiredMaterial: result.filamentCheck.requiredMaterial ?? result.nextJob.requiredMaterialType,
-          printerId,
-          printerName,
-          reviewedPrinterRowVersion,
-          spoolInfo: {
-            hasActiveSpool: true,
-            material: result.filamentCheck.loadedMaterial,
-          },
-        });
-        return;
-      }
-
-      if (result.filamentCheck && !result.filamentCheck.sufficient) {
-        toast.warning(
-          result.filamentCheck.message ?? 'Insufficient filament. Job not dispatched.',
-          { duration: 8000 },
-        );
-        return;
-      }
-
-      toast.success(`Dispatching "${result.nextJob.name}" to ${printerName}`);
-      applyOptimisticUpdate(result);
+      await readyFlow.confirmReady(autoDispatchStatus, printerName);
     } catch {
-      toast.error('Failed to confirm bed clear');
+      // The mutation's onError handler displays the typed server failure.
+    }
+  };
+
+  const handleFilamentOverride = async () => {
+    try {
+      await readyFlow.confirmFilamentOverride();
+    } catch {
+      // The mutation's onError handler displays the typed server failure.
     }
   };
 
@@ -204,7 +98,7 @@ export function BedClearBanner({
             variant="success"
             size="sm"
             onClick={handleConfirm}
-            loading={confirmBedClear.isPending}
+            loading={readyFlow.confirmation.isPending}
             disabled={isAnyPending}
             iconCenter={<CheckCircleIcon className="h-4 w-4" />}
             aria-label={`Confirm bed clear for ${printerName}`}
@@ -236,11 +130,12 @@ export function BedClearBanner({
         </div>
       </div>
 
-      <SpoolValidationModal
-        isOpen={mismatchContext !== null}
-        onClose={() => setMismatchContext(null)}
-        onProceed={handleMismatchProceed}
-        context={mismatchContext}
+      <FilamentOverrideModal
+        isOpen={readyFlow.challenge !== null}
+        filamentCheck={readyFlow.challenge?.result.filamentCheck ?? null}
+        isPending={readyFlow.confirmation.isPending}
+        onCancel={readyFlow.cancelFilamentOverride}
+        onConfirm={handleFilamentOverride}
       />
     </>
   );

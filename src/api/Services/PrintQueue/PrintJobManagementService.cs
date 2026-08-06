@@ -1115,7 +1115,54 @@ public class PrintJobManagementService(
         string jobId,
         string userId,
         string? ifMatchJobRowVersion,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<QueuedPrintJobDto> DispatchReviewedJobAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            cancellationToken);
+
+    private async Task<QueuedPrintJobDto> DispatchJobCoreAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        byte[]? expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken cancellationToken)
     {
         PrintJob? dispatchJob = null;
         QueueDispatchAttempt? dispatchAttempt = null;
@@ -1197,19 +1244,33 @@ public class PrintJobManagementService(
                     "IDispatchClaimService is required for dispatch. This service must be registered in the DI container.");
             }
 
+            string startPathKind = filamentOverride?.OverrideApproved == true
+                ? "FilamentOverride"
+                : expectedDispatchStateRowVersion is not null
+                    ? "ReadyConfirmation"
+                    : "Manual";
             DispatchClaimResult claimResult = await _dispatchClaimService.AcquireClaimAsync(
                 new DispatchClaimRequest(
                     Guid.Parse(jobId),
                     job.AssignedPrinterId.Value,
                     userId,
-                    "Manual",
+                    startPathKind,
                     null,
                     expectedJobRowVersion,
-                    null),
+                    expectedDispatchStateRowVersion,
+                    filamentOverride),
                 cancellationToken);
 
             if (!claimResult.Success || claimResult.Attempt is null)
             {
+                if (claimResult.CurrentFilamentCheck is not null &&
+                    claimResult.CurrentFilamentCheckVersion is { Length: > 0 })
+                {
+                    throw new FilamentCheckChangedException(
+                        claimResult.CurrentFilamentCheck,
+                        claimResult.CurrentFilamentCheckVersion);
+                }
+
                 if (claimResult.IsPreconditionFailure)
                 {
                     throw new QueueRevisionConflictException(

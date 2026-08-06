@@ -201,24 +201,25 @@ private int _inFlightCount; // Concurrent dispatch limiter
 - Resolves filament types for enclosure/abrasive checks
 - Uses split queries and `AsNoTracking()` for performance
 
-### AutoPrintService.cs (Internal Implementation)
+### AutoDispatchService.cs
 **Purpose:** Manages the Ready Gate workflow for bed-clear confirmation.
-
-> **Note:** `AutoPrintService` is an internal implementation detail. User-facing terminology is "auto-dispatch."
 
 **State Machine:**
 ```
-None → PendingReady → Ready → (dispatch) → None
-         ↓                ↓
-      (Cancel)         (Skip)
-         ↓                ↓
-       None          PendingReady (if more jobs) or None
+None → PendingReady → (exact-job dispatch) → None
+         ↓     ↓
+      (Cancel) (Skip)
+         ↓     ↓
+       None   PendingReady (if more jobs) or None
 ```
 
 **Responsibilities:**
 - Transitions printer to `PendingReady` after job completion (called by `PrintJobCompletionService`)
-- Marks printer as `Ready` when operator confirms bed is clear
-- Performs filament pre-flight checks (material match, sufficient weight)
+- Performs tri-state filament pre-flight checks: `Compatible`, `Incompatible`, or `Unknown`
+- Dispatches the exact reviewed queue-head job after bed-clear confirmation
+- Requires explicit operator confirmation for incompatible or unknown filament data
+- Binds overrides to the reviewed job, dispatch state, and filament-check result
+- Records the operator and mismatch or unknown reason in the dispatch audit
 - Skips next queued job (cancels it) if operator requests
 - Cancels auto-dispatch workflow (returns to `None` state)
 
@@ -394,8 +395,9 @@ stateDiagram-v2
     [*] --> None: Printer idle,<br/>no queued jobs
     
     None --> PendingReady: Print completes,<br/>jobs queued
-    PendingReady --> Ready: Operator confirms<br/>bed is clear
-    Ready --> None: Next job dispatched
+    PendingReady --> None: Compatible check;<br/>exact job dispatched
+    PendingReady --> PendingReady: Incompatible or unknown;<br/>confirmation required
+    PendingReady --> None: Operator confirms warning;<br/>exact job dispatched
     
     PendingReady --> None: Skip pressed<br/>(no more jobs after cancellation)
     PendingReady --> PendingReady: Skip pressed<br/>(more jobs remain)
@@ -408,16 +410,16 @@ stateDiagram-v2
 
 - **None** — Default state. Printer is idle and not awaiting bed confirmation.
 - **PendingReady** — Print completed on auto-dispatch-enabled printer with queued jobs. Awaiting operator confirmation that bed is clear.
-- **Ready** — Operator confirmed bed is clear. Next queued job is eligible for dispatch.
+- **Ready** — Transitional state used by the pre-cleared background path.
 
 **Actions:**
 
 - **Confirm** — Operator presses Confirm button on Bed Clear Banner:
-  1. Transitions to `Ready` state
-  2. Performs filament pre-flight check (material match, sufficient weight)
-  3. If check passes, dispatches next queued job via API
-  4. Transitions back to `None`
-  5. If check fails, shows warning and stays in `Ready` (operator must manually fix and dispatch)
+  1. Performs the filament pre-flight check for the exact queue-head job.
+  2. If compatible, attempts that exact job immediately and reports success only when the printer accepts the dispatch.
+  3. If incompatible or unknown, returns a confirmation challenge without dispatching and keeps the printer in `PendingReady`.
+  4. If the operator confirms, the client sends the reviewed job, dispatch-state, and filament-check revisions. The server rechecks all conditions.
+  5. The authoritative dispatch claim reruns the filament check and fences the printer's spool assignment. If any reviewed condition changed, the new warning is shown and confirmation is required again. Otherwise the exact job is dispatched and the override is written to the durable dispatch audit.
 
 - **Skip** — Operator presses Skip button:
   1. Cancels next queued job (`Status = Cancelled`)
@@ -597,7 +599,7 @@ curl -X PUT http://localhost:5245/api/dispatch-settings \
 
 **Step 2: Enable Printers**
 - UI: Toggle Zap (⚡) icon on each printer card
-- OR API: `PUT /api/autoprint/{printerId}/enabled` with `{ "enabled": true }`
+- OR API: `PUT /api/auto-dispatch/{printerId}/enabled` with `{ "enabled": true }`
 - OR Bulk: Use global toggle on Print Queue Dashboard
 
 **Step 3: Verify Settings**
@@ -649,10 +651,10 @@ Each printer has two auto-dispatch properties:
 
 **How to Enable:**
 - **UI:** Toggle the Zap (⚡) icon on the printer card in the Printers Dashboard
-- **API:** PUT `/api/autoprint/{printerId}/enabled` with `{ "enabled": true }`
+- **API:** PUT `/api/auto-dispatch/{printerId}/enabled` with `{ "enabled": true }`
 
 **Bulk Operations:**
-- PUT `/api/autoprint/enabled` — Enable/disable for ALL printers at once (requires `farm_admin` role)
+- PUT `/api/auto-dispatch/enabled` — Enable/disable for ALL printers at once (requires `farm_admin` role)
 
 **UI Indicator:**
 Global toggle appears on Print Queue Dashboard showing `X/Y printers` enabled. Clicking toggles all printers on/off.
@@ -702,9 +704,9 @@ Updates auto-dispatch settings. **⚠️ Remember to set both `autoDispatchEnabl
 
 ### Auto-Dispatch (Ready Gate)
 
-**⚠️ API Naming Note:** These endpoints use `/autoprint/` paths, which match the backend property name `autoPrintEnabled`. The frontend code was renamed from `autoPrint` to `autoDispatch` (March 2025) for consistency with the system-level "Auto-Dispatch" terminology, but the API paths remain `/autoprint/` for backward compatibility. This is intentional and does not affect functionality.
+These ready-gate endpoints use the `/api/auto-dispatch/` route.
 
-#### GET `/api/autoprint/{printerId}/status`
+#### GET `/api/auto-dispatch/{printerId}/status`
 
 Returns auto-dispatch status for a specific printer.
 
@@ -712,23 +714,32 @@ Returns auto-dispatch status for a specific printer.
 ```json
 {
   "printerId": "abc-123",
-  "autoPrintEnabled": true,
+  "enabled": true,
   "state": "PendingReady",
-  "queuedJobCount": 3
+  "queueDepth": 3,
+  "dispatchStateETag": "AQIDBA==",
+  "nextJobETag": "BQYHCA=="
 }
 ```
 
-#### POST `/api/autoprint/{printerId}/ready`
-Marks printer as ready (bed is clear). Returns next queued job and filament pre-flight check result.
+#### POST `/api/auto-dispatch/{printerId}/ready`
 
-**Response:**
+Confirms the bed is clear and attempts to dispatch the exact reviewed queue-head
+job. The request requires the current dispatch-state revision:
+
+```http
+POST /api/auto-dispatch/{printerId}/ready
+If-Match: AQIDBA==
+```
+
+**Compatible response (`200`):**
+
 ```json
 {
   "status": {
     "printerId": "abc-123",
-    "autoPrintEnabled": true,
-    "state": "Ready",
-    "queuedJobCount": 3
+    "enabled": true,
+    "queueDepth": 2
   },
   "nextJob": {
     "id": "job-456",
@@ -738,6 +749,7 @@ Marks printer as ready (bed is clear). Returns next queued job and filament pre-
     "estimatedPrintTime": "00:45:00"
   },
   "filamentCheck": {
+    "outcome": "Compatible",
     "sufficient": true,
     "remainingWeightG": 850.0,
     "requiredWeightG": 15.2,
@@ -745,48 +757,98 @@ Marks printer as ready (bed is clear). Returns next queued job and filament pre-
     "requiredMaterial": "PLA",
     "materialMismatch": false,
     "message": "Filament OK: 850.0g remaining, 15.2g required"
-  }
+  },
+  "dispatchInitiated": true,
+  "requiresFilamentOverride": false,
+  "filamentOverrideApplied": false
 }
 ```
 
-**Filament Check Failures:**
+**Confirmation challenge (`409`):**
+
 ```json
 {
+  "status": {
+    "printerId": "abc-123",
+    "enabled": true,
+    "state": "PendingReady",
+    "queueDepth": 3,
+    "dispatchStateETag": "AQIDBA=="
+  },
+  "nextJob": {
+    "id": "job-456",
+    "name": "Benchy-v2.gcode",
+    "jobETag": "BQYHCA==",
+    "jobKind": "Standard"
+  },
   "filamentCheck": {
+    "outcome": "Incompatible",
     "sufficient": false,
+    "loadedMaterial": "ABS",
+    "requiredMaterial": "PLA",
     "materialMismatch": true,
     "message": "Material mismatch: loaded ABS, job requires PLA"
-  }
+  },
+  "dispatchInitiated": false,
+  "requiresFilamentOverride": true,
+  "filamentCheckETag": "CRITDA=="
 }
 ```
 
-#### POST `/api/autoprint/{printerId}/skip`
+`Unknown` is returned when filament data cannot be verified, including when no
+spool is assigned, required data is missing, Spoolman is unavailable, or the
+check throws. Unknown data is never reported as compatible.
+
+To confirm the displayed warning, repeat the request with all reviewed
+revisions:
+
+```http
+POST /api/auto-dispatch/{printerId}/ready?confirmFilamentOverride=true
+If-Match: AQIDBA==
+X-Job-If-Match: BQYHCA==
+X-Filament-Check-If-Match: CRITDA==
+```
+
+The server reruns the filament check when accepting the request and again in the
+authoritative dispatch claim. It also uses the reviewed printer revision to
+fence concurrent spool-assignment changes. A changed job or dispatch state
+returns `412`; changed filament evidence returns a fresh `409` challenge.
+Missing confirmation revisions return `428`, and malformed revision values
+return `400`.
+
+If the physical printer request has an unknown outcome, the endpoint returns
+HTTP `202` with `dispatchInitiated: true`,
+`dispatchReconciliationPending: true`, and `dispatchOutcome: "Unknown"`. The
+job may have started, so clients must show reconciliation-pending status rather
+than retrying or reporting that dispatch was rejected.
+
+#### POST `/api/auto-dispatch/{printerId}/skip`
 Skips the next queued job (cancels it). If more jobs remain, stays in `PendingReady`; otherwise transitions to `None`.
 
 **Response:**
 ```json
 {
   "printerId": "abc-123",
-  "autoPrintEnabled": true,
+  "enabled": true,
   "state": "PendingReady",
-  "queuedJobCount": 2
+  "queueDepth": 2
 }
 ```
 
-#### POST `/api/autoprint/{printerId}/cancel`
+#### POST `/api/auto-dispatch/{printerId}/cancel`
 Cancels the auto-dispatch workflow. Returns printer to `None` state without affecting queued jobs.
 
 **Response:**
 ```json
 {
   "printerId": "abc-123",
-  "autoPrintEnabled": true,
+  "enabled": true,
   "state": "None",
-  "queuedJobCount": 3
+  "queueDepth": 3
 }
 ```
 
-#### PUT `/api/autoprint/{printerId}/enabled`
+#### PUT `/api/auto-dispatch/{printerId}/enabled`
 Enables or disables auto-dispatch for a specific printer.
 
 **Request:**
@@ -796,9 +858,9 @@ Enables or disables auto-dispatch for a specific printer.
 }
 ```
 
-**Response:** Same as GET `/api/autoprint/{printerId}/status`
+**Response:** Same as GET `/api/auto-dispatch/{printerId}/status`
 
-#### PUT `/api/autoprint/enabled`
+#### PUT `/api/auto-dispatch/enabled`
 Enables or disables auto-dispatch for ALL printers at once. Requires `farm_admin` role.
 
 **Request:**
@@ -1028,10 +1090,12 @@ Fired when a printer's `AutoDispatchState` changes (e.g., `None` → `PendingRea
    - Label: "Confirm"
    - Icon: CheckCircle
    - Action: POST `/api/auto-dispatch/{printerId}/ready`
-   - On Success:
-     - If filament check passes → dispatches next job
-     - If material mismatch → shows warning toast, job NOT dispatched
-     - If insufficient filament → shows warning toast, job NOT dispatched
+   - Behavior:
+     - Compatible filament dispatches the exact reviewed job.
+     - Incompatible or unknown filament opens a confirmation modal showing the server-provided warning; the job is not dispatched.
+     - Confirming retries with the reviewed job, dispatch-state, and filament-check revisions.
+     - If conditions changed, the modal shows the new warning and requires confirmation again.
+     - Success messaging appears only when the server reports `dispatchInitiated: true`.
    - Loading state while API call is in progress
 
 2. **Skip** (secondary variant)

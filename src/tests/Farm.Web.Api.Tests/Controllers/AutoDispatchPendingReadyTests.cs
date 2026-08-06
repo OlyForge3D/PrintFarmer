@@ -142,7 +142,7 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetStatus_WhenQueuedJobsExistButPersistedStateIsNone_CanonicalizesPendingReadyAndAllowsReady()
+    public async Task GetStatus_WhenQueuedJobsExistButPersistedStateIsNone_CanonicalizesPendingReadyAndReturnsFilamentChallenge()
     {
         Printer printer = await CreateTestPrinterAsync(name: "none-state-printer");
         await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
@@ -169,10 +169,62 @@ public class AutoDispatchPendingReadyTests : IAsyncLifetime
             $"\"{status.DispatchStateETag}\"");
         HttpResponseMessage readyResponse = await _client.SendAsync(readyRequest);
 
-        readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
         AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
         readyResult.Should().NotBeNull();
-        readyResult!.Status.State.Should().Be("Ready");
+        readyResult!.Status.State.Should().Be("PendingReady");
+        readyResult.RequiresFilamentOverride.Should().BeTrue();
+        readyResult.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
+        readyResult.DispatchInitiated.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task MarkReady_WhenFilamentDataIsUnknown_ReturnsConflictWithoutDispatch()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "unknown-filament-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+
+        HttpResponseMessage statusResponse = await _client!.GetAsync(
+            $"{CurrentRouteBase}/{printer.Id}/status");
+        statusResponse.EnsureSuccessStatusCode();
+        AutoDispatchStatusDto status =
+            (await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions))!;
+        using HttpRequestMessage readyRequest = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/ready");
+        readyRequest.Headers.TryAddWithoutValidation(
+            "If-Match",
+            $"\"{status.DispatchStateETag}\"");
+
+        HttpResponseMessage readyResponse = await _client.SendAsync(readyRequest);
+
+        readyResponse.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        AutoDispatchReadyResult? readyResult =
+            await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
+        readyResult.Should().NotBeNull();
+        readyResult!.Status.State.Should().Be("PendingReady");
+        readyResult.DispatchInitiated.Should().BeFalse();
+        readyResult.RequiresFilamentOverride.Should().BeTrue();
+        readyResult.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
+        readyResult.FilamentCheck.Message.Should().Be("No spool is assigned to the printer.");
+        readyResult.FilamentCheckETag.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public async Task MarkReady_WithMalformedRevisionHeader_ReturnsBadRequest()
+    {
+        Printer printer = await CreateTestPrinterAsync(name: "malformed-etag-printer");
+        await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
+        using HttpRequestMessage readyRequest = new(
+            HttpMethod.Post,
+            $"{CurrentRouteBase}/{printer.Id}/ready");
+        readyRequest.Headers.TryAddWithoutValidation("If-Match", "\"not-base64!\"");
+
+        HttpResponseMessage response = await _client!.SendAsync(readyRequest);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("base-64 encoded ETag");
     }
 
     private async Task<Printer> CreateTestPrinterAsync(string name)

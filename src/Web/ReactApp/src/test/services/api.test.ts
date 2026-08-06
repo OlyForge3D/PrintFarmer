@@ -375,9 +375,107 @@ describe("ApiClient", () => {
       expect(mockPost).toHaveBeenCalledWith(
         "/auto-dispatch/printer-1/ready",
         undefined,
-        { headers: { "If-Match": '"dispatch-etag"' } }
+        expect.objectContaining({
+          headers: { "If-Match": '"dispatch-etag"' },
+          validateStatus: expect.any(Function),
+        })
       );
+      const config = mockPost.mock.calls[0]?.[2];
+      expect(config.validateStatus(200)).toBe(true);
+      expect(config.validateStatus(202)).toBe(true);
+      expect(config.validateStatus(409)).toBe(true);
+      expect(config.validateStatus(500)).toBe(false);
       expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should return reconciliation-pending ready responses from HTTP 202", async () => {
+      const mockResponse = {
+        status: 202,
+        data: {
+          status: {
+            printerId: "printer-1",
+            enabled: true,
+            state: "PendingReady",
+            queueDepth: 1,
+          },
+          dispatchInitiated: true,
+          dispatchOutcome: "Unknown",
+          dispatchReconciliationPending: true,
+        },
+      };
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      const result = await apiClient.confirmAutoDispatchReady(
+        "printer-1",
+        "dispatch-etag"
+      );
+
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should make filament override confirmation explicit in the ready request", async () => {
+      const mockResponse = {
+        data: {
+          status: {
+            printerId: "printer-1",
+            enabled: true,
+            state: "Ready",
+            queueDepth: 1,
+          },
+          dispatchInitiated: true,
+          filamentOverrideApplied: true,
+        },
+      };
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await apiClient.confirmAutoDispatchReady(
+        "printer-1",
+        "dispatch-etag",
+        true,
+        "job-etag",
+        "filament-check-etag"
+      );
+
+      expect(mockPost).toHaveBeenCalledWith(
+        "/auto-dispatch/printer-1/ready?confirmFilamentOverride=true",
+        undefined,
+        expect.objectContaining({
+          headers: {
+            "If-Match": '"dispatch-etag"',
+            "X-Job-If-Match": '"job-etag"',
+            "X-Filament-Check-If-Match": '"filament-check-etag"',
+          },
+        })
+      );
+    });
+
+    it("should reject non-filament 409 responses as real conflicts", async () => {
+      const mockPost = vi.fn().mockResolvedValue({
+        status: 409,
+        data: {
+          error: "queue_empty",
+          detail: "The reviewed queue head no longer exists.",
+        },
+      });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await expect(
+        apiClient.confirmAutoDispatchReady(
+          "printer-1",
+          "dispatch-etag",
+          true,
+          "job-etag",
+          "filament-check-etag"
+        )
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: "The reviewed queue head no longer exists.",
+      });
     });
 
     it("should expose confirmAutoDispatchReady instead of the removed markPrinterReady alias", () => {

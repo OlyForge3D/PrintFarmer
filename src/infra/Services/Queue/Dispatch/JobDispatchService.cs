@@ -78,6 +78,8 @@ public class JobDispatchService(
             userId,
             printerScore,
             ifMatchJobRowVersion: null,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
 
@@ -96,8 +98,59 @@ public class JobDispatchService(
             userId,
             printerScore,
             ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
+
+    public async Task<QueuedPrintJobDto> DispatchReviewedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken ct = default)
+    {
+        List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
+        DispatchScore? printerScore = scores.FirstOrDefault(score => score.PrinterId == printerId);
+        if (printerScore is null)
+        {
+            throw new InvalidOperationException(
+                $"Printer '{printerId}' is not an eligible dispatch candidate.");
+        }
+
+        EnsureReviewedPrinterIsEligible(
+            printerScore,
+            filamentOverride?.OverrideApproved == true);
+
+        return await DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            printerScore,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            ct);
+    }
+
+    public Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
+        CancellationToken ct = default) =>
+        DispatchReviewedJobAsync(
+            jobId,
+            printerId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            ct);
 
     public Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, DispatchScore preComputedScore, CancellationToken ct = default)
     {
@@ -108,6 +161,8 @@ public class JobDispatchService(
             userId,
             preComputedScore,
             ifMatchJobRowVersion: null,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
 
@@ -117,6 +172,8 @@ public class JobDispatchService(
         string userId,
         DispatchScore? printerScore,
         string? ifMatchJobRowVersion,
+        byte[]? expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
         CancellationToken ct)
     {
         PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
@@ -163,10 +220,30 @@ public class JobDispatchService(
             }
         }
 
+        PrinterDispatchState? reviewedDispatchState = null;
+        if (expectedDispatchStateRowVersion is { Length: > 0 })
+        {
+            reviewedDispatchState = await db.PrinterDispatchStates
+                .FirstOrDefaultAsync(state => state.PrinterId == printerId, ct);
+            if (reviewedDispatchState?.RowVersion is null ||
+                !expectedDispatchStateRowVersion.SequenceEqual(reviewedDispatchState.RowVersion))
+            {
+                throw new QueueRevisionConflictException(
+                    "The printer dispatch state changed after the filament override was reviewed.",
+                    job.RowVersion,
+                    reviewedDispatchState?.RowVersion);
+            }
+
+            db.Entry(reviewedDispatchState)
+                .Property(state => state.RowVersion)
+                .OriginalValue = expectedDispatchStateRowVersion;
+        }
+
         if (printerScore is { Eliminated: true })
         {
-            string reasons = string.Join("; ", printerScore.EliminationReasons);
-            throw new InvalidOperationException($"Printer '{printer.Name}' is eliminated: {reasons}");
+            EnsureReviewedPrinterIsEligible(
+                printerScore,
+                filamentOverride?.OverrideApproved == true);
         }
 
         if (job.JobKind == JobKind.FilamentCalibration &&
@@ -254,6 +331,11 @@ public class JobDispatchService(
                     ct);
             if (state is not null)
             {
+                if (affectedPrinterId == printerId)
+                {
+                    reviewedDispatchState = state;
+                }
+
                 state.QueueRevision++;
                 state.AcknowledgedJobId = null;
                 state.AcknowledgedAtUtc = null;
@@ -305,10 +387,55 @@ public class JobDispatchService(
             jobId, printer.Name, printerScore?.TotalScore ?? 0);
 
         string postAssignmentEtag = Convert.ToBase64String(job.RowVersion ?? []);
+        if (expectedDispatchStateRowVersion is not null)
+        {
+            byte[] postAssignmentDispatchVersion =
+                reviewedDispatchState?.RowVersion ??
+                expectedDispatchStateRowVersion ??
+                [];
+            return await printJobManagement.DispatchReviewedJobAsync(
+                jobId.ToString(),
+                userId,
+                postAssignmentEtag,
+                postAssignmentDispatchVersion,
+                filamentOverride,
+                ct);
+        }
+
         return await printJobManagement.DispatchJobAsync(
             jobId.ToString(),
             userId,
             postAssignmentEtag,
             ct);
+    }
+
+    private static void EnsureReviewedPrinterIsEligible(
+        DispatchScore printerScore,
+        bool hasFilamentOverride)
+    {
+        if (!printerScore.Eliminated)
+        {
+            return;
+        }
+
+        List<FactorScore> nonFilamentFailures = printerScore.ScoreBreakdown
+            .Where(pair =>
+                !string.Equals(pair.Key, "MaterialMatch", StringComparison.Ordinal) &&
+                pair.Value is { IsHardRequirement: true, Score: 0 })
+            .Select(pair => pair.Value)
+            .ToList();
+        bool materialMatchFailed = printerScore.ScoreBreakdown.TryGetValue(
+            "MaterialMatch",
+            out FactorScore? materialScore) &&
+            materialScore is { IsHardRequirement: true, Score: 0 };
+
+        if (hasFilamentOverride && materialMatchFailed && nonFilamentFailures.Count == 0)
+        {
+            return;
+        }
+
+        string reasons = string.Join("; ", printerScore.EliminationReasons);
+        throw new InvalidOperationException(
+            $"Printer '{printerScore.PrinterName}' is eliminated: {reasons}");
     }
 }

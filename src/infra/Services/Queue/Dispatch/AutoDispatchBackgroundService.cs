@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -405,12 +406,24 @@ public sealed class AutoDispatchBackgroundService(
         }
 
         if ((printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) != AutoDispatchState.Ready
-            && !(printer.DispatchState?.BedPreConfirmed ?? false))
+            && (printer.DispatchState?.BedPreConfirmed ?? false))
+        {
+            IAutoDispatchService readyGate = sp.GetRequiredService<IAutoDispatchService>();
+            await readyGate.TransitionToPendingReadyAsync(printerId, ct);
+            printer = await db.Printers
+                .Include(value => value.DispatchState)
+                .AsNoTracking()
+                .FirstOrDefaultAsync(value => value.Id == printerId, ct);
+        }
+
+        if (printer is null ||
+            (printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None) !=
+            AutoDispatchState.Ready)
         {
             logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} state is {State} and bed not pre-confirmed",
+                "[AutoDispatch] Printer {PrinterId} is not ready after ready-gate evaluation (state: {State})",
                 printerId,
-                printer.DispatchState?.AutoDispatchState ?? AutoDispatchState.None);
+                printer?.DispatchState?.AutoDispatchState ?? AutoDispatchState.None);
             return DispatchPlan.NoWork;
         }
 

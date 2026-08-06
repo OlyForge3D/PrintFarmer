@@ -4968,14 +4968,58 @@ export class ApiClient {
 
   async confirmAutoDispatchReady(
     printerId: string,
-    dispatchStateETag: string
+    dispatchStateETag: string,
+    confirmFilamentOverride = false,
+    overrideJobETag?: string | null,
+    filamentCheckETag?: string | null
   ): Promise<AutoDispatchReadyResult> {
     const etag = this.autoDispatchIfMatch(dispatchStateETag);
+    const overrideQuery = confirmFilamentOverride
+      ? "?confirmFilamentOverride=true"
+      : "";
     const response = await this.client.post(
-      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready`,
+      `${AUTO_DISPATCH_API_BASE}/${printerId}/ready${overrideQuery}`,
       undefined,
-      { headers: { "If-Match": etag } }
+      {
+        headers: {
+          "If-Match": etag,
+          ...(confirmFilamentOverride
+            ? {
+                "X-Job-If-Match": this.reviewedEtag(
+                  overrideJobETag,
+                  "The reviewed filament override job"
+                ),
+                "X-Filament-Check-If-Match": this.reviewedEtag(
+                  filamentCheckETag,
+                  "The reviewed filament check"
+                ),
+              }
+            : {}),
+        },
+        validateStatus: (status) =>
+          status === 200 || status === 202 || status === 409,
+      }
     );
+    if (
+      response.status === 409 &&
+      (
+        (
+          response.data?.requiresFilamentOverride !== true &&
+          response.data?.filamentCheckChanged !== true
+        ) ||
+        typeof response.data?.status !== "object" ||
+        response.data?.status === null
+      )
+    ) {
+      const data = response.data as { detail?: string; error?: string } | undefined;
+      throw Object.assign(
+        new Error(data?.detail ?? data?.error ?? "The ready request conflicted with the current queue state."),
+        {
+          statusCode: response.status,
+          data: response.data,
+        }
+      );
+    }
     return response.data;
   }
 

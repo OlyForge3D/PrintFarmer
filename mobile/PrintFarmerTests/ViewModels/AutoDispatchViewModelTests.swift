@@ -119,7 +119,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 name: "test_print.gcode",
                 estimatedFilamentUsageG: 50.5,
                 requiredMaterialType: nil,
-                estimatedPrintTime: 3600
+                estimatedPrintTime: "01:00:00"
             ),
             filamentCheck: FilamentCheckResult(
                 sufficient: true,
@@ -129,7 +129,9 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 requiredMaterial: nil,
                 materialMismatch: false,
                 message: nil
-            )
+            ),
+            dispatchInitiated: true,
+            dispatchOutcome: "Accepted"
         )
         mockAutoDispatchService.readyResultToReturn = readyResult
         mockAutoDispatchService.statusToReturn = readyResult.status
@@ -144,6 +146,106 @@ final class AutoDispatchViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.status?.state, "ready")
         XCTAssertNil(viewModel.error)
         XCTAssertEqual(mockAutoDispatchService.markReadyCalledWith, testPrinterId)
+    }
+
+    func testMarkReadyFilamentChallengeDoesNotOptimisticallyReportReady() async {
+        let jobId = UUID()
+        let pendingStatus = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady",
+            dispatchStateETag: "dispatch-v1",
+            nextJobId: jobId,
+            nextJobName: "Standard print",
+            nextJobETag: "job-v1",
+            nextJobKind: "Standard"
+        )
+        let challenge = AutoDispatchReadyResult(
+            status: pendingStatus,
+            nextJob: AutoDispatchNextJob(
+                id: jobId,
+                name: "Standard print",
+                estimatedFilamentUsageG: 100,
+                requiredMaterialType: "PETG",
+                estimatedPrintTime: "01:00:00",
+                jobKind: "Standard",
+                jobETag: "job-v1"
+            ),
+            filamentCheck: FilamentCheckResult(
+                outcome: "Incompatible",
+                sufficient: false,
+                remainingWeightG: 500,
+                requiredWeightG: 100,
+                loadedMaterial: "PLA",
+                requiredMaterial: "PETG",
+                materialMismatch: true,
+                message: "Material mismatch: loaded PLA, job requires PETG"
+            ),
+            requiresFilamentOverride: true,
+            filamentCheckETag: "filament-v1"
+        )
+        mockAutoDispatchService.readyResultToReturn = challenge
+        mockAutoDispatchService.statusToReturn = pendingStatus
+        viewModel.status = pendingStatus
+
+        await viewModel.markReady(printerId: testPrinterId)
+
+        XCTAssertEqual(viewModel.status?.state, "PendingReady")
+        XCTAssertEqual(
+            viewModel.filamentChallenge?.filamentCheck?.message,
+            "Material mismatch: loaded PLA, job requires PETG"
+        )
+        XCTAssertNil(viewModel.dispatchMessage)
+    }
+
+    func testConfirmFilamentOverrideUsesAuthoritativeReconciliationResult() async {
+        let pendingStatus = AutoDispatchStatus(
+            printerId: testPrinterId,
+            enabled: true,
+            queueDepth: 1,
+            state: "PendingReady",
+            dispatchStateETag: "dispatch-v1"
+        )
+        let challenge = AutoDispatchReadyResult(
+            status: pendingStatus,
+            nextJob: nil,
+            filamentCheck: FilamentCheckResult(
+                outcome: "Unknown",
+                sufficient: false,
+                remainingWeightG: nil,
+                requiredWeightG: 100,
+                loadedMaterial: nil,
+                requiredMaterial: "PETG",
+                materialMismatch: false,
+                message: "No spool is assigned to the printer."
+            ),
+            requiresFilamentOverride: true,
+            filamentCheckETag: "filament-v1"
+        )
+        mockAutoDispatchService.readyResultToReturn = challenge
+        mockAutoDispatchService.statusToReturn = pendingStatus
+        viewModel.status = pendingStatus
+        await viewModel.markReady(printerId: testPrinterId)
+        mockAutoDispatchService.readyResultToReturn = AutoDispatchReadyResult(
+            status: pendingStatus,
+            nextJob: nil,
+            filamentCheck: challenge.filamentCheck,
+            dispatchInitiated: true,
+            filamentOverrideApplied: true,
+            dispatchOutcome: "Unknown",
+            dispatchReconciliationPending: true
+        )
+
+        await viewModel.confirmFilamentOverride(printerId: testPrinterId)
+
+        XCTAssertTrue(mockAutoDispatchService.confirmFilamentOverrideCalled)
+        XCTAssertNil(viewModel.filamentChallenge)
+        XCTAssertEqual(viewModel.status?.state, "PendingReady")
+        XCTAssertEqual(
+            viewModel.dispatchMessage,
+            "Dispatch submitted; awaiting printer reconciliation."
+        )
     }
 
     func testMarkReadyHandlesError() async {
@@ -399,7 +501,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 name: "test_job.gcode",
                 estimatedFilamentUsageG: 25.0,
                 requiredMaterialType: nil,
-                estimatedPrintTime: 1800
+                estimatedPrintTime: "00:30:00"
             ),
             filamentCheck: FilamentCheckResult(
                 sufficient: true,

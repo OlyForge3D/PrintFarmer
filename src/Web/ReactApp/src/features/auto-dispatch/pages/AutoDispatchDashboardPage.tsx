@@ -5,7 +5,7 @@ import { PlayIcon, CheckIcon, SkipForwardIcon, StopIcon, CheckCircleIcon } from 
 import { Zap, Activity, AlertTriangle, Power, Pause, Layers } from 'lucide-react';
 import {
   useAutoDispatchGlobalStatus,
-  useConfirmBedClear,
+  useAutoDispatchReadyFlow,
   useSkipNextJob,
   useCancelAutoDispatch,
   useSetAutoDispatchEnabled,
@@ -14,6 +14,7 @@ import {
 } from '@/features/printers/hooks/useAutoDispatch';
 import type { AutoDispatchDetailedStatus } from '@/types/api';
 import clsx from 'clsx';
+import { FilamentOverrideModal } from '@/features/printers/components/FilamentOverrideModal';
 
 /* ── Inline keyframe styles (injected once) ──────────────────────────── */
 const COMMAND_CENTER_STYLES = `
@@ -144,7 +145,7 @@ function FarmStatusBar({ stats, globalEnabled }: { stats: FarmStats; globalEnabl
 
 export function AutoDispatchDashboardPage() {
   const { data: status, isLoading, error } = useAutoDispatchGlobalStatus();
-  const markReadyMutation = useConfirmBedClear();
+  const readyFlow = useAutoDispatchReadyFlow();
   const skipMutation = useSkipNextJob();
   const cancelMutation = useCancelAutoDispatch();
   const setEnabledMutation = useSetAutoDispatchEnabled();
@@ -221,7 +222,11 @@ export function AutoDispatchDashboardPage() {
 
   const handleMarkReady = (printerId: string) => {
     const printer = status?.printers.find(p => p.printerId === printerId);
-    if (printer) markReadyMutation.mutate(printer);
+    if (printer) {
+      void readyFlow.confirmReady(printer, printer.printerName).catch(() => {
+        // The mutation's onError handler displays the typed server failure.
+      });
+    }
   };
 
   const handleSkip = (printerId: string) => {
@@ -258,7 +263,8 @@ export function AutoDispatchDashboardPage() {
   const globalEnabled = status?.globalEnabled ?? false;
 
   return (
-    <PageTemplate
+    <>
+      <PageTemplate
       title="Auto-Dispatch"
       subtitle="Farm queue control and ready-gate monitoring"
       icon={PlayIcon}
@@ -361,7 +367,7 @@ export function AutoDispatchDashboardPage() {
                   onCancel={handleCancel}
                   onPreClear={handlePreClear}
                   isPending={
-                    markReadyMutation.isPending ||
+                    readyFlow.confirmation.isPending ||
                     skipMutation.isPending ||
                     cancelMutation.isPending ||
                     setEnabledMutation.isPending ||
@@ -373,7 +379,19 @@ export function AutoDispatchDashboardPage() {
           )}
         </>
       )}
-    </PageTemplate>
+      </PageTemplate>
+      <FilamentOverrideModal
+        isOpen={readyFlow.challenge !== null}
+        filamentCheck={readyFlow.challenge?.result.filamentCheck ?? null}
+        isPending={readyFlow.confirmation.isPending}
+        onCancel={readyFlow.cancelFilamentOverride}
+        onConfirm={() => {
+          void readyFlow.confirmFilamentOverride().catch(() => {
+            // The mutation's onError handler displays the typed server failure.
+          });
+        }}
+      />
+    </>
   );
 }
 

@@ -36,6 +36,33 @@ public interface IJobDispatchService
         CancellationToken ct = default);
 
     /// <summary>
+    /// Dispatches the exact job reviewed by the ready gate, enforcing both job and
+    /// dispatch-state revisions. A filament override, when supplied, bypasses only
+    /// the material-match gate.
+    /// </summary>
+    Task<QueuedPrintJobDto> DispatchReviewedJobAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Dispatches the exact reviewed job while bypassing only the filament gate under an
+    /// explicit operator authorization. All other claim-time safety gates remain enforced.
+    /// </summary>
+    Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Assigns a job to the specified printer using a pre-computed dispatch score,
     /// skipping the redundant scoring pass. Use this overload when the caller
     /// (e.g. auto-dispatch) already has a valid score.
