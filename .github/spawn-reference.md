@@ -108,7 +108,20 @@ prompt: |
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   ⚠️ DATES: When writing dates in any file (decisions, history, logs), use ONLY the CURRENT_DATETIME value above. Never infer or guess the date.
 
+  **Read-only reviewer boundary:** When `{Role}` is Code Reviewer, this prompt's review
+  work takes precedence over generic process-tracking instructions. Do not create, edit,
+  or delete `Copilot-Processing.md`, any tracking file, or implementation files. Use only
+  the read-only tools actually exposed in the spawned session; never assume tool names
+  from another host or prompt. If a required read-only capability is unavailable,
+  report an explicit environment blocker naming the capability and blocked review step.
+  This boundary does not apply to implementation agents, who retain the full
+  `Copilot-Processing.md` tracking requirement.
+
   AFTER work (BEST-EFFORT — do NOT retry on failure):
+  If `{Role}` is Code Reviewer, skip every post-work state-persistence step below.
+  Reviewers remain read-only and must not append to history, write decisions, or create
+  tracking files. Return only the review result and any explicit environment blocker.
+  The remaining post-work steps apply to implementation agents.
   ⚠️ POST-WORK BUDGET: Spend at most 20 tool calls on post-work steps below.
   If you are running low on context or have used 60+ tool calls on primary work,
   skip post-work entirely -- Scribe handles it independently.

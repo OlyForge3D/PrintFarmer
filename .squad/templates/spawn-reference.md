@@ -183,6 +183,10 @@ prompt: |
   - **Failure handling:** Stop on genuine blockers (permission errors, API unavailable, storage full, etc.) and report clearly. This policy removes *arbitrary* budgets, not robust error handling.
 
   AFTER work (BEST-EFFORT — do NOT retry on failure):
+  If `{Role}` is Code Reviewer, skip every post-work state-persistence step below.
+  Reviewers remain read-only and must not append to history, write decisions, or create
+  tracking files. Return only the review result and any explicit environment blocker.
+  The remaining post-work steps apply to implementation agents.
   1. APPEND learnings with `squad_state_append` to `agents/{name}/history.md`.
      Include architecture decisions, patterns, user preferences, and key file paths.
      Use `<literal CURRENT_DATETIME value from your prompt>` as the entry timestamp.
