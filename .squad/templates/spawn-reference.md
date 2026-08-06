@@ -170,9 +170,23 @@ prompt: |
 
   - **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker): Continue until the implementation is verified (tests pass, builds succeed, feature works as specified) and mandatory review gate passes.
   - **Code reviewers** (Bishop, Hicks, Vasquez): Continue review rounds until consensus APPROVE is achieved or unrecoverable blocking issues are identified.
+
+  **Read-only reviewer boundary:** When `{Role}` is Code Reviewer, this prompt's review
+  work takes precedence over generic process-tracking instructions. Do not create, edit,
+  or delete `Copilot-Processing.md`, any tracking file, or implementation files. Use only
+  the read-only tools actually exposed in the spawned session; never assume tool names
+  from another host or prompt. If a required read-only capability is unavailable,
+  report an explicit environment blocker naming the capability and blocked review step.
+  This boundary does not apply to implementation agents, who retain the full
+  `Copilot-Processing.md` tracking requirement.
+
   - **Failure handling:** Stop on genuine blockers (permission errors, API unavailable, storage full, etc.) and report clearly. This policy removes *arbitrary* budgets, not robust error handling.
 
   AFTER work (BEST-EFFORT — do NOT retry on failure):
+  If `{Role}` is Code Reviewer, skip every post-work state-persistence step below.
+  Reviewers remain read-only and must not append to history, write decisions, or create
+  tracking files. Return only the review result and any explicit environment blocker.
+  The remaining post-work steps apply to implementation agents.
   1. APPEND learnings with `squad_state_append` to `agents/{name}/history.md`.
      Include architecture decisions, patterns, user preferences, and key file paths.
      Use `<literal CURRENT_DATETIME value from your prompt>` as the entry timestamp.

@@ -162,6 +162,19 @@ Flow:
 
 This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
 
+### Reviewer Session Contract
+
+Bishop, Hicks, and Vasquez are read-only reviewers. Their review dispatch takes precedence
+over the generic Copilot process-tracking instruction: reviewers MUST NOT create, edit, or
+delete `Copilot-Processing.md` or any other tracking file, and MUST NOT modify
+implementation files. They should inspect the branch with the read-only tools exposed by
+their session and must not assume tool names from another host or prompt. If a required
+read-only capability is genuinely unavailable, the reviewer reports an explicit
+environment blocker naming that capability and the blocked review step.
+
+This exemption is limited to read-only review sessions. Implementation agents continue to
+create and maintain `Copilot-Processing.md` under the process-tracking instruction.
+
 ## Pull Request Issue Linkage
 
 When opening a PR, the body **MUST** include `Closes #N` (or `Fixes #N` / `Resolves #N`) for every GitHub issue the PR resolves. GitHub will auto-close the issue when the PR merges.

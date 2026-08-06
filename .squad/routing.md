@@ -117,3 +117,11 @@ When work is repo-specific, pass the correct repo path as `WORKTREE_PATH` in the
 7. **Issue-labeled work** — when a `squad:{member}` label is applied to an issue, route to that member. The Lead handles all `squad` (base label) triage.
 8. **@copilot routing** — when evaluating issues, check @copilot's capability profile in `team.md`. Route 🟢 good-fit tasks to `squad:copilot`. Flag 🟡 needs-review tasks for PR review. Keep 🔴 not-suitable tasks with squad members.
 9. **Machine-Local Policy (Jeff Papiez's current machine)** — Lead/Architect Dallas uses maximum reasoning effort. Implementation agents (Lambert, Ripley, Hudson, Gorman, Parker) and code reviewers (Bishop, Hicks, Vasquez) use medium reasoning effort. Agents do not self-impose time, tool-call, review-round, or iteration budgets. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
+10. **Read-only reviewer precedence** — Bishop, Hicks, and Vasquez review sessions are
+    read-only and take precedence over generic process-tracking instructions. They MUST
+    NOT create, edit, or delete `Copilot-Processing.md`, any tracking file, or
+    implementation files. Dispatches must direct them to use only tools exposed in the
+    current session; they must not assume tool names from another host. If a required
+    read-only capability is unavailable, the reviewer reports an explicit environment
+    blocker naming the capability and blocked review step. Implementation agents retain
+    the full process-tracking requirement.
