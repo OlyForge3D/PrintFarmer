@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Farm.Migrations.PostgreSQL.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260806223451_CanonicalizePrintJobPriority")]
+    [Migration("20260806230920_CanonicalizePrintJobPriority")]
     partial class CanonicalizePrintJobPriority
     {
         /// <inheritdoc />
@@ -5356,7 +5356,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(1);
 

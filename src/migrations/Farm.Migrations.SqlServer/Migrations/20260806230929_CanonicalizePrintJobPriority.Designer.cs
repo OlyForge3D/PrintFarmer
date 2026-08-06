@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.SqlServer.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260806223503_CanonicalizePrintJobPriority")]
+    [Migration("20260806230929_CanonicalizePrintJobPriority")]
     partial class CanonicalizePrintJobPriority
     {
         /// <inheritdoc />
@@ -5370,7 +5370,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(1);
 

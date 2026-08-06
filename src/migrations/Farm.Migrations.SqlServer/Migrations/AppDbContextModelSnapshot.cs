@@ -5367,7 +5367,6 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("int")
                         .HasDefaultValue(1);
 

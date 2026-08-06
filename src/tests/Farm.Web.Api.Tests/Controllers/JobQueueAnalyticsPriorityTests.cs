@@ -42,6 +42,28 @@ public class JobQueueAnalyticsPriorityTests
         Assert.Equal($"{{\"newPriority\":\"{expectedName}\"}}", json);
     }
 
+    [Theory]
+    [InlineData(PrintJobPriority.Low, "Low")]
+    [InlineData(PrintJobPriority.Normal, "Normal")]
+    [InlineData(PrintJobPriority.High, "High")]
+    [InlineData(PrintJobPriority.Urgent, "Urgent")]
+    public void PrimaryQueueResponse_SerializesCanonicalEnumName(
+        PrintJobPriority priority,
+        string expectedName)
+    {
+        JsonSerializerOptions options = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            Converters = { new JsonStringEnumConverter() },
+        };
+
+        string json = JsonSerializer.Serialize(
+            new JobQueuePrintJobDto { Priority = priority },
+            options);
+
+        Assert.Contains($"\"priority\":\"{expectedName}\"", json, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void UpdatePriorityRequest_UnknownEnumName_IsRejected()
     {
@@ -157,7 +179,7 @@ public class JobQueueAnalyticsPriorityTests
         new()
         {
             Id = Guid.NewGuid(),
-            RowVersion = Guid.NewGuid().ToByteArray(),
+            RowVersion = [1, 2, 3, 4, 5, 6, 7, 8],
             Name = "priority.gcode",
             Priority = (int)PrintJobPriority.Normal,
             Status = PrintJobStatus.Queued,

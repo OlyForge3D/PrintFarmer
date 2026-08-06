@@ -5353,7 +5353,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(1);
 

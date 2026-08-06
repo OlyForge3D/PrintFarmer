@@ -15,6 +15,25 @@ namespace Farm.Web.Api.Tests.Dispatch;
 public sealed class PriorityQueueOrderingTests
 {
     [Fact]
+    public async Task SaveChangesAsync_ExplicitLowPriority_PreservesZeroInsteadOfDatabaseDefault()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using AppDbContext db = await CreateContextAsync(connection);
+        PrintJob job = CreateJob(
+            PrintJobPriority.Low,
+            new DateTime(2026, 8, 4, 12, 0, 0, DateTimeKind.Utc),
+            queuePosition: 1);
+
+        db.PrintJobs.Add(job);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        PrintJob persisted = await db.PrintJobs.SingleAsync(candidate => candidate.Id == job.Id);
+        Assert.Equal((int)PrintJobPriority.Low, persisted.Priority);
+    }
+
+    [Fact]
     public async Task BatchDispatchAsync_QueuedPriorities_ProcessesUrgentFirstAndLowLast()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
