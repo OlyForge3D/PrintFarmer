@@ -345,11 +345,15 @@ public class TagService(
                 await _tagRepository.GetTagsByObjectsAsync(objectIds, objectType, ct);
 
             return objectIds
-                .Select(id => new ObjectTagsDto(
-                    id,
-                    tagsByObject.TryGetValue(id, out IReadOnlyList<Tag>? tags)
+                .Select(id =>
+                {
+                    // Extracted to a local so the ternary isn't passed as a multi-line
+                    // constructor argument (SA1118).
+                    IReadOnlyList<TagDto> objectTags = tagsByObject.TryGetValue(id, out IReadOnlyList<Tag>? tags)
                         ? tags.Select(MapToDto).ToList()
-                        : []))
+                        : [];
+                    return new ObjectTagsDto(id, objectTags);
+                })
                 .ToList();
         }
         catch (Exception ex)

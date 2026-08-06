@@ -552,4 +552,259 @@ public class TagsControllerTests
     }
 
     #endregion
+
+    #region AssignTagToObjectAsync Tests
+
+    [Fact]
+    public async Task AssignTagToObjectAsync_PrinterType_Authorized_AssignsAndReturnsOk()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var tag = new TagDto { Id = tagId, Name = "Maintenance" };
+        _tagServiceMock
+            .Setup(s => s.GetTagByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.AssignTagToObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        Assert.Equal(tag, okResult.Value);
+        _tagServiceMock.Verify(s => s.AssignTagAsync(printerId, tagId, "Printer", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AssignTagToObjectAsync_PrinterType_Denied_ReturnsNotFoundWithoutAssigning()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.AssignTagToObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        NotFoundResult notFound = Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(StatusCodes.Status404NotFound, notFound.StatusCode);
+        _tagServiceMock.Verify(
+            s => s.AssignTagAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task AssignTagToObjectAsync_PrinterType_WithoutResourceAuthorization_FallsOpenAndAssigns()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var tag = new TagDto { Id = tagId, Name = "Maintenance" };
+        _tagServiceMock
+            .Setup(s => s.GetTagByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+
+        // The default test controller is built without a resourceAuthorization dependency
+        // (mirrors production DI resolving none registered): filtering must degrade to a
+        // pure passthrough rather than denying every printer mutation.
+        IActionResult result = await _controller.AssignTagToObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        _tagServiceMock.Verify(s => s.AssignTagAsync(printerId, tagId, "Printer", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AssignTagToObjectAsync_NonPrinterType_SkipsAuthorizationCheck()
+    {
+        Guid modelId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var tag = new TagDto { Id = tagId, Name = "Draft" };
+        _tagServiceMock
+            .Setup(s => s.GetTagByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+
+        // Even a resourceAuthorization that would deny everything must not affect Model3D/GcodeFile
+        // assigns - only "Printer" carries printer-group ACLs today.
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.AssignTagToObjectAsync(modelId, tagId, "Model3D", CancellationToken.None);
+
+        _ = Assert.IsType<OkObjectResult>(result);
+        _tagServiceMock.Verify(s => s.AssignTagAsync(modelId, tagId, "Model3D", It.IsAny<CancellationToken>()), Times.Once);
+        resourceAuthorization.Verify(
+            r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region RemoveTagFromObjectAsync Tests
+
+    [Fact]
+    public async Task RemoveTagFromObjectAsync_PrinterType_Authorized_RemovesAndReturnsNoContent()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.RemoveTagFromObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        _ = Assert.IsType<NoContentResult>(result);
+        _tagServiceMock.Verify(s => s.RemoveTagAsync(printerId, tagId, "Printer", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveTagFromObjectAsync_PrinterType_Denied_ReturnsNotFoundWithoutRemoving()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.RemoveTagFromObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        NotFoundResult notFound = Assert.IsType<NotFoundResult>(result);
+        Assert.Equal(StatusCodes.Status404NotFound, notFound.StatusCode);
+        _tagServiceMock.Verify(
+            s => s.RemoveTagAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RemoveTagFromObjectAsync_PrinterType_WithoutResourceAuthorization_FallsOpenAndRemoves()
+    {
+        Guid printerId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+
+        // Mirrors production DI resolving none registered: must fall open, not deny everyone.
+        IActionResult result = await _controller.RemoveTagFromObjectAsync(printerId, tagId, "Printer", CancellationToken.None);
+
+        _ = Assert.IsType<NoContentResult>(result);
+        _tagServiceMock.Verify(s => s.RemoveTagAsync(printerId, tagId, "Printer", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveTagFromObjectAsync_NonPrinterType_SkipsAuthorizationCheck()
+    {
+        Guid gcodeFileId = Guid.NewGuid();
+        Guid tagId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        IActionResult result = await controller.RemoveTagFromObjectAsync(gcodeFileId, tagId, "GcodeFile", CancellationToken.None);
+
+        _ = Assert.IsType<NoContentResult>(result);
+        _tagServiceMock.Verify(s => s.RemoveTagAsync(gcodeFileId, tagId, "GcodeFile", It.IsAny<CancellationToken>()), Times.Once);
+        resourceAuthorization.Verify(
+            r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
+
+    #region GetObjectTagsAsync (single object) Tests
+
+    [Fact]
+    public async Task GetObjectTagsAsync_PrinterType_Authorized_ReturnsOkWithTags()
+    {
+        Guid printerId = Guid.NewGuid();
+        var tags = new List<TagDto> { new() { Id = Guid.NewGuid(), Name = "Maintenance" } };
+        _tagServiceMock
+            .Setup(s => s.GetObjectTagsAsync(printerId, "Printer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tags);
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        ActionResult<IEnumerable<TagDto>> result =
+            await controller.GetObjectTagsAsync(printerId, "Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(tags, okResult.Value);
+    }
+
+    [Fact]
+    public async Task GetObjectTagsAsync_PrinterType_Denied_ReturnsNotFoundWithoutCallingService()
+    {
+        Guid printerId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), printerId, PrinterGroupAccessLevel.View, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        ActionResult<IEnumerable<TagDto>> result =
+            await controller.GetObjectTagsAsync(printerId, "Printer", CancellationToken.None);
+
+        NotFoundResult notFound = Assert.IsType<NotFoundResult>(result.Result);
+        Assert.Equal(StatusCodes.Status404NotFound, notFound.StatusCode);
+        _tagServiceMock.Verify(
+            s => s.GetObjectTagsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task GetObjectTagsAsync_PrinterType_WithoutResourceAuthorization_FallsOpenAndReturnsTags()
+    {
+        Guid printerId = Guid.NewGuid();
+        var tags = new List<TagDto> { new() { Id = Guid.NewGuid(), Name = "Maintenance" } };
+        _tagServiceMock
+            .Setup(s => s.GetObjectTagsAsync(printerId, "Printer", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tags);
+
+        // Mirrors production DI resolving none registered: must fall open, not hide every printer.
+        ActionResult<IEnumerable<TagDto>> result =
+            await _controller.GetObjectTagsAsync(printerId, "Printer", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(tags, okResult.Value);
+    }
+
+    [Fact]
+    public async Task GetObjectTagsAsync_NonPrinterType_SkipsAuthorizationCheck()
+    {
+        Guid gcodeFileId = Guid.NewGuid();
+        var tags = new List<TagDto> { new() { Id = Guid.NewGuid(), Name = "Draft" } };
+        _tagServiceMock
+            .Setup(s => s.GetObjectTagsAsync(gcodeFileId, "GcodeFile", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tags);
+
+        // Even a resourceAuthorization that would deny everything must not affect Model3D/GcodeFile
+        // reads - only "Printer" carries printer-group ACLs today.
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        TagsController controller = CreateControllerWithAuthorization(_tagServiceMock, resourceAuthorization.Object);
+
+        ActionResult<IEnumerable<TagDto>> result =
+            await controller.GetObjectTagsAsync(gcodeFileId, "GcodeFile", CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        Assert.Equal(tags, okResult.Value);
+        resourceAuthorization.Verify(
+            r => r.CanAccessPrinterAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    #endregion
 }
