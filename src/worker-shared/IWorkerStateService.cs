@@ -40,6 +40,9 @@ public interface IWorkerStateService
     /// <summary>Records the local work directory currently owned by a job attempt.</summary>
     void SetJobWorkDirectory(Guid jobId, string directory);
 
+    /// <summary>Reads the local work directory recorded for a job.</summary>
+    bool TryGetJobWorkDirectory(Guid jobId, out string directory);
+
     /// <summary>Releases the local work directory recorded for a job.</summary>
     void ClearJobWorkDirectory(Guid jobId);
 

@@ -203,6 +203,29 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         }
     }
 
+    [Fact(DisplayName = "Terminal cleanup rejects a result URI outside the configured attempt")]
+    public async Task TerminalCleanup_OutsideRootResultUri_IsRetained()
+    {
+        Guid jobId = Guid.NewGuid();
+        string insideJobDirectory = CreateJobOutput(jobId);
+        string outsideAttempt = Path.Combine(
+            Path.GetDirectoryName(_workingDirectory)!,
+            "outside",
+            jobId.ToString(),
+            Guid.NewGuid().ToString(),
+            "output");
+        _ = Directory.CreateDirectory(outsideAttempt);
+        string outsideResult = Path.Combine(outsideAttempt, "result.gcode");
+        await File.WriteAllTextAsync(outsideResult, "; outside\nG28\n");
+
+        RecordingPoller poller = CreatePoller(HttpStatusCode.OK, workingDirectory: _workingDirectory);
+        poller.ResultFilePathOverride = outsideResult;
+        await poller.RunAsync(jobId, insideJobDirectory);
+
+        _ = File.Exists(outsideResult).Should().BeTrue(
+            "terminal cleanup must not recursively delete a result outside the configured attempt");
+    }
+
     [Fact(DisplayName = "Native profiles are rejected when a delivered document fails its digest")]
     public void NativeProfiles_RejectTamperedDocuments()
     {
@@ -280,32 +303,46 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     /// <summary>
     /// Drives <see cref="HttpJobPollerService"/>'s job lifecycle for a single synthetic job.
     /// </summary>
-    private sealed class RecordingPoller(
-        IHttpClientFactory httpClientFactory,
-        IServiceProvider serviceProvider,
-        IWorkerStateService workerState,
-        IConfiguration configuration,
-        StubHandler handler)
-        : HttpJobPollerService(
-            httpClientFactory,
-            serviceProvider,
-            NullLogger<HttpJobPollerService>.Instance,
-            workerState,
-            configuration)
+    private sealed class RecordingPoller : HttpJobPollerService
     {
+        private readonly IConfiguration _configuration;
+        private readonly StubHandler _handler;
+        private readonly IWorkerStateService _workerState;
         private string _jobDirectory = string.Empty;
 
-        public bool FailureReported => handler.FailureReported;
+        public RecordingPoller(
+            IHttpClientFactory httpClientFactory,
+            IServiceProvider serviceProvider,
+            IWorkerStateService workerState,
+            IConfiguration configuration,
+            StubHandler handler)
+            : base(
+                httpClientFactory,
+                serviceProvider,
+                NullLogger<HttpJobPollerService>.Instance,
+                workerState,
+                configuration)
+        {
+            _configuration = configuration;
+            _handler = handler;
+            _workerState = workerState;
+        }
 
-        public string? FailureReason => handler.FailureReason;
+        public bool FailureReported => _handler.FailureReported;
 
-        public bool WorkDirectoryExistedAtUpload => handler.WorkDirectoryExistedAtUpload;
+        public string? FailureReason => _handler.FailureReason;
+
+        public bool WorkDirectoryExistedAtUpload => _handler.WorkDirectoryExistedAtUpload;
+
+        public string? ResultFilePathOverride { get; set; }
 
         public async Task RunAsync(Guid jobId, string jobDirectory)
         {
             _jobDirectory = jobDirectory;
-            handler.ExpectedJobDirectory = jobDirectory;
-            using HttpClient client = new(handler, disposeHandler: false)
+            _configuration["Worker:WorkingDirectory"] ??= Path.GetDirectoryName(jobDirectory);
+            _workerState.SetJobWorkDirectory(jobId, jobDirectory);
+            _handler.ExpectedJobDirectory = jobDirectory;
+            using HttpClient client = new(_handler, disposeHandler: false)
             {
                 BaseAddress = new Uri("http://localhost"),
             };
@@ -329,7 +366,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
             Task.FromResult(new SlicingResult
             {
                 Success = true,
-                ResultFileUrl = new Uri(Path.GetFullPath(Path.Combine(_jobDirectory, "output", "result.gcode"))),
+                ResultFileUrl = new Uri(Path.GetFullPath(ResultFilePathOverride ?? Path.Combine(_jobDirectory, "output", "result.gcode"))),
                 OutputFileSizeBytes = 32,
             });
 

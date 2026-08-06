@@ -85,6 +85,9 @@ public class WorkerStateService : IWorkerStateService
         _jobWorkDirectories[jobId] = directory;
     }
 
+    public bool TryGetJobWorkDirectory(Guid jobId, out string directory) =>
+        _jobWorkDirectories.TryGetValue(jobId, out directory!);
+
     public void ClearJobWorkDirectory(Guid jobId) => _jobWorkDirectories.TryRemove(jobId, out _);
 
     public IReadOnlyCollection<string> GetActiveJobWorkDirectories() => _jobWorkDirectories.Values.ToArray();

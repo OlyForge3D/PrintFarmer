@@ -79,6 +79,37 @@ public sealed class JobWorkDirectoryTests : IDisposable
         _ = Directory.Exists(activeAttempt).Should().BeTrue();
     }
 
+    [Fact(DisplayName = "Legacy recovery parent is retained when an active claim is nested beneath it")]
+    public void CleanupRecoveryDirectories_LegacyParentWithActiveClaim_IsRetained()
+    {
+        Guid jobId = Guid.NewGuid();
+        string jobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
+        _ = Directory.CreateDirectory(jobDirectory);
+        string marker = Path.Combine(jobDirectory, ".printfarmer-recovery.json");
+        File.WriteAllText(marker, "{}");
+        File.WriteAllBytes(Path.Combine(jobDirectory, "legacy.gcode"), new byte[32]);
+        File.SetLastWriteTimeUtc(marker, DateTime.UtcNow.AddDays(-10));
+
+        string activeAttempt = CreateAttempt(
+            jobId,
+            Guid.NewGuid().ToString(),
+            DateTime.UtcNow.AddDays(-10),
+            32,
+            marker: false);
+
+        System.Reflection.MethodInfo cleanupMethod = typeof(HttpJobPollerService).GetMethod(
+            "CleanupRecoveryDirectories",
+            System.Reflection.BindingFlags.Static |
+            System.Reflection.BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("CleanupRecoveryDirectories is missing.");
+        IReadOnlyList<string> deleted = (IReadOnlyList<string>)cleanupMethod.Invoke(
+            null,
+            [_workingDirectory, DateTime.UtcNow, TimeSpan.FromHours(1), 1L, null, new[] { activeAttempt }])!;
+
+        _ = deleted.Should().BeEmpty();
+        _ = Directory.Exists(jobDirectory).Should().BeTrue();
+    }
+
     private string CreateRecoveryAttempt(Guid jobId, string name, DateTime markerTimeUtc, int payloadSize)
         => CreateAttempt(jobId, name, markerTimeUtc, payloadSize, marker: true);
 

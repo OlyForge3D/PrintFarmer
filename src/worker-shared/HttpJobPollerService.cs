@@ -1052,24 +1052,29 @@ public abstract class HttpJobPollerService(
     {
         if (!TryResolveJobDirectory(jobId, result, out string directory))
         {
-            if (result?.ResultFileUrl is { IsAbsoluteUri: true, IsFile: true } fileUri &&
-                File.Exists(NormalizeLocalPath(fileUri)))
-            {
-                TryDeleteFile(jobId, NormalizeLocalPath(fileUri));
-            }
-
             return;
         }
 
         try
         {
+            string? configuredWorkingDirectory = _configuration["Worker:WorkingDirectory"];
+            if (string.IsNullOrWhiteSpace(configuredWorkingDirectory) ||
+                !_workerState.TryGetJobWorkDirectory(jobId, out string recordedAttemptDirectory) ||
+                !IsPathWithinRoot(directory, configuredWorkingDirectory) ||
+                !string.Equals(
+                    Path.GetFullPath(directory),
+                    Path.GetFullPath(recordedAttemptDirectory),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "Refused local cleanup for job {JobId}; result directory was not the recorded configured attempt",
+                    jobId);
+                return;
+            }
+
             Directory.Delete(directory, recursive: true);
             TryDeleteEmptyJobParent(directory, jobId);
-            string? workingDirectory = _configuration["Worker:WorkingDirectory"];
-            if (!string.IsNullOrWhiteSpace(workingDirectory))
-            {
-                TryCleanupRecoveryDirectories(workingDirectory, jobId);
-            }
+            TryCleanupRecoveryDirectories(configuredWorkingDirectory, jobId);
         }
         catch (Exception exception)
         {
@@ -1230,7 +1235,7 @@ public abstract class HttpJobPollerService(
         {
             if (totalBytes <= maxBytes ||
                 (activeJobId.HasValue && jobId == activeJobId.Value) ||
-                IsActiveAttempt(path, activeAttemptDirectories) ||
+                IsActiveAttemptOrAncestor(path, activeAttemptDirectories) ||
                 utcNow - lastWriteUtc < minimumAge)
             {
                 continue;
@@ -1251,7 +1256,7 @@ public abstract class HttpJobPollerService(
         return deleted;
     }
 
-    private static bool IsActiveAttempt(
+    private static bool IsActiveAttemptOrAncestor(
         string path,
         IReadOnlyCollection<string>? activeAttemptDirectories)
     {
@@ -1260,25 +1265,28 @@ public abstract class HttpJobPollerService(
             return false;
         }
 
-        string fullPath = Path.GetFullPath(path)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string fullPath = Path.GetFullPath(path);
         return activeAttemptDirectories.Any(activePath =>
-            string.Equals(
-                fullPath,
-                Path.GetFullPath(activePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                StringComparison.OrdinalIgnoreCase));
+        {
+            string activeFullPath = Path.GetFullPath(activePath);
+            string relativePath = Path.GetRelativePath(fullPath, activeFullPath);
+            return relativePath == "." ||
+                (!Path.IsPathRooted(relativePath) &&
+                 !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+                 !string.Equals(relativePath, "..", StringComparison.Ordinal));
+        });
     }
 
-    private void TryDeleteFile(Guid jobId, string filePath)
+    private static bool IsPathWithinRoot(string path, string root)
     {
-        try
-        {
-            File.Delete(filePath);
-        }
-        catch (Exception exception)
-        {
-            _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
-        }
+        string fullPath = Path.GetFullPath(path);
+        string fullRoot = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string relativePath = Path.GetRelativePath(fullRoot, fullPath);
+        return relativePath == "." ||
+            (!Path.IsPathRooted(relativePath) &&
+             !relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) &&
+             !string.Equals(relativePath, "..", StringComparison.Ordinal));
     }
 
     /// <summary>
