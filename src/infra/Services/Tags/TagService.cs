@@ -255,15 +255,16 @@ public class TagService(
                 throw new KeyNotFoundException($"Tag {tagId} not found");
             }
 
-            // Check if mapping already exists (object-agnostic)
-            bool exists = await _tagRepository.HasTagAsync(objectId, tagId, ct);
+            // Check if mapping already exists. Dispatches by objectType (not the
+            // object-agnostic GcodeFile/Model3D probe) so Printer is handled correctly (#1146).
+            bool exists = await _tagRepository.HasTagAsync(objectId, tagId, objectType, ct);
             if (exists)
             {
                 return; // Already assigned, nothing to do
             }
 
-            // Assign the tag to the object (object-agnostic)
-            await _tagRepository.AssignTagAsync(objectId, tagId, ct);
+            // Assign the tag to the object, dispatched by objectType (#1146).
+            await _tagRepository.AssignTagAsync(objectId, tagId, objectType, ct);
             await _tagRepository.SaveChangesAsync(ct);
         }
         catch (Exception ex)
@@ -284,8 +285,9 @@ public class TagService(
     {
         try
         {
-            // Object type parameter ignored - tags are object-agnostic
-            await _tagRepository.RemoveTagAsync(objectId, tagId, ct);
+            // Dispatch by objectType so Printer is handled correctly (#1146) instead of the
+            // object-agnostic GcodeFile/Model3D probe, which never checks Printers.
+            await _tagRepository.RemoveTagAsync(objectId, tagId, objectType, ct);
             await _tagRepository.SaveChangesAsync(ct);
         }
         catch (Exception ex)
@@ -306,8 +308,10 @@ public class TagService(
     {
         try
         {
-            // Object type parameter ignored - tags are object-agnostic
-            IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(objectId, ct);
+            // Dispatch by objectType so Printer is handled correctly (#1146) instead of the
+            // object-agnostic GcodeFile/Model3D probe, which never checks Printers and would
+            // always return an empty list for a printer object ID.
+            IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(objectId, objectType, ct);
             return tags.Select(MapToDto).ToList();
         }
         catch (Exception ex)
