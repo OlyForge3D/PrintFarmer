@@ -177,15 +177,22 @@ is_local_orcaslicer_binaries_image() {
 # no-cache build cannot retain a stale `latest` or version alias.
 remove_local_orcaslicer_binaries_tags() {
     local image_name
+    local image_list
     local -a matching_images=()
+
+    if ! image_list=$(docker image ls \
+        --filter "reference=orcaslicer-binaries:*" \
+        --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); then
+        print_error "Failed to enumerate local OrcaSlicer binary cache tags."
+        return 1
+    fi
+    image_list="${image_list//$'\r'/}"
 
     while IFS= read -r image_name; do
         if is_local_orcaslicer_binaries_image "$image_name"; then
             matching_images+=("$image_name")
         fi
-    done < <(docker image ls \
-        --filter "reference=orcaslicer-binaries:*" \
-        --format '{{.Repository}}:{{.Tag}}' 2>/dev/null || true)
+    done <<< "$image_list"
 
     if (( ${#matching_images[@]} == 0 )); then
         return 0
@@ -193,6 +200,50 @@ remove_local_orcaslicer_binaries_tags() {
 
     print_warning "Removing stale local OrcaSlicer binary cache tags: ${matching_images[*]}"
     docker rmi -f "${matching_images[@]}"
+}
+
+# Return 0 for a verified reusable image, 10 when a local image must be
+# rebuilt, and 1 when an operator-owned external image must fail closed.
+prepare_orcaslicer_binary_cache() {
+    local image_name="$1"
+    local expected_version="$2"
+    local expected_sha256="$3"
+
+    if docker image inspect "$image_name" >/dev/null 2>&1; then
+        if validate_orcaslicer_binary_image "$image_name" "$expected_version" "$expected_sha256"; then
+            return 0
+        fi
+
+        if is_local_orcaslicer_binaries_image "$image_name"; then
+            print_warning "Local OrcaSlicer binary cache '$image_name' is stale or unverifiable; rebuilding the pinned release."
+            if ! remove_local_orcaslicer_binaries_tags; then
+                print_error "Unable to remove the stale local OrcaSlicer binary cache."
+                return 1
+            fi
+            return 10
+        fi
+
+        print_error "Registry-qualified ORCA_ASSET_IMAGE does not attest the requested OrcaSlicer release; refusing to retag it."
+    elif is_local_orcaslicer_binaries_image "$image_name"; then
+        return 10
+    else
+        print_error "Registry-qualified ORCA_ASSET_IMAGE '$image_name' is unavailable."
+    fi
+
+    print_error "Update the pinned image, unset ORCA_ASSET_IMAGE, or set ORCA_FORCE_REBUILD=1 (or pass --rebuild-orcaslicer)."
+    return 1
+}
+
+validate_orcaslicer_rebuild_request() {
+    local force_rebuild="$1"
+    local worker_enabled="$2"
+    local is_arm_platform="$3"
+
+    if [[ "$force_rebuild" == "1" ]] &&
+       { [[ "$worker_enabled" != "yes" ]] || [[ "$is_arm_platform" == "true" ]]; }; then
+        print_error "Cannot rebuild OrcaSlicer because its worker is disabled or unsupported on this host."
+        return 1
+    fi
 }
 
 # Audit log helper (if not already defined)

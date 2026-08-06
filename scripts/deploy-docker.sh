@@ -1656,19 +1656,23 @@ build_base_images() {
     local rebuild_orca_binary=false
     if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
         print_info "Forcing a clean OrcaSlicer binary cache rebuild."
-        remove_local_orcaslicer_binaries_tags
+        if ! remove_local_orcaslicer_binaries_tags; then
+            return 2
+        fi
         rebuild_orca_binary=true
-    elif docker image inspect "$orca_binary_image" >/dev/null 2>&1; then
-        if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
-            print_warning "Cached OrcaSlicer binary layer failed identity validation; rebuilding it locally."
-            remove_local_orcaslicer_binaries_tags
-            rebuild_orca_binary=true
-        else
+    else
+        local orca_cache_status
+        if prepare_orcaslicer_binary_cache "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
             print_success "✓ $orca_binary_image already exists locally (skipping rebuild)"
             ((successful++))
+        else
+            orca_cache_status=$?
+            if [[ "$orca_cache_status" -eq 10 ]]; then
+                rebuild_orca_binary=true
+            else
+                return 2
+            fi
         fi
-    else
-        rebuild_orca_binary=true
     fi
 
     if [[ "$rebuild_orca_binary" == "true" ]]; then
@@ -1679,6 +1683,7 @@ build_base_images() {
         
         # Prepare build args - include ORCA_ASSET_PATH if available for offline builds
         local build_args=(
+            --no-cache
             -f "$docker_dir/Dockerfile.base-orcaslicer-binaries"
             -t "$orca_binary_image"
             --label="printfarmer-precache=true"
@@ -1687,12 +1692,6 @@ build_base_images() {
             --build-arg "CACHE_BUST=$cache_bust"
         )
 
-        if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
-            build_args+=(--no-cache)
-        elif ! docker image inspect "$orca_binary_image" >/dev/null 2>&1; then
-            build_args+=(--no-cache)
-        fi
-        
         # Add platform flag if DOCKER_BUILD_PLATFORM is set (e.g., on macOS Apple Silicon)
         if [ -n "${DOCKER_BUILD_PLATFORM:-}" ]; then
             build_args+=(--platform "${DOCKER_BUILD_PLATFORM}")
@@ -1709,13 +1708,15 @@ build_base_images() {
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
             if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
                 print_error "Built OrcaSlicer binary layer failed identity validation."
-                return 1
+                remove_local_orcaslicer_binaries_tags || true
+                return 2
             fi
             print_success "✓ Build successful: $orca_binary_image"
             ((successful++))
         else
             print_error "✗ Build failed: $orca_binary_image"
-            return 1
+            remove_local_orcaslicer_binaries_tags || true
+            return 2
         fi
     fi
     echo
@@ -1770,11 +1771,18 @@ prepare_offline_deployment() {
     
     # Step 1: Build pre-upgraded base images (including OrcaSlicer binaries)
     print_header "STEP 1/4: Building Pre-Upgraded Base Images & OrcaSlicer Binary Layer"
+    local build_status
     if build_base_images "$target_dir"; then
         upgraded_built=true
         print_success "Pre-upgraded base images built successfully"
     else
-        print_warning "Some base images failed to build, will use standard images as fallback"
+        build_status=$?
+        if [[ "$build_status" -eq 2 ]]; then
+            print_error "OrcaSlicer binary preparation failed strict validation; offline preparation cannot continue."
+            succeeded=false
+        else
+            print_warning "Some base images failed to build, will use standard images as fallback"
+        fi
     fi
     
     # Step 2: Only pull standard base images if upgraded versions weren't built
@@ -4601,10 +4609,7 @@ EOF
         local orca_clean_rebuild=false
 
         if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
-            print_info "Forcing a clean OrcaSlicer binary cache rebuild."
-            remove_local_orcaslicer_binaries_tags
             ORCA_ASSET_IMAGE=""
-            orca_clean_rebuild=true
         fi
 
         # Clean directories with literal backslashes created by dotnet ef on WSL.
@@ -4671,6 +4676,9 @@ EOF
 
         # Build orcaslicer-binaries layer first if orca worker is enabled (optimized caching)
         # Note: All binary downloading and extraction is now consolidated in Dockerfile.multistage orcaslicer-binaries stage
+        if ! validate_orcaslicer_rebuild_request "$ORCA_FORCE_REBUILD" "$ENABLE_ORCA_WORKER" "$IS_ARM_PLATFORM"; then
+            exit 1
+        fi
         if [ "$IS_ARM_PLATFORM" = "true" ] && [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
             print_warning "Skipping OrcaSlicer worker build — not available on ARM architecture"
             ENABLE_ORCA_WORKER="no"
@@ -4693,33 +4701,29 @@ EOF
                 BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
             fi
 
+            if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
+                print_info "Forcing a clean OrcaSlicer binary cache rebuild."
+                if ! remove_local_orcaslicer_binaries_tags; then
+                    exit 1
+                fi
+                ORCA_ASSET_IMAGE=""
+                orca_clean_rebuild=true
+            fi
+
             # If caller supplied a prebuilt ORCA_ASSET_IMAGE and it exists locally, tag and skip building
             if [ -n "${ORCA_ASSET_IMAGE:-}" ]; then
-                if docker image inspect "${ORCA_ASSET_IMAGE}" >/dev/null 2>&1; then
-                    if ! validate_orcaslicer_binary_image "${ORCA_ASSET_IMAGE}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
-                        if is_local_orcaslicer_binaries_image "${ORCA_ASSET_IMAGE}"; then
-                            print_warning "Local ORCA_ASSET_IMAGE is stale or unverifiable; rebuilding it from the pinned release."
-                            remove_local_orcaslicer_binaries_tags
-                            ORCA_ASSET_IMAGE=""
-                            orca_clean_rebuild=true
-                        else
-                            print_error "Registry-qualified ORCA_ASSET_IMAGE does not attest the requested OrcaSlicer release; refusing to retag it."
-                            print_error "Update the pinned image, unset ORCA_ASSET_IMAGE, or set ORCA_FORCE_REBUILD=1 (or pass --rebuild-orcaslicer)."
-                            exit 1
-                        fi
-                    else
-                        print_info "Found verified ORCA_ASSET_IMAGE: ${ORCA_ASSET_IMAGE} - tagging for use and skipping build"
-                        docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:${ORCA_VERSION}"
-                        docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:latest"
-                        # Mark to skip the build step
-                        export _PF_SKIP_ORCA_BUILD=1
-                    fi
+                local orca_asset_status
+                if prepare_orcaslicer_binary_cache "${ORCA_ASSET_IMAGE}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
+                    print_info "Found verified ORCA_ASSET_IMAGE: ${ORCA_ASSET_IMAGE} - tagging for use and skipping build"
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:${ORCA_VERSION}"
+                    docker tag "${ORCA_ASSET_IMAGE}" "orcaslicer-binaries:latest"
+                    export _PF_SKIP_ORCA_BUILD=1
                 else
-                    if is_local_orcaslicer_binaries_image "${ORCA_ASSET_IMAGE}"; then
-                        print_info "Local ORCA_ASSET_IMAGE ${ORCA_ASSET_IMAGE} was not found; building the pinned release."
+                    orca_asset_status=$?
+                    if [[ "$orca_asset_status" -eq 10 ]]; then
+                        ORCA_ASSET_IMAGE=""
+                        orca_clean_rebuild=true
                     else
-                        print_error "Registry-qualified ORCA_ASSET_IMAGE '${ORCA_ASSET_IMAGE}' is unavailable."
-                        print_error "Update the pinned image, unset ORCA_ASSET_IMAGE, or set ORCA_FORCE_REBUILD=1 (or pass --rebuild-orcaslicer)."
                         exit 1
                     fi
                 fi
@@ -4727,15 +4731,19 @@ EOF
             
             # Auto-detect if orcaslicer-binaries image already exists locally (even if not from ORCA_ASSET_IMAGE)
             # This handles the case where images were loaded externally before this script runs
-            if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ]; then
+            if [ "${_PF_SKIP_ORCA_BUILD:-0}" != "1" ] && [ "$orca_clean_rebuild" != "true" ]; then
                 if docker image inspect "orcaslicer-binaries:${ORCA_VERSION}" >/dev/null 2>&1; then
-                    if ! validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
-                        print_warning "Cached OrcaSlicer binary layer is stale or unverifiable; rebuilding it from the pinned release."
-                        remove_local_orcaslicer_binaries_tags
-                        orca_clean_rebuild=true
-                    else
+                    local orca_cache_status
+                    if prepare_orcaslicer_binary_cache "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
                         print_success "✓ orcaslicer-binaries:${ORCA_VERSION} already exists locally - skipping rebuild"
                         export _PF_SKIP_ORCA_BUILD=1
+                    else
+                        orca_cache_status=$?
+                        if [[ "$orca_cache_status" -eq 10 ]]; then
+                            orca_clean_rebuild=true
+                        else
+                            exit 1
+                        fi
                     fi
                 fi
             fi

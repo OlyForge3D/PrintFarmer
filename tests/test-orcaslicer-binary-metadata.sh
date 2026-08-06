@@ -71,6 +71,9 @@ case "${1:-}" in
                 esac
                 ;;
             ls)
+                if [[ "${MOCK_IMAGE_LS_FAIL:-false}" == "true" ]]; then
+                    exit 1
+                fi
                 printf '%s\n' "${MOCK_IMAGE_LIST:-}"
                 ;;
             *)
@@ -104,6 +107,9 @@ case "${1:-}" in
         ;;
     rmi)
         printf '%s\n' "$*" >> "${DOCKER_COMMAND_LOG:?}"
+        if [[ "${MOCK_RMI_FAIL:-false}" == "true" ]]; then
+            exit 1
+        fi
         ;;
     *)
         exit 2
@@ -383,8 +389,9 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$multistage" 'ln -s /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer' "Worker launcher should preserve AppRun-relative paths"
     assert_contains "$base_dockerfile" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Precache image should label its version"
     assert_contains "$base_dockerfile" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Precache image should label its checksum"
-    assert_contains "$deploy_script" 'validate_orcaslicer_binary_image "${ORCA_ASSET_IMAGE}"' "Supplied cache images should be validated"
-    assert_contains "$deploy_script" 'validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}"' "Auto-detected cache images should be validated"
+    assert_contains "$deploy_script" 'prepare_orcaslicer_binary_cache "${ORCA_ASSET_IMAGE}"' "Supplied cache images should be validated"
+    assert_contains "$deploy_script" 'prepare_orcaslicer_binary_cache "orcaslicer-binaries:${ORCA_VERSION}"' "Auto-detected cache images should be validated"
+    assert_contains "$docker_utils" 'validate_orcaslicer_binary_image "$image_name"' "Cache preparation should enforce strict attestation"
     assert_contains "$deploy_script" 'ALLOW_STUB=false" --build-arg "_SKIP_ORCA_BINARY_BUILD=1' "Cached binary builds must keep embedded metadata validation enabled"
     assert_contains "$powershell_deploy_script" "Get-FileHash -Path \$resolvedAppImagePath -Algorithm SHA256" "PowerShell should verify cached AppImages"
     assert_not_contains "$deploy_script" "OrcaSlicer version to deploy" "Bash deployment should not offer an OrcaSlicer version selector"
@@ -467,7 +474,7 @@ test_matching_local_orcaslicer_tags_are_removed() {
     (
         export PATH="$MOCK_BIN:$PATH"
         export DOCKER_COMMAND_LOG
-        export MOCK_IMAGE_LIST=$'orcaslicer-binaries:2.4.2\norcaslicer-binaries:latest\nghcr.io/olyforge3d/orcaslicer-binaries:2.4.2\nprintfarmer-api:latest'
+        export MOCK_IMAGE_LIST=$'orcaslicer-binaries:2.4.2\r\norcaslicer-binaries:latest\r\nghcr.io/olyforge3d/orcaslicer-binaries:2.4.2\r\nprintfarmer-api:latest\r'
         remove_local_orcaslicer_binaries_tags
     )
 
@@ -480,18 +487,110 @@ test_matching_local_orcaslicer_tags_are_removed() {
     pass_test
 }
 
+test_local_cache_recovery_is_behavioral() {
+    start_test "stale local cache is removed and requests a rebuild"
+
+    local output
+    local exit_code
+    : > "$DOCKER_COMMAND_LOG"
+    set +e
+    output=$(
+        export PATH="$MOCK_BIN:$PATH"
+        export DOCKER_COMMAND_LOG
+        export MOCK_VERSION_LABEL="2.4.2"
+        unset MOCK_SHA_LABEL
+        export MOCK_ALLOW_STUB_LABEL="false"
+        export MOCK_IMAGE_LIST=$'orcaslicer-binaries:2.4.2\r\norcaslicer-binaries:latest\r'
+        prepare_orcaslicer_binary_cache \
+            "orcaslicer-binaries:2.4.2" \
+            "2.4.2" \
+            "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    ) 2>&1
+    exit_code=$?
+    set -e
+
+    assert_equals "10" "$exit_code" "Stale local cache should request a rebuild"
+    assert_contains "$output" "rebuilding the pinned release" "Local recovery should be explicit"
+    assert_contains "$(cat "$DOCKER_COMMAND_LOG")" "rmi -f orcaslicer-binaries:2.4.2 orcaslicer-binaries:latest" "Local recovery should remove every matching tag"
+
+    pass_test
+}
+
+test_external_cache_fails_closed_behaviorally() {
+    start_test "stale external cache fails closed without deletion"
+
+    local output
+    local exit_code
+    : > "$DOCKER_COMMAND_LOG"
+    set +e
+    output=$(
+        export PATH="$MOCK_BIN:$PATH"
+        export DOCKER_COMMAND_LOG
+        export MOCK_VERSION_LABEL="2.4.2"
+        unset MOCK_SHA_LABEL
+        export MOCK_ALLOW_STUB_LABEL="false"
+        prepare_orcaslicer_binary_cache \
+            "ghcr.io/olyforge3d/orcaslicer-binaries:2.4.2" \
+            "2.4.2" \
+            "d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+    ) 2>&1
+    exit_code=$?
+    set -e
+
+    assert_equals "1" "$exit_code" "External cache mismatch should fail closed"
+    assert_contains "$output" "Update the pinned image, unset ORCA_ASSET_IMAGE" "External rejection should be actionable"
+    assert_equals "" "$(cat "$DOCKER_COMMAND_LOG")" "External images must never be removed"
+
+    pass_test
+}
+
+test_cleanup_failure_is_propagated() {
+    start_test "local cache cleanup failure is propagated"
+
+    local exit_code
+    set +e
+    (
+        export PATH="$MOCK_BIN:$PATH"
+        export DOCKER_COMMAND_LOG
+        export MOCK_IMAGE_LIST="orcaslicer-binaries:2.4.2"
+        export MOCK_RMI_FAIL=true
+        remove_local_orcaslicer_binaries_tags
+    ) >/dev/null 2>&1
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Cleanup failure must stop recovery"
+
+    pass_test
+}
+
+test_force_rebuild_requires_supported_worker() {
+    start_test "force rebuild requires an enabled supported worker"
+
+    assert_command_success "validate_orcaslicer_rebuild_request '1' 'yes' 'false'"
+    assert_command_failure "validate_orcaslicer_rebuild_request '1' 'no' 'false'"
+    assert_command_failure "validate_orcaslicer_rebuild_request '1' 'yes' 'true'"
+    assert_command_success "validate_orcaslicer_rebuild_request '0' 'no' 'true'"
+
+    pass_test
+}
+
 test_deploy_recovery_controls_are_fail_closed() {
     start_test "deploy recovery controls preserve external image attestation"
 
     local deploy_script
+    local docker_utils
     deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
+    docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
 
     assert_contains "$deploy_script" 'ORCA_FORCE_REBUILD="${ORCA_FORCE_REBUILD:-0}"' "Environment control should default to disabled"
     assert_contains "$deploy_script" '--rebuild-orcaslicer)' "CLI should expose an OrcaSlicer rebuild flag"
     assert_contains "$deploy_script" 'ORCA_BUILD_CMD+=(--no-cache)' "Recovered binary layers should rebuild without cache"
+    assert_contains "$deploy_script" 'return 2' "Offline OrcaSlicer failures should use a non-fallback status"
+    assert_contains "$deploy_script" 'succeeded=false' "Offline preparation should stop after strict OrcaSlicer failure"
     assert_contains "$deploy_script" 'remove_local_orcaslicer_binaries_tags' "Recovery should remove stale local tags"
-    assert_contains "$deploy_script" "Registry-qualified ORCA_ASSET_IMAGE does not attest" "External image mismatches should fail closed"
-    assert_contains "$deploy_script" "Update the pinned image, unset ORCA_ASSET_IMAGE" "External failures should provide actionable remediation"
+    assert_contains "$docker_utils" "Registry-qualified ORCA_ASSET_IMAGE does not attest" "External image mismatches should fail closed"
+    assert_contains "$docker_utils" "Update the pinned image, unset ORCA_ASSET_IMAGE" "External failures should provide actionable remediation"
 
     pass_test
 }
@@ -513,6 +612,10 @@ run_tests() {
     test_stable_default_and_checksum_are_pinned
     test_local_orcaslicer_tags_are_recoverable
     test_matching_local_orcaslicer_tags_are_removed
+    test_local_cache_recovery_is_behavioral
+    test_external_cache_fails_closed_behaviorally
+    test_cleanup_failure_is_propagated
+    test_force_rebuild_requires_supported_worker
     test_deploy_recovery_controls_are_fail_closed
 }
 
