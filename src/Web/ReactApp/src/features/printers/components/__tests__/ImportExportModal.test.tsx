@@ -139,23 +139,58 @@ function wasClearedWith(clearIntervalSpy: MockInstance, intervalId: unknown): bo
   return clearIntervalSpy.mock.calls.some(([id]) => id === intervalId);
 }
 
-describe('ImportExportModal resource cleanup (#1146 item 10 lazy-unmount leak)', () => {
-  beforeEach(() => {
-    hoisted.state.progressCallback = undefined;
-    hoisted.getPrinters.mockClear();
-    hoisted.getPrinters.mockResolvedValue([]);
-    hoisted.uploadPrinterImport.mockClear();
-    hoisted.uploadPrinterImport.mockResolvedValue(undefined);
-    hoisted.streamExportFile.mockClear();
-    hoisted.streamExportFile.mockResolvedValue(undefined);
-    hoisted.isConnected.mockClear();
-    hoisted.isConnected.mockReturnValue(true);
-    hoisted.start.mockClear();
-    hoisted.start.mockResolvedValue(undefined);
-    hoisted.unsubscribeImportProgress.mockClear();
-    hoisted.onPrinterImportProgress.mockClear();
-  });
+/** A promise plus its resolve/reject, for precisely sequencing races in tests. */
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
+}
 
+function createDeferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/**
+ * Yields a full macrotask turn so every microtask queued by resolving/rejecting
+ * a `Deferred` — including the chained `.then`s inside the component under
+ * test — has already run by the time this resolves. Real timers are in
+ * effect for this whole file (see the natural-completion test below), so a
+ * 0ms `setTimeout` is enough to guarantee that.
+ */
+async function flushMicrotasks() {
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+}
+
+/** Matches the `<strong>File:</strong> {fileName}` line by its exact text content. */
+function fileInfoText(name: string) {
+  return (_content: string, element: Element | null) => element?.textContent === `File: ${name}`;
+}
+
+// Shared by every describe block below so a test that overrides a mock's
+// return value (e.g. to defer or reject it) never leaks into the next test.
+beforeEach(() => {
+  hoisted.state.progressCallback = undefined;
+  hoisted.getPrinters.mockClear();
+  hoisted.getPrinters.mockResolvedValue([]);
+  hoisted.uploadPrinterImport.mockClear();
+  hoisted.uploadPrinterImport.mockResolvedValue(undefined);
+  hoisted.streamExportFile.mockClear();
+  hoisted.streamExportFile.mockResolvedValue(undefined);
+  hoisted.isConnected.mockClear();
+  hoisted.isConnected.mockReturnValue(true);
+  hoisted.start.mockClear();
+  hoisted.start.mockResolvedValue(undefined);
+  hoisted.unsubscribeImportProgress.mockClear();
+  hoisted.onPrinterImportProgress.mockClear();
+});
+
+describe('ImportExportModal resource cleanup (#1146 item 10 lazy-unmount leak)', () => {
   it('subscribes to import progress and starts exactly one completion-poll interval per import', async () => {
     const setIntervalSpy = vi.spyOn(window, 'setInterval');
     renderModal();
@@ -273,5 +308,151 @@ describe('ImportExportModal resource cleanup (#1146 item 10 lazy-unmount leak)',
 
     setIntervalSpy.mockRestore();
     clearIntervalSpy.mockRestore();
+  });
+});
+
+describe('ImportExportModal startImport() mounted + operation-generation guard (#1146 re-review — Hicks)', () => {
+  it('does not start the hub, subscribe, or update state if the component unmounts while file.text() is pending', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const textDeferred = createDeferred<string>();
+    const textSpy = vi.spyOn(Blob.prototype, 'text').mockReturnValueOnce(textDeferred.promise);
+
+    const { unmount } = renderModal();
+    const file = new File([JSON.stringify([{ name: 'A' }, { name: 'B' }])], 'printers.json', {
+      type: 'application/json',
+    });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    // countPrintersInFile() is still awaiting file.text() — nothing has run yet.
+    expect(hoisted.start).not.toHaveBeenCalled();
+
+    unmount();
+
+    // Resolve file.text() *after* unmount: the startImport() continuation
+    // must recognize the component is gone and stop before doing anything
+    // else (no hub connect, no listener/interval, no setState).
+    textDeferred.resolve(JSON.stringify([{ name: 'A' }, { name: 'B' }]));
+    await act(async () => {
+      await flushMicrotasks();
+    });
+
+    expect(hoisted.start).not.toHaveBeenCalled();
+    expect(hoisted.onPrinterImportProgress).not.toHaveBeenCalled();
+    expect(completionIntervalCalls(setIntervalSpy)).toHaveLength(0);
+    expect(hoisted.uploadPrinterImport).not.toHaveBeenCalled();
+
+    setIntervalSpy.mockRestore();
+    textSpy.mockRestore();
+  });
+
+  it('does not subscribe or start the completion interval if the component unmounts while printerHubService.start() is pending', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    hoisted.isConnected.mockReturnValue(false);
+    const startDeferred = createDeferred<void>();
+    hoisted.start.mockReturnValue(startDeferred.promise);
+
+    const { unmount } = renderModal();
+    const file = new File([JSON.stringify([{ name: 'A' }, { name: 'B' }])], 'printers.json', {
+      type: 'application/json',
+    });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [file] } });
+
+    // The "importing" state is already committed (it's set before the hub
+    // connects) but startImport() itself is suspended awaiting the hub.
+    await waitFor(() => expect(hoisted.start).toHaveBeenCalledTimes(1));
+    expect(hoisted.onPrinterImportProgress).not.toHaveBeenCalled();
+
+    unmount();
+
+    // Resolve the hub connection *after* unmount.
+    startDeferred.resolve();
+    await act(async () => {
+      await flushMicrotasks();
+    });
+
+    expect(hoisted.onPrinterImportProgress).not.toHaveBeenCalled();
+    expect(completionIntervalCalls(setIntervalSpy)).toHaveLength(0);
+    expect(hoisted.uploadPrinterImport).not.toHaveBeenCalled();
+
+    setIntervalSpy.mockRestore();
+  });
+
+  it('disposes the SignalR subscription and completion interval when the upload request is rejected after they were created', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+    // A deferred (rather than an immediately-rejecting mock) lets the test
+    // assert the listener/interval definitely exist *before* the rejection
+    // is observed — react 18+'s automatic batching can otherwise collapse
+    // the transient "importing" state and its immediate revert into a
+    // single commit when a mock rejects on the very same tick it's awaited.
+    const uploadDeferred = createDeferred<void>();
+    hoisted.uploadPrinterImport.mockReturnValueOnce(uploadDeferred.promise);
+
+    renderModal();
+    await startTestImport();
+    const intervalId = getCompletionIntervalId(setIntervalSpy);
+    expect(hoisted.onPrinterImportProgress).toHaveBeenCalledTimes(1);
+
+    // Reject the upload now that the listener/interval definitely exist.
+    uploadDeferred.reject(new Error('network exploded'));
+
+    await waitFor(() => expect(hoisted.unsubscribeImportProgress).toHaveBeenCalledTimes(1));
+    expect(wasClearedWith(clearIntervalSpy, intervalId)).toBe(true);
+    // Preserves the existing UX: the failure surfaces and the modal returns
+    // to the file picker instead of leaving a dead "importing" screen up.
+    expect(document.querySelector('input[type="file"]')).not.toBeNull();
+
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
+  });
+
+  it('a stale first startImport() continuation cannot attach resources or overwrite state once a second import has started', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const textDeferred = createDeferred<string>();
+    // Only the *first* file.text() call (the doomed first import) hangs; the
+    // second import's own file.text() call falls through to the real
+    // (polyfilled) implementation and resolves normally.
+    const textSpy = vi.spyOn(Blob.prototype, 'text').mockReturnValueOnce(textDeferred.promise);
+
+    renderModal();
+
+    const staleFile = new File(
+      [JSON.stringify([{ name: 'Stale-1' }, { name: 'Stale-2' }, { name: 'Stale-3' }])],
+      'stale.json',
+      { type: 'application/json' },
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [staleFile] } });
+
+    // The first import is still parsing its file — nothing has happened yet.
+    expect(hoisted.uploadPrinterImport).not.toHaveBeenCalled();
+
+    // A second import starts, and runs to completion, before the first's
+    // prelude resolves.
+    await startTestImport();
+
+    expect(hoisted.uploadPrinterImport).toHaveBeenCalledTimes(1);
+    expect(hoisted.onPrinterImportProgress).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(fileInfoText('printers.json'))).toBeInTheDocument();
+
+    // Now let the stale first import's file.text() resolve.
+    textDeferred.resolve(JSON.stringify([{ name: 'Stale-1' }, { name: 'Stale-2' }, { name: 'Stale-3' }]));
+    await act(async () => {
+      await flushMicrotasks();
+    });
+
+    // The stale continuation must not have attached a second listener or
+    // completion interval, re-uploaded, or overwritten the active (second)
+    // import's file name / progress state.
+    expect(hoisted.onPrinterImportProgress).toHaveBeenCalledTimes(1);
+    expect(completionIntervalCalls(setIntervalSpy)).toHaveLength(1);
+    expect(hoisted.uploadPrinterImport).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(fileInfoText('printers.json'))).toBeInTheDocument();
+    expect(screen.queryByText(fileInfoText('stale.json'))).not.toBeInTheDocument();
+
+    setIntervalSpy.mockRestore();
+    textSpy.mockRestore();
   });
 });

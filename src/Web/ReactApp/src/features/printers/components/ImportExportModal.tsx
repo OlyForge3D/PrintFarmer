@@ -60,6 +60,31 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   const importUnsubscribeRef = useRef<(() => void) | undefined>(undefined);
   const importCompletionIntervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
+  // `startImport`'s async prelude (clone/parse the file, then — if needed —
+  // establish the SignalR connection) can straddle an unmount, or a second
+  // import starting before the first one's prelude has finished. #1146
+  // re-review (Hicks) flagged that those continuations could resume after
+  // unmount and still register a listener/interval or call setState, and
+  // that the upload/start failure path didn't always dispose what it had
+  // just created.
+  //
+  // `mountedRef` answers "is the component still here?"; `importOperationIdRef`
+  // answers "is this the import the caller still cares about?" — every
+  // `startImport` call mints a fresh id and captures it locally, and the
+  // counter is also bumped by `doClose`/`handleImportComplete` so an
+  // explicit Close/Cancel invalidates an in-flight prelude too, not only a
+  // later import. Every await inside `startImport` re-checks
+  // `isCurrentImport(operationId)` before registering a resource or
+  // mutating state, so a stale continuation can neither resurrect a
+  // closed/cancelled import nor attach on top of (or stomp on) a newer one.
+  const mountedRef = useRef(true);
+  const importOperationIdRef = useRef(0);
+
+  const isCurrentImport = useCallback(
+    (operationId: number) => mountedRef.current && importOperationIdRef.current === operationId,
+    [],
+  );
+
   const disposeImportWatchers = useCallback(() => {
     if (importCompletionIntervalRef.current !== undefined) {
       clearInterval(importCompletionIntervalRef.current);
@@ -73,7 +98,12 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
   // Belt-and-suspenders: dispose on unmount / route change even if none of
   // the explicit close/cancel handlers below ran first.
-  useEffect(() => disposeImportWatchers, [disposeImportWatchers]);
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      disposeImportWatchers();
+    };
+  }, [disposeImportWatchers]);
 
   const countPrintersInFile = async (f: File) => {
     try {
@@ -96,12 +126,23 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const startImport = async (file: File) => {
-    const count = await countPrintersInFile(file);
-    if (count === 0) return toast.error('No printers found in file');
-
-    // Defensive: a stray previous import's watchers should never still be
-    // running when a new one starts.
+    // Mint a new operation id and tear down whatever the previous attempt
+    // (if any) had registered *before* awaiting anything: a later import
+    // always invalidates an earlier one, synchronously, so a stale
+    // continuation can never find its own resources still attached (or a
+    // fresher operation's resources within reach) once it resumes.
+    const operationId = ++importOperationIdRef.current;
     disposeImportWatchers();
+
+    const count = await countPrintersInFile(file);
+    // Unmounted, or superseded by a newer startImport() call, while parsing
+    // the file: nothing has been registered yet at this checkpoint, so bail
+    // without touching state or resources.
+    if (!isCurrentImport(operationId)) return;
+    if (count === 0) {
+      toast.error('No printers found in file');
+      return;
+    }
 
     setFileName(file.name);
     setTotalCount(count);
@@ -122,6 +163,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       if (!printerHubService.isConnected()) {
         if (window.PrintFarmerDebug?.import) console.log('[Import] Connecting to SignalR hub...');
         await printerHubService.start(getHubUrl(''));
+        // Unmounted, or superseded by a newer import, while connecting —
+        // nothing has been registered yet, so just don't attach a
+        // listener/interval for a dead import.
+        if (!isCurrentImport(operationId)) return;
       }
 
       // Subscribe to events BEFORE triggering the import
@@ -171,6 +216,20 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
     } catch (err) {
       console.error('Import start failed', err);
+      if (!isCurrentImport(operationId)) {
+        // Either unmounted (the effect above already disposed anything this
+        // attempt had registered) or superseded by a newer import (which
+        // took ownership of importUnsubscribeRef/importCompletionIntervalRef
+        // — and already disposed this attempt's resources — when *it*
+        // started). Disposing or updating state here would tear down a
+        // live operation instead of this dead one's, so there is nothing
+        // left for this stale continuation to do.
+        return;
+      }
+      // Still mounted and current: this attempt's own listener/interval (if
+      // it got that far) must not outlive its failed start — preserve the
+      // existing UX (surface the error, return to the file picker).
+      disposeImportWatchers();
       toast.error('Failed to start import');
       setIsImporting(false);
     }
@@ -210,6 +269,11 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const doClose = () => {
+    // Invalidate any in-flight startImport() prelude so it can't resurrect
+    // the import after the user has explicitly closed the modal, even
+    // during the brief window before the parent actually unmounts this
+    // component (unmount itself is also guarded — see mountedRef above).
+    importOperationIdRef.current += 1;
     disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
@@ -219,6 +283,9 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const handleImportComplete = () => {
+    // Same reasoning as doClose(): both Cancel and natural completion must
+    // invalidate a still-pending startImport() continuation too.
+    importOperationIdRef.current += 1;
     disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
