@@ -63,7 +63,7 @@ public class QueuedPrintJobDto
 
     public string Status { get; set; } = string.Empty;
 
-    public int Priority { get; set; }
+    public PrintJobPriority Priority { get; set; }
 
     public int QueuePosition { get; set; }
 
@@ -284,7 +284,7 @@ public class EnqueueQueueJobRequest
 {
     public string GcodeFileId { get; set; } = null!;
 
-    public int Priority { get; set; } = 1;
+    public PrintJobPriority Priority { get; set; } = PrintJobPriority.Normal;
 
     public JobKind? JobKind { get; set; }
 
@@ -305,7 +305,7 @@ public class EnqueueQueueJobRequest
 /// </summary>
 public class UpdateQueueJobRequest
 {
-    public int? Priority { get; set; }
+    public PrintJobPriority? Priority { get; set; }
 
     public string? AssignedPrinterId { get; set; }
 
@@ -324,7 +324,7 @@ public class UpdateQueueJobRequest
 /// </summary>
 public class UpdateQueueJobPriorityRequest
 {
-    public required int NewPriority { get; set; }
+    public required PrintJobPriority NewPriority { get; set; }
 }
 
 /// <summary>
@@ -654,7 +654,7 @@ public class UpdateJobDetailsRequest
 {
     public string? Name { get; set; }
 
-    public int? Priority { get; set; }
+    public PrintJobPriority? Priority { get; set; }
 
     public string? Notes { get; set; }
 

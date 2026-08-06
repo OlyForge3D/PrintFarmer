@@ -128,14 +128,14 @@ public interface IPrintJobManagementService
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
         string jobId,
-        int newPriority,
+        PrintJobPriority newPriority,
         string userId,
         CancellationToken cancellationToken = default);
 
     /// <summary>Updates priority after enforcing a caller-supplied job ETag.</summary>
     Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
         string jobId,
-        int newPriority,
+        PrintJobPriority newPriority,
         string userId,
         string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default);

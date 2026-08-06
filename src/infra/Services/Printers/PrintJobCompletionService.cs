@@ -698,7 +698,7 @@ public class PrintJobCompletionService : IPrintJobCompletionService
                     j.Id,
                     Name = j.Name ?? j.GcodeFile!.Name,
                     j.Status,
-                    j.Priority,
+                    Priority = (PrintJobPriority)j.Priority,
                     j.QueuedAt,
                     j.ActualStartTime,
                     j.ActualEndTime

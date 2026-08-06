@@ -2,7 +2,7 @@ import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import clsx from "clsx";
 import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } from "lucide-react";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
-import type { DispatchUploadProgressDto } from "@/types/api";
+import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
 
 const DUE_SOON_HOURS = 24;
 
@@ -19,7 +19,7 @@ interface QueueJobsCollectionViewProps {
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
   onAbortPrint?: (jobId: string) => void;
-  onPriority?: (jobId: string, priority: number) => void;
+  onPriority?: (jobId: string, priority: PrintJobPriority) => void;
   onDispatch?: (jobId: string) => void;
   onSchedule?: (jobId: string) => void;
   onEdit?: (jobId: string) => void;
@@ -220,7 +220,7 @@ function QueueJobCommon({
   const fileName = jobWrapper.gcodeFile?.name || jobWrapper.gcodeFile?.fileName || job.name || "Unknown File";
   const printerName = jobWrapper.assignedPrinter?.name || "Unknown Printer";
   const status = job.status || "Unknown";
-  const priority = job.priority || 0;
+  const priority = job.priority;
   const projectName = job.projectName;
   const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "";
   const deadlineAtUtc = job.deadlineAtUtc;
@@ -312,14 +312,14 @@ function QueueJobCommon({
           <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
             <Select
               value={priority}
-              onChange={(e) => onPriority?.(jobId, parseInt(e.target.value, 10))}
+              onChange={(e) => onPriority?.(jobId, e.target.value as PrintJobPriority)}
               className="text-xs w-28"
               aria-label="Job priority"
             >
-              <option value="0">Normal</option>
-              <option value="1">High</option>
-              <option value="2">Urgent</option>
-              <option value="-1">Low</option>
+              <option value={PrintJobPriority.Low}>Low</option>
+              <option value={PrintJobPriority.Normal}>Normal</option>
+              <option value={PrintJobPriority.High}>High</option>
+              <option value={PrintJobPriority.Urgent}>Urgent</option>
             </Select>
             <QueueJobActions
               jobId={jobId}

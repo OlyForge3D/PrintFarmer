@@ -21,7 +21,10 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
 
         // Basic properties
         builder.Property(pj => pj.Name).IsRequired().HasMaxLength(255);
-        builder.Property(pj => pj.Priority).HasDefaultValue(0);
+        builder.Property(pj => pj.Priority).HasDefaultValue((int)PrintJobPriority.Normal);
+        builder.ToTable(table => table.HasCheckConstraint(
+            "CK_PrintJobs_Priority",
+            "\"Priority\" >= 0 AND \"Priority\" <= 3"));
         builder.Property(pj => pj.Status).HasConversion<int>();
         builder.Property(pj => pj.EstimatedPrintTime).HasConversion<long>();
         builder.Property(pj => pj.ActualPrintTime).HasConversion<long>();

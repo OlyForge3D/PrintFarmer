@@ -609,9 +609,10 @@ public class PrintJobManagementService(
                     QueueJobClassifier.CalibrationMisclassificationMessage(gcodeFile.Id));
             }
 
-            if (!QueueOrdering.IsDefinedPriority(request.Priority))
+            if (!QueueOrdering.IsDefinedPriority((int)request.Priority))
             {
-                throw new ValidationException(QueueOrdering.UndefinedPriorityMessage(request.Priority));
+                throw new ValidationException(
+                    QueueOrdering.UndefinedPriorityMessage((int)request.Priority));
             }
 
             // Create new print job
@@ -637,7 +638,7 @@ public class PrintJobManagementService(
                 GcodeFileId = Guid.Parse(request.GcodeFileId),
                 AssignedPrinterId = assignedPrinterId,
                 Status = assignedPrinterId.HasValue ? PrintJobStatus.Assigned : PrintJobStatus.Queued,
-                Priority = request.Priority,
+                Priority = (int)request.Priority,
                 RequiredNozzleDiameter = request.RequiredNozzleDiameter,
                 RequiredMaterialType = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper
                     .ResolveEffectiveMaterial(request.RequiredMaterialType, gcodeFile),
@@ -775,13 +776,13 @@ public class PrintJobManagementService(
             // Update fields if provided
             if (request.Priority.HasValue)
             {
-                if (!QueueOrdering.IsDefinedPriority(request.Priority.Value))
+                if (!QueueOrdering.IsDefinedPriority((int)request.Priority.Value))
                 {
                     throw new ValidationException(
-                        QueueOrdering.UndefinedPriorityMessage(request.Priority.Value));
+                        QueueOrdering.UndefinedPriorityMessage((int)request.Priority.Value));
                 }
 
-                job.Priority = request.Priority.Value;
+                job.Priority = (int)request.Priority.Value;
             }
 
             if (!string.IsNullOrEmpty(request.AssignedPrinterId))
@@ -891,7 +892,7 @@ public class PrintJobManagementService(
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
     public async Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
         string jobId,
-        int newPriority,
+        PrintJobPriority newPriority,
         string userId,
         CancellationToken cancellationToken = default) =>
         await UpdateJobPriorityAsync(
@@ -904,7 +905,7 @@ public class PrintJobManagementService(
     /// <inheritdoc />
     public async Task<QueuedPrintJobDto> UpdateJobPriorityAsync(
         string jobId,
-        int newPriority,
+        PrintJobPriority newPriority,
         string userId,
         string? ifMatchJobRowVersion,
         CancellationToken cancellationToken = default)
@@ -926,13 +927,13 @@ public class PrintJobManagementService(
                     "priority update");
             }
 
-            if (!QueueOrdering.IsDefinedPriority(newPriority))
+            if (!Enum.IsDefined(newPriority))
             {
                 throw new ValidationException(
-                    QueueOrdering.UndefinedPriorityMessage(newPriority));
+                    QueueOrdering.UndefinedPriorityMessage((int)newPriority));
             }
 
-            job.Priority = newPriority;
+            job.Priority = (int)newPriority;
             job.UpdatedAt = DateTime.UtcNow;
             if (job.AssignedPrinterId.HasValue)
             {
@@ -4382,7 +4383,7 @@ public class PrintJobManagementService(
             PrinterName = job.AssignedPrinter?.Name, // Denormalized printer name for display
             PrinterModel = job.AssignedPrinter?.Model?.Name, // Denormalized printer model for display
             Status = job.Status.ToString(),
-            Priority = job.Priority,
+            Priority = (PrintJobPriority)job.Priority,
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
@@ -4690,13 +4691,13 @@ public class PrintJobManagementService(
 
             if (updates.Priority.HasValue)
             {
-                if (!QueueOrdering.IsDefinedPriority(updates.Priority.Value))
+                if (!QueueOrdering.IsDefinedPriority((int)updates.Priority.Value))
                 {
                     throw new ValidationException(
-                        QueueOrdering.UndefinedPriorityMessage(updates.Priority.Value));
+                        QueueOrdering.UndefinedPriorityMessage((int)updates.Priority.Value));
                 }
 
-                job.Priority = updates.Priority.Value;
+                job.Priority = (int)updates.Priority.Value;
             }
 
             if (updates.Notes != null)

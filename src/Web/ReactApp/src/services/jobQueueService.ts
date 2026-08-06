@@ -1,4 +1,5 @@
 import { apiClient } from '@/services/api';
+import { PrintJobPriority } from '@/types/api';
 import type {
   JobQueuePrintJob,
   QueuedPrintJobWithFileMetaDto,
@@ -33,7 +34,7 @@ export const jobQueueService = {
   async queuePrintJob(
     printerId: string,
     gcodeFileId: string,
-    priority?: number
+    priority?: PrintJobPriority
   ): Promise<JobQueuePrintJob> {
     return apiClient.queuePrintJob(printerId, gcodeFileId, priority);
   },
@@ -87,7 +88,7 @@ export const jobQueueService = {
 
   async updateJobPriority(
     jobId: string,
-    newPriority: number,
+    newPriority: PrintJobPriority,
     reviewedRowVersion: string
   ): Promise<unknown> {
     return apiClient.updateJobPriority(jobId, newPriority, reviewedRowVersion);

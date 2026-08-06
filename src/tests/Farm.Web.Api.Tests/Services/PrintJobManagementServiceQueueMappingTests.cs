@@ -1,4 +1,5 @@
-﻿using Farm.Api.Services.PrintQueue;
+﻿using System.ComponentModel.DataAnnotations;
+using Farm.Api.Services.PrintQueue;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -519,6 +520,70 @@ public class PrintJobManagementServiceQueueMappingTests
         Assert.Equal(3, queuedOnly.QueuedCount);
         Assert.Equal(0, queuedOnly.PrintingCount);
         Assert.Null(queuedOnly.PrintingPosition);
+    }
+
+    [Theory]
+    [InlineData(PrintJobPriority.Low)]
+    [InlineData(PrintJobPriority.Normal)]
+    [InlineData(PrintJobPriority.High)]
+    [InlineData(PrintJobPriority.Urgent)]
+    public async Task UpdateJobPriorityAsync_DefinedPriority_PreservesMeaningInPersistenceAndDto(
+        PrintJobPriority priority)
+    {
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "priority.gcode",
+            Priority = (int)PrintJobPriority.Normal,
+            Status = PrintJobStatus.Queued,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(value => value.GetByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        repository.Setup(value => value.UpdateAsync(job, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        PrintJobManagementService service = CreateService(repository);
+
+        QueuedPrintJobDto result = await service.UpdateJobPriorityAsync(
+            job.Id.ToString(),
+            priority,
+            "operator");
+
+        Assert.Equal((int)priority, job.Priority);
+        Assert.Equal(priority, result.Priority);
+        repository.VerifyAll();
+    }
+
+    [Fact]
+    public async Task UpdateJobPriorityAsync_UndefinedPriority_RejectsBeforePersistence()
+    {
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "priority.gcode",
+            Priority = (int)PrintJobPriority.Normal,
+            Status = PrintJobStatus.Queued,
+            QueuedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        Mock<IPrintJobManagementRepository> repository = new(MockBehavior.Strict);
+        repository.Setup(value => value.GetByIdAsync(job.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(job);
+        PrintJobManagementService service = CreateService(repository);
+
+        ValidationException exception = await Assert.ThrowsAsync<ValidationException>(
+            () => service.UpdateJobPriorityAsync(
+                job.Id.ToString(),
+                (PrintJobPriority)99,
+                "operator"));
+
+        Assert.Contains("not a valid PrintJobPriority", exception.Message, StringComparison.Ordinal);
+        Assert.Equal((int)PrintJobPriority.Normal, job.Priority);
+        repository.VerifyAll();
     }
 
     private static PrintJobManagementService CreateService(

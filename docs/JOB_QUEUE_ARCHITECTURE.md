@@ -76,6 +76,28 @@ The job queue system manages the lifecycle of print jobs in PrintFarmer:
 - **Analytics:** Historical data, duration trends, queue statistics
 - **Scheduling:** Deferred execution with recurrence patterns
 
+### Priority contract
+
+`PrintJobPriority` is the canonical queue-priority scale at every API and UI
+boundary:
+
+| Name | Stored value |
+|---|---:|
+| `Low` | 0 |
+| `Normal` | 1 |
+| `High` | 2 |
+| `Urgent` | 3 |
+
+REST and SignalR payloads use the enum names as strings. The database stores
+their integer values with `Normal` as the default and constrains rows to
+`0..3`.
+
+The `CanonicalizePrintJobPriority` deployment migrations preserve existing
+defined values. Legacy values below `0`, including the former web value `-1`,
+map to `Low`; values above `3` map to `Urgent`. This clamps malformed rows to
+the nearest conservative boundary without promoting an old low-priority job
+or demoting an old high-priority job.
+
 ### Calibration dispatch safety contract
 
 Generated calibration G-code has one execution path: immutable artifact

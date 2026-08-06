@@ -143,7 +143,7 @@ final class DemoSignalRService: SignalRServiceProtocol, @unchecked Sendable {
                         jobs: [
                             JobQueueUpdateEntry(
                                 id: DemoData.job1ID, name: "phone_case_v3.gcode",
-                                status: .printing, priority: 1, queuedAt: Date().addingTimeInterval(-86400),
+                                status: .printing, priority: .normal, queuedAt: Date().addingTimeInterval(-86400),
                                 actualStartTime: Date().addingTimeInterval(-7200), actualEndTime: nil),
                         ])
                     jobQueueHub.deliver(queueUpdate)
