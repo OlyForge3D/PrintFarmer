@@ -5,6 +5,7 @@ import { TagSelector } from './TagSelector';
 import { tagService, type TagDto as TagOption } from '@/services/tagService';
 import { Modal } from '@/common/components/modals/Modal';
 import { apiClient } from '@/services/api';
+import { printerTagsFleetQueryKey } from '@/features/printers/hooks/usePrinterTagsFleet';
 
 interface TaggingModalProps {
   objectId: string;
@@ -69,7 +70,13 @@ export const TaggingModal: React.FC<TaggingModalProps> = ({
       queryClient.invalidateQueries({ queryKey: ['model-tags'] });
       queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
       if (objectType === 'Printer') {
+        // Compatibility key (#1146 item 1): kept for any lingering
+        // single-object consumer of the pre-fleet per-card tag query.
         queryClient.invalidateQueries({ queryKey: ['printer-tags', objectId] });
+        // Fleet key: refetches the batched `GET /api/tags/objects` read every
+        // compact printer card now shares, so an edit shows up immediately
+        // instead of waiting out the fleet query's staleTime.
+        queryClient.invalidateQueries({ queryKey: printerTagsFleetQueryKey });
       }
       setError(null);
       onClose();

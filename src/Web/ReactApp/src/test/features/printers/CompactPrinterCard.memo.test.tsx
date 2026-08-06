@@ -7,23 +7,31 @@ import {
   type CompactPrinterCardMemoProps,
 } from '@/features/printers/utils/compactPrinterCardMemo';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
+import type { PrinterQueueSummaryDto } from '@/types/api';
 
 const progressBarRender = vi.hoisted(() => vi.fn());
-const useJobQueueMock = vi.hoisted(() => vi.fn(() => ({ data: [], isLoading: false })));
+const printerTagsFromFleetMock = vi.hoisted(() =>
+  vi.fn(() => ({ data: [], isPending: false, isError: false, error: null }))
+);
+const queueSummaryFromFleetMock = vi.hoisted(() =>
+  vi.fn(() => ({ data: undefined as PrinterQueueSummaryDto | undefined, isPending: false, isError: false, error: null }))
+);
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ data: [], isLoading: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-vi.mock('@/common/hooks/useApi', () => ({
-  useJobQueue: useJobQueueMock,
+vi.mock('@/features/printers/hooks/usePrinterTagsFleet', () => ({
+  usePrinterTagsFromFleet: printerTagsFromFleetMock,
 }));
 
-vi.mock('@/services/api', () => ({
-  apiClient: {
-    getObjectTags: vi.fn().mockResolvedValue([]),
-  },
+vi.mock('@/features/printers/hooks/useQueueSummariesFleet', () => ({
+  useQueueSummaryFromFleet: queueSummaryFromFleetMock,
+}));
+
+vi.mock('@/features/printers/hooks/useFailureDetectionPolling', () => ({
+  useFailureDetectionPollingEnabled: () => false,
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
@@ -164,7 +172,10 @@ function createCapabilities(
 describe('CompactPrinterCard memoization', () => {
   beforeEach(() => {
     progressBarRender.mockClear();
-    useJobQueueMock.mockClear();
+    printerTagsFromFleetMock.mockClear();
+    printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: false, isError: false, error: null });
+    queueSummaryFromFleetMock.mockClear();
+    queueSummaryFromFleetMock.mockReturnValue({ data: undefined, isPending: false, isError: false, error: null });
   });
 
   it('skips rendering when parent recreates unchanged printer props with stable callbacks', () => {
@@ -266,7 +277,7 @@ describe('CompactPrinterCard memoization', () => {
     expect(progressBarRender).toHaveBeenCalledTimes(2);
   });
 
-  it('does not poll the job queue for idle compact cards', () => {
+  it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {
     render(
       <CompactPrinterCard
         printer={createPrinter({ state: 'Idle', isOnline: true })}
@@ -275,16 +286,22 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    expect(useJobQueueMock).toHaveBeenCalledWith('printer-1', { enabled: false });
+    // #1146 item 9: no per-card `useJobQueue` call exists anymore — the card
+    // selects its row from the one shared fleet query instead.
+    expect(queueSummaryFromFleetMock).toHaveBeenCalledWith('printer-1');
   });
 
-  it('does not render a stale queue label from cached data while queue polling is disabled', () => {
-    useJobQueueMock.mockReturnValueOnce({
-      data: [
-        { job: { id: 'job-1', status: 'Printing' } },
-        { job: { id: 'job-2', status: 'Queued' } },
-      ],
-      isLoading: false,
+  it('does not render a queue label for an idle printer even if the fleet summary has one (prevents stale labels)', () => {
+    // The fleet endpoint omits idle printers entirely, but this guards the
+    // display-side predicate directly: even if a summary entry existed for
+    // this printer id (e.g. queued-but-not-dispatched jobs while blocked on
+    // a bed-clear confirmation), an Idle/non-printing card must never show a
+    // stray position label — matching the pre-fleet UI exactly.
+    queueSummaryFromFleetMock.mockReturnValue({
+      data: { printerId: 'printer-1', queuedCount: 2, printingCount: 0, printingPosition: null },
+      isPending: false,
+      isError: false,
+      error: null,
     });
 
     render(
@@ -298,7 +315,14 @@ describe('CompactPrinterCard memoization', () => {
     expect(screen.queryByText('1 of 2')).not.toBeInTheDocument();
   });
 
-  it('polls the job queue for active compact cards so queue labels stay fresh', () => {
+  it('renders the "X of Y" queue label for an active printer from the fleet summary', () => {
+    queueSummaryFromFleetMock.mockReturnValue({
+      data: { printerId: 'printer-1', queuedCount: 1, printingCount: 1, printingPosition: 1 },
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
     render(
       <CompactPrinterCard
         printer={createPrinter({ state: 'Printing', isOnline: true })}
@@ -307,7 +331,61 @@ describe('CompactPrinterCard memoization', () => {
       />,
     );
 
-    expect(useJobQueueMock).toHaveBeenCalledWith('printer-1', { enabled: true });
+    expect(queueSummaryFromFleetMock).toHaveBeenCalledWith('printer-1');
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+  });
+
+  it('does not render a queue label when only the currently-printing job is active (no queue depth)', () => {
+    queueSummaryFromFleetMock.mockReturnValue({
+      data: { printerId: 'printer-1', queuedCount: 0, printingCount: 1, printingPosition: 1 },
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ state: 'Printing', isOnline: true })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('1 of 1')).not.toBeInTheDocument();
+  });
+
+  it('reads its tag list from the shared tags fleet query by printer id (#1146 item 1)', () => {
+    printerTagsFromFleetMock.mockReturnValue({
+      data: [{ id: 'tag-1', name: 'Production' }],
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(printerTagsFromFleetMock).toHaveBeenCalledWith('printer-1');
+    expect(screen.getByText('Production')).toBeInTheDocument();
+  });
+
+  it('renders no tag pills when the fleet query has no tags for this printer (empty-tag behavior)', () => {
+    printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: false, isError: false, error: null });
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('Production')).not.toBeInTheDocument();
   });
 
   it('rerenders when only onEdit changes while all other props stay equal', () => {

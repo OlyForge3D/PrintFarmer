@@ -28,7 +28,6 @@ vi.mock('@/common/hooks/useApi', () => ({
     printers: ['printers'] as const,
     printer: (id: string) => ['printers', id] as const,
   },
-  useJobQueue: () => ({ data: [], isLoading: false }),
   useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
   usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
 }));
@@ -46,6 +45,8 @@ vi.mock('@/services/api', () => ({
     get: vi.fn(),
     getAutoDispatchStatus: vi.fn().mockResolvedValue({ printers: [] }),
     getObjectTags: vi.fn().mockResolvedValue([]),
+    getObjectsTags: vi.fn().mockResolvedValue([]),
+    getPrinterQueueSummaries: vi.fn().mockResolvedValue([]),
     setAutoDispatchEnabled: vi.fn().mockResolvedValue(undefined),
     post: vi.fn().mockResolvedValue({ data: {} }),
     skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),

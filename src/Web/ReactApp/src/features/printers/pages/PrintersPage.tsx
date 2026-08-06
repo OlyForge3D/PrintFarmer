@@ -1,4 +1,4 @@
-import React, { useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
+import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
@@ -16,20 +16,17 @@ import { toast } from 'sonner';
 import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
-import { EditPrinterModal } from '@/features/printers/components/EditPrinterModal';
 import { AddPrinterButton } from '@/features/printers/components/AddPrinterButton';
-import { PrinterDiscoveryModal } from '@/features/printers/components/PrinterDiscoveryModal';
 import { DeleteConfirmationModal } from '@/common/components/modals/DeleteConfirmationModal';
 import { PrinterCardSkeleton } from '@/common/components/skeletons/PrinterCardSkeleton';
-import { DetailedPrinterCard } from '@/features/printers/components/DetailedPrinterCard';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button } from '@/common/components/ui/Button';
 import { Select } from '@/common/components/ui/Select';
 import { ViewModeToggle, type ViewMode } from '@/common/components/ViewModeToggle';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
-import { PrinterBackend } from '@/types/api';
-import { getPrinterBackendName } from '@/common/utils/enumHelpers';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
+import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { sortPrintersForDisplay, getBackendName, type PrinterSortMode } from '@/features/printers/utils/printerDisplaySort';
 
 import { PrinterIcon, PrinterSearchIcon } from '@/common/components/icons/MdiIcons';
 import PrinterImportExportControls from '@/features/printers/components/admin/PrinterImportExportControls';
@@ -38,27 +35,32 @@ import { usePageTour } from '@/common/hooks/usePageTour';
 import { printersTour } from '@/features/printers/tours/printers.tour';
 import { HelpButton } from '@/common/components/HelpButton';
 import { useFleetFilamentCoverage } from '@/features/filament-coverage/hooks';
+import { useFleetPrinterTags } from '@/features/printers/hooks/usePrinterTagsFleet';
+import { useFleetQueueSummaries } from '@/features/printers/hooks/useQueueSummariesFleet';
+import { useDiscoveryAvailable } from '@/features/printers/hooks/useDiscoveryAvailability';
+import { FailureDetectionPollingProvider } from '@/features/printers/hooks/useFailureDetectionPolling';
+import type { DetailedPrinterCardProps } from '@/features/printers/components/DetailedPrinterCard';
+import type { EditPrinterModalProps } from '@/features/printers/components/EditPrinterModal';
+import type { PrinterDiscoveryModalProps } from '@/features/printers/components/PrinterDiscoveryModal';
+
+// Interaction-only surfaces: not needed for the initial grid paint, so they're
+// lazy-loaded out of the PrintersPage chunk (#1146 item 10). `DetailedPrinterCard`
+// only renders in the "detailed" view mode; the modals only render once a user
+// opens them. Each keeps its existing behavior — only the import timing changes.
+const DetailedPrinterCard = lazyWithPreload<DetailedPrinterCardProps, React.FC<DetailedPrinterCardProps>>(
+  () => import('@/features/printers/components/DetailedPrinterCard').then(m => ({ default: m.DetailedPrinterCard }))
+);
+const EditPrinterModal = lazyWithPreload<EditPrinterModalProps, React.FC<EditPrinterModalProps>>(
+  () => import('@/features/printers/components/EditPrinterModal').then(m => ({ default: m.EditPrinterModal }))
+);
+const PrinterDiscoveryModal = lazyWithPreload<PrinterDiscoveryModalProps, React.FC<PrinterDiscoveryModalProps>>(
+  () => import('@/features/printers/components/PrinterDiscoveryModal').then(m => ({ default: m.PrinterDiscoveryModal }))
+);
 
 
 type PrinterStateFilter = 'all' | 'online' | 'printing' | 'paused' | 'offline';
 type BackendFilter = 'all' | 'Moonraker' | 'PrusaLink' | 'SDCP' | 'OctoPrint' | 'FlashForge';
-type PrinterSortMode = 'state' | 'name' | 'backend';
 type AvailabilityFilter = 'all' | '1' | '2' | '4' | '8' | '12' | '24';
-
-/** State priority for sorting: lower number = higher in list */
-function getStateSortPriority(printer: Printer, pendingIds: Set<string>): number {
-  if (pendingIds.has(printer.id)) return 0;       // PendingReady (attention)
-  if (!printer.isOnline) return 4;                 // Offline
-  const state = (printer.state || '').toLowerCase();
-  if (state.includes('printing')) return 1;        // Printing
-  if (state.includes('paused')) return 2;           // Paused
-  return 3;                                         // Idle / other online
-}
-
-// Helper function to get backend name from a wire or legacy value
-function getBackendName(backend: PrinterBackend | string | number): string {
-  return getPrinterBackendName(backend);
-}
 
 export function PrintersPage() {
   const { hasPermission } = useAuth();
@@ -66,6 +68,12 @@ export function PrintersPage() {
   // per-printer hooks dedupe via the fleet snapshot instead of each issuing
   // a separate request (N+1 guard, issue #717).
   useFleetFilamentCoverage();
+  // Prime the batched printer-tags and queue-summary fleet caches the same
+  // way, so CompactPrinterCard's per-printer selectors dedupe onto these
+  // single requests instead of one tag/queue request per card (#1146 items
+  // 1 and 9).
+  useFleetPrinterTags();
+  useFleetQueueSummaries();
   const queryClient = useQueryClient();
   
   const { 
@@ -78,6 +86,15 @@ export function PrintersPage() {
   
   // Merge with realtime SignalR updates for display
   const displayPrinters = usePrinterDisplays(printers || []);
+
+  // Whether ANY printer in the fleet has Obico/failure detection enabled,
+  // computed once here (not per-card) and shared via context so the
+  // failure-detection status poll is controlled at the page level instead of
+  // depending on which mix of cards happens to be mounted (#1146 item 3).
+  const anyObicoEnabled = useMemo(
+    () => displayPrinters.some((printer) => !!printer.obicoEnabled),
+    [displayPrinters]
+  );
 
   const printerBackendCapabilitiesQuery = usePrinterBackendCapabilities();
   const backendCapabilitiesByPrinterId = useMemo(() => {
@@ -136,30 +153,13 @@ export function PrintersPage() {
   const navigate = useNavigate();
   const { startTour } = usePageTour({ tourId: 'printers', steps: printersTour });
 
-  // Discovery availability state
-  const [discoveryAvailable, setDiscoveryAvailable] = useState(false);
   // Page-level discovery modal state (header button opens modal)
   const [showDiscovery, setShowDiscovery] = useState(false);
 
-  // Check if discovery service is available
-  useEffect(() => {
-    const checkDiscoveryAvailability = async () => {
-      try {
-        const settings = await apiClient.getSettings<import('@/types/NetworkDiscoverySettings').NetworkDiscoverySettings>('NetworkDiscovery');
-        const isEnabled = settings?.enableDiscovery === true;
-        const hasRecentHeartbeat = settings?.lastHeartbeat 
-          ? new Date().getTime() - new Date(settings.lastHeartbeat).getTime() < 60000
-          : false;
-        setDiscoveryAvailable(isEnabled && hasRecentHeartbeat);
-      } catch {
-        setDiscoveryAvailable(false);
-      }
-    };
-
-    checkDiscoveryAvailability();
-    const interval = setInterval(checkDiscoveryAvailability, 30000);
-    return () => clearInterval(interval);
-  }, []);
+  // Discovery availability: one shared TanStack Query hook (admin-gated,
+  // visibility/backoff handled by local convention defaults) replacing the
+  // previous raw setInterval + local state (#1146 item 7).
+  const discoveryAvailable = useDiscoveryAvailable();
 
   // Save view mode preference to localStorage
   useEffect(() => {
@@ -205,7 +205,13 @@ export function PrintersPage() {
 
   // React 19: Filter printers using optimisticPrinters for optimistic deletion feedback
   const userPrinters = useMemo(() => {
-    let filtered = optimisticPrinters || [];
+    // Copy before sort (#1146 item 5): when every filter below is a no-op,
+    // `filtered` would otherwise stay aliased to `optimisticPrinters` (and
+    // transitively to `displayPrinters`/the query cache); `filtered` is only
+    // ever read from below (never sorted in place — see
+    // `sortPrintersForDisplay`), so this copy exists purely so nothing
+    // downstream can be surprised by a shared reference.
+    let filtered = [...(optimisticPrinters ?? [])];
     // State filter
     if (stateFilter !== 'all') {
       filtered = filtered.filter(p => {
@@ -233,27 +239,7 @@ export function PrintersPage() {
     if (bedTypeFilter !== 'all') {
       filtered = filtered.filter(p => p.bedTypeId === bedTypeFilter);
     }
-    // Sort based on selected mode
-    filtered.sort((a, b) => {
-      if (sortMode === 'state') {
-        const aPriority = getStateSortPriority(a, pendingPrinterIds);
-        const bPriority = getStateSortPriority(b, pendingPrinterIds);
-        if (aPriority !== bPriority) return aPriority - bPriority;
-        return (a.name ?? '').localeCompare(b.name ?? '');
-      }
-      if (sortMode === 'name') {
-        return (a.name ?? '').localeCompare(b.name ?? '');
-      }
-      if (sortMode === 'backend') {
-        const aBackend = getBackendName(a.backend);
-        const bBackend = getBackendName(b.backend);
-        const cmp = aBackend.localeCompare(bBackend);
-        if (cmp !== 0) return cmp;
-        return (a.name ?? '').localeCompare(b.name ?? '');
-      }
-      return 0;
-    });
-    return filtered;
+    return sortPrintersForDisplay(filtered, sortMode, pendingPrinterIds);
   }, [optimisticPrinters, stateFilter, backendFilter, availabilityHours, filterNow, sortMode, pendingPrinterIds, bedTypeFilter]);
 
   const deferredUserPrinters = useDeferredValue(userPrinters);
@@ -418,6 +404,7 @@ export function PrintersPage() {
       icon={PrinterIcon}
       titleActions={<HelpButton onClick={startTour} />}
     >
+      <FailureDetectionPollingProvider value={anyObicoEnabled}>
       <div className={isSidebarOpen ? 'min-w-0 lg:grid lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start lg:gap-6' : 'min-w-0'}>
         <div className="min-w-0">
           {/* Toolbar with three-zone layout: Primary Actions | Spacer | View & Filters */}
@@ -433,6 +420,8 @@ export function PrintersPage() {
                     variant="secondary"
                     aria-label="Trigger network discovery to find printers on local network"
                     onClick={() => setShowDiscovery(true)}
+                    onMouseEnter={() => PrinterDiscoveryModal.preload()}
+                    onFocus={() => PrinterDiscoveryModal.preload()}
                     iconLeft={<PrinterSearchIcon className="w-4 h-4" ariaLabel="Discover" />}
                   >
                     Discover Printers
@@ -583,17 +572,27 @@ export function PrintersPage() {
                   ))}
                 </div>
               ) : viewMode === 'detailed' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
-                  {deferredUserPrinters.map((printer) => (
-                    <DetailedPrinterCard
-                      key={printer.id}
-                      printer={printer}
-                      backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                      onEdit={handleEditPrinter}
-                      onOpenDetails={handleOpenPrinterDetails}
-                    />
-                  ))}
-                </div>
+                <Suspense
+                  fallback={(
+                    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
+                      {deferredUserPrinters.map((printer) => (
+                        <PrinterCardSkeleton key={printer.id} />
+                      ))}
+                    </div>
+                  )}
+                >
+                  <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
+                    {deferredUserPrinters.map((printer) => (
+                      <DetailedPrinterCard
+                        key={printer.id}
+                        printer={printer}
+                        backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
+                        onEdit={handleEditPrinter}
+                        onOpenDetails={handleOpenPrinterDetails}
+                      />
+                    ))}
+                  </div>
+                </Suspense>
               ) : (
                 <>
                   <div className="mb-4">
@@ -670,20 +669,29 @@ export function PrintersPage() {
           onCancel={handleDeleteCancel}
         />
         
-        <EditPrinterModal
-          printerId={editPrinterId}
-          isOpen={showEditModal}
-          onClose={() => setShowEditModal(false)}
-          onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
-        />
+        {showEditModal && (
+          <Suspense fallback={null}>
+            <EditPrinterModal
+              printerId={editPrinterId}
+              isOpen={showEditModal}
+              onClose={() => setShowEditModal(false)}
+              onSuccess={() => { setShowEditModal(false); refetchPrinters(); }}
+            />
+          </Suspense>
+        )}
 
         {/* Page-level discovery modal: header button opens this and we refetch on success */}
-        <PrinterDiscoveryModal
-          isOpen={showDiscovery}
-          onClose={() => setShowDiscovery(false)}
-          onSuccess={() => { setShowDiscovery(false); refetchPrinters(); }}
-        />
+        {showDiscovery && (
+          <Suspense fallback={null}>
+            <PrinterDiscoveryModal
+              isOpen={showDiscovery}
+              onClose={() => setShowDiscovery(false)}
+              onSuccess={() => { setShowDiscovery(false); refetchPrinters(); }}
+            />
+          </Suspense>
+        )}
 
+      </FailureDetectionPollingProvider>
     </PageTemplate>
   );
 }

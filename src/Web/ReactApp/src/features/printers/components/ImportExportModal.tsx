@@ -14,7 +14,7 @@ import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-interface ImportExportModalProps {
+export interface ImportExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onComplete?: () => void;
