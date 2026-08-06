@@ -214,6 +214,47 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     expect(screen.getByText('1 job queued')).toBeInTheDocument();
   });
 
+  it.each(['Starting', 'Printing', 'Paused'] as const)(
+    'shows live %s without a bed-clear banner when auto-dispatch is stale PendingReady',
+    async (state) => {
+      const printer = makePrinter({ state });
+      vi.mocked(apiClient.getAutoDispatchStatus).mockResolvedValueOnce({
+        printers: [
+          {
+            printerId: printer.id,
+            printerName: printer.name,
+            enabled: true,
+            isReady: false,
+            queueDepth: 1,
+            state: 'PendingReady',
+            bedPreConfirmed: false,
+            readyGateChecks: [
+              {
+                name: 'Bed Clear Confirmed',
+                passed: false,
+                message: 'Waiting for operator to confirm bed is clear',
+                checkedAt: '2026-03-25T00:00:00Z',
+              },
+            ],
+            attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+          },
+        ],
+      });
+
+      render(
+        <CompactPrinterCard
+          printer={printer}
+          onExpand={vi.fn()}
+        />,
+        { wrapper: createWrapper() },
+      );
+
+      expect(await screen.findByText(state)).toBeInTheDocument();
+      expect(screen.queryByRole('alert', { name: 'Bed clear confirmation required' })).not.toBeInTheDocument();
+      expect(screen.queryByText('Print complete — confirm bed is clear')).not.toBeInTheDocument();
+    },
+  );
+
   it('shows Pending Ready status and bed-clear banner after an auto-dispatch SignalR update', async () => {
     const printer = makePrinter();
 

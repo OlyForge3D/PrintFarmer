@@ -74,6 +74,11 @@ function normalizeStatusMessage(value: string | undefined | null): string {
   return value?.trim().replace(/[\s_-]+/g, ' ').toLowerCase() ?? '';
 }
 
+function isPrinterOccupyingState(value: string | undefined | null): boolean {
+  const normalized = normalizeStatusText(value);
+  return normalized === 'starting' || normalized === 'printing' || normalized === 'paused';
+}
+
 function isWaitingForBedClearConfirmationText(value: string | undefined | null): boolean {
   const normalized = normalizeStatusMessage(value);
 
@@ -90,7 +95,8 @@ function isWaitingForBedClearConfirmationText(value: string | undefined | null):
 /**
  * Determine whether auto-dispatch is blocked on operator bed-clear confirmation.
  *
- * Prefer the explicit PendingReady state, but fall back to the failed
+ * Active printer-occupying states take precedence over stale gate data.
+ * Otherwise, prefer the explicit PendingReady state, but fall back to the failed
  * "Bed Clear Confirmed" gate from the detailed/global auto-dispatch payload so
  * UI surfaces still show the operator-facing state when the summary row is stale.
  * Treat a failed bed-clear gate with queued work as actionable even when the
@@ -99,10 +105,18 @@ function isWaitingForBedClearConfirmationText(value: string | undefined | null):
  * rendering a stale Pending Ready overlay.
  *
  * @param status - Auto-dispatch status row from the bulk or per-printer endpoint
+ * @param printerState - Live printer state, when available
  * @returns True when the operator must clear the bed before queued work can resume
  */
-export function requiresBedClearConfirmation(status: AutoDispatchStatus | undefined | null): boolean {
+export function requiresBedClearConfirmation(
+  status: AutoDispatchStatus | undefined | null,
+  printerState?: string | undefined | null,
+): boolean {
   if (!status) {
+    return false;
+  }
+
+  if (isPrinterOccupyingState(printerState) || isPrinterOccupyingState(status.state)) {
     return false;
   }
 
@@ -156,7 +170,7 @@ export function getPrinterDisplayState(options: {
     enabled: true,
     queueDepth: 0,
     state: autoDispatchState as AutoDispatchStatus['state'],
-  } : undefined))) {
+  } : undefined), printerState)) {
     return 'Pending Ready';
   }
 

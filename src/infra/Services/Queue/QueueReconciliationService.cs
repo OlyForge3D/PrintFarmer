@@ -425,10 +425,7 @@ public sealed class QueueReconciliationService(
                 ClearStartBarrier(activeState, attempt.Id);
 
                 if (attempt.PrintJob is not null &&
-                    attempt.PrintJob.Status is
-                        PrintJobStatus.Starting or
-                        PrintJobStatus.Printing or
-                        PrintJobStatus.Paused)
+                    attempt.PrintJob.Status.OccupiesPrinter())
                 {
                     PrintJobStatus fromStatus = attempt.PrintJob.Status;
                     attempt.PrintJob.Status = terminalStatus;

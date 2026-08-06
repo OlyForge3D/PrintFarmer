@@ -163,8 +163,44 @@ describe('Button', () => {
       
       rerender(<Button variant="danger">Danger</Button>);
       button = screen.getByRole('button');
-      expect(button.className).toContain('bg-[var(--pf-button-danger-bg)]');
-      expect(button.className).toContain('text-[var(--pf-on-danger)]');
+      expect(button).toHaveAttribute('data-pf-variant', 'danger');
+    });
+
+    it('uses dedicated semantic tokens for the danger surface and hover state', () => {
+      render(<Button variant="danger">Danger</Button>);
+      const button = screen.getByRole('button', { name: 'Danger' });
+
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-danger-bg)]',
+        'enabled:hover:bg-[var(--pf-button-danger-hover)]',
+        'text-[var(--pf-on-danger)]',
+        'border-[var(--pf-button-danger-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-error',
+        'enabled:hover:bg-pf-error-hover',
+        'text-[var(--pf-text-inverse)]',
+        'hover:opacity-90',
+        'active:opacity-75',
+      );
+    });
+
+    it('uses dedicated semantic tokens for the success surface and hover state', () => {
+      render(<Button variant="success">Success</Button>);
+      const button = screen.getByRole('button', { name: 'Success' });
+
+      expect(button).toHaveClass(
+        'bg-[var(--pf-button-success-bg)]',
+        'enabled:hover:bg-[var(--pf-button-success-hover)]',
+        'text-[var(--pf-button-success-text)]',
+        'border-[var(--pf-button-success-border)]',
+      );
+      expect(button).not.toHaveClass(
+        'bg-pf-success-bg',
+        'enabled:hover:bg-pf-success-hover',
+        'text-white',
+        'text-pf-success-text',
+      );
     });
   });
 
@@ -461,14 +497,24 @@ describe('Button', () => {
       );
     });
 
-    it.each(VARIANTS)('%s preserves caller paint classes verbatim', (variant) => {      render(
-        <Button variant={variant} className="bg-pf-accent hover:bg-pf-accent/90">
-          Active
+    it.each(VARIANTS)('%s preserves caller paint classes verbatim', (variant) => {
+      render(
+        <Button
+          variant={variant}
+          className="bg-pf-accent hover:bg-pf-accent/90 text-pf-error border-pf-accent shadow-md"
+        >
+          Label
         </Button>
       );
-      const button = screen.getByRole('button', { name: 'Active' });
-      expect(button).toHaveClass('bg-pf-accent');
-      expect(button).toHaveClass('hover:bg-pf-accent/90');
+      const button = screen.getByRole('button', { name: 'Label' });
+
+      expect(button).toHaveClass(
+        'bg-pf-accent',
+        'hover:bg-pf-accent/90',
+        'text-pf-error',
+        'border-pf-accent',
+        'shadow-md'
+      );
     });
   });
 });

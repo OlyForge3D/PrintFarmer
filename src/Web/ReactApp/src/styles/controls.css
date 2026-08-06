@@ -1855,31 +1855,6 @@
     transition: background-color 0.2s ease-in-out;
   }
 
-  /*
-   * Row hover default.
-   *
-   * This sits in `@layer components`, so every Tailwind `bg-*` a caller passes
-   * through `className` displaces it — layer order beats specificity, and
-   * `@import 'tailwindcss'` pins components below utilities. Verified two ways:
-   * in the built stylesheet this rule falls inside the `@layer components`
-   * block while `.bg-pf-bg-2` falls inside the later `@layer utilities` block
-   * (re-derive the offsets per build, the hash and the byte positions both
-   * move); and in chromium with transitions suppressed, `<tr class="bg-pf-bg-2">`
-   * reads the same computed background at rest and on hover in all seven themes.
-   *
-   * So this rule is NOT what erases a selected row's highlight, despite the
-   * (0,1,3) vs (0,1,0) specificity reading in #1088. That was the row's own
-   * unconditional `hover:bg-*` utility: same layer, and `:hover` at (0,1,1)
-   * outranks the selected class at (0,1,0). The fix is to withhold the hover
-   * utility while the row is selected, which is what every selectable table row
-   * whose only selection signal is a background now does. Do not add
-   * `hover:bg-x` alongside `bg-x` to defeat this rule — it is a no-op against a
-   * default that already loses to utilities.
-   */
-  table tbody tr:hover {
-    background-color: var(--pf-hover-overlay);
-  }
-
   table tbody td {
     padding: 1rem 1rem;
     color: var(--pf-text-primary);

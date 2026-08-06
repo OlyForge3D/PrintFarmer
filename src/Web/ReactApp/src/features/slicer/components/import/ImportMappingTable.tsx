@@ -112,7 +112,7 @@ export function ImportMappingTable({
                 className={clsx(
                   'px-3 py-1.5 text-sm rounded transition-colors',
                   statusFilter === 'all'
-                    ? 'bg-pf-accent text-white'
+                    ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
                     : 'bg-pf-bg-1 text-pf-text-secondary hover:bg-pf-bg-2'
                 )}
               >
@@ -126,7 +126,7 @@ export function ImportMappingTable({
                   className={clsx(
                     'px-3 py-1.5 text-sm rounded transition-colors',
                     statusFilter === status
-                      ? 'bg-pf-accent text-white'
+                      ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
                       : 'bg-pf-bg-1 text-pf-text-secondary hover:bg-pf-bg-2'
                   )}
                 >
@@ -187,8 +187,8 @@ export function ImportMappingTable({
                       <tr
                         key={index}
                         className={clsx(
-                          'bg-pf-bg-0 hover:bg-pf-bg-1 transition-colors',
-                          hasNote && 'cursor-pointer'
+                          'bg-pf-bg-0 transition-colors',
+                          hasNote && 'cursor-pointer hover:bg-pf-bg-1'
                         )}
                         onClick={hasNote ? () => toggleRow(index) : undefined}
                       >

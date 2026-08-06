@@ -397,9 +397,7 @@ public sealed class AttentionService(
         // The incident may have auto-paused the job, so accept Paused in addition to the
         // in-flight states. Anything else (Completed/Cancelled/Failed/etc.) means a newer
         // operator action has already resolved the plate — refuse to mutate.
-        bool jobIsActive = job.Status is PrintJobStatus.Starting
-            or PrintJobStatus.Printing
-            or PrintJobStatus.Paused;
+        bool jobIsActive = job.Status.OccupiesPrinter();
         if (!jobIsActive)
         {
             return new AttentionActionResult(

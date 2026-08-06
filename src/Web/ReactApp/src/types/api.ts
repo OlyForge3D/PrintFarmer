@@ -3506,6 +3506,8 @@ export interface WebhookDelivery {
 
 export type AutoDispatchState = 'None' | 'PendingReady' | 'Ready';
 
+export type AutoDispatchEffectiveState = AutoDispatchState | 'Starting' | 'Printing' | 'Paused';
+
 export type StartBehavior = 'Manual' | 'AutoStart' | 'WaitForConfirmation';
 
 export interface SetModelDispatchDefaultsRequest {
@@ -3521,7 +3523,7 @@ export interface ApplyModelDefaultsResult {
 export interface AutoDispatchStatus {
   printerId: string;
   enabled: boolean;
-  state: AutoDispatchState;
+  state: AutoDispatchEffectiveState;
   queueDepth: number;
   printerName?: string;
   isReady?: boolean;

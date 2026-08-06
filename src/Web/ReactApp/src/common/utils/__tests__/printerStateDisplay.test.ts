@@ -175,6 +175,35 @@ describe('printerStateDisplay utils', () => {
       })).toBe('Pending Ready');
     });
 
+    it.each(['Starting', 'Printing', 'Paused'] as const)(
+      'treats live %s as authoritative over stale PendingReady data',
+      (printerState) => {
+        const autoDispatchStatus: AutoDispatchStatus = {
+          printerId: 'printer-1',
+          enabled: true,
+          state: 'PendingReady',
+          queueDepth: 1,
+          readyGateChecks: [
+            {
+              name: 'Bed Clear Confirmed',
+              passed: false,
+              message: 'Waiting for operator to confirm bed is clear',
+              checkedAt: '2026-03-25T00:00:00Z',
+            },
+          ],
+          attentionMessage: 'Print completed. 1 queued job is blocked until you clear the bed and confirm ready.',
+        };
+
+        expect(requiresBedClearConfirmation(autoDispatchStatus, printerState)).toBe(false);
+        expect(getPrinterDisplayState({
+          printerState,
+          autoDispatchState: autoDispatchStatus.state,
+          autoDispatchStatus,
+          isOnline: true,
+        })).toBe(printerState);
+      },
+    );
+
     it('treats a failed bed-clear gate with queued work as Pending Ready even when the gate copy is missing', () => {
       const autoDispatchStatus: AutoDispatchStatus = {
         printerId: 'printer-1',

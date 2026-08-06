@@ -222,3 +222,25 @@ their own fix**.
 2. **Technical Accuracy Verified**: The panel confirmed that the corrected text is accurate. Sharpest test applied: a post-reset re-import DOES fire fetchModule with `cached:true` (`vite/dist/node/module-runner.js:1083,1086`), the server returns 304 (`:1094`), and the round-trip duration IS added to `transformTime` (`vitest cli-api.B7PN_QUv.js:7296-7299`) — so "transform" is affected by the re-import. But the re-evaluation itself runs in `directRequest` (`module-runner.js:1101-1146`) inside test execution, outside both the timed fetch RPC and the collect phase. Therefore, "neither number measures this re-evaluation" is true of the evaluation cost.
 3. **Other Claims Validated**: "resets every non-mock evaluated module" is accurate (per `vitest utils.DvEY5TfP.js:22-35` which exempts Vitest internals, not only mocks). The quoted "pay the full transform cost on every run" is faithful to the removed lines. The diff is exactly one file / one commit whose parent is the base (clean rebase, nothing dropped or duplicated), and concurrent work remains intact.
 4. **Acceptable Maintainer Shorthand**: The panel declined to overrule the author's declared deviation (using "transform cache" rather than `transformResult`), ruling it as acceptable maintainer shorthand.
+
+---
+## Decision: Squad State Bridge Root-Path Loss (#1130)
+
+| Field | Value |
+|-------|-------|
+| **Date** | 2026-08-04T20:34:00.249-07:00 |
+| **Agent** | Squad (Coordinator) |
+| **Requested by** | Jeff Papiez |
+| **Status** | RESOLVED — fixed by PR #1136, #1130 closed 2026-08-05 |
+
+## Core Findings
+
+1. **State writes were misrouted**: The filesystem-backed `squad_state` bridge resolved keys into repo-root paths such as `decisions/inbox/` instead of the tracked `.squad/` tree. Writes reported success but were invisible to every other worktree. Root cause was `"teamRoot": "."` in `.squad/config.json`, which put the SDK in remote mode and resolved the team directory to the workspace root. Composition is `<root>/<key>` with the root resolved once, so **every** key was affected, not only `decisions`.
+2. **The misroute had two failure modes**: where the root path was covered by `.gitignore` (`decisions/`, `agents/`, `orchestration-log/`, `log/`) the loss was *silent* — `git status` stayed clean and the records simply vanished. Where it was not covered (`memory/`) the loss was *dangerous* — the files showed as untracked, so an unrelated `git add -A` would commit Squad state into the repository. Final measured residue: 42 files across 13 locations in 9 worktrees.
+3. **Canonical locations**: Accepted decisions belong in `.squad/decisions.md`; pending proposals and coordination drop-box entries belong in `.squad/decisions/inbox/`. Repo-root state paths are invalid and must not be treated as durable.
+4. **Verification method — the original interim rule was wrong and is superseded**: The rule first recorded here directed writing accepted decisions straight to `.squad/decisions.md` and confirming durability with `git check-ignore` / `git status`. **Those checks cannot establish durability.** In the quarantined mode they are actively blind: a misrouted write into an ignored root path is untracked *by construction*, so `git check-ignore`, `git status`, and `git ls-files` each return a clean answer precisely when the bug fires. In the un-quarantined mode (`memory/`) they do signal, but they signal the wrong property — "this file is not tracked" is not the same fact as "state landed outside `.squad/`", and a clean result never distinguishes correct placement from a write that was quarantined out of sight. Every one of these probes reports a true fact about a *git* property while the defect is *filesystem placement*. Durability must therefore be asserted by filesystem existence — no state key materialises at the repo root — never by a git property. Demonstrated: 13 real stranded files on disk while `git ls-files 'decisions/'` returned empty.
+5. **Recovery boundary**: Do not move or delete stranded files while their owning sessions are active. Recovery and migration are tracked under #1135 and must be deliberate, owned, and verified.
+
+## Resolution
+
+Fixed by PR #1136 (merged 2026-08-05): removes `"teamRoot": "."` from `.squad/config.json` and pins `SQUAD_TEAM_ROOT` to the workspace folder in `.mcp.json`. `/memory/` was added to the `.gitignore` quarantine block, root-anchored so it cannot shadow the tracked `.squad/memory/`. A CI fixture (`scripts/ci/tests/test-squad-state-root.mjs`) asserts filesystem non-existence at the fixture root; it is sound and goes red on the injected defect, though its key coverage is currently `decisions`-only — see #1130 for the coverage-hardening note and the allowlist trap that makes a naive enumeration pass vacuously.

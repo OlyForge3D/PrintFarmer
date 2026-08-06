@@ -111,9 +111,7 @@ public class FilamentCoverageService(
             .Where(j => j.AssignedPrinterId == printerId
                 && (j.Status == PrintJobStatus.Queued
                     || j.Status == PrintJobStatus.Assigned
-                    || j.Status == PrintJobStatus.Starting
-                    || j.Status == PrintJobStatus.Printing
-                    || j.Status == PrintJobStatus.Paused))
+                    || PrintJobOccupancy.Statuses.Contains(j.Status)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -125,8 +123,7 @@ public class FilamentCoverageService(
 
         // Fetch one bounded live status for the single-printer path; the fleet
         // path uses the batched status-cache snapshot instead.
-        bool hasActive = jobs.Any(j =>
-            j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
+        bool hasActive = jobs.Any(j => j.Status.OccupiesPrinter());
         LiveProgressObservation liveProgress = hasActive
             ? await TryReadLiveProgressAsync(printer.Id, settings.LiveProgressTimeoutMs, ct).ConfigureAwait(false)
             : new LiveProgressObservation(null, WasObserved: true);
@@ -190,9 +187,7 @@ public class FilamentCoverageService(
                 && ids.Contains(j.AssignedPrinterId.Value)
                 && (j.Status == PrintJobStatus.Queued
                     || j.Status == PrintJobStatus.Assigned
-                    || j.Status == PrintJobStatus.Starting
-                    || j.Status == PrintJobStatus.Printing
-                    || j.Status == PrintJobStatus.Paused))
+                    || PrintJobOccupancy.Statuses.Contains(j.Status)))
             .ToListAsync(ct)
             .ConfigureAwait(false);
 
@@ -231,8 +226,7 @@ public class FilamentCoverageService(
         {
             List<PrintJob> jobs = jobsByPrinter.TryGetValue(printer.Id, out List<PrintJob>? list) ? list : [];
             IReadOnlyDictionary<int, FilamentCoverageSpoolSnapshot> scoped = fleetSpoolLookup[printer.Id];
-            bool hasActive = jobs.Any(job =>
-                job.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
+            bool hasActive = jobs.Any(job => job.Status.OccupiesPrinter());
             double? liveProgress = cachedStatuses.TryGetValue(printer.Id, out PrinterStatusCacheSnapshot? cachedStatus)
                 ? cachedStatus.Status.Progress
                 : null;
@@ -359,8 +353,7 @@ public class FilamentCoverageService(
             .Where(t => ToolheadIndexMapper.IsFilamentSource(t, allToolheads))
             .ToList();
 
-        PrintJob? activeJob = jobs.FirstOrDefault(j =>
-            j.Status is PrintJobStatus.Starting or PrintJobStatus.Printing or PrintJobStatus.Paused);
+        PrintJob? activeJob = jobs.FirstOrDefault(j => j.Status.OccupiesPrinter());
         List<PrintJob> assignedQueuedJobs = jobs
             .Where(j => j.Id != activeJob?.Id
                 && j.Status is PrintJobStatus.Assigned or PrintJobStatus.Queued)

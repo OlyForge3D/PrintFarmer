@@ -387,7 +387,7 @@ export const SlicerToolbar: React.FC<SlicerToolbarProps> = ({
         />
 
         {/* Beta badge */}
-        <span className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-sm bg-pf-accent-bg text-white">
+        <span className="ml-1 px-2 py-0.5 text-xs font-semibold rounded-sm bg-pf-accent-bg text-[var(--pf-on-accent)]">
           Beta
         </span>
       </div>

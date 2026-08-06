@@ -148,6 +148,46 @@ public sealed class PrintFailureMonitorPersistenceTests : IDisposable
             Times.Never);
     }
 
+    [Theory]
+    [InlineData(PrintJobStatus.Starting, true)]
+    [InlineData(PrintJobStatus.Printing, true)]
+    [InlineData(PrintJobStatus.Paused, false)]
+    public async Task FindAutoPausableJobAsync_OnlyReturnsRunningJobs(
+        PrintJobStatus status,
+        bool shouldReturnJob)
+    {
+        using AppDbContext dbContext = CreateDbContext();
+        Printer printer = await SeedPrinterAsync(dbContext, $"Auto Pause {status} Printer");
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = $"{status}-job",
+            AssignedPrinterId = printer.Id,
+            Status = status,
+            Priority = 0,
+            QueuePosition = 0,
+            QueuedAt = DateTime.UtcNow.AddMinutes(-5),
+            CreatedAt = DateTime.UtcNow.AddMinutes(-5),
+            UpdatedAt = DateTime.UtcNow,
+        };
+        _ = dbContext.PrintJobs.Add(job);
+        await dbContext.SaveChangesAsync();
+
+        PrintJob? result = await PrintFailureMonitorService.FindAutoPausableJobAsync(
+            dbContext,
+            printer.Id);
+
+        if (shouldReturnJob)
+        {
+            result.Should().NotBeNull();
+            result!.Id.Should().Be(job.Id);
+        }
+        else
+        {
+            result.Should().BeNull();
+        }
+    }
+
     public void Dispose()
     {
         _connection.Dispose();

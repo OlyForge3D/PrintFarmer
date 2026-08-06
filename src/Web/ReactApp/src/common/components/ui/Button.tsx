@@ -31,7 +31,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   // `[data-pf-variant='ghost']`, so that anything a caller passes through
   // `className` wins on layer order instead of losing on source order. See #1087.
   ghost: '',
-  success: 'bg-pf-success-bg enabled:hover:bg-pf-success-hover text-white border border-pf-success shadow-md font-semibold',
+  success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] shadow-md font-semibold',
   // tab/toggle/link keep only their structural utilities; their paint lives in the
   // components layer alongside subtle's and ghost's. See #1102.
   tab: 'border-b-2 focus:ring-0 rounded-none',

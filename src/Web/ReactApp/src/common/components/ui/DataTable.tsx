@@ -2,6 +2,8 @@ import React, { useState, useCallback, useMemo } from 'react';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from './Table';
 import type { SortDirection } from '../../hooks/useTableSort';
 
+const INTERACTIVE_ROW_CHILD_SELECTOR = 'a, button, input, select, textarea, [role="button"], [role="link"]';
+
 /**
  * Column definition for DataTable
  */
@@ -32,7 +34,7 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   /** Function to get unique key for each row */
   getRowKey: (item: T) => string | number;
-  /** Enable keyboard navigation */
+  /** Enable keyboard navigation; row selection enables it automatically */
   keyboardNavigation?: boolean;
   /** Default sort column key */
   defaultSortColumn?: string;
@@ -101,6 +103,8 @@ export function DataTable<T>({
   emptyMessage = 'No data available.',
   className,
 }: DataTableProps<T>) {
+  const keyboardNavigationEnabled = keyboardNavigation || Boolean(onRowSelect);
+
   // Internal sort state
   const [sortColumn, setSortColumn] = useState<string | null>(defaultSortColumn ?? null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(
@@ -159,6 +163,20 @@ export function DataTable<T>({
     }
   }, [onRowSelect, sortedData]);
 
+  const handleRowClick = useCallback((
+    event: React.MouseEvent<HTMLTableRowElement>,
+    index: number,
+  ) => {
+    if (
+      event.target instanceof Element
+      && event.target.closest(INTERACTIVE_ROW_CHILD_SELECTOR)
+    ) {
+      return;
+    }
+
+    handleRowSelect(index);
+  }, [handleRowSelect]);
+
   // Handle row focus
   const handleRowFocus = useCallback((index: number) => {
     if (onRowFocus && sortedData[index]) {
@@ -177,7 +195,7 @@ export function DataTable<T>({
 
   return (
     <Table
-      keyboardNavigation={keyboardNavigation}
+      keyboardNavigation={keyboardNavigationEnabled}
       onRowSelect={handleRowSelect}
       onRowFocus={handleRowFocus}
       className={className}
@@ -206,7 +224,12 @@ export function DataTable<T>({
       </TableHead>
       <TableBody>
         {sortedData.map((item, index) => (
-          <TableRow key={getRowKey(item)} rowIndex={index}>
+          <TableRow
+            key={getRowKey(item)}
+            rowIndex={index}
+            isHoverable={Boolean(onRowSelect)}
+            onClick={onRowSelect ? (event) => handleRowClick(event, index) : undefined}
+          >
             {columns.map(column => (
               <TableCell key={column.key} className={column.cellClassName}>
                 {column.render(item)}

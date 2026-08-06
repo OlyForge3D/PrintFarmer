@@ -307,7 +307,7 @@ export const ProfileImportWizardPage: React.FC = () => {
                 <div
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg transition-colors ${
                     isActive
-                      ? 'bg-pf-accent text-white'
+                      ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]'
                       : isCompleted
                         ? 'bg-pf-accent/20 text-pf-accent'
                         : 'bg-pf-bg-1 text-pf-text-tertiary'

@@ -130,7 +130,7 @@ export default function ModelFiltersBar({
                           : "bg-pf-warning"
                     } text-[var(--pf-text-inverse)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-text-inverse)]`
                   : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary enabled:hover:bg-pf-bg-1"
-              } ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+              } ${selectedStatuses.includes(status) ? "enabled:hover:scale-105 enabled:hover:shadow-sm" : ""} ${isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
             >
               {status === "queued"
                 ? `⏳ Queued (${selectedStatuses.includes("queued") ? "✓" : ""})`

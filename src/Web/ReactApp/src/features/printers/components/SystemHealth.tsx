@@ -68,14 +68,14 @@ export function DetailedSystemHealth({ className }: DetailedSystemHealthProps) {
 
     let icon, colorClass;
     if (healthy) {
-      icon = <CheckCircleIcon className="h-5 w-5 text-white" />;
-      colorClass = 'text-white bg-pf-success-bg';
+      icon = <CheckCircleIcon className="h-5 w-5" />;
+      colorClass = 'text-pf-success-text bg-pf-success-bg';
     } else if (warning) {
-      icon = <AlertCircleIcon className="h-5 w-5 text-white" />;
-      colorClass = 'text-white bg-pf-warning';
+      icon = <AlertCircleIcon className="h-5 w-5" />;
+      colorClass = 'text-[var(--pf-text-inverse)] bg-pf-warning';
     } else {
-      icon = <XCircleIcon className="h-5 w-5 text-white" />;
-      colorClass = 'text-white bg-pf-error-bg';
+      icon = <XCircleIcon className="h-5 w-5" />;
+      colorClass = 'text-pf-error-text bg-pf-error-bg';
     }
 
     return (

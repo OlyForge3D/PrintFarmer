@@ -126,15 +126,11 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             // Include all "active" statuses in default view:
             // - Queued: waiting in queue
             // - Assigned: assigned to printer but not yet started
-            // - Starting: dispatch initiated, connecting to printer
-            // - Printing: actively printing
-            // - Paused: temporarily paused by user
+            // - Printer-occupying: starting, printing, or paused
             query = query.Where(pj =>
                 pj.Status == PrintJobStatus.Queued ||
                 pj.Status == PrintJobStatus.Assigned ||
-                pj.Status == PrintJobStatus.Starting ||
-                pj.Status == PrintJobStatus.Printing ||
-                pj.Status == PrintJobStatus.Paused);
+                PrintJobOccupancy.Statuses.Contains(pj.Status));
         }
 
         // Filter by printer model
