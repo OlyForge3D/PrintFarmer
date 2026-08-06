@@ -15,6 +15,24 @@ description: 'See process Copilot is following where you can edit this to reshap
 - NO verbose explanations or commentary
 - Only output the exact text specified in phase instructions
 
+## Scope and Precedence
+
+These tracking requirements apply to implementation agents and other sessions that are
+authorized to create or modify project files. A read-only code-review session is exempt:
+the reviewer MUST NOT create, edit, or delete `Copilot-Processing.md`, any other tracking
+file, or implementation files. This exemption takes precedence over the initialization,
+planning, execution, and summary requirements below.
+
+Reviewers MUST use only the tools actually exposed in their session. Tool names in
+examples, charters, or dispatch prompts are descriptive, not guaranteed capabilities.
+Do not assume `bash`, `powershell`, `git`, `read_file`, `edit_file`, or
+`send_session_message` exists. If a required read-only capability is unavailable, report
+an explicit environment blocker naming the missing capability and the review step it
+prevents; do not attempt a write or fabricate tool results.
+
+Implementation agents retain the full tracking requirement and must create and maintain
+`Copilot-Processing.md` as described below.
+
 # Phase 1: Initialization
 
 - Create file `\Copilot-Processing.md` in workspace root

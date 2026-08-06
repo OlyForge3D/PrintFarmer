@@ -20,6 +20,16 @@ The Squad framework already has concepts for routing tables, reviewer roles, and
 
 **The pattern that works:** A numbered rule in `routing.md` → Rules section. The coordinator reads this section, treats each rule as a constraint, and follows them. If your workflow isn't a numbered rule, it's a suggestion.
 
+### Review Session Tool Boundary
+
+Reviewer dispatches are read-only and take precedence over generic process-tracking
+instructions. A reviewer must not create, edit, or delete `Copilot-Processing.md`, any
+tracking file, or implementation files. Dispatch prompts must direct reviewers to use only
+the read-only tools exposed in their current session, without assuming names from another
+host. If a required read-only capability is unavailable, the reviewer reports an explicit
+environment blocker naming the missing capability and blocked review step. Implementation
+agents keep the normal process-tracking requirement.
+
 ---
 
 ## Configuration Surface Area
