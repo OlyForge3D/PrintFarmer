@@ -1525,10 +1525,12 @@ public class AutoDispatchService(
         // Ready-head selection MUST use the single shared ordering selector so the job the
         // operator sees at the head of the queue is exactly the job that gets dispatched.
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
+            .AsNoTracking()
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
             .OrderByPriorityDescending();
 
         IQueryable<PrintJob> unassignedQuery = db.PrintJobs
+            .AsNoTracking()
             .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
             .OrderByPriorityDescending();
 
