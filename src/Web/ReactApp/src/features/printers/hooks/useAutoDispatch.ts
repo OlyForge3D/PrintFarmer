@@ -419,6 +419,15 @@ export function useAutoDispatchReadyFlow(
     }
 
     setChallenge(null);
+    if (result.dispatchReconciliationPending) {
+      toast.warning(
+        `Dispatch submitted for "${result.nextJob.name}" to ${printerName}; awaiting printer reconciliation.`,
+        { duration: 8000 }
+      );
+      onDispatchInitiated?.(result);
+      return;
+    }
+
     toast.success(
       result.filamentOverrideApplied
         ? `Dispatching "${result.nextJob.name}" to ${printerName} (filament override confirmed)`

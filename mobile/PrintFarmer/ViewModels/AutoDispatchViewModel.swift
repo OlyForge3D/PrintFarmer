@@ -5,6 +5,8 @@ import os
 final class AutoDispatchViewModel {
     var status: AutoDispatchStatus?
     var readyResult: AutoDispatchReadyResult?
+    var filamentChallenge: AutoDispatchReadyResult?
+    var dispatchMessage: String?
     var isLoading = false
     var isMarkingReady = false
     var isSkipping = false
@@ -41,25 +43,11 @@ final class AutoDispatchViewModel {
         isMarkingReady = true
         error = nil
         do {
-            readyResult = try await autoDispatchService.markReady(
+            let result = try await autoDispatchService.markReady(
                 status: reviewedStatus
             )
             guard isViewActive else { isMarkingReady = false; return }
-            // Optimistically transition away from PendingReady — the backend
-            // processes the state machine asynchronously so an immediate reload
-            // often still returns PendingReady even though the action succeeded.
-            if var optimistic = status {
-                optimistic.isReady = true
-                optimistic.queueDepth = max(optimistic.queueDepth - 1, 0)
-                optimistic.state = "Ready"
-                status = optimistic
-            }
-            // Keep button disabled through the reload cycle so the user sees
-            // sustained feedback. Re-enable only after the authoritative reload.
-            try? await Task.sleep(for: .seconds(2))
-            guard isViewActive else { isMarkingReady = false; return }
-            await loadStatus(printerId: printerId)
-            isMarkingReady = false
+            await applyReadyResult(result, printerId: printerId)
         } catch let acknowledgementError as BedClearAcknowledgementError {
             if acknowledgementError.requiresReview {
                 await loadStatus(printerId: printerId)
@@ -70,6 +58,64 @@ final class AutoDispatchViewModel {
             self.error = error.localizedDescription
             isMarkingReady = false
         }
+    }
+
+    func confirmFilamentOverride(printerId: UUID) async {
+        guard let autoDispatchService,
+              let challenge = filamentChallenge,
+              !isMarkingReady else {
+            return
+        }
+        isMarkingReady = true
+        error = nil
+        do {
+            let result = try await autoDispatchService
+                .confirmFilamentOverride(challenge: challenge)
+            guard isViewActive else {
+                isMarkingReady = false
+                return
+            }
+            await applyReadyResult(result, printerId: printerId)
+        } catch {
+            self.error = error.localizedDescription
+            isMarkingReady = false
+        }
+    }
+
+    private func applyReadyResult(
+        _ result: AutoDispatchReadyResult,
+        printerId: UUID
+    ) async {
+        readyResult = result
+        status = result.status
+        dispatchMessage = nil
+
+        if !result.dispatchInitiated &&
+            (result.requiresFilamentOverride ||
+                result.filamentCheckChanged) {
+            filamentChallenge = result
+            isMarkingReady = false
+            return
+        }
+
+        filamentChallenge = nil
+        guard result.dispatchInitiated else {
+            error = result.filamentCheck?.message ??
+                "The server did not initiate dispatch."
+            isMarkingReady = false
+            return
+        }
+
+        dispatchMessage = result.dispatchReconciliationPending
+            ? "Dispatch submitted; awaiting printer reconciliation."
+            : "Dispatch accepted by the printer."
+        try? await Task.sleep(for: .seconds(2))
+        guard isViewActive else {
+            isMarkingReady = false
+            return
+        }
+        await loadStatus(printerId: printerId)
+        isMarkingReady = false
     }
 
     func skip(printerId: UUID) async {

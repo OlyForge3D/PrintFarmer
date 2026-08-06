@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoDispatch;
 
 namespace Farm.Infrastructure.Services.Queue.Dispatch;
 
@@ -15,6 +16,8 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 /// </param>
 /// <param name="CurrentJobRowVersion">Current job revision on a precondition failure.</param>
 /// <param name="CurrentDispatchStateRowVersion">Current dispatch-state revision on a precondition failure.</param>
+/// <param name="CurrentFilamentCheck">Fresh claim-time filament result when evidence changed.</param>
+/// <param name="CurrentFilamentCheckVersion">Fingerprint of the fresh filament result.</param>
 public sealed record DispatchClaimResult(
     bool Success,
     QueueDispatchAttempt? Attempt,
@@ -22,7 +25,9 @@ public sealed record DispatchClaimResult(
     string? ErrorDetail,
     bool IsPreconditionFailure = false,
     byte[]? CurrentJobRowVersion = null,
-    byte[]? CurrentDispatchStateRowVersion = null)
+    byte[]? CurrentDispatchStateRowVersion = null,
+    FilamentCheckResult? CurrentFilamentCheck = null,
+    byte[]? CurrentFilamentCheckVersion = null)
 {
     /// <summary>Creates a successful claim result.</summary>
     /// <param name="attempt">The persisted attempt row.</param>
@@ -56,6 +61,27 @@ public sealed record DispatchClaimResult(
             IsPreconditionFailure: true,
             currentJobRowVersion?.ToArray(),
             currentDispatchStateRowVersion?.ToArray());
+
+    /// <summary>
+    /// Creates a failed claim result when claim-time filament evidence differs
+    /// from the exact condition reviewed by the operator.
+    /// </summary>
+    public static DispatchClaimResult FilamentCheckChanged(
+        string errorDetail,
+        FilamentCheckResult currentCheck,
+        byte[] currentCheckVersion,
+        byte[]? currentJobRowVersion,
+        byte[]? currentDispatchStateRowVersion) =>
+        new(
+            false,
+            null,
+            "filament_check_changed",
+            errorDetail,
+            IsPreconditionFailure: false,
+            currentJobRowVersion?.ToArray(),
+            currentDispatchStateRowVersion?.ToArray(),
+            currentCheck,
+            currentCheckVersion.ToArray());
 }
 
 /// <summary>
@@ -100,7 +126,27 @@ public sealed record FilamentOverrideAuthorization(
     string? LoadedMaterial,
     string? RequiredMaterial,
     double? RemainingWeightG,
-    double? RequiredWeightG);
+    double? RequiredWeightG,
+    byte[] FilamentCheckVersion,
+    byte[] PrinterRowVersion,
+    bool OverrideApproved);
+
+/// <summary>
+/// Raised when claim-time filament evidence changed after operator review.
+/// </summary>
+[System.Diagnostics.CodeAnalysis.SuppressMessage(
+    "Design",
+    "CA1032:Implement standard exception constructors",
+    Justification = "This typed contract requires current filament evidence.")]
+public sealed class FilamentCheckChangedException(
+    FilamentCheckResult currentCheck,
+    byte[] currentCheckVersion) : Exception(
+        "Filament conditions changed before the dispatch claim was acquired.")
+{
+    public FilamentCheckResult CurrentCheck { get; } = currentCheck;
+
+    public byte[] CurrentCheckVersion { get; } = currentCheckVersion.ToArray();
+}
 
 /// <summary>
 /// Parameters for an ad-hoc (non-queue) printer start, such as the slice→print bridge or

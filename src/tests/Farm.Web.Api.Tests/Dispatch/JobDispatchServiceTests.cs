@@ -203,7 +203,10 @@ public sealed class JobDispatchServiceTests : IDisposable
             "PLA",
             "PETG",
             500,
-            100);
+            100,
+            new byte[32],
+            new byte[8],
+            OverrideApproved: true);
 
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
@@ -266,7 +269,10 @@ public sealed class JobDispatchServiceTests : IDisposable
             "PLA",
             "PETG",
             500,
-            100);
+            100,
+            new byte[32],
+            new byte[8],
+            OverrideApproved: true);
         Mock<IDispatchScorer> scorer = new(MockBehavior.Strict);
         scorer
             .Setup(service => service.ScorePrintersForJobAsync(

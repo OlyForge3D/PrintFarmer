@@ -419,7 +419,7 @@ stateDiagram-v2
   2. If compatible, attempts that exact job immediately and reports success only when the printer accepts the dispatch.
   3. If incompatible or unknown, returns a confirmation challenge without dispatching and keeps the printer in `PendingReady`.
   4. If the operator confirms, the client sends the reviewed job, dispatch-state, and filament-check revisions. The server rechecks all conditions.
-  5. If any reviewed condition changed, the new warning is shown and confirmation is required again. Otherwise the exact job is dispatched and the override is written to the durable dispatch audit.
+  5. The authoritative dispatch claim reruns the filament check and fences the printer's spool assignment. If any reviewed condition changed, the new warning is shown and confirmation is required again. Otherwise the exact job is dispatched and the override is written to the durable dispatch audit.
 
 - **Skip** — Operator presses Skip button:
   1. Cancels next queued job (`Status = Cancelled`)
@@ -809,10 +809,18 @@ X-Job-If-Match: BQYHCA==
 X-Filament-Check-If-Match: CRITDA==
 ```
 
-The server reruns the filament check. A changed job or dispatch state returns
-`412`; a changed filament-check result returns a fresh `409` challenge. Missing
-confirmation revisions return `428`, and malformed revision values return
-`400`.
+The server reruns the filament check when accepting the request and again in the
+authoritative dispatch claim. It also uses the reviewed printer revision to
+fence concurrent spool-assignment changes. A changed job or dispatch state
+returns `412`; changed filament evidence returns a fresh `409` challenge.
+Missing confirmation revisions return `428`, and malformed revision values
+return `400`.
+
+If the physical printer request has an unknown outcome, the endpoint returns
+HTTP `202` with `dispatchInitiated: true`,
+`dispatchReconciliationPending: true`, and `dispatchOutcome: "Unknown"`. The
+job may have started, so clients must show reconciliation-pending status rather
+than retrying or reporting that dispatch was rejected.
 
 #### POST `/api/auto-dispatch/{printerId}/skip`
 Skips the next queued job (cancels it). If more jobs remain, stays in `PendingReady`; otherwise transitions to `None`.

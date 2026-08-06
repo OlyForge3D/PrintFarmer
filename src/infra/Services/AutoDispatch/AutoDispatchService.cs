@@ -1,8 +1,7 @@
-﻿using System.Globalization;
 using System.Security.Cryptography;
-using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
@@ -175,6 +174,16 @@ public class AutoDispatchReadyResult
     /// Indicates that filament conditions changed after the operator reviewed the warning.
     /// </summary>
     public bool FilamentCheckChanged { get; set; }
+
+    /// <summary>
+    /// Typed physical dispatch outcome reported by the durable attempt.
+    /// </summary>
+    public string? DispatchOutcome { get; set; }
+
+    /// <summary>
+    /// Indicates that the physical start may have occurred and requires reconciliation.
+    /// </summary>
+    public bool DispatchReconciliationPending { get; set; }
 }
 
 public class NextJobDto
@@ -361,48 +370,101 @@ public class AutoDispatchService(
             return;
         }
 
-        // If bed was pre-confirmed, skip PendingReady and go straight to Ready
+        // A pre-clear is printer-scoped only until completion. At completion,
+        // re-evaluate and dispatch the exact current queue head.
         if (printer.DispatchState?.BedPreConfirmed == true)
         {
+            PrintJob reviewedJob = queuedJobs.NextJob!;
             FilamentCheckResult filamentCheck =
-                await CheckFilamentAsync(printer, queuedJobs.NextJob!, ct);
+                await CheckFilamentAsync(printer, reviewedJob, ct);
             if (filamentCheck.Outcome != FilamentCheckOutcome.Compatible)
             {
                 logger.LogWarning(
                     ReadyGateLogPrefix + " Pre-cleared printer {PrinterId} requires explicit filament confirmation for job {JobId}: {Outcome}: {FilamentCheckMessage}",
                     printerId,
-                    queuedJobs.NextJob!.Id,
+                    reviewedJob.Id,
                     filamentCheck.Outcome,
                     filamentCheck.Message);
-                PrinterDispatchState blockedState = EnsureDispatchState(printer);
-                blockedState.AutoDispatchState = AutoDispatchState.PendingReady;
-                blockedState.BedPreConfirmed = false;
-                await db.SaveChangesAsync(ct);
-
-                AutoDispatchStatusDto blockedStatus = await BuildStatusDtoAsync(printer, ct);
-                await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
-                    .SendAsync(AutoDispatchStateChangedEventName, blockedStatus, ct);
-                webhookService?.Enqueue(
-                    AutoDispatchPendingWebhookEventName,
-                    new { printerId, printerName = printer.Name });
+                await RequirePendingReadyConfirmationAsync(printer, ct);
                 return;
             }
 
-            logger.LogInformation(
-                ReadyGateLogPrefix + " Printer {PrinterId} ({Name}) bed was pre-confirmed — skipping PendingReady, going straight to Ready",
-                printerId, printer.Name);
-            PrinterDispatchState ds = EnsureDispatchState(printer);
-            ds.AutoDispatchState = AutoDispatchState.Ready;
-            ds.BedPreConfirmed = false; // Reset the flag after using it
-            await db.SaveChangesAsync(ct);
+            if (jobDispatchService is null ||
+                reviewedJob.RowVersion is null ||
+                printer.RowVersion is null ||
+                printer.DispatchState.RowVersion is null)
+            {
+                logger.LogWarning(
+                    ReadyGateLogPrefix + " Exact pre-cleared dispatch is unavailable for printer {PrinterId}; requiring operator confirmation",
+                    printerId);
+                await RequirePendingReadyConfirmationAsync(printer, ct);
+                return;
+            }
 
-            var readyStatus = await BuildStatusDtoAsync(printer, ct);
-            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, readyStatus, ct);
+            byte[] filamentCheckVersion =
+                FilamentPreflightEvaluator.ComputeVersion(filamentCheck);
+            FilamentOverrideAuthorization review = new(
+                filamentCheck.Outcome.ToString(),
+                filamentCheck.Message ?? "Filament is compatible.",
+                filamentCheck.LoadedMaterial,
+                filamentCheck.RequiredMaterial,
+                filamentCheck.RemainingWeightG,
+                filamentCheck.RequiredWeightG,
+                filamentCheckVersion,
+                printer.RowVersion.ToArray(),
+                OverrideApproved: false);
+            try
+            {
+                QueuedPrintJobDto dispatched =
+                    await jobDispatchService.DispatchReviewedJobAsync(
+                        reviewedJob.Id,
+                        printerId,
+                        QueueActorIdentity.AutoDispatch,
+                        Convert.ToBase64String(reviewedJob.RowVersion),
+                        printer.DispatchState.RowVersion,
+                        review,
+                        ct);
+                DispatchAttemptOutcome? outcome =
+                    dispatched.DispatchResult?.Outcome;
+                if (outcome is not (
+                        DispatchAttemptOutcome.Accepted or
+                        DispatchAttemptOutcome.Unknown))
+                {
+                    logger.LogWarning(
+                        ReadyGateLogPrefix + " Exact pre-cleared dispatch was not accepted for printer {PrinterId}, job {JobId}: {Outcome}",
+                        printerId,
+                        reviewedJob.Id,
+                        outcome?.ToString() ?? "Unavailable");
+                    await RequirePendingReadyConfirmationAsync(printer, ct);
+                    return;
+                }
 
-            // Trigger immediate dispatch
-            dispatchTrigger?.NotifyJobQueued(printerId);
+                AutoDispatchStatusDto dispatchedStatus =
+                    await BuildStatusDtoAsync(printer, ct);
+                await hub.Clients.Group(
+                        AuthorizedHubGroups.Printer(printerId))
+                    .SendAsync(
+                        AutoDispatchStateChangedEventName,
+                        dispatchedStatus,
+                        ct);
+                if (outcome == DispatchAttemptOutcome.Accepted)
+                {
+                    webhookService?.Enqueue(
+                        AutoDispatchReadyWebhookEventName,
+                        new { printerId, printerName = printer.Name });
+                }
+            }
+            catch (FilamentCheckChangedException ex)
+            {
+                logger.LogWarning(
+                    ReadyGateLogPrefix + " Filament evidence changed before exact pre-cleared dispatch for printer {PrinterId}, job {JobId}: {Outcome}: {FilamentCheckMessage}",
+                    printerId,
+                    reviewedJob.Id,
+                    ex.CurrentCheck.Outcome,
+                    ex.CurrentCheck.Message);
+                await RequirePendingReadyConfirmationAsync(printer, ct);
+            }
 
-            webhookService?.Enqueue(AutoDispatchReadyWebhookEventName, new { printerId, printerName = printer.Name });
             return;
         }
 
@@ -416,6 +478,36 @@ public class AutoDispatchService(
         await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId)).SendAsync(AutoDispatchStateChangedEventName, status, ct);
 
         webhookService?.Enqueue(AutoDispatchPendingWebhookEventName, new { printerId, printerName = printer.Name });
+    }
+
+    private async Task RequirePendingReadyConfirmationAsync(
+        Printer printer,
+        CancellationToken ct)
+    {
+        Printer currentPrinter = await db.Printers
+            .Include(candidate => candidate.DispatchState)
+            .SingleAsync(candidate => candidate.Id == printer.Id, ct);
+        PrinterDispatchState blockedState =
+            EnsureDispatchState(currentPrinter);
+        blockedState.AutoDispatchState = AutoDispatchState.PendingReady;
+        blockedState.BedPreConfirmed = false;
+        await db.SaveChangesAsync(ct);
+
+        AutoDispatchStatusDto blockedStatus =
+            await BuildStatusDtoAsync(currentPrinter, ct);
+        await hub.Clients.Group(
+                AuthorizedHubGroups.Printer(currentPrinter.Id))
+            .SendAsync(
+                AutoDispatchStateChangedEventName,
+                blockedStatus,
+                ct);
+        webhookService?.Enqueue(
+            AutoDispatchPendingWebhookEventName,
+            new
+            {
+                printerId = currentPrinter.Id,
+                printerName = currentPrinter.Name,
+            });
     }
 
     public Task<AutoDispatchReadyResult> MarkReadyAsync(
@@ -581,7 +673,8 @@ public class AutoDispatchService(
         };
         bool filamentOverrideRequired =
             filamentCheck.Outcome != FilamentCheckOutcome.Compatible;
-        byte[] filamentCheckVersion = ComputeFilamentCheckVersion(filamentCheck);
+        byte[] filamentCheckVersion =
+            FilamentPreflightEvaluator.ComputeVersion(filamentCheck);
         string filamentCheckETag = Convert.ToBase64String(filamentCheckVersion);
 
         if (confirmFilamentOverride &&
@@ -636,7 +729,6 @@ public class AutoDispatchService(
                 "Exact-job ready dispatch is unavailable.");
         }
 
-        FilamentOverrideAuthorization? authorization = null;
         if (filamentOverrideRequired)
         {
             logger.LogWarning(
@@ -646,15 +738,24 @@ public class AutoDispatchService(
                 printerId,
                 nextJob.Id,
                 filamentCheck.Message);
-
-            authorization = new FilamentOverrideAuthorization(
-                filamentCheck.Outcome.ToString(),
-                filamentCheck.Message ?? "Filament compatibility could not be verified.",
-                filamentCheck.LoadedMaterial,
-                filamentCheck.RequiredMaterial,
-                filamentCheck.RemainingWeightG,
-                filamentCheck.RequiredWeightG);
         }
+
+        string authorizationReason = filamentCheck.Message ??
+            "Filament compatibility could not be verified.";
+        byte[] reviewedPrinterVersion =
+            printer.RowVersion?.ToArray() ??
+            throw new InvalidOperationException(
+                "The reviewed printer revision is required for ready dispatch.");
+        FilamentOverrideAuthorization authorization = new(
+            filamentCheck.Outcome.ToString(),
+            authorizationReason,
+            filamentCheck.LoadedMaterial,
+            filamentCheck.RequiredMaterial,
+            filamentCheck.RemainingWeightG,
+            filamentCheck.RequiredWeightG,
+            filamentCheckVersion,
+            reviewedPrinterVersion,
+            OverrideApproved: filamentOverrideRequired);
 
         byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
             printer.DispatchState?.RowVersion ??
@@ -666,18 +767,49 @@ public class AutoDispatchService(
                 : nextJob.RowVersion ??
                   throw new InvalidOperationException(
                       "The reviewed job revision is required for ready dispatch."));
-        var dispatched = await jobDispatchService.DispatchReviewedJobAsync(
-            nextJob.Id,
-            printerId,
-            actorSubject,
-            reviewedJobETag,
-            reviewedDispatchStateVersion,
-            authorization,
-            ct);
-        if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
+        QueuedPrintJobDto dispatched;
+        try
+        {
+            dispatched = await jobDispatchService.DispatchReviewedJobAsync(
+                nextJob.Id,
+                printerId,
+                actorSubject,
+                reviewedJobETag,
+                reviewedDispatchStateVersion,
+                authorization,
+                ct);
+        }
+        catch (FilamentCheckChangedException ex)
+        {
+            Printer currentPrinter = await db.Printers
+                .Include(candidate => candidate.DispatchState)
+                .AsNoTracking()
+                .SingleAsync(candidate => candidate.Id == printerId, ct);
+            AutoDispatchStatusDto changedStatus =
+                await BuildStatusDtoAsync(currentPrinter, ct);
+            return new AutoDispatchReadyResult
+            {
+                Status = changedStatus,
+                NextJob = nextJobDto,
+                FilamentCheck = ex.CurrentCheck,
+                FilamentCheckETag =
+                    Convert.ToBase64String(ex.CurrentCheckVersion),
+                DispatchInitiated = false,
+                RequiresFilamentOverride =
+                    ex.CurrentCheck.Outcome !=
+                    FilamentCheckOutcome.Compatible,
+                FilamentCheckChanged = true,
+            };
+        }
+
+        DispatchAttemptOutcome? dispatchOutcome =
+            dispatched.DispatchResult?.Outcome;
+        if (dispatchOutcome is not (
+                DispatchAttemptOutcome.Accepted or
+                DispatchAttemptOutcome.Unknown))
         {
             string outcome =
-                dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
+                dispatchOutcome?.ToString() ?? "Unavailable";
             throw new InvalidOperationException(
                 $"The ready dispatch was not accepted by the printer (outcome: {outcome}).");
         }
@@ -692,7 +824,10 @@ public class AutoDispatchService(
             FilamentCheck = filamentCheck,
             FilamentCheckETag = filamentCheckETag,
             DispatchInitiated = true,
-            FilamentOverrideApplied = authorization is not null,
+            FilamentOverrideApplied = authorization.OverrideApproved,
+            DispatchOutcome = dispatchOutcome.ToString(),
+            DispatchReconciliationPending =
+                dispatchOutcome == DispatchAttemptOutcome.Unknown,
         };
     }
 
@@ -931,21 +1066,6 @@ public class AutoDispatchService(
         }
 
         return status;
-    }
-
-    private static byte[] ComputeFilamentCheckVersion(FilamentCheckResult check)
-    {
-        string canonical = string.Join(
-            "\u001f",
-            ((int)check.Outcome).ToString(CultureInfo.InvariantCulture),
-            check.Sufficient ? "1" : "0",
-            check.MaterialMismatch ? "1" : "0",
-            check.LoadedMaterial ?? string.Empty,
-            check.RequiredMaterial ?? string.Empty,
-            check.RemainingWeightG?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty,
-            check.RequiredWeightG?.ToString("R", CultureInfo.InvariantCulture) ?? string.Empty,
-            check.Message ?? string.Empty);
-        return SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
     }
 
     public async Task<AutoDispatchStatusDto> GetStatusAsync(Guid printerId, CancellationToken ct = default)
@@ -1446,93 +1566,10 @@ public class AutoDispatchService(
     }
 
     private async Task<FilamentCheckResult> CheckFilamentAsync(Printer printer, PrintJob nextJob, CancellationToken ct)
-    {
-        var result = new FilamentCheckResult
-        {
-            RequiredWeightG = nextJob.EstimatedFilamentUsage,
-            RequiredMaterial = nextJob.RequiredMaterialType,
-        };
-
-        if (printer.CurrentSpoolId is null)
-        {
-            result.Outcome = FilamentCheckOutcome.Unknown;
-            result.Message = "No spool is assigned to the printer.";
-            return result;
-        }
-
-        if (spoolmanService is null)
-        {
-            result.Outcome = FilamentCheckOutcome.Unknown;
-            result.Message = "Spoolman is unavailable, so the assigned spool could not be verified.";
-            return result;
-        }
-
-        try
-        {
-            var spool = await spoolmanService.GetSpoolByIdAsync(printer.CurrentSpoolId.Value, ct);
-            if (spool is null)
-            {
-                result.Outcome = FilamentCheckOutcome.Unknown;
-                result.Message = $"Spool {printer.CurrentSpoolId.Value} data is unavailable.";
-                return result;
-            }
-
-            result.RemainingWeightG = spool.RemainingWeightG;
-            result.LoadedMaterial = spool.Material;
-
-            if (string.IsNullOrWhiteSpace(nextJob.RequiredMaterialType))
-            {
-                result.Outcome = FilamentCheckOutcome.Unknown;
-                result.Message = "The queued job does not specify a required filament material.";
-                return result;
-            }
-
-            if (string.IsNullOrWhiteSpace(spool.Material))
-            {
-                result.Outcome = FilamentCheckOutcome.Unknown;
-                result.Message = "The assigned spool does not specify a filament material.";
-                return result;
-            }
-
-            if (!string.Equals(nextJob.RequiredMaterialType, spool.Material, StringComparison.OrdinalIgnoreCase))
-            {
-                result.Outcome = FilamentCheckOutcome.Incompatible;
-                result.MaterialMismatch = true;
-                result.Message = $"Material mismatch: loaded {spool.Material}, job requires {nextJob.RequiredMaterialType}";
-                return result;
-            }
-
-            if (!nextJob.EstimatedFilamentUsage.HasValue)
-            {
-                result.Outcome = FilamentCheckOutcome.Unknown;
-                result.Message = "The queued job does not include an estimated filament requirement.";
-                return result;
-            }
-
-            if (!spool.RemainingWeightG.HasValue)
-            {
-                result.Outcome = FilamentCheckOutcome.Unknown;
-                result.Message = "The assigned spool does not include a remaining filament weight.";
-                return result;
-            }
-
-            result.Sufficient =
-                spool.RemainingWeightG.Value >= nextJob.EstimatedFilamentUsage.Value;
-            result.Outcome = result.Sufficient
-                ? FilamentCheckOutcome.Compatible
-                : FilamentCheckOutcome.Incompatible;
-            result.Message = result.Sufficient
-                ? $"Filament OK: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required"
-                : $"Insufficient filament: {spool.RemainingWeightG:F1}g remaining, {nextJob.EstimatedFilamentUsage:F1}g required";
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            logger.LogWarning(ex, ReadyGateLogPrefix + " Filament check failed for printer {PrinterId}", printer.Id);
-            result.Outcome = FilamentCheckOutcome.Unknown;
-            result.Sufficient = false;
-            result.Message = "Filament verification failed because Spoolman could not be reached.";
-        }
-
-        return result;
-    }
+        => await FilamentPreflightEvaluator.CheckAsync(
+            printer,
+            nextJob,
+            spoolmanService,
+            logger,
+            ct);
 }

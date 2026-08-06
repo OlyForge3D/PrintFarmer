@@ -63,6 +63,7 @@ public class AutoDispatchController(
     [RequirePermission(PrintFarmerPermissions.Queue.AcknowledgeBedClear)]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status202Accepted)]
     [ProducesResponseType(typeof(AutoDispatchReadyResult), StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -130,8 +131,14 @@ public class AutoDispatchController(
                 expectedOverrideJob,
                 expectedFilamentCheck,
                 ct);
-            return result.RequiresFilamentOverride || result.FilamentCheckChanged
-                ? Conflict(result)
+            if (result.RequiresFilamentOverride ||
+                result.FilamentCheckChanged)
+            {
+                return Conflict(result);
+            }
+
+            return result.DispatchReconciliationPending
+                ? Accepted(result)
                 : Ok(result);
         }
         catch (FormatException)

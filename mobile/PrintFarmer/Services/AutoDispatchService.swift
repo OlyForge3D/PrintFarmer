@@ -20,10 +20,13 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
     func markReady(status: AutoDispatchStatus) async throws -> AutoDispatchReadyResult {
         let dispatchETag = try required(status.dispatchStateETag)
         if status.nextJobKind != "FilamentCalibration" {
-            return try await apiClient.post(
+            let response: HTTPDecodedResponse<AutoDispatchReadyResult> =
+                try await apiClient.post(
                 "/api/auto-dispatch/\(status.printerId)/ready",
-                headers: ["If-Match": "\"\(dispatchETag)\""]
+                headers: ["If-Match": "\"\(dispatchETag)\""],
+                accepting: [200, 202, 409]
             )
+            return response.value
         }
 
         guard let jobId = status.nextJobId,
@@ -94,9 +97,38 @@ actor AutoDispatchService: AutoDispatchServiceProtocol {
                     status.nextJobPrinterConfigRevision
             ),
             filamentCheck: nil,
+            dispatchInitiated: true,
+            dispatchOutcome: "Accepted",
             acknowledgementOutcome:
                 response.statusCode == 202 ? .accepted : .replayed
         )
+    }
+
+    func confirmFilamentOverride(
+        challenge: AutoDispatchReadyResult
+    ) async throws -> AutoDispatchReadyResult {
+        let dispatchETag = try required(
+            challenge.status.dispatchStateETag
+        )
+        let jobETag = try required(
+            challenge.nextJob?.jobETag ??
+                challenge.status.nextJobETag
+        )
+        let filamentCheckETag = try required(
+            challenge.filamentCheckETag
+        )
+        let response: HTTPDecodedResponse<AutoDispatchReadyResult> =
+            try await apiClient.post(
+                "/api/auto-dispatch/\(challenge.status.printerId)/ready?confirmFilamentOverride=true",
+                headers: [
+                    "If-Match": "\"\(dispatchETag)\"",
+                    "X-Job-If-Match": "\"\(jobETag)\"",
+                    "X-Filament-Check-If-Match":
+                        "\"\(filamentCheckETag)\""
+                ],
+                accepting: [200, 202, 409]
+            )
+        return response.value
     }
 
     func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {

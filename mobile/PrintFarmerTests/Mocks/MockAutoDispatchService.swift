@@ -11,6 +11,7 @@ final class MockAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
     var getAllStatusCalled = false
     var getStatusCalledWith: UUID?
     var markReadyCalledWith: UUID?
+    var confirmFilamentOverrideCalled = false
     var skipCalledWith: UUID?
     var cancelCalledWith: UUID?
     var preClearCalledWith: UUID?
@@ -32,6 +33,14 @@ final class MockAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
         markReadyCalledWith = status.printerId
         if let error = errorToThrow { throw error }
         return readyResultToReturn!
+    }
+
+    func confirmFilamentOverride(
+        challenge: AutoDispatchReadyResult
+    ) async throws -> AutoDispatchReadyResult {
+        confirmFilamentOverrideCalled = true
+        if let error = errorToThrow { throw error }
+        return readyResultToReturn ?? challenge
     }
 
     func skip(status: AutoDispatchStatus) async throws -> AutoDispatchStatus {

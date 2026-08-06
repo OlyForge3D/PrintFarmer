@@ -1222,7 +1222,7 @@ public class PrintJobManagementService(
                     "IDispatchClaimService is required for dispatch. This service must be registered in the DI container.");
             }
 
-            string startPathKind = filamentOverride is not null
+            string startPathKind = filamentOverride?.OverrideApproved == true
                 ? "FilamentOverride"
                 : expectedDispatchStateRowVersion is not null
                     ? "ReadyConfirmation"
@@ -1241,6 +1241,14 @@ public class PrintJobManagementService(
 
             if (!claimResult.Success || claimResult.Attempt is null)
             {
+                if (claimResult.CurrentFilamentCheck is not null &&
+                    claimResult.CurrentFilamentCheckVersion is { Length: > 0 })
+                {
+                    throw new FilamentCheckChangedException(
+                        claimResult.CurrentFilamentCheck,
+                        claimResult.CurrentFilamentCheckVersion);
+                }
+
                 if (claimResult.IsPreconditionFailure)
                 {
                     throw new QueueRevisionConflictException(

@@ -245,6 +245,16 @@ const readyResultOverrideDispatched: AutoDispatchReadyResult = {
   filamentOverrideApplied: true,
 };
 
+const readyResultOverrideReconciliationPending: AutoDispatchReadyResult = {
+  ...readyResultOverrideDispatched,
+  status: {
+    ...readyResultOverrideDispatched.status,
+    state: 'PendingReady',
+  },
+  dispatchOutcome: 'Unknown',
+  dispatchReconciliationPending: true,
+};
+
 describe('BedClearBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -513,6 +523,31 @@ describe('BedClearBanner', () => {
         'Dispatching "part.gcode" to MK4 (filament override confirmed)',
       );
     });
+  });
+
+  it('reports reconciliation pending without claiming dispatch was rejected', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady)
+      .mockResolvedValueOnce(readyResultMaterialMismatch)
+      .mockResolvedValueOnce(readyResultOverrideReconciliationPending);
+    render(
+      <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />,
+      { wrapper: createWrapper() },
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filament-override-modal')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        'Dispatch submitted for "part.gcode" to MK4; awaiting printer reconciliation.',
+        { duration: 8000 },
+      );
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   it('shows a changed filament reason before accepting a retry', async () => {

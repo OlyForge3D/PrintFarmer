@@ -46,6 +46,13 @@ struct AutoDispatchReadyResult: Codable, Sendable {
     let status: AutoDispatchStatus
     let nextJob: AutoDispatchNextJob?
     let filamentCheck: FilamentCheckResult?
+    var dispatchInitiated = false
+    var requiresFilamentOverride = false
+    var filamentOverrideApplied = false
+    var filamentCheckETag: String?
+    var filamentCheckChanged = false
+    var dispatchOutcome: String?
+    var dispatchReconciliationPending = false
     var acknowledgementOutcome: BedClearAcknowledgementOutcome? = nil
 }
 
@@ -100,6 +107,7 @@ struct AutoDispatchNextJob: Codable, Sendable, Identifiable {
 // MARK: - Filament Check Result
 
 struct FilamentCheckResult: Codable, Sendable {
+    var outcome: String? = nil
     let sufficient: Bool
     let remainingWeightG: Double?
     let requiredWeightG: Double?

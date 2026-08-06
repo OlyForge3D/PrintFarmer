@@ -6,6 +6,7 @@ struct AutoDispatchSection: View {
     @Environment(ServiceContainer.self) private var services
     @State private var viewModel = AutoDispatchViewModel()
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var isShowingFilamentConfirmation = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -42,6 +43,23 @@ struct AutoDispatchSection: View {
                     }
 
                     if viewModel.isEnabled == true {
+                        if let dispatchMessage = viewModel.dispatchMessage {
+                            Label(
+                                dispatchMessage,
+                                systemImage: viewModel.readyResult?
+                                    .dispatchReconciliationPending == true
+                                    ? "clock.arrow.circlepath"
+                                    : "checkmark.circle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(
+                                viewModel.readyResult?
+                                    .dispatchReconciliationPending == true
+                                    ? Color.pfWarning
+                                    : Color.pfSuccess
+                            )
+                        }
+
                         // State-specific UI
                         if viewModel.parsedState == .pendingReady {
                             pendingReadyView
@@ -70,6 +88,26 @@ struct AutoDispatchSection: View {
             activeTasks.forEach { $0.cancel() }
             activeTasks.removeAll()
             viewModel.isViewActive = false
+        }
+        .alert(
+            "Confirm Filament Override",
+            isPresented: $isShowingFilamentConfirmation,
+            presenting: viewModel.filamentChallenge
+        ) { _ in
+            Button("Cancel", role: .cancel) {}
+            Button("Dispatch Anyway") {
+                let task = Task {
+                    await viewModel.confirmFilamentOverride(
+                        printerId: printerId
+                    )
+                }
+                activeTasks.append(task)
+            }
+        } message: { challenge in
+            Text(
+                challenge.filamentCheck?.message ??
+                    "Filament compatibility could not be verified."
+            )
         }
     }
 
@@ -103,6 +141,10 @@ struct AutoDispatchSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+            }
+
+            if let challenge = viewModel.filamentChallenge {
+                filamentCheckResult(challenge)
             }
         }
     }
@@ -158,9 +200,15 @@ struct AutoDispatchSection: View {
         HStack(spacing: 8) {
             Button {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                viewModel.isMarkingReady = true
-                let task = Task { await viewModel.markReady(printerId: printerId) }
-                activeTasks.append(task)
+                if viewModel.filamentChallenge != nil {
+                    isShowingFilamentConfirmation = true
+                } else {
+                    viewModel.isMarkingReady = true
+                    let task = Task {
+                        await viewModel.markReady(printerId: printerId)
+                    }
+                    activeTasks.append(task)
+                }
             } label: {
                 HStack(spacing: 6) {
                     if viewModel.isMarkingReady {
@@ -170,7 +218,11 @@ struct AutoDispatchSection: View {
                     } else {
                         Image(systemName: "play.fill")
                     }
-                    Text(viewModel.parsedState == .pendingReady ? "Confirm Bed Clear" : "Next Job")
+                    Text(
+                        viewModel.filamentChallenge == nil
+                            ? "Confirm Bed Clear"
+                            : "Review Filament"
+                    )
                 }
                 .font(.subheadline.weight(.medium))
                 .fullWidthActionButton()

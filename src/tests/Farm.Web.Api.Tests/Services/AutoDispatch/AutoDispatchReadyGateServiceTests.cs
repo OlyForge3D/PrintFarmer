@@ -205,7 +205,8 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<byte[]>(),
-                null,
+                It.Is<FilamentOverrideAuthorization>(authorization =>
+                    !authorization.OverrideApproved),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(AcceptedDispatch(queuedJob.Id, printer.Id));
         AutoDispatchService service = new(

@@ -21,12 +21,14 @@ using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
@@ -164,9 +166,11 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             fixture = await SeedStandardJobAsync(seed);
             PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
             job.RequiredMaterialType = "PETG";
+            job.EstimatedFilamentUsage = 100;
             Printer printer = await seed.Printers.SingleAsync(
                 candidate => candidate.Id == fixture.PrinterId);
             printer.CurrentMaterial = "PLA";
+            printer.CurrentSpoolId = 42;
             await seed.SaveChangesAsync();
         }
 
@@ -187,18 +191,46 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             denied.ErrorCode.Should().Be("filament_material_mismatch");
         }
 
-        var authorization = new FilamentOverrideAuthorization(
-            "Incompatible",
-            "Material mismatch: loaded PLA, job requires PETG",
-            "PLA",
-            "PETG",
-            500,
-            100);
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(
+                42,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+                new SpoolmanSpoolDto(
+                    42,
+                    "PLA spool",
+                    "PLA",
+                    500,
+                    null,
+                    false));
         await using (AppDbContext claimContext = CreateContext())
         {
+            PrintJob reviewedJob = await claimContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            Printer reviewedPrinter = await claimContext.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            FilamentCheckResult reviewedCheck =
+                await FilamentPreflightEvaluator.CheckAsync(
+                    reviewedPrinter,
+                    reviewedJob,
+                    spoolmanService.Object,
+                    NullLogger.Instance,
+                    CancellationToken.None);
+            var authorization = new FilamentOverrideAuthorization(
+                reviewedCheck.Outcome.ToString(),
+                reviewedCheck.Message!,
+                reviewedCheck.LoadedMaterial,
+                reviewedCheck.RequiredMaterial,
+                reviewedCheck.RemainingWeightG,
+                reviewedCheck.RequiredWeightG,
+                FilamentPreflightEvaluator.ComputeVersion(reviewedCheck),
+                reviewedPrinter.RowVersion!,
+                OverrideApproved: true);
             DispatchClaimResult accepted = await CreateClaim(
                     claimContext,
-                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId),
+                    spoolmanService: spoolmanService.Object)
                 .AcquireClaimAsync(new DispatchClaimRequest(
                     fixture.JobId,
                     fixture.PrinterId,
@@ -221,6 +253,177 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         audit.ActorSubject.Should().Be("operator-1");
         audit.ReasonCode.Should().Be("filament_override");
         audit.DetailJson.Should().Contain("Material mismatch: loaded PLA, job requires PETG");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task StartPath_WhenFilamentEvidenceChangesAtClaimTime_ReturnsFreshChallenge()
+    {
+        Fixture fixture;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedStandardJobAsync(seed);
+            PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
+            job.RequiredMaterialType = "PETG";
+            job.EstimatedFilamentUsage = 100;
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.CurrentSpoolId = 42;
+            await seed.SaveChangesAsync();
+        }
+
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .SetupSequence(service => service.GetSpoolByIdAsync(
+                42,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+                new SpoolmanSpoolDto(
+                    42,
+                    "PLA spool",
+                    "PLA",
+                    500,
+                    null,
+                    false))
+            .ReturnsAsync(
+                new SpoolmanSpoolDto(
+                    42,
+                    "ABS spool",
+                    "ABS",
+                    500,
+                    null,
+                    false));
+        await using AppDbContext claimContext = CreateContext();
+        PrintJob reviewedJob = await claimContext.PrintJobs.SingleAsync(
+            candidate => candidate.Id == fixture.JobId);
+        Printer reviewedPrinter = await claimContext.Printers.SingleAsync(
+            candidate => candidate.Id == fixture.PrinterId);
+        FilamentCheckResult reviewedCheck =
+            await FilamentPreflightEvaluator.CheckAsync(
+                reviewedPrinter,
+                reviewedJob,
+                spoolmanService.Object,
+                NullLogger.Instance,
+                CancellationToken.None);
+        var authorization = new FilamentOverrideAuthorization(
+            reviewedCheck.Outcome.ToString(),
+            reviewedCheck.Message!,
+            reviewedCheck.LoadedMaterial,
+            reviewedCheck.RequiredMaterial,
+            reviewedCheck.RemainingWeightG,
+            reviewedCheck.RequiredWeightG,
+            FilamentPreflightEvaluator.ComputeVersion(reviewedCheck),
+            reviewedPrinter.RowVersion!,
+            OverrideApproved: true);
+
+        DispatchClaimResult result = await CreateClaim(
+                claimContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId),
+                spoolmanService: spoolmanService.Object)
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "operator-1",
+                "FilamentOverride",
+                null,
+                null,
+                null,
+                authorization));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("filament_check_changed");
+        result.CurrentFilamentCheck.Should().NotBeNull();
+        result.CurrentFilamentCheck!.LoadedMaterial.Should().Be("ABS");
+        await using AppDbContext verify = CreateContext();
+        (await verify.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId))
+            .Status.Should().Be(PrintJobStatus.Assigned);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task StartPath_WhenSpoolAssignmentChangesAfterReview_RejectsClaim()
+    {
+        Fixture fixture;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedStandardJobAsync(seed);
+            PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
+            job.RequiredMaterialType = "PLA";
+            job.EstimatedFilamentUsage = 100;
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.CurrentSpoolId = 42;
+            await seed.SaveChangesAsync();
+        }
+
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(
+                It.IsAny<int>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+                new SpoolmanSpoolDto(
+                    42,
+                    "PLA spool",
+                    "PLA",
+                    500,
+                    null,
+                    false));
+        FilamentOverrideAuthorization authorization;
+        await using (AppDbContext reviewContext = CreateContext())
+        {
+            PrintJob reviewedJob = await reviewContext.PrintJobs.SingleAsync(
+                candidate => candidate.Id == fixture.JobId);
+            Printer reviewedPrinter = await reviewContext.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            FilamentCheckResult reviewedCheck =
+                await FilamentPreflightEvaluator.CheckAsync(
+                    reviewedPrinter,
+                    reviewedJob,
+                    spoolmanService.Object,
+                    NullLogger.Instance,
+                    CancellationToken.None);
+            authorization = new FilamentOverrideAuthorization(
+                reviewedCheck.Outcome.ToString(),
+                reviewedCheck.Message ?? "Filament compatible.",
+                reviewedCheck.LoadedMaterial,
+                reviewedCheck.RequiredMaterial,
+                reviewedCheck.RemainingWeightG,
+                reviewedCheck.RequiredWeightG,
+                FilamentPreflightEvaluator.ComputeVersion(reviewedCheck),
+                reviewedPrinter.RowVersion!,
+                OverrideApproved: false);
+        }
+
+        await using (AppDbContext concurrentContext = CreateContext())
+        {
+            Printer printer = await concurrentContext.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.CurrentSpoolId = 43;
+            await concurrentContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext claimContext = CreateContext();
+        DispatchClaimResult result = await CreateClaim(
+                claimContext,
+                DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId),
+                spoolmanService: spoolmanService.Object)
+            .AcquireClaimAsync(new DispatchClaimRequest(
+                fixture.JobId,
+                fixture.PrinterId,
+                "system:auto-dispatch",
+                "AutoDispatch",
+                null,
+                null,
+                null,
+                authorization));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("filament_check_changed");
+        result.CurrentFilamentCheck.Should().NotBeNull();
+        await using AppDbContext verify = CreateContext();
+        (await verify.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId))
+            .Status.Should().Be(PrintJobStatus.Assigned);
     }
 
     [Fact]
@@ -5890,7 +6093,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     private static DispatchClaimService CreateClaim(
         AppDbContext db,
         IPrinterStatusSnapshotReader reader,
-        IPrinterTelemetryFreshnessPolicy? telemetryFreshnessPolicy = null) =>
+        IPrinterTelemetryFreshnessPolicy? telemetryFreshnessPolicy = null,
+        ISpoolmanService? spoolmanService = null) =>
         new(
             db,
             reader,
@@ -5898,7 +6102,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             NullLogger<DispatchClaimService>.Instance,
             telemetryFreshnessPolicy ??
                 DispatchTestDoubles.TelemetryFreshnessPolicy(),
-            DispatchTestDoubles.ValidByteIntegrityVerifier());
+            DispatchTestDoubles.ValidByteIntegrityVerifier(),
+            spoolmanService: spoolmanService);
 
     private static JobQueueService CreateQueueService(AppDbContext db) =>
         new(

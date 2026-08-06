@@ -120,7 +120,9 @@ public class JobDispatchService(
                 $"Printer '{printerId}' is not an eligible dispatch candidate.");
         }
 
-        EnsureReviewedPrinterIsEligible(printerScore, filamentOverride is not null);
+        EnsureReviewedPrinterIsEligible(
+            printerScore,
+            filamentOverride?.OverrideApproved == true);
 
         return await DispatchJobCoreAsync(
             jobId,
@@ -239,7 +241,9 @@ public class JobDispatchService(
 
         if (printerScore is { Eliminated: true })
         {
-            EnsureReviewedPrinterIsEligible(printerScore, filamentOverride is not null);
+            EnsureReviewedPrinterIsEligible(
+                printerScore,
+                filamentOverride?.OverrideApproved == true);
         }
 
         if (job.JobKind == JobKind.FilamentCalibration &&
