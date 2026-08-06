@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import React from 'react';
+import React, { StrictMode } from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { MockInstance } from 'vitest';
@@ -88,15 +88,22 @@ vi.mock('sonner', () => ({
 
 import ImportExportModal from '../ImportExportModal';
 
-function renderModal(overrides: { onClose?: () => void; onComplete?: () => void } = {}) {
+function renderModal(
+  overrides: { onClose?: () => void; onComplete?: () => void; strictMode?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const onClose = overrides.onClose ?? vi.fn();
   const onComplete = overrides.onComplete ?? vi.fn();
-  const utils = render(
+  const tree = (
     <QueryClientProvider client={client}>
       <ImportExportModal isOpen onClose={onClose} onComplete={onComplete} />
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  // StrictMode (development) synchronously replays this component's mount
+  // as setup -> cleanup -> setup before the tests below ever get to
+  // interact with it — exercising that replay is the whole point of the
+  // `strictMode` option, see the describe block guarding mountedRef restoration.
+  const utils = render(overrides.strictMode ? <StrictMode>{tree}</StrictMode> : tree);
   return { ...utils, client, onClose, onComplete };
 }
 
@@ -454,5 +461,65 @@ describe('ImportExportModal startImport() mounted + operation-generation guard (
 
     setIntervalSpy.mockRestore();
     textSpy.mockRestore();
+  });
+});
+
+describe('ImportExportModal StrictMode mount replay (final review — Hicks: setup must restore mountedRef, not just seed it once)', () => {
+  it('completes a normal import startup under StrictMode: parses the file, connects the hub, registers the listener + completion interval, and uploads', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    // Force the "hub not yet connected" branch too, so this exercises every
+    // isCurrentImport() checkpoint in startImport()'s prelude — the one
+    // right after file parsing *and* the one right after the hub connects —
+    // not just the first.
+    hoisted.isConnected.mockReturnValue(false);
+    renderModal({ strictMode: true });
+
+    // StrictMode's synchronous setup -> cleanup -> setup mount replay has
+    // already happened by the time render() returns. Before this fix, the
+    // replay's cleanup left mountedRef.current stuck on `false` forever
+    // (setup had nothing that restored it), so every isCurrentImport()
+    // check below would fail and startImport() would silently bail out
+    // before ever reaching printerHubService or apiClient — the progress
+    // table would never replace the file picker and this await would
+    // time out.
+    await startTestImport();
+
+    await waitFor(() => expect(hoisted.uploadPrinterImport).toHaveBeenCalledTimes(1));
+    expect(hoisted.start).toHaveBeenCalledTimes(1);
+    expect(hoisted.onPrinterImportProgress).toHaveBeenCalledTimes(1);
+    expect(completionIntervalCalls(setIntervalSpy)).toHaveLength(1);
+    expect(screen.getByText(fileInfoText('printers.json'))).toBeInTheDocument();
+
+    setIntervalSpy.mockRestore();
+  });
+
+  it('does not leave duplicate listeners or completion intervals from the StrictMode replay, and disposes the real ones exactly once on unmount', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(window, 'clearInterval');
+    const { unmount } = renderModal({ strictMode: true });
+
+    await startTestImport();
+
+    // Exactly one *live* listener/interval must exist: the replay's setup
+    // only restores mountedRef — it does not call startImport() or
+    // register anything by itself — so it cannot have left a second,
+    // orphaned registration behind alongside the one the file-select
+    // actually created.
+    expect(hoisted.onPrinterImportProgress).toHaveBeenCalledTimes(1);
+    expect(completionIntervalCalls(setIntervalSpy)).toHaveLength(1);
+    const intervalId = getCompletionIntervalId(setIntervalSpy);
+    expect(wasClearedWith(clearIntervalSpy, intervalId)).toBe(false);
+
+    unmount();
+
+    // The real unmount disposes the one, still-live listener/interval
+    // exactly once. The earlier StrictMode replay's own cleanup ran long
+    // before the import started and had nothing registered yet to
+    // dispose, so it cannot inflate this count.
+    expect(hoisted.unsubscribeImportProgress).toHaveBeenCalledTimes(1);
+    expect(clearIntervalSpy.mock.calls.filter(([id]) => id === intervalId)).toHaveLength(1);
+
+    setIntervalSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
   });
 });

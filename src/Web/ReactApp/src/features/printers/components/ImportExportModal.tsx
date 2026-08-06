@@ -98,9 +98,37 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
   // Belt-and-suspenders: dispose on unmount / route change even if none of
   // the explicit close/cancel handlers below ran first.
+  //
+  // StrictMode (development) intentionally replays every mount as
+  // setup -> cleanup -> setup, synchronously, specifically to prove that
+  // setup can always undo whatever the preceding cleanup did — it is not
+  // an occasional dev quirk, it happens on every mount. The bug Hicks
+  // found: `useRef(true)` only *seeds* mountedRef the first time this
+  // component instance is created; it does not run again on each effect
+  // setup. The replay's cleanup set `mountedRef.current = false`, and
+  // because setup here had no body of its own, nothing ever set it back
+  // to `true` — so the *real*, still-mounted component was permanently
+  // stuck with `mountedRef.current === false`, and every `startImport()`
+  // afterward failed `isCurrentImport()` and silently bailed out before
+  // registering anything. Setup must explicitly (re)assert `true` so the
+  // replay's cleanup->setup round-trip restores exactly the state a fresh
+  // mount starts with, the same way it would for a plain `useState`.
+  //
+  // Cleanup also invalidates the current operation generation (mirroring
+  // doClose()/handleImportComplete()) and disposes any watchers, so a
+  // still-in-flight startImport() prelude can't resurrect after this
+  // effect tears down, and the listener/interval never outlive it. Both
+  // are no-ops during the StrictMode replay itself: setup above does not
+  // register anything by itself (only startImport(), triggered by a real
+  // user file selection, does), and that replay runs synchronously with
+  // no async gap for a file-select event to land in between setup and its
+  // immediate cleanup — so replay can never invalidate a genuinely active
+  // later operation or leak a resource it never created.
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      importOperationIdRef.current += 1;
       disposeImportWatchers();
     };
   }, [disposeImportWatchers]);
