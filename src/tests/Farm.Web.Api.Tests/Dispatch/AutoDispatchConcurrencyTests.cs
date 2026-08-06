@@ -40,6 +40,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
     private readonly AutoDispatchTrigger _trigger;
     private readonly Mock<IHubContext<PrinterHub>> _hubMock;
     private readonly Mock<IClientProxy> _clientProxyMock;
+    private readonly DispatchConcurrencyCoordinator _concurrencyCoordinator = new();
     private readonly Guid _folderId = Guid.NewGuid();
 
     // Track which (jobId, printerId) pairs were dispatched
@@ -68,7 +69,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         _clientProxyMock = new Mock<IClientProxy>();
         var hubClientsMock = new Mock<IHubClients>();
         hubClientsMock.Setup(c => c.All).Returns(_clientProxyMock.Object);
-        hubClientsMock.Setup(c => c.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Farm))
+        hubClientsMock.Setup(c => c.Group(It.IsAny<string>()))
             .Returns(_clientProxyMock.Object);
         _hubMock = new Mock<IHubContext<PrinterHub>>();
         _hubMock.Setup(h => h.Clients).Returns(hubClientsMock.Object);
@@ -78,6 +79,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
     {
         _db.Dispose();
         _connection.Dispose();
+        _concurrencyCoordinator.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -285,7 +287,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
 
         using CancellationTokenSource shutdown = new();
         using AutoDispatchBackgroundService svc = new(
-            _trigger, scopeFactory, _hubMock.Object,
+            _trigger, scopeFactory, _concurrencyCoordinator, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
         var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -385,6 +387,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService svc = new(
             _trigger,
             scopeFactory,
+            _concurrencyCoordinator,
             _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
         var startGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -600,6 +603,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService service = new(
             _trigger,
             provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
             _hubMock.Object,
             serviceLogger);
 
@@ -637,6 +641,433 @@ public class AutoDispatchConcurrencyTests : IDisposable
                 It.IsAny<DispatchScore>(),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(3));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
+    public async Task ProcessPrinterIdleAsync_ConfiguredCapacity_BoundsConcurrentSlowUploads(
+        int configuredCapacity)
+    {
+        const int dispatchCount = 4;
+        SeedSettings(
+            enabled: true,
+            mode: AutoDispatchMode.Auto,
+            idleThresholdSeconds: 0,
+            maxConcurrentDispatches: configuredCapacity);
+        var printerByJob = new Dictionary<Guid, Guid>();
+        var printers = new List<Guid>();
+        for (int index = 0; index < dispatchCount; index++)
+        {
+            Guid printerId =
+                SeedPrinter($"configured-capacity-{index}", 300 + index);
+            Guid jobId =
+                SeedQueuedJob(
+                    $"configured-capacity-job-{index}",
+                    queuePosition: index + 1);
+            Printer printer =
+                _db.Printers.Single(value => value.Id == printerId);
+            printer.AutoDispatchEnabled = true;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                AutoDispatchState = AutoDispatchState.Ready,
+            };
+            PrintJob job =
+                _db.PrintJobs.Single(value => value.Id == jobId);
+            job.AssignedPrinterId = printerId;
+            printerByJob.Add(jobId, printerId);
+            printers.Add(printerId);
+        }
+
+        _db.SaveChanges();
+        var scorerMock = new Mock<IDispatchScorer>();
+        scorerMock.Setup(value => value.ScorePrintersForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid jobId, CancellationToken _) =>
+            {
+                Guid printerId = printerByJob[jobId];
+                return
+                [
+                    new DispatchScore(
+                        printerId,
+                        $"configured-{printerId:N}",
+                        90,
+                        new Dictionary<string, FactorScore>(),
+                        false,
+                        []),
+                ];
+            });
+        var configuredCapacityReached = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseUploads = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int active = 0;
+        int maximumActive = 0;
+
+        void ObserveMaximum(int current)
+        {
+            int observed = Volatile.Read(ref maximumActive);
+            while (current > observed)
+            {
+                int original = Interlocked.CompareExchange(
+                    ref maximumActive,
+                    current,
+                    observed);
+                if (original == observed)
+                {
+                    return;
+                }
+
+                observed = original;
+            }
+        }
+
+        var dispatchMock = new Mock<IJobDispatchService>();
+        dispatchMock.Setup(value => value.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(
+                async (_, _, _, _, cancellationToken) =>
+                {
+                    int current = Interlocked.Increment(ref active);
+                    ObserveMaximum(current);
+                    if (current == configuredCapacity)
+                    {
+                        configuredCapacityReached.TrySetResult();
+                    }
+
+                    try
+                    {
+                        await releaseUploads.Task.WaitAsync(cancellationToken);
+                        return new QueuedPrintJobDto
+                        {
+                            DispatchResult = new DispatchAttemptResultDto
+                            {
+                                Outcome = DispatchAttemptOutcome.Accepted,
+                            },
+                        };
+                    }
+                    finally
+                    {
+                        _ = Interlocked.Decrement(ref active);
+                    }
+                });
+        _clientProxyMock.Setup(value => value.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await using ServiceProvider provider =
+            BuildServiceProvider(scorerMock, dispatchMock);
+        using AutoDispatchBackgroundService service = new(
+            _trigger,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
+            _hubMock.Object,
+            NullLogger<AutoDispatchBackgroundService>.Instance);
+        using CancellationTokenSource timeout =
+            new(TimeSpan.FromSeconds(15));
+        Task[] dispatches = printers
+            .Select(printerId => service.ProcessPrinterIdleAsync(
+                printerId,
+                skipIdleThreshold: true,
+                timeout.Token))
+            .ToArray();
+
+        try
+        {
+            await configuredCapacityReached.Task.WaitAsync(timeout.Token);
+            _concurrencyCoordinator.InFlightCount
+                .Should().Be(configuredCapacity);
+            Volatile.Read(ref maximumActive)
+                .Should().Be(configuredCapacity);
+        }
+        finally
+        {
+            releaseUploads.TrySetResult();
+            await Task.WhenAll(dispatches).WaitAsync(timeout.Token);
+        }
+
+        Volatile.Read(ref maximumActive).Should().Be(configuredCapacity);
+        _concurrencyCoordinator.InFlightCount.Should().Be(0);
+        dispatchMock.Verify(value => value.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(dispatchCount));
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
+    public async Task AutoDispatchInFlight_BatchDispatchSamePrinter_IsSkipped()
+    {
+        SeedSettings(
+            enabled: true,
+            mode: AutoDispatchMode.Auto,
+            idleThresholdSeconds: 0,
+            maxConcurrentDispatches: 3);
+        Guid printerId = SeedPrinter("shared-claim-printer", 33);
+        Guid autoJobId = SeedQueuedJob("shared-claim-auto", queuePosition: 1);
+        Guid batchJobId = SeedQueuedJob("shared-claim-batch", queuePosition: 2);
+        Printer printer = _db.Printers.Single(value => value.Id == printerId);
+        printer.AutoDispatchEnabled = true;
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printerId,
+            AutoDispatchState = AutoDispatchState.Ready,
+        };
+        PrintJob autoJob = _db.PrintJobs.Single(value => value.Id == autoJobId);
+        autoJob.AssignedPrinterId = printerId;
+        _db.SaveChanges();
+
+        var scorerMock = new Mock<IDispatchScorer>();
+        scorerMock.Setup(value => value.ScorePrintersForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new DispatchScore(
+                    printerId,
+                    printer.Name,
+                    90,
+                    new Dictionary<string, FactorScore>(),
+                    false,
+                    []),
+            ]);
+        var dispatchEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseDispatch = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatchMock = new Mock<IJobDispatchService>();
+        dispatchMock.Setup(value => value.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(
+                async (_, _, _, _, cancellationToken) =>
+                {
+                    dispatchEntered.TrySetResult();
+                    await releaseDispatch.Task.WaitAsync(cancellationToken);
+                    return new QueuedPrintJobDto
+                    {
+                        DispatchResult = new DispatchAttemptResultDto
+                        {
+                            Outcome = DispatchAttemptOutcome.Accepted,
+                        },
+                    };
+                });
+
+        await using ServiceProvider provider =
+            BuildServiceProvider(scorerMock, dispatchMock);
+        IServiceScopeFactory scopeFactory =
+            provider.GetRequiredService<IServiceScopeFactory>();
+        using AutoDispatchBackgroundService autoService = new(
+            _trigger,
+            scopeFactory,
+            _concurrencyCoordinator,
+            _hubMock.Object,
+            NullLogger<AutoDispatchBackgroundService>.Instance);
+        BatchDispatchService batchService = new(
+            scorerMock.Object,
+            _db,
+            scopeFactory,
+            _concurrencyCoordinator,
+            _hubMock.Object,
+            NullLogger<BatchDispatchService>.Instance);
+        using CancellationTokenSource timeout =
+            new(TimeSpan.FromSeconds(10));
+
+        Task autoDispatch = autoService.ProcessPrinterIdleAsync(
+            printerId,
+            skipIdleThreshold: true,
+            timeout.Token);
+        await dispatchEntered.Task.WaitAsync(timeout.Token);
+        PrintJob batchJob =
+            _db.PrintJobs.Single(value => value.Id == batchJobId);
+        BatchDispatchResult batchResult =
+            await batchService.BatchDispatchAsync(
+                new BatchDispatchRequest
+                {
+                    JobIds = [batchJobId],
+                    JobETags = new Dictionary<Guid, string>
+                    {
+                        [batchJobId] =
+                            Convert.ToBase64String(batchJob.RowVersion ?? []),
+                    },
+                },
+                "operator",
+                timeout.Token);
+
+        batchResult.DispatchedCount.Should().Be(0);
+        batchResult.SkippedCount.Should().Be(1);
+        dispatchMock.Invocations.Should().ContainSingle();
+
+        releaseDispatch.TrySetResult();
+        await autoDispatch.WaitAsync(timeout.Token);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
+    public async Task BatchDispatchAsync_ConfiguredCapacity_DispatchesEveryJobWithinLimit()
+    {
+        const int configuredCapacity = 2;
+        const int dispatchCount = 4;
+        SeedSettings(
+            enabled: true,
+            mode: AutoDispatchMode.Auto,
+            idleThresholdSeconds: 0,
+            maxConcurrentDispatches: configuredCapacity);
+        var printers = new List<(Guid Id, string Name)>();
+        var jobs = new List<Guid>();
+        for (int index = 0; index < dispatchCount; index++)
+        {
+            Guid printerId =
+                SeedPrinter($"batch-capacity-{index}", 340 + index);
+            Printer printer =
+                _db.Printers.Single(value => value.Id == printerId);
+            printers.Add((printerId, printer.Name));
+            jobs.Add(SeedQueuedJob(
+                $"batch-capacity-job-{index}",
+                queuePosition: index + 1));
+        }
+
+        var scorerMock = new Mock<IDispatchScorer>();
+        scorerMock.Setup(value => value.ScorePrintersForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printers
+                .Select((printer, index) => new DispatchScore(
+                    printer.Id,
+                    printer.Name,
+                    100 - index,
+                    new Dictionary<string, FactorScore>(),
+                    false,
+                    []))
+                .ToList());
+        var capacityReached = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseUploads = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int active = 0;
+        int maximumActive = 0;
+
+        void ObserveMaximum(int current)
+        {
+            int observed = Volatile.Read(ref maximumActive);
+            while (current > observed)
+            {
+                int original = Interlocked.CompareExchange(
+                    ref maximumActive,
+                    current,
+                    observed);
+                if (original == observed)
+                {
+                    return;
+                }
+
+                observed = original;
+            }
+        }
+
+        var dispatchMock = new Mock<IJobDispatchService>();
+        dispatchMock.Setup(value => value.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(
+                async (_, _, _, _, cancellationToken) =>
+                {
+                    int current = Interlocked.Increment(ref active);
+                    ObserveMaximum(current);
+                    if (current == configuredCapacity)
+                    {
+                        capacityReached.TrySetResult();
+                    }
+
+                    try
+                    {
+                        await releaseUploads.Task.WaitAsync(cancellationToken);
+                        return new QueuedPrintJobDto
+                        {
+                            DispatchResult = new DispatchAttemptResultDto
+                            {
+                                Outcome = DispatchAttemptOutcome.Accepted,
+                            },
+                        };
+                    }
+                    finally
+                    {
+                        _ = Interlocked.Decrement(ref active);
+                    }
+                });
+        _clientProxyMock.Setup(value => value.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await using ServiceProvider provider =
+            BuildServiceProvider(scorerMock, dispatchMock);
+        BatchDispatchService batchService = new(
+            scorerMock.Object,
+            _db,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
+            _hubMock.Object,
+            NullLogger<BatchDispatchService>.Instance);
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobs,
+            JobETags = _db.PrintJobs
+                .Where(job => jobs.Contains(job.Id))
+                .ToDictionary(
+                    job => job.Id,
+                    job => Convert.ToBase64String(job.RowVersion ?? [])),
+        };
+        using CancellationTokenSource timeout =
+            new(TimeSpan.FromSeconds(15));
+        Task<BatchDispatchResult> batchDispatch =
+            batchService.BatchDispatchAsync(
+                request,
+                "operator",
+                timeout.Token);
+
+        BatchDispatchResult result;
+        try
+        {
+            await capacityReached.Task.WaitAsync(timeout.Token);
+            Volatile.Read(ref maximumActive)
+                .Should().Be(configuredCapacity);
+            _concurrencyCoordinator.InFlightCount
+                .Should().Be(configuredCapacity);
+        }
+        finally
+        {
+            releaseUploads.TrySetResult();
+        }
+
+        result = await batchDispatch.WaitAsync(timeout.Token);
+
+        result.DispatchedCount.Should().Be(dispatchCount);
+        result.Results.Should().HaveCount(dispatchCount);
+        Volatile.Read(ref maximumActive).Should().Be(configuredCapacity);
+        _concurrencyCoordinator.InFlightCount.Should().Be(0);
     }
 
     [Fact]
@@ -694,6 +1125,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService service = new(
             _trigger,
             provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
             _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
 
@@ -810,6 +1242,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService service = new(
             _trigger,
             provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
             _hubMock.Object,
             serviceLogger);
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(30));
@@ -938,6 +1371,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService service = new(
             _trigger,
             provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
             _hubMock.Object,
             serviceLogger);
         Task? stop = null;
@@ -1019,6 +1453,7 @@ public class AutoDispatchConcurrencyTests : IDisposable
         using AutoDispatchBackgroundService service = new(
             _trigger,
             provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
             _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
         using CancellationTokenSource timeout = new(TimeSpan.FromSeconds(10));

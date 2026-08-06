@@ -49,6 +49,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     private readonly Mock<IDispatchScorer> _scorerMock;
     private readonly Mock<IJobDispatchService> _dispatchServiceMock;
     private readonly Mock<IAutoDispatchService> _readyGateMock;
+    private readonly DispatchConcurrencyCoordinator _concurrencyCoordinator = new();
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Guid _folderId = Guid.NewGuid();
 
@@ -100,6 +101,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     {
         _db.Dispose();
         _connection.Dispose();
+        _concurrencyCoordinator.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -195,7 +197,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     private AutoDispatchBackgroundService CreateService()
     {
         return new AutoDispatchBackgroundService(
-            _trigger, _scopeFactory, _hubMock.Object,
+            _trigger, _scopeFactory, _concurrencyCoordinator, _hubMock.Object,
             NullLogger<AutoDispatchBackgroundService>.Instance);
     }
 

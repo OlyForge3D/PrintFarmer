@@ -23,11 +23,11 @@ namespace Farm.Infrastructure.Services.Queue.Dispatch;
 public sealed class AutoDispatchBackgroundService(
     AutoDispatchTrigger trigger,
     IServiceScopeFactory scopeFactory,
+    DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
     ILogger<AutoDispatchBackgroundService> logger) : BackgroundService
 {
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
-    private readonly ResizableDispatchSemaphore _dispatchCapacity = new();
     private readonly object _workerSync = new();
     private readonly object _claimSync = new();
     private readonly HashSet<Task> _workers = [];
@@ -38,7 +38,6 @@ public sealed class AutoDispatchBackgroundService(
     public override void Dispose()
     {
         _selectionLock.Dispose();
-        _dispatchCapacity.Dispose();
         base.Dispose();
     }
 
@@ -319,41 +318,47 @@ public sealed class AutoDispatchBackgroundService(
                     printerId);
             }
 
-            logger.LogDebug(
-                "[AutoDispatch] Printer {PrinterId} waiting for dispatch capacity ({MaxConcurrentDispatches})",
-                printerId,
-                settings.MaxConcurrentDispatches);
-            using ResizableDispatchSemaphore.Lease capacityLease =
-                await _dispatchCapacity.AcquireAsync(
-                    Math.Max(1, settings.MaxConcurrentDispatches),
-                    serviceCt);
-
-            DispatchPlan plan;
-            await _selectionLock.WaitAsync(serviceCt);
-            try
+            if (!concurrencyCoordinator.TryClaimPrinter(printerId))
             {
-                await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                plan = await SelectDispatchPlanAsync(
-                    scope.ServiceProvider,
-                    printerId,
-                    settings,
-                    serviceCt);
-            }
-            finally
-            {
-                _selectionLock.Release();
+                logger.LogDebug(
+                    "[AutoDispatch] Printer {PrinterId} is already claimed by another dispatch",
+                    printerId);
+                return;
             }
 
             try
             {
-                await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
-            }
-            finally
-            {
-                if (plan.ClaimedJobId is Guid claimedJobId)
+                DispatchPlan plan;
+                await _selectionLock.WaitAsync(serviceCt);
+                try
                 {
-                    ReleaseJobClaim(claimedJobId);
+                    await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+                    plan = await SelectDispatchPlanAsync(
+                        scope.ServiceProvider,
+                        printerId,
+                        settings,
+                        serviceCt);
                 }
+                finally
+                {
+                    _selectionLock.Release();
+                }
+
+                try
+                {
+                    await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
+                }
+                finally
+                {
+                    if (plan.ClaimedJobId is Guid claimedJobId)
+                    {
+                        ReleaseJobClaim(claimedJobId);
+                    }
+                }
+            }
+            finally
+            {
+                concurrencyCoordinator.ReleasePrinter(printerId);
             }
         }
         finally
@@ -527,7 +532,10 @@ public sealed class AutoDispatchBackgroundService(
                 await ExecuteSuggestionAsync(plan, ct);
                 return;
             case DispatchPlanKind.Auto:
-                await ExecuteAutoDispatchAsync(plan, ct);
+                await ExecuteAutoDispatchAsync(
+                    plan,
+                    settings.MaxConcurrentDispatches,
+                    ct);
                 return;
             default:
                 throw new InvalidOperationException($"Unknown dispatch plan kind {plan.Kind}.");
@@ -569,7 +577,10 @@ public sealed class AutoDispatchBackgroundService(
             ct);
     }
 
-    private async Task ExecuteAutoDispatchAsync(DispatchPlan plan, CancellationToken ct)
+    private async Task ExecuteAutoDispatchAsync(
+        DispatchPlan plan,
+        int maxConcurrentDispatches,
+        CancellationToken ct)
     {
         DispatchScore score = plan.Score!;
         try
@@ -578,13 +589,25 @@ public sealed class AutoDispatchBackgroundService(
             IServiceProvider sp = scope.ServiceProvider;
             AppDbContext db = sp.GetRequiredService<AppDbContext>();
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
-            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} waiting for dispatch capacity ({MaxConcurrentDispatches})",
+                plan.PrinterId,
+                maxConcurrentDispatches);
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched;
+            using (DispatchCapacityLease capacityLease =
+                await concurrencyCoordinator.AcquireCapacityAsync(
+                    maxConcurrentDispatches,
+                    ct))
+            {
+                dispatched =
                 await dispatchService.DispatchJobAsync(
                     plan.JobId,
                     plan.PrinterId,
                     QueueActorIdentity.AutoDispatch,
                     score,
                     ct);
+            }
+
             if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
             {
                 string outcome = dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
@@ -739,102 +762,5 @@ public sealed class AutoDispatchBackgroundService(
             string.Empty,
             Score: null,
             ClaimedJobId: null);
-    }
-
-    private sealed class ResizableDispatchSemaphore : IDisposable
-    {
-        private readonly SemaphoreSlim _semaphore = new(0, int.MaxValue);
-        private readonly object _sync = new();
-        private int _limit;
-        private int _withheldReturns;
-        private bool _initialized;
-        private bool _disposed;
-
-        public async Task<Lease> AcquireAsync(int limit, CancellationToken cancellationToken)
-        {
-            Configure(limit);
-            await _semaphore.WaitAsync(cancellationToken);
-            return new Lease(this);
-        }
-
-        public void Dispose()
-        {
-            lock (_sync)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-
-                _disposed = true;
-                _semaphore.Dispose();
-            }
-        }
-
-        private void Configure(int requestedLimit)
-        {
-            lock (_sync)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                int newLimit = Math.Max(1, requestedLimit);
-                if (!_initialized)
-                {
-                    _initialized = true;
-                    _limit = newLimit;
-                    _semaphore.Release(newLimit);
-                    return;
-                }
-
-                if (newLimit > _limit)
-                {
-                    int increase = newLimit - _limit;
-                    int restoredReturns = Math.Min(increase, _withheldReturns);
-                    _withheldReturns -= restoredReturns;
-                    increase -= restoredReturns;
-                    if (increase > 0)
-                    {
-                        _semaphore.Release(increase);
-                    }
-                }
-                else if (newLimit < _limit)
-                {
-                    int reduction = _limit - newLimit;
-                    while (reduction > 0 && _semaphore.Wait(0))
-                    {
-                        reduction--;
-                    }
-
-                    _withheldReturns += reduction;
-                }
-
-                _limit = newLimit;
-            }
-        }
-
-        private void Release()
-        {
-            lock (_sync)
-            {
-                ObjectDisposedException.ThrowIf(_disposed, this);
-                if (_withheldReturns > 0)
-                {
-                    _withheldReturns--;
-                }
-                else
-                {
-                    _semaphore.Release();
-                }
-            }
-        }
-
-        public sealed class Lease(ResizableDispatchSemaphore owner) : IDisposable
-        {
-            private Action? _release = owner.Release;
-
-            public void Dispose()
-            {
-                Interlocked.Exchange(ref _release, null)?.Invoke();
-            }
-        }
     }
 }

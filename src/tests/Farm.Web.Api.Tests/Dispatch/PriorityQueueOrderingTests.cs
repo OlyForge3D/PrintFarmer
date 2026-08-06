@@ -7,6 +7,7 @@ using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -176,8 +177,9 @@ public sealed class PriorityQueueOrderingTests
 
         return new BatchDispatchService(
             scorer.Object,
-            Mock.Of<IJobDispatchService>(),
             db,
+            Mock.Of<IServiceScopeFactory>(),
+            new DispatchConcurrencyCoordinator(),
             hub.Object,
             NullLogger<BatchDispatchService>.Instance);
     }
