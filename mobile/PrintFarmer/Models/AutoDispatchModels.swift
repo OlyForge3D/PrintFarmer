@@ -98,7 +98,7 @@ struct AutoDispatchNextJob: Codable, Sendable, Identifiable {
     let name: String
     let estimatedFilamentUsageG: Double?
     let requiredMaterialType: String?
-    let estimatedPrintTime: TimeInterval?
+    let estimatedPrintTime: String?
     var jobKind: String = "Standard"
     var jobETag: String?
     var expectedPrinterConfigRevision: Int64?

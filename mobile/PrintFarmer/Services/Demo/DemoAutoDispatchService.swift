@@ -60,7 +60,7 @@ final class DemoAutoDispatchService: AutoDispatchServiceProtocol, @unchecked Sen
                                         bedPreConfirmed: false, attentionMessage: nil)
         let nextJob = AutoDispatchNextJob(id: DemoData.job5ID, name: "raspberry_pi_case.gcode",
                                           estimatedFilamentUsageG: 35.0, requiredMaterialType: "PLA",
-                                          estimatedPrintTime: 8100)
+                                          estimatedPrintTime: "02:15:00")
         let filamentCheck = FilamentCheckResult(sufficient: true, remainingWeightG: 750.0,
                                                 requiredWeightG: 35.0, loadedMaterial: "PLA",
                                                 requiredMaterial: "PLA", materialMismatch: false,

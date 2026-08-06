@@ -315,7 +315,7 @@ final class AutoDispatchServiceTests: XCTestCase {
             "name": "Standard print",
             "estimatedFilamentUsageG": 100,
             "requiredMaterialType": "PETG",
-            "estimatedPrintTime": 3600,
+            "estimatedPrintTime": "01:00:00",
             "jobKind": "Standard",
             "jobETag": "job-v1",
             "expectedPrinterConfigRevision": null

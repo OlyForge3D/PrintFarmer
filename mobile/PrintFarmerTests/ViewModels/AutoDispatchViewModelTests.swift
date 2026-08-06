@@ -119,7 +119,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 name: "test_print.gcode",
                 estimatedFilamentUsageG: 50.5,
                 requiredMaterialType: nil,
-                estimatedPrintTime: 3600
+                estimatedPrintTime: "01:00:00"
             ),
             filamentCheck: FilamentCheckResult(
                 sufficient: true,
@@ -166,7 +166,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 name: "Standard print",
                 estimatedFilamentUsageG: 100,
                 requiredMaterialType: "PETG",
-                estimatedPrintTime: 3600,
+                estimatedPrintTime: "01:00:00",
                 jobKind: "Standard",
                 jobETag: "job-v1"
             ),
@@ -499,7 +499,7 @@ final class AutoDispatchViewModelTests: XCTestCase {
                 name: "test_job.gcode",
                 estimatedFilamentUsageG: 25.0,
                 requiredMaterialType: nil,
-                estimatedPrintTime: 1800
+                estimatedPrintTime: "00:30:00"
             ),
             filamentCheck: FilamentCheckResult(
                 sufficient: true,

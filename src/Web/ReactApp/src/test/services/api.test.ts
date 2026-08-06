@@ -382,8 +382,36 @@ describe("ApiClient", () => {
       );
       const config = mockPost.mock.calls[0]?.[2];
       expect(config.validateStatus(200)).toBe(true);
+      expect(config.validateStatus(202)).toBe(true);
       expect(config.validateStatus(409)).toBe(true);
       expect(config.validateStatus(500)).toBe(false);
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it("should return reconciliation-pending ready responses from HTTP 202", async () => {
+      const mockResponse = {
+        status: 202,
+        data: {
+          status: {
+            printerId: "printer-1",
+            enabled: true,
+            state: "PendingReady",
+            queueDepth: 1,
+          },
+          dispatchInitiated: true,
+          dispatchOutcome: "Unknown",
+          dispatchReconciliationPending: true,
+        },
+      };
+      const mockPost = vi.fn().mockResolvedValue(mockResponse);
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      const result = await apiClient.confirmAutoDispatchReady(
+        "printer-1",
+        "dispatch-etag"
+      );
+
       expect(result).toEqual(mockResponse.data);
     });
 

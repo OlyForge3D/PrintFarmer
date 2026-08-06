@@ -4944,7 +4944,8 @@ export class ApiClient {
               }
             : {}),
         },
-        validateStatus: (status) => status === 200 || status === 409,
+        validateStatus: (status) =>
+          status === 200 || status === 202 || status === 409,
       }
     );
     if (

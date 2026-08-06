@@ -203,7 +203,6 @@ struct AutoDispatchSection: View {
                 if viewModel.filamentChallenge != nil {
                     isShowingFilamentConfirmation = true
                 } else {
-                    viewModel.isMarkingReady = true
                     let task = Task {
                         await viewModel.markReady(printerId: printerId)
                     }
