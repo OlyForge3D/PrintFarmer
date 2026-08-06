@@ -452,6 +452,20 @@ public class QueuePrinterModelStatsDto
 }
 
 /// <summary>
+/// Compact per-printer queue summary for the printer grid's "X of Y" compact-card label
+/// (<c>GET /api/job-queue-analytics/printer-summaries</c>). Printers with no active
+/// (Queued or Printing) job are omitted from the response entirely; treat their absence as
+/// "no active queue" rather than zero-filling every printer. <see cref="PrintingPosition"/> is
+/// the 1-based rank of the printing job among this printer's active jobs (priority desc, then
+/// queued time, then job ID) and is <see langword="null"/> when nothing is currently printing.
+/// </summary>
+public sealed record PrinterQueueSummaryDto(
+    Guid PrinterId,
+    int QueuedCount,
+    int PrintingCount,
+    int? PrintingPosition);
+
+/// <summary>
 /// Overall queue statistics
 /// </summary>
 public class QueueStatsDto

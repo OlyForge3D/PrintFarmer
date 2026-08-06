@@ -3,6 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 import type { AutoDispatchReadyResult, AutoDispatchStatus } from '@/types/api';
 
 vi.mock('@/services/api', () => ({
@@ -453,6 +454,33 @@ describe('BedClearBanner', () => {
         expect.stringContaining('material override'),
       );
     });
+  });
+
+  it('invalidates the canonical fleet queue-summary key (alongside job-queue/queue-jobs) when a stale material-override dispatch is rejected', async () => {
+    vi.mocked(apiClient.confirmAutoDispatchReady).mockResolvedValueOnce(readyResultMaterialMismatch);
+    vi.mocked(apiClient.dispatchJobToPrinter).mockRejectedValueOnce(
+      Object.assign(new Error('The reviewed job changed.'), { statusCode: 412 }),
+    );
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    render(
+      <QueryClientProvider client={queryClient}>
+        <BedClearBanner printerId="printer-1" printerName="MK4" autoDispatchStatus={baseStatus} />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
+    await waitFor(() => {
+      expect(screen.getByTestId('spool-validation-modal')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId('print-anyway-btn'));
+
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queueSummariesFleetQueryKey }),
+    );
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['job-queue'] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['queue-jobs'] });
   });
 
   it('closes modal when user cancels material mismatch', async () => {

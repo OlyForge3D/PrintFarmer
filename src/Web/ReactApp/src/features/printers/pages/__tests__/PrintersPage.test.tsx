@@ -170,6 +170,21 @@ vi.mock('@/features/filament-coverage/hooks', () => ({
   __resetFilamentCoverageSubscriptionForTests: vi.fn(),
 }));
 
+vi.mock('@/features/printers/hooks/usePrinterTagsFleet', () => ({
+  useFleetPrinterTags: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
+  usePrinterTagsFromFleet: vi.fn(() => ({ data: [], isPending: false, isError: false, error: null })),
+}));
+
+vi.mock('@/features/printers/hooks/useQueueSummariesFleet', () => ({
+  useFleetQueueSummaries: vi.fn(() => ({ data: [], isLoading: false, isError: false })),
+  useQueueSummaryFromFleet: vi.fn(() => ({ data: undefined, isPending: false, isError: false, error: null })),
+}));
+
+vi.mock('@/features/printers/hooks/useDiscoveryAvailability', () => ({
+  useDiscoveryAvailable: vi.fn(() => false),
+  useNetworkDiscoverySettings: vi.fn(() => ({ data: undefined, isLoading: false, isError: false })),
+}));
+
 vi.mock('@/common/components/ui', () => ({
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,
 }));

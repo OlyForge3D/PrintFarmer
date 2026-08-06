@@ -204,6 +204,55 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Lightweight projection of an active (Queued/Printing) job used only to compute per-printer
+    /// queue summaries. Deliberately excludes GcodeFile/AssignedPrinter navigations — those are
+    /// exactly what <see cref="GetPrinterQueueSummariesAsync"/> must avoid transferring.
+    /// </summary>
+    private sealed record ActiveQueueRow(
+        Guid PrinterId,
+        PrintJobStatus Status,
+        int Priority,
+        DateTime QueuedAt,
+        Guid JobId);
+
+    public async Task<List<PrinterQueueSummary>> GetPrinterQueueSummariesAsync(CancellationToken ct = default)
+    {
+        // Single flat query for every active job in the fleet - no Include, no per-printer
+        // round trips. The result set is bounded by "jobs currently Queued or Printing",
+        // never the full PrintJobs table.
+        List<ActiveQueueRow> activeJobs = await _context.PrintJobs
+            .Where(pj => pj.AssignedPrinterId != null &&
+                (pj.Status == PrintJobStatus.Queued || pj.Status == PrintJobStatus.Printing))
+            .Select(pj => new ActiveQueueRow(
+                pj.AssignedPrinterId!.Value,
+                pj.Status,
+                pj.Priority,
+                pj.QueuedAt,
+                pj.Id))
+            .ToListAsync(ct);
+
+        return activeJobs
+            .GroupBy(row => row.PrinterId)
+            .Select(group =>
+            {
+                // Same deterministic order as QueueOrdering.OrderByPriorityDescending:
+                // priority desc, then queued time, then job ID as the tiebreak.
+                List<ActiveQueueRow> ordered = group
+                    .OrderByDescending(row => row.Priority)
+                    .ThenBy(row => row.QueuedAt)
+                    .ThenBy(row => row.JobId)
+                    .ToList();
+                int printingIndex = ordered.FindIndex(row => row.Status == PrintJobStatus.Printing);
+                return new PrinterQueueSummary(
+                    group.Key,
+                    ordered.Count(row => row.Status == PrintJobStatus.Queued),
+                    ordered.Count(row => row.Status == PrintJobStatus.Printing),
+                    printingIndex >= 0 ? printingIndex + 1 : null);
+            })
+            .ToList();
+    }
+
     public async Task<List<PrintJob>> GetJobsByStatusAsync(PrintJobStatus status, CancellationToken ct = default)
     {
         return await _context.PrintJobs

@@ -50,6 +50,7 @@ import {
   PrinterGroupDetail,
   PrinterModelDto,
   PrinterVersionInfo,
+  PrinterQueueSummaryDto,
   QueuedPrintJobWithFileMetaDto,
   QueuedPrintJobDto,
   DispatchClientResult,
@@ -246,6 +247,25 @@ interface GcodeFileApiResponse extends Omit<GcodeFile,
 
 interface GetGcodeFilesApiResponse extends Omit<GetGcodeFilesResponse, "files"> {
   files: GcodeFileApiResponse[];
+}
+
+/** Tag shape returned by tag-read endpoints; mirrors `TagDto` in `tagService.ts`. */
+interface TagRecord {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string;
+}
+
+/**
+ * One entry from the batched fleet tag-read endpoint
+ * (`GET /api/tags/objects`, #1146 item 1). `tags` is always an array
+ * (possibly empty), never omitted, so "no tags" is distinguishable from
+ * "object filtered out / inaccessible".
+ */
+export interface ObjectTagsDto {
+  objectId: string;
+  tags: TagRecord[];
 }
 
 export class ApiClient {
@@ -2745,6 +2765,21 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Batched fleet queue-summary read (#1146 item 9). One flat call replaces
+   * the N per-printer `getJobQueue(printerId)` round trips the compact
+   * printer grid previously made only to derive its "X of Y" queue label.
+   * Printers with no active (queued or printing) job are simply absent from
+   * the response.
+   */
+  async getPrinterQueueSummaries(signal?: AbortSignal): Promise<PrinterQueueSummaryDto[]> {
+    const response = await this.client.get<PrinterQueueSummaryDto[]>(
+      "/job-queue-analytics/printer-summaries",
+      { signal }
+    );
+    return response.data ?? [];
+  }
+
   async queuePrintJob(
     printerId: string,
     gcodeFileId: string,
@@ -3315,6 +3350,23 @@ export class ApiClient {
       params: { objectType }
     });
     return response.data || [];
+  }
+
+  /**
+   * Batched fleet tag-read (#1146 item 1). One entry per accessible object of
+   * `objectType`, replacing N per-object `getObjectTags` calls. Powers grid
+   * surfaces (e.g. the compact printer grid) that would otherwise issue one
+   * tag request per card.
+   */
+  async getObjectsTags(
+    objectType: 'Model3D' | 'GcodeFile' | 'Printer',
+    signal?: AbortSignal
+  ): Promise<ObjectTagsDto[]> {
+    const response = await this.client.get<ObjectTagsDto[]>('/tags/objects', {
+      params: { objectType },
+      signal,
+    });
+    return response.data ?? [];
   }
 
   async getGcodeFileTags(gcodeFileId: string): Promise<Record<string, unknown>[]> {

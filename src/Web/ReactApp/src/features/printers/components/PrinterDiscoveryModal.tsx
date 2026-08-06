@@ -18,7 +18,7 @@ import { Label } from '@/common/components/ui/Label';
 import { Alert } from '@/common/components/ui/Alert';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 
-interface PrinterDiscoveryModalProps {
+export interface PrinterDiscoveryModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: () => void;

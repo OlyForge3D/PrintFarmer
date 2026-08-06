@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure;
+﻿using Farm.Infrastructure.Dtos;
+
+namespace Farm.Infrastructure;
 
 /// <summary>
 /// Request to create or update a tag (generic for any object type)
@@ -135,3 +137,11 @@ public class BulkOperationResultDto
 
     public int TotalCount { get; set; }
 }
+
+/// <summary>
+/// Tags assigned to one object, as returned by the fleet-scoped
+/// <c>GET /api/tags/objects</c> read. One entry per requested object ID; objects with no
+/// tags still appear with an empty <see cref="Tags"/> list so callers can distinguish
+/// "no tags" from "object not found".
+/// </summary>
+public sealed record ObjectTagsDto(Guid ObjectId, IReadOnlyList<TagDto> Tags);

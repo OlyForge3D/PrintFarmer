@@ -2532,6 +2532,24 @@ export interface QueuedPrintJobWithFileMetaDto {
   estimatedCompletionTime?: string;
 }
 
+/**
+ * Compact per-printer queue summary from the batched fleet endpoint
+ * (`GET /api/job-queue-analytics/printer-summaries`, #1146 item 9). Replaces
+ * the N per-printer `GET /api/job-queue-analytics/printer/{id}` calls the
+ * compact printer grid previously made only to derive the "X of Y" queue
+ * label. `printingPosition` is the 1-based position of the printing job
+ * among this printer's active (queued or printing) jobs, ordered the same
+ * way as the queue itself (priority desc, queued-time asc, id asc); it is
+ * `null` when nothing is currently printing. Printers with no active job are
+ * simply absent from the response — there is no "zero" entry.
+ */
+export interface PrinterQueueSummaryDto {
+  printerId: string;
+  queuedCount: number;
+  printingCount: number;
+  printingPosition: number | null;
+}
+
 export type DispatchAttemptOutcome =
   | 'Accepted'
   | 'Rejected'

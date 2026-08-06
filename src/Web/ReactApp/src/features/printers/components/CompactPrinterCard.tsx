@@ -23,12 +23,13 @@ import { PrinterCoverageSummary } from '@/features/filament-coverage/components/
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
-import { apiClient } from '@/services/api';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
+import { useFailureDetectionPollingEnabled } from '@/features/printers/hooks/useFailureDetectionPolling';
+import { usePrinterTagsFromFleet } from '@/features/printers/hooks/usePrinterTagsFleet';
+import { useQueueSummaryFromFleet } from '@/features/printers/hooks/useQueueSummariesFleet';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
-import { useJobQueue } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 import {
   canOpenFiles,
@@ -36,10 +37,8 @@ import {
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
 import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
-import type { TagDto } from '@/services/tagService';
 import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
 
 interface CompactPrinterCardProps {
@@ -120,36 +119,29 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [showMenu]);
 
-  // Fetch printer tags
-  const queryClient = useQueryClient();
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
+  // Polling for the shared failure-detection status query is controlled once
+  // at the fleet level (`FailureDetectionPollingProvider` in `PrintersPage`),
+  // not per-card from just this printer's own `obicoEnabled` flag (#1146
+  // item 3) — every card in the grid shares the same enabled decision.
+  const failureDetectionPollingEnabled = useFailureDetectionPollingEnabled();
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
     printer.id,
-    !!printer.obicoEnabled
+    failureDetectionPollingEnabled
   );
-  const { data: printerTags = [] } = useQuery<TagDto[]>({
-    queryKey: ['printer-tags', printer.id],
-    queryFn: async () => {
-      const tags = await apiClient.getObjectTags(printer.id, 'Printer');
-      return tags as unknown as TagDto[];
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  // Batched fleet tag read (#1146 item 1): shares one `GET /api/tags/objects`
+  // request across every card instead of this card issuing its own
+  // `GET /api/tags/object/{id}` call. `isPending` is threaded into
+  // `TaggingModal` as `tagsLoading` — this card renders `TaggingModal`
+  // unconditionally (only `isOpen` toggles), so the modal can mount before
+  // this fleet query has hydrated and must know not to seed its selection
+  // (or allow Save) from an unresolved, possibly-empty tag list.
+  const { data: printerTags = [], isPending: printerTagsLoading } = usePrinterTagsFromFleet(printer.id);
 
   // Auto-dispatch opt-in status
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printer.id);
   const { data: coverage } = usePrinterCoverageFromFleet(printer.id);
   const setAutoDispatchEnabled = useSetAutoDispatchEnabled();
-
-  // Per-printer job queue for "X of Y" indicator
-  const { data: printerQueue = [] } = useJobQueue(printer.id);
-  const activeQueueJobs = printerQueue.filter(
-    (j) => {
-      // Analytics endpoint returns flat objects with status at top level
-      const status = (j as unknown as { status?: string }).status ?? j.job?.status;
-      return status === 'Queued' || status === 'Printing' || status === 'Dispatched';
-    }
-  );
 
   const handleAutoDispatchToggle = async () => {
     const newEnabled = !(autoDispatchStatus?.enabled ?? false);
@@ -183,14 +175,25 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     autoDispatchStatus,
     isOnline,
   });
-
-  // Queue label: "1 of 3" when printing with more jobs queued
-  const printingIndex = activeQueueJobs.findIndex(j => {
-    const status = (j as unknown as { status?: string }).status ?? j.job?.status;
-    return status === 'Printing';
-  });
-  const queueLabel = activeQueueJobs.length > 1
-    ? `${(printingIndex >= 0 ? printingIndex + 1 : 1)} of ${activeQueueJobs.length}`
+  // Batched fleet queue-summary read (#1146 item 9): replaces the per-card
+  // `useJobQueue(printer.id)` poll. Printers with no active job are simply
+  // absent from the fleet response, so "no summary" already means "nothing
+  // to show" — no extra staleness gating is needed to avoid a stray label.
+  const { data: queueSummary } = useQueueSummaryFromFleet(printer.id);
+  const totalActiveQueueJobs = queueSummary
+    ? queueSummary.queuedCount + queueSummary.printingCount
+    : 0;
+  // "X of Y" is derived *only* from the authoritative fleet summary total
+  // (Dallas item-9 decision), matching origin/development's pre-fleet
+  // behavior: the backend counts a printer's not-yet-dispatched queued jobs
+  // as "active" even while it reports Idle (e.g. blocked on a bed-clear
+  // confirmation) or Offline, and that queue depth is genuinely useful
+  // information for those printers too. Reintroducing an
+  // `isOnline && (isPrinting || isPaused)` display gate here was the
+  // regression: it suppressed the label for legitimately-queued idle/offline
+  // printers that the pre-fleet UI always showed it for.
+  const queueLabel = totalActiveQueueJobs > 1
+    ? `${queueSummary?.printingPosition ?? 1} of ${totalActiveQueueJobs}`
     : undefined;
 
   const support = getPrinterSupport(backendCapabilities, {
@@ -587,10 +590,8 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
         objectType="Printer"
         initialTags={printerTags}
         isOpen={showTagModal}
-        onClose={() => {
-          setShowTagModal(false);
-          void queryClient.invalidateQueries({ queryKey: ['printer-tags', printer.id] });
-        }}
+        onClose={() => setShowTagModal(false)}
+        tagsLoading={printerTagsLoading}
       />
       {/* end card body */}
     </article>

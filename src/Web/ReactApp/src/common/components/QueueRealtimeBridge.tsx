@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { printerSignalRService } from '@/services/printer-signalr';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
 const resourceRefreshRetryDelaysMs = [100, 250, 500] as const;
 
@@ -23,6 +24,11 @@ export function QueueRealtimeBridge() {
         queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue() }),
         queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
         queryClient.invalidateQueries({ queryKey: ['queue-stats'] }),
+        // Canonical fleet queue-summary key (#1146 item 9): keeps every
+        // compact printer card's "X of Y" label in step with the same
+        // realtime queue events that refresh the rest of the queue surface,
+        // instead of waiting out the summary query's own 30s poll.
+        queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
         queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs }),
         queryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),

@@ -79,6 +79,7 @@ import type { UseQueryOptions } from '@tanstack/react-query';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
+import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
 
 // Type alias for query options that omit queryKey and queryFn (already provided by hooks)
 type QueryOptions<TData, TError = ApiError> = Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'>;
@@ -1377,6 +1378,10 @@ export function useQueuePrintJob() {
     onSettled: (_d, _e, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue(vars.printerId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.jobQueue() });
+      // Canonical fleet queue-summary key (#1146 item 9): a newly-queued job
+      // can change another printer's "X of Y" position/depth too, so refresh
+      // the shared summary the same way the rest of the queue surface does.
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     }
   });
 }
@@ -1414,6 +1419,7 @@ export function useCancelPrintQueueJob() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['job-queue'] });
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     }
   });
 }
@@ -1448,6 +1454,7 @@ export function useDeletePrintQueueJob() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['job-queue'] });
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey });
     }
   });
 }

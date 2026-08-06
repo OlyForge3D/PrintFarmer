@@ -152,6 +152,54 @@ public class JobQueueAnalyticsController(
     }
 
     /// <summary>
+    /// Get compact per-printer queue summaries (queued/printing counts and the printing job's
+    /// position) for every printer in one call. Replaces the N per-printer
+    /// <see cref="GetPrinterQueueAsync"/> round trips the compact printer grid previously made
+    /// to derive its "X of Y" label — this endpoint computes every summary from a single
+    /// grouped query with no GcodeFile/AssignedPrinter includes. Printers the caller cannot
+    /// access, and printers with no active (Queued or Printing) job, are both omitted from the
+    /// response.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token for async operation</param>
+    [HttpGet("printer-summaries")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(typeof(List<PrinterQueueSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> GetPrinterQueueSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            List<PrinterQueueSummaryDto> summaries = await _printJobManagementService.GetPrinterQueueSummariesAsync(cancellationToken);
+
+            if (resourceAuthorization is null)
+            {
+                return Ok(summaries);
+            }
+
+            var authorized = new List<PrinterQueueSummaryDto>(summaries.Count);
+            foreach (PrinterQueueSummaryDto summary in summaries)
+            {
+                if (await resourceAuthorization.CanAccessPrinterAsync(
+                    User,
+                    summary.PrinterId,
+                    PrinterGroupAccessLevel.View,
+                    cancellationToken))
+                {
+                    authorized.Add(summary);
+                }
+            }
+
+            return Ok(authorized);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving printer queue summaries");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer queue summaries" });
+        }
+    }
+
+    /// <summary>
     /// Get overall queue statistics
     /// </summary>
     /// <param name="cancellationToken">Cancellation token for async operation</param>

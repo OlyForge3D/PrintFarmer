@@ -487,6 +487,40 @@ public class PrintJobManagementServiceQueueMappingTests
             recovered.DispatchResult.Outcome);
     }
 
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_MapsRepositoryRecordsToDto()
+    {
+        Guid printerWithPrinting = Guid.NewGuid();
+        Guid printerQueuedOnly = Guid.NewGuid();
+        var repositorySummaries = new List<PrinterQueueSummary>
+        {
+            new(printerWithPrinting, QueuedCount: 2, PrintingCount: 1, PrintingPosition: 1),
+            new(printerQueuedOnly, QueuedCount: 3, PrintingCount: 0, PrintingPosition: null),
+        };
+
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository
+            .Setup(r => r.GetPrinterQueueSummariesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(repositorySummaries);
+        PrintJobManagementService service = CreateService(repository);
+
+        List<Farm.Infrastructure.Dtos.PrintQueue.PrinterQueueSummaryDto> result =
+            await service.GetPrinterQueueSummariesAsync();
+
+        Assert.Equal(2, result.Count);
+        Farm.Infrastructure.Dtos.PrintQueue.PrinterQueueSummaryDto printing =
+            Assert.Single(result, r => r.PrinterId == printerWithPrinting);
+        Assert.Equal(2, printing.QueuedCount);
+        Assert.Equal(1, printing.PrintingCount);
+        Assert.Equal(1, printing.PrintingPosition);
+
+        Farm.Infrastructure.Dtos.PrintQueue.PrinterQueueSummaryDto queuedOnly =
+            Assert.Single(result, r => r.PrinterId == printerQueuedOnly);
+        Assert.Equal(3, queuedOnly.QueuedCount);
+        Assert.Equal(0, queuedOnly.PrintingCount);
+        Assert.Null(queuedOnly.PrintingPosition);
+    }
+
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
         IPartOutputSnapshotService? snapshots = null,

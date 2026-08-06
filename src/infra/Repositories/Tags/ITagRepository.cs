@@ -64,12 +64,36 @@ public interface ITagRepository
     Task<bool> HasTagAsync(Guid objectId, Guid tagId, CancellationToken ct);
 
     /// <summary>
+    /// Check if an object of a specific type has a specific tag. Unlike the object-agnostic
+    /// overload above (which probes GcodeFile then Model3D), this dispatches directly by
+    /// <paramref name="objectType"/>, so types the probe order does not check — such as
+    /// Printer — are handled correctly.
+    /// </summary>
+    /// <param name="objectId">The unique identifier of the object.</param>
+    /// <param name="tagId">The unique identifier of the tag.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<bool> HasTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct);
+
+    /// <summary>
     /// Assign a tag to an object (object-agnostic).
     /// </summary>
     /// <param name="objectId">The unique identifier of the object.</param>
     /// <param name="tagId">The unique identifier of the tag to assign.</param>
     /// <param name="ct">Cancellation token.</param>
     Task AssignTagAsync(Guid objectId, Guid tagId, CancellationToken ct);
+
+    /// <summary>
+    /// Assign a tag to an object of a specific type, dispatching directly by
+    /// <paramref name="objectType"/> instead of probing object-agnostically. Required for
+    /// object types — such as Printer — that the object-agnostic overload's probe order does
+    /// not check.
+    /// </summary>
+    /// <param name="objectId">The unique identifier of the object.</param>
+    /// <param name="tagId">The unique identifier of the tag to assign.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task AssignTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct);
 
     /// <summary>
     /// Remove a tag from an object (object-agnostic).
@@ -80,11 +104,47 @@ public interface ITagRepository
     Task RemoveTagAsync(Guid objectId, Guid tagId, CancellationToken ct);
 
     /// <summary>
+    /// Remove a tag from an object of a specific type, dispatching directly by
+    /// <paramref name="objectType"/> instead of probing object-agnostically. Required for
+    /// object types — such as Printer — that the object-agnostic overload's probe order does
+    /// not check.
+    /// </summary>
+    /// <param name="objectId">The unique identifier of the object.</param>
+    /// <param name="tagId">The unique identifier of the tag to remove.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task RemoveTagAsync(Guid objectId, Guid tagId, string objectType, CancellationToken ct);
+
+    /// <summary>
     /// Get all tags for an object (object-agnostic).
     /// </summary>
     /// <param name="objectId">The unique identifier of the object.</param>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyList<Tag>> GetTagsByObjectAsync(Guid objectId, CancellationToken ct);
+
+    /// <summary>
+    /// Get all tags for an object of a specific type, dispatching directly by
+    /// <paramref name="objectType"/> instead of probing object-agnostically. Required for
+    /// object types — such as Printer — that the object-agnostic overload's probe order does
+    /// not check.
+    /// </summary>
+    /// <param name="objectId">The unique identifier of the object.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyList<Tag>> GetTagsByObjectAsync(Guid objectId, string objectType, CancellationToken ct);
+
+    /// <summary>
+    /// Get tags for multiple objects of the same type in a single grouped query, keyed by
+    /// object ID. Used by fleet-scoped reads (e.g. the printer grid) to replace N per-object
+    /// round trips with one query. Objects with no tags are omitted from the result map.
+    /// </summary>
+    /// <param name="objectIds">The unique identifiers of the objects to retrieve tags for.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<Tag>>> GetTagsByObjectsAsync(
+        IReadOnlyCollection<Guid> objectIds,
+        string objectType,
+        CancellationToken ct);
 
     /// <summary>
     /// Remove all tags from an object (object-agnostic).

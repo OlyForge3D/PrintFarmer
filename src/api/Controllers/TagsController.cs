@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Exceptions;
+﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Tags;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -17,7 +19,8 @@ namespace Farm.Api.Controllers;
 [Tags("Tags")]
 public class TagsController(
     ILogger<TagsController> unifiedLoggingService,
-    ITagService tagService) : ControllerBase
+    ITagService tagService,
+    IQueueResourceAuthorizationService? resourceAuthorization = null) : ControllerBase
 {
     private readonly ILogger<TagsController> _unifiedLoggingService = unifiedLoggingService;
     private readonly ITagService _tagService = tagService;
@@ -359,9 +362,10 @@ public class TagsController(
     /// <response code="200">Tag successfully assigned</response>
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
-    /// <response code="404">Object or tag not found</response>
+    /// <response code="404">Object or tag not found, or caller lacks printer resource access (existence not disclosed)</response>
     /// <response code="500">Internal server error</response>
-    /// Keep [Authorize] from class level - users can tag their own items
+    /// Keep [Authorize] from class level - users can tag their own items; Printer objects are
+    /// additionally scoped to the caller's printer-group Submit access below (#1146 QA follow-up).
     [HttpPost("{objectId:guid}/{tagId:guid}/assign")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -379,6 +383,11 @@ public class TagsController(
             if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
             {
                 return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
+            }
+
+            if (!await CanAccessPrinterForTagsAsync(objectType, objectId, PrinterGroupAccessLevel.Submit, ct))
+            {
+                return NotFound();
             }
 
             await _tagService.AssignTagAsync(objectId, tagId, objectType, ct);
@@ -410,9 +419,10 @@ public class TagsController(
     /// <response code="204">Tag unassigned successfully</response>
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
-    /// <response code="404">Mapping not found</response>
+    /// <response code="404">Mapping not found, or caller lacks printer resource access (existence not disclosed)</response>
     /// <response code="500">Internal server error</response>
-    /// Keep [Authorize] from class level - users can remove tags from their own items
+    /// Keep [Authorize] from class level - users can remove tags from their own items; Printer
+    /// objects are additionally scoped to the caller's printer-group Submit access below (#1146 QA follow-up).
     [HttpDelete("{objectId:guid}/{tagId:guid}/remove")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -430,6 +440,11 @@ public class TagsController(
             if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
             {
                 return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
+            }
+
+            if (!await CanAccessPrinterForTagsAsync(objectType, objectId, PrinterGroupAccessLevel.Submit, ct))
+            {
+                return NotFound();
             }
 
             await _tagService.RemoveTagAsync(objectId, tagId, objectType, ct);
@@ -488,12 +503,15 @@ public class TagsController(
     /// <response code="200">Returns the list of tags</response>
     /// <response code="400">Invalid parameters</response>
     /// <response code="401">Unauthorized</response>
+    /// <response code="404">Caller lacks printer resource access (existence not disclosed)</response>
     /// <response code="500">Internal server error</response>
-    /// Keep [Authorize] from class level - authenticated users can view item tags
+    /// Keep [Authorize] from class level - authenticated users can view item tags; Printer
+    /// objects are additionally scoped to the caller's printer-group View access below (#1146 QA follow-up).
     [HttpGet("object/{objectId:guid}")]
     [ProducesResponseType(typeof(IEnumerable<TagDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<IEnumerable<TagDto>>> GetObjectTagsAsync(
         [FromRoute] Guid objectId,
@@ -507,6 +525,11 @@ public class TagsController(
                 return BadRequest(new { error = "objectType query parameter is required" });
             }
 
+            if (!await CanAccessPrinterForTagsAsync(objectType, objectId, PrinterGroupAccessLevel.View, ct))
+            {
+                return NotFound();
+            }
+
             IReadOnlyList<TagDto> tags = await _tagService.GetObjectTagsAsync(objectId, objectType, ct);
             return Ok(tags);
         }
@@ -515,5 +538,95 @@ public class TagsController(
             _unifiedLoggingService?.LogError(ex, "[TagsController] GetObjectTagsAsync failed: {Message}", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve object tags" });
         }
+    }
+
+    /// <summary>
+    /// Gets tags for every object of a given type in one grouped read, replacing N per-object
+    /// <see cref="GetObjectTagsAsync"/> calls with a single fleet-scoped query (e.g. the printer
+    /// grid no longer issues one <c>GET /api/tags/object/{id}?objectType=Printer</c> per card).
+    /// When <paramref name="objectType"/> is "Printer", entries for printers the caller cannot
+    /// access (per <see cref="PrinterGroupAccessLevel.View"/>) are filtered out so a fleet read
+    /// never leaks tags across printer-group boundaries.
+    /// </summary>
+    /// <param name="objectType">Type of object: "Model3D", "GcodeFile", or "Printer"</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>One entry per accessible object of the given type, each mapping the object ID to its tags.</returns>
+    /// <response code="200">Returns the list of object-tag mappings</response>
+    /// <response code="400">Invalid parameters</response>
+    /// <response code="401">Unauthorized</response>
+    /// <response code="500">Internal server error</response>
+    /// Keep [Authorize] from class level - authenticated users can view item tags; Printer
+    /// entries are additionally scoped to the caller's printer-group visibility below.
+    [HttpGet("objects")]
+    [ProducesResponseType(typeof(IEnumerable<ObjectTagsDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+    public async Task<ActionResult<IEnumerable<ObjectTagsDto>>> GetObjectsTagsAsync(
+        [FromQuery] string? objectType,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(objectType) || (objectType != "Model3D" && objectType != "GcodeFile" && objectType != "Printer"))
+            {
+                return BadRequest(new { error = "objectType query parameter is required and must be 'Model3D', 'GcodeFile', or 'Printer'" });
+            }
+
+            IReadOnlyList<ObjectTagsDto> tags = await _tagService.GetObjectsTagsAsync(objectType, ct);
+
+            // Only "Printer" carries printer-group ACLs; Model3D/GcodeFile have no per-caller
+            // visibility scoping today, matching GetObjectTagsAsync's existing behavior.
+            if (objectType != "Printer" || resourceAuthorization is null)
+            {
+                return Ok(tags);
+            }
+
+            var authorized = new List<ObjectTagsDto>(tags.Count);
+            foreach (ObjectTagsDto entry in tags)
+            {
+                if (await resourceAuthorization.CanAccessPrinterAsync(
+                    User,
+                    entry.ObjectId,
+                    PrinterGroupAccessLevel.View,
+                    ct))
+                {
+                    authorized.Add(entry);
+                }
+            }
+
+            return Ok(authorized);
+        }
+        catch (Exception ex)
+        {
+            _unifiedLoggingService?.LogError(ex, "[TagsController] GetObjectsTagsAsync failed: {Message}", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve object tags" });
+        }
+    }
+
+    /// <summary>
+    /// Gates single-object tag read/assign/remove by printer-group ACL when
+    /// <paramref name="objectType"/> is "Printer" (#1146 QA follow-up: these endpoints
+    /// previously ignored resource authorization entirely, turning the printer-tagging
+    /// modal's silent no-ops from #1146 item into functional unauthorized reads/mutations
+    /// once dispatch-by-objectType was fixed). GcodeFile/Model3D carry no printer-group ACL
+    /// today and are always allowed here, matching <see cref="GetObjectsTagsAsync"/>. When the
+    /// injected <c>resourceAuthorization</c> service is not registered in DI, access is
+    /// allowed (fail-open), also matching <see cref="GetObjectsTagsAsync"/>.
+    /// </summary>
+    /// <param name="objectType">The object type from the request.</param>
+    /// <param name="objectId">The object identifier to check when it is a printer.</param>
+    /// <param name="minimumAccess">The minimum printer-group access level required.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>True if the caller may proceed; false if the caller must receive a not-found response.</returns>
+    private Task<bool> CanAccessPrinterForTagsAsync(
+        string objectType,
+        Guid objectId,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct)
+    {
+        return objectType != "Printer" || resourceAuthorization is null
+            ? Task.FromResult(true)
+            : resourceAuthorization.CanAccessPrinterAsync(User, objectId, minimumAccess, ct);
     }
 }
