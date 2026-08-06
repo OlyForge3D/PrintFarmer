@@ -144,7 +144,6 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
         _ = Directory.Exists(jobParent).Should().BeTrue(
             "a sibling recovery attempt remains under the job parent");
     }
-
     [Fact(DisplayName = "A terminal acknowledgement supersedes an old recovery marker")]
     public async Task RecoveryMarker_TerminalAcknowledgement_RemovesWorkDirectory()
     {

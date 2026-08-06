@@ -130,7 +130,6 @@ public sealed class JobWorkDirectoryTests : IDisposable
         Directory.SetLastWriteTimeUtc(attempt, lastWriteUtc);
         return attempt;
     }
-
     public void Dispose()
     {
         if (Directory.Exists(_workingDirectory))

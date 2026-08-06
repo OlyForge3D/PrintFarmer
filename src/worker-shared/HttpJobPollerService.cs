@@ -1052,6 +1052,12 @@ public abstract class HttpJobPollerService(
     {
         if (!TryResolveJobDirectory(jobId, result, out string directory))
         {
+            if (result?.ResultFileUrl is { IsAbsoluteUri: true, IsFile: true } fileUri &&
+                File.Exists(NormalizeLocalPath(fileUri)))
+            {
+                TryDeleteFile(jobId, NormalizeLocalPath(fileUri));
+            }
+
             return;
         }
 
@@ -1075,6 +1081,18 @@ public abstract class HttpJobPollerService(
             Directory.Delete(directory, recursive: true);
             TryDeleteEmptyJobParent(directory, jobId);
             TryCleanupRecoveryDirectories(configuredWorkingDirectory, jobId);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to clean local result for job {JobId}", jobId);
+        }
+    }
+
+    private void TryDeleteFile(Guid jobId, string filePath)
+    {
+        try
+        {
+            File.Delete(filePath);
         }
         catch (Exception exception)
         {
@@ -1289,9 +1307,6 @@ public abstract class HttpJobPollerService(
              !string.Equals(relativePath, "..", StringComparison.Ordinal));
     }
 
-    /// <summary>
-    /// Resolves the lease-attempt working directory that owns a pipeline result.
-    /// </summary>
     /// <param name="jobId">The job identifier, which names the parent working directory.</param>
     /// <param name="result">The pipeline result, when the pipeline produced one.</param>
     /// <param name="directory">The resolved directory when the method returns true.</param>
