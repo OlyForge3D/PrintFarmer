@@ -922,6 +922,157 @@ public class AutoDispatchConcurrencyTests : IDisposable
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "2")]
+    public async Task BatchDispatchAsync_ConfiguredCapacity_DispatchesEveryJobWithinLimit()
+    {
+        const int configuredCapacity = 2;
+        const int dispatchCount = 4;
+        SeedSettings(
+            enabled: true,
+            mode: AutoDispatchMode.Auto,
+            idleThresholdSeconds: 0,
+            maxConcurrentDispatches: configuredCapacity);
+        var printers = new List<(Guid Id, string Name)>();
+        var jobs = new List<Guid>();
+        for (int index = 0; index < dispatchCount; index++)
+        {
+            Guid printerId =
+                SeedPrinter($"batch-capacity-{index}", 340 + index);
+            Printer printer =
+                _db.Printers.Single(value => value.Id == printerId);
+            printers.Add((printerId, printer.Name));
+            jobs.Add(SeedQueuedJob(
+                $"batch-capacity-job-{index}",
+                queuePosition: index + 1));
+        }
+
+        var scorerMock = new Mock<IDispatchScorer>();
+        scorerMock.Setup(value => value.ScorePrintersForJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printers
+                .Select((printer, index) => new DispatchScore(
+                    printer.Id,
+                    printer.Name,
+                    100 - index,
+                    new Dictionary<string, FactorScore>(),
+                    false,
+                    []))
+                .ToList());
+        var capacityReached = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseUploads = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        int active = 0;
+        int maximumActive = 0;
+
+        void ObserveMaximum(int current)
+        {
+            int observed = Volatile.Read(ref maximumActive);
+            while (current > observed)
+            {
+                int original = Interlocked.CompareExchange(
+                    ref maximumActive,
+                    current,
+                    observed);
+                if (original == observed)
+                {
+                    return;
+                }
+
+                observed = original;
+            }
+        }
+
+        var dispatchMock = new Mock<IJobDispatchService>();
+        dispatchMock.Setup(value => value.DispatchJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<DispatchScore>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, Guid, string, DispatchScore, CancellationToken>(
+                async (_, _, _, _, cancellationToken) =>
+                {
+                    int current = Interlocked.Increment(ref active);
+                    ObserveMaximum(current);
+                    if (current == configuredCapacity)
+                    {
+                        capacityReached.TrySetResult();
+                    }
+
+                    try
+                    {
+                        await releaseUploads.Task.WaitAsync(cancellationToken);
+                        return new QueuedPrintJobDto
+                        {
+                            DispatchResult = new DispatchAttemptResultDto
+                            {
+                                Outcome = DispatchAttemptOutcome.Accepted,
+                            },
+                        };
+                    }
+                    finally
+                    {
+                        _ = Interlocked.Decrement(ref active);
+                    }
+                });
+        _clientProxyMock.Setup(value => value.SendCoreAsync(
+                It.IsAny<string>(),
+                It.IsAny<object?[]>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        await using ServiceProvider provider =
+            BuildServiceProvider(scorerMock, dispatchMock);
+        BatchDispatchService batchService = new(
+            scorerMock.Object,
+            _db,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            _concurrencyCoordinator,
+            _hubMock.Object,
+            NullLogger<BatchDispatchService>.Instance);
+        var request = new BatchDispatchRequest
+        {
+            JobIds = jobs,
+            JobETags = _db.PrintJobs
+                .Where(job => jobs.Contains(job.Id))
+                .ToDictionary(
+                    job => job.Id,
+                    job => Convert.ToBase64String(job.RowVersion ?? [])),
+        };
+        using CancellationTokenSource timeout =
+            new(TimeSpan.FromSeconds(15));
+        Task<BatchDispatchResult> batchDispatch =
+            batchService.BatchDispatchAsync(
+                request,
+                "operator",
+                timeout.Token);
+
+        BatchDispatchResult result;
+        try
+        {
+            await capacityReached.Task.WaitAsync(timeout.Token);
+            Volatile.Read(ref maximumActive)
+                .Should().Be(configuredCapacity);
+            _concurrencyCoordinator.InFlightCount
+                .Should().Be(configuredCapacity);
+        }
+        finally
+        {
+            releaseUploads.TrySetResult();
+        }
+
+        result = await batchDispatch.WaitAsync(timeout.Token);
+
+        result.DispatchedCount.Should().Be(dispatchCount);
+        result.Results.Should().HaveCount(dispatchCount);
+        Volatile.Read(ref maximumActive).Should().Be(configuredCapacity);
+        _concurrencyCoordinator.InFlightCount.Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
     public async Task ExecuteAsync_StartupAboveLegacyCapacity_ConsidersEveryEligiblePrinter()
     {
         const int printerCount = 80;

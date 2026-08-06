@@ -346,22 +346,7 @@ public sealed class AutoDispatchBackgroundService(
 
                 try
                 {
-                    if (plan.Kind == DispatchPlanKind.Auto)
-                    {
-                        logger.LogDebug(
-                            "[AutoDispatch] Printer {PrinterId} waiting for dispatch capacity ({MaxConcurrentDispatches})",
-                            printerId,
-                            settings.MaxConcurrentDispatches);
-                        using DispatchCapacityLease capacityLease =
-                            await concurrencyCoordinator.AcquireCapacityAsync(
-                                settings.MaxConcurrentDispatches,
-                                serviceCt);
-                        await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
-                    }
-                    else
-                    {
-                        await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
-                    }
+                    await ExecuteDispatchPlanAsync(plan, settings, serviceCt);
                 }
                 finally
                 {
@@ -547,7 +532,10 @@ public sealed class AutoDispatchBackgroundService(
                 await ExecuteSuggestionAsync(plan, ct);
                 return;
             case DispatchPlanKind.Auto:
-                await ExecuteAutoDispatchAsync(plan, ct);
+                await ExecuteAutoDispatchAsync(
+                    plan,
+                    settings.MaxConcurrentDispatches,
+                    ct);
                 return;
             default:
                 throw new InvalidOperationException($"Unknown dispatch plan kind {plan.Kind}.");
@@ -589,7 +577,10 @@ public sealed class AutoDispatchBackgroundService(
             ct);
     }
 
-    private async Task ExecuteAutoDispatchAsync(DispatchPlan plan, CancellationToken ct)
+    private async Task ExecuteAutoDispatchAsync(
+        DispatchPlan plan,
+        int maxConcurrentDispatches,
+        CancellationToken ct)
     {
         DispatchScore score = plan.Score!;
         try
@@ -598,13 +589,25 @@ public sealed class AutoDispatchBackgroundService(
             IServiceProvider sp = scope.ServiceProvider;
             AppDbContext db = sp.GetRequiredService<AppDbContext>();
             IJobDispatchService dispatchService = sp.GetRequiredService<IJobDispatchService>();
-            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+            logger.LogDebug(
+                "[AutoDispatch] Printer {PrinterId} waiting for dispatch capacity ({MaxConcurrentDispatches})",
+                plan.PrinterId,
+                maxConcurrentDispatches);
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched;
+            using (DispatchCapacityLease capacityLease =
+                await concurrencyCoordinator.AcquireCapacityAsync(
+                    maxConcurrentDispatches,
+                    ct))
+            {
+                dispatched =
                 await dispatchService.DispatchJobAsync(
                     plan.JobId,
                     plan.PrinterId,
                     QueueActorIdentity.AutoDispatch,
                     score,
                     ct);
+            }
+
             if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
             {
                 string outcome = dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";

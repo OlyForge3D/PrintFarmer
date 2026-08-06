@@ -280,22 +280,25 @@ public class BatchDispatchService(
     {
         try
         {
-            using DispatchCapacityLease capacityLease =
-                await concurrencyCoordinator.AcquireCapacityAsync(
-                    settings.MaxConcurrentDispatches,
-                    ct);
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             IJobDispatchService dispatchService =
                 scope.ServiceProvider.GetRequiredService<IJobDispatchService>();
             AppDbContext dispatchDb =
                 scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched =
+            Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched;
+            using (DispatchCapacityLease capacityLease =
+                await concurrencyCoordinator.AcquireCapacityAsync(
+                    settings.MaxConcurrentDispatches,
+                    ct))
+            {
+                dispatched =
                 await dispatchService.DispatchJobAsync(
                     job.Id,
                     candidate.Score.PrinterId,
                     userId,
                     candidate.Score,
                     ct);
+            }
 
             DispatchAttemptOutcome? outcome = dispatched.DispatchResult?.Outcome;
             if (outcome != DispatchAttemptOutcome.Accepted)

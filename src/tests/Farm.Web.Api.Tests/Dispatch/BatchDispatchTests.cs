@@ -241,7 +241,7 @@ public class BatchDispatchTests : IAsyncLifetime
     [Fact]
     [Trait("Category", "Dispatch")]
     [Trait("Phase", "3")]
-    public async Task BatchDispatch_RespectsMaxConcurrentDispatchesLimit()
+    public async Task BatchDispatch_WithConfiguredLimit_ReturnsResultForEveryRequestedJob()
     {
         // Set MaxConcurrentDispatches=1 via settings
         var settingsUpdate = new UpdateDispatchSettingsDto
@@ -280,8 +280,10 @@ public class BatchDispatchTests : IAsyncLifetime
         BatchDispatchResponse? result = await response.Content
             .ReadFromJsonAsync<BatchDispatchResponse>(JsonOptions);
         result.Should().NotBeNull();
-        result!.DispatchedCount.Should().BeInRange(0, 1,
-            "MaxConcurrentDispatches=1 should limit concurrent dispatches");
+        result!.TotalCount.Should().Be(3);
+        result.Results.Should().HaveCount(3);
+        (result.DispatchedCount + result.FailedCount + result.SkippedCount)
+            .Should().Be(3);
     }
 
     [Fact]
