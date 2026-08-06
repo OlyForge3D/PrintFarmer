@@ -549,6 +549,56 @@ public class EfTagRepository(AppDbContext dbContext, IModel3DQueryProvider? mode
     }
 
     /// <summary>
+    /// Get tags for multiple objects of the same type using skip-navigation, in one query
+    /// per object type. Replaces N per-object round trips (e.g. per-card printer tag fetches)
+    /// with a single grouped lookup. Objects with no tags are omitted from the result map.
+    /// </summary>
+    /// <param name="objectIds">The unique identifiers of the objects to retrieve tags for.</param>
+    /// <param name="objectType">The type of object (e.g., "GcodeFile", "Model3D", or "Printer").</param>
+    /// <param name="ct">A cancellation token to observe while waiting for the task to complete.</param>
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Tag>>> GetTagsByObjectsAsync(
+        IReadOnlyCollection<Guid> objectIds,
+        string objectType,
+        CancellationToken ct)
+    {
+        if (objectIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<Tag>>();
+        }
+
+        switch (objectType)
+        {
+            case "GcodeFile":
+                List<GcodeFile> gcodeFiles = await _dbContext.GcodeFiles
+                    .AsNoTracking()
+                    .Where(g => objectIds.Contains(g.Id))
+                    .Include(g => g.Tags)
+                    .ToListAsync(ct);
+                return gcodeFiles.ToDictionary(g => g.Id, g => (IReadOnlyList<Tag>)g.Tags.ToList());
+
+            case "Model3D":
+                List<Model3DTagMapping> mappings = await Model3DTags
+                    .Where(x => objectIds.Contains(x.Model3DId))
+                    .Include(x => x.Tag)
+                    .ToListAsync(ct);
+                return mappings
+                    .GroupBy(x => x.Model3DId)
+                    .ToDictionary(g => g.Key, g => (IReadOnlyList<Tag>)g.Select(x => x.Tag!).ToList());
+
+            case "Printer":
+                List<Printer> printers = await _dbContext.Printers
+                    .AsNoTracking()
+                    .Where(p => objectIds.Contains(p.Id))
+                    .Include(p => p.Tags)
+                    .ToListAsync(ct);
+                return printers.ToDictionary(p => p.Id, p => (IReadOnlyList<Tag>)p.Tags.ToList());
+
+            default:
+                return new Dictionary<Guid, IReadOnlyList<Tag>>();
+        }
+    }
+
+    /// <summary>
     /// Get the total count of objects using a specific tag (across both GcodeFile and Model3D).
     /// </summary>
     /// <param name="tagId">The unique identifier of the tag to count usage for.</param>

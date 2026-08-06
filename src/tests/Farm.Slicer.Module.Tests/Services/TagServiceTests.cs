@@ -200,9 +200,9 @@ public class TagServiceTests
 
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tag);
-        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
-        _tagRepository.Setup(r => r.AssignTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.AssignTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -211,7 +211,7 @@ public class TagServiceTests
         await _service.AssignTagAsync(objectId, tagId, objectType, CancellationToken.None);
 
         // Assert
-        _tagRepository.Verify(r => r.AssignTagAsync(objectId, tagId, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.AssignTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -225,14 +225,42 @@ public class TagServiceTests
 
         _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tag);
-        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         // Act
         await _service.AssignTagAsync(objectId, tagId, objectType, CancellationToken.None);
 
         // Assert
-        _tagRepository.Verify(r => r.AssignTagAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _tagRepository.Verify(r => r.AssignTagAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AssignTagAsync_WithPrinterObjectType_DispatchesObjectTypeToRepository()
+    {
+        // Arrange - regression test for the printer-tag single-object defect (#1146): the
+        // object-agnostic repository overload never checks Printers, so TagService must pass
+        // objectType through to the type-aware repository overload instead.
+        var objectId = Guid.NewGuid();
+        var tagId = Guid.NewGuid();
+        string objectType = "Printer";
+        var tag = new Tag { Id = tagId, Name = "TestTag", CreatedAt = DateTime.UtcNow };
+
+        _tagRepository.Setup(r => r.GetByIdAsync(tagId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tag);
+        _tagRepository.Setup(r => r.HasTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        _tagRepository.Setup(r => r.AssignTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _service.AssignTagAsync(objectId, tagId, objectType, CancellationToken.None);
+
+        // Assert
+        _tagRepository.Verify(r => r.HasTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.AssignTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
@@ -247,7 +275,7 @@ public class TagServiceTests
         var tagId = Guid.NewGuid();
         string objectType = "Model3D";
 
-        _tagRepository.Setup(r => r.RemoveTagAsync(objectId, tagId, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.RemoveTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -256,7 +284,27 @@ public class TagServiceTests
         await _service.RemoveTagAsync(objectId, tagId, objectType, CancellationToken.None);
 
         // Assert
-        _tagRepository.Verify(r => r.RemoveTagAsync(objectId, tagId, It.IsAny<CancellationToken>()), Times.Once);
+        _tagRepository.Verify(r => r.RemoveTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task RemoveTagAsync_WithPrinterObjectType_DispatchesObjectTypeToRepository()
+    {
+        // Arrange - regression test for the printer-tag single-object defect (#1146).
+        var objectId = Guid.NewGuid();
+        var tagId = Guid.NewGuid();
+        string objectType = "Printer";
+
+        _tagRepository.Setup(r => r.RemoveTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        _tagRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // Act
+        await _service.RemoveTagAsync(objectId, tagId, objectType, CancellationToken.None);
+
+        // Assert
+        _tagRepository.Verify(r => r.RemoveTagAsync(objectId, tagId, objectType, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     #endregion
@@ -274,7 +322,7 @@ public class TagServiceTests
             new Tag { Id = Guid.NewGuid(), Name = "Tag2", Color = "#00FF00", CreatedAt = DateTime.UtcNow }
         };
 
-        _tagRepository.Setup(r => r.GetTagsByObjectAsync(objectId, It.IsAny<CancellationToken>()))
+        _tagRepository.Setup(r => r.GetTagsByObjectAsync(objectId, objectType, It.IsAny<CancellationToken>()))
             .ReturnsAsync(tags);
 
         // Act
@@ -284,6 +332,26 @@ public class TagServiceTests
         Assert.NotNull(result);
         Assert.Equal(2, result.Count);
         Assert.Equal(tags[0].Name, result[0].Name);
+    }
+
+    [Fact]
+    public async Task GetObjectTagsAsync_WithPrinterObjectType_DispatchesObjectTypeToRepository()
+    {
+        // Arrange - regression test for the printer-tag single-object defect (#1146): reading
+        // a printer's tags must not silently return an empty list because objectType was
+        // dropped before reaching the repository.
+        var objectId = Guid.NewGuid();
+        string objectType = "Printer";
+        Tag[] tags = new[] { new Tag { Id = Guid.NewGuid(), Name = "Workhorse", CreatedAt = DateTime.UtcNow } };
+
+        _tagRepository.Setup(r => r.GetTagsByObjectAsync(objectId, objectType, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(tags);
+
+        // Act
+        IReadOnlyList<TagDto> result = await _service.GetObjectTagsAsync(objectId, objectType, CancellationToken.None);
+
+        // Assert
+        Assert.Equal("Workhorse", Assert.Single(result).Name);
     }
 
     #endregion

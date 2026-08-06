@@ -335,6 +335,28 @@ public class PrintJobManagementService(
     }
 
     /// <summary>
+    /// Get compact per-printer queue summaries used to derive the compact-card "X of Y" label
+    /// for every printer in one call, replacing N per-printer <see cref="GetPrinterQueueAsync"/>
+    /// round trips.
+    /// </summary>
+    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
+    public async Task<List<PrinterQueueSummaryDto>> GetPrinterQueueSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            List<PrinterQueueSummary> summaries = await _repository.GetPrinterQueueSummariesAsync(cancellationToken);
+            return summaries
+                .Select(s => new PrinterQueueSummaryDto(s.PrinterId, s.QueuedCount, s.PrintingCount, s.PrintingPosition))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error retrieving printer queue summaries");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Get aggregated queue statistics
     /// </summary>
     /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { Suspense, useState, useRef, useEffect } from 'react';
 import './DetailedPrinterCard.css';
 import { PanelRightOpen, Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -18,7 +18,7 @@ import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolhea
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
-import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
+import type { ZOffsetCalibrationWizardProps } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
@@ -26,6 +26,7 @@ import { EstimatedCompletionBadge } from '@/features/printers/components/Estimat
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
 import { usePrinterFailureDetectionStatus } from '@/features/printers/hooks/usePrinterFailureDetectionStatus';
+import { useFailureDetectionPollingEnabled } from '@/features/printers/hooks/useFailureDetectionPolling';
 import { toast } from 'sonner';
 import { Button, LoadedFilamentCard } from '@/common/components/ui';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
@@ -69,8 +70,16 @@ import {
   DEFAULT_EXTRUDE_DISTANCE_MM,
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
+import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 
-interface DetailedPrinterCardProps {
+// Interaction-only: the Z-offset calibration wizard is a modal only opened
+// via an explicit "Calibrate Z-Offset" click, so it's lazy-loaded out of the
+// detailed-card bundle (#1146 item 10).
+const ZOffsetCalibrationWizard = lazyWithPreload<ZOffsetCalibrationWizardProps, React.FC<ZOffsetCalibrationWizardProps>>(
+  () => import('@/features/printers/components/ZOffsetCalibrationWizard').then(m => ({ default: m.ZOffsetCalibrationWizard }))
+);
+
+export interface DetailedPrinterCardProps {
   /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
@@ -85,15 +94,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
-
-  // Fetch printer details to check for multi-toolhead configuration
-  const { data: printerDetails } = usePrinterDetails(
-    printer.id,
-    {
-      enabled: spoolmanReady,
-      staleTime: 60000,
-    }
-  );
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -113,10 +113,35 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [step, setStep] = useState(1);
   const [extrudeStep, setExtrudeStep] = useState(DEFAULT_EXTRUDE_DISTANCE_MM);
   const [extrudeSpeed, setExtrudeSpeed] = useState(DEFAULT_EXTRUDE_SPEED_MMS);
+
+  // Collapsed Material-Slots/Spool badges can render entirely from data
+  // already loaded without a details fetch (`mmuStatus`/`printer.spoolInfo`
+  // cover the AMS/MMU and single-spool cases respectively). The only
+  // collapsed (no click required) case that genuinely needs
+  // `printerDetails.toolheads` is a printer with independent physical
+  // toolheads that ISN'T reflected via MMU gates — there is no other signal
+  // available before the fetch, so that one case stays eager. Every other
+  // card defers the request until the Z-Offset wizard (this component's
+  // other `printerDetails` consumer) is actually opened (#1146 item 4).
+  const hasMmuGateData = !!(mmuStatus?.gates && mmuStatus.gates.length > 0);
+  const needsCollapsedToolheadProbe = !hasMmuGateData;
+  const { data: printerDetails } = usePrinterDetails(
+    printer.id,
+    {
+      enabled: spoolmanReady && (needsCollapsedToolheadProbe || showZOffsetWizard),
+      staleTime: 60000,
+    }
+  );
+
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
+  // Polling for the shared failure-detection status query is controlled once
+  // at the fleet level (`FailureDetectionPollingProvider` in `PrintersPage`),
+  // not per-card from just this printer's own `obicoEnabled` flag (#1146
+  // item 3) — every card in the grid shares the same enabled decision.
+  const failureDetectionPollingEnabled = useFailureDetectionPollingEnabled();
   const { printerStatus: failureDetectionStatus } = usePrinterFailureDetectionStatus(
     printer.id,
-    !!printer.obicoEnabled
+    failureDetectionPollingEnabled
   );
 
   const expandedProgressRef = useRef<HTMLDivElement>(null);
@@ -716,6 +741,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                     size="sm"
                     disabled={!isOnline || isPrinting}
                     onClick={() => setShowZOffsetWizard(true)}
+                    onMouseEnter={() => ZOffsetCalibrationWizard.preload()}
+                    onFocus={() => ZOffsetCalibrationWizard.preload()}
                   >
                     Calibrate Z-Offset
                   </Button>
@@ -916,13 +943,17 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         }}
       />
 
-      <ZOffsetCalibrationWizard
-        isOpen={showZOffsetWizard}
-        onClose={() => setShowZOffsetWizard(false)}
-        printer={printer}
-        bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
-        bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
-      />
+      {showZOffsetWizard && (
+        <Suspense fallback={null}>
+          <ZOffsetCalibrationWizard
+            isOpen={showZOffsetWizard}
+            onClose={() => setShowZOffsetWizard(false)}
+            printer={printer}
+            bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
+            bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
+          />
+        </Suspense>
+      )}
     </article>
   );
 });

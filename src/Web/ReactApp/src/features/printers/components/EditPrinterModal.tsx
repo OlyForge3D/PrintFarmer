@@ -15,7 +15,7 @@ import { useSlicer } from '@/hooks/useSlicer';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 
-interface EditPrinterModalProps {
+export interface EditPrinterModalProps {
   printerId: string | null;
   isOpen: boolean;
   onClose: () => void;

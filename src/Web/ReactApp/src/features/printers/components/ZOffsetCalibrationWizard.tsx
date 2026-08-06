@@ -20,7 +20,7 @@ const WIZARD_STEPS = [
 
 const Z_INCREMENTS = [0.01, 0.05, 0.1] as const;
 
-interface ZOffsetCalibrationWizardProps {
+export interface ZOffsetCalibrationWizardProps {
   isOpen: boolean;
   onClose: () => void;
   printer: Printer;

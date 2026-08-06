@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import Tabs from '@/common/components/ui/Tabs';
@@ -14,7 +14,7 @@ import ImportProgressTable from './ImportProgressTable';
 import { apiClient } from '@/services/api';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
-interface ImportExportModalProps {
+export interface ImportExportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onComplete?: () => void;
@@ -47,6 +47,92 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
 
+  // Tracks the *current* import's SignalR progress unsubscribe and
+  // completion-poll interval in refs (not local closure consts) so every
+  // exit path — natural completion, Cancel, Close Anyway, unmount, or a
+  // route change while an import is in flight — can tear them down. #1146
+  // item 10 made this modal conditionally mounted (unmounted entirely when
+  // closed) instead of always-mounted-with-`isOpen`-toggling; a `setInterval`
+  // and a SignalR subscription are plain browser/service resources, not
+  // tied to React's lifecycle, so without this they would keep running (and
+  // the SignalR callback would keep calling `setState` on an unmounted
+  // component) after the modal itself is gone.
+  const importUnsubscribeRef = useRef<(() => void) | undefined>(undefined);
+  const importCompletionIntervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
+
+  // `startImport`'s async prelude (clone/parse the file, then — if needed —
+  // establish the SignalR connection) can straddle an unmount, or a second
+  // import starting before the first one's prelude has finished. #1146
+  // re-review (Hicks) flagged that those continuations could resume after
+  // unmount and still register a listener/interval or call setState, and
+  // that the upload/start failure path didn't always dispose what it had
+  // just created.
+  //
+  // `mountedRef` answers "is the component still here?"; `importOperationIdRef`
+  // answers "is this the import the caller still cares about?" — every
+  // `startImport` call mints a fresh id and captures it locally, and the
+  // counter is also bumped by `doClose`/`handleImportComplete` so an
+  // explicit Close/Cancel invalidates an in-flight prelude too, not only a
+  // later import. Every await inside `startImport` re-checks
+  // `isCurrentImport(operationId)` before registering a resource or
+  // mutating state, so a stale continuation can neither resurrect a
+  // closed/cancelled import nor attach on top of (or stomp on) a newer one.
+  const mountedRef = useRef(true);
+  const importOperationIdRef = useRef(0);
+
+  const isCurrentImport = useCallback(
+    (operationId: number) => mountedRef.current && importOperationIdRef.current === operationId,
+    [],
+  );
+
+  const disposeImportWatchers = useCallback(() => {
+    if (importCompletionIntervalRef.current !== undefined) {
+      clearInterval(importCompletionIntervalRef.current);
+      importCompletionIntervalRef.current = undefined;
+    }
+    if (importUnsubscribeRef.current) {
+      importUnsubscribeRef.current();
+      importUnsubscribeRef.current = undefined;
+    }
+  }, []);
+
+  // Belt-and-suspenders: dispose on unmount / route change even if none of
+  // the explicit close/cancel handlers below ran first.
+  //
+  // StrictMode (development) intentionally replays every mount as
+  // setup -> cleanup -> setup, synchronously, specifically to prove that
+  // setup can always undo whatever the preceding cleanup did — it is not
+  // an occasional dev quirk, it happens on every mount. The bug Hicks
+  // found: `useRef(true)` only *seeds* mountedRef the first time this
+  // component instance is created; it does not run again on each effect
+  // setup. The replay's cleanup set `mountedRef.current = false`, and
+  // because setup here had no body of its own, nothing ever set it back
+  // to `true` — so the *real*, still-mounted component was permanently
+  // stuck with `mountedRef.current === false`, and every `startImport()`
+  // afterward failed `isCurrentImport()` and silently bailed out before
+  // registering anything. Setup must explicitly (re)assert `true` so the
+  // replay's cleanup->setup round-trip restores exactly the state a fresh
+  // mount starts with, the same way it would for a plain `useState`.
+  //
+  // Cleanup also invalidates the current operation generation (mirroring
+  // doClose()/handleImportComplete()) and disposes any watchers, so a
+  // still-in-flight startImport() prelude can't resurrect after this
+  // effect tears down, and the listener/interval never outlive it. Both
+  // are no-ops during the StrictMode replay itself: setup above does not
+  // register anything by itself (only startImport(), triggered by a real
+  // user file selection, does), and that replay runs synchronously with
+  // no async gap for a file-select event to land in between setup and its
+  // immediate cleanup — so replay can never invalidate a genuinely active
+  // later operation or leak a resource it never created.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      importOperationIdRef.current += 1;
+      disposeImportWatchers();
+    };
+  }, [disposeImportWatchers]);
+
   const countPrintersInFile = async (f: File) => {
     try {
       // Clone the file using slice() to avoid consuming the original stream
@@ -68,9 +154,24 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const startImport = async (file: File) => {
+    // Mint a new operation id and tear down whatever the previous attempt
+    // (if any) had registered *before* awaiting anything: a later import
+    // always invalidates an earlier one, synchronously, so a stale
+    // continuation can never find its own resources still attached (or a
+    // fresher operation's resources within reach) once it resumes.
+    const operationId = ++importOperationIdRef.current;
+    disposeImportWatchers();
+
     const count = await countPrintersInFile(file);
-    if (count === 0) return toast.error('No printers found in file');
-    
+    // Unmounted, or superseded by a newer startImport() call, while parsing
+    // the file: nothing has been registered yet at this checkpoint, so bail
+    // without touching state or resources.
+    if (!isCurrentImport(operationId)) return;
+    if (count === 0) {
+      toast.error('No printers found in file');
+      return;
+    }
+
     setFileName(file.name);
     setTotalCount(count);
     setIsImporting(true);
@@ -90,11 +191,15 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       if (!printerHubService.isConnected()) {
         if (window.PrintFarmerDebug?.import) console.log('[Import] Connecting to SignalR hub...');
         await printerHubService.start(getHubUrl(''));
+        // Unmounted, or superseded by a newer import, while connecting —
+        // nothing has been registered yet, so just don't attach a
+        // listener/interval for a dead import.
+        if (!isCurrentImport(operationId)) return;
       }
 
       // Subscribe to events BEFORE triggering the import
       if (window.PrintFarmerDebug?.import) console.log('[Import] Subscribing to import progress events...');
-      const unsubscribe = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
+      importUnsubscribeRef.current = printerHubService.onPrinterImportProgress((progress: PrinterImportProgress) => {
         if (window.PrintFarmerDebug?.import) console.log('[Import] Received progress update:', progress);
 
         setProgressItems(prevItems => {
@@ -115,11 +220,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
       });
 
       // Setup completion monitor
-      const checkCompletion = setInterval(() => {
+      importCompletionIntervalRef.current = setInterval(() => {
         setProgressItems(prevItems => {
           if (prevItems.length > 0 && prevItems.every(item => item.status !== 'Pending')) {
-            clearInterval(checkCompletion);
-            unsubscribe();
+            disposeImportWatchers();
             setIsImportComplete(true);
             // Refresh printer count so Export tab shows updated count
             queryClient.invalidateQueries({ queryKey: ['printers'] });
@@ -140,6 +244,20 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
 
     } catch (err) {
       console.error('Import start failed', err);
+      if (!isCurrentImport(operationId)) {
+        // Either unmounted (the effect above already disposed anything this
+        // attempt had registered) or superseded by a newer import (which
+        // took ownership of importUnsubscribeRef/importCompletionIntervalRef
+        // — and already disposed this attempt's resources — when *it*
+        // started). Disposing or updating state here would tear down a
+        // live operation instead of this dead one's, so there is nothing
+        // left for this stale continuation to do.
+        return;
+      }
+      // Still mounted and current: this attempt's own listener/interval (if
+      // it got that far) must not outlive its failed start — preserve the
+      // existing UX (surface the error, return to the file picker).
+      disposeImportWatchers();
       toast.error('Failed to start import');
       setIsImporting(false);
     }
@@ -179,6 +297,12 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const doClose = () => {
+    // Invalidate any in-flight startImport() prelude so it can't resurrect
+    // the import after the user has explicitly closed the modal, even
+    // during the brief window before the parent actually unmounts this
+    // component (unmount itself is also guarded — see mountedRef above).
+    importOperationIdRef.current += 1;
+    disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);
@@ -187,6 +311,10 @@ export default function ImportExportModal({ isOpen, onClose, onComplete }: Impor
   };
 
   const handleImportComplete = () => {
+    // Same reasoning as doClose(): both Cancel and natural completion must
+    // invalidate a still-pending startImport() continuation too.
+    importOperationIdRef.current += 1;
+    disposeImportWatchers();
     setIsImporting(false);
     setProgressItems([]);
     setIsImportComplete(false);

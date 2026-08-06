@@ -1,6 +1,8 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
+using Farm.Web.Api.Tests.Builders;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Tests.Infrastructure.Repositories.Queue;
@@ -51,5 +53,209 @@ public class EfPrintJobManagementRepositoryTests
         Printer loaded = Assert.Single(printers);
         Assert.NotNull(loaded.ServiceState);
         Assert.Equal(watermarkUtc, loaded.ServiceState!.LastHistorySeedUtc);
+    }
+
+    private static DbContextOptions<AppDbContext> CreateInMemoryOptions(string testName) =>
+        new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"{testName}_{Guid.NewGuid():N}")
+            .Options;
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_NoActiveJobs_ReturnsEmptyList()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_NoActiveJobs_ReturnsEmptyList));
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_PrintingPosition_ReflectsPriorityOrderNotArrivalOrder()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_PrintingPosition_ReflectsPriorityOrderNotArrivalOrder));
+        Guid printerId = Guid.NewGuid();
+        DateTime baseTime = DateTime.UtcNow;
+
+        // The printing job arrived first (earliest QueuedAt) but has LOWER priority than a
+        // later-arriving queued job. QueueOrdering ranks by priority first, so the printing
+        // job's position must reflect priority rank, not arrival order.
+        PrintJob highPriorityQueued = new PrintJobBuilder()
+            .WithAssignedPrinterId(printerId)
+            .WithStatus(PrintJobStatus.Queued)
+            .WithPriority(2)
+            .WithQueuedAt(baseTime)
+            .Build();
+        PrintJob printing = new PrintJobBuilder()
+            .WithAssignedPrinterId(printerId)
+            .WithStatus(PrintJobStatus.Printing)
+            .WithPriority(1)
+            .WithQueuedAt(baseTime.AddMinutes(-10))
+            .Build();
+        PrintJob lowPriorityQueued = new PrintJobBuilder()
+            .WithAssignedPrinterId(printerId)
+            .WithStatus(PrintJobStatus.Queued)
+            .WithPriority(0)
+            .WithQueuedAt(baseTime.AddMinutes(5))
+            .Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.AddRange(highPriorityQueued, printing, lowPriorityQueued);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        PrinterQueueSummary summary = Assert.Single(summaries);
+        Assert.Equal(printerId, summary.PrinterId);
+        Assert.Equal(2, summary.QueuedCount);
+        Assert.Equal(1, summary.PrintingCount);
+
+        // Priority order is [highPriorityQueued(P2), printing(P1), lowPriorityQueued(P0)],
+        // so the printing job is rank 2, not rank 1.
+        Assert.Equal(2, summary.PrintingPosition);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_PrinterWithNoPrintingJob_PrintingPositionIsNull()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_PrinterWithNoPrintingJob_PrintingPositionIsNull));
+        Guid printerId = Guid.NewGuid();
+
+        PrintJob first = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Queued).WithPriority(1).Build();
+        PrintJob second = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Queued).WithPriority(0).Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.AddRange(first, second);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        PrinterQueueSummary summary = Assert.Single(summaries);
+        Assert.Equal(2, summary.QueuedCount);
+        Assert.Equal(0, summary.PrintingCount);
+        Assert.Null(summary.PrintingPosition);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_ExcludesTerminalAndPausedStatuses()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_ExcludesTerminalAndPausedStatuses));
+        Guid printerId = Guid.NewGuid();
+
+        PrintJob activeQueued = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Queued).Build();
+        PrintJob assigned = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Assigned).Build();
+        PrintJob starting = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Starting).Build();
+        PrintJob paused = new PrintJobBuilder().WithAssignedPrinterId(printerId).WithStatus(PrintJobStatus.Paused).Build();
+        PrintJob completed = new PrintJobBuilder().WithAssignedPrinterId(printerId).AsCompleted().Build();
+        PrintJob failed = new PrintJobBuilder().WithAssignedPrinterId(printerId).AsFailed().Build();
+        PrintJob cancelled = new PrintJobBuilder().WithAssignedPrinterId(printerId).AsCancelled().Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.AddRange(activeQueued, assigned, starting, paused, completed, failed, cancelled);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        // Same active-job scope as GetJobsByPrinterAsync: only Queued/Printing count.
+        // Assigned/Starting/Paused/Completed/Failed/Cancelled must not inflate the counts.
+        PrinterQueueSummary summary = Assert.Single(summaries);
+        Assert.Equal(1, summary.QueuedCount);
+        Assert.Equal(0, summary.PrintingCount);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_PrinterWithOnlyNonActiveJobs_IsOmittedFromResult()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_PrinterWithOnlyNonActiveJobs_IsOmittedFromResult));
+        Guid printerId = Guid.NewGuid();
+        PrintJob completed = new PrintJobBuilder().WithAssignedPrinterId(printerId).AsCompleted().Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.Add(completed);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        // An idle printer with no active queue is absent, not zero-filled - callers must
+        // treat a missing entry as "no active queue".
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_IgnoresUnassignedJobs()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_IgnoresUnassignedJobs));
+        PrintJob unassigned = new PrintJobBuilder().WithAssignedPrinterId(null).WithStatus(PrintJobStatus.Queued).Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.Add(unassigned);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        Assert.Empty(summaries);
+    }
+
+    [Fact]
+    public async Task GetPrinterQueueSummariesAsync_MultiplePrinters_EachGetsAnIndependentSummary()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetPrinterQueueSummariesAsync_MultiplePrinters_EachGetsAnIndependentSummary));
+        Guid printerA = Guid.NewGuid();
+        Guid printerB = Guid.NewGuid();
+
+        PrintJob printerAPrinting = new PrintJobBuilder().WithAssignedPrinterId(printerA).WithStatus(PrintJobStatus.Printing).WithPriority(1).Build();
+        PrintJob printerAQueued = new PrintJobBuilder().WithAssignedPrinterId(printerA).WithStatus(PrintJobStatus.Queued).WithPriority(0).Build();
+        PrintJob printerBQueued1 = new PrintJobBuilder().WithAssignedPrinterId(printerB).WithStatus(PrintJobStatus.Queued).WithPriority(1).Build();
+        PrintJob printerBQueued2 = new PrintJobBuilder().WithAssignedPrinterId(printerB).WithStatus(PrintJobStatus.Queued).WithPriority(0).Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.AddRange(printerAPrinting, printerAQueued, printerBQueued1, printerBQueued2);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        List<PrinterQueueSummary> summaries = await repository.GetPrinterQueueSummariesAsync();
+
+        Assert.Equal(2, summaries.Count);
+        PrinterQueueSummary summaryA = summaries.Single(s => s.PrinterId == printerA);
+        Assert.Equal(1, summaryA.QueuedCount);
+        Assert.Equal(1, summaryA.PrintingCount);
+        Assert.Equal(1, summaryA.PrintingPosition);
+
+        PrinterQueueSummary summaryB = summaries.Single(s => s.PrinterId == printerB);
+        Assert.Equal(2, summaryB.QueuedCount);
+        Assert.Equal(0, summaryB.PrintingCount);
+        Assert.Null(summaryB.PrintingPosition);
     }
 }

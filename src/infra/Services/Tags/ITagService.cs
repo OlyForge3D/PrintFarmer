@@ -82,6 +82,16 @@ public interface ITagService
     Task<IReadOnlyList<TagDto>> GetObjectTagsAsync(Guid objectId, string objectType, CancellationToken ct);
 
     /// <summary>
+    /// Get tags for every object of a given type in one grouped read (polymorphic). Replaces
+    /// N per-object <see cref="GetObjectTagsAsync"/> calls with a single query/grouping
+    /// operation — used by fleet-scoped UI reads such as the printer grid.
+    /// </summary>
+    /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile", "Printer")</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>One entry per object of the given type, each mapping the object ID to its tags.</returns>
+    Task<IReadOnlyList<ObjectTagsDto>> GetObjectsTagsAsync(string objectType, CancellationToken ct);
+
+    /// <summary>
     /// Assign tags to an object (replaces existing tags - polymorphic)
     /// </summary>
     /// <param name="objectId">The ID of the object</param>

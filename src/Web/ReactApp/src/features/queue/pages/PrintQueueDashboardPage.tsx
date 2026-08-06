@@ -37,6 +37,7 @@ import {
   mutationErrorMessage,
   mutationErrorStatus,
 } from "@/common/utils/mutationError";
+import { queueSummariesFleetQueryKey } from "@/features/printers/hooks/useQueueSummariesFleet";
 import type { DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueuedPrintJobWithFileMetaDto,
@@ -143,6 +144,11 @@ export function PrintQueueDashboardPage() {
       queryClient.invalidateQueries({ queryKey: ['queue-jobs'] }),
       queryClient.invalidateQueries({ queryKey: ['queue-stats'] }),
       queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
+      // Canonical fleet queue-summary key (#1146 item 9): every queue
+      // mutation on this page (dispatch, cancel, pause/resume, priority,
+      // bulk cancel, etc.) funnels through this one invalidator, so the
+      // compact printer cards' "X of Y" labels stay in step with it too.
+      queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
     ]);
   }, [queryClient]);
 

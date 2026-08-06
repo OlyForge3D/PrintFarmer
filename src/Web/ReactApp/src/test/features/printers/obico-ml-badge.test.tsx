@@ -8,6 +8,7 @@ import type {
   FailureDetectionPrinterStatusDto,
   Printer,
 } from '@/types/api';
+import { __resetFailureDetectionAlertStoreForTests } from '@/features/printers/hooks/useFailureDetectionAlert';
 
 let failureDetectionStatusMock: FailureDetectionMonitorStatusDto | undefined;
 let failureDetectionPrinterStatusMock: FailureDetectionPrinterStatusDto | undefined;
@@ -179,6 +180,12 @@ beforeEach(() => {
   failureDetectionStatusMock = undefined;
   failureDetectionPrinterStatusMock = undefined;
   autoDispatchStatusMock = null;
+  // The failure-detection alert store is module-level (#1146 item 3: one
+  // SignalR handler/timer per grid, not one per card), so it persists across
+  // tests in this file unless explicitly reset — otherwise a later test
+  // could see a "recent failure" leftover from an earlier one that used the
+  // same default printer id.
+  __resetFailureDetectionAlertStoreForTests();
 });
 
 afterEach(cleanup);

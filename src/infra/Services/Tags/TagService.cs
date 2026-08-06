@@ -255,15 +255,16 @@ public class TagService(
                 throw new KeyNotFoundException($"Tag {tagId} not found");
             }
 
-            // Check if mapping already exists (object-agnostic)
-            bool exists = await _tagRepository.HasTagAsync(objectId, tagId, ct);
+            // Check if mapping already exists. Dispatches by objectType (not the
+            // object-agnostic GcodeFile/Model3D probe) so Printer is handled correctly (#1146).
+            bool exists = await _tagRepository.HasTagAsync(objectId, tagId, objectType, ct);
             if (exists)
             {
                 return; // Already assigned, nothing to do
             }
 
-            // Assign the tag to the object (object-agnostic)
-            await _tagRepository.AssignTagAsync(objectId, tagId, ct);
+            // Assign the tag to the object, dispatched by objectType (#1146).
+            await _tagRepository.AssignTagAsync(objectId, tagId, objectType, ct);
             await _tagRepository.SaveChangesAsync(ct);
         }
         catch (Exception ex)
@@ -284,8 +285,9 @@ public class TagService(
     {
         try
         {
-            // Object type parameter ignored - tags are object-agnostic
-            await _tagRepository.RemoveTagAsync(objectId, tagId, ct);
+            // Dispatch by objectType so Printer is handled correctly (#1146) instead of the
+            // object-agnostic GcodeFile/Model3D probe, which never checks Printers.
+            await _tagRepository.RemoveTagAsync(objectId, tagId, objectType, ct);
             await _tagRepository.SaveChangesAsync(ct);
         }
         catch (Exception ex)
@@ -306,13 +308,57 @@ public class TagService(
     {
         try
         {
-            // Object type parameter ignored - tags are object-agnostic
-            IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(objectId, ct);
+            // Dispatch by objectType so Printer is handled correctly (#1146) instead of the
+            // object-agnostic GcodeFile/Model3D probe, which never checks Printers and would
+            // always return an empty list for a printer object ID.
+            IReadOnlyList<Tag> tags = await _tagRepository.GetTagsByObjectAsync(objectId, objectType, ct);
             return tags.Select(MapToDto).ToList();
         }
         catch (Exception ex)
         {
             _logger.LogError("Failed to get tags for object {ObjectId}: {Message}", objectId, ex.Message);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Gets tags for every object of a given type in one grouped read (polymorphic).
+    /// Resolves the full ID set for <paramref name="objectType"/> via
+    /// <see cref="ITagRepository.GetAllObjectsOfTypeAsync"/>, then loads all of their tags with
+    /// a single call to <see cref="ITagRepository.GetTagsByObjectsAsync"/> — never one query
+    /// per object.
+    /// </summary>
+    /// <param name="objectType">The type of object (e.g., "Model3D", "GcodeFile", "Printer").</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <returns>One entry per object of the given type, each mapping the object ID to its tags.</returns>
+    public async Task<IReadOnlyList<ObjectTagsDto>> GetObjectsTagsAsync(string objectType, CancellationToken ct)
+    {
+        try
+        {
+            IReadOnlyList<Guid> objectIds = await _tagRepository.GetAllObjectsOfTypeAsync(objectType, ct);
+            if (objectIds.Count == 0)
+            {
+                return [];
+            }
+
+            IReadOnlyDictionary<Guid, IReadOnlyList<Tag>> tagsByObject =
+                await _tagRepository.GetTagsByObjectsAsync(objectIds, objectType, ct);
+
+            return objectIds
+                .Select(id =>
+                {
+                    // Extracted to a local so the ternary isn't passed as a multi-line
+                    // constructor argument (SA1118).
+                    IReadOnlyList<TagDto> objectTags = tagsByObject.TryGetValue(id, out IReadOnlyList<Tag>? tags)
+                        ? tags.Select(MapToDto).ToList()
+                        : [];
+                    return new ObjectTagsDto(id, objectTags);
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Failed to get tags for objects of type {ObjectType}: {Message}", objectType, ex.Message);
             throw;
         }
     }
