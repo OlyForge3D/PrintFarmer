@@ -352,6 +352,32 @@ Cached binary images are reusable only when both `orcaslicer.version` and
 `orcaslicer.sha256` labels exactly match the requested release. The same
 values are embedded in the binary layer. Missing or mismatched metadata causes
 the deploy/build path to reject the cached image instead of retagging it.
+
+Local short tags such as `orcaslicer-binaries:2.4.2` are recoverable. If a
+legacy local image is missing strict labels or has mismatched identity, the
+deployment script removes all local `orcaslicer-binaries:*` tags and rebuilds
+the pinned release with `--no-cache`. The rebuilt image must pass the same
+strict validation before deployment continues.
+
+Registry-qualified `ORCA_ASSET_IMAGE` values are operator-owned pins and are
+never removed automatically. An unavailable or unverifiable registry image
+fails closed. Update the pin, unset `ORCA_ASSET_IMAGE` to use the supported
+release, or request an explicit local clean rebuild:
+
+```bash
+ORCA_FORCE_REBUILD=1 ./scripts/deploy-docker.sh
+./scripts/deploy-docker.sh --rebuild-orcaslicer
+```
+
+For one-time manual remediation before using the updated deployment script:
+
+```bash
+docker rmi -f orcaslicer-binaries:2.4.2 orcaslicer-binaries:latest \
+  2>/dev/null || true
+unset ORCA_ASSET_IMAGE
+./scripts/deploy-docker.sh
+```
+
 Deployment scripts always request the repository-supported version/checksum
 pair; these build arguments are retained only as internal upgrade surfaces.
 
