@@ -258,7 +258,7 @@ function PillGroup<T extends string>({ options, active, onChange, ariaLabel }: P
             "px-3 py-1.5 text-sm font-medium transition-colors",
             i > 0 ? "border-l border-pf-border" : "",
             active === opt.value
-              ? "bg-pf-accent text-white"
+              ? "bg-pf-accent-bg text-[var(--pf-on-accent)]"
               : "bg-pf-bg-2 text-pf-text-secondary hover:text-pf-text-primary",
           ]
             .filter(Boolean)

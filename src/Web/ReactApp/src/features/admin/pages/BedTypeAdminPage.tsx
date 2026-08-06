@@ -138,7 +138,7 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
                   }}
                   title="Delete"
                   aria-label={`Delete ${bt.name}`}
-                  className="text-pf-error"
+                  className="text-pf-error-text"
                   iconCenter={<DeleteIcon className="h-4 w-4" />}
                 />
               </div>

@@ -147,7 +147,7 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
     const buttonVariantClasses: Record<string, string> = {
       primary: `
         px-4 py-2 rounded-lg font-medium
-        bg-pf-accent text-white
+        bg-pf-accent-bg text-[var(--pf-on-accent)]
         hover:opacity-90 active:opacity-75
         focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
@@ -164,15 +164,14 @@ export const FileUpload = React.forwardRef<HTMLInputElement, FileUploadProps>(
       `,
       danger: `
         px-4 py-2 rounded-lg font-medium
-        bg-pf-error text-white
-        hover:opacity-90 active:opacity-75
+        active:scale-95
         focus:outline-hidden focus:ring-2 focus:ring-pf-error focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed
-        transition-opacity duration-150
+        transition-colors duration-150
       `,
       success: `
         px-4 py-2 rounded-lg font-medium
-        bg-pf-success-bg text-white
+        bg-pf-success-bg text-pf-success-text
         hover:opacity-90 active:opacity-75
         focus:outline-hidden focus:ring-2 focus:ring-pf-success focus:ring-offset-2
         disabled:opacity-50 disabled:cursor-not-allowed

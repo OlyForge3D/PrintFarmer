@@ -332,7 +332,7 @@ export function HarvestWizardStep1Selection({
                   {printer.name}
                   <span className="inline-block w-2 h-2 rounded-full bg-pf-success" />
                   {hasActiveHarvest && (
-                    <span className="ml-auto text-xs bg-pf-warning text-white px-2 py-1 rounded-sm whitespace-nowrap">
+                    <span className="ml-auto text-xs bg-pf-warning text-[var(--pf-text-inverse)] px-2 py-1 rounded-sm whitespace-nowrap">
                       Harvest in progress
                     </span>
                   )}

@@ -138,7 +138,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
               >
                 <span>{tag}</span>
                 <Button
-                  className="p-0 h-4 w-4 min-w-0 hover:text-pf-error"
+                  className="p-0 h-4 w-4 min-w-0 hover:text-pf-error-text"
                   onClick={() => removeTag(tag)}
                   aria-label={`Remove tag ${tag}`}
                   title={`Remove tag ${tag}`}

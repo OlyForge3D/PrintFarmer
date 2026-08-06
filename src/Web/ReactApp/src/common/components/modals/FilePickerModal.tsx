@@ -303,7 +303,7 @@ function FilePickerContent({
                         className={clsx(
                           'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors cursor-pointer',
                           isActive
-                            ? 'bg-pf-accent text-white border-pf-accent'
+                            ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] border-pf-accent'
                             : 'bg-pf-bg-0 text-pf-text-primary border-pf-border hover:border-pf-accent'
                         )}
                         aria-pressed={isActive}
@@ -389,7 +389,7 @@ function FilePickerContent({
                     <div className={clsx(
                       'w-5 h-5 rounded-sm border-2 flex items-center justify-center',
                       isSelected
-                        ? 'bg-pf-accent border-pf-accent text-white'
+                        ? 'bg-pf-accent-bg border-pf-accent text-[var(--pf-on-accent)]'
                         : 'bg-pf-bg-0/80 border-pf-border'
                     )}>
                       {isSelected && (

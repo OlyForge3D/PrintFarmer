@@ -102,7 +102,7 @@ function FilamentTypeCard({ filament, onEdit, onClone, onDelete, isDeleting }: F
               onClick={() => onDelete(filament)}
               disabled={isDeleting}
               aria-label={`Delete ${filament.name}`}
-              className="text-pf-error hover:text-pf-error hover:bg-pf-error/10 dark:hover:text-pf-error"
+              className="text-pf-error-text enabled:hover:bg-pf-error/10"
             >
               <svg
                 className="w-4 h-4"

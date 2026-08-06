@@ -142,7 +142,7 @@ export function ComponentReplacementHistory({
               variant="subtle"
               size="sm"
               onClick={() => handleSort('date')}
-              className={sortField === 'date' ? 'bg-pf-accent/10' : ''}
+              className={sortField === 'date' ? 'bg-pf-accent/10 hover:bg-pf-accent/20 text-pf-text-primary' : ''}
               iconLeft={<SortIcon className="h-4 w-4" />}
             >
               Date
@@ -151,7 +151,7 @@ export function ComponentReplacementHistory({
               variant="subtle"
               size="sm"
               onClick={() => handleSort('cost')}
-              className={sortField === 'cost' ? 'bg-pf-accent/10' : ''}
+              className={sortField === 'cost' ? 'bg-pf-accent/10 hover:bg-pf-accent/20 text-pf-text-primary' : ''}
             >
               Cost
             </Button>

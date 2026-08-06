@@ -79,7 +79,7 @@ export function ThemeToggle({
           <label
             key={value}
             data-testid={`theme-option-${value}`}
-            className={`cursor-pointer first:rounded-l-lg last:rounded-r-lg border-r last:border-r-0 border-pf-border ${sizeClasses[size]} flex items-center space-x-2 transition-all duration-200 ${theme === value ? 'bg-pf-accent text-white' : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'}`}
+            className={`relative cursor-pointer first:rounded-l-lg last:rounded-r-lg border-r last:border-r-0 border-pf-border ${sizeClasses[size]} flex items-center space-x-2 transition-all duration-200 focus-within:z-10 focus-within:outline-hidden focus-within:ring-2 focus-within:ring-pf-accent focus-within:ring-offset-1 focus-within:ring-offset-pf-bg-0 ${theme === value ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]' : 'text-pf-text-secondary hover:text-pf-text-primary hover:bg-pf-bg-2'}`}
           >
             <input
               type="radio"

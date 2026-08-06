@@ -624,7 +624,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={handleNetworkScan}
                 disabled={isScanning}
-                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent text-white rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
+                className="flex items-center gap-2 px-3 py-1.5 bg-pf-accent-bg text-[var(--pf-on-accent)] rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
               >
                 <SearchIcon className="h-4 w-4" />
                 {isScanning ? 'Scanning...' : 'Scan Network'}
@@ -685,7 +685,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 type="button"
                 onClick={testSpoolman}
                 disabled={testingSpoolman}
-                className="px-3 py-2 bg-pf-accent-bg text-white rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
+                className="px-3 py-2 bg-pf-accent-bg text-[var(--pf-on-accent)] rounded-sm text-sm hover:bg-pf-accent-hover disabled:opacity-50"
               >
                 {testingSpoolman ? 'Testing...' : 'Test URL'}
               </button>
@@ -832,7 +832,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             </div>
             <div className="mb-4 flex items-center gap-2 text-xs flex-wrap">
               {['Account','Network','Spoolman','Summary'].map((label, idx) => (
-                <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent text-white':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
+                <div key={label} className={`px-2 py-1 rounded-sm ${idx===step ? 'bg-pf-accent-bg text-[var(--pf-on-accent)]':'bg-pf-bg-2 text-pf-text-secondary'}`}>{idx+1}. {label}</div>
               ))}
             </div>
             {globalError && step !== 3 && <div className="mb-4 text-sm text-pf-error" role="alert">{globalError}</div>}

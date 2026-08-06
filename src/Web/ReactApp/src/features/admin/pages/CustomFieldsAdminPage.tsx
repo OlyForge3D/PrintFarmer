@@ -230,7 +230,7 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
                         }}
                         title="Delete"
                         aria-label={`Delete ${def.fieldName}`}
-                        className="text-pf-error"
+                        className="text-pf-error-text"
                         iconCenter={<DeleteIcon className="h-4 w-4" />}
                       />
                     </div>

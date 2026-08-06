@@ -1700,6 +1700,100 @@
     background-color: rgba(255, 255, 255, 0.1);
   }
 
+  /*
+   * subtle / tab / toggle / link Button defaults.
+   *
+   * Same mechanism, same remedy and the same caller contract as ghost above; read
+   * that comment first. These four variants declared their paint as Tailwind
+   * utilities, so they sat in `@layer utilities` next to every class a caller
+   * passes through `className` and beat it on source order. Measured in the built
+   * stylesheet of this commit's parent (index-GjUfAWS-.css, 360909 B), with the
+   * class names escaped the way Tailwind emits them and a negative control in the
+   * same run:
+   *
+   *   .bg-pf-accent           100434  |  .bg-transparent          120028  wins
+   *   .bg-pf-bg-1             106281  |
+   *   .text-pf-error          144402  |  .text-pf-text-secondary  145966  wins
+   *   .border-pf-accent        85325  |  .border-transparent       93384  wins
+   *   .hover\:bg-pf-accent-hover       |  enabled\:hover\:bg-pf-bg-1
+   *                           175576  |                           192235  wins
+   *   .hover\:bg-pf-bg-2      177449  |                           192235  wins
+   *
+   * The last pair is the half that a duplicate report (#1100) missed and that is
+   * easy to miss again: the `enabled:hover:` block sorts *after* the plain
+   * `hover:` block, so the variant beat caller hovers too. Freeing the resting
+   * background alone would have left every caller hover still suppressed. Both
+   * directions are fixed by the same move, because layer order applies in every
+   * state at once.
+   *
+   * Offsets rot — the palette and the class inventory both change under them, and
+   * two builds a few commits apart have drifted ~700 bytes. They are recorded as
+   * the evidence the diagnosis rested on, not as something to re-assert. Do not
+   * quote a rule *count*; that is convention-dependent and has been measured four
+   * different ways.
+   *
+   * `subtle` keeps the border *width* utility, and `tab` keeps its underline
+   * width, radius and focus reset: those are structure, not paint, and a caller
+   * that wants to change them says so explicitly. Only the four painted
+   * properties moved.
+   *
+   * CALLER CONTRACT (see #1107, and #1112 for the one that bit): the hovers below
+   * are defaults living in this layer, so a caller that passes any `bg-*` utility
+   * overrides them in *both* states and the hover goes inert. If you give one of
+   * these Buttons a background, give it a `hover:bg-*` too — and make it visibly
+   * different from whatever surface the button sits on, or the affordance is
+   * still gone. Several call sites needed exactly that when this landed; the
+   * count is deliberately not quoted, for the reason given above.
+   */
+  [data-pf-button][data-pf-variant='subtle'] {
+    color: var(--pf-text-secondary);
+    background-color: transparent;
+    border-color: transparent;
+  }
+
+  [data-pf-button][data-pf-variant='subtle']:hover:not(:disabled) {
+    background-color: var(--pf-bg-1);
+  }
+
+  [data-pf-button][data-pf-variant='tab'] {
+    color: var(--pf-text-muted);
+    background-color: transparent;
+    border-color: transparent;
+  }
+
+  [data-pf-button][data-pf-variant='tab']:hover:not(:disabled) {
+    color: var(--pf-text-primary);
+  }
+
+  /*
+   * The active tab's underline and text. `data-pf-active` is emitted by
+   * Button.tsx only for `variant="tab"`, so this cannot leak to other variants.
+   * It sits in the components layer with the rest, which keeps a caller's own
+   * border/text utilities winning on layer order even in the active state —
+   * the whole point of #1102.
+   */
+  [data-pf-button][data-pf-variant='tab'][data-pf-active] {
+    color: var(--pf-text-primary);
+    border-color: var(--pf-accent);
+  }
+
+  [data-pf-button][data-pf-variant='toggle'] {
+    color: var(--pf-text-secondary);
+    background-color: transparent;
+    border-color: transparent;
+  }
+
+  [data-pf-button][data-pf-variant='toggle']:hover:not(:disabled) {
+    color: var(--pf-text-primary);
+  }
+
+  [data-pf-button][data-pf-variant='link'] {
+    color: var(--pf-accent);
+    background-color: transparent;
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /**
    * Fieldset - Group of related form fields
    */
@@ -1759,31 +1853,6 @@
   table tbody tr {
     border-bottom: 1px solid var(--pf-border);
     transition: background-color 0.2s ease-in-out;
-  }
-
-  /*
-   * Row hover default.
-   *
-   * This sits in `@layer components`, so every Tailwind `bg-*` a caller passes
-   * through `className` displaces it — layer order beats specificity, and
-   * `@import 'tailwindcss'` pins components below utilities. Verified two ways:
-   * in the built stylesheet this rule falls inside the `@layer components`
-   * block while `.bg-pf-bg-2` falls inside the later `@layer utilities` block
-   * (re-derive the offsets per build, the hash and the byte positions both
-   * move); and in chromium with transitions suppressed, `<tr class="bg-pf-bg-2">`
-   * reads the same computed background at rest and on hover in all seven themes.
-   *
-   * So this rule is NOT what erases a selected row's highlight, despite the
-   * (0,1,3) vs (0,1,0) specificity reading in #1088. That was the row's own
-   * unconditional `hover:bg-*` utility: same layer, and `:hover` at (0,1,1)
-   * outranks the selected class at (0,1,0). The fix is to withhold the hover
-   * utility while the row is selected, which is what every selectable table row
-   * whose only selection signal is a background now does. Do not add
-   * `hover:bg-x` alongside `bg-x` to defeat this rule — it is a no-op against a
-   * default that already loses to utilities.
-   */
-  table tbody tr:hover {
-    background-color: var(--pf-hover-overlay);
   }
 
   table tbody td {

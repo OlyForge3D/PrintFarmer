@@ -494,7 +494,7 @@ const FileRow: React.FC<FileRowProps> = ({
         variant="subtle"
         size="sm"
         onClick={onRemove}
-        className="text-pf-text-tertiary hover:text-pf-error"
+        className="text-pf-text-tertiary hover:text-pf-error-text"
         title="Remove from project"
       >
         <DeleteIcon className="w-4 h-4" />

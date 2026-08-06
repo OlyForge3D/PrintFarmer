@@ -225,7 +225,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
       <div className={`flex gap-2 ${compact ? 'mt-1' : 'mt-auto'}`}>
         {!isRunning && (
           <button
-            className={`flex-1 rounded-lg bg-pf-accent hover:bg-pf-accent-hover text-white transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
+            className={`flex-1 rounded-lg bg-pf-accent-bg hover:bg-pf-accent-hover text-[var(--pf-on-accent)] transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
             onClick={() => onStartHarvest?.(printer.id, options)}
             disabled={!printer.isOnline}
             aria-label={`Start harvest on ${printer.name}`}
@@ -237,7 +237,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         {isRunning && operation && (
           <>
             <button
-              className={`flex-1 rounded-lg bg-pf-error hover:bg-pf-error-hover text-white transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
+              className={`flex-1 rounded-lg bg-[var(--pf-button-danger-bg)] hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
               onClick={() => onCancelHarvest?.(operation.id)}
               aria-label={`Cancel harvest on ${printer.name}`}
               tabIndex={0}
@@ -245,7 +245,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
               Cancel
             </button>
             <button
-              className={`flex-1 rounded-lg bg-pf-text-tertiary hover:bg-pf-text-secondary text-white transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
+              className={`flex-1 rounded-lg bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
               onClick={() => onViewDetails?.(operation)}
               aria-label={`View details for ${printer.name}`}
               tabIndex={0}
@@ -256,7 +256,7 @@ export const PrinterCard: React.FC<PrinterCardProps> = ({
         )}
         {!isRunning && operation && (
           <button
-            className={`flex-1 rounded-lg bg-pf-text-tertiary hover:bg-pf-text-secondary text-white transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
+            className={`flex-1 rounded-lg bg-pf-bg-2 hover:bg-pf-bg-1 text-pf-text-primary transition-all duration-200 cursor-pointer hover:scale-105 hover:shadow-md active:scale-95 ${compact ? 'text-xs py-1.5 px-3' : 'text-sm py-2 px-4 font-medium'}`}
             onClick={() => onViewDetails?.(operation)}
             aria-label={`View details for ${printer.name}`}
             tabIndex={0}

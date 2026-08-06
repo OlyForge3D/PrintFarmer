@@ -48,7 +48,7 @@ export const FloatingActionButton = React.forwardRef<
       title={label}
       variant={variant}
       className={`
-        fixed rounded-full shadow-lg hover:shadow-xl transition-all
+        fixed rounded-full shadow-lg enabled:hover:shadow-xl transition-all
         ${position === 'bottom-right' ? 'bottom-6 right-6' : ''}
         ${position === 'bottom-center' ? 'bottom-6 left-1/2 -translate-x-1/2' : ''}
         ${position === 'bottom-left' ? 'bottom-6 left-6' : ''}
