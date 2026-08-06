@@ -280,7 +280,7 @@ public sealed class DispatchClaimService(
         }
 
         DispatchClaimResult? filamentGate = DispatchSafetyGates.EvaluateFilament(job, printer);
-        if (filamentGate is not null)
+        if (filamentGate is not null && request.FilamentOverride is null)
         {
             await WriteDeniedAuditAsync(request, filamentGate, job, dispatchState, ct);
             return filamentGate;
@@ -375,6 +375,12 @@ public sealed class DispatchClaimService(
 
         dispatchState.ActiveJobId = request.JobId;
         dispatchState.ActiveDispatchAttemptId = attempt.Id;
+        if (request.FilamentOverride is not null)
+        {
+            dispatchState.AutoDispatchState = AutoDispatchState.None;
+            dispatchState.BedPreConfirmed = false;
+        }
+
         if (bedClearCommand is not null)
         {
             bedClearCommand.Status = BedClearCommandStatus.Claimed;
@@ -423,6 +429,33 @@ public sealed class DispatchClaimService(
                 backendCommandId = attempt.BackendCommandId,
                 acknowledgementConsumed = consumesAcknowledgement,
             });
+
+        if (request.FilamentOverride is { } filamentOverride)
+        {
+            _ = QueueAuditWriter.Add(
+               _db,
+               request.ActorSubject,
+               QueueAuditOperations.SafetyOverride,
+               QueueAuditOutcomes.Success,
+               nameof(PrintJob),
+               resourceId: request.JobId,
+               printerId: request.PrinterId,
+               printJobId: request.JobId,
+               dispatchAttemptId: attempt.Id,
+               reasonCode: "filament_override",
+               jobRowVersion: job.RowVersion,
+               dispatchStateRowVersion: dispatchState.RowVersion,
+               detail: new
+               {
+                   outcome = filamentOverride.Outcome,
+                   reason = filamentOverride.Reason,
+                   filamentOverride.LoadedMaterial,
+                   filamentOverride.RequiredMaterial,
+                   filamentOverride.RemainingWeightG,
+                   filamentOverride.RequiredWeightG,
+                   authoritativeGate = filamentGate?.ErrorCode,
+               });
+        }
 
         try
         {

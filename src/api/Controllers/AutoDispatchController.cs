@@ -101,21 +101,13 @@ public class AutoDispatchController(
                 });
         }
 
-        if (confirmFilamentOverride &&
-            await CheckQueueHeadPreconditionAsync(printerId, jobIfMatch, ct) is { } jobPrecondition)
-        {
-            return jobPrecondition;
-        }
-
         try
         {
             byte[] expectedDispatch = DecodeEtag(Request.Headers.IfMatch[0]!);
             byte[]? expectedOverrideJob = confirmFilamentOverride
                 ? DecodeEtag(jobIfMatch!)
                 : null;
-            string actorSubject = confirmFilamentOverride
-                ? QueueActorIdentity.Resolve(User)
-                : QueueActorIdentity.AutoDispatch;
+            string actorSubject = QueueActorIdentity.Resolve(User);
             var result = await autoDispatchService.MarkReadyAsync(
                 printerId,
                 expectedDispatch,
@@ -126,6 +118,12 @@ public class AutoDispatchController(
             return result.RequiresFilamentOverride
                 ? Conflict(result)
                 : Ok(result);
+        }
+        catch (QueueRevisionConflictException)
+        {
+            return StatusCode(
+                StatusCodes.Status412PreconditionFailed,
+                new { error = "job_revision_conflict" });
         }
         catch (DbUpdateConcurrencyException)
         {

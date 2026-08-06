@@ -53,6 +53,35 @@ public sealed class AutoDispatchServiceTests : IDisposable
     public async Task MarkPreClearAsync_WhenQueuedJobsAlreadyExist_NotifiesDispatchTrigger()
     {
         Printer printer = await CreatePrinterAsync();
+        printer.CurrentSpoolId = 42;
+        PrintJob queuedJob = await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
+        queuedJob.RequiredMaterialType = "PLA";
+        queuedJob.EstimatedFilamentUsage = 10;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolmanService.Object,
+            dispatchTrigger: dispatchTrigger.Object);
+
+        AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
+
+        status.BedPreConfirmed.Should().BeTrue();
+        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task MarkPreClearAsync_WhenQueuedJobFilamentIsUnknown_RequiresReadyConfirmation()
+    {
+        Printer printer = await CreatePrinterAsync();
         await CreateQueuedJobAsync(printer, "queued-job", queuePosition: 1);
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
@@ -65,8 +94,11 @@ public sealed class AutoDispatchServiceTests : IDisposable
 
         AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
 
-        status.BedPreConfirmed.Should().BeTrue();
-        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+        status.BedPreConfirmed.Should().BeFalse();
+        status.State.Should().Be(nameof(AutoDispatchState.PendingReady));
+        dispatchTrigger.Verify(
+            trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()),
+            Times.Never);
     }
 
     [Fact]
@@ -286,14 +318,37 @@ public sealed class AutoDispatchServiceTests : IDisposable
             .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 500, null, false));
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
-        Mock<ILogger<AutoDispatchService>> logger = new();
         const string actorSubject = "8a196a30-022e-4c5f-92e6-dc13677b5bf6";
+        Mock<IJobDispatchService> jobDispatchService = new();
+        jobDispatchService
+            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+                queuedJob.Id,
+                printer.Id,
+                actorSubject,
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.Is<FilamentOverrideAuthorization>(authorization =>
+                    authorization.Outcome == nameof(FilamentCheckOutcome.Incompatible) &&
+                    authorization.Reason == "Material mismatch: loaded PLA, job requires PETG"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                Id = queuedJob.Id.ToString(),
+                AssignedPrinterId = printer.Id.ToString(),
+                Status = nameof(PrintJobStatus.Printing),
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+        Mock<ILogger<AutoDispatchService>> logger = new();
         AutoDispatchService service = new(
             _db,
             hubContext.Object,
             logger.Object,
             spoolmanService: spoolmanService.Object,
-            dispatchTrigger: dispatchTrigger.Object);
+            dispatchTrigger: dispatchTrigger.Object,
+            jobDispatchService: jobDispatchService.Object);
 
         AutoDispatchReadyResult result = await service.MarkReadyAsync(
             printer.Id,
@@ -306,7 +361,10 @@ public sealed class AutoDispatchServiceTests : IDisposable
         result.RequiresFilamentOverride.Should().BeFalse();
         result.FilamentOverrideApplied.Should().BeTrue();
         result.FilamentCheck!.Message.Should().Be("Material mismatch: loaded PLA, job requires PETG");
-        dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(printer.Id), Times.Once);
+        dispatchTrigger.Verify(
+            trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()),
+            Times.Never);
+        jobDispatchService.VerifyAll();
         logger.Verify(
             candidate => candidate.Log(
                 LogLevel.Warning,
@@ -346,6 +404,63 @@ public sealed class AutoDispatchServiceTests : IDisposable
         result.FilamentCheck.Sufficient.Should().BeFalse();
         result.FilamentCheck.Message.Should().Be("No spool is assigned to the printer.");
         dispatchTrigger.Verify(trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MarkReadyAsync_WhenUnknownFilamentOverrideIsConfirmed_DispatchesExactJob()
+    {
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        await _db.SaveChangesAsync();
+        PrintJob queuedJob = await CreateQueuedJobAsync(
+            printer,
+            "unknown-filament-job",
+            queuePosition: 1);
+        const string actorSubject = "operator-unknown";
+        Mock<IJobDispatchService> jobDispatchService = new();
+        jobDispatchService
+            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+                queuedJob.Id,
+                printer.Id,
+                actorSubject,
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.Is<FilamentOverrideAuthorization>(authorization =>
+                    authorization.Outcome == nameof(FilamentCheckOutcome.Unknown) &&
+                    authorization.Reason == "No spool is assigned to the printer."),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto
+            {
+                Id = queuedJob.Id.ToString(),
+                AssignedPrinterId = printer.Id.ToString(),
+                Status = nameof(PrintJobStatus.Printing),
+                DispatchResult = new Farm.Infrastructure.Dtos.PrintQueue.DispatchAttemptResultDto
+                {
+                    Outcome = DispatchAttemptOutcome.Accepted,
+                },
+            });
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            jobDispatchService: jobDispatchService.Object);
+
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(
+            printer.Id,
+            printer.DispatchState.RowVersion ?? [],
+            confirmFilamentOverride: true,
+            actorSubject,
+            queuedJob.RowVersion);
+
+        result.DispatchInitiated.Should().BeTrue();
+        result.FilamentOverrideApplied.Should().BeTrue();
+        result.FilamentCheck!.Outcome.Should().Be(FilamentCheckOutcome.Unknown);
+        jobDispatchService.VerifyAll();
     }
 
     [Fact]
@@ -616,14 +731,26 @@ public sealed class AutoDispatchServiceTests : IDisposable
     public async Task MarkPreClearAsync_WhenQueuedJobExists_PopulatesReadyAttentionMessage()
     {
         Printer printer = await CreatePrinterAsync();
-        await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
+        printer.CurrentSpoolId = 42;
+        PrintJob queuedJob = await CreateQueuedJobAsync(
+            printer,
+            "queued-job-1",
+            queuePosition: 1);
+        queuedJob.RequiredMaterialType = "PLA";
+        queuedJob.EstimatedFilamentUsage = 10;
+        await _db.SaveChangesAsync();
 
         var (hubContext, _) = CreateHubContextMockWithProxy();
         Mock<IAutoDispatchTrigger> dispatchTrigger = new();
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
         AutoDispatchService service = new(
             _db,
             hubContext.Object,
             NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolmanService.Object,
             dispatchTrigger: dispatchTrigger.Object);
 
         AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);

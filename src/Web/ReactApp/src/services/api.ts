@@ -4942,6 +4942,23 @@ export class ApiClient {
         validateStatus: (status) => status === 200 || status === 409,
       }
     );
+    if (
+      response.status === 409 &&
+      (
+        response.data?.requiresFilamentOverride !== true ||
+        typeof response.data?.status !== "object" ||
+        response.data?.status === null
+      )
+    ) {
+      const data = response.data as { detail?: string; error?: string } | undefined;
+      throw Object.assign(
+        new Error(data?.detail ?? data?.error ?? "The ready request conflicted with the current queue state."),
+        {
+          statusCode: response.status,
+          data: response.data,
+        }
+      );
+    }
     return response.data;
   }
 

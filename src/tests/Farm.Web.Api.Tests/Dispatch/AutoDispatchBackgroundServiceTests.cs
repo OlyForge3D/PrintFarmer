@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Web.Api.Tests.Builders;
@@ -47,6 +48,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     private readonly Mock<IClientProxy> _clientProxyMock;
     private readonly Mock<IDispatchScorer> _scorerMock;
     private readonly Mock<IJobDispatchService> _dispatchServiceMock;
+    private readonly Mock<IAutoDispatchService> _readyGateMock;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly Guid _folderId = Guid.NewGuid();
 
@@ -75,6 +77,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
 
         _scorerMock = new Mock<IDispatchScorer>();
         _dispatchServiceMock = new Mock<IJobDispatchService>();
+        _readyGateMock = new Mock<IAutoDispatchService>();
 
         // Build a minimal service provider for the scoped factory
         ServiceCollection services = new();
@@ -87,6 +90,7 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         });
         services.AddScoped<IDispatchScorer>(_ => _scorerMock.Object);
         services.AddScoped<IJobDispatchService>(_ => _dispatchServiceMock.Object);
+        services.AddScoped<IAutoDispatchService>(_ => _readyGateMock.Object);
 
         ServiceProvider sp = services.BuildServiceProvider();
         _scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
@@ -367,6 +371,43 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         await svc.ReconcileStartupEligiblePrintersAsync(cts.Token);
 
         _trigger.IntentStateCount.Should().Be(0);
+        _scorerMock.VerifyNoOtherCalls();
+        _dispatchServiceMock.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    public async Task OnPrinterIdle_PreClearedPrinter_ReevaluatesReadyGateBeforeSelectingJob()
+    {
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (Printer printer, Guid printerId) = SeedPrinter(name: "Pre-cleared Printer");
+        printer.DispatchState!.AutoDispatchState = AutoDispatchState.None;
+        printer.DispatchState.BedPreConfirmed = true;
+        _db.SaveChanges();
+        _ = SeedQueuedJob("unknown-filament-job");
+        _readyGateMock
+            .Setup(service => service.TransitionToPendingReadyAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                _db.ChangeTracker.Clear();
+                PrinterDispatchState state =
+                    await _db.PrinterDispatchStates.SingleAsync(
+                        candidate => candidate.PrinterId == printerId);
+                state.AutoDispatchState = AutoDispatchState.PendingReady;
+                state.BedPreConfirmed = false;
+                await _db.SaveChangesAsync();
+            });
+
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
+        AutoDispatchBackgroundService service = CreateService();
+        await service.ProcessPrinterIdleAsync(
+            printerId,
+            skipIdleThreshold: true,
+            cts.Token);
+
+        _readyGateMock.VerifyAll();
         _scorerMock.VerifyNoOtherCalls();
         _dispatchServiceMock.VerifyNoOtherCalls();
     }

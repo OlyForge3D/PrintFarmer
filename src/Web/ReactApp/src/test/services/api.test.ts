@@ -423,6 +423,30 @@ describe("ApiClient", () => {
       );
     });
 
+    it("should reject non-filament 409 responses as real conflicts", async () => {
+      const mockPost = vi.fn().mockResolvedValue({
+        status: 409,
+        data: {
+          error: "queue_empty",
+          detail: "The reviewed queue head no longer exists.",
+        },
+      });
+      (apiClient as unknown as { client: { post: typeof mockPost } }).client.post =
+        mockPost;
+
+      await expect(
+        apiClient.confirmAutoDispatchReady(
+          "printer-1",
+          "dispatch-etag",
+          true,
+          "job-etag"
+        )
+      ).rejects.toMatchObject({
+        statusCode: 409,
+        message: "The reviewed queue head no longer exists.",
+      });
+    });
+
     it("should expose confirmAutoDispatchReady instead of the removed markPrinterReady alias", () => {
       expect(typeof apiClient.confirmAutoDispatchReady).toBe("function");
       expect((apiClient as unknown as { markPrinterReady?: unknown }).markPrinterReady).toBeUndefined();

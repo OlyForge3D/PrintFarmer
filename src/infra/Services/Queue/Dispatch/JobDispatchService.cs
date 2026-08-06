@@ -78,6 +78,8 @@ public class JobDispatchService(
             userId,
             printerScore,
             ifMatchJobRowVersion: null,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
 
@@ -96,8 +98,28 @@ public class JobDispatchService(
             userId,
             printerScore,
             ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
+
+    public Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        Guid jobId,
+        Guid printerId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
+        CancellationToken ct = default) =>
+        DispatchJobCoreAsync(
+            jobId,
+            printerId,
+            userId,
+            printerScore: null,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            ct);
 
     public Task<QueuedPrintJobDto> DispatchJobAsync(Guid jobId, Guid printerId, string userId, DispatchScore preComputedScore, CancellationToken ct = default)
     {
@@ -108,6 +130,8 @@ public class JobDispatchService(
             userId,
             preComputedScore,
             ifMatchJobRowVersion: null,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
             ct);
     }
 
@@ -117,6 +141,8 @@ public class JobDispatchService(
         string userId,
         DispatchScore? printerScore,
         string? ifMatchJobRowVersion,
+        byte[]? expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
         CancellationToken ct)
     {
         PrintJob? job = await db.PrintJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
@@ -163,7 +189,26 @@ public class JobDispatchService(
             }
         }
 
-        if (printerScore is { Eliminated: true })
+        PrinterDispatchState? reviewedDispatchState = null;
+        if (expectedDispatchStateRowVersion is { Length: > 0 })
+        {
+            reviewedDispatchState = await db.PrinterDispatchStates
+                .FirstOrDefaultAsync(state => state.PrinterId == printerId, ct);
+            if (reviewedDispatchState?.RowVersion is null ||
+                !expectedDispatchStateRowVersion.SequenceEqual(reviewedDispatchState.RowVersion))
+            {
+                throw new QueueRevisionConflictException(
+                    "The printer dispatch state changed after the filament override was reviewed.",
+                    job.RowVersion,
+                    reviewedDispatchState?.RowVersion);
+            }
+
+            db.Entry(reviewedDispatchState)
+                .Property(state => state.RowVersion)
+                .OriginalValue = expectedDispatchStateRowVersion;
+        }
+
+        if (filamentOverride is null && printerScore is { Eliminated: true })
         {
             string reasons = string.Join("; ", printerScore.EliminationReasons);
             throw new InvalidOperationException($"Printer '{printer.Name}' is eliminated: {reasons}");
@@ -254,6 +299,11 @@ public class JobDispatchService(
                     ct);
             if (state is not null)
             {
+                if (affectedPrinterId == printerId)
+                {
+                    reviewedDispatchState = state;
+                }
+
                 state.QueueRevision++;
                 state.AcknowledgedJobId = null;
                 state.AcknowledgedAtUtc = null;
@@ -305,6 +355,21 @@ public class JobDispatchService(
             jobId, printer.Name, printerScore?.TotalScore ?? 0);
 
         string postAssignmentEtag = Convert.ToBase64String(job.RowVersion ?? []);
+        if (filamentOverride is not null)
+        {
+            byte[] postAssignmentDispatchVersion =
+                reviewedDispatchState?.RowVersion ??
+                expectedDispatchStateRowVersion ??
+                [];
+            return await printJobManagement.DispatchJobWithFilamentOverrideAsync(
+                jobId.ToString(),
+                userId,
+                postAssignmentEtag,
+                postAssignmentDispatchVersion,
+                filamentOverride,
+                ct);
+        }
+
         return await printJobManagement.DispatchJobAsync(
             jobId.ToString(),
             userId,

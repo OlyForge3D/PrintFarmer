@@ -266,7 +266,8 @@ public class AutoDispatchService(
     IWebhookService? webhookService = null,
     Queue.Dispatch.IAutoDispatchTrigger? dispatchTrigger = null,
     IDispatchScorer? dispatchScorer = null,
-    IFilamentCoverageBroadcaster? coverageBroadcaster = null) : IAutoDispatchService
+    IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IJobDispatchService? jobDispatchService = null) : IAutoDispatchService
 {
     private const string ReadyGateLogPrefix = "[AutoDispatchReadyGate]";
     private const string AutoDispatchStateChangedEventName = "autodispatchstatechanged";
@@ -326,7 +327,7 @@ public class AutoDispatchService(
             return;
         }
 
-        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
 
         if (queuedJobs.QueueDepth == 0)
         {
@@ -341,6 +342,30 @@ public class AutoDispatchService(
         // If bed was pre-confirmed, skip PendingReady and go straight to Ready
         if (printer.DispatchState?.BedPreConfirmed == true)
         {
+            FilamentCheckResult filamentCheck =
+                await CheckFilamentAsync(printer, queuedJobs.NextJob!, ct);
+            if (filamentCheck.Outcome != FilamentCheckOutcome.Compatible)
+            {
+                logger.LogWarning(
+                    ReadyGateLogPrefix + " Pre-cleared printer {PrinterId} requires explicit filament confirmation for job {JobId}: {Outcome}: {FilamentCheckMessage}",
+                    printerId,
+                    queuedJobs.NextJob!.Id,
+                    filamentCheck.Outcome,
+                    filamentCheck.Message);
+                PrinterDispatchState blockedState = EnsureDispatchState(printer);
+                blockedState.AutoDispatchState = AutoDispatchState.PendingReady;
+                blockedState.BedPreConfirmed = false;
+                await db.SaveChangesAsync(ct);
+
+                AutoDispatchStatusDto blockedStatus = await BuildStatusDtoAsync(printer, ct);
+                await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+                    .SendAsync(AutoDispatchStateChangedEventName, blockedStatus, ct);
+                webhookService?.Enqueue(
+                    AutoDispatchPendingWebhookEventName,
+                    new { printerId, printerName = printer.Name });
+                return;
+            }
+
             logger.LogInformation(
                 ReadyGateLogPrefix + " Printer {PrinterId} ({Name}) bed was pre-confirmed — skipping PendingReady, going straight to Ready",
                 printerId, printer.Name);
@@ -487,8 +512,10 @@ public class AutoDispatchService(
              nextJob.RowVersion is null ||
              !expectedOverrideJobVersion.SequenceEqual(nextJob.RowVersion)))
         {
-            throw new DbUpdateConcurrencyException(
-                "The reviewed queue head changed before the filament override was confirmed.");
+            throw new QueueRevisionConflictException(
+                "The reviewed queue head changed before the filament override was confirmed.",
+                nextJob.RowVersion,
+                printer.DispatchState?.RowVersion);
         }
 
         // Perform filament pre-flight check
@@ -534,6 +561,12 @@ public class AutoDispatchService(
 
         if (filamentOverrideRequired)
         {
+            if (jobDispatchService is null || expectedOverrideJobVersion is null)
+            {
+                throw new InvalidOperationException(
+                    "Exact-job filament override dispatch is unavailable.");
+            }
+
             logger.LogWarning(
                 ReadyGateLogPrefix + " Operator {ActorSubject} explicitly overrode {Outcome} filament check for printer {PrinterId}, job {JobId}: {FilamentCheckMessage}",
                 actorSubject,
@@ -541,6 +574,45 @@ public class AutoDispatchService(
                 printerId,
                 nextJob.Id,
                 filamentCheck.Message);
+
+            var authorization = new FilamentOverrideAuthorization(
+                filamentCheck.Outcome.ToString(),
+                filamentCheck.Message ?? "Filament compatibility could not be verified.",
+                filamentCheck.LoadedMaterial,
+                filamentCheck.RequiredMaterial,
+                filamentCheck.RemainingWeightG,
+                filamentCheck.RequiredWeightG);
+            byte[] reviewedDispatchStateVersion = expectedDispatchStateVersion ??
+                throw new InvalidOperationException(
+                    "The reviewed dispatch-state revision is required for a filament override.");
+            var dispatched = await jobDispatchService.DispatchJobWithFilamentOverrideAsync(
+                nextJob.Id,
+                printerId,
+                actorSubject,
+                Convert.ToBase64String(expectedOverrideJobVersion),
+                reviewedDispatchStateVersion,
+                authorization,
+                ct);
+            if (dispatched.DispatchResult?.Outcome != DispatchAttemptOutcome.Accepted)
+            {
+                string outcome =
+                    dispatched.DispatchResult?.Outcome.ToString() ?? "Unavailable";
+                throw new InvalidOperationException(
+                    $"The filament override dispatch was not accepted by the printer (outcome: {outcome}).");
+            }
+
+            AutoDispatchStatusDto dispatchedStatus = await BuildStatusDtoAsync(printer, ct);
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+                .SendAsync(AutoDispatchStateChangedEventName, dispatchedStatus, ct);
+
+            return new AutoDispatchReadyResult
+            {
+                Status = dispatchedStatus,
+                NextJob = nextJobDto,
+                FilamentCheck = filamentCheck,
+                DispatchInitiated = true,
+                FilamentOverrideApplied = true,
+            };
         }
 
         // Transition to Ready state
@@ -741,7 +813,7 @@ public class AutoDispatchService(
                 $"Cannot pre-clear the bed while a job occupies printer {printer.Name}");
         }
 
-        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: false, ct);
+        QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printerId, includeGcodeFile: true, ct);
         if (queuedJobs.NextJob?.JobKind == JobKind.FilamentCalibration)
         {
             throw new InvalidOperationException(
@@ -749,28 +821,48 @@ public class AutoDispatchService(
         }
 
         PrinterDispatchState preClearState = EnsureDispatchState(printer);
-        preClearState.BedPreConfirmed = true;
+        FilamentCheckResult? queuedFilamentCheck = queuedJobs.NextJob is null
+            ? null
+            : await CheckFilamentAsync(printer, queuedJobs.NextJob, ct);
+        bool requiresFilamentConfirmation =
+            queuedFilamentCheck is not null &&
+            queuedFilamentCheck.Outcome != FilamentCheckOutcome.Compatible;
+
+        preClearState.BedPreConfirmed = !requiresFilamentConfirmation;
+        if (requiresFilamentConfirmation)
+        {
+            preClearState.AutoDispatchState = AutoDispatchState.PendingReady;
+            logger.LogWarning(
+                ReadyGateLogPrefix + " Bed pre-clear for printer {PrinterId} stopped at the filament gate for job {JobId}: {Outcome}: {FilamentCheckMessage}",
+                printerId,
+                queuedJobs.NextJob!.Id,
+                queuedFilamentCheck!.Outcome,
+                queuedFilamentCheck.Message);
+        }
 
         // Pre-clearing the bed is a SAFETY OVERRIDE: it lets the next job dispatch without
         // the per-job bed-clear acknowledgement. It must be durably audited in the SAME
         // transaction as the flag it sets (issue #900, defect 13).
-        _ = QueueAuditWriter.Add(
-            db,
-            actorSubject,
-            QueueAuditOperations.SafetyOverride,
-            QueueAuditOutcomes.Success,
-            nameof(Printer),
-            resourceId: printerId,
-            printerId: printerId,
-            reasonCode: "bed_pre_confirmed",
-            dispatchStateRowVersion: preClearState.RowVersion,
-            detail: new { queueDepth = queuedJobs.QueueDepth });
+        if (!requiresFilamentConfirmation)
+        {
+            _ = QueueAuditWriter.Add(
+                db,
+                actorSubject,
+                QueueAuditOperations.SafetyOverride,
+                QueueAuditOutcomes.Success,
+                nameof(Printer),
+                resourceId: printerId,
+                printerId: printerId,
+                reasonCode: "bed_pre_confirmed",
+                dispatchStateRowVersion: preClearState.RowVersion,
+                detail: new { queueDepth = queuedJobs.QueueDepth });
+        }
 
         await db.SaveChangesAsync(ct);
 
         logger.LogInformation(ReadyGateLogPrefix + " Bed pre-clear confirmed for printer {PrinterId} ({Name})", printerId, printer.Name);
 
-        if (queuedJobs.QueueDepth > 0)
+        if (queuedJobs.QueueDepth > 0 && !requiresFilamentConfirmation)
         {
             // A pre-cleared idle printer just became eligible for immediate dispatch.
             dispatchTrigger?.NotifyJobQueued(printerId);
@@ -1251,13 +1343,13 @@ public class AutoDispatchService(
             unassignedQuery = unassignedQuery.Include(j => j.GcodeFile);
         }
 
-        List<PrintJob> assignedJobs = await assignedQuery.ToListAsync(ct);
-        PrintJob? nextJob = assignedJobs.FirstOrDefault();
-        int queueDepth = assignedJobs.Count;
+        List<PrintJob> eligibleJobs = await assignedQuery.ToListAsync(ct);
 
         if (dispatchScorer is null)
         {
-            return new QueuedJobSelection(nextJob, queueDepth);
+            return new QueuedJobSelection(
+                eligibleJobs.OrderByPriorityDescending().FirstOrDefault(),
+                eligibleJobs.Count);
         }
 
         DispatchSettings? settings = await db.DispatchSettings.AsNoTracking().FirstOrDefaultAsync(ct);
@@ -1273,11 +1365,12 @@ public class AutoDispatchService(
                 continue;
             }
 
-            queueDepth++;
-            nextJob ??= job;
+            eligibleJobs.Add(job);
         }
 
-        return new QueuedJobSelection(nextJob, queueDepth);
+        return new QueuedJobSelection(
+            eligibleJobs.OrderByPriorityDescending().FirstOrDefault(),
+            eligibleJobs.Count);
     }
 
     private async Task<FilamentCheckResult> CheckFilamentAsync(Printer printer, PrintJob nextJob, CancellationToken ct)

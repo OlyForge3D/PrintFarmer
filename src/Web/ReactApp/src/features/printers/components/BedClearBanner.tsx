@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
 import { CheckCircleIcon, SkipForwardIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
-import { useConfirmBedClear, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
+import { useAutoDispatchReadyFlow, useSkipNextJob, useCancelAutoDispatch } from '@/features/printers/hooks/useAutoDispatch';
 import { queryKeys } from '@/common/hooks/useApi';
 import { requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { toast } from 'sonner';
@@ -23,14 +23,8 @@ export function BedClearBanner({
   printerState,
 }: BedClearBannerProps) {
   const queryClient = useQueryClient();
-  const confirmBedClear = useConfirmBedClear();
   const skipNextJob = useSkipNextJob();
   const cancelAutoDispatch = useCancelAutoDispatch();
-  const [overrideResult, setOverrideResult] = useState<AutoDispatchReadyResult | null>(null);
-
-  if (!requiresBedClearConfirmation(autoDispatchStatus, printerState)) return null;
-
-  const isAnyPending = confirmBedClear.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
   const applyOptimisticUpdate = (result: AutoDispatchReadyResult) => {
     if (!result.nextJob) return;
@@ -44,74 +38,25 @@ export function BedClearBanner({
       old ? optimisticUpdate(old) : undefined,
     );
   };
+  const readyFlow = useAutoDispatchReadyFlow(applyOptimisticUpdate);
 
-  const handleReadyResult = (result: AutoDispatchReadyResult) => {
-    if (!result.nextJob) {
-      toast.success(`Bed clear confirmed for ${printerName} — no jobs queued`);
-      return;
-    }
+  if (!requiresBedClearConfirmation(autoDispatchStatus, printerState)) return null;
 
-    const dispatchInitiated =
-      result.dispatchInitiated ?? result.status.state === 'Ready';
-    if (result.requiresFilamentOverride && !dispatchInitiated) {
-      setOverrideResult(result);
-      return;
-    }
-
-    if (!dispatchInitiated) {
-      toast.warning(
-        `Job was not dispatched: ${
-          result.filamentCheck?.message ?? 'the server did not initiate dispatch'
-        }`,
-        { duration: 8000 },
-      );
-      return;
-    }
-
-    setOverrideResult(null);
-    toast.success(
-      result.filamentOverrideApplied
-        ? `Dispatching "${result.nextJob.name}" to ${printerName} (filament override confirmed)`
-        : `Dispatching "${result.nextJob.name}" to ${printerName}`
-    );
-    applyOptimisticUpdate(result);
-  };
+  const isAnyPending = readyFlow.confirmation.isPending || skipNextJob.isPending || cancelAutoDispatch.isPending;
 
   const handleConfirm = async () => {
     try {
-      const confirmation = await confirmBedClear.mutateAsync(autoDispatchStatus);
-      if (confirmation.kind === 'calibration') {
-        const result = confirmation.result;
-        const jobName = autoDispatchStatus.nextJobName ?? 'Calibration job';
-        toast.success(
-          result.kind === 'accepted'
-            ? `Dispatching "${jobName}" to ${printerName}`
-            : `Calibration dispatch for "${jobName}" was already accepted`
-        );
-        return;
-      }
-
-      handleReadyResult(confirmation.result);
+      await readyFlow.confirmReady(autoDispatchStatus, printerName);
     } catch {
-      toast.error('Failed to confirm bed clear');
+      // The mutation's onError handler displays the typed server failure.
     }
   };
 
   const handleFilamentOverride = async () => {
     try {
-      const confirmation = await confirmBedClear.mutateAsync({
-        status: autoDispatchStatus,
-        confirmFilamentOverride: true,
-        overrideJobETag:
-          overrideResult?.nextJob?.jobETag ??
-          autoDispatchStatus.nextJobETag ??
-          '',
-      });
-      if (confirmation.kind === 'standard') {
-        handleReadyResult(confirmation.result);
-      }
+      await readyFlow.confirmFilamentOverride();
     } catch {
-      toast.error('Failed to confirm filament override');
+      // The mutation's onError handler displays the typed server failure.
     }
   };
 
@@ -153,7 +98,7 @@ export function BedClearBanner({
             variant="success"
             size="sm"
             onClick={handleConfirm}
-            loading={confirmBedClear.isPending}
+            loading={readyFlow.confirmation.isPending}
             disabled={isAnyPending}
             iconCenter={<CheckCircleIcon className="h-4 w-4" />}
             aria-label={`Confirm bed clear for ${printerName}`}
@@ -186,10 +131,10 @@ export function BedClearBanner({
       </div>
 
       <FilamentOverrideModal
-        isOpen={overrideResult !== null}
-        filamentCheck={overrideResult?.filamentCheck ?? null}
-        isPending={confirmBedClear.isPending}
-        onCancel={() => setOverrideResult(null)}
+        isOpen={readyFlow.challenge !== null}
+        filamentCheck={readyFlow.challenge?.result.filamentCheck ?? null}
+        isPending={readyFlow.confirmation.isPending}
+        onCancel={readyFlow.cancelFilamentOverride}
         onConfirm={handleFilamentOverride}
       />
     </>

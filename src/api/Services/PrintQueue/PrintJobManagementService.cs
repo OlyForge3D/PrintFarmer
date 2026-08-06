@@ -1093,7 +1093,38 @@ public class PrintJobManagementService(
         string jobId,
         string userId,
         string? ifMatchJobRowVersion,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion: null,
+            filamentOverride: null,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
+        CancellationToken cancellationToken = default) =>
+        await DispatchJobCoreAsync(
+            jobId,
+            userId,
+            ifMatchJobRowVersion,
+            expectedDispatchStateRowVersion,
+            filamentOverride,
+            cancellationToken);
+
+    private async Task<QueuedPrintJobDto> DispatchJobCoreAsync(
+        string jobId,
+        string userId,
+        string? ifMatchJobRowVersion,
+        byte[]? expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization? filamentOverride,
+        CancellationToken cancellationToken)
     {
         PrintJob? dispatchJob = null;
         QueueDispatchAttempt? dispatchAttempt = null;
@@ -1180,10 +1211,11 @@ public class PrintJobManagementService(
                     Guid.Parse(jobId),
                     job.AssignedPrinterId.Value,
                     userId,
-                    "Manual",
+                    filamentOverride is null ? "Manual" : "FilamentOverride",
                     null,
                     expectedJobRowVersion,
-                    null),
+                    expectedDispatchStateRowVersion,
+                    filamentOverride),
                 cancellationToken);
 
             if (!claimResult.Success || claimResult.Attempt is null)

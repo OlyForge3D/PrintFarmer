@@ -185,6 +185,64 @@ public sealed class JobDispatchServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DispatchJobWithFilamentOverrideAsync_AssignsAndDispatchesOnlyReviewedJob()
+    {
+        var dispatchState = new PrinterDispatchState
+        {
+            PrinterId = _printerId,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        _db.PrinterDispatchStates.Add(dispatchState);
+        await _db.SaveChangesAsync();
+        PrintJob reviewedJob = await _db.PrintJobs.SingleAsync(job => job.Id == _jobId);
+        string reviewedJobEtag = Convert.ToBase64String(reviewedJob.RowVersion ?? []);
+        byte[] reviewedDispatchVersion = dispatchState.RowVersion?.ToArray() ?? [];
+        var authorization = new FilamentOverrideAuthorization(
+            "Incompatible",
+            "Material mismatch: loaded PLA, job requires PETG",
+            "PLA",
+            "PETG",
+            500,
+            100);
+
+        Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
+        management
+            .Setup(service => service.DispatchJobWithFilamentOverrideAsync(
+                _jobId.ToString(),
+                "operator",
+                It.IsAny<string>(),
+                It.Is<byte[]>(version => version.Length > 0),
+                authorization,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new QueuedPrintJobDto
+            {
+                Id = _jobId.ToString(),
+                AssignedPrinterId = _printerId.ToString(),
+                Status = nameof(PrintJobStatus.Printing),
+            });
+        Mock<IFilamentCoverageBroadcaster> broadcaster = Broadcaster();
+        JobDispatchService service = CreateService(
+            management,
+            broadcaster,
+            SpoolmanWithFilament(73));
+
+        QueuedPrintJobDto result =
+            await service.DispatchJobWithFilamentOverrideAsync(
+                _jobId,
+                _printerId,
+                "operator",
+                reviewedJobEtag,
+                reviewedDispatchVersion,
+                authorization);
+
+        result.Status.Should().Be(nameof(PrintJobStatus.Printing));
+        _db.ChangeTracker.Clear();
+        (await _db.PrintJobs.SingleAsync(job => job.Id == _jobId))
+            .AssignedPrinterId.Should().Be(_printerId);
+        management.VerifyAll();
+    }
+
+    [Fact]
     public async Task DispatchJobAsync_EliminatedPrinter_DoesNotBroadcastOrPersistAssignment()
     {
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);

@@ -605,7 +605,7 @@ describe('BedClearBanner', () => {
     );
     fireEvent.click(screen.getByLabelText('Confirm bed clear for MK4'));
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith('Failed to confirm bed clear');
+      expect(toast.error).toHaveBeenCalledWith('Network error');
     });
   });
 

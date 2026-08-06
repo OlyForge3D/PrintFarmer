@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Services.Queue.Dispatch;
 
 namespace Farm.Infrastructure.Services.Interfaces;
 
@@ -191,6 +192,17 @@ public interface IPrintJobManagementService
         string jobId,
         string userId,
         string? ifMatchJobRowVersion,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Dispatches an exact reviewed job with an explicit one-use filament override.
+    /// </summary>
+    Task<QueuedPrintJobDto> DispatchJobWithFilamentOverrideAsync(
+        string jobId,
+        string userId,
+        string ifMatchJobRowVersion,
+        byte[] expectedDispatchStateRowVersion,
+        FilamentOverrideAuthorization filamentOverride,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -316,7 +316,7 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task MarkPreClearAsync_WhenQueuedJobExists_PopulatesReadyAttentionMessage()
+    public async Task MarkPreClearAsync_WhenQueuedJobFilamentIsUnknown_PopulatesPendingAttentionMessage()
     {
         Printer printer = await CreatePrinterAsync();
         await CreateQueuedJobAsync(printer, "queued-job-1", queuePosition: 1);
@@ -331,8 +331,12 @@ public sealed class AutoDispatchReadyGateServiceTests : IDisposable
 
         AutoDispatchStatusDto status = await service.MarkPreClearAsync(printer.Id);
 
-        status.BedPreConfirmed.Should().BeTrue();
-        status.AttentionMessage.Should().Be("Bed is clear. The next queued job will start automatically.");
+        status.BedPreConfirmed.Should().BeFalse();
+        status.State.Should().Be(nameof(AutoDispatchState.PendingReady));
+        status.AttentionMessage.Should().Contain("blocked until you clear the bed and confirm ready");
+        dispatchTrigger.Verify(
+            trigger => trigger.NotifyJobQueued(It.IsAny<Guid>()),
+            Times.Never);
     }
 
     [Fact]

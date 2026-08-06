@@ -156,6 +156,75 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
+    public async Task StartPath_FilamentOverride_ClaimsExactMismatchAndWritesDurableAudit()
+    {
+        Fixture fixture;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedStandardJobAsync(seed);
+            PrintJob job = await seed.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId);
+            job.RequiredMaterialType = "PETG";
+            Printer printer = await seed.Printers.SingleAsync(
+                candidate => candidate.Id == fixture.PrinterId);
+            printer.CurrentMaterial = "PLA";
+            await seed.SaveChangesAsync();
+        }
+
+        await using (AppDbContext deniedContext = CreateContext())
+        {
+            DispatchClaimResult denied = await CreateClaim(
+                    deniedContext,
+                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                .AcquireClaimAsync(new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "Manual",
+                    null,
+                    null,
+                    null));
+            denied.Success.Should().BeFalse();
+            denied.ErrorCode.Should().Be("filament_material_mismatch");
+        }
+
+        var authorization = new FilamentOverrideAuthorization(
+            "Incompatible",
+            "Material mismatch: loaded PLA, job requires PETG",
+            "PLA",
+            "PETG",
+            500,
+            100);
+        await using (AppDbContext claimContext = CreateContext())
+        {
+            DispatchClaimResult accepted = await CreateClaim(
+                    claimContext,
+                    DispatchTestDoubles.OnlineIdleReader(fixture.PrinterId))
+                .AcquireClaimAsync(new DispatchClaimRequest(
+                    fixture.JobId,
+                    fixture.PrinterId,
+                    "operator-1",
+                    "FilamentOverride",
+                    null,
+                    null,
+                    null,
+                    authorization));
+            accepted.Success.Should().BeTrue(accepted.ErrorDetail);
+        }
+
+        await using AppDbContext verify = CreateContext();
+        (await verify.PrintJobs.SingleAsync(candidate => candidate.Id == fixture.JobId))
+            .Status.Should().Be(PrintJobStatus.Starting);
+        QueueOperationAudit audit = await verify.QueueOperationAudits.SingleAsync(
+            candidate =>
+                candidate.PrintJobId == fixture.JobId &&
+                candidate.Operation == QueueAuditOperations.SafetyOverride);
+        audit.ActorSubject.Should().Be("operator-1");
+        audit.ReasonCode.Should().Be("filament_override");
+        audit.DetailJson.Should().Contain("Material mismatch: loaded PLA, job requires PETG");
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
     public async Task StartPath_AdHocClaim_BlocksASecondConcurrentStartOnTheSamePrinter()
     {
         await using AppDbContext seed = CreateContext();

@@ -320,7 +320,7 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Ready_AfterPreClear_CurrentRouteSucceedsAndClearsPreConfirmedFlag()
+    public async Task PreClear_WithUnknownFilament_StopsAtPendingReady()
     {
         Printer printer = await CreateTestPrinterAsync(autoDispatchEnabled: true);
         await CreateQueuedJobAsync(printer.Id, "queued-job-1", queuePosition: 1);
@@ -336,20 +336,8 @@ public class AutoDispatchPreClearTests : IAsyncLifetime
 
         AutoDispatchStatusDto? statusBeforeReady = await statusResponse.Content.ReadFromJsonAsync<AutoDispatchStatusDto>(JsonOptions);
         statusBeforeReady.Should().NotBeNull();
-        statusBeforeReady!.State.Should().Be("None");
-        statusBeforeReady.BedPreConfirmed.Should().BeTrue();
-
-        HttpResponseMessage readyResponse = await PostWithDispatchEtagAsync(
-            printer.Id,
-            "ready?confirmFilamentOverride=true");
-        readyResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        AutoDispatchReadyResult? readyResult = await readyResponse.Content.ReadFromJsonAsync<AutoDispatchReadyResult>(JsonOptions);
-        readyResult.Should().NotBeNull();
-        readyResult!.Status.State.Should().Be("Ready");
-        readyResult.Status.BedPreConfirmed.Should().BeFalse();
-        readyResult.NextJob.Should().NotBeNull();
-        readyResult.FilamentOverrideApplied.Should().BeTrue();
+        statusBeforeReady!.State.Should().Be("PendingReady");
+        statusBeforeReady.BedPreConfirmed.Should().BeFalse();
     }
 
     private async Task CreateQueuedJobAsync(Guid printerId, string name, int queuePosition)

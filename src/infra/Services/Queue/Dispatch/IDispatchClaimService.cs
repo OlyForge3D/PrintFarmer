@@ -76,6 +76,9 @@ public sealed record DispatchClaimResult(
 /// <param name="ExpectedDispatchStateRowVersion">
 /// ETag / RowVersion for optimistic concurrency on the printer dispatch state.
 /// </param>
+/// <param name="FilamentOverride">
+/// Exact-job operator authorization to bypass only the filament gate, or null.
+/// </param>
 public sealed record DispatchClaimRequest(
     Guid JobId,
     Guid PrinterId,
@@ -83,7 +86,21 @@ public sealed record DispatchClaimRequest(
     string StartPathKind,
     string? AcknowledgementIdempotencyKey,
     byte[]? ExpectedJobRowVersion,
-    byte[]? ExpectedDispatchStateRowVersion);
+    byte[]? ExpectedDispatchStateRowVersion,
+    FilamentOverrideAuthorization? FilamentOverride = null);
+
+/// <summary>
+/// Exact-job authorization to bypass only the filament safety gate during an operator-confirmed
+/// dispatch. The authorization is consumed by the claim transaction and is never persisted as
+/// reusable printer-level state.
+/// </summary>
+public sealed record FilamentOverrideAuthorization(
+    string Outcome,
+    string Reason,
+    string? LoadedMaterial,
+    string? RequiredMaterial,
+    double? RemainingWeightG,
+    double? RequiredWeightG);
 
 /// <summary>
 /// Parameters for an ad-hoc (non-queue) printer start, such as the slice→print bridge or
