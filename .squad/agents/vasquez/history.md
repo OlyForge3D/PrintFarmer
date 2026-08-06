@@ -91,3 +91,10 @@ Participated in multi-round trio review cycle. Key learnings:
   - **Positive**: Verified every claim directly with pasted command output, wrote no files, and correctly applied the proportionality finding he himself raised. This breaks a prior three-strike unverified-assertion pattern.
   - **Residual Finding**: Asserted it was "mathematically impossible" for a comment-only diff to break gates and that gates could be trusted "implicitly". While directionally fine, this was still a reach past the evidence.
   - **Process Lesson**: A 3-cycle gate on a 4-line comment held up because each rejection caught a genuinely false technical claim, one of which originated with the panel itself (Bishop's ~562ms/~32ms figure). Panels must treat their own measurements as unverified evidence.
+
+### 2026-08-05 — Issue #1102 review gate (REJECT)
+
+- **Verdict:** ❌ REJECT.
+- **Key finding:** A11y review held the line on selected-pill contrast; hover repaint behavior also needs correction.
+- **Process note:** Two earlier overreach claims were withdrawn and should not be re-raised.
+
