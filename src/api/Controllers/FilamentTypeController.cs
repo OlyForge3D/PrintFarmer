@@ -44,7 +44,6 @@ public class FilamentTypeController(
     /// <returns>List of filament types, optionally paged</returns>
     /// <response code="200">Returns the list of filament types</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<FilamentTypeDto>), 200)]
     [ProducesResponseType(typeof(PagedResult<FilamentTypeDto>), 200)]
@@ -92,7 +91,6 @@ public class FilamentTypeController(
     /// <returns>Dictionary of filament type names to temperature targets</returns>
     /// <response code="200">Returns the filament presets dictionary</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpGet("presets")]
     [ProducesResponseType(typeof(FilamentPresetsDto), 200)]
     [ProducesResponseType(503)]
@@ -341,7 +339,6 @@ public class FilamentTypeController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of SpoolmanDB filament entries</returns>
     /// <response code="200">Returns all SpoolmanDB filaments</response>
-    [AllowAnonymous]
     [HttpGet("spoolmandb/filaments")]
     [ProducesResponseType(typeof(IEnumerable<SpoolmanDbFilamentEntry>), 200)]
     public async Task<ActionResult<IEnumerable<SpoolmanDbFilamentEntry>>> GetSpoolmanDbFilamentsAsync(CancellationToken ct)
@@ -364,7 +361,6 @@ public class FilamentTypeController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of SpoolmanDB material entries</returns>
     /// <response code="200">Returns all SpoolmanDB materials</response>
-    [AllowAnonymous]
     [HttpGet("spoolmandb/materials")]
     [ProducesResponseType(typeof(IEnumerable<SpoolmanDbMaterialEntry>), 200)]
     public async Task<ActionResult<IEnumerable<SpoolmanDbMaterialEntry>>> GetSpoolmanDbMaterialsAsync(CancellationToken ct)

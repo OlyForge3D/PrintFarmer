@@ -16,6 +16,7 @@ using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Telemetry;
 using Farm.Slicer.Integration;
 using Farm.Web.Api;
+using Farm.Web.Api.Authorization;
 using Farm.Web.Api.Health;
 using Farm.Web.Api.Hubs;
 using Farm.Web.Api.Infrastructure;
@@ -346,6 +347,23 @@ catch (Exception ex)
     throw;
 }
 
+bool devModeBypassRequested = app.Configuration.GetValue<bool>(DevModeAuthorizationHandler.ConfigurationKey);
+if (devModeBypassRequested && app.Environment.IsDevelopment())
+{
+    app.Logger.LogWarning(
+        "Development-mode authorization bypass is ENABLED. Unauthenticated safe-method requests will bypass authorization.");
+}
+else if (devModeBypassRequested)
+{
+    app.Logger.LogWarning(
+        "Development-mode authorization bypass was requested but is disabled outside Development. Current environment: {EnvironmentName}.",
+        app.Environment.EnvironmentName);
+}
+else
+{
+    app.Logger.LogInformation("Development-mode authorization bypass is disabled.");
+}
+
 // Populate previously-deferred startup captures using the built application service provider.
 // Use CreateAsyncScope to resolve scoped/singleton services safely without calling BuildServiceProvider on the service collection.
 try
@@ -394,7 +412,7 @@ if (slicerModuleEnabled)
 // during database initialization in ProgramHelpers.InitializeDatabaseAsync
 // to ensure the database schema exists before any SettingsService queries run.
 
-// Early liveness endpoint (process up) + readiness separate
+// Public because orchestrator liveness probes cannot obtain application credentials.
 app.MapGet("/livez", () => Results.Ok(new { status = "alive" }))
     .AllowAnonymous();
 
@@ -452,7 +470,7 @@ app.UseTelemetryMiddleware();
 
 if (app.Environment.IsDevelopment())
 {
-    _ = app.MapOpenApi().AllowAnonymous();
+    _ = app.MapOpenApi().AllowAnonymous(); // Public only in Development for pre-login API tooling.
 }
 
 // Native ASP.NET Core OpenAPI automatically exposes at /openapi/v1.json
@@ -507,10 +525,12 @@ app.UseAuthorization();
 // Configure API routing and SignalR hubs
 app.MapControllers();
 
-// Public farm hubs require authenticated clients; NFC retains its existing anonymous contract.
+// Public farm hubs require authenticated clients.
 app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
+
+// Public because unprovisioned NFC firmware connects before an admin approves the device.
 app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
@@ -566,7 +586,7 @@ try
 {
     if (app.Services.GetService<MeterProvider>() != null)
     {
-        _ = app.MapPrometheusScrapingEndpoint().AllowAnonymous();
+        _ = app.MapPrometheusScrapingEndpoint().AllowAnonymous(); // Public for network-policy-authenticated collectors.
     }
 }
 catch
@@ -581,6 +601,8 @@ IHostEnvironment _programHostEnvironment = app.Environment;
 
 // Resolve IStartupStatus once from the root provider (it's a singleton-like service used for diagnostics)
 IStartupStatus? _startupStatus = _capturedStartupStatus ?? app.Services.GetService<IStartupStatus>();
+
+// Public because Docker and orchestrator health checks cannot obtain application credentials.
 app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
@@ -589,7 +611,7 @@ app.MapHealthChecks("/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks
     }
 }).AllowAnonymous();
 
-// Alias route for clients expecting the comprehensive health endpoint under /api prefix
+// Public for compatibility with health-check clients that use the /api-prefixed route.
 app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     ResponseWriter = async (context, report) =>
@@ -636,11 +658,11 @@ app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "Re
     return Results.Ok(current);
 });
 
-// Basic health endpoint for UI ping and tests
+// Public because login screens and basic uptime probes use this endpoint before authentication.
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }))
     .AllowAnonymous();
 
-// Build version endpoint (uses /api/system/version to avoid conflict with OctoPrint-compat /api/version)
+// Public because login and update clients need build compatibility metadata before authentication.
 app.MapGet("/api/system/version", () =>
 {
     (string version, string? commit) = Farm.Web.Api.Health.BuildVersion.FromAssembly();
@@ -759,7 +781,7 @@ if (isMonolithMode)
     string staticRoot = app.Environment.WebRootPath;
     if (!string.IsNullOrWhiteSpace(staticRoot) && Directory.Exists(staticRoot))
     {
-        _ = app.MapFallbackToFile("index.html").AllowAnonymous();
+        _ = app.MapFallbackToFile("index.html").AllowAnonymous(); // Public to serve the login and setup shell.
     }
 }
 

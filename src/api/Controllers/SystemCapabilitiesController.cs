@@ -11,11 +11,9 @@ namespace Farm.Web.Api.Controllers;
 
 /// <summary>
 /// Exposes platform capabilities for ARM/Raspberry Pi graceful degradation.
-/// Unauthenticated so the frontend can gate UI before login.
 /// </summary>
 [ApiController]
 [Route("api/system")]
-[AllowAnonymous]
 public class SystemCapabilitiesController(
     ICalibrationCapabilityService capabilityService,
     IFeatureFlagService featureFlagService,
@@ -31,6 +29,7 @@ public class SystemCapabilitiesController(
     /// </summary>
     /// <returns>Platform capabilities for the running host.</returns>
     [HttpGet("capabilities")]
+    [AllowAnonymous] // Public because login and setup use these non-sensitive flags before authentication.
     [ProducesResponseType(typeof(PlatformCapabilitiesDto), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status426UpgradeRequired)]
     public async Task<ActionResult<PlatformCapabilitiesDto>> GetCapabilitiesAsync(

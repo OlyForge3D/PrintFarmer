@@ -11,7 +11,6 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/setup")]
-[AllowAnonymous] // First-run setup must be reachable before any user or admin account exists.
 public class SetupController(ISetupService setupService) : ControllerBase
 {
     private readonly ISetupService _setupService = setupService;
@@ -22,6 +21,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// </summary>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpGet("status")]
+    [AllowAnonymous] // Public because an unconfigured installation has no account that can authenticate yet.
     public async Task<ActionResult<object>> GetSetupStatusAsync(CancellationToken ct)
     {
         bool needsSetup = await _setupService.NeedsSetupAsync(ct);
@@ -35,6 +35,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// <param name="request">The request containing the initial admin user details.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpPost("initial-admin")]
+    [AllowAnonymous] // Public because this bootstrap action creates the installation's first authenticated account.
     public async Task<ActionResult<AuthenticationResult>> CreateInitialAdminAsync(
         [FromBody] CreateInitialAdminRequest request,
         CancellationToken ct)
@@ -62,6 +63,7 @@ public class SetupController(ISetupService setupService) : ControllerBase
     /// Gets available configuration options for setup.
     /// </summary>
     [HttpGet("config-options")]
+    [AllowAnonymous] // Public because the setup client needs installation options before the first account exists.
     public ActionResult<object> GetConfigurationOptions()
     {
         SetupConfigurationOptions options = _setupService.GetConfigurationOptions();

@@ -14,8 +14,6 @@ namespace Farm.Slicer.Module.Api.Controllers;
 [ApiController]
 [Route("api/slicers")]
 
-// Slicer workers authenticate through the slicer API-key filters, not PrintFarmer bearer tokens.
-[AllowAnonymous]
 [System.Diagnostics.CodeAnalysis.SuppressMessage(
     "SonarAnalyzer",
     "S6960:This controller has multiple responsibilities",
@@ -39,7 +37,6 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// is gated strictly by the Online set — offline services are honoured.
     /// </summary>
     [HttpGet("engines")]
-    [AllowAnonymous]
     public async Task<IActionResult> ListEnginesAsync()
     {
         IReadOnlyList<ISlicerLibrary> libraries = _registry.ListAllLibraries().ToList();
@@ -133,6 +130,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// </summary>
     [HttpGet]
     [RequireSlicerApiKey]
+    [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their slicer API key.
     public async Task<IActionResult> ListAsync()
     {
         IReadOnlyList<SlicerService> list = await _service.ListAsync(HttpContext.RequestAborted);
@@ -145,6 +143,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <param name="dto">Registration data.</param>
     [HttpPost("register")]
     [RequireSlicerApiKey]
+    [AllowAnonymous] // Public to JWT auth because new slicer hosts authenticate with the registration key.
     public async Task<IActionResult> RegisterAsync([FromBody] RegisterSlicerDto dto)
     {
         CancellationToken ct = HttpContext.RequestAborted;
@@ -159,6 +158,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <param name="id">The slicer service ID.</param>
     [HttpGet("{id}")]
     [RequireSlicerServiceApiKey]
+    [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their slicer API key.
     public async Task<IActionResult> GetAsync(Guid id)
     {
         SlicerService? svc = await _service.GetAsync(id, HttpContext.RequestAborted);
@@ -172,6 +172,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <param name="dto">Heartbeat data.</param>
     [HttpPost("{id}/heartbeat")]
     [RequireSlicerServiceApiKey]
+    [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their slicer API key.
     public async Task<IActionResult> HeartbeatAsync(Guid id, [FromBody] HeartbeatDto dto)
     {
         bool ok = await _service.HeartbeatAsync(id, dto, HttpContext.RequestAborted);
@@ -184,6 +185,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <param name="id">The slicer service ID.</param>
     [HttpPost("{id}/deregister")]
     [RequireSlicerServiceApiKey]
+    [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their slicer API key.
     public async Task<IActionResult> DeregisterAsync(Guid id)
     {
         bool ok = await _service.DeregisterAsync(id, HttpContext.RequestAborted);
@@ -196,6 +198,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
     /// <param name="id">The slicer service ID.</param>
     [HttpPost("{id}/rotate-key")]
     [RequireSlicerServiceApiKey]
+    [AllowAnonymous] // Public to JWT auth because slicer hosts authenticate with their current slicer API key.
     public async Task<IActionResult> RotateApiKeyAsync(Guid id)
     {
         string? newApiKey = await _service.RotateApiKeyAsync(id, HttpContext.RequestAborted);

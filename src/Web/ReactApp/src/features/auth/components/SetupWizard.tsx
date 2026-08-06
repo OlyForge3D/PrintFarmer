@@ -98,7 +98,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [globalError, setGlobalError] = useState<string | null>(null);
-  const { login } = useAuth();
+  const { isAuthenticated, login } = useAuth();
   const [step, setStep] = useState(0); // 0 Account, 1 Network, 2 Spoolman, 3 Summary
   const [adminCreated, setAdminCreated] = useState(false);
 
@@ -165,6 +165,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // Fetch Spoolman settings from backend on mount (pre-populate from deployment config)
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     apiClient.getSettings<import("@/types/SpoolmanSettings").SpoolmanSettings>('Spoolman')
       .then(settings => {
         if (settings?.baseUrl) {
@@ -175,7 +177,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       .catch(() => {
         // Silently fail - user can configure manually
       });
-  }, []);
+  }, [isAuthenticated]);
 
   // Network scanning for Spoolman discovery
   const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();
@@ -265,10 +267,45 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     if (!formData.lastName.trim()) errs.lastName = 'Required';
     return errs;
   };
-  const nextFromAccount = () => {
+  const ensureAdminAuthenticated = async () => {
+    if (isAuthenticated) return;
+
+    if (!adminCreated) {
+      const result = await apiClient.createInitialAdmin({
+        username: formData.username,
+        email: formData.email,
+        password: formData.password,
+        firstName: formData.firstName,
+        lastName: formData.lastName
+      });
+      const adminResult = result as { success?: boolean; token?: string; error?: string };
+      if (!(adminResult.success && adminResult.token)) {
+        throw new Error(adminResult.error || 'Admin creation failed');
+      }
+
+      setAdminCreated(true);
+    }
+
+    const loggedIn = await login({ username: formData.username, password: formData.password });
+    if (!loggedIn) {
+      throw new Error('Admin account was created, but automatic login failed');
+    }
+  };
+
+  const nextFromAccount = async () => {
     const errors = validateAccount();
     if (Object.keys(errors).length > 0) return;
-    setStep(1);
+
+    setSubmitting(true);
+    setGlobalError(null);
+    try {
+      await ensureAdminAuthenticated();
+      setStep(1);
+    } catch (error) {
+      setGlobalError(error instanceof Error ? error.message : 'Admin creation failed');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   // (all helpers now use networkDiscoverySettings)
@@ -309,7 +346,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         setSpoolmanTestResult('URL must start with http:// or https://');
         return;
       }
-      const data = (await apiClient.testSpoolmanConnection()) as unknown as { success?: boolean; version?: string; endpointTried?: string; errorCategory?: string; message?: string };
+      const data = (await apiClient.testSpoolmanConnection(normalized)) as unknown as { success?: boolean; version?: string; endpointTried?: string; errorCategory?: string; message?: string };
       if (data.success) {
         setSpoolmanTestOk(true);
         const parts: string[] = ['Reachable'];
@@ -373,19 +410,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setGlobalError(null);
     try {
       // 1. Ensure admin exists & login
-      if (!adminCreated) {
-        const result = await apiClient.createInitialAdmin({ 
-          username: formData.username, 
-          email: formData.email, 
-          password: formData.password, 
-          firstName: formData.firstName, 
-          lastName: formData.lastName 
-        });
-        const adminResult = result as unknown as { success?: boolean; token?: string; error?: string };
-        if (!(adminResult.success && adminResult.token)) throw new Error((adminResult.error as string) || 'Admin creation failed');
-        await login({ username: formData.username, password: formData.password });
-        setAdminCreated(true);
-      }
+      await ensureAdminAuthenticated();
 
       // 2. Save network settings
       if (!networkDiscoverySettings) return;
@@ -497,7 +522,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           variant="primary"
           iconLeft={<CheckCircleIcon className="h-4 w-4" />}
         >
-          Next
+          {submitting ? 'Creating Admin...' : 'Create Admin & Continue'}
         </Button>
       </div>
     </form>

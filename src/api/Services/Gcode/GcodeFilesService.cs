@@ -145,31 +145,11 @@ public class GcodeFilesService(
         List<GcodeFileEntryDto> entries = [];
         long totalSize = 0;
 
-        // Get storage directory once (same for all files)
-        string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
-        string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
-
         foreach (GcodeFile file in files)
         {
-            // Convert thumbnail path to API URL if available
-            string? thumbnailUrl = null;
-            if (!string.IsNullOrEmpty(file.ThumbnailFileName))
-            {
-                string thumbnailFullPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-                string normalizedThumbnailPath = Path.GetFullPath(thumbnailFullPath);
-
-                if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
-                {
-                    string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
-                        .TrimStart(Path.DirectorySeparatorChar, '/');
-                    relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
-                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
-                }
-                else
-                {
-                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
-                }
-            }
+            string? thumbnailUrl = string.IsNullOrEmpty(file.ThumbnailFileName)
+                ? null
+                : _fileOperations.BuildGcodeThumbnailUrl(file.Id);
 
             // Map tags from the eagerly-loaded Tags collection
             List<TagDto> tags = file.Tags
@@ -302,27 +282,9 @@ public class GcodeFilesService(
 
             string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
 
-            // Convert thumbnail path to API URL if available
-            string? thumbnailUrl = null;
-            if (!string.IsNullOrEmpty(file.ThumbnailFileName))
-            {
-                string thumbnailFullPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
-                string gcodeStorageDir = _storagePathService.GetGcodeStorageDirectory();
-                string normalizedStorageDir = Path.GetFullPath(gcodeStorageDir);
-                string normalizedThumbnailPath = Path.GetFullPath(thumbnailFullPath);
-
-                if (normalizedThumbnailPath.StartsWith(normalizedStorageDir, StringComparison.Ordinal))
-                {
-                    string relativePath = normalizedThumbnailPath.Substring(normalizedStorageDir.Length)
-                        .TrimStart(Path.DirectorySeparatorChar, '/');
-                    relativePath = relativePath.Replace(Path.DirectorySeparatorChar, '/');
-                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(relativePath)}";
-                }
-                else
-                {
-                    thumbnailUrl = $"/api/gcode-files/download?path={Uri.EscapeDataString(file.ThumbnailFileName)}";
-                }
-            }
+            string? thumbnailUrl = string.IsNullOrEmpty(file.ThumbnailFileName)
+                ? null
+                : _fileOperations.BuildGcodeThumbnailUrl(file.Id);
 
             // Map tags from the eagerly-loaded Tags skip-navigation collection
             List<TagDto> tags = file.Tags

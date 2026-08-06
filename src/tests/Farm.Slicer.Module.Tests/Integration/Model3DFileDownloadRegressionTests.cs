@@ -38,7 +38,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         await _factory.ResetDatabaseAsync();
-        _client = _factory.CreateClient();
+        _client = await _factory.CreateAuthenticatedClientAsync();
     }
 
     public Task DisposeAsync()

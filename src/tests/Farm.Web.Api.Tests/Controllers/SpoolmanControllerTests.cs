@@ -10,6 +10,7 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -54,6 +55,21 @@ public class SpoolmanControllerTests
                 },
             },
         };
+    }
+
+    [Theory]
+    [InlineData(nameof(SpoolmanController.TestAsync))]
+    [InlineData(nameof(SpoolmanController.ClearConfigAsync))]
+    [InlineData(nameof(SpoolmanController.ScanNetworkAsync))]
+    public void PrivilegedNetworkAndConfigurationActions_RequireAdmin(string methodName)
+    {
+        AuthorizeAttribute attribute = Assert.Single(
+            typeof(SpoolmanController)
+                .GetMethod(methodName)!
+                .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
+                .Cast<AuthorizeAttribute>());
+
+        Assert.Equal("RequireAdmin", attribute.Policy);
     }
 
     [Fact]

@@ -3,31 +3,31 @@
 namespace Farm.Web.Api.Authorization;
 
 /// <summary>
-/// Authorization handler that bypasses authentication for GET requests when DevModeBypassAuth is enabled.
+/// Authorization handler that bypasses authorization requirements for safe requests when DevModeBypassAuth is enabled.
 /// This allows easier debugging in development while maintaining full security in production.
 /// </summary>
 /// <remarks>
 /// Configuration:
 /// - Set Security:DevModeBypassAuth=true in appsettings.Development.json to enable
-/// - In production, this should ALWAYS be false (default)
+/// - The setting is ignored unless the host environment is Development
 ///
-/// Only GET requests are bypassed - all mutations (POST, PUT, DELETE, PATCH) still require auth.
+/// Only GET, HEAD, and OPTIONS requests are bypassed - all mutations still require authorization.
 /// </remarks>
 public class DevModeAuthorizationHandler : IAuthorizationHandler
 {
+    public const string ConfigurationKey = "Security:DevModeBypassAuth";
+
     private readonly bool _bypassEnabled;
     private readonly ILogger<DevModeAuthorizationHandler> _logger;
 
-    public DevModeAuthorizationHandler(IConfiguration configuration, ILogger<DevModeAuthorizationHandler> logger)
+    public DevModeAuthorizationHandler(
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        ILogger<DevModeAuthorizationHandler> logger)
     {
-        _bypassEnabled = configuration.GetValue<bool>("Security:DevModeBypassAuth", false);
+        _bypassEnabled = environment.IsDevelopment()
+            && configuration.GetValue<bool>(ConfigurationKey, false);
         _logger = logger;
-
-        if (_bypassEnabled)
-        {
-            _logger.LogWarning("⚠️  DevModeBypassAuth is ENABLED - GET requests will bypass authentication. " +
-                              "This should ONLY be used in development!");
-        }
     }
 
     public Task HandleAsync(AuthorizationHandlerContext context)

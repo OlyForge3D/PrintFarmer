@@ -247,7 +247,6 @@ public class CamerasController(
     /// <response code="200">Returns detection result; detected is false when unsupported or probing fails</response>
     /// <response code="404">If the printer is not found</response>
     /// <response code="503">If the system is still initializing</response>
-    [AllowAnonymous]
     [HttpPost("detect-endpoints")]
     [ProducesResponseType(typeof(CameraEndpointDetectionDto), 200)]
     [ProducesResponseType(404)]

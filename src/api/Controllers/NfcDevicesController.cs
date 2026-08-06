@@ -98,7 +98,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// Auto-registers the device if not already known.
     /// Called periodically by the ESP32 firmware (every 60 seconds).
     /// </summary>
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because unprovisioned firmware must announce itself before approval.
     [HttpPost("heartbeat")]
     [ProducesResponseType(typeof(NfcDeviceDto), 200)]
     [ProducesResponseType(400)]
@@ -112,7 +112,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// Receives a scan event from an NFC device.
     /// Called when a tag is scanned by the ESP32 firmware.
     /// </summary>
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because approved NFC firmware identifies itself without a user JWT.
     [HttpPost("scan")]
     [ProducesResponseType(typeof(NfcScanHistoryDto), 200)]
     [ProducesResponseType(400)]

@@ -15,7 +15,6 @@ import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
 import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { Model, Model3DSearchResponse } from '@/types/models';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { toast } from 'sonner';
 
@@ -218,20 +217,16 @@ export const ModelsFileBrowser = ({
     [onSliceModel]
   );
 
-  const handleDownload = useCallback((file: FileItem) => {
+  const handleDownload = useCallback(async (file: FileItem) => {
     if (file.isDirectory) return;
     const model3dFile = file.meta?.model3d as { name?: string } | undefined;
     const originalName = model3dFile?.name || file.fileName;
-    const downloadUrl = `${getApiBaseUrl()}/3d-models/file/${file.id}`;
-    
-    // Create a link with the original filename for download
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.download = originalName || '3d-model';
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    try {
+      await apiClient.downloadModel3dFile(file.id, originalName || '3d-model');
+    } catch {
+      toast.error('Failed to download model');
+    }
   }, []);
 
   const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean; file: FileItem | null }>({

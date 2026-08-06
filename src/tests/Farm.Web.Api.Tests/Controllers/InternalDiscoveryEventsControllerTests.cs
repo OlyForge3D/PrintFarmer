@@ -215,17 +215,28 @@ public class InternalDiscoveryEventsControllerTests : IAsyncLifetime
     }
 
     [Fact]
-    public void ControllerAdvertisesAllowAnonymous_SoJwtFallbackPolicyDoesNotShortCircuit()
+    public void SharedKeyActionsAdvertiseAllowAnonymous_SoJwtFallbackPolicyDoesNotShortCircuit()
     {
-        // The [AllowAnonymous] class attribute is the exact mechanism that lets the controller's
-        // own X-Discovery-Service-Key check run instead of being pre-empted by the global JWT
-        // FallbackPolicy configured in AuthenticationStartup.cs. Assert it directly so a future
-        // refactor cannot silently regress B2 while the request-level tests still happen to
-        // observe some other 401 shape.
+        // Action-level [AllowAnonymous] lets each reviewed shared-key route run its own
+        // X-Discovery-Service-Key authentication without making future controller actions public.
         Type controllerType = typeof(InternalDiscoveryEventsController);
+        string[] actionNames =
+        [
+            nameof(InternalDiscoveryEventsController.ProgressAsync),
+            nameof(InternalDiscoveryEventsController.PrinterFoundAsync),
+            nameof(InternalDiscoveryEventsController.CompletedAsync),
+        ];
+
+        foreach (string actionName in actionNames)
+        {
+            controllerType.GetMethod(actionName)!
+                .GetCustomAttribute<AllowAnonymousAttribute>(inherit: true)
+                .Should().NotBeNull(
+                    $"{actionName} must opt out of JWT fallback so its shared-key authenticator can run");
+        }
+
         controllerType.GetCustomAttribute<AllowAnonymousAttribute>(inherit: true)
-            .Should().NotBeNull(
-                "the controller must opt out of the global JWT fallback policy so the shared-key authenticator can run");
+            .Should().BeNull("future actions must remain protected by the global fallback policy");
     }
 
     private static HttpRequestMessage BuildRequest<T>(string path, T payload, string sharedKey = SharedKey)

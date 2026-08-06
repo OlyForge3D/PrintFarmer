@@ -30,7 +30,6 @@ public class TagsController(
     /// <response code="200">Returns the list of tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("")]
     [ProducesResponseType(typeof(IEnumerable<TagDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -58,7 +57,6 @@ public class TagsController(
     /// <response code="200">Returns matching tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("search")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -91,7 +89,6 @@ public class TagsController(
     /// <response code="200">Returns popular tags</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("popular")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -123,7 +120,6 @@ public class TagsController(
     /// <response code="200">Returns analytics data</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("analytics")]
     [ProducesResponseType(typeof(TagAnalyticsDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -152,7 +148,6 @@ public class TagsController(
     /// <response code="200">Returns suggestions</response>
     /// <response code="401">Unauthorized</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("suggestions")]
     [ProducesResponseType(typeof(IEnumerable<TagSuggestionDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -233,7 +228,6 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Tag not found</response>
     /// <response code="500">Internal server error</response>
-    [AllowAnonymous]
     [HttpGet("{tagId:guid}")]
     [ProducesResponseType(typeof(TagDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

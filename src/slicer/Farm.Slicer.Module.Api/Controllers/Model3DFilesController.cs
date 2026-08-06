@@ -268,7 +268,6 @@ public class Model3DFilesController(
     /// <param name="id">The model's unique identifier.</param>
     /// <param name="forceStl">If true and the file is a 3MF, convert to STL for the response.</param>
     [HttpGet("file/{id:guid}")]
-    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
 #pragma warning disable CA3003 // File path from DB lookup by Guid — no injection risk
@@ -319,7 +318,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">The model's unique identifier.</param>
     [HttpGet("thumbnail/{id:guid}")]
-    [AllowAnonymous]
+    [AllowAnonymous] // Public because model-card image elements cannot attach bearer headers.
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
 #pragma warning disable CA3003 // File path from DB lookup by Guid — no injection risk
@@ -351,7 +350,6 @@ public class Model3DFilesController(
     /// <param name="path">Relative path to the file.</param>
     /// <param name="forceStl">Convert 3MF to STL if true.</param>
     [HttpGet("download-for-viewer")]
-    [AllowAnonymous]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -127,6 +127,35 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         _ = job.ModelFileUrl.Should().NotContain("169.254.169.254");
     }
 
+    [Fact(DisplayName = "Multi-model worker downloads resolve stored model URLs without anonymous HTTP access")]
+    public async Task DownloadWorkerModel_WithStoredMultiModelUrl_ResolvesByIdentity()
+    {
+        Guid userId = await GetAuthenticatedUserIdAsync();
+        (Guid firstModelId, _) = await AddStoredModelAsync(userId);
+        (Guid secondModelId, _) = await AddStoredModelAsync(userId);
+        HttpResponseMessage submit = await _client.PostAsJsonAsync("/api/slice", new SubmitSliceJobRequest
+        {
+            UserId = userId,
+            ModelFileUrl = $"/api/3d-models/file/{firstModelId}",
+            ModelFileName = "first.stl",
+            ModelFileUrls =
+            [
+                $"/api/3d-models/file/{firstModelId}",
+                $"/api/3d-models/file/{secondModelId}",
+            ],
+            SlicerEngine = SlicerEngineType.OrcaSlicer,
+        });
+        _ = submit.StatusCode.Should().Be(HttpStatusCode.Created, await submit.Content.ReadAsStringAsync());
+        WorkerSliceJobResponse claimed = await ClaimAsync();
+        using HttpRequestMessage download = new(HttpMethod.Get, claimed.ModelFileUrls![1]);
+        AddLease(download, claimed);
+
+        HttpResponseMessage response = await _client.SendAsync(download);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _ = (await response.Content.ReadAsStringAsync()).Should().Contain("solid canonical-test-model");
+    }
+
     [Fact(DisplayName = "A stored model owned by another user is not resolvable")]
     public async Task Submit_WithForeignStoredModel_ReturnsBadRequest()
     {
@@ -403,7 +432,8 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         string root = storagePaths.GetModelUploadDirectory();
         _ = Directory.CreateDirectory(root);
         string storedName = $"{Guid.NewGuid():N}.stl";
-        byte[] bytes = Encoding.UTF8.GetBytes("solid canonical-test-model\nendsolid canonical-test-model\n");
+        string modelName = $"canonical-test-model-{Guid.NewGuid():N}";
+        byte[] bytes = Encoding.UTF8.GetBytes($"solid {modelName}\nendsolid {modelName}\n");
         await File.WriteAllBytesAsync(Path.Combine(root, storedName), bytes);
         string hash = Convert.ToHexString(SHA256.HashData(bytes));
 

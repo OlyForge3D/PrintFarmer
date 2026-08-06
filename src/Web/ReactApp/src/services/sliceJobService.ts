@@ -28,6 +28,8 @@ export interface SubmitSliceJobRequest {
   userId: string;
   printerId?: string;
   modelFileUrl: string;
+  /** Stored model identity used by the server for ownership-checked worker downloads. */
+  model3DId?: string;
   modelFileName: string;
   slicerEngine: number;
   /**

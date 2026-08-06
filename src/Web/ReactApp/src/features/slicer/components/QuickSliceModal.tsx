@@ -235,6 +235,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
     const request: SubmitSliceJobRequest = {
       userId: user?.id || '',
       modelFileUrl,
+      model3DId: model.id,
       modelFileName: model.fileName || model.name,
       slicerEngine: 0, // OrcaSlicer
       ...(pinnedVersion ? { slicerEngineVersion: pinnedVersion } : {}),

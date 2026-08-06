@@ -4,9 +4,10 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { mockToast, mockDeleteModel3dFile, mockGet3DModelsQuery } = vi.hoisted(() => ({
+const { mockToast, mockDeleteModel3dFile, mockDownloadModel3dFile, mockGet3DModelsQuery } = vi.hoisted(() => ({
   mockToast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
   mockDeleteModel3dFile: vi.fn(),
+  mockDownloadModel3dFile: vi.fn(),
   mockGet3DModelsQuery: vi.fn(),
 }));
 
@@ -15,6 +16,7 @@ vi.mock('sonner', () => ({ toast: mockToast }));
 vi.mock('@/services/api', () => ({
   apiClient: {
     deleteModel3dFile: (...args: unknown[]) => mockDeleteModel3dFile(...args),
+    downloadModel3dFile: (...args: unknown[]) => mockDownloadModel3dFile(...args),
     get3DModelsQuery: (...args: unknown[]) => mockGet3DModelsQuery(...args),
   },
 }));
@@ -187,5 +189,16 @@ describe('ModelsFileBrowser delete flow', () => {
 
     expect(mockDeleteModel3dFile).not.toHaveBeenCalled();
     expect(mockRefetch).not.toHaveBeenCalled();
+  });
+
+  it('downloads models through the authenticated API client', async () => {
+    mockDownloadModel3dFile.mockResolvedValue(undefined);
+    renderWithProviders(<ModelsFileBrowser />);
+
+    fireEvent.click(screen.getByTitle('Download file'));
+
+    await waitFor(() => {
+      expect(mockDownloadModel3dFile).toHaveBeenCalledWith('model-123', 'test-model.stl');
+    });
   });
 });

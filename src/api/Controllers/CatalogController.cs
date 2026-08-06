@@ -34,7 +34,6 @@ public class CatalogController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>List of all printer manufacturers ordered by name</returns>
     /// <response code="200">Returns the list of manufacturers</response>
-    [AllowAnonymous]
     [HttpGet("manufacturers")]
     [ProducesResponseType(typeof(IEnumerable<ManufacturerDto>), 200)]
     public async Task<ActionResult<IEnumerable<ManufacturerDto>>> GetManufacturersAsync(CancellationToken ct)
@@ -54,7 +53,6 @@ public class CatalogController(
         }
     }
 
-    [AllowAnonymous]
     [HttpGet("manufacturers/{id:guid}", Name = "GetManufacturerById")]
     [ProducesResponseType(typeof(ManufacturerDto), 200)]
     [ProducesResponseType(404)]
@@ -99,7 +97,6 @@ public class CatalogController(
         return CreatedAtRoute("GetManufacturerById", new { id = dto.Id }, dto);
     }
 
-    [AllowAnonymous]
     [HttpGet("printer-models")]
     [ProducesResponseType(typeof(IEnumerable<PrinterModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<PrinterModelDto>>> GetPrinterModelsAsync([FromQuery] Guid? manufacturerId, CancellationToken ct)
@@ -108,7 +105,6 @@ public class CatalogController(
         return Ok(list);
     }
 
-    [AllowAnonymous]
     [HttpGet("printer-models/{id:guid}", Name = "GetPrinterModelById")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]
@@ -212,7 +208,6 @@ public class CatalogController(
     /// <returns>List of slicer name aliases for the model</returns>
     /// <response code="200">Returns the list of aliases</response>
     /// <response code="404">Model not found</response>
-    [AllowAnonymous]
     [HttpGet("printer-models/{modelId:guid}/aliases")]
     [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
     [ProducesResponseType(404)]
@@ -360,7 +355,6 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all hotend model definitions</returns>
-    [AllowAnonymous]
     [HttpGet("hotends")]
     [ProducesResponseType(typeof(IEnumerable<HotendModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<HotendModelDto>>> GetHotendsAsync(CancellationToken ct)
@@ -382,7 +376,6 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all extruder model definitions</returns>
-    [AllowAnonymous]
     [HttpGet("extruders")]
     [ProducesResponseType(typeof(IEnumerable<ExtruderModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ExtruderModelDto>>> GetExtrudersAsync(CancellationToken ct)
@@ -404,7 +397,6 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all toolhead model definitions</returns>
-    [AllowAnonymous]
     [HttpGet("toolheads")]
     [ProducesResponseType(typeof(IEnumerable<ToolheadModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<ToolheadModelDto>>> GetToolheadsAsync(CancellationToken ct)
@@ -426,7 +418,6 @@ public class CatalogController(
     /// </summary>
     /// <param name="ct">Cancellation token for the operation.</param>
     /// <returns>List of all nozzle model definitions</returns>
-    [AllowAnonymous]
     [HttpGet("nozzles")]
     [ProducesResponseType(typeof(IEnumerable<NozzleModelDto>), 200)]
     public async Task<ActionResult<IEnumerable<NozzleModelDto>>> GetNozzlesAsync(CancellationToken ct)
@@ -752,7 +743,6 @@ public class CatalogController(
     /// <param name="context">The catalog context (Printers, Hotends, Extruders, Toolheads, Nozzles)</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Manufacturers split into with-items and without-items groups</returns>
-    [AllowAnonymous]
     [HttpGet("manufacturers/by-context/{context}")]
     [ProducesResponseType(typeof(ManufacturersByContextDto), 200)]
     [ProducesResponseType(400)]

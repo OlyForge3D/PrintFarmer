@@ -777,7 +777,6 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("catalog-hierarchy")]
-    [AllowAnonymous]
     [ProducesResponseType(typeof(AllProfilesResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetCatalogFilteredWorkerHierarchyAsync(
@@ -1385,7 +1384,7 @@ public class ProfilesController(
         }
     }
 
-    // ── Schema metadata endpoints (engine-version-aware, public, cached) ─────
+    // ── Schema metadata endpoints (engine-version-aware, cached) ─────────────
 
     /// <summary>
     /// Returns combined schema metadata for all profile types (process, machine, filament),
@@ -1395,7 +1394,6 @@ public class ProfilesController(
     /// (issue #578). Null / unparsable version returns all fields unfiltered.
     /// </summary>
     [HttpGet("schemas")]
-    [AllowAnonymous]
     [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileSchemasResponseDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
@@ -1409,7 +1407,6 @@ public class ProfilesController(
     /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/process")]
-    [AllowAnonymous]
     [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
@@ -1423,7 +1420,6 @@ public class ProfilesController(
     /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/machine")]
-    [AllowAnonymous]
     [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
@@ -1437,7 +1433,6 @@ public class ProfilesController(
     /// requested OrcaSlicer engine version (issue #578).
     /// </summary>
     [HttpGet("schema/filament")]
-    [AllowAnonymous]
     [ResponseCache(Duration = 3600, VaryByQueryKeys = ["engineVersion"])]
     [ProducesResponseType(typeof(ProfileTypeSchemaDto), StatusCodes.Status200OK)]
     [Tags("Slicer Profile Schemas")]
