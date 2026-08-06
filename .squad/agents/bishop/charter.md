@@ -8,8 +8,8 @@
 
 ## Model
 
-- **Preferred:** `claude-opus-4.8`
-- **Rationale:** Claude Opus 4.8 for correctness-focused branch diff review and reviewer gate analysis.
+- **Preferred:** `claude-opus-5`
+- **Rationale:** Claude Opus 5 for correctness-focused branch diff review and reviewer gate analysis.
 
 ## Responsibilities
 
@@ -28,7 +28,7 @@
 
 ## Machine-Local Execution Policy (this worktree)
 
-On this machine, Bishop uses reasoning effort **`max`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Hicks + Vasquez) is satisfied. Unavoidable platform/provider hard limits still apply.
+On this machine, Bishop uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Hicks + Vasquez) is satisfied. Unavoidable platform/provider hard limits still apply.
 
 ## Review Protocol
 

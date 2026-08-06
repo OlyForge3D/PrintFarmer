@@ -103,9 +103,9 @@ Reasoning effort is resolved independently **after** the model is selected. Chec
 
 - **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker): reasoning effort `max`
 - **Code reviewers:**
-  - Bishop (`claude-opus-4.8`): reasoning effort `max`
-  - Hicks (`gpt-5.6-sol`): reasoning effort `max`
-  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `high` (Gemini 3.1 Pro Preview does not support `max`)
+  - Bishop (`claude-opus-5`): reasoning effort `medium`
+  - Hicks (`gpt-5.6-sol`): reasoning effort `medium`
+  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `medium`
 
 These overrides are automatically resolved when spawning. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
 

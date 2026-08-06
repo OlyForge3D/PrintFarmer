@@ -5,7 +5,7 @@
     "scribe": "claude-haiku-4.5",
     "ripley": "claude-opus-4.7",
     "newt": "claude-opus-4.7-xhigh",
-    "bishop": "claude-opus-4.8",
+    "bishop": "claude-opus-5",
     "hicks": "gpt-5.6-sol",
     "vasquez": "gemini-3.1-pro-preview"
   },
@@ -15,8 +15,8 @@
     "hudson": "max",
     "gorman": "max",
     "parker": "max",
-    "bishop": "max",
-    "hicks": "max",
-    "vasquez": "high"
+    "bishop": "medium",
+    "hicks": "medium",
+    "vasquez": "medium"
   }
 }

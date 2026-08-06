@@ -28,7 +28,7 @@
 
 ## Machine-Local Execution Policy (this worktree)
 
-On this machine, Vasquez uses reasoning effort **`high`** (Gemini 3.1 Pro Preview does not support `max`) and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Bishop + Hicks) is satisfied. Unavoidable platform/provider hard limits still apply.
+On this machine, Vasquez uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Bishop + Hicks) is satisfied. Unavoidable platform/provider hard limits still apply.
 
 ## Review Protocol
 
