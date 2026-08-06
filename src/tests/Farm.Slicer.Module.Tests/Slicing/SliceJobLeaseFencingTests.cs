@@ -326,11 +326,48 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
         _ = (await ReadProblemCodeAsync(response)).Should().Be("artifact_size_mismatch");
     }
 
+    [Fact(DisplayName = "An artifact without a declared size is rejected")]
+    public async Task ArtifactWithoutDeclaredSize_IsRejected()
+    {
+        await QueueJobAsync();
+        WorkerSliceJobResponse claimed = await ClaimSuccessfullyAsync(_firstWorker);
+
+        byte[] bytes = Encoding.UTF8.GetBytes("; produced gcode\nG28\n");
+        using HttpRequestMessage message = CreateArtifactUpload(
+            claimed,
+            bytes,
+            declaredSha256: Convert.ToHexString(SHA256.HashData(bytes)),
+            includeDeclaredSize: false);
+        HttpResponseMessage response = await _firstWorker.SendAsync(message);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = (await ReadProblemCodeAsync(response)).Should().Be("artifact_size_mismatch");
+    }
+
+    [Fact(DisplayName = "An artifact with an invalid declared size is rejected")]
+    public async Task ArtifactWithInvalidDeclaredSize_IsRejected()
+    {
+        await QueueJobAsync();
+        WorkerSliceJobResponse claimed = await ClaimSuccessfullyAsync(_firstWorker);
+
+        byte[] bytes = Encoding.UTF8.GetBytes("; produced gcode\nG28\n");
+        using HttpRequestMessage message = CreateArtifactUpload(
+            claimed,
+            bytes,
+            declaredSha256: Convert.ToHexString(SHA256.HashData(bytes)),
+            declaredSize: -1);
+        HttpResponseMessage response = await _firstWorker.SendAsync(message);
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _ = (await ReadProblemCodeAsync(response)).Should().Be("artifact_size_mismatch");
+    }
+
     private static HttpRequestMessage CreateArtifactUpload(
         WorkerSliceJobResponse claimed,
         byte[] bytes,
         string declaredSha256,
-        long? declaredSize = null)
+        long? declaredSize = null,
+        bool includeDeclaredSize = true)
     {
         MultipartFormDataContent content = new();
         ByteArrayContent file = new(bytes);
@@ -338,9 +375,12 @@ public sealed class SliceJobLeaseFencingTests : IAsyncLifetime
         content.Add(file, "file", "result.gcode");
         content.Add(new StringContent("gcode"), "kind");
         content.Add(new StringContent(declaredSha256), "sha256");
-        content.Add(
-            new StringContent((declaredSize ?? bytes.Length).ToString(CultureInfo.InvariantCulture)),
-            "sizeBytes");
+        if (includeDeclaredSize)
+        {
+            content.Add(
+                new StringContent((declaredSize ?? bytes.Length).ToString(CultureInfo.InvariantCulture)),
+                "sizeBytes");
+        }
 
         HttpRequestMessage message = new(HttpMethod.Post, $"/api/slice/{claimed.Id}/artifacts")
         {
