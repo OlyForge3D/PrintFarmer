@@ -163,7 +163,7 @@ public class PrintersController(
         try
         {
             PrinterSummaryDto[] summaries = await _printersService.GetAllSummaryDtosAsync(ct);
-            if (!isAdmin)
+            if (!includeDisabled)
             {
                 summaries = summaries.Where(summary => summary.IsEnabled).ToArray();
             }
@@ -177,7 +177,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/summary. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous");
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/summary. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Internal Server Error");
         }
     }
