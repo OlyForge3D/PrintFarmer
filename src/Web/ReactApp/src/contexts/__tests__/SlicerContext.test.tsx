@@ -83,11 +83,11 @@ describe('SlicerProvider authenticated settings loading', () => {
     await waitFor(() => expect(readState().isLoading).toBe(false));
 
     expect(apiTestState.getSettings).not.toHaveBeenCalled();
-    expect(apiTestState.getSlicers).toHaveBeenCalledOnce();
+    expect(apiTestState.getSlicers).not.toHaveBeenCalled();
     expect(readState()).toEqual({
       settingEnabled: true,
-      workerCount: 1,
-      isSlicerAvailable: true,
+      workerCount: 0,
+      isSlicerAvailable: false,
       isLoading: false,
     });
   });
@@ -203,10 +203,15 @@ describe('SlicerProvider authenticated settings loading', () => {
   it('does not reuse or apply an in-flight settings response from a previous session', async () => {
     const firstSessionRequest = deferred<{ enabled: boolean }>();
     const secondSessionRequest = deferred<{ enabled: boolean }>();
+    const firstWorkersRequest = deferred<SlicerDto[]>();
+    const secondWorkersRequest = deferred<SlicerDto[]>();
     localStorage.setItem('auth-token', 'first-session');
     apiTestState.getSettings
       .mockReturnValueOnce(firstSessionRequest.promise)
       .mockReturnValueOnce(secondSessionRequest.promise);
+    apiTestState.getSlicers
+      .mockReturnValueOnce(firstWorkersRequest.promise)
+      .mockReturnValueOnce(secondWorkersRequest.promise);
 
     renderProvider();
     localStorage.removeItem('auth-token');
@@ -214,16 +219,21 @@ describe('SlicerProvider authenticated settings loading', () => {
     window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
 
     expect(apiTestState.getSettings).toHaveBeenCalledTimes(2);
+    expect(apiTestState.getSlicers).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       secondSessionRequest.resolve({ enabled: false });
+      secondWorkersRequest.resolve(WORKERS);
     });
     await waitFor(() => expect(readState().settingEnabled).toBe(false));
+    expect(readState().workerCount).toBe(1);
 
     await act(async () => {
       firstSessionRequest.resolve({ enabled: true });
+      firstWorkersRequest.resolve([]);
     });
     expect(readState().settingEnabled).toBe(false);
+    expect(readState().workerCount).toBe(1);
   });
 
   it('shares the initial request across a StrictMode remount', async () => {

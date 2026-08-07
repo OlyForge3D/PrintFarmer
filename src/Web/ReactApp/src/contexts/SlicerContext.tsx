@@ -21,25 +21,44 @@ const defaultState: SlicerState = {
   workerCount: 0,
 };
 
-let workersRequest: Promise<SlicerSnapshot['workers']> | null = null;
+let workersRequest: {
+  authToken: string;
+  promise: Promise<SlicerSnapshot['workers']>;
+} | null = null;
 let snapshotRequest: {
   authToken: string;
   promise: Promise<SlicerSnapshot>;
 } | null = null;
 
-function loadWorkers(): Promise<SlicerSnapshot['workers']> {
-  if (!workersRequest) {
-    workersRequest = slicerRegistry.getSlicers()
-      .catch(error => {
-        console.warn('[SlicerContext] Failed to fetch slicer workers, using defaults:', error);
-        return [];
-      })
-      .finally(() => {
-        workersRequest = null;
-      });
+function loadWorkers(authToken: string): Promise<SlicerSnapshot['workers']> {
+  if (workersRequest?.authToken === authToken) {
+    return workersRequest.promise;
   }
 
-  return workersRequest;
+  const promise = slicerRegistry.getSlicers()
+    .catch(error => {
+      console.warn('[SlicerContext] Failed to fetch slicer workers, using defaults:', error);
+      return [];
+    });
+
+  workersRequest = { authToken, promise };
+  void promise.finally(() => {
+    if (workersRequest?.promise === promise) {
+      workersRequest = null;
+    }
+  });
+
+  return promise;
+}
+
+function clearLoggedOutState() {
+  return {
+    settingEnabled: true,
+    hasWorkers: false,
+    isSlicerAvailable: false,
+    isLoading: false,
+    workerCount: 0,
+  } satisfies SlicerState;
 }
 
 function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
@@ -48,17 +67,17 @@ function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
   }
 
   const promise = Promise.all([
-      apiClient.getSettings<SlicerSettings>('Slicer').catch(error => {
-        console.warn('[SlicerContext] Failed to fetch slicer settings, using defaults:', error);
-        return { enabled: true };
-      }),
-      loadWorkers(),
-    ]).then(([settings, workers]) => ({ settings, workers }));
+    apiClient.getSettings<SlicerSettings>('Slicer').catch(error => {
+      console.warn('[SlicerContext] Failed to fetch slicer settings, using defaults:', error);
+      return { enabled: true };
+    }),
+    loadWorkers(authToken),
+  ]).then(([settings, workers]) => ({ settings, workers }));
 
   snapshotRequest = { authToken, promise };
   void promise.finally(() => {
     if (snapshotRequest?.promise === promise) {
-        snapshotRequest = null;
+      snapshotRequest = null;
     }
   });
 
@@ -66,7 +85,8 @@ function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
 }
 
 export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<SlicerState>(defaultState);
+  const [state, setState] = useState<SlicerState>(() =>
+    localStorage.getItem('auth-token') ? defaultState : clearLoggedOutState());
   const mountedRef = useRef(false);
   const settingsLoadGenerationRef = useRef(0);
   const workersLoadGenerationRef = useRef(0);
@@ -112,27 +132,6 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     };
 
-    const refreshAnonymousWorkers = () => {
-      const generation = ++workersLoadGenerationRef.current;
-
-      void loadWorkers().then(workers => {
-        if (
-          !mountedRef.current
-          || generation !== workersLoadGenerationRef.current
-        ) {
-          return;
-        }
-
-        setState(previousState => ({
-          ...previousState,
-          hasWorkers: workers.length > 0,
-          isSlicerAvailable: previousState.settingEnabled && workers.length > 0,
-          isLoading: false,
-          workerCount: workers.length,
-        }));
-      });
-    };
-
     window.addEventListener(
       AUTH_SESSION_ESTABLISHED_EVENT,
       refreshAuthenticatedState,
@@ -140,8 +139,6 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
     if (localStorage.getItem('auth-token')) {
       refreshAuthenticatedState();
-    } else {
-      refreshAnonymousWorkers();
     }
 
     return () => {
@@ -154,12 +151,21 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   }, []);
 
   const refreshWorkers = useCallback(async () => {
+    const authToken = localStorage.getItem('auth-token');
+    if (!authToken) {
+      if (mountedRef.current) {
+        setState(clearLoggedOutState());
+      }
+      return;
+    }
+
     const generation = ++workersLoadGenerationRef.current;
-    const workers = await loadWorkers();
+    const workers = await loadWorkers(authToken);
 
     if (
       !mountedRef.current
       || generation !== workersLoadGenerationRef.current
+      || localStorage.getItem('auth-token') !== authToken
     ) {
       return;
     }
