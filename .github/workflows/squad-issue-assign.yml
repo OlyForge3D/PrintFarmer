@@ -21,11 +21,19 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const path = require('path');
+            const { slugify } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
             const issue = context.payload.issue;
             const label = context.payload.label.name;
 
-            // Extract member name from label (e.g., "squad:ripley" → "ripley")
-            const memberName = label.replace('squad:', '').toLowerCase();
+            // Extract member slug from label (e.g. "squad:ripley" → "ripley").
+            // Roster names carry emoji prefixes ("⚛️ Ripley"), so the label
+            // suffix is slugified too — that way both the canonical
+            // `squad:ripley` and the legacy `squad:⚛️ ripley` duplicate resolve
+            // to the same member instead of the canonical form failing to match.
+            const memberName = slugify(label.replace('squad:', ''));
 
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
@@ -54,7 +62,7 @@ jobs:
                 }
                 if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
                   const cells = line.split('|').map(c => c.trim()).filter(Boolean);
-                  if (cells.length >= 2 && cells[0].toLowerCase() === memberName) {
+                  if (cells.length >= 2 && slugify(cells[0]) === memberName) {
                     assignedMember = { name: cells[0], role: cells[1] };
                     break;
                   }

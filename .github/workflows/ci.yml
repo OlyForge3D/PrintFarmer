@@ -185,6 +185,9 @@ jobs:
       - name: Test squad verdict provenance
         run: node --test scripts/ci/tests/test-squad-verdict.mjs
 
+      - name: Test squad triage routing
+        run: node --test scripts/ci/tests/test-squad-routing.mjs
+
       # Full dependency-license validation requires restored NuGet assets
       # (project.assets.json under src/**/obj/). Without a restore the
       # validator emits NUGET_ASSETS_MISSING. `ci-tools` ALWAYS runs, so
