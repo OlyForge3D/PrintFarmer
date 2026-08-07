@@ -19,9 +19,17 @@
 
 When `create_session` is available, spawn commit-producing agents as **sub-sessions** instead of tasks. Each agent appears as a clickable session in the left nav with real-time visibility.
 
-**When to use sub-sessions vs task:**
-- **Sub-session** (`create_session`): Agent produces commits, needs worktree isolation, or benefits from persistent session visibility
-- **Task** (`task` tool): Pure analysis, coordination, read-only research, or quick one-shot work
+**When to use sub-sessions vs task:** the deciding factor is solely whether the agent **writes**.
+- **Sub-session** (`create_session`): the agent produces commits or must otherwise mutate a working tree. Nothing else qualifies — session visibility alone NEVER justifies a sub-session.
+- **Task** (`task` tool): every read-only agent — pure analysis, coordination, read-only research, review, or quick one-shot work.
+
+> **⛔ Code Reviewers are ALWAYS spawned with `task` — NEVER with `create_session`.**
+> Bishop, Hicks, and Vasquez are read-only by definition: they produce a verdict, not commits.
+> Two concrete reasons this is absolute:
+> 1. Each sub-session consumes one of Ralph's limited implementation-dispatch slots, starving the backlog driver so it reports "no free slots" and dispatches no real work.
+> 2. Each sub-session leaves a stale worktree on disk holding duplicate copies of commits, requiring manual cleanup.
+>
+> This holds even when several reviewers run concurrently in a multi-reviewer review round — spawn all of them with `task`, in parallel. There is no exception for visibility, for review size, or for reviewer count.
 
 **Sub-session parameters:**
 - **`name`**: `"{Name} {verb}ing {noun}"` — 40-char max, sentence case (e.g., "EECOM refactoring auth", "Flight reviewing arch")

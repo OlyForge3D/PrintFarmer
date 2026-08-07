@@ -2,19 +2,20 @@
 
 ## Request
 
-Implement issue #1160: add a real, authorization-safe printer summary projection for dashboard statistics and compatible alert consumers, migrate compatible frontend consumers to one shared summary query/cache, add focused tests, validate, commit, push, pass Bishop/Hicks/Vasquez consensus, open a non-draft PR with `Closes #1160`, and complete the merge/closure lifecycle.
+Revise issue #1111 after adversarial review by replacing the malformed negative
+regex fixture with a valid utility token, while retaining the positive legitimate
+string regression. Validate, commit, and push without opening a PR or repeating
+reviewer gating.
 
 ## Action plan
 
-- [x] Inspect printer API routes, authorization helpers, DTOs, frontend consumers, and focused tests.
-- [x] Implement the additive projected summary endpoint without changing existing detailed printer contracts.
-- [x] Add backend authorization, empty-result, status/count, and projection-focused tests.
-- [x] Migrate compatible dashboard consumers to one summary query/cache and add frontend tests.
-- [x] Run targeted backend/frontend validation and fix regressions.
-- [ ] Review the diff, commit, and push the branch.
-- [ ] Obtain mandatory Bishop/Hicks/Vasquez exact-head adversarial consensus.
-- [ ] Open a non-draft PR targeting development with `Closes #1160`, verify issue linkage, and report lifecycle evidence.
-- [ ] Follow CI, trusted verdict, merge, and issue-closure status through completion.
+- [x] Read the focused test, current diff, tracking file, and applicable guidance.
+- [x] Replace the malformed negative fixture with a regex literal containing
+  `className="bg-pf-missing"`.
+- [x] Preserve the positive legitimate string utility regression.
+- [x] Run the focused AdminThemeSafety Vitest test.
+- [x] Run focused frontend lint.
+- [x] Review the focused diff, commit with the required trailer, and push.
 
 ## Summary
 
@@ -65,3 +66,8 @@ Selected #1 because it removes five round trips from a frequently used analytics
 - Final review follow-up: changed the grouping expression to use the non-empty primary-key invariant (`Id != Guid.Empty`) so SQL Server receives a column-bearing `GROUP BY` expression, folded any defensive extra group in memory, and compiled both aggregate and ticks projections for all supported providers; focused tests: 22 passed; full solution build: 0 warnings, 0 errors.
 - Final hardening: accumulated streamed print durations as `double` hours to avoid cumulative tick overflow, asserted date-range filtering for `TotalPrintHours`, and bounded stale single-sided `startDate` validation without changing end-date-only behavior; focused tests: 24 passed; full solution build: 0 warnings, 0 errors.
 - Consensus evidence: Bishop/Hicks/Vasquez unanimously APPROVE at `82afe60b993782d111b7c9c7faaf3fee0d2c8db5`; any subsequent commit requires a fresh exact-head review.
+Replaced the malformed negative test input with a regex literal containing the
+fully valid `bg-pf-missing` utility, so the regression now distinguishes
+syntax-aware AST scanning from lexical scanning. Preserved the positive
+legitimate string utility regression. The focused Vitest suite passed all 27
+tests, and focused ESLint completed successfully.
