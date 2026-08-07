@@ -223,11 +223,11 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
   const sources = collectThemeSources(SRC);
   const facts = cssFacts(sources);
   const factsByTheme = cssFactsByTheme(sources);
+  const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
   const asSingleTheme = (singleFacts: CssFacts): Map<string, CssFacts> =>
     new Map([['fixture.css', singleFacts]]);
 
   it('finds utilities to check', () => {
-    const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
     expect([...factsByTheme.keys()].sort()).toEqual([...themeFiles].sort());
     expect(references.filter((reference) => reference.kind === 'utility').length).toBeGreaterThan(50);
     expect(references.filter((reference) => reference.kind === 'arbitrary-value').length).toBeGreaterThan(10);
@@ -385,8 +385,6 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
       expect(text).not.toBe(source.text);
       return { ...source, text };
     });
-    const references = mutatedSources.flatMap(({ file, text }) => scanThemeText(text, file));
-
     expect(cssFacts(mutatedSources).declarations.has('--pf-success-text')).toBe(true);
     const findings = deadThemeReferencesByTheme(
       references,
@@ -411,7 +409,6 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
   });
 
   it('has no unexplained dead theme reference in the current source tree', () => {
-    const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
     expect(deadThemeReferencesByTheme(references, factsByTheme).map(formatThemeFinding)).toEqual([]);
   });
 });
