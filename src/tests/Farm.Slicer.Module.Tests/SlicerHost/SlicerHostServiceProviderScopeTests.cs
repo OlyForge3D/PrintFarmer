@@ -7,6 +7,7 @@ using Farm.Slicer.Module.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.SlicerHost;
@@ -22,6 +23,7 @@ public sealed class SlicerHostServiceProviderScopeTests
         });
 
         builder.Configuration["DEPLOYMENT_MODE"] = string.Empty;
+        builder.Configuration["Slicer:PluginsPath"] = string.Empty;
         builder.Configuration["DB_PROVIDER"] = "sqlite";
         builder.Configuration["ConnectionStrings:Default"] = "Data Source=:memory:";
 
@@ -32,14 +34,14 @@ public sealed class SlicerHostServiceProviderScopeTests
         _ = builder.Services.AddUnimplementedSlicerServiceStubs();
         _ = builder.Services.AddSignalR();
 
-        using ServiceProvider provider = builder.Services.BuildServiceProvider(
-            new ServiceProviderOptions
-            {
-                ValidateOnBuild = true,
-                ValidateScopes = true,
-            });
+        builder.Host.UseDefaultServiceProvider((_, options) =>
+        {
+            options.ValidateOnBuild = true;
+            options.ValidateScopes = true;
+        });
 
-        using IServiceScope scope = provider.CreateScope();
+        using WebApplication app = builder.Build();
+        using IServiceScope scope = app.Services.CreateScope();
         Assert.NotNull(
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>());
     }
