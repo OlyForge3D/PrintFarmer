@@ -507,6 +507,28 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       output: '<div className={`rounded-lg ${extra}`} />',
       errors: [{ messageId: 'oversized' }],
     },
+    // Cooked string offsets differ from source offsets when an earlier JavaScript
+    // escape contracts. Replacements must still target only the radius token.
+    {
+      code: '<div className={"foo\\\\! rounded-2xl"} />',
+      output: '<div className={"foo\\\\! rounded-lg"} />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className={`foo\\\\! rounded-[12px]`} />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className={`foo\\\\! rounded-lg`} />',
+            },
+          ],
+        },
+      ],
+    },
     // Two violations in one attribute are both reported.
     {
       code: '<div className="rounded-2xl md:rounded-3xl" />',

@@ -814,22 +814,24 @@ export default {
       return `${prefix}${leadingImportant}${replacement}${trailingImportant}`
     }
 
-    function reportToken({ stringNode, quasi, rawToken, offset, messageId, data, autofix }) {
-      // A template quasi's own range includes the backtick or `${`, so the raw
-      // text starts one character in. Literals carry their quote at index 0 too.
-      const base = stringNode.range[0] + 1
-      const start = base + offset
-      const range = [start, start + rawToken.length]
+    function reportToken({ stringNode, quasi, rawToken, sourceOffset, messageId, data, autofix }) {
       const replacement = toLargeToken(rawToken)
-
       const descriptor = {
         node: quasi ?? stringNode,
-        loc: {
-          start: context.sourceCode.getLocFromIndex(start),
-          end: context.sourceCode.getLocFromIndex(range[1]),
-        },
         messageId,
         data,
+      }
+
+      if (sourceOffset < 0) {
+        context.report(descriptor)
+        return
+      }
+
+      const start = stringNode.range[0] + sourceOffset
+      const range = [start, start + rawToken.length]
+      descriptor.loc = {
+        start: context.sourceCode.getLocFromIndex(start),
+        end: context.sourceCode.getLocFromIndex(range[1]),
       }
 
       if (autofix) {
@@ -874,8 +876,12 @@ export default {
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
+          const sourceText = context.sourceCode.getText(stringNode)
+          let sourceCursor = 0
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
+            const sourceOffset = sourceText.indexOf(rawToken, sourceCursor)
+            if (sourceOffset >= 0) sourceCursor = sourceOffset + rawToken.length
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue
@@ -895,7 +901,7 @@ export default {
                 stringNode,
                 quasi,
                 rawToken,
-                offset: match.index,
+                sourceOffset,
                 messageId: 'fullRound',
                 data: { token: rawToken },
                 autofix: false,
@@ -924,7 +930,7 @@ export default {
                 stringNode,
                 quasi,
                 rawToken,
-                offset: match.index,
+                sourceOffset,
                 messageId: 'oversized',
                 data: { token: rawToken, px: Math.round(px * 100) / 100 },
                 // Named sizes map onto the scale deterministically, so they are
