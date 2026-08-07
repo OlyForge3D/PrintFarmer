@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useEffectEvent } from 'react';
 import { usePasswordPolicy } from '@/common/hooks/usePasswordPolicy';
-import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
+import {
+  AdminEmpty,
+  AdminError,
+  AdminLoading,
+  AdminSaveBar,
+  adminToast,
+  useDirtyState,
+} from '@/common/components/admin';
 import {
   Plus,
   Shield,
@@ -15,7 +22,6 @@ import { DeleteIcon, SearchIcon, EditIcon, LockIcon } from '@/common/components/
 import { Button, Input, Select, FormField, Alert, Checkbox } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
-import { TableSkeleton } from '@/common/components/skeletons/TableSkeleton';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { User, Role } from '@/types/admin';
 
@@ -29,27 +35,51 @@ const APPLICATION_AREAS = [
   { id: 'spools', name: 'Spools', description: 'Manage filament spools inventory' },
 ] as const;
 
+const EMPTY_NEW_USER = {
+  username: '',
+  email: '',
+  password: '',
+  firstName: '',
+  lastName: '',
+};
+
+const EMPTY_PASSWORD_FORM = {
+  newPassword: '',
+  confirmNewPassword: '',
+};
+
 export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const { hasRole } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<unknown>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const editForm = useDirtyState<{ user: User | null }>({ user: null });
+  const permissionForm = useDirtyState({ permissions: [] as string[] });
+  const selectedUser = editForm.values.user;
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isSavingPermissions, setIsSavingPermissions] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [userToChangePassword, setUserToChangePassword] = useState<User | null>(null);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showChangePasswordConfirm, setShowChangePasswordConfirm] = useState(false);
   const [changePasswordError, setChangePasswordError] = useState<string | null>(null);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [passwordChangeForm, setPasswordChangeForm] = useState({ newPassword: '', confirmNewPassword: '' });
+  const passwordForm = useDirtyState(EMPTY_PASSWORD_FORM);
+  const passwordChangeForm = passwordForm.values;
   const { data: passwordPolicy } = usePasswordPolicy();
-  const [newUser, setNewUser] = useState({ username: '', email: '', password: '', firstName: '', lastName: '' });
-  const [selectedRoleId, setSelectedRoleId] = useState<string>('');
-  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([]);
+  const createForm = useDirtyState({
+    user: EMPTY_NEW_USER,
+    roleId: '',
+    permissions: [] as string[],
+  });
+  const newUser = createForm.values.user;
+  const selectedRoleId = createForm.values.roleId;
+  const selectedPermissions = createForm.values.permissions;
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
   const [emailStatus, setEmailStatus] = useState<AvailabilityStatus>('idle');
@@ -130,6 +160,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   const createUser = async () => {
     if (isCreating) return;
+    if (usernameStatus === 'taken' || emailStatus === 'taken') return;
     const fieldErrs = validateForm();
     if (Object.keys(fieldErrs).length > 0) {
       setCreateErrors(fieldErrs);
@@ -151,11 +182,13 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
 
       // We could optimistically insert but reloading ensures roles & computed fields
       await loadUsers();
-      toast.success('User created');
+      adminToast.success('User created');
+      createForm.markPristine({
+        user: EMPTY_NEW_USER,
+        roleId: '',
+        permissions: [],
+      });
       setShowCreateModal(false);
-      setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
-      setSelectedRoleId('');
-      setSelectedPermissions([]);
     } catch (err) {
       const error = err as { response?: { data?: Record<string, unknown> } };
       let errorMessage = 'Failed to create user';
@@ -166,14 +199,94 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         errorMessage = (data.error || data.message || data.title || errorMessage) as string;
         }
 
-        toast.error(errorMessage);
+        adminToast.error(errorMessage);
     } finally {
       setIsCreating(false);
     }
   };
 
+  const openCreateUser = () => {
+    const farmUserRole = roles.find(r => r.name === 'farm_user');
+    createForm.markPristine({
+      user: EMPTY_NEW_USER,
+      roleId: farmUserRole ? farmUserRole.id : '',
+      permissions: [],
+    });
+    setShowCreateModal(true);
+  };
+
+  const openEditUser = (user: User) => {
+    editForm.markPristine({ user: { ...user, permissions: user.permissions ?? [] } });
+    setShowEditModal(true);
+  };
+
+  const openPermissions = (user: User) => {
+    editForm.markPristine({ user: { ...user, permissions: user.permissions ?? [] } });
+    permissionForm.markPristine({ permissions: user.permissions ?? [] });
+    setShowPermissionsModal(true);
+  };
+
+  const updateSelectedUser = (update: (user: User) => User) => {
+    if (selectedUser) {
+      editForm.setValue('user', update(selectedUser));
+    }
+  };
+
+  const saveSelectedUser = async () => {
+    if (!selectedUser || isSavingUser) return;
+    setIsSavingUser(true);
+    try {
+      await apiClient.updateUser(selectedUser.id, {
+        firstName: selectedUser.firstName,
+        lastName: selectedUser.lastName,
+        email: selectedUser.email,
+        isActive: selectedUser.isActive,
+        roles: selectedUser.roles,
+        permissions: selectedUser.permissions,
+      });
+      editForm.markPristine({ user: selectedUser });
+      adminToast.success('User updated successfully');
+      setUsers(users => users.map(user => user.id === selectedUser.id ? { ...user, ...selectedUser } : user));
+      setShowEditModal(false);
+    } catch (err) {
+      const error = err as { response?: { data?: Record<string, unknown> } };
+      const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
+      adminToast.error(message);
+    } finally {
+      setIsSavingUser(false);
+    }
+  };
+
+  const savePermissions = async () => {
+    if (!selectedUser || isSavingPermissions) return;
+    setIsSavingPermissions(true);
+    try {
+      const permissions = permissionForm.values.permissions;
+      await apiClient.updateUser(selectedUser.id, {
+        accessibleAreas: permissions,
+      });
+      permissionForm.markPristine({ permissions });
+      const nextUser = { ...selectedUser, permissions };
+      const nextOriginalUser = editForm.original.user
+        ? { ...editForm.original.user, permissions }
+        : nextUser;
+      editForm.markPristine({ user: nextOriginalUser });
+      editForm.replaceValues({ user: nextUser });
+      adminToast.success('Permissions updated');
+      setShowPermissionsModal(false);
+      await loadUsers();
+    } catch (err) {
+      const error = err as { response?: { data?: Record<string, unknown> } };
+      const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update permissions';
+      adminToast.error(message);
+    } finally {
+      setIsSavingPermissions(false);
+    }
+  };
+
   const loadUsers = async () => {
     try {
+      setLoadError(null);
       const data = await apiClient.getUsers();
       setUsers((data as unknown) as User[]);
     } catch (error) {
@@ -183,35 +296,34 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     }
   };
 
+  const loadData = async () => {
+    try {
+      setLoadError(null);
+      const [usersData, rolesData] = await Promise.all([
+        apiClient.getUsers(),
+        apiClient.getRoles(),
+      ]);
+      setUsers((usersData as unknown) as User[]);
+      setRoles((rolesData as unknown) as Role[]);
+    } catch (error) {
+      console.error('Error loading user management data:', error);
+      setLoadError(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Extract keyboard handler with useEffectEvent to access latest state without retriggers
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
     if (e.key === 'k' && !['input', 'textarea'].includes((e.target as HTMLElement).tagName.toLowerCase())) {
       e.preventDefault();
-      const farmUserRole = roles.find(r => r.name === 'farm_user');
-      setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
-      setSelectedPermissions([]);
-      setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
-      setShowCreateModal(true);
+      openCreateUser();
     }
   });
 
   // Load users and roles on mount
   useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [usersData, rolesData] = await Promise.all([
-          apiClient.getUsers(),
-          apiClient.getRoles()
-        ]);
-        setUsers((usersData as unknown) as User[]);
-        setRoles((rolesData as unknown) as Role[]);
-      } catch (error) {
-        console.error('Error loading user management data:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
+    void loadData();
   }, []);
 
   // Keyboard shortcut: 'k' to create new user
@@ -252,17 +364,17 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   // Early access check AFTER hooks to avoid conditional hook usage
   if (!hasRole('farm_admin')) {
     return (
-      <div className="flex items-center justify-center min-h-screen" aria-live="polite" aria-label="Access denied message">
-        <div className="text-center" role="alert">
-          <Shield className="h-16 w-16 mx-auto text-pf-error mb-4" aria-hidden="true" />
-          <h2 className="text-xl font-semibold text-pf-text-primary mb-2">
-            Access Denied
-          </h2>
-          <p className="text-pf-text-secondary">
-            You need administrator privileges to access user management.
-          </p>
-        </div>
-      </div>
+      <PageTemplate
+        title="User Management"
+        subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+        icon={Users}
+        embedded={embedded}
+      >
+        <AdminError
+          title="Access denied"
+          description="You need administrator privileges to access user management."
+        />
+      </PageTemplate>
     );
   }
 
@@ -274,7 +386,25 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         icon={Users}
         embedded={embedded}
       >
-        <TableSkeleton rows={6} cols={6} />
+        <AdminLoading variant="table" rows={6} cols={6} label="Loading users" />
+      </PageTemplate>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <PageTemplate
+        title="User Management"
+        subtitle="Manage user accounts, roles, and permissions for PrintFarmer."
+        icon={Users}
+        embedded={embedded}
+      >
+        <AdminError
+          title="Couldn't load users"
+          description="Try loading user management data again."
+          error={loadError}
+          onRetry={() => void loadData()}
+        />
       </PageTemplate>
     );
   }
@@ -287,13 +417,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       actions={
         <Button
           variant="primary"
-          onClick={() => {
-            const farmUserRole = roles.find(r => r.name === 'farm_user');
-            setSelectedRoleId(farmUserRole ? farmUserRole.id : '');
-            setSelectedPermissions([]);
-            setNewUser({ username: '', email: '', password: '', firstName: '', lastName: '' });
-            setShowCreateModal(true);
-          }}
+          onClick={openCreateUser}
           className="flex items-center gap-2"
         >
           <Plus className="h-4 w-4" />
@@ -385,7 +509,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                         size="sm"
                         onClick={() => {
                           setUserToChangePassword(user);
-                          setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+                          passwordForm.markPristine(EMPTY_PASSWORD_FORM);
                           setChangePasswordError(null);
                           setShowChangePasswordModal(true);
                         }}
@@ -398,10 +522,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                         type="button"
                         variant="subtle"
                         size="sm"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setShowPermissionsModal(true);
-                        }}
+                        onClick={() => openPermissions(user)}
                         className="!p-2 !h-auto"
                         title="Manage permissions"
                       >
@@ -411,10 +532,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                         type="button"
                         variant="subtle"
                         size="sm"
-                        onClick={() => {
-                          setSelectedUser(user);
-                          setShowEditModal(true);
-                        }}
+                        onClick={() => openEditUser(user)}
                         className="!p-2 !h-auto"
                         title="Edit user"
                       >
@@ -439,12 +557,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         </div>
 
         {filteredUsers.length === 0 && (
-          <div className="text-center py-8">
-            <Users className="h-12 w-12 mx-auto text-pf-text-tertiary mb-4" />
-            <p className="text-pf-text-secondary">
-              {searchTerm ? 'No users found matching your search.' : 'No users found.'}
-            </p>
-          </div>
+          <AdminEmpty
+            icon={<Users className="h-12 w-12" />}
+            title={searchTerm ? 'No matching users' : 'No users found'}
+            description={searchTerm
+              ? 'Try a different username, email, or name.'
+              : 'Create a user account to grant access to PrintFarmer.'}
+            size="compact"
+          />
         )}
       </div>
 
@@ -458,9 +578,35 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         {showCreateModal && (
           <Modal
             isOpen={showCreateModal}
-            onClose={() => setShowCreateModal(false)}
+            onClose={() => {
+              createForm.reset();
+              setShowCreateModal(false);
+            }}
             title="Create New User"
             size="lg"
+            footer={(
+              <AdminSaveBar
+                isDirty={createForm.isDirty}
+                changeCount={createForm.changedCount}
+                changedLabels={createForm.changedKeys.map(key => ({
+                  user: 'User details',
+                  roleId: 'Role',
+                  permissions: 'Application access',
+                })[key])}
+                onDiscard={() => {
+                  createForm.reset();
+                  setShowCreateModal(false);
+                }}
+                onSave={createUser}
+                isSaving={isCreating}
+                error={usernameStatus === 'taken' || emailStatus === 'taken'
+                  ? 'Choose an available username and email before creating the user.'
+                  : null}
+                saveLabel="Create user"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               {createErrors.general && (
@@ -476,7 +622,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   value={newUser.username}
                   onChange={(e) => {
                     const v = e.target.value;
-                    setNewUser(u => ({ ...u, username: v }));
+                    createForm.setValue('user', { ...newUser, username: v });
                     setUsernameStatus('idle');
                   }}
                   placeholder="Enter username"
@@ -506,7 +652,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   value={newUser.email}
                   onChange={(e) => {
                     const v = e.target.value;
-                    setNewUser(u => ({ ...u, email: v }));
+                    createForm.setValue('user', { ...newUser, email: v });
                     setEmailStatus('idle');
                   }}
                   placeholder="Enter email address"
@@ -531,7 +677,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   <Input
                     type="text"
                     value={newUser.firstName}
-                    onChange={(e) => setNewUser(u => ({ ...u, firstName: e.target.value }))}
+                    onChange={(e) => createForm.setValue('user', { ...newUser, firstName: e.target.value })}
                     placeholder="Optional"
                   />
                 </FormField>
@@ -539,7 +685,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   <Input
                     type="text"
                     value={newUser.lastName}
-                    onChange={(e) => setNewUser(u => ({ ...u, lastName: e.target.value }))}
+                    onChange={(e) => createForm.setValue('user', { ...newUser, lastName: e.target.value })}
                     placeholder="Optional"
                   />
                 </FormField>
@@ -553,7 +699,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 <Input
                   type="password"
                   value={newUser.password}
-                  onChange={(e) => setNewUser(u => ({ ...u, password: e.target.value }))}
+                  onChange={(e) => createForm.setValue('user', { ...newUser, password: e.target.value })}
                   placeholder="Enter password"
                 />
                 {passwordPolicy && (
@@ -592,14 +738,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 <Select
                   value={selectedRoleId}
                   onChange={(e) => {
-                    setSelectedRoleId(e.target.value);
+                    createForm.setValue('roleId', e.target.value);
                     const selectedRole = roles.find(r => r.id === e.target.value);
                     if (selectedRole?.name === 'farm_admin') {
-                      setSelectedPermissions(APPLICATION_AREAS.map(a => a.id));
+                      createForm.setValue('permissions', APPLICATION_AREAS.map(a => a.id));
                     } else if (selectedRole?.name === 'farm_user') {
-                      setSelectedPermissions(['printers', 'files', 'jobs', 'spools']);
+                      createForm.setValue('permissions', ['printers', 'files', 'jobs', 'spools']);
                     } else {
-                      setSelectedPermissions([]);
+                      createForm.setValue('permissions', []);
                     }
                   }}
                 >
@@ -635,10 +781,11 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                           checked={selectedPermissions.includes(area.id)}
                           onChange={() => {
                             if (!isDisabled) {
-                              setSelectedPermissions(prev =>
-                                prev.includes(area.id)
-                                  ? prev.filter(id => id !== area.id)
-                                  : [...prev, area.id]
+                              createForm.setValue(
+                                'permissions',
+                                selectedPermissions.includes(area.id)
+                                  ? selectedPermissions.filter(id => id !== area.id)
+                                  : [...selectedPermissions, area.id],
                               );
                             }
                           }}
@@ -656,61 +803,43 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                loading={isCreating}
-                disabled={isCreating || !newUser.username || !newUser.email || !passwordMeetsPolicy() || usernameStatus === 'taken' || emailStatus === 'taken'}
-                onClick={createUser}
-              >
-                {isCreating ? 'Creating User...' : 'Create User'}
-              </Button>
-            </div>
           </Modal>
         )}
         {showEditModal && selectedUser && (
           <Modal
             isOpen={showEditModal}
             onClose={() => {
+              if (isSavingUser) return;
+              editForm.reset();
               setShowEditModal(false);
-              setSelectedUser(null);
             }}
             title={`Edit User: ${selectedUser.username}`}
             size="lg"
-          >
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault();
-                try {
-                  await apiClient.updateUser(selectedUser.id, {
-                    firstName: selectedUser.firstName,
-                    lastName: selectedUser.lastName,
-                    email: selectedUser.email,
-                    isActive: selectedUser.isActive,
-                    roles: selectedUser.roles,
-                    permissions: selectedUser.permissions
-                  });
-                  toast.success('User updated successfully');
-                  setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
+            footer={(
+              <AdminSaveBar
+                isDirty={editForm.isDirty}
+                changeCount={editForm.changedCount}
+                changedLabels={['User details']}
+                onDiscard={() => {
+                  editForm.reset();
                   setShowEditModal(false);
-                  setSelectedUser(null);
-                } catch (err: unknown) {
-                  const error = err as { response?: { data?: Record<string, unknown> } };
-                  const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
-                  toast.error(message);
-                }
-              }}
-              className="space-y-4"
-            >
+                }}
+                onSave={saveSelectedUser}
+                isSaving={isSavingUser}
+                saveLabel="Save changes"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
+          >
+            <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
               <FormField label="First Name">
                 <Input
                   type="text"
                   value={selectedUser.firstName || ''}
-                  onChange={e => setSelectedUser(u => u ? { ...u, firstName: e.target.value } : u)}
+                  onChange={e => updateSelectedUser(user => ({ ...user, firstName: e.target.value }))}
                   placeholder="First Name"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
@@ -718,8 +847,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 <Input
                   type="text"
                   value={selectedUser.lastName || ''}
-                  onChange={e => setSelectedUser(u => u ? { ...u, lastName: e.target.value } : u)}
+                  onChange={e => updateSelectedUser(user => ({ ...user, lastName: e.target.value }))}
                   placeholder="Last Name"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
@@ -727,34 +857,36 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 <Input
                   type="email"
                   value={selectedUser.email}
-                  onChange={e => setSelectedUser(u => u ? { ...u, email: e.target.value } : u)}
+                  onChange={e => updateSelectedUser(user => ({ ...user, email: e.target.value }))}
                   placeholder="Email"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
               <FormField label="Active">
                 <Checkbox
                   checked={selectedUser.isActive}
-                  onChange={e => setSelectedUser(u => u ? { ...u, isActive: e.target.checked } : u)}
+                  onChange={e => updateSelectedUser(user => ({ ...user, isActive: e.target.checked }))}
                   label="User account is active"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
               <FormField label="Role" required>
                 <Select
                   value={selectedUser.roles[0] || ''}
+                  disabled={isSavingUser}
                   onChange={(e) => {
-                    setSelectedUser(u => {
-                      if (!u) return u;
+                    updateSelectedUser(user => {
                       const newRole = e.target.value;
-                      let newPermissions = u.permissions;
+                      let newPermissions = user.permissions;
                       if (newRole === 'farm_admin') {
                         newPermissions = APPLICATION_AREAS.map(a => a.id);
                       } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
                         newPermissions = ['printers', 'files', 'jobs', 'spools'];
                       }
                       return {
-                        ...u,
+                        ...user,
                         roles: newRole ? [newRole] : [],
                         permissions: newPermissions
                       };
@@ -782,8 +914,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                     type="button"
                     variant="subtle"
                     size="sm"
+                    disabled={isSavingUser}
                     onClick={() => {
-                      setSelectedUser(u => u ? { ...u } : u);
+                      permissionForm.markPristine({ permissions: selectedUser.permissions ?? [] });
                       setShowPermissionsModal(true);
                     }}
                   >
@@ -807,42 +940,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </form>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowEditModal(false);
-                  setSelectedUser(null);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                onClick={async () => {
-                  try {
-                    await apiClient.updateUser(selectedUser.id, {
-                      firstName: selectedUser.firstName,
-                      lastName: selectedUser.lastName,
-                      email: selectedUser.email,
-                      isActive: selectedUser.isActive,
-                      roles: selectedUser.roles,
-                      permissions: selectedUser.permissions
-                    });
-                    toast.success('User updated successfully');
-                    setUsers(users => users.map(u => u.id === selectedUser.id ? { ...u, ...selectedUser } : u));
-                    setShowEditModal(false);
-                    setSelectedUser(null);
-                  } catch (err) {
-                    const error = err as { response?: { data?: Record<string, unknown> } };
-                    const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
-                    toast.error(message);
-                  }
-                }}
-              >
-                Save Changes
-              </Button>
-            </div>
           </Modal>
         )}
 
@@ -850,9 +947,29 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         {showPermissionsModal && selectedUser && (
           <Modal
             isOpen={showPermissionsModal}
-            onClose={() => setShowPermissionsModal(false)}
+            onClose={() => {
+              if (isSavingPermissions) return;
+              permissionForm.reset();
+              setShowPermissionsModal(false);
+            }}
             title={`Manage Application Access for ${selectedUser.username}`}
             size="lg"
+            footer={(
+              <AdminSaveBar
+                isDirty={permissionForm.isDirty}
+                changeCount={permissionForm.changedCount}
+                changedLabels={['Application access']}
+                onDiscard={() => {
+                  permissionForm.reset();
+                  setShowPermissionsModal(false);
+                }}
+                onSave={savePermissions}
+                isSaving={isSavingPermissions}
+                saveLabel="Save permissions"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               <p className="text-sm text-pf-text-secondary">
@@ -863,7 +980,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   const userRole = selectedUser.roles[0];
                   const isAdmin = userRole === 'farm_admin';
                   const isDisabled = isAdmin;
-                  const hasAccess = selectedUser.permissions?.includes(area.id) ?? false;
+                  const hasAccess = permissionForm.values.permissions.includes(area.id);
 
                   return (
                     <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-1 rounded-sm cursor-pointer transition">
@@ -872,15 +989,12 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                         onChange={() => {
                           if (!isDisabled) {
                             const updatedPermissions = hasAccess
-                              ? selectedUser.permissions.filter(id => id !== area.id)
-                              : [...selectedUser.permissions, area.id];
-                            setSelectedUser({
-                              ...selectedUser,
-                              permissions: updatedPermissions
-                            });
+                              ? permissionForm.values.permissions.filter(id => id !== area.id)
+                              : [...permissionForm.values.permissions, area.id];
+                            permissionForm.setValue('permissions', updatedPermissions);
                           }
                         }}
-                        disabled={isDisabled}
+                        disabled={isDisabled || isSavingPermissions}
                       />
                       <div className="flex-1">
                         <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
@@ -893,33 +1007,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                variant="secondary"
-                onClick={() => setShowPermissionsModal(false)}
-              >
-                Close
-              </Button>
-              <Button
-                variant="primary"
-                onClick={async () => {
-                  try {
-                    await apiClient.updateUser(selectedUser.id, {
-                      accessibleAreas: selectedUser.permissions
-                    });
-                    toast.success('Permissions updated');
-                    setShowPermissionsModal(false);
-                    loadUsers();
-                  } catch (err) {
-                    const error = err as { response?: { data?: Record<string, unknown> } };
-                    const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update permissions';
-                    toast.error(message);
-                  }
-                }}
-              >
-                Save Permissions
-              </Button>
-            </div>
           </Modal>
         )}
 
@@ -931,11 +1018,43 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               setShowChangePasswordModal(false);
               setUserToChangePassword(null);
               setShowChangePasswordConfirm(false);
-              setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+              passwordForm.reset();
               setChangePasswordError(null);
             }}
             title={`Change Password: ${userToChangePassword.username}`}
             size="md"
+            footer={(
+              <AdminSaveBar
+                isDirty={passwordForm.isDirty}
+                changeCount={passwordForm.changedCount}
+                changedLabels={passwordForm.changedKeys.map(key => ({
+                  newPassword: 'New password',
+                  confirmNewPassword: 'Password confirmation',
+                })[key])}
+                onDiscard={() => {
+                  passwordForm.reset();
+                  setShowChangePasswordModal(false);
+                  setUserToChangePassword(null);
+                  setChangePasswordError(null);
+                }}
+                onSave={() => {
+                  if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
+                    setChangePasswordError('Password confirmation does not match.');
+                    return;
+                  }
+                  if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
+                    setChangePasswordError('Password does not meet policy requirements.');
+                    return;
+                  }
+                  setShowChangePasswordConfirm(true);
+                }}
+                isSaving={isChangingPassword}
+                error={changePasswordError}
+                saveLabel="Continue"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               {changePasswordError && <Alert type="error">{changePasswordError}</Alert>}
@@ -949,7 +1068,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   type="password"
                   value={passwordChangeForm.newPassword}
                   onChange={(e) => {
-                    setPasswordChangeForm((prev) => ({ ...prev, newPassword: e.target.value }));
+                    passwordForm.setValue('newPassword', e.target.value);
                     setChangePasswordError(null);
                   }}
                   placeholder="Enter new password"
@@ -962,7 +1081,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   type="password"
                   value={passwordChangeForm.confirmNewPassword}
                   onChange={(e) => {
-                    setPasswordChangeForm((prev) => ({ ...prev, confirmNewPassword: e.target.value }));
+                    passwordForm.setValue('confirmNewPassword', e.target.value);
                     setChangePasswordError(null);
                   }}
                   placeholder="Confirm new password"
@@ -999,37 +1118,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               )}
             </div>
 
-            <div className="flex justify-end gap-2 mt-6">
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setShowChangePasswordModal(false);
-                  setUserToChangePassword(null);
-                  setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
-                  setChangePasswordError(null);
-                }}
-                disabled={isChangingPassword}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={isChangingPassword || !passwordChangeForm.newPassword || !passwordChangeForm.confirmNewPassword}
-                onClick={() => {
-                  if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
-                    setChangePasswordError('Password confirmation does not match.');
-                    return;
-                  }
-                  if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
-                    setChangePasswordError('Password does not meet policy requirements.');
-                    return;
-                  }
-                  setShowChangePasswordConfirm(true);
-                }}
-              >
-                Continue
-              </Button>
-            </div>
           </Modal>
         )}
 
@@ -1049,11 +1137,11 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 passwordChangeForm.newPassword,
                 passwordChangeForm.confirmNewPassword
               );
-              toast.success(`Password changed for "${userToChangePassword.username}"`);
+              adminToast.success(`Password changed for "${userToChangePassword.username}"`);
               setShowChangePasswordConfirm(false);
               setShowChangePasswordModal(false);
               setUserToChangePassword(null);
-              setPasswordChangeForm({ newPassword: '', confirmNewPassword: '' });
+              passwordForm.markPristine(EMPTY_PASSWORD_FORM);
               setChangePasswordError(null);
             } catch (err) {
               const error = err as { response?: { data?: Record<string, unknown> } };
@@ -1062,7 +1150,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 || 'Failed to change user password';
               setChangePasswordError(message);
               setShowChangePasswordConfirm(false);
-              toast.error(message);
+              adminToast.error(message);
             } finally {
               setIsChangingPassword(false);
             }
@@ -1085,13 +1173,13 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
             if (!userToDelete) return;
             try {
               await apiClient.deleteUser(userToDelete.id);
-              toast.success(`User "${userToDelete.username}" deleted`);
+              adminToast.success(`User "${userToDelete.username}" deleted`);
               setUserToDelete(null);
               loadUsers();
             } catch (err) {
               const error = err as { response?: { data?: Record<string, unknown> } };
               const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to delete user';
-              toast.error(message);
+              adminToast.error(message);
               setUserToDelete(null);
             }
           }}

@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
 import { Button, Radio, FileUpload } from '@/common/components/ui';
-import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, AlertCircleIcon, CloudDownloadIcon } from '@/common/components/icons/MdiIcons';
+import { AdminError } from '@/common/components/admin';
+import { DatabaseIcon, DownloadIcon, UploadIcon, RefreshIcon, CheckCircleIcon, CloudDownloadIcon } from '@/common/components/icons/MdiIcons';
 import { 
   exportCatalog, 
   exportPrinters, 
@@ -213,15 +214,11 @@ export function DataManagementPage({ embedded = false }: EmbeddablePageProps) {
       <div className="space-y-6">
         {/* Status Messages */}
         {error && (
-          <div className="bg-pf-error/10 border border-pf-error/30 rounded-lg p-4">
-            <div className="flex items-start">
-              <AlertCircleIcon className="w-5 h-5 text-pf-error mt-0.5 mr-3 shrink-0" />
-              <div className="flex-1">
-                <h3 className="text-sm font-medium text-pf-error">Error</h3>
-                <p className="text-sm text-pf-error mt-1">{error}</p>
-              </div>
-            </div>
-          </div>
+          <AdminError
+            title="Data operation failed"
+            description={error}
+            size="compact"
+          />
         )}
 
         {success && (

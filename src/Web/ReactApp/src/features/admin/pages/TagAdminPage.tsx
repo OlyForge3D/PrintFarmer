@@ -1,16 +1,24 @@
 import React, { useState, useEffect, useOptimistic, useTransition, useEffectEvent, useMemo, useRef } from 'react';
 import { SelectableRow } from '@/common/components/Table/SelectableRow';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { DeleteIcon, CheckIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
+import { DeleteIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, RefreshIcon } from '@/common/components/icons/MdiIcons';
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, Input, FormField, Alert, Tabs } from '@/common/components/ui';
+import { Button, Input, FormField, Tabs } from '@/common/components/ui';
 import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
+import {
+    AdminEmpty,
+    AdminError,
+    AdminLoading,
+    AdminSaveBar,
+    adminToast,
+    useDirtyState,
+} from '@/common/components/admin';
 import { getRevisionConflict, getErrorMessage } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 import TagAnalyticsDashboard from '@/components/TagAnalyticsDashboard';
-import type { TagOption, EditingTag, UpdateTagRequest } from '@/types/admin';
+import type { TagOption, UpdateTagRequest } from '@/types/admin';
 
 /**
  * Generate a visually distinct color using the golden angle.
@@ -72,10 +80,17 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     const [editingTagId, setEditingTagId] = useState<string | null>(null);
     const [hoveredTagId, setHoveredTagId] = useState<string | null>(null);
     const [focusedIndex, setFocusedIndex] = useState<number>(-1);
-    const [newTagName, setNewTagName] = useState('');
-    const [newTagColor, setNewTagColor] = useState('#6366f1');
-    const [newTagDescription, setNewTagDescription] = useState('');
-    const [editingTag, setEditingTag] = useState<EditingTag | null>(null);
+    const createForm = useDirtyState({
+        name: '',
+        color: '#6366f1',
+        description: '',
+    });
+    const editForm = useDirtyState({
+        name: '',
+        color: '',
+        description: '',
+    });
+    const [editingRevision, setEditingRevision] = useState<number | undefined>();
     const [isPending, startTransition] = useTransition();
     const editNameInputRef = useRef<HTMLInputElement>(null);
     const rowRefs = useRef<Map<number, HTMLTableRowElement>>(new Map());
@@ -101,7 +116,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     }, [focusedIndex]);
 
     // Fetch all tags with usage count
-    const { data: tags = [], isLoading } = useQuery<TagOption[]>({
+    const { data: tags = [], isLoading, error, refetch } = useQuery<TagOption[]>({
         queryKey: ['admin-all-tags'],
         queryFn: async () => {
             // Fetch tags
@@ -161,23 +176,25 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     // Create tag mutation
     const createTagMutation = useMutation({
         mutationFn: async () => {
-            if (!newTagName.trim()) throw new Error('Tag name is required');
+            if (!createForm.values.name.trim()) throw new Error('Tag name is required');
 
             return apiClient.createNewTag({
-                name: newTagName.trim(),
-                color: newTagColor,
-                description: newTagDescription.trim()
+                name: createForm.values.name.trim(),
+                color: createForm.values.color,
+                description: createForm.values.description.trim()
             });
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
             queryClient.invalidateQueries({ queryKey: ['model-tags'] });
             queryClient.invalidateQueries({ queryKey: ['tagAnalytics'] });
-            setNewTagName('');
-            setNewTagColor('#6366f1');
-            setNewTagDescription('');
+            adminToast.success('Tag created');
+            createForm.markPristine({ name: '', color: '#6366f1', description: '' });
             setShowNewTagForm(false);
-        }
+        },
+        onError: (mutationError) => {
+            adminToast.error(getErrorMessage(mutationError, 'Failed to create tag'));
+        },
     });
 
     // Delete tag mutation
@@ -189,7 +206,11 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             queryClient.invalidateQueries({ queryKey: ['admin-all-tags'] });
             queryClient.invalidateQueries({ queryKey: ['model-tags'] });
             queryClient.invalidateQueries({ queryKey: ['tagAnalytics'] });
-        }
+            adminToast.success('Tag deleted');
+        },
+        onError: (mutationError) => {
+            adminToast.error(getErrorMessage(mutationError, 'Failed to delete tag'));
+        },
     });
 
     // Update tag mutation - uses the revision/concurrency contract added in #844.
@@ -232,13 +253,12 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
 
     const handleStartEdit = (tag: TagOption) => {
         setEditingTagId(tag.id);
-        setEditingTag({
-            id: tag.id,
+        editForm.markPristine({
             name: tag.name,
-            color: tag.color,
-            description: tag.description,
-            revision: tag.revision
+            color: tag.color ?? '',
+            description: tag.description ?? '',
         });
+        setEditingRevision(tag.revision);
         setSaveError(null);
         setConflictServerTag(null);
         // Focus the name input after React renders the input
@@ -250,16 +270,17 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
 
     const handleCancelEdit = () => {
         setEditingTagId(null);
-        setEditingTag(null);
+        editForm.reset();
+        setEditingRevision(undefined);
         setSaveError(null);
         setConflictServerTag(null);
     };
 
     const handleSaveEdit = async () => {
-        if (!editingTag || !editingTag.name.trim() || !editingTag.id) {
+        if (!editingTagId || !editForm.values.name.trim()) {
             return;
         }
-        if (editingTag.revision == null) {
+        if (editingRevision == null) {
             // No revision baseline to send as expectedRevision - guessing 0 would either
             // spuriously conflict on every save (trapping the user in a reload loop) or,
             // worse, silently match an unrelated revision 0. Block the save and ask the
@@ -271,16 +292,21 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         setSaveError(null);
         try {
             await updateTagMutation.mutateAsync({
-                id: editingTag.id,
+                id: editingTagId,
                 dto: {
-                    name: editingTag.name.trim(),
-                    color: editingTag.color,
-                    description: editingTag.description,
-                    expectedRevision: editingTag.revision
+                    name: editForm.values.name.trim(),
+                    ...(editForm.values.color || editForm.original.color
+                        ? { color: editForm.values.color }
+                        : {}),
+                    ...(editForm.values.description || editForm.original.description
+                        ? { description: editForm.values.description }
+                        : {}),
+                    expectedRevision: editingRevision
                 }
             });
+            editForm.markPristine(editForm.values);
             setEditingTagId(null);
-            setEditingTag(null);
+            setEditingRevision(undefined);
         } catch (error) {
             const revisionConflict = getRevisionConflict(error);
             if (revisionConflict) {
@@ -288,20 +314,20 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 // untouched, and fetch the current server state so the conflict dialog can
                 // show both sides of the diff.
                 try {
-                    const freshTag = await apiClient.getTag(editingTag.id);
+                    const freshTag = await apiClient.getTag(editingTagId);
                     setConflictServerTag(
                         freshTag ?? {
                             // Tag not found (e.g. deleted by someone else) - use a neutral
                             // placeholder rather than echoing the user's own attempted name,
                             // which would misleadingly appear as if it were the server state.
-                            id: editingTag.id,
+                            id: editingTagId,
                             name: '(tag not found - it may have been deleted)',
                             revision: revisionConflict.actualRevision
                         }
                     );
                 } catch {
                     setConflictServerTag({
-                        id: editingTag.id,
+                        id: editingTagId,
                         name: '(unable to load current version)',
                         revision: revisionConflict.actualRevision
                     });
@@ -315,12 +341,12 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
     // Reloads the fresh server tag into the edit form's revision baseline so a retry can
     // succeed, without discarding the name/color/description the user already typed.
     const handleReloadConflict = async () => {
-        if (!editingTag?.id) return;
+        if (!editingTagId) return;
         setIsReloadingConflict(true);
         try {
-            const freshTag = await apiClient.getTag(editingTag.id);
+            const freshTag = await apiClient.getTag(editingTagId);
             if (freshTag) {
-                setEditingTag((prev) => (prev ? { ...prev, revision: freshTag.revision } : prev));
+                setEditingRevision(freshTag.revision);
             }
             setConflictServerTag(null);
             setSaveError(null);
@@ -331,11 +357,11 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         }
     };
 
-    const conflictFields: RevisionConflictField[] = conflictServerTag && editingTag
+    const conflictFields: RevisionConflictField[] = conflictServerTag && editingTagId
         ? [
-            { label: 'Name', yourValue: editingTag.name, serverValue: conflictServerTag.name },
-            { label: 'Description', yourValue: editingTag.description ?? '', serverValue: conflictServerTag.description ?? '' },
-            { label: 'Color', yourValue: editingTag.color ?? '', serverValue: conflictServerTag.color ?? '' }
+            { label: 'Name', yourValue: editForm.values.name, serverValue: conflictServerTag.name },
+            { label: 'Description', yourValue: editForm.values.description, serverValue: conflictServerTag.description ?? '' },
+            { label: 'Color', yourValue: editForm.values.color, serverValue: conflictServerTag.color ?? '' }
         ]
         : [];
 
@@ -393,9 +419,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
         if (e.key === 'a') {
             e.preventDefault();
             setShowNewTagForm(true);
-            setNewTagName('');
-            setNewTagColor(nextTagColor);
-            setNewTagDescription('');
+            createForm.markPristine({ name: '', color: nextTagColor, description: '' });
         }
         
         // 'E' to edit focused or hovered tag
@@ -426,9 +450,25 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 icon={TagIcon}
                 embedded={embedded}
             >
-                <div className="flex items-center justify-center h-64">
-                    <div className="pf-animate-spin rounded-full h-12 w-12 border-b-2 border-pf-accent"></div>
-                </div>
+                <AdminLoading variant="table" cols={5} rows={6} label="Loading tags" />
+            </PageTemplate>
+        );
+    }
+
+    if (error) {
+        return (
+            <PageTemplate
+                title="Tag Management"
+                subtitle="Create, manage, and analyze 3D model tags"
+                icon={TagIcon}
+                embedded={embedded}
+            >
+                <AdminError
+                    title="Couldn't load tags"
+                    description="Try loading the tag library again."
+                    error={error}
+                    onRetry={() => void refetch()}
+                />
             </PageTemplate>
         );
     }
@@ -457,9 +497,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                     variant="primary"
                                     iconLeft={<PlusIcon className="w-4 h-4" />}
                                     onClick={() => {
-                                        setNewTagName('');
-                                        setNewTagColor(nextTagColor);
-                                        setNewTagDescription('');
+                                        createForm.markPristine({ name: '', color: nextTagColor, description: '' });
                                         setShowNewTagForm(true);
                                     }}
                                     title="Add new tag (A)"
@@ -470,13 +508,6 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
 
                 {/* Tags List */}
                 <div className="bg-pf-bg-1 rounded-lg border border-pf-border overflow-x-auto">
-                    {saveError && (
-                        <div className="p-3 border-b border-pf-border">
-                            <Alert type="error" title="Couldn't save tag">
-                                {saveError}
-                            </Alert>
-                        </div>
-                    )}
                     <table className="w-full min-w-max">
                         <thead>
                             <tr className="border-b border-pf-border bg-pf-bg-2">
@@ -527,17 +558,12 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                             />
                                         </td>
                                         <td className="px-6 py-4">
-                                            {editingTagId === tag.id && editingTag ? (
+                                            {editingTagId === tag.id ? (
                                                 <Input
                                                     ref={editNameInputRef}
                                                     type="text"
-                                                    value={editingTag.name}
-                                                    onChange={(e) =>
-                                                        setEditingTag({
-                                                            ...editingTag,
-                                                            name: e.target.value
-                                                        })
-                                                    }
+                                                    value={editForm.values.name}
+                                                    onChange={(e) => editForm.setValue('name', e.target.value)}
                                                 />
                                             ) : (
                                                 <span className="font-medium text-pf-text-primary">
@@ -546,16 +572,11 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                             )}
                                         </td>
                                         <td className="px-6 py-4 text-pf-text-secondary text-sm">
-                                            {editingTagId === tag.id && editingTag ? (
+                                            {editingTagId === tag.id ? (
                                                 <Input
                                                     type="text"
-                                                    value={editingTag.description || ''}
-                                                    onChange={(e) =>
-                                                        setEditingTag({
-                                                            ...editingTag,
-                                                            description: e.target.value
-                                                        })
-                                                    }
+                                                    value={editForm.values.description}
+                                                    onChange={(e) => editForm.setValue('description', e.target.value)}
                                                 />
                                             ) : (
                                                 tag.description || '-'
@@ -569,22 +590,6 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                         <td className="px-6 py-4 text-right">
                                             {editingTagId === tag.id ? (
                                                 <div className="flex justify-end gap-2">
-                                                    <Button
-                                                        type="button"
-                                                        onClick={handleSaveEdit}
-                                                        variant="success"
-                                                        size="sm"
-                                                        className="!p-2 !h-auto"
-                                                        title="Save changes"
-                                                        disabled={updateTagMutation.isPending}
-                                                        aria-busy={updateTagMutation.isPending}
-                                                    >
-                                                        {updateTagMutation.isPending ? (
-                                                            <LoadingIcon className="w-4 h-4" />
-                                                        ) : (
-                                                            <CheckIcon className="w-4 h-4" />
-                                                        )}
-                                                    </Button>
                                                     <Button
                                                         type="button"
                                                         onClick={handleCancelEdit}
@@ -632,15 +637,43 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                 ))
                             ) : (
                                 <tr>
-                                    <td colSpan={5} className="px-6 py-8 text-center text-pf-text-secondary">
-                                        <TagIcon className="w-12 h-12 mx-auto mb-2 text-pf-text-tertiary" />
-                                        No tags created yet. Create one to get started!
+                                    <td colSpan={5}>
+                                        <AdminEmpty
+                                            icon={<TagIcon className="w-12 h-12" />}
+                                            title="No tags created yet"
+                                            description="Create a tag to organize models and G-code files."
+                                            action={
+                                                <Button
+                                                    variant="primary"
+                                                    onClick={() => {
+                                                        createForm.markPristine({ name: '', color: nextTagColor, description: '' });
+                                                        setShowNewTagForm(true);
+                                                    }}
+                                                >
+                                                    Add Tag
+                                                </Button>
+                                            }
+                                            size="compact"
+                                        />
                                     </td>
                                 </tr>
                             )}
                         </tbody>
                     </table>
                 </div>
+                <AdminSaveBar
+                    isDirty={editForm.isDirty}
+                    changeCount={editForm.changedCount}
+                    changedLabels={editForm.changedKeys.map(key => ({
+                        name: 'Name',
+                        color: 'Color',
+                        description: 'Description',
+                    })[key])}
+                    onDiscard={handleCancelEdit}
+                    onSave={handleSaveEdit}
+                    isSaving={updateTagMutation.isPending}
+                    error={saveError}
+                />
 
                 {/* Statistics */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -677,13 +710,31 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             <Modal
                 isOpen={showNewTagForm}
                 onClose={() => {
+                    createForm.reset();
                     setShowNewTagForm(false);
-                    setNewTagName('');
-                    setNewTagColor(nextTagColor);
-                    setNewTagDescription('');
                 }}
                 title="Create New Tag"
                 width="max-w-md"
+                footer={(
+                    <AdminSaveBar
+                        isDirty={createForm.isDirty}
+                        changeCount={createForm.changedCount}
+                        changedLabels={createForm.changedKeys.map(key => ({
+                            name: 'Name',
+                            color: 'Color',
+                            description: 'Description',
+                        })[key])}
+                        onDiscard={() => {
+                            createForm.reset();
+                            setShowNewTagForm(false);
+                        }}
+                        onSave={() => createTagMutation.mutate()}
+                        isSaving={createTagMutation.isPending}
+                        saveLabel="Create tag"
+                        discardLabel="Cancel"
+                        className="-mx-6 -my-4"
+                    />
+                )}
             >
                 <div className="space-y-6">
                     {/* Tag Preview */}
@@ -691,9 +742,9 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                         <div
                             data-pf-radius="full"
                             className="px-4 py-2 rounded-full text-white font-medium shadow-md transition-all duration-200"
-                            style={{ backgroundColor: newTagColor }}
+                            style={{ backgroundColor: createForm.values.color }}
                         >
-                            {newTagName || 'Tag Preview'}
+                            {createForm.values.name || 'Tag Preview'}
                         </div>
                         <p className="text-xs text-pf-text-tertiary mt-2">Preview of your new tag</p>
                     </div>
@@ -701,15 +752,15 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                     {/* Tag Name */}
                     <FormField
                         label="Tag Name"
-                        error={createTagMutation.isError ? undefined : (newTagName.trim() === '' ? undefined : undefined)}
+                        error={createTagMutation.isError ? undefined : (createForm.values.name.trim() === '' ? undefined : undefined)}
                         helper="Choose a short, descriptive name"
                     >
                         <Input
                             type="text"
-                            value={newTagName}
-                            onChange={(e) => setNewTagName(e.target.value)}
+                            value={createForm.values.name}
+                            onChange={(e) => createForm.setValue('name', e.target.value)}
                             onKeyDown={(e) => {
-                                if (e.key === 'Enter' && newTagName.trim() && !createTagMutation.isPending) {
+                                if (e.key === 'Enter' && createForm.values.name.trim() && !createTagMutation.isPending) {
                                     e.preventDefault();
                                     createTagMutation.mutate();
                                 }
@@ -725,8 +776,8 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                         <div className="flex items-center gap-4">
                             <input
                                 type="color"
-                                value={newTagColor}
-                                onChange={(e) => setNewTagColor(e.target.value)}
+                                value={createForm.values.color}
+                                onChange={(e) => createForm.setValue('color', e.target.value)}
                                 disabled={createTagMutation.isPending}
                                 className="h-12 w-12 border-2 border-pf-border rounded-lg cursor-pointer disabled:opacity-50 shadow-xs"
                                 aria-label="Select tag color"
@@ -735,11 +786,11 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                 <div className="flex gap-2">
                                     <Input
                                         type="text"
-                                        value={newTagColor}
+                                        value={createForm.values.color}
                                         onChange={(e) => {
                                             const val = e.target.value;
                                             if (/^#[0-9A-Fa-f]{0,6}$/.test(val)) {
-                                                setNewTagColor(val);
+                                                createForm.setValue('color', val);
                                             }
                                         }}
                                         placeholder="#6366f1"
@@ -749,7 +800,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                                     <Button
                                         type="button"
                                         variant="secondary"
-                                        onClick={() => setNewTagColor(hslToHex(generateTagColor(Math.floor(Math.random() * 100))))}
+                                        onClick={() => createForm.setValue('color', hslToHex(generateTagColor(Math.floor(Math.random() * 100))))}
                                         disabled={createTagMutation.isPending}
                                         title="Generate new color"
                                         aria-label="Generate new color"
@@ -768,47 +819,21 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                     <FormField label="Description" helper="Optional - helps others understand this tag's purpose">
                         <Input
                             type="text"
-                            value={newTagDescription}
-                            onChange={(e) => setNewTagDescription(e.target.value)}
+                            value={createForm.values.description}
+                            onChange={(e) => createForm.setValue('description', e.target.value)}
                             placeholder="Brief description of this tag..."
                             disabled={createTagMutation.isPending}
                         />
                     </FormField>
 
-                    {/* Error Alert */}
                     {createTagMutation.isError && (
-                        <Alert type="error" title="Error">
-                            {createTagMutation.error instanceof Error
-                                ? createTagMutation.error.message
-                                : 'Failed to create tag'}
-                        </Alert>
+                        <AdminError
+                            title="Couldn't create tag"
+                            error={createTagMutation.error}
+                            size="compact"
+                        />
                     )}
 
-                    {/* Actions */}
-                    <div className="flex gap-3 pt-2">
-                        <Button
-                            variant="secondary"
-                            onClick={() => {
-                                setShowNewTagForm(false);
-                                setNewTagName('');
-                                setNewTagColor(nextTagColor);
-                                setNewTagDescription('');
-                            }}
-                            disabled={createTagMutation.isPending}
-                            className="flex-1"
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={() => createTagMutation.mutate()}
-                            disabled={createTagMutation.isPending || !newTagName.trim()}
-                            className="flex-1"
-                            loading={createTagMutation.isPending}
-                        >
-                            Create Tag
-                        </Button>
-                    </div>
                 </div>
             </Modal>
 
@@ -816,7 +841,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
             <RevisionConflictDialog
                 isOpen={!!conflictServerTag}
                 entityLabel="tag"
-                entityName={editingTag?.name}
+                entityName={editForm.values.name}
                 fields={conflictFields}
                 isReloading={isReloadingConflict}
                 onReloadLatest={handleReloadConflict}
