@@ -6,8 +6,22 @@
  */
 
 /* eslint-disable local/pf-no-unguarded-console */
-import { OrcaImportWizard, orcaProfilesService } from '@/features/slicer/orca';
+import type React from 'react';
+import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { orcaProfilesService } from '@/features/slicer/orca/services/orcaProfilesService';
 import type { ISlicerUIRegistry, SlicerUIExports } from './SlicerUIRegistry';
+
+type OrcaImportWizardComponent = typeof import(
+  '@/features/slicer/orca/components/OrcaImportWizard'
+)['OrcaImportWizard'];
+
+const OrcaImportWizard = lazyWithPreload<
+  React.ComponentProps<OrcaImportWizardComponent>,
+  OrcaImportWizardComponent
+>(
+  () => import('@/features/slicer/orca/components/OrcaImportWizard')
+    .then((module) => ({ default: module.OrcaImportWizard })),
+);
 
 /**
  * Register OrcaSlicer UI

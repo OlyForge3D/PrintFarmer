@@ -12,7 +12,12 @@ export interface PreloadableComponent<P, T extends React.ComponentType<P>> {
 export function lazyWithPreload<P, T extends React.ComponentType<P>>(
   factory: () => Promise<{ default: T }>
 ): T & PreloadableComponent<P, T> {
-  const LazyComp = React.lazy(factory) as unknown as T & PreloadableComponent<P, T>;
-  LazyComp.preload = factory;
+  let modulePromise: Promise<{ default: T }> | undefined;
+  const load = () => {
+    modulePromise ??= factory();
+    return modulePromise;
+  };
+  const LazyComp = React.lazy(load) as unknown as T & PreloadableComponent<P, T>;
+  LazyComp.preload = load;
   return LazyComp;
 }

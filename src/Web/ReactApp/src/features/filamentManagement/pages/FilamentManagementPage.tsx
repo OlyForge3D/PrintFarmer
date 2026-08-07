@@ -1,15 +1,35 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { Suspense, useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon, BarcodeScanIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { FilamentsTab } from '@/features/filamentManagement/components/FilamentsTab';
-import { SpoolsTab } from '@/features/filamentManagement/components/SpoolsTab';
-import { MaterialClustersTab } from '@/features/filamentManagement/components/MaterialClustersTab';
-import { ScanSpoolModal } from '@/features/filamentManagement/components/ScanSpoolModal';
+import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import type { SpoolmanSpool } from '@/types/api';
 
 type TabId = 'filaments' | 'spools' | 'clusters';
+type FilamentsTabComponent = typeof import('@/features/filamentManagement/components/FilamentsTab')['FilamentsTab'];
+type SpoolsTabComponent = typeof import('@/features/filamentManagement/components/SpoolsTab')['SpoolsTab'];
+type MaterialClustersTabComponent = typeof import('@/features/filamentManagement/components/MaterialClustersTab')['MaterialClustersTab'];
+type ScanSpoolModalComponent = typeof import('@/features/filamentManagement/components/ScanSpoolModal')['ScanSpoolModal'];
+
+const FilamentsTab = lazyWithPreload<React.ComponentProps<FilamentsTabComponent>, FilamentsTabComponent>(
+  () => import('@/features/filamentManagement/components/FilamentsTab').then((module) => ({ default: module.FilamentsTab })),
+);
+const SpoolsTab = lazyWithPreload<React.ComponentProps<SpoolsTabComponent>, SpoolsTabComponent>(
+  () => import('@/features/filamentManagement/components/SpoolsTab').then((module) => ({ default: module.SpoolsTab })),
+);
+const MaterialClustersTab = lazyWithPreload<React.ComponentProps<MaterialClustersTabComponent>, MaterialClustersTabComponent>(
+  () => import('@/features/filamentManagement/components/MaterialClustersTab').then((module) => ({ default: module.MaterialClustersTab })),
+);
+const ScanSpoolModal = lazyWithPreload<React.ComponentProps<ScanSpoolModalComponent>, ScanSpoolModalComponent>(
+  () => import('@/features/filamentManagement/components/ScanSpoolModal').then((module) => ({ default: module.ScanSpoolModal })),
+);
+
+const TAB_COMPONENTS = {
+  filaments: FilamentsTab,
+  spools: SpoolsTab,
+  clusters: MaterialClustersTab,
+} satisfies Record<TabId, typeof FilamentsTab | typeof SpoolsTab | typeof MaterialClustersTab>;
 
 interface Tab {
   id: TabId;
@@ -73,6 +93,7 @@ export function FilamentManagementPage() {
   }, [navigate]);
 
   const currentTab = TABS.find(t => t.id === activeTab) ?? TABS[0];
+  const ActiveTab = TAB_COMPONENTS[activeTab];
 
   const handleSpoolFound = useCallback((spool: SpoolmanSpool) => {
     // Switch to Spools tab so the user can find the matched spool
@@ -91,6 +112,8 @@ export function FilamentManagementPage() {
           variant="secondary"
           size="sm"
           onClick={() => setScanModalOpen(true)}
+          onFocus={() => void ScanSpoolModal.preload()}
+          onPointerEnter={() => void ScanSpoolModal.preload()}
           iconLeft={<BarcodeScanIcon className="w-4 h-4" />}
         >
           Scan
@@ -105,6 +128,8 @@ export function FilamentManagementPage() {
             <Button
               key={tab.id}
               onClick={() => handleTabChange(tab.id)}
+              onFocus={() => void TAB_COMPONENTS[tab.id].preload()}
+              onPointerEnter={() => void TAB_COMPONENTS[tab.id].preload()}
               variant="tab"
               className={`transition-all duration-200 motion-reduce:transition-none
                 ${isActive
@@ -130,16 +155,26 @@ export function FilamentManagementPage() {
         aria-labelledby={`tab-${activeTab}`}
         className="transition-opacity duration-200 motion-reduce:transition-none"
       >
-        {activeTab === 'filaments' && <FilamentsTab />}
-        {activeTab === 'spools' && <SpoolsTab />}
-        {activeTab === 'clusters' && <MaterialClustersTab />}
+        <Suspense
+          fallback={(
+            <div className="flex min-h-48 items-center justify-center" role="status" aria-label={`Loading ${currentTab.label}`}>
+              <div className="pf-animate-spin h-8 w-8 rounded-full border-b-2 border-pf-accent" />
+            </div>
+          )}
+        >
+          <ActiveTab />
+        </Suspense>
       </div>
 
-      <ScanSpoolModal
-        isOpen={scanModalOpen}
-        onClose={() => setScanModalOpen(false)}
-        onSpoolFound={handleSpoolFound}
-      />
+      {scanModalOpen && (
+        <Suspense fallback={null}>
+          <ScanSpoolModal
+            isOpen={scanModalOpen}
+            onClose={() => setScanModalOpen(false)}
+            onSpoolFound={handleSpoolFound}
+          />
+        </Suspense>
+      )}
     </PageTemplate>
   );
 }
