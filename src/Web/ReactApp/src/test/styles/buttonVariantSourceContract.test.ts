@@ -23,6 +23,10 @@ const REACT_APP_ROOT = resolve(TEST_DIR, '../../..');
 // or shadow utility in any state.
 // ---------------------------------------------------------------------------
 const BUTTON_SOURCE = resolve(REACT_APP_ROOT, 'src/common/components/ui/Button.tsx');
+const CONTROL_PAD_BUTTON_SOURCE = resolve(
+  REACT_APP_ROOT,
+  'src/common/components/ui/ControlPadButton.tsx',
+);
 const ALL_VARIANTS = [
   'primary',
   'secondary',
@@ -291,11 +295,11 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
  * and the defect was invisible. Freeing caller paint is what lets it through,
  * which makes it this change's fallout rather than a pre-existing caller bug.
  *
- * Scope is every call site this cluster unmasked, found by walking the tree
- * rather than by listing files. An earlier version enumerated nine files by
- * hand; a repo-wide sweep then found ten more offending sites in files that
- * list did not mention, so the list was not a deliberate scope boundary — it
- * was the limit of what had been looked at.
+ * Scope is every call site imported from the shared Button modules, including
+ * named-import aliases, namespace member tags, and the explicitly registered
+ * forwarding wrappers whose source contract is verified below. This is a
+ * module/export boundary, not a global component-name match: unrelated
+ * components named Button or ControlPadButton remain outside the proof.
  *
  * `unstyled` is deliberately excluded. It declares no paint and has no
  * components-layer default, so its callers were always in full control and
@@ -337,7 +341,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   };
 
   /**
-   * Every `<Button>` element in a file, parsed with the TypeScript compiler.
+   * Every JSX element resolved to the shared Button or a verified forwarding
+   * wrapper, parsed with the TypeScript compiler.
    *
    * Three hand-rolled parsers preceded this one and each shipped a different
    * tokenisation bug: a tag terminated at the first `>` inside an arrow
@@ -380,6 +385,170 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     disableable: boolean;
     dynamicVariant: boolean;
   }
+
+  interface ButtonComponent {
+    defaultVariant: string;
+  }
+
+  interface ButtonTagOptions {
+    /**
+     * Parser fixtures historically omit imports. Production scans disable this
+     * fallback so only exact shared-module imports establish component identity.
+     */
+    allowImplicitButton?: boolean;
+    /** Reproduce the pre-#1143 literal-tag predicate for falsification fixtures. */
+    literalOnly?: boolean;
+  }
+
+  const SHARED_UI_MODULE = '@/common/components/ui';
+  const BUTTON_MODULE = `${SHARED_UI_MODULE}/Button`;
+  const CONTROL_PAD_BUTTON_MODULE = `${SHARED_UI_MODULE}/ControlPadButton`;
+  const BUTTON_COMPONENT: ButtonComponent = { defaultVariant: 'primary' };
+  const CONTROL_PAD_BUTTON_COMPONENT: ButtonComponent = { defaultVariant: 'secondary' };
+
+  /**
+   * The forwarding population is bounded by exact shared module exports. Adding
+   * a wrapper requires both an entry here and a source-contract assertion below;
+   * a coincidental global name can never opt a component into the guard.
+   */
+  const exportsForModule = (
+    moduleName: string,
+    fileName: string,
+  ): ReadonlyMap<string, ButtonComponent> => {
+    const exports = new Map<string, ButtonComponent>();
+    const resolvedImport = moduleName.startsWith('.')
+      ? resolve(dirname(fileName), moduleName).replace(/\.(?:tsx?|jsx?)$/, '')
+      : '';
+    const buttonPath = BUTTON_SOURCE.replace(/\.(?:tsx?|jsx?)$/, '');
+    const controlPadPath = CONTROL_PAD_BUTTON_SOURCE.replace(/\.(?:tsx?|jsx?)$/, '');
+
+    if (moduleName === SHARED_UI_MODULE) {
+      exports.set('Button', BUTTON_COMPONENT);
+      exports.set('ControlPadButton', CONTROL_PAD_BUTTON_COMPONENT);
+    } else if (moduleName === BUTTON_MODULE || resolvedImport === buttonPath) {
+      exports.set('default', BUTTON_COMPONENT);
+      exports.set('Button', BUTTON_COMPONENT);
+    } else if (
+      moduleName === CONTROL_PAD_BUTTON_MODULE ||
+      resolvedImport === controlPadPath
+    ) {
+      exports.set('ControlPadButton', CONTROL_PAD_BUTTON_COMPONENT);
+    }
+
+    return exports;
+  };
+
+  const buttonReferences = (
+    sf: ts.SourceFile,
+    fileName: string,
+    allowImplicitButton: boolean,
+  ) => {
+    const identifiers = new Map<string, ButtonComponent>();
+    const namespaces = new Map<string, ReadonlyMap<string, ButtonComponent>>();
+
+    if (allowImplicitButton) identifiers.set('Button', BUTTON_COMPONENT);
+
+    for (const statement of sf.statements) {
+      if (
+        !ts.isImportDeclaration(statement) ||
+        !ts.isStringLiteral(statement.moduleSpecifier) ||
+        !statement.importClause
+      ) {
+        continue;
+      }
+
+      const moduleExports = exportsForModule(statement.moduleSpecifier.text, fileName);
+      if (moduleExports.size === 0) continue;
+
+      if (statement.importClause.name) {
+        const component = moduleExports.get('default');
+        if (component) identifiers.set(statement.importClause.name.text, component);
+      }
+
+      const bindings = statement.importClause.namedBindings;
+      if (!bindings) continue;
+      if (ts.isNamespaceImport(bindings)) {
+        namespaces.set(bindings.name.text, moduleExports);
+        continue;
+      }
+
+      for (const element of bindings.elements) {
+        const importedName = element.propertyName?.text ?? element.name.text;
+        const component = moduleExports.get(importedName);
+        if (component) identifiers.set(element.name.text, component);
+      }
+    }
+
+    return { identifiers, namespaces };
+  };
+
+  const forwardingWrapperViolations = (source: string): string[] => {
+    const sf = ts.createSourceFile(
+      CONTROL_PAD_BUTTON_SOURCE,
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
+    let extendsButtonProps = false;
+    let typedComponent = false;
+    let forwardsVariant = false;
+    let defaultsToRegisteredVariant = false;
+    let forwardsClassName = false;
+    let forwardsRest = false;
+
+    const visit = (node: ts.Node): void => {
+      if (ts.isInterfaceDeclaration(node) && node.name.text === 'ControlPadButtonProps') {
+        extendsButtonProps =
+          node.heritageClauses?.some((clause) =>
+            clause.types.some((type) => type.expression.getText(sf) === 'ButtonProps'),
+          ) ?? false;
+      }
+
+      if (ts.isFunctionDeclaration(node) && node.name?.text === 'ControlPadButton') {
+        typedComponent =
+          node.parameters[0]?.type?.getText(sf) === 'ControlPadButtonProps';
+        const parameterName = node.parameters[0]?.name;
+        if (parameterName && ts.isObjectBindingPattern(parameterName)) {
+          defaultsToRegisteredVariant = parameterName.elements.some(
+            (element) =>
+              element.name.getText(sf) === 'variant' &&
+              element.initializer?.getText(sf) ===
+                `'${CONTROL_PAD_BUTTON_COMPONENT.defaultVariant}'`,
+          );
+        }
+      }
+
+      if (
+        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
+        node.tagName.getText(sf) === 'Button'
+      ) {
+        for (const attribute of node.attributes.properties) {
+          if (ts.isJsxSpreadAttribute(attribute)) {
+            if (attribute.expression.getText(sf) === 'props') forwardsRest = true;
+            continue;
+          }
+          const name = attribute.name.getText(sf);
+          const initializer = attribute.initializer?.getText(sf) ?? '';
+          if (name === 'variant' && initializer.includes('variant')) forwardsVariant = true;
+          if (name === 'className' && initializer.includes('className')) forwardsClassName = true;
+        }
+      }
+
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+
+    return [
+      !extendsButtonProps && 'ControlPadButtonProps must extend ButtonProps',
+      !typedComponent && 'ControlPadButton must consume ControlPadButtonProps',
+      !defaultsToRegisteredVariant &&
+        `ControlPadButton must default variant to ${CONTROL_PAD_BUTTON_COMPONENT.defaultVariant}`,
+      !forwardsVariant && 'ControlPadButton must forward variant to Button',
+      !forwardsClassName && 'ControlPadButton must forward className to Button',
+      !forwardsRest && 'ControlPadButton must spread remaining ButtonProps onto Button',
+    ].filter((violation): violation is string => violation !== false);
+  };
 
   /**
    * Every string the expression can contribute, including the literal segments
@@ -540,11 +709,33 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     return plain(literalsIn(node).join(' '));
   };
 
-  const buttonTags = (source: string, fileName = 'f.tsx'): ButtonTag[] => {
+  const buttonTags = (
+    source: string,
+    fileName = 'f.tsx',
+    options: ButtonTagOptions = {},
+  ): ButtonTag[] => {
     const sf = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
     const out: ButtonTag[] = [];
+    const references = buttonReferences(sf, fileName, options.allowImplicitButton ?? true);
 
-    const read = (node: ts.JsxOpeningElement | ts.JsxSelfClosingElement): void => {
+    const componentFor = (tagName: ts.JsxTagNameExpression): ButtonComponent | undefined => {
+      if (options.literalOnly) {
+        return tagName.getText(sf) === 'Button' ? BUTTON_COMPONENT : undefined;
+      }
+      if (ts.isIdentifier(tagName)) return references.identifiers.get(tagName.text);
+      if (
+        ts.isPropertyAccessExpression(tagName) &&
+        ts.isIdentifier(tagName.expression)
+      ) {
+        return references.namespaces.get(tagName.expression.text)?.get(tagName.name.text);
+      }
+      return undefined;
+    };
+
+    const read = (
+      node: ts.JsxOpeningElement | ts.JsxSelfClosingElement,
+      component: ButtonComponent,
+    ): void => {
       /**
        * The cap in `branchesOf` throws rather than conflating arms. Rethrow with
        * the site attached: a bare "past the 64 cap" tells you the guard tripped
@@ -566,8 +757,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
         className: '',
         branches: [],
-        variants: ['primary'],
-        variantBranches: [{ text: 'primary', conds: new Map() }],
+        variants: [component.defaultVariant],
+        variantBranches: [{ text: component.defaultVariant, conds: new Map() }],
         disableable: false,
         dynamicVariant: false,
       };
@@ -591,11 +782,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     };
 
     const visit = (node: ts.Node): void => {
-      if (
-        (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) &&
-        node.tagName.getText(sf) === 'Button'
-      ) {
-        read(node);
+      if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+        const component = componentFor(node.tagName);
+        if (component) read(node, component);
       }
       ts.forEachChild(node, visit);
     };
@@ -644,7 +833,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
+        allowImplicitButton: false,
+      })) {
         if (!tag.disableable || !unguardedHover(tag.className)) continue;
         if (!isUnmasked(tag)) continue;
         offenders.push(`${rel}:${tag.line}`);
@@ -705,7 +896,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
+        allowImplicitButton: false,
+      })) {
         if (!isUnmasked(tag)) continue;
         // Every offending token, not just the first: a site typically carries
         // both a resting and a hover spelling, and reporting one hides the other.
@@ -858,7 +1051,9 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     for (const file of sourceFiles(SRC_ROOT)) {
       const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file)) {
+      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
+        allowImplicitButton: false,
+      })) {
         for (const branch of tag.branches) {
           if (!isUnmaskedIn(tag, branch)) continue;
           const { rest, hover } = hoverTokens(branch.text);
@@ -1091,6 +1286,78 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     expect(
       buttonTags(fixed).filter((t) => t.disableable && unguardedHover(t.className)),
     ).toHaveLength(0);
+  });
+
+  it('keeps every registered forwarding wrapper inside the ButtonProps contract', () => {
+    const violations = forwardingWrapperViolations(
+      readFileSync(CONTROL_PAD_BUTTON_SOURCE, 'utf8'),
+    );
+    expect(violations, violations.join('\n')).toEqual([]);
+  });
+
+  it('resolves an aliased shared Button import that the literal-only guard misses', () => {
+    const source = [
+      "import { Button as Btn } from '@/common/components/ui';",
+      '<Btn variant="subtle" disabled className="bg-pf-bg-1 hover:bg-pf-bg-0">x</Btn>',
+    ].join('\n');
+
+    expect(buttonTags(source, 'Alias.tsx', { literalOnly: true })).toHaveLength(0);
+    const [tag] = buttonTags(source, 'Alias.tsx', { allowImplicitButton: false });
+    expect(tag.disableable && isUnmasked(tag) && unguardedHover(tag.className)).toBe(true);
+  });
+
+  it('preserves default-imported shared Buttons in the production scan', () => {
+    const source = [
+      "import Button from '@/common/components/ui/Button';",
+      '<Button variant="subtle" disabled className="hover:bg-pf-bg-0">x</Button>',
+    ].join('\n');
+
+    expect(buttonTags(source, 'DefaultImport.tsx', { literalOnly: true })).toHaveLength(1);
+    const [tag] = buttonTags(source, 'DefaultImport.tsx', { allowImplicitButton: false });
+    expect(tag.disableable && isUnmasked(tag) && unguardedHover(tag.className)).toBe(true);
+  });
+
+  it('resolves a shared UI member tag that the literal-only guard misses', () => {
+    const source = [
+      "import * as UI from '@/common/components/ui';",
+      '<UI.Button variant="ghost" className="text-pf-error">x</UI.Button>',
+    ].join('\n');
+
+    expect(buttonTags(source, 'Member.tsx', { literalOnly: true })).toHaveLength(0);
+    const [tag] = buttonTags(source, 'Member.tsx', { allowImplicitButton: false });
+    expect(isUnmasked(tag)).toBe(true);
+    expect(classTokens(tag.className).map(bareUtility)).toContain('text-pf-error');
+  });
+
+  it('resolves a ButtonProps forwarding wrapper that the literal-only guard misses', () => {
+    const source = [
+      "import { ControlPadButton } from '@/common/components/ui';",
+      '<ControlPadButton variant="subtle" disabled className="hover:bg-pf-bg-0">x</ControlPadButton>',
+    ].join('\n');
+
+    expect(buttonTags(source, 'Wrapper.tsx', { literalOnly: true })).toHaveLength(0);
+    const [tag] = buttonTags(source, 'Wrapper.tsx', { allowImplicitButton: false });
+    expect(tag.disableable && isUnmasked(tag) && unguardedHover(tag.className)).toBe(true);
+  });
+
+  it('keeps unrelated names, masked wrappers, and guarded disabled states out of violations', () => {
+    const unrelated = [
+      "import { Button } from '@other/ui';",
+      "import { ControlPadButton } from '@/feature/local-controls';",
+      '<Button variant="subtle" disabled className="hover:bg-pf-bg-0" />',
+      '<ControlPadButton variant="subtle" disabled className="hover:bg-pf-bg-0" />',
+    ].join('\n');
+    expect(buttonTags(unrelated, 'Unrelated.tsx', { allowImplicitButton: false })).toEqual([]);
+
+    const valid = [
+      "import { ControlPadButton } from '@/common/components/ui';",
+      '<ControlPadButton disabled className="hover:bg-pf-bg-0">default is masked</ControlPadButton>',
+      '<ControlPadButton variant="success" disabled className="hover:bg-pf-bg-0">masked</ControlPadButton>',
+      '<ControlPadButton variant="subtle" disabled className="enabled:hover:bg-pf-bg-0">guarded</ControlPadButton>',
+    ].join('\n');
+    const tags = buttonTags(valid, 'ValidWrappers.tsx', { allowImplicitButton: false });
+    expect(tags).toHaveLength(3);
+    expect(tags.filter((tag) => tag.disableable && isUnmasked(tag) && unguardedHover(tag.className))).toEqual([]);
   });
 
   /**
