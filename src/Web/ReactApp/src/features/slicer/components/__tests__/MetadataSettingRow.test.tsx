@@ -151,7 +151,12 @@ describe('MetadataSettingRow coFloats', () => {
         disabled={false}
       />,
     );
-    expect(screen.getByRole('button', { name: /reset/i })).toBeInTheDocument();
+    const resetButton = screen.getByRole('button', {
+      name: 'Reset Maximum speed X to original values',
+    });
+    expect(resetButton).toHaveAccessibleName('Reset Maximum speed X to original values');
+    expect(resetButton.querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
   });
 
   it('renders three inputs for three extruders', () => {
