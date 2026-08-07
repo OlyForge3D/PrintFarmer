@@ -263,7 +263,7 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
-- the **verbatim self-archive clause** from SESSION LIFECYCLE AND REAPING, as the final
+- the **verbatim hand-off clause** from SESSION LIFECYCLE AND REAPING, as the final
   paragraph of the kickoff prompt. A kickoff prompt without it is malformed.
 
 ## ACCOUNT FOR EVERY ISSUE
@@ -300,33 +300,44 @@ While a PR is open, keep the owning session alive. If checks fail or changes are
 requested, message that session to address them.
 
 Ownership decides **when** a session ends. SESSION LIFECYCLE AND REAPING decides **who**
-archives it and how a finished session is surfaced — Ralph does not archive it.
+archives it and how a finished session is surfaced — Ralph archives only its own children
+from the current round, never a prior round's session.
 
 ## SESSION LIFECYCLE AND REAPING
 
 ### The constraint
 
-**`archive_session` only works on sessions the caller created.** Every Ralph round is a
-brand-new session. Therefore **a round CANNOT archive a session spawned by any previous
-round** — the round can see it via `list_sessions_and_chats`, but the `archive_session`
-call will fail. Ralph must never attempt it.
+Two platform limits, both verified against the live runtime:
 
-This is a hard platform constraint, not a wording problem. Ralph can only ever archive a
-session it spawned during the current round.
+1. **`archive_session` only works on sessions the caller created.** Every Ralph round is a
+   brand-new session, so **a round CANNOT archive a session spawned by any previous
+   round** — the round can see it via `list_sessions_and_chats`, but the call fails.
+2. **A session cannot archive itself.** `archive_session` on your own session id returns
+   `Cannot archive the current session`. True self-archiving does not exist.
 
-### Self-archive is the primary mechanism
+Together these mean a finished implementation session can only be archived by **the session
+that created it, while that creator is still alive**, or by a human. Ralph must never
+attempt either failing call.
 
-Because Ralph cannot reap across rounds, **each session archives itself**. Every dispatch
-kickoff prompt Ralph writes MUST end with this clause, verbatim:
+### Hand off, then let the creator reap
+
+Because self-archiving is impossible, a finished session **reports and hands off** rather
+than archiving. Every dispatch kickoff prompt Ralph writes MUST end with this clause,
+verbatim:
 
 ```
-When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status and then archive yourself with `archive_session` using your own session id. Do not archive while your PR is still open, has pending checks, or needs fixes.
+When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status and then message your creating session to request archival — you cannot archive yourself, and `archive_session` on your own id will fail. Do not request archival while your PR is still open, has pending checks, or needs fixes.
 ```
 
-### The reap report is the safety net
+Before finishing a round, Ralph MUST archive **its own children** — sessions it spawned
+this round whose PR merged and closed out before the round ended. That is the only
+archiving Ralph is ever permitted to perform.
 
-A session that finishes but crashes, stalls, or is interrupted before self-archiving will
-linger forever holding a stale worktree. The reap report is exactly what catches that case.
+### The reap report is the primary safety net
+
+Most sessions outlive the round that spawned them, so their creator is gone by the time
+their PR merges and nobody can archive them automatically. The reap report is what surfaces
+them for a human — treat it as load-bearing, not as a fallback.
 
 Each round, call `list_sessions_and_chats` and list **every session in the project whose PR
 is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
@@ -336,9 +347,9 @@ is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
 - PR number
 - merged / closed state
 
-**This is REPORT ONLY.** Ralph never archives another round's session, and never deletes a
-session whose PR is still open or which holds uncommitted or unpushed work. A human (or the
-session itself) does the reaping.
+**This is REPORT ONLY.** Ralph never archives another round's session, and never lists a
+session whose PR is still open or which holds uncommitted or unpushed work. A human does
+the reaping.
 
 Produce the `🧹 Ready to reap` heading **every round, even when it is empty** — a missing
 section is indistinguishable from an unchecked one.
@@ -423,8 +434,11 @@ When nothing is eligible, report exactly:
 - Deep-inspecting issues or PRs whose comparison fields did not change.
 - Archiving a session while its PR is still open.
 - Calling `archive_session` on a session created by a previous round — the call fails; only
-  the session itself can archive it.
-- Writing a kickoff prompt that omits the verbatim self-archive clause.
+  a live creator or a human can archive it.
+- Instructing a session to archive itself — `archive_session` on your own id returns
+  `Cannot archive the current session`.
+- Writing a kickoff prompt that omits the verbatim hand-off clause.
+- Ending a round without archiving your own children whose PRs merged during that round.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
 - Treating "this branch's commits are not on `development`" as proof the work is unmerged —
   squash merges never put branch commits on `development`.
