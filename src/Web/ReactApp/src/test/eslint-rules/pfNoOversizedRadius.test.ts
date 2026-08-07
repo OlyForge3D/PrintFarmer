@@ -48,11 +48,42 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<input className="[&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full" />',
     },
+    {
+      code: '<input className="[&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full" />',
+    },
+    {
+      code: '<input className="[&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:rounded-full" />',
+    },
+    {
+      code: '<input className="[&::-moz-range-thumb]:w-5 [&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:rounded-full" />',
+    },
+    // State placement around a selector scope is preserved. Same-scope evidence
+    // still proves the descendant itself is circular.
+    {
+      code: '<div className="[&_img]:hover:w-4 [&_img]:hover:h-4 [&_img]:hover:rounded-full" />',
+    },
     // An unconditional square is square in every scope, so unprefixed evidence
     // excuses a scoped radius.
     { code: '<div className="aspect-square md:rounded-full" />' },
     // Same scope, so both apply together or neither does.
     { code: '<div className="md:aspect-square md:rounded-full" />' },
+    // A state selector has greater specificity than a media-only selector.
+    {
+      code: '<div className="hover:aspect-square md:aspect-video md:hover:rounded-full" />',
+    },
+    // Media-only conditions add no selector specificity.
+    {
+      code: '<div className="hover:aspect-square dark:aspect-video dark:hover:rounded-full" />',
+    },
+    // A custom-property dimension cannot be resolved statically. Withholding a
+    // report avoids condemning a value that may resolve to the matching axis.
+    { code: '<div className="w-[var(--avatar-size)] h-8 rounded-full" />' },
+    // Tailwind emits static dimension candidates in value order, independent of
+    // their order in the class attribute.
+    { code: '<div className="h-8 w-8 w-4 rounded-full" />' },
+    { code: '<div className="h-8 w-4 w-8 rounded-full" />' },
+    { code: '<div className="h-min w-min w-auto rounded-full" />' },
+    { code: '<div className="h-min w-auto w-min rounded-full" />' },
 
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
@@ -302,7 +333,163 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
+    // Breakpoints are cumulative: md:w-4 remains active at lg and overrides w-8.
+    {
+      code: '<div className="w-8 h-8 md:w-4 lg:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-8 h-8 md:w-4 lg:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Host dimensions cannot prove the descendant selected by an arbitrary
+    // variant is circular.
+    {
+      code: '<div className="w-8 h-8 [&_img]:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-8 h-8 [&_img]:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // These ordered selectors target different conditions and must not share
+    // shape evidence.
+    {
+      code: '<div className="[&_img]:hover:w-4 [&_img]:hover:h-4 hover:[&_img]:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="[&_img]:hover:w-4 [&_img]:hover:h-4 hover:[&_img]:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Equal-specificity declarations resolve by their declaration/source order.
+    {
+      code: '<div className="h-8 hover:w-8 focus:w-4 hover:focus:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="h-8 hover:w-8 focus:w-4 hover:focus:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Media conditions add no selector specificity, so hover:aspect-video wins
+    // over md:aspect-square while both apply.
+    {
+      code: '<div className="md:aspect-square hover:aspect-video md:hover:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="md:aspect-square hover:aspect-video md:hover:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // A base radius remains active at later breakpoints and in additional
+    // states, so later evidence must also be resolved.
+    {
+      code: '<div className="w-4 h-4 rounded-full md:w-8" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-4 h-4 rounded-lg md:w-8" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="w-4 h-4 hover:rounded-full focus:w-8" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-4 h-4 hover:rounded-lg focus:w-8" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Tailwind emits focus after hover regardless of class attribute order.
+    {
+      code: '<div className="h-8 focus:w-4 hover:w-8 hover:focus:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="h-8 focus:w-4 hover:w-8 hover:focus:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Axis utilities are emitted after size utilities in Tailwind's utility
+    // order, so w-8 wins even when size-4 appears later in the attribute.
+    {
+      code: '<div className="w-8 size-4 rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-8 size-4 rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // A lower breakpoint remains active at the radius's larger breakpoint.
+    {
+      code: '<div className="w-4 h-4 lg:rounded-full md:hover:w-8" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-4 h-4 lg:rounded-lg md:hover:w-8" />',
+            },
+          ],
+        },
+      ],
+    },
   ],
 })
-
-

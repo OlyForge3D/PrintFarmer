@@ -95,22 +95,70 @@ const WAIVER_ATTRIBUTES = new Set([
   'data-pf-progress-fill',
 ])
 
-/** Strip Tailwind variant prefixes: `md:`, `hover:`, `[&::-webkit-slider-thumb]:`. */
-function stripVariants(token) {
-  let rest = token
-  for (;;) {
-    const arbitrary = /^\[[^\]]*\]:/.exec(rest)
-    if (arbitrary) {
-      rest = rest.slice(arbitrary[0].length)
-      continue
+const BREAKPOINTS = new Map([
+  ['sm', 1],
+  ['md', 2],
+  ['lg', 3],
+  ['xl', 4],
+  ['2xl', 5],
+])
+
+const MEDIA_VARIANTS = new Map([
+  ['dark', 1],
+  ['motion-safe', 2],
+  ['motion-reduce', 3],
+  ['contrast-more', 4],
+  ['contrast-less', 5],
+  ['portrait', 6],
+  ['landscape', 7],
+  ['print', 8],
+  ['forced-colors', 9],
+])
+
+const STATE_SOURCE_ORDER = new Map([
+  ['focus-within', 1],
+  ['hover', 2],
+  ['focus', 3],
+  ['focus-visible', 4],
+  ['active', 5],
+  ['enabled', 6],
+  ['disabled', 7],
+])
+
+const DIMENSION_SOURCE_ORDER = new Map([
+  ['auto', 0],
+  ['px', 1],
+  ['full', 20_000],
+  ['screen', 21_000],
+  ['svw', 21_001],
+  ['lvw', 21_002],
+  ['dvw', 21_003],
+  ['min', 22_000],
+  ['max', 23_000],
+  ['fit', 24_000],
+])
+
+/**
+ * Split a utility into its ordered variants and base token. Colons inside
+ * arbitrary variants are selector syntax, not separators.
+ */
+function splitToken(token) {
+  const parts = []
+  let depth = 0
+  let start = 0
+
+  for (let index = 0; index < token.length; index += 1) {
+    const character = token[index]
+    if (character === '[') depth += 1
+    if (character === ']') depth = Math.max(0, depth - 1)
+    if (character === ':' && depth === 0) {
+      parts.push(token.slice(start, index))
+      start = index + 1
     }
-    const named = /^[\w-]+:/.exec(rest)
-    if (named) {
-      rest = rest.slice(named[0].length)
-      continue
-    }
-    return rest
   }
+
+  parts.push(token.slice(start))
+  return { variants: parts.slice(0, -1), base: parts.at(-1) ?? '' }
 }
 
 /**
@@ -128,69 +176,258 @@ function arbitraryToPx(value) {
   return match[2] === 'px' ? scalar : scalar * 16
 }
 
-/** The variant prefix of a token: `md:`, `hover:`, `[&::-webkit-slider-thumb]:`, or `''`. */
-function variantPrefix(token) {
-  return token.slice(0, token.length - stripVariants(token).length)
+function changesSelectorScope(variant) {
+  if (variant === 'before' || variant === 'after' || variant === '*' || variant === '**') {
+    return true
+  }
+  if (!variant.startsWith('[') || !variant.endsWith(']')) return false
+
+  const selector = variant.slice(1, -1)
+  const subject = selector.indexOf('&')
+  if (subject === -1) return false
+  return /::|[>+~_\s]/.test(selector.slice(subject + 1))
 }
 
 /**
- * Index the shape evidence on an element by variant scope.
+ * Parse the independent parts of a Tailwind condition.
  *
- * Returns a predicate: given the variant prefix of a `rounded-full`, is the
- * element provably a circle *where that radius applies*?
- *
- * Evidence is bucketed by raw prefix string, and matched by string equality —
- * there is no understanding of what a variant means, which is what keeps this
- * small. `hover:w-4` never pairs with `focus:h-4` because `'hover:' !== 'focus:'`.
- *
- * Unprefixed evidence counts everywhere, because an unconditional square is
- * square at every breakpoint and in every state: `aspect-square md:rounded-full`
- * is a circle. Prefixed evidence counts only in its own scope, which preserves
- * the case this function has always had to catch -- `md:aspect-square` with a
- * bare `rounded-full` is a rectangle below `md`, and still reports.
+ * Breakpoints are cumulative media conditions. Scope-changing variants identify
+ * the element being styled. State variants remain ordered in the zones before,
+ * between and after scope changes; this keeps `[&_img]:hover:` distinct from
+ * `hover:[&_img]:` without preventing `hover:` evidence from applying under
+ * `hover:focus:`.
  */
-function circularScopes(classText) {
-  const scopes = new Map()
-  const scopeOf = key => {
-    let entry = scopes.get(key)
-    if (!entry) {
-      entry = { absolute: false, widths: new Set(), heights: new Set() }
-      scopes.set(key, entry)
+function parseCondition(variants) {
+  const scope = []
+  const stateZones = [[]]
+  const media = []
+  let breakpoint = 0
+
+  for (const variant of variants) {
+    const breakpointOrder = BREAKPOINTS.get(variant)
+    if (breakpointOrder !== undefined) {
+      breakpoint = Math.max(breakpoint, breakpointOrder)
+      continue
     }
-    return entry
+    if (MEDIA_VARIANTS.has(variant)) {
+      media.push(variant)
+      continue
+    }
+    if (changesSelectorScope(variant)) {
+      scope.push(variant)
+      stateZones.push([])
+      continue
+    }
+    stateZones.at(-1).push(variant)
+  }
+
+  return {
+    scopeKey: scope.join('\u0000'),
+    stateZones,
+    media,
+    breakpoint,
+    specificity: stateZones.reduce((total, zone) => total + zone.length, 0),
+    variantOrder: Math.max(
+      0,
+      ...stateZones.flat().map(variant => STATE_SOURCE_ORDER.get(variant) ?? 0),
+    ),
+    mediaOrder: Math.max(0, ...media.map(variant => MEDIA_VARIANTS.get(variant) ?? 0)),
+  }
+}
+
+function conditionSubset(required, active) {
+  const available = new Map()
+  for (const variant of active) available.set(variant, (available.get(variant) ?? 0) + 1)
+  for (const variant of required) {
+    const count = available.get(variant) ?? 0
+    if (count === 0) return false
+    available.set(variant, count - 1)
+  }
+  return true
+}
+
+function conditionApplies(condition, target) {
+  if (condition.scopeKey !== target.scopeKey || condition.breakpoint > target.breakpoint) {
+    return false
+  }
+  if (!conditionSubset(condition.media, target.media)) return false
+  return condition.stateZones.every((zone, index) =>
+    conditionSubset(zone, target.stateZones[index] ?? []),
+  )
+}
+
+function conditionsConflict(left, right) {
+  const variants = new Set([...left, ...right])
+  return [...variants].some(variant => {
+    if (variant.startsWith('not-')) return variants.has(variant.slice(4))
+    return variants.has(`not-${variant}`)
+  })
+}
+
+function mergeConditions(base, extension) {
+  if (base.scopeKey !== extension.scopeKey) return undefined
+  const stateZones = base.stateZones.map((zone, index) => {
+    const other = extension.stateZones[index] ?? []
+    if (conditionsConflict(zone, other)) return undefined
+    return [...zone, ...other.filter(variant => !zone.includes(variant))]
+  })
+  if (stateZones.some(zone => zone === undefined)) return undefined
+  const media = [...base.media, ...extension.media.filter(variant => !base.media.includes(variant))]
+  if (conditionsConflict(base.media, extension.media)) return undefined
+
+  return {
+    scopeKey: base.scopeKey,
+    stateZones,
+    media,
+    breakpoint: Math.max(base.breakpoint, extension.breakpoint),
+    specificity: stateZones.reduce((total, zone) => total + zone.length, 0),
+    variantOrder: Math.max(base.variantOrder, extension.variantOrder),
+    mediaOrder: Math.max(base.mediaOrder, extension.mediaOrder),
+  }
+}
+
+function outranks(candidate, winner) {
+  if (!winner) return true
+  if (candidate.condition.specificity !== winner.condition.specificity) {
+    return candidate.condition.specificity > winner.condition.specificity
+  }
+  if (candidate.condition.breakpoint !== winner.condition.breakpoint) {
+    return candidate.condition.breakpoint > winner.condition.breakpoint
+  }
+  if (candidate.condition.mediaOrder !== winner.condition.mediaOrder) {
+    return candidate.condition.mediaOrder > winner.condition.mediaOrder
+  }
+  if (candidate.condition.variantOrder !== winner.condition.variantOrder) {
+    return candidate.condition.variantOrder > winner.condition.variantOrder
+  }
+  if (candidate.utilityOrder !== winner.utilityOrder) {
+    return candidate.utilityOrder > winner.utilityOrder
+  }
+  if (candidate.valueOrder !== winner.valueOrder) {
+    return candidate.valueOrder > winner.valueOrder
+  }
+  return candidate.order > winner.order
+}
+
+function resolveDeclaration(declarations, target) {
+  let winner
+  for (const declaration of declarations) {
+    if (conditionApplies(declaration.condition, target) && outranks(declaration, winner)) {
+      winner = declaration
+    }
+  }
+  return winner
+}
+
+function isUnresolvedDimension(value) {
+  return /(?:var|calc|min|max|clamp)\(/.test(value) || value.startsWith('(--')
+}
+
+function dimensionSourceOrder(value) {
+  const keywordOrder = DIMENSION_SOURCE_ORDER.get(value)
+  if (keywordOrder !== undefined) return keywordOrder
+  const numeric = /^\d*\.?\d+$/.exec(value)
+  if (numeric) return 1_000 + Number(value)
+  const fraction = /^(\d+)\/(\d+)$/.exec(value)
+  if (fraction) return 10_000 + Number(fraction[1]) / Number(fraction[2])
+  if (value.startsWith('[') || value.startsWith('(')) return 30_000
+  return 0
+}
+
+function aspectKind(value) {
+  if (value === 'square') return 'square'
+  if (value === 'video') return 'nonsquare'
+  if (!value.startsWith('[') || !value.endsWith(']')) return 'unknown'
+
+  const ratio = /^(\d*\.?\d+)\/(\d*\.?\d+)$/.exec(value.slice(1, -1))
+  if (!ratio) return 'unknown'
+  return Number(ratio[1]) === Number(ratio[2]) ? 'square' : 'nonsquare'
+}
+
+/**
+ * Build a per-property cascade for shape evidence and return a predicate for a
+ * rounded-full condition. Media order wins over broader media declarations;
+ * selector specificity wins before Tailwind's variant, utility and candidate
+ * source order; only otherwise identical ties use class declaration order.
+ * Evidence never crosses a selector-target boundary.
+ */
+function circularAt(classText) {
+  const widths = []
+  const heights = []
+  const aspects = []
+  const animations = []
+  const radii = []
+  let order = 0
+
+  const add = (declarations, condition, value, utilityOrder = 0, valueOrder = 0) => {
+    declarations.push({ condition, value, utilityOrder, valueOrder, order })
   }
 
   for (const raw of classText.split(/\s+/)) {
     if (!raw) continue
-    const scope = scopeOf(variantPrefix(raw))
-    const token = stripVariants(raw)
+    const { variants, base } = splitToken(raw)
+    const condition = parseCondition(variants)
 
-    if (token === 'aspect-square' || /^size-\S+$/.test(token)) {
-      scope.absolute = true
-      continue
+    const size = /^size-(\S+)$/.exec(base)
+    if (size) {
+      add(widths, condition, size[1], 0, dimensionSourceOrder(size[1]))
+      add(heights, condition, size[1], 0, dimensionSourceOrder(size[1]))
     }
-    if (token === 'animate-spin' || token === 'animate-ping' || token === 'pf-animate-spin') {
-      scope.absolute = true
-      continue
+    const width = /^w-(\S+)$/.exec(base)
+    if (width) add(widths, condition, width[1], 1, dimensionSourceOrder(width[1]))
+    const height = /^h-(\S+)$/.exec(base)
+    if (height) add(heights, condition, height[1], 1, dimensionSourceOrder(height[1]))
+    const aspect = /^aspect-(\S+)$/.exec(base)
+    if (aspect) add(aspects, condition, aspectKind(aspect[1]))
+    if (base === 'animate-spin' || base === 'animate-ping' || base === 'pf-animate-spin') {
+      add(animations, condition, true)
     }
-
-    const width = /^w-(\S+)$/.exec(token)
-    if (width) scope.widths.add(width[1])
-    const height = /^h-(\S+)$/.exec(token)
-    if (height) scope.heights.add(height[1])
+    const radiusSize = parseRoundedSize(base)
+    if (radiusSize !== null) {
+      const isArbitrary = radiusSize.startsWith('[') && radiusSize.endsWith(']')
+      const px = isArbitrary ? arbitraryToPx(radiusSize) : NAMED_RADII[radiusSize]
+      add(radii, condition, radiusSize === 'full' || px === Infinity ? 'full' : 'other')
+    }
+    order += 1
   }
 
-  const isCircle = entry => {
-    if (!entry) return false
-    if (entry.absolute) return true
-    for (const value of entry.widths) {
-      if (entry.heights.has(value)) return true
+  const shapeDeclarations = [...widths, ...heights, ...aspects, ...animations]
+
+  const isCircularAt = target => {
+    if (resolveDeclaration(animations, target)) return true
+
+    const width = resolveDeclaration(widths, target)?.value
+    const height = resolveDeclaration(heights, target)?.value
+    const aspect = resolveDeclaration(aspects, target)?.value
+
+    if (
+      (width !== undefined && isUnresolvedDimension(width)) ||
+      (height !== undefined && isUnresolvedDimension(height)) ||
+      aspect === 'unknown'
+    ) {
+      return true
     }
-    return false
+    if (width !== undefined && height !== undefined) return width === height
+    return aspect === 'square'
   }
 
-  const global = isCircle(scopes.get(''))
-  return prefix => global || isCircle(scopes.get(prefix))
+  return radiusCondition => {
+    const contexts = [radiusCondition]
+    for (const declaration of shapeDeclarations) {
+      if (
+        declaration.condition.scopeKey !== radiusCondition.scopeKey
+      ) {
+        continue
+      }
+      const merged = mergeConditions(radiusCondition, declaration.condition)
+      if (merged) contexts.push(merged)
+    }
+
+    return contexts.every(target => {
+      if (resolveDeclaration(radii, target)?.value !== 'full') return true
+      return isCircularAt(target)
+    })
+  }
 }
 
 /** Collect every string literal and template quasi beneath a className value. */
@@ -341,17 +578,18 @@ export default {
         // index it by variant scope, so a scoped radius is judged against the
         // evidence that applies where it applies.
         const classText = strings.map(entry => entry.text).join(' ')
-        const circularIn = circularScopes(classText)
+        const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
-            const size = parseRoundedSize(stripVariants(rawToken))
+            const { variants, base } = splitToken(rawToken)
+            const size = parseRoundedSize(base)
             if (size === null) continue
 
             const reportFullRound = () => {
-              if (!checkFullRound || waived || circularIn(variantPrefix(rawToken))) return
+              if (!checkFullRound || waived || isCircular(parseCondition(variants))) return
               reportToken({
                 stringNode,
                 quasi,

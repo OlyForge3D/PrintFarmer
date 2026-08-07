@@ -84,26 +84,35 @@ excused by shape evidence the rule can see for itself (`size-*`, matching `w-`/`
 spinner animations). The rest were either genuine circles, which got that evidence or an explicit
 `data-pf-radius="full"`, or rectangles wearing a pill, which became `rounded-xs`.
 
-Shape evidence is matched within its own variant scope. The slider thumbs in `Slider.tsx` and
-`SettingRow.tsx` are circles declared entirely inside a variant —
-`[&::-webkit-slider-thumb]:w-4` paired with `:h-4` and `:rounded-full` — and gathering evidence
-across the whole element without regard to scope read them as pills. Evidence is now bucketed by
-raw variant prefix and matched by string equality, so `hover:w-4` never pairs with `focus:h-4`.
-There is no understanding of what a variant *means*, which is what keeps it small.
+Shape evidence is resolved as a small CSS cascade. The resolver keeps selector target scope,
+ordered state variants, and cumulative breakpoints separate. Host dimensions therefore do not
+excuse a descendant radius, while the slider thumbs in `Slider.tsx` and `SettingRow.tsx` continue
+to pass because their `w-*`, `h-*`, and `rounded-full` utilities share the same
+`[&::-webkit-slider-thumb]` or `[&::-moz-range-thumb]` scope.
 
-Unprefixed evidence counts in every scope, because an unconditional square is square at every
-breakpoint and in every state, so `aspect-square md:rounded-full` is a circle. Prefixed evidence
-counts only in its own scope, which preserves the case this check has always had to catch:
-`md:aspect-square` with a bare `rounded-full` is a rectangle below `md`, and still reports.
+Within one target scope, evidence applies when its ordered state condition is active where the
+radius applies. State variants contribute selector specificity; media variants do not.
+Breakpoints are cumulative and ordered, so an `md:` declaration still participates at `lg:`.
+After specificity and breakpoint precedence, declarations resolve by Tailwind's emitted variant,
+utility, and static-candidate source order; only otherwise identical ties use class declaration
+order. Width, height, and aspect ratio are resolved independently before the rule decides whether
+the resulting box is circular. A radius is checked in later breakpoint, media, and state conditions
+where it remains active, not only at the condition where its class was declared.
+
+The resolver remains deliberately conservative around dynamic dimensions. A winning width or
+height containing `var()`, `calc()`, `min()`, `max()`, or `clamp()` cannot be evaluated without
+the browser's computed custom properties and layout context. The rule withholds a
+`rounded-full` report in that case rather than risk a false positive. Identical static dimensions,
+known aspect ratios, and state/media overrides are still resolved normally.
 
 ### Reading class names
 
 Class strings are collected recursively, so the rule sees radii inside `clsx()`/`cn()` calls,
 nested arrays and object keys, template literal quasis, and plain `className` strings.
 Responsive and state variants are stripped before matching the radius itself, so `md:rounded-2xl`
-and `hover:rounded-2xl` are caught. The prefix is kept, though, and used to scope the circularity
-evidence as described above. Side-specific utilities are handled explicitly — `rounded-l`
-is the left side, not a size.
+and `hover:rounded-2xl` are caught. Their ordered variant segments are retained for the cascade
+resolver described above. Side-specific utilities are handled explicitly — `rounded-l` is the
+left side, not a size.
 
 Arbitrary values in units the rule cannot resolve statically (e.g. `rounded-[var(--x)]`) are
 left alone rather than guessed at.
