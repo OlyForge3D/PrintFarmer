@@ -233,8 +233,43 @@ function routeIssue(issue, members, lead) {
   return { member, reason: best.reason, domain: best.id, scores };
 }
 
+/**
+ * Split the repository's `squad:*` labels into duplicates and retired labels.
+ *
+ * Classification is by *roster membership of the canonical form*, not by
+ * spelling. `squad:🏗️ dallas` is a duplicate because Dallas is on the roster
+ * and already owns `squad:dallas`. `squad:📱 frost` is retired, not a
+ * duplicate — Frost is gone, so there is no canonical label to migrate onto
+ * and deleting it would erase the assignment history of every closed issue
+ * that carries it.
+ *
+ * @param {string[]} existingNames every label name in the repository
+ * @param {string[]} rosterLabels canonical labels for the current roster
+ * @returns {{duplicates: Array<{name: string, canonical: string}>, retired: string[]}}
+ */
+function classifySquadLabels(existingNames, rosterLabels) {
+  const roster = new Set(rosterLabels);
+  const duplicates = [];
+  const retired = [];
+
+  for (const name of [...existingNames].sort()) {
+    if (!name.startsWith('squad:') || roster.has(name)) {
+      continue;
+    }
+    const canonical = memberLabel(name.slice('squad:'.length));
+    if (canonical && roster.has(canonical)) {
+      duplicates.push({ name, canonical });
+    } else {
+      retired.push(name);
+    }
+  }
+
+  return { duplicates, retired };
+}
+
 module.exports = {
   DOMAINS,
+  classifySquadLabels,
   hasWord,
   isCanonicalMemberLabel,
   memberLabel,

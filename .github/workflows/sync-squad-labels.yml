@@ -24,7 +24,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const { memberLabel, isCanonicalMemberLabel } = require(
+            const { memberLabel, classifySquadLabels } = require(
               path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
             );
             const teamFile = '.squad/team.md';
@@ -178,52 +178,40 @@ jobs:
             // already exist so the migration can be done deliberately rather
             // than silently relabelling issues here.
             //
-            // Two distinct cases, deliberately reported separately:
-            //   - duplicates: a non-canonical spelling of a current member.
-            //     Actionable — migrate issues, then delete the duplicate.
-            //   - retired: a canonically spelled label for somebody no longer
-            //     on the roster. NOT actionable — deleting it would erase the
-            //     assignment history of every closed issue that carries it.
             // `squad:copilot` is emitted by squad-triage.yml and gates the
             // coding-agent assignment step in squad-issue-assign.yml, so it is
             // always canonical — even when the roster has no `🤖 Coding Agent`
             // marker and this run therefore did not sync it.
-            const canonical = new Set(labels.map(l => l.name));
-            canonical.add('squad:copilot');
+            const rosterLabels = members.map(m => memberLabel(m.name));
+            rosterLabels.push('squad:copilot');
+
             const existing = await github.paginate(
               github.rest.issues.listLabelsForRepo,
               { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
             );
 
-            const unmanaged = existing
-              .map(l => l.name)
-              .filter(name => name.startsWith('squad:'))
-              .filter(name => !canonical.has(name))
-              .sort();
-
-            const duplicates = unmanaged.filter(n => !isCanonicalMemberLabel(n));
-            const retired = unmanaged.filter(n => isCanonicalMemberLabel(n));
+            const { duplicates, retired } = classifySquadLabels(
+              existing.map(l => l.name),
+              rosterLabels
+            );
 
             if (duplicates.length > 0) {
               core.warning(
-                `${duplicates.length} non-canonical squad:* label(s) found: ${duplicates.join(', ')}`
+                `${duplicates.length} non-canonical squad:* label(s) found: ${duplicates.map(d => d.name).join(', ')}`
               );
-              const rows = duplicates.map(name =>
-                `| \`${name}\` | \`${memberLabel(name.slice('squad:'.length))}\` |`
-              );
+              const rows = duplicates.map(d => `| \`${d.name}\` | \`${d.canonical}\` |`);
               await core.summary
                 .addHeading('Non-canonical `squad:*` labels', 3)
                 .addRaw(
-                  'These labels are not produced by this workflow. Exactly one '
-                  + '`squad:*` label per issue identifies the owner, so '
-                  + 'duplicates break that invariant. Migrate issues onto the '
-                  + 'canonical label, then delete the duplicate.\n\n'
+                  'These are alternate spellings of labels for people on the '
+                  + 'current roster. Exactly one `squad:*` label per issue '
+                  + 'identifies the owner, so duplicates break that invariant. '
+                  + 'Migrate issues onto the canonical label, then delete the '
+                  + 'duplicate.\n\n'
                 )
                 .addRaw(['| Duplicate | Canonical form |', '|---|---|', ...rows].join('\n'))
                 .addRaw('\n\n')
                 .write();
-            } else {
-              core.info('No non-canonical squad:* labels found');
             }
 
             if (retired.length > 0) {
@@ -233,11 +221,11 @@ jobs:
               await core.summary
                 .addHeading('Retired `squad:*` labels', 3)
                 .addRaw(
-                  'These are canonically spelled labels for people no longer on '
-                  + 'the roster. **Do not delete them** — they carry the '
-                  + 'assignment history of closed issues. They are listed only '
-                  + 'so the audit above is not mistaken for a complete '
-                  + 'inventory.\n\n'
+                  'These belong to people who are no longer on the roster, in '
+                  + 'either spelling. **Do not delete them** — there is no '
+                  + 'current owner to migrate to, and they carry the assignment '
+                  + 'history of closed issues. They are listed only so the '
+                  + 'audit above is not mistaken for a complete inventory.\n\n'
                 )
                 .addRaw(retired.map(n => `- \`${n}\``).join('\n'))
                 .write();

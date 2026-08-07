@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const {
+  classifySquadLabels,
   hasWord,
   isCanonicalMemberLabel,
   memberLabel,
@@ -349,4 +350,43 @@ test('isCanonicalMemberLabel rejects the emoji duplicates', () => {
   assert.equal(isCanonicalMemberLabel('squad:Dallas'), false);
   assert.equal(isCanonicalMemberLabel('squad'), false);
   assert.equal(isCanonicalMemberLabel('squad:'), false);
+});
+
+test('the label audit classifies by roster membership, not spelling', () => {
+  const rosterLabels = members.map((m) => memberLabel(m.name));
+  rosterLabels.push('squad:copilot');
+
+  const { duplicates, retired } = classifySquadLabels(
+    [
+      'squad',                 // base triage label — not a member label
+      'squad:dallas',          // canonical, on roster
+      'squad:copilot',         // load-bearing, never synced from the roster
+      'squad:🏗️ dallas',       // duplicate of a current member
+      'squad:⚛️ ripley',       // duplicate of a current member
+      'squad:kaylee',          // retired, canonical spelling
+      'squad:📱 frost',        // retired, emoji spelling
+      'squad:🔨 anvil',        // retired, emoji spelling
+      'bug',                   // unrelated
+    ],
+    rosterLabels,
+  );
+
+  assert.deepEqual(
+    duplicates,
+    [
+      { name: 'squad:⚛️ ripley', canonical: 'squad:ripley' },
+      { name: 'squad:🏗️ dallas', canonical: 'squad:dallas' },
+    ],
+  );
+
+  // A former member's label is retired in EITHER spelling. There is no current
+  // owner to migrate onto, and deleting it would erase closed-issue history.
+  assert.deepEqual(retired, ['squad:kaylee', 'squad:📱 frost', 'squad:🔨 anvil']);
+
+  // Never flag the labels the workflow itself manages.
+  const flagged = [...duplicates.map((d) => d.name), ...retired];
+  assert.equal(flagged.includes('squad'), false);
+  assert.equal(flagged.includes('squad:copilot'), false);
+  assert.equal(flagged.includes('squad:dallas'), false);
+  assert.equal(flagged.includes('bug'), false);
 });
