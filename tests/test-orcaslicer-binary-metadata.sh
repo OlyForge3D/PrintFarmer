@@ -25,17 +25,129 @@ setup() {
 #!/bin/bash
 set -euo pipefail
 
+# ── Stateful mock docker ─────────────────────────────────────────────────────
+# The pre-hardening mock returned canned results from environment variables
+# without any inter-call memory, so `docker image rm` succeeding did not change
+# what a later `docker image inspect` / `docker images --quiet` observed.
+# That let production bugs slip through review: a caller could execute the
+# "remove stale tag → rebuild → validate" sequence and see all three succeed
+# in tests even when the daemon (in reality) had refused the removal or the
+# rebuild had never actually run.
+#
+# The state file below tracks which tags currently exist. `image rm` removes
+# them; `build -t <tag>` re-adds them; `image ls`, `images --quiet`, and
+# `image inspect` all consult the live state. Callers opt in by exporting
+# `MOCK_STATE_DIR`; when unset, the mock keeps the legacy behavior so old
+# tests keep working during the migration.
+#
+# Initialization is lazy: the first mock docker call in a test subshell seeds
+# the state file from `MOCK_LOCAL_TAGS` (the canonical "what tags exist at
+# test start" input). Subsequent calls in the same subshell see the mutated
+# state.
+_state_dir="${MOCK_STATE_DIR:-}"
+_state_file=""
+_removed_file=""
+_built_file=""
+if [[ -n "$_state_dir" ]]; then
+    mkdir -p "$_state_dir"
+    _state_file="$_state_dir/present.txt"
+    _removed_file="$_state_dir/removed.txt"
+    _built_file="$_state_dir/built.txt"
+    if [[ ! -f "$_state_dir/.initialized" ]]; then
+        : > "$_state_file"
+        : > "$_removed_file"
+        : > "$_built_file"
+        if [[ -n "${MOCK_LOCAL_TAGS:-}" ]]; then
+            printf '%s\n' "$MOCK_LOCAL_TAGS" > "$_state_file"
+        fi
+        : > "$_state_dir/.initialized"
+    fi
+fi
+
+_tag_present() {
+    local tag="$1"
+    if [[ -n "$_state_dir" ]]; then
+        # Effective present = seed content of $_state_file, which the
+        # `image rm` / `build` handlers keep up to date.
+        if [[ -s "$_state_file" ]] && grep -Fxq "$tag" "$_state_file"; then
+            return 0
+        fi
+        return 1
+    fi
+    # Legacy path: MOCK_IMAGE_EXISTS controls presence globally.
+    if [[ "${MOCK_IMAGE_EXISTS:-true}" == "true" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+_tag_add() {
+    local tag="$1"
+    if [[ -z "$_state_dir" ]]; then
+        return 0
+    fi
+    if _tag_present "$tag"; then
+        return 0
+    fi
+    printf '%s\n' "$tag" >> "$_state_file"
+    if [[ -n "${MOCK_BUILT_LOG:-}" ]]; then
+        printf '%s\n' "$tag" >> "$MOCK_BUILT_LOG"
+    fi
+    printf '%s\n' "$tag" >> "$_built_file"
+}
+
+_tag_remove() {
+    local tag="$1"
+    if [[ -z "$_state_dir" ]]; then
+        return 0
+    fi
+    if [[ ! -s "$_state_file" ]]; then
+        return 0
+    fi
+    local tmp
+    tmp="$_state_file.tmp.$$"
+    grep -Fxv "$tag" "$_state_file" > "$tmp" || true
+    mv "$tmp" "$_state_file"
+    printf '%s\n' "$tag" >> "$_removed_file"
+}
+
 case "${1:-}" in
     image)
         subcommand="${2:-}"
         if [[ "$subcommand" == "ls" ]]; then
             # Enumerate mocked local orcaslicer-binaries:* tags used by
-            # remove_local_orcaslicer_binaries_tags. `MOCK_LOCAL_TAGS` is a
-            # newline-separated list; unset/empty means no tags exist.
-            # Fall back to `MOCK_IMAGE_LIST` (legacy) or fail if
-            # `MOCK_IMAGE_LS_FAIL=true`.
+            # remove_local_orcaslicer_binaries_tags. When `MOCK_STATE_DIR` is
+            # set, list the live present-tag state (so removals persist).
+            # Otherwise fall back to `MOCK_LOCAL_TAGS` → `MOCK_IMAGE_LIST`.
             if [[ "${MOCK_IMAGE_LS_FAIL:-false}" == "true" ]]; then
                 exit 1
+            fi
+            # Extract the `reference=<pattern>` filter (if any) so we only
+            # emit matching tags — production `docker image ls` honors this
+            # and callers rely on the filter to avoid enumerating unrelated
+            # images. We support the exact filter shape used by the deploy
+            # script (`--filter reference=orcaslicer-binaries:*`).
+            local_filter=""
+            for _arg in "$@"; do
+                case "$_arg" in
+                    reference=*) local_filter="${_arg#reference=}" ;;
+                esac
+            done
+            if [[ -n "$_state_dir" && -s "$_state_file" ]]; then
+                while IFS= read -r _tag; do
+                    [[ -z "$_tag" ]] && continue
+                    if [[ -n "$local_filter" ]]; then
+                        # Only match the `orcaslicer-binaries:*` shape used
+                        # by the caller. Fixed-string prefix match keeps the
+                        # mock simple and matches production's actual filter.
+                        case "$_tag" in
+                            ${local_filter}) : ;;
+                            *) continue ;;
+                        esac
+                    fi
+                    printf '%s\n' "$_tag"
+                done < "$_state_file"
+                exit 0
             fi
             if [[ -n "${MOCK_LOCAL_TAGS:-}" ]]; then
                 printf '%s\n' "$MOCK_LOCAL_TAGS"
@@ -46,7 +158,10 @@ case "${1:-}" in
         fi
         if [[ "$subcommand" == "rm" ]]; then
             # Simulate `docker image rm -f <tag>`. Success unless
-            # `MOCK_RM_FAILS_FOR_TAG` matches the last argument.
+            # `MOCK_RM_FAILS_FOR_TAG` matches the last argument. On success
+            # the tag disappears from subsequent `image inspect` / `image ls`
+            # / `images --quiet` calls — this is the key statefulness that
+            # lets the "rm → rebuild → validate" chain be tested end-to-end.
             target_tag="${!#}"
             if [[ "${MOCK_RM_FAILS_FOR_TAG:-}" == "$target_tag" ]]; then
                 exit 1
@@ -55,9 +170,19 @@ case "${1:-}" in
             if [[ -n "${MOCK_RM_LOG:-}" ]]; then
                 printf '%s\n' "$target_tag" >> "$MOCK_RM_LOG"
             fi
+            _tag_remove "$target_tag"
             exit 0
         fi
-        if [[ "$subcommand" != "inspect" || "${MOCK_IMAGE_EXISTS:-true}" != "true" ]]; then
+        if [[ "$subcommand" != "inspect" ]]; then
+            exit 1
+        fi
+        # `image inspect <tag>` — consult live state when opted in. In legacy
+        # mode fall back to `MOCK_IMAGE_EXISTS`.
+        _inspect_tag=""
+        # `docker image inspect --format '<fmt>' <tag>` puts the tag last; the
+        # bare form is `docker image inspect <tag>`. Grab the last positional.
+        _inspect_tag="${!#}"
+        if ! _tag_present "$_inspect_tag"; then
             exit 1
         fi
         if [[ "${3:-}" != "--format" ]]; then
@@ -134,9 +259,31 @@ case "${1:-}" in
         # Simulate `docker build ...`. Success is the default so tests that
         # exercise build_base_images can focus on the OrcaSlicer recovery path.
         # Set `MOCK_BUILD_SUCCESS=false` to force a build failure.
+        #
+        # Statefulness: on success, add every `-t <tag>` argument to the
+        # present-tag set. This is what makes "rm → rebuild → validate" end-
+        # to-end — after the build, `docker image inspect` returns success
+        # for the freshly-built tag, and label lookups return whatever the
+        # test configured via `MOCK_VERSION_LABEL` etc.
+        #
+        # Also record the full argv so tests can assert on `--no-cache` and
+        # other build-arg presence (the reviewer's B3: "prove `--no-cache`
+        # and actual build execution").
+        if [[ -n "${MOCK_BUILD_LOG:-}" ]]; then
+            printf '%s\n' "$*" >> "$MOCK_BUILD_LOG"
+        fi
         if [[ "${MOCK_BUILD_SUCCESS:-true}" != "true" ]]; then
             exit 1
         fi
+        # Collect `-t <tag>` pairs. Production callers always pass one, but
+        # supporting many keeps the mock general.
+        _prev=""
+        for _arg in "$@"; do
+            if [[ "$_prev" == "-t" ]]; then
+                _tag_add "$_arg"
+            fi
+            _prev="$_arg"
+        done
         exit 0
         ;;
     pull)
@@ -149,13 +296,13 @@ case "${1:-}" in
         ;;
     images)
         # Simulate `docker images --quiet <ref>` used by save_images_to_tar to
-        # decide whether to attempt export. `MOCK_LOCAL_TAGS` (newline-list)
-        # defines which references are considered "present"; a match prints a
-        # deterministic ID so `docker images --quiet` reports non-empty.
+        # decide whether to attempt export. Stateful mode consults the live
+        # present-tag file so removals persist. Legacy mode still uses
+        # `MOCK_LOCAL_TAGS`.
         # `--quiet` is at $2 for `docker images --quiet <ref>`.
         if [[ "${2:-}" == "--quiet" ]]; then
             target_ref="${3:-}"
-            if [[ -n "${MOCK_LOCAL_TAGS:-}" ]] && printf '%s\n' "$MOCK_LOCAL_TAGS" | grep -Fxq "$target_ref"; then
+            if _tag_present "$target_ref"; then
                 printf 'sha256:deadbeef%s\n' "$target_ref"
             fi
             exit 0
@@ -1018,13 +1165,23 @@ test_save_images_refuses_unattested_orcaslicer_binaries() {
     exit_code=$?
     set -e
 
-    # save_images_to_tar increments fail_count but returns 0 by design so
-    # partial-success semantics survive. Exit code alone is therefore not the
-    # signal here — the export-suppression assertion is the source of truth.
-    unused_exit_code="$exit_code"
+    # save_images_to_tar must now propagate a hard non-zero exit code when the
+    # OrcaSlicer strict-attestation guard trips at the export boundary. The
+    # pre-fix behavior — incrementing `fail_count` internally but still
+    # returning 0 and printing "Images exported successfully!" — was the
+    # blocker C the pre-PR review flagged: operators and CI could not tell
+    # from the exit code that the offline bundle was missing its required
+    # OrcaSlicer layer. Return 2 is the documented strict-attestation status
+    # (matches build_base_images / prepare_offline_deployment).
+    assert_not_equals "0" "$exit_code" "save_images_to_tar must exit non-zero on strict OrcaSlicer attestation refusal"
+    assert_equals "2" "$exit_code" "save_images_to_tar must return 2 (strict-attestation status) on OrcaSlicer refusal"
 
     assert_contains "$output" "Refusing to export unattested orcaslicer-binaries:2.4.2" "save boundary refuses unattested OrcaSlicer image"
     assert_contains "$output" "strict OrcaSlicer attestation missing" "save boundary refusal explains the attestation gap"
+    # The success banner must NOT appear alongside a refusal — that was the
+    # exact deceptive-status bug the reviewers flagged.
+    assert_not_contains "$output" "Images exported successfully!" "success banner must not print when an OrcaSlicer refusal occurred"
+    assert_contains "$output" "OrcaSlicer strict-attestation refusal detected" "refusal summary is emitted so operators see the failure category"
 
     local save_log_contents=""
     if [ -f "$export_dir/save.log" ]; then
@@ -1049,17 +1206,37 @@ test_save_images_refuses_unattested_orcaslicer_binaries() {
 
 # Helper — runs build_base_images() in a mocked-docker subshell with the given
 # ORCA_FORCE_REBUILD value and a strictly-valid cached image, and captures both
-# the combined output and the docker-image-rm log so the caller can assert on
-# whether the ORCA_FORCE_REBUILD gate triggered auto-recovery. The image is set
-# up as strictly valid so recovery is only triggered by the gate under test,
-# not by the validator's own reject path (which has its own dedicated tests).
+# the combined output, the return code, and the docker command logs so the
+# caller can assert on whether the ORCA_FORCE_REBUILD gate triggered auto-
+# recovery, whether the rebuild actually executed, and whether the whole path
+# completed cleanly (rc 0) or bailed on a strict-attestation refusal (rc 2).
+# The image is set up as strictly valid so recovery is only triggered by the
+# gate under test, not by the validator's own reject path (which has its own
+# dedicated tests).
+#
+# Writes:
+#   $2 rm_log      — one line per `docker image rm` call the mock observed
+#   $3 build_log   — full argv per `docker build` call (for `--no-cache` etc.)
+#   $4 built_log   — one line per tag `docker build -t <tag>` produced
+# Prints the combined stdout+stderr of build_base_images. The caller captures
+# the subshell's exit code separately.
 _run_build_base_images_with_force_rebuild() {
     local force_rebuild_value="$1"
     local rm_log="$2"
+    local build_log="${3:-}"
+    local built_log="${4:-}"
     (
         set --
         export PATH="$MOCK_BIN:$PATH"
-        export MOCK_IMAGE_EXISTS=true
+        # Opt into the stateful mock so `docker image rm` really removes the
+        # tag from subsequent `docker image inspect` / `images --quiet` calls.
+        # Without this, "removal succeeded → rebuild → validate" is untested
+        # end-to-end and the reviewer's B blocker (no proof the mock changes
+        # in response to successful rm) applies.
+        local state_dir
+        state_dir=$(create_test_temp_dir)/mock-state
+        mkdir -p "$state_dir"
+        export MOCK_STATE_DIR="$state_dir"
         export MOCK_VERSION_LABEL="2.4.2"
         export MOCK_SHA_LABEL="d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
         export MOCK_ALLOW_STUB_LABEL="false"
@@ -1071,6 +1248,12 @@ _run_build_base_images_with_force_rebuild() {
         # when removal itself fails.
         unset MOCK_RM_FAILS_FOR_TAG
         export MOCK_RM_LOG="$rm_log"
+        if [ -n "$build_log" ]; then
+            export MOCK_BUILD_LOG="$build_log"
+        fi
+        if [ -n "$built_log" ]; then
+            export MOCK_BUILT_LOG="$built_log"
+        fi
         export MOCK_BUILD_SUCCESS=true
         export MOCK_PULL_SUCCESS=true
 
@@ -1095,25 +1278,49 @@ test_orca_force_rebuild_env_1_triggers_offline_recovery() {
     start_test "ORCA_FORCE_REBUILD=1 (documented env value) triggers offline recovery gate at runtime"
 
     local rm_log
+    local build_log
+    local built_log
     rm_log="$TEST_TEMP_DIR/rm-env-1.log"
+    build_log="$TEST_TEMP_DIR/build-env-1.log"
+    built_log="$TEST_TEMP_DIR/built-env-1.log"
     : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
 
     local output
+    local exit_code
     set +e
-    output=$(_run_build_base_images_with_force_rebuild "1" "$rm_log" 2>&1)
+    output=$(_run_build_base_images_with_force_rebuild "1" "$rm_log" "$build_log" "$built_log" 2>&1)
+    exit_code=$?
     set -e
 
     # The gate must fire when ORCA_FORCE_REBUILD=1 — this is the exact literal
     # every operator-facing doc prescribes ("rerun with --rebuild-orcaslicer /
-    # ORCA_FORCE_REBUILD=1"). Two independent runtime signals prove the gate
-    # tripped: (1) the "clearing" info message from deploy-docker.sh itself,
-    # and (2) an actual `docker image rm` call recorded by the mock docker
-    # shim. Either one alone would be circumstantial; both together lock the
-    # behavior in.
+    # ORCA_FORCE_REBUILD=1"). Assertions layer up from "the gate printed its
+    # marker" (weakest) through "docker actually removed and rebuilt the tag"
+    # (strongest end-to-end proof).
     assert_contains "$output" "ORCA_FORCE_REBUILD is set — clearing local orcaslicer-binaries" "clearing message printed when ORCA_FORCE_REBUILD=1"
     local rm_log_contents
     rm_log_contents=$(cat "$rm_log")
     assert_contains "$rm_log_contents" "orcaslicer-binaries:2.4.2" "docker image rm was invoked for the target tag when ORCA_FORCE_REBUILD=1"
+
+    # Statefulness proof: the mock actually removed the tag, so the guard
+    # (which fires when the tag persists after removal) did NOT trip and the
+    # rebuild branch ran. Assert the actual build execution and success
+    # message that follows, not just the "would rebuild" intent.
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "docker build was invoked with the OrcaSlicer target tag"
+    assert_contains "$build_log_contents" "--no-cache" "the rebuild is forced with --no-cache so BuildKit cannot reuse the stale layer"
+    assert_contains "$build_log_contents" "Dockerfile.base-orcaslicer-binaries" "the rebuild targets the OrcaSlicer binary Dockerfile"
+    local built_log_contents
+    built_log_contents=$(cat "$built_log")
+    assert_contains "$built_log_contents" "orcaslicer-binaries:2.4.2" "the rebuild produced the target tag (post-build present in mock state)"
+    assert_contains "$output" "✓ Build successful: orcaslicer-binaries:2.4.2" "build_base_images reports the OrcaSlicer rebuild as successful"
+
+    # And the whole flow must return rc 0: removal succeeded, rebuild ran,
+    # post-build attestation passed. Any non-zero here is a regression.
+    assert_equals "0" "$exit_code" "successful removal → rebuild → post-build attestation returns rc 0"
 
     pass_test
 }
@@ -1122,22 +1329,36 @@ test_orca_force_rebuild_env_true_triggers_offline_recovery() {
     start_test "ORCA_FORCE_REBUILD=true (CLI-flag path) still triggers offline recovery gate at runtime"
 
     local rm_log
+    local build_log
+    local built_log
     rm_log="$TEST_TEMP_DIR/rm-env-true.log"
+    build_log="$TEST_TEMP_DIR/build-env-true.log"
+    built_log="$TEST_TEMP_DIR/built-env-true.log"
     : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
 
     local output
+    local exit_code
     set +e
-    output=$(_run_build_base_images_with_force_rebuild "true" "$rm_log" 2>&1)
+    output=$(_run_build_base_images_with_force_rebuild "true" "$rm_log" "$build_log" "$built_log" 2>&1)
+    exit_code=$?
     set -e
 
     # Regression: --rebuild-orcaslicer sets ORCA_FORCE_REBUILD=true (see
     # scripts/deploy-docker.sh case '--rebuild-orcaslicer'), so the truthy
     # widening must not accidentally break the value the CLI flag itself
-    # emits. Same two runtime signals as the =1 test.
+    # emits. Same layered assertions as the =1 test.
     assert_contains "$output" "ORCA_FORCE_REBUILD is set — clearing local orcaslicer-binaries" "clearing message printed when ORCA_FORCE_REBUILD=true"
     local rm_log_contents
     rm_log_contents=$(cat "$rm_log")
     assert_contains "$rm_log_contents" "orcaslicer-binaries:2.4.2" "docker image rm was invoked for the target tag when ORCA_FORCE_REBUILD=true"
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "docker build was invoked with the OrcaSlicer target tag"
+    assert_contains "$build_log_contents" "--no-cache" "the rebuild is forced with --no-cache"
+    assert_contains "$output" "✓ Build successful: orcaslicer-binaries:2.4.2" "build_base_images reports the OrcaSlicer rebuild as successful"
+    assert_equals "0" "$exit_code" "successful removal → rebuild returns rc 0"
 
     pass_test
 }
@@ -1146,27 +1367,42 @@ test_orca_force_rebuild_env_false_leaves_valid_cache_intact() {
     start_test "ORCA_FORCE_REBUILD=false leaves a strictly-valid cached image untouched"
 
     local rm_log
+    local build_log
+    local built_log
     rm_log="$TEST_TEMP_DIR/rm-env-false.log"
+    build_log="$TEST_TEMP_DIR/build-env-false.log"
+    built_log="$TEST_TEMP_DIR/built-env-false.log"
     : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
 
     local output
+    local exit_code
     set +e
-    output=$(_run_build_base_images_with_force_rebuild "false" "$rm_log" 2>&1)
+    output=$(_run_build_base_images_with_force_rebuild "false" "$rm_log" "$build_log" "$built_log" 2>&1)
+    exit_code=$?
     set -e
 
-    # False must not trip the gate. Three independent signals:
+    # False must not trip the gate. Layered assertions:
     # 1. No "clearing" message (gate did not print it).
     # 2. MOCK_RM_LOG is empty (remove_local_orcaslicer_binaries_tags was never
     #    invoked from the gate — and since the strictly-valid cache means the
     #    validator's own recovery path also never fires, no other caller
     #    writes to this log either).
-    # 3. The "already exists locally (skipping rebuild)" happy-path message
+    # 3. No OrcaSlicer rebuild happened (the `-t orcaslicer-binaries:2.4.2`
+    #    call must not appear in MOCK_BUILD_LOG).
+    # 4. The "already exists locally (skipping rebuild)" happy-path message
     #    is present, confirming the cache was reused as documented.
+    # 5. rc 0 (happy path).
     assert_not_contains "$output" "ORCA_FORCE_REBUILD is set — clearing local orcaslicer-binaries" "clearing message MUST NOT print when ORCA_FORCE_REBUILD=false"
     local rm_log_contents
     rm_log_contents=$(cat "$rm_log")
     assert_equals "" "$rm_log_contents" "no docker image rm calls were issued when ORCA_FORCE_REBUILD=false and the cache is strictly valid"
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_not_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "no OrcaSlicer rebuild was invoked when the cache is strictly valid"
     assert_contains "$output" "already exists locally (skipping rebuild)" "strictly-valid cache is reused when ORCA_FORCE_REBUILD=false"
+    assert_equals "0" "$exit_code" "strictly-valid cache reuse returns rc 0"
 
     pass_test
 }
@@ -1175,12 +1411,20 @@ test_orca_force_rebuild_env_unset_leaves_valid_cache_intact() {
     start_test "unset ORCA_FORCE_REBUILD leaves a strictly-valid cached image untouched"
 
     local rm_log
+    local build_log
+    local built_log
     rm_log="$TEST_TEMP_DIR/rm-env-unset.log"
+    build_log="$TEST_TEMP_DIR/build-env-unset.log"
+    built_log="$TEST_TEMP_DIR/built-env-unset.log"
     : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
 
     local output
+    local exit_code
     set +e
-    output=$(_run_build_base_images_with_force_rebuild "__UNSET__" "$rm_log" 2>&1)
+    output=$(_run_build_base_images_with_force_rebuild "__UNSET__" "$rm_log" "$build_log" "$built_log" 2>&1)
+    exit_code=$?
     set -e
 
     # Default (unset) behavior must equal false — this is what every fresh
@@ -1189,7 +1433,11 @@ test_orca_force_rebuild_env_unset_leaves_valid_cache_intact() {
     local rm_log_contents
     rm_log_contents=$(cat "$rm_log")
     assert_equals "" "$rm_log_contents" "no docker image rm calls were issued when ORCA_FORCE_REBUILD is unset"
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_not_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "no OrcaSlicer rebuild was invoked when ORCA_FORCE_REBUILD is unset"
     assert_contains "$output" "already exists locally (skipping rebuild)" "strictly-valid cache is reused when ORCA_FORCE_REBUILD is unset"
+    assert_equals "0" "$exit_code" "strictly-valid cache reuse (default) returns rc 0"
 
     pass_test
 }
@@ -1198,23 +1446,35 @@ test_orca_force_rebuild_env_invalid_is_treated_as_false() {
     start_test "invalid ORCA_FORCE_REBUILD value (e.g. 'yes') is treated as false, not silently truthy"
 
     local rm_log
+    local build_log
+    local built_log
     rm_log="$TEST_TEMP_DIR/rm-env-invalid.log"
+    build_log="$TEST_TEMP_DIR/build-env-invalid.log"
+    built_log="$TEST_TEMP_DIR/built-env-invalid.log"
     : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
 
     # `yes` is a common footgun value that some scripts accept but this one
     # deliberately rejects (matches the DISABLE_SLICER_BUILDS convention). If
     # this test starts failing, the truthy set has quietly widened and docs
     # must be re-audited so operators aren't blindsided by partial acceptance.
     local output
+    local exit_code
     set +e
-    output=$(_run_build_base_images_with_force_rebuild "yes" "$rm_log" 2>&1)
+    output=$(_run_build_base_images_with_force_rebuild "yes" "$rm_log" "$build_log" "$built_log" 2>&1)
+    exit_code=$?
     set -e
 
     assert_not_contains "$output" "ORCA_FORCE_REBUILD is set — clearing local orcaslicer-binaries" "invalid value 'yes' must NOT trip the ORCA_FORCE_REBUILD gate"
     local rm_log_contents
     rm_log_contents=$(cat "$rm_log")
     assert_equals "" "$rm_log_contents" "no docker image rm calls were issued for invalid ORCA_FORCE_REBUILD='yes'"
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_not_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "no OrcaSlicer rebuild was invoked for invalid ORCA_FORCE_REBUILD='yes'"
     assert_contains "$output" "already exists locally (skipping rebuild)" "strictly-valid cache is reused when ORCA_FORCE_REBUILD is invalid (treated as false)"
+    assert_equals "0" "$exit_code" "invalid value is falsy → happy-path rc 0"
 
     pass_test
 }
@@ -1287,6 +1547,317 @@ test_orca_force_rebuild_deploy_containers_gate_matches_offline_gate() {
     pass_test
 }
 
+# ── Bash 3.2 compatibility: `remove_local_orcaslicer_binaries_tags` must   ──
+# ── work under macOS's system /bin/bash (3.2.57) which never gained          ──
+# ── associative arrays. Previous versions used `local -A seen=()`; this     ──
+# ── test guards against reintroducing any Bash-4-only syntax.               ──
+
+test_remove_local_orcaslicer_binaries_tags_uses_no_bash4_only_features() {
+    start_test "remove_local_orcaslicer_binaries_tags avoids Bash-4-only syntax (macOS /bin/bash compat)"
+
+    local docker_utils
+    docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
+
+    # Extract the function body and confirm it contains no `local -A` /
+    # `declare -A` / `typeset -A` (associative arrays) — those are the
+    # concrete Bash-4-only features that broke this helper for the operator
+    # who ran the deploy on macOS.
+    local fn_body
+    fn_body=$(sed -n '/^remove_local_orcaslicer_binaries_tags()/,/^}/p' "$REPO_ROOT/scripts/docker-utils.sh")
+
+    if [ -z "$fn_body" ]; then
+        fail_test "unable to extract remove_local_orcaslicer_binaries_tags function body from docker-utils.sh"
+        return
+    fi
+
+    # Precise negative assertions — any of these would break Bash 3.2.
+    if echo "$fn_body" | grep -qE '(^|\s)(local|declare|typeset)\s+-A(\s|$)'; then
+        fail_test "remove_local_orcaslicer_binaries_tags must not declare associative arrays (Bash 4+ only)"
+        return
+    fi
+    # `${!var@P}` prompt-transformation is also Bash-4-only; guard against it
+    # in case anyone tries to build a set-emulation via indirection later.
+    if echo "$fn_body" | grep -qE '\$\{![^}]*@P\}'; then
+        fail_test "remove_local_orcaslicer_binaries_tags must not use \${!var@P} (Bash 4+ only)"
+        return
+    fi
+
+    pass_test
+}
+
+# ── Statefulness proof: `docker image rm` failing to actually remove the tag  ──
+# ── from the daemon (e.g. a running container is holding it) must cause      ──
+# ── build_base_images to bail with rc 2, NOT falsely report success. The     ──
+# ── pre-fix mock returned canned answers so this was untestable end-to-end.  ──
+
+test_orca_force_rebuild_persistent_stale_tag_returns_rc_2() {
+    start_test "ORCA_FORCE_REBUILD=1 with a genuinely persistent stale tag returns strict rc 2"
+
+    local output
+    local exit_code
+    local rm_log
+    local build_log
+    local built_log
+    rm_log="$TEST_TEMP_DIR/rm-persistent.log"
+    build_log="$TEST_TEMP_DIR/build-persistent.log"
+    built_log="$TEST_TEMP_DIR/built-persistent.log"
+    : > "$rm_log"
+    : > "$build_log"
+    : > "$built_log"
+
+    set +e
+    output=$(
+        set --
+        export PATH="$MOCK_BIN:$PATH"
+        # Stateful mock: the tag is present, ORCA_FORCE_REBUILD=1 triggers
+        # `docker image rm`, but the mock refuses removal for the version tag
+        # (simulating the "running container is holding the reference" case).
+        # `remove_local_orcaslicer_binaries_tags` returns 0 because it treats
+        # per-tag rm failures as warnings; the guard in build_base_images
+        # must catch this — the tag is still present and a subsequent build
+        # would silently reuse the stale layer.
+        local state_dir
+        state_dir=$(create_test_temp_dir)/mock-state
+        mkdir -p "$state_dir"
+        export MOCK_STATE_DIR="$state_dir"
+        export MOCK_VERSION_LABEL="2.4.2"
+        export MOCK_SHA_LABEL="d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+        export MOCK_ALLOW_STUB_LABEL="false"
+        export MOCK_EMBEDDED_VERSION="2.4.2"
+        export MOCK_EMBEDDED_SHA="d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+        export MOCK_LOCAL_TAGS=$'orcaslicer-binaries:2.4.2\norcaslicer-binaries:latest'
+        export MOCK_RM_FAILS_FOR_TAG="orcaslicer-binaries:2.4.2"
+        export MOCK_RM_LOG="$rm_log"
+        export MOCK_BUILD_LOG="$build_log"
+        export MOCK_BUILT_LOG="$built_log"
+        export MOCK_BUILD_SUCCESS=true
+        export MOCK_PULL_SUCCESS=true
+        export ORCA_FORCE_REBUILD=1
+
+        # shellcheck disable=SC1091
+        source "$REPO_ROOT/scripts/deploy-docker.sh" >/dev/null 2>&1
+        set +e
+
+        build_base_images 2>&1
+    )
+    exit_code=$?
+    set -e
+
+    # Strict rc: this is the strict-attestation status code (2), not a
+    # generic non-zero. The reviewer's blocker demanded that both the
+    # successful-recovery path (rc 0) and the genuine persistence failure
+    # (rc 2) be tested end-to-end with a stateful mock. rc 1 would mean a
+    # non-Orca failure and would trigger the documented soft fallback — but
+    # OrcaSlicer strict-attestation refusals MUST NOT fall back, so rc 2 is
+    # the required signal.
+    assert_equals "2" "$exit_code" "persistent stale tag must return the strict-attestation status code (2)"
+    assert_contains "$output" "Refusing to proceed with offline preparation" "guard emits explicit refusal message"
+    assert_contains "$output" "orcaslicer-binaries:2.4.2 could not be removed" "guard names the specific stale tag"
+    # The rebuild must NOT have executed — the guard must have short-circuited
+    # before docker build ran with the OrcaSlicer target.
+    local build_log_contents
+    build_log_contents=$(cat "$build_log")
+    assert_not_contains "$build_log_contents" "-t orcaslicer-binaries:2.4.2" "no OrcaSlicer rebuild is executed when the stale tag persists"
+    assert_not_contains "$output" "✓ Build successful: orcaslicer-binaries:2.4.2" "no rebuild success is claimed after failed recovery"
+
+    pass_test
+}
+
+# ── CLI-path exit propagation: `--save-images` and `--pull-images --save-  ──
+# ── images` must return non-zero when save_images_to_tar refuses to export   ──
+# ── an unattested orcaslicer-binaries:* tag. Pre-fix both paths `exit 0`.   ──
+
+_orca_test_run_cli_direct_save() {
+    # Exec the deploy-docker.sh CLI with `--save-images` in a subshell where
+    # the mock docker knows about a stale unattested orcaslicer-binaries:2.4.2
+    # tag. Prints "RC=<code>" on the first line followed by combined output;
+    # callers parse both from the returned string. Using output-only return
+    # avoids nameref pitfalls where `local output` inside the helper would
+    # shadow the caller's variable of the same name.
+    local export_dir
+    export_dir=$(create_test_temp_dir)/cli-direct-save
+    mkdir -p "$export_dir"
+
+    local combined
+    local rc
+    set +e
+    combined=$(
+        set --
+        export PATH="$MOCK_BIN:$PATH"
+        export MOCK_VERSION_LABEL="2.4.2"
+        # MOCK_SHA_LABEL / MOCK_ALLOW_STUB_LABEL intentionally unset →
+        # validator rejects the tag at the save boundary.
+        export MOCK_LOCAL_TAGS="orcaslicer-binaries:2.4.2"
+        export MOCK_SAVE_LOG="$export_dir/save.log"
+        : > "$MOCK_SAVE_LOG"
+        # Suppress interactive prompts. The mock is a no-op anyway, but be
+        # explicit.
+        export SKIP_UI_TESTS=1
+        bash "$REPO_ROOT/scripts/deploy-docker.sh" --save-images --images-dir "$export_dir" 2>&1
+    )
+    rc=$?
+    set -e
+    printf 'RC=%s\n%s' "$rc" "$combined"
+}
+
+test_cli_save_images_propagates_orca_attestation_refusal() {
+    start_test "CLI --save-images propagates non-zero exit on OrcaSlicer strict-attestation refusal"
+
+    local combined
+    local rc
+    local output
+    combined=$(_orca_test_run_cli_direct_save)
+    rc="${combined#RC=}"
+    rc="${rc%%$'\n'*}"
+    output="${combined#*$'\n'}"
+
+    # The CLI must exit non-zero when save_images_to_tar refuses the
+    # unattested OrcaSlicer tag. Previously both `--save-images` and
+    # `--pull-images --save-images` `exit 0` unconditionally regardless of
+    # save_images_to_tar's return, hiding a security-critical refusal.
+    assert_not_equals "0" "$rc" "CLI --save-images must exit non-zero when the OrcaSlicer save is refused"
+    assert_equals "2" "$rc" "CLI --save-images must propagate the strict-attestation status code (2)"
+    assert_contains "$output" "Refusing to export unattested orcaslicer-binaries:2.4.2" "CLI --save-images surfaces the refusal to operators"
+    assert_not_contains "$output" "Images exported successfully!" "success banner must not print when the CLI is about to exit non-zero"
+
+    pass_test
+}
+
+test_cli_pull_and_save_images_propagates_orca_attestation_refusal() {
+    start_test "CLI --pull-images --save-images propagates non-zero exit on OrcaSlicer refusal"
+
+    local export_dir
+    export_dir=$(create_test_temp_dir)/cli-pull-save
+    mkdir -p "$export_dir"
+
+    local combined
+    local rc
+    local output
+    set +e
+    combined=$(
+        set --
+        export PATH="$MOCK_BIN:$PATH"
+        export MOCK_VERSION_LABEL="2.4.2"
+        export MOCK_LOCAL_TAGS="orcaslicer-binaries:2.4.2"
+        export MOCK_SAVE_LOG="$export_dir/save.log"
+        : > "$MOCK_SAVE_LOG"
+        export MOCK_PULL_SUCCESS=true
+        export SKIP_UI_TESTS=1
+        bash "$REPO_ROOT/scripts/deploy-docker.sh" --pull-images --save-images --images-dir "$export_dir" 2>&1
+        printf 'MARKER_RC=%s\n' "$?"
+    )
+    set -e
+    # Extract the CLI's own rc from the marker line — the outer $? here is
+    # the rc of the printf, which is always 0.
+    rc=$(printf '%s\n' "$combined" | awk -F= '/^MARKER_RC=/ {print $2; exit}')
+    output=$(printf '%s\n' "$combined" | grep -v '^MARKER_RC=')
+
+    assert_not_equals "0" "$rc" "CLI --pull-images --save-images must exit non-zero when the OrcaSlicer save is refused"
+    assert_equals "2" "$rc" "CLI --pull-images --save-images must propagate the strict-attestation status code (2)"
+    assert_contains "$output" "Refusing to export unattested orcaslicer-binaries:2.4.2" "combined pull+save CLI surfaces the refusal"
+
+    pass_test
+}
+
+# ── save_images_to_tar function-level exit-code coverage: happy path       ──
+# ── (nothing to export, no Orca refusal) still returns 0 so the "no local  ──
+# ── OrcaSlicer image present" and "attested OrcaSlicer image present"      ──
+# ── flows don't accidentally start failing.                                 ──
+
+test_save_images_returns_zero_when_no_orca_image_present() {
+    start_test "save_images_to_tar returns 0 when DOCKER_LOCAL_IMAGES has no orcaslicer-binaries entry"
+
+    local output
+    local exit_code
+    local export_dir
+    export_dir=$(create_test_temp_dir)/no-orca-save
+    mkdir -p "$export_dir"
+
+    set +e
+    output=$(
+        set --
+        export PATH="$MOCK_BIN:$PATH"
+        # No local OrcaSlicer image at all — save_images_to_tar should just
+        # skip it and return 0 as it did pre-fix (partial-success semantics).
+        # We empty DOCKER_LOCAL_IMAGES to model the "orcaslicer worker
+        # disabled" configuration; without an orcaslicer-binaries:* entry
+        # the attestation loop never fires and rc must be 0.
+        unset MOCK_LOCAL_TAGS
+        export MOCK_SAVE_LOG="$export_dir/save.log"
+        : > "$MOCK_SAVE_LOG"
+
+        # shellcheck disable=SC1091
+        source "$REPO_ROOT/scripts/deploy-docker.sh" >/dev/null 2>&1
+        set +e
+
+        DOCKER_UPGRADED_IMAGES=()
+        DOCKER_BASE_IMAGES=()
+        # Also empty DOCKER_LOCAL_IMAGES to model the "no OrcaSlicer at all"
+        # config (`ENABLE_ORCA_WORKER=false`). Production's own `docker
+        # images --quiet` presence check is not sufficient to detect a
+        # missing image (it returns 0 with empty output for missing refs),
+        # so the honest way to model "OrcaSlicer is not in scope for this
+        # save" is to remove it from the list save_images_to_tar iterates.
+        DOCKER_LOCAL_IMAGES=()
+
+        save_images_to_tar "$export_dir" 2>&1
+    )
+    exit_code=$?
+    set -e
+
+    assert_equals "0" "$exit_code" "no OrcaSlicer image in scope → happy-path rc 0"
+    assert_contains "$output" "Images exported successfully!" "success banner is present on the happy path"
+    assert_not_contains "$output" "Refusing to export unattested" "no refusal message when there is nothing to refuse"
+
+    pass_test
+}
+
+test_save_images_returns_zero_when_orca_image_is_attested() {
+    start_test "save_images_to_tar returns 0 when orcaslicer-binaries:* image is fully attested"
+
+    local output
+    local exit_code
+    local export_dir
+    export_dir=$(create_test_temp_dir)/attested-orca-save
+    mkdir -p "$export_dir"
+
+    set +e
+    output=$(
+        set --
+        export PATH="$MOCK_BIN:$PATH"
+        # Fully attested OrcaSlicer image: all labels present and matching.
+        export MOCK_VERSION_LABEL="2.4.2"
+        export MOCK_SHA_LABEL="d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+        export MOCK_ALLOW_STUB_LABEL="false"
+        export MOCK_EMBEDDED_VERSION="2.4.2"
+        export MOCK_EMBEDDED_SHA="d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd"
+        export MOCK_LOCAL_TAGS="orcaslicer-binaries:2.4.2"
+        export MOCK_SAVE_LOG="$export_dir/save.log"
+        : > "$MOCK_SAVE_LOG"
+
+        # shellcheck disable=SC1091
+        source "$REPO_ROOT/scripts/deploy-docker.sh" >/dev/null 2>&1
+        set +e
+
+        DOCKER_UPGRADED_IMAGES=()
+        DOCKER_BASE_IMAGES=()
+
+        save_images_to_tar "$export_dir" 2>&1
+    )
+    exit_code=$?
+    set -e
+
+    assert_equals "0" "$exit_code" "attested OrcaSlicer image exports cleanly → rc 0"
+    assert_contains "$output" "Images exported successfully!" "success banner is present on the attested happy path"
+    local save_log_contents=""
+    if [ -f "$export_dir/save.log" ]; then
+        save_log_contents=$(cat "$export_dir/save.log")
+    fi
+    assert_contains "$save_log_contents" "orcaslicer-binaries:2.4.2" "attested OrcaSlicer image is passed to docker save"
+
+    pass_test
+}
+
 run_tests() {
     test_matching_metadata_is_accepted
     test_immutable_digest_reference_is_required
@@ -1329,6 +1900,21 @@ run_tests() {
     test_orca_force_rebuild_env_unset_leaves_valid_cache_intact
     test_orca_force_rebuild_env_invalid_is_treated_as_false
     test_orca_force_rebuild_deploy_containers_gate_matches_offline_gate
+    # Bash 3.2 compat (macOS system /bin/bash) — blocker A.
+    test_remove_local_orcaslicer_binaries_tags_uses_no_bash4_only_features
+    # Stateful mock end-to-end coverage — blocker B: proves successful rm →
+    # rebuild → attestation returns rc 0, and genuine persistence failure
+    # returns strict rc 2.
+    test_orca_force_rebuild_persistent_stale_tag_returns_rc_2
+    # save_images_to_tar exit-code coverage — blocker C: refusal → rc 2,
+    # happy paths → rc 0.
+    test_save_images_returns_zero_when_no_orca_image_present
+    test_save_images_returns_zero_when_orca_image_is_attested
+    # CLI-path exit-code propagation — blocker C, second half: both
+    # `--save-images` and `--pull-images --save-images` CLI paths must
+    # propagate the non-zero refusal instead of `exit 0`.
+    test_cli_save_images_propagates_orca_attestation_refusal
+    test_cli_pull_and_save_images_propagates_orca_attestation_refusal
 }
 
 setup

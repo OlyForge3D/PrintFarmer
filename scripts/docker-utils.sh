@@ -232,14 +232,29 @@ remove_local_orcaslicer_binaries_tags() {
         done <<< "$existing_tags"
     fi
 
-    # De-duplicate while preserving order.
-    local -A seen=()
+    # De-duplicate while preserving order. This helper is intentionally
+    # Bash-3.2 compatible so it works under macOS's system /bin/bash (3.2.57),
+    # which never gained associative arrays (`declare -A` / `local -A`) — those
+    # only landed in Bash 4.0. The candidate list is at most a handful of tags
+    # (an explicit `:version`, `:latest`, plus whatever `docker image ls`
+    # returned), so an O(n²) linear-scan dedup is fine and avoids the need for
+    # any Bash-4-only features.
     local deduped=()
+    local existing
+    local already
     for tag in "${candidate_tags[@]}"; do
         [[ -z "$tag" ]] && continue
-        if [[ -z "${seen[$tag]:-}" ]]; then
+        already=0
+        if [[ ${#deduped[@]} -gt 0 ]]; then
+            for existing in "${deduped[@]}"; do
+                if [[ "$existing" == "$tag" ]]; then
+                    already=1
+                    break
+                fi
+            done
+        fi
+        if [[ "$already" -eq 0 ]]; then
             deduped+=("$tag")
-            seen[$tag]=1
         fi
     done
 

@@ -1301,6 +1301,17 @@ save_images_to_tar() {
     local fail_count=0
     local total_size=0
     local exported_images=()
+    # Track OrcaSlicer strict-attestation refusals separately so the caller can
+    # distinguish "some optional base image failed to save" (soft warning,
+    # return 0 to preserve partial-success semantics) from "the required
+    # OrcaSlicer binary layer refused strict attestation and MUST NOT ship in
+    # the offline bundle" (hard failure, propagate a non-zero return so the
+    # `--save-images` and `--pull-images --save-images` CLI paths exit non-
+    # zero as well). Without this split, a bad orcaslicer-binaries:* tag was
+    # silently downgraded to a warning and the outer script printed
+    # "Images exported successfully!" and returned 0, hiding a security-
+    # critical refusal from operators and CI.
+    local orca_attestation_refused=false
     
     # Export upgraded base images first (preferred)
     print_info "Exporting pre-upgraded base images (with tools pre-installed)..."
@@ -1395,6 +1406,13 @@ save_images_to_tar() {
                 print_error "Remediate: rerun with --rebuild-orcaslicer / ORCA_FORCE_REBUILD=1, or remove the stale tag:"
                 print_error "  docker rmi $image"
                 fail_count=$((fail_count + 1))
+                # Distinguish OrcaSlicer strict-attestation refusal from a
+                # generic "optional image failed to save" so the outer
+                # accounting can propagate a hard non-zero exit. Missing this
+                # flag was the exact bug the pre-PR review flagged: without
+                # it the summary block still prints "Images exported
+                # successfully!" and returns 0.
+                orca_attestation_refused=true
                 continue
             fi
         fi
@@ -1431,7 +1449,33 @@ save_images_to_tar() {
         print_warning "Failed to export: $fail_count images"
         # Don't fail completely if some export fails
     fi
-    
+
+    # OrcaSlicer strict-attestation refusal MUST propagate as a hard failure.
+    # Preserve the partial-success semantics for other optional base images
+    # (which just warn and continue), but any orcaslicer-binaries:* rejection
+    # is security-critical: the offline bundle would otherwise ship an
+    # unverifiable OrcaSlicer binary layer. Return 2 to match the strict-
+    # attestation status code used by `prepare_offline_deployment` and
+    # `build_base_images`, and to give operator-facing callers (`--save-images`
+    # / `--pull-images --save-images`) a distinguishable non-zero exit.
+    if [ "$orca_attestation_refused" = "true" ]; then
+        echo
+        print_error "Refusing to complete image export: OrcaSlicer strict-attestation refusal detected above."
+        print_error "The offline bundle will NOT be marked as successfully exported."
+        print_info "TAR files (excluding the refused OrcaSlicer layer) remain at: $target_dir"
+        # Still write the manifest of what did export cleanly so the failure
+        # is auditable — but do not print the "Images exported successfully!"
+        # banner, and do not return 0.
+        local manifest_path="$target_dir/manifest.txt"
+        if [ "${#exported_images[@]}" -gt 0 ]; then
+            {
+                printf "%s\n" "${exported_images[@]}"
+            } > "$manifest_path"
+            print_info "Created partial manifest file (excludes refused images): $manifest_path"
+        fi
+        return 2
+    fi
+
     print_success "Images exported successfully!"
     print_info "TAR files location: $target_dir"
     print_info "You can now transfer this folder to offline machines"
@@ -6749,22 +6793,33 @@ main() {
         fi
     fi
     
-    # Handle image management options (these exit early if used)
+    # Handle image management options (these exit early if used).
+    #
+    # Both `--pull-images --save-images` and the direct `--save-images` path
+    # must propagate `save_images_to_tar`'s return code. Previously both paths
+    # `exit 0` unconditionally, so an OrcaSlicer strict-attestation refusal
+    # inside `save_images_to_tar` was invisible to operators and CI: the
+    # exported tarball was missing but the CLI still reported success. Return
+    # the actual save status so a refusal surfaces as a non-zero exit.
     if [ "$PULL_IMAGES" = "true" ]; then
+        local save_rc=0
         if pull_base_images; then
             if [ "$SAVE_IMAGES" = "true" ]; then
-                save_images_to_tar "$IMAGES_DIR"
+                save_images_to_tar "$IMAGES_DIR" || save_rc=$?
             fi
+        else
+            save_rc=1
         fi
-        exit 0
+        exit "$save_rc"
     fi
-    
+
     if [ "$SAVE_IMAGES" = "true" ]; then
         if [ "$PULL_IMAGES" != "true" ]; then
             print_info "Saving already downloaded images..."
         fi
-        save_images_to_tar "$IMAGES_DIR"
-        exit 0
+        local save_rc=0
+        save_images_to_tar "$IMAGES_DIR" || save_rc=$?
+        exit "$save_rc"
     fi
     
     if [ "$LOAD_IMAGES" = "true" ]; then
