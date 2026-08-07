@@ -1098,6 +1098,33 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Retrieves a minimal projected printer summary for dashboard consumers.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Array of summaries with status from the shared cache.</returns>
+    public async Task<PrinterSummaryDto[]> GetAllSummaryDtosAsync(CancellationToken ct)
+    {
+        List<PrinterSummaryDto> summaries = await _db.Printers
+            .AsNoTracking()
+            .Select(p => new PrinterSummaryDto(
+                p.Id,
+                p.Name,
+                false,
+                null,
+                p.InMaintenance,
+                p.IsEnabled,
+                p.Model != null && p.ServiceState != null && p.Model.UpdatedAt > (p.ServiceState.LastModelSyncAt ?? DateTime.MinValue)))
+            .ToListAsync(ct);
+
+        IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
+        return summaries
+            .Select(summary => cachedStatuses.TryGetValue(summary.Id, out PrinterStatusDto? status)
+                ? summary with { IsOnline = status.IsOnline, State = status.State }
+                : summary)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Retrieves all printers with complete status and hardware information (full detail DTOs).
     /// </summary>
     /// <param name="ct">Cancellation token for async operation</param>

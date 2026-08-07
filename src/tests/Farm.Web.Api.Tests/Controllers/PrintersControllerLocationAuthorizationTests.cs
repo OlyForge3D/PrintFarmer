@@ -50,6 +50,53 @@ public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SummaryAsync_Unauthenticated_Returns401()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync("/api/printers/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task SummaryAsync_NonAdminCannotIncludeDisabled_Returns403()
+    {
+        HttpResponseMessage response = await _nonAdminClient.GetAsync(
+            "/api/printers/summary?includeDisabled=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task SummaryAsync_Admin_ReturnsMinimalContract()
+    {
+        HttpResponseMessage response = await _adminClient.GetAsync("/api/printers/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Be("[]");
+    }
+
+    [Fact]
+    public async Task SummaryAsync_Admin_ExcludesDisabledUnlessRequested()
+    {
+        (Guid disabledPrinterId, _) = await SeedPrinterAndLocationAsync(isEnabled: false);
+
+        HttpResponseMessage defaultResponse = await _adminClient.GetAsync("/api/printers/summary");
+        string defaultBody = await defaultResponse.Content.ReadAsStringAsync();
+
+        HttpResponseMessage includeDisabledResponse = await _adminClient.GetAsync(
+            "/api/printers/summary?includeDisabled=true");
+        string includeDisabledBody = await includeDisabledResponse.Content.ReadAsStringAsync();
+
+        defaultResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        includeDisabledResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        defaultBody.Should().NotContain(disabledPrinterId.ToString());
+        includeDisabledBody.Should().Contain(disabledPrinterId.ToString());
+    }
+
+    [Fact]
     public async Task AssignPrinterToLocationAsync_NonAdmin_Returns403()
     {
         HttpResponseMessage response = await _nonAdminClient.PostAsJsonAsync(
@@ -144,7 +191,9 @@ public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 
-    private async Task<(Guid PrinterId, Guid LocationId)> SeedPrinterAndLocationAsync(bool assignLocation = false)
+    private async Task<(Guid PrinterId, Guid LocationId)> SeedPrinterAndLocationAsync(
+        bool assignLocation = false,
+        bool isEnabled = true)
     {
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -180,7 +229,7 @@ public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
             ModelId = model.Id,
             ManufacturerId = manufacturer.Id,
             LocationId = assignLocation ? location.Id : null,
-            IsEnabled = true,
+            IsEnabled = isEnabled,
             IsAvailable = true
         };
 

@@ -461,6 +461,16 @@ export interface PrinterFast extends
   backendUrl: string;
 }
 
+export interface PrinterSummary {
+  id: string;
+  name: string;
+  isOnline: boolean;
+  state?: string | null;
+  inMaintenance: boolean;
+  isEnabled: boolean;
+  hasCatalogUpdate: boolean;
+}
+
 /**
  * Printer backend type.
  *

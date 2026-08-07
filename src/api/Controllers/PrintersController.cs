@@ -142,6 +142,47 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Retrieves the minimal printer projection used by dashboard statistics and alerts.
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <param name="includeDisabled">Return disabled printers as well (admin-only).</param>
+    /// <returns>Visible printers with identity, maintenance, catalog-update, and cached status fields.</returns>
+    [HttpGet("summary")]
+    [ProducesResponseType(typeof(IEnumerable<PrinterSummaryDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    public async Task<ActionResult<IEnumerable<PrinterSummaryDto>>> GetSummaryAsync(
+        CancellationToken ct,
+        [FromQuery] bool includeDisabled = false)
+    {
+        bool isAdmin = User.IsInRole("farm_admin");
+        if (!isAdmin && includeDisabled)
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            PrinterSummaryDto[] summaries = await _printersService.GetAllSummaryDtosAsync(ct);
+            if (!includeDisabled)
+            {
+                summaries = summaries.Where(summary => summary.IsEnabled).ToArray();
+            }
+
+            return Ok(summaries);
+        }
+        catch (Exception ex) when (IsTransientStartupDbException(ex))
+        {
+            _logger.LogWarning("[GET] Startup DB exception in /api/printers/summary. TraceId={HttpContextTraceIdentifier}, Exception={Message}", HttpContext.TraceIdentifier, ex.Message);
+            return Ok(Array.Empty<PrinterSummaryDto>());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/summary. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous", ex.Message);
+            return StatusCode(StatusCodes.Status500InternalServerError, "Internal Server Error");
+        }
+    }
+
+    /// <summary>
     /// Retrieves backend capabilities for all printers.
     /// Indicates which features each backend (Moonraker, PrusaLink, etc.) supports.
     /// </summary>

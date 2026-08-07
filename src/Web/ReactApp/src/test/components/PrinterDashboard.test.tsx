@@ -12,6 +12,7 @@ import { AuthProvider } from '@/common/contexts/AuthContext';
 // Mock the API hooks
 vi.mock('@/common/hooks/useApi', async () => ({
   usePrinters: vi.fn(),
+  usePrinterSummary: vi.fn(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   useStartDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useCancelDiscoveryStream: () => ({ mutateAsync: vi.fn(), isPending: false }),
@@ -64,7 +65,7 @@ vi.mock('@/hooks/useSignalR', () => ({
 }));
 
 // dynamic import after mocks
-const { usePrinters } = await import('@/common/hooks/useApi');
+const { usePrinterSummary } = await import('@/common/hooks/useApi');
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -90,12 +91,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render loading state', () => {
-  vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrinterSummary).mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrinterSummary>);
 
     render(
       <TestWrapper>
@@ -109,12 +110,12 @@ describe('PrinterDashboard', () => {
   });
 
   it('should render empty state when no printers', () => {
-  vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrinterSummary).mockReturnValue({
       data: [] as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrinterSummary>);
 
     render(
       <TestWrapper>
@@ -132,12 +133,12 @@ describe('PrinterDashboard', () => {
       statusCode: 500,
     };
 
-  vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrinterSummary).mockReturnValue({
       data: undefined,
       isLoading: false,
       error: mockError,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrinterSummary>);
 
     render(
       <TestWrapper>
@@ -173,12 +174,12 @@ describe('PrinterDashboard', () => {
       },
     ];
 
-  vi.mocked(usePrinters).mockReturnValue({
+  vi.mocked(usePrinterSummary).mockReturnValue({
       data: mockPrinters as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-  } as unknown as ReturnType<typeof usePrinters>);
+  } as unknown as ReturnType<typeof usePrinterSummary>);
 
     render(
       <TestWrapper>
@@ -194,14 +195,14 @@ describe('PrinterDashboard', () => {
 
   it('exposes data-testid attributes for printers list and items', () => {
     // Reuse a small mock response
-    vi.mocked(usePrinters).mockReturnValue({
+    vi.mocked(usePrinterSummary).mockReturnValue({
       data: [
         { id: '42', name: 'X', manufacturerName: 'M', modelName: 'Model' }
       ] as unknown as Printer[],
       isLoading: false,
       error: null,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof usePrinters>);
+    } as unknown as ReturnType<typeof usePrinterSummary>);
 
     render(
       <TestWrapper>
