@@ -46,6 +46,11 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
         repository
             .Setup(candidate => candidate.AddAsync(It.IsAny<Artifact>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("repository failed"));
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                It.IsAny<Guid>(),
+                CancellationToken.None))
+            .ReturnsAsync((Artifact?)null);
         using ArtifactsMetrics metrics = new();
         ArtifactsService service = CreateService(repository.Object, metrics);
         IFormFile file = new TestFormFile(
@@ -75,6 +80,11 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("repository failed"));
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                It.IsAny<Guid>(),
+                CancellationToken.None))
+            .ReturnsAsync((Artifact?)null);
         using ArtifactsMetrics metrics = new();
         ArtifactsService service = CreateService(repository.Object, metrics);
         IFormFile file = new TestFormFile(
@@ -101,6 +111,11 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
         repository
             .Setup(candidate => candidate.AddAsync(It.IsAny<Artifact>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("repository failed"));
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                It.IsAny<Guid>(),
+                CancellationToken.None))
+            .ReturnsAsync((Artifact?)null);
         using ArtifactsMetrics metrics = new();
         ArtifactsService service = CreateService(repository.Object, metrics);
 
@@ -114,6 +129,42 @@ public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
 
         await upload.Should().ThrowAsync<InvalidOperationException>();
         AssertNoArtifactFiles();
+    }
+
+    [Fact]
+    public async Task UploadAsync_AmbiguousRepositoryFailure_PreservesFileForReconciliation()
+    {
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        repository
+            .Setup(candidate => candidate.AddAsync(
+                It.IsAny<Artifact>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("commit outcome unknown"));
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                It.IsAny<Guid>(),
+                CancellationToken.None))
+            .ThrowsAsync(new InvalidOperationException("probe failed"));
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService service = CreateService(repository.Object, metrics);
+        IFormFile file = new TestFormFile(
+            () => new MemoryStream("complete upload"u8.ToArray(), writable: false),
+            "ambiguous.gcode",
+            length: 15);
+
+        Func<Task> upload = () => service.UploadAsync(
+            file,
+            Guid.NewGuid(),
+            workerId: null,
+            "gcode",
+            CancellationToken.None);
+
+        await upload.Should().ThrowAsync<InvalidOperationException>();
+        string[] remainingFiles =
+            Directory.EnumerateFiles(_root, "*", SearchOption.AllDirectories)
+                .ToArray();
+        remainingFiles.Should().ContainSingle();
+        Path.GetFileName(remainingFiles[0]).Should().EndWith("-ambiguous.gcode");
     }
 
     private ArtifactsService CreateService(IArtifactsRepository repository, ArtifactsMetrics metrics)

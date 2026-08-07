@@ -30,12 +30,16 @@ public class ArtifactCleanupService(
 
     public async Task<int> ScanAndCleanupAsync(CancellationToken ct)
     {
+        string rootPath = ArtifactStorageFileSystem.ResolveRootPath(
+            _settings.RootPath,
+            _env.ContentRootPath);
         _logger.LogInformation(
             "Starting artifact cleanup scan (DryRun={DryRun}, MaxAgeDays={MaxAgeDays}, MaxTotalBytes={MaxTotalBytes})",
             _settings.EnableCleanupDryRun,
             _settings.MaxAgeDays,
             _settings.MaxTotalBytes);
 
+        int deletedCount = await ReconcileOrphanFilesAsync(rootPath, ct);
         List<Artifact> candidatesForDeletion =
             (await _artifactsRepo.GetCleanupInProgressAsync(ct)).ToList();
 
@@ -86,7 +90,7 @@ public class ArtifactCleanupService(
         if (candidatesForDeletion.Count == 0)
         {
             _logger.LogInformation("No artifacts eligible for cleanup");
-            return 0;
+            return deletedCount;
         }
 
         _logger.LogInformation(
@@ -109,13 +113,23 @@ public class ArtifactCleanupService(
                     artifact.CreatedAt);
             }
 
-            return eligibleCandidates.Count;
+            return deletedCount + eligibleCandidates.Count;
         }
 
         // Actual deletion
-        int deletedCount = 0;
         foreach (Artifact artifact in candidatesForDeletion)
         {
+            if (!ArtifactStorageFileSystem.TryResolveArtifactPath(
+                    rootPath,
+                    artifact.RelativePath,
+                    out string fullPath))
+            {
+                _logger.LogWarning(
+                    "Skipped artifact {Id} because its path is outside the artifact root or traverses a reparse point",
+                    artifact.Id);
+                continue;
+            }
+
             Guid reservationToken;
             if (artifact.CleanupReservationToken is Guid inProgressToken &&
                 artifact.CleanupDeletionStartedAtUtc.HasValue)
@@ -164,16 +178,11 @@ public class ArtifactCleanupService(
 
             try
             {
-                string rootPath = Path.IsPathRooted(_settings.RootPath)
-                    ? _settings.RootPath
-                    : Path.Combine(_env.ContentRootPath, _settings.RootPath);
-                string fullPath = Path.Combine(rootPath, artifact.RelativePath);
-
                 // File.Delete is idempotent for a missing path and throws for access or filesystem
                 // failures. File.Exists cannot distinguish those failures from absence.
                 try
                 {
-                    DeleteArtifactFile(fullPath);
+                    DeleteArtifactFile(rootPath, fullPath);
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
                 }
                 catch (Exception ex) when (
@@ -216,7 +225,278 @@ public class ArtifactCleanupService(
         return deletedCount;
     }
 
+    private async Task<int> ReconcileOrphanFilesAsync(
+        string rootPath,
+        CancellationToken ct)
+    {
+        if (!Directory.Exists(rootPath))
+        {
+            return 0;
+        }
+
+        DateTime staleBeforeUtc = DateTime.UtcNow.AddMinutes(
+            -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
+        bool usesCaseInsensitivePaths = OperatingSystem.IsWindows();
+        StringComparer pathComparer = usesCaseInsensitivePaths
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        StringComparison pathComparison = usesCaseInsensitivePaths
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+
+        int reconciledCount = 0;
+        foreach (string fullPath in ArtifactStorageFileSystem.EnumerateRegularFiles(rootPath))
+        {
+            ct.ThrowIfCancellationRequested();
+            string relativePath =
+                ArtifactStorageFileSystem.GetRelativePath(rootPath, fullPath);
+
+            string? parentPath = Path.GetDirectoryName(fullPath);
+            bool isDirectStagingFile = string.Equals(
+                parentPath,
+                ArtifactStorageFileSystem.GetStagingDirectory(rootPath),
+                pathComparison);
+            Guid artifactId = Guid.Empty;
+            bool isDirectPublishedLease =
+                string.Equals(parentPath, rootPath, pathComparison) &&
+                string.Equals(
+                    Path.GetExtension(fullPath),
+                    ArtifactStorageFileSystem.LeaseFileExtension,
+                    StringComparison.Ordinal) &&
+                ArtifactStorageFileSystem.TryGetStagingArtifactId(
+                    fullPath,
+                    out artifactId);
+            if (isDirectStagingFile)
+            {
+                if (!ArtifactStorageFileSystem.TryGetStagingArtifactId(
+                        fullPath,
+                        out artifactId))
+                {
+                    _logger.LogWarning(
+                        "Preserving unexpected artifact staging entry {Path}",
+                        fullPath);
+                    continue;
+                }
+            }
+            else if (isDirectPublishedLease)
+            {
+                // The artifact ID was parsed while classifying the root lease.
+            }
+            else if (!ArtifactStorageFileSystem.TryGetProtocolArtifactId(
+                         fullPath,
+                         out artifactId))
+            {
+                _logger.LogWarning(
+                    "Preserving unexpected artifact storage entry {Path}",
+                    fullPath);
+                continue;
+            }
+
+            if (!TryGetStableFileSnapshot(
+                    rootPath,
+                    fullPath,
+                    staleBeforeUtc,
+                    out FileSnapshot snapshot))
+            {
+                continue;
+            }
+
+            string leasePath = isDirectStagingFile
+                ? ArtifactStorageFileSystem.GetStagingLeasePath(
+                    rootPath,
+                    artifactId)
+                : ArtifactStorageFileSystem.GetPublishedLeasePath(
+                    rootPath,
+                    artifactId);
+            if (!TryAcquireInactiveLease(
+                    leasePath,
+                    staleBeforeUtc,
+                    out FileStream? leaseStream))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (!TryGetStableFileSnapshot(
+                        rootPath,
+                        fullPath,
+                        staleBeforeUtc,
+                        out FileSnapshot currentSnapshot) ||
+                    currentSnapshot != snapshot)
+                {
+                    continue;
+                }
+
+                if (!isDirectStagingFile)
+                {
+                    Artifact? committed =
+                        await _artifactsRepo.GetByIdAsync(artifactId, ct);
+                    if (committed is not null &&
+                        pathComparer.Equals(
+                            committed.RelativePath.Replace('\\', '/'),
+                            relativePath))
+                    {
+                        continue;
+                    }
+                }
+
+                if (_settings.EnableCleanupDryRun)
+                {
+                    _logger.LogInformation(
+                        "[DRY RUN] Would reconcile stale orphan artifact file {Path}",
+                        fullPath);
+                    reconciledCount++;
+                    continue;
+                }
+
+                bool deletingLeaseFile = string.Equals(
+                    fullPath,
+                    leasePath,
+                    pathComparison);
+                if (deletingLeaseFile)
+                {
+                    if (leaseStream is not null)
+                    {
+                        await leaseStream.DisposeAsync();
+                    }
+
+                    leaseStream = null;
+                }
+
+                try
+                {
+                    DeleteArtifactFile(rootPath, fullPath);
+                    reconciledCount++;
+                    _logger.LogInformation(
+                        "Reconciled stale orphan artifact file {Path}",
+                        fullPath);
+                }
+                catch (Exception exception) when (
+                    exception is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    _logger.LogDebug(
+                        "Orphan artifact file {Path} was already absent during reconciliation",
+                        fullPath);
+                }
+                catch (Exception exception) when (
+                    exception is IOException or UnauthorizedAccessException)
+                {
+                    _logger.LogWarning(
+                        exception,
+                        "Could not reconcile stale orphan artifact file {Path}",
+                        fullPath);
+                }
+            }
+            finally
+            {
+                if (leaseStream is not null)
+                {
+                    await leaseStream.DisposeAsync();
+                }
+            }
+        }
+
+        return reconciledCount;
+    }
+
+    private static bool TryGetStableFileSnapshot(
+        string rootPath,
+        string fullPath,
+        DateTime staleBeforeUtc,
+        out FileSnapshot snapshot)
+    {
+        snapshot = default;
+        string relativePath =
+            ArtifactStorageFileSystem.GetRelativePath(rootPath, fullPath);
+        if (!ArtifactStorageFileSystem.TryResolveArtifactPath(
+                rootPath,
+                relativePath,
+                out string resolvedPath))
+        {
+            return false;
+        }
+
+        var file = new FileInfo(resolvedPath);
+        try
+        {
+            file.Refresh();
+            if (!file.Exists ||
+                ArtifactStorageFileSystem.IsReparsePoint(file) ||
+                file.LastWriteTimeUtc > staleBeforeUtc)
+            {
+                return false;
+            }
+
+            snapshot = new FileSnapshot(
+                file.Length,
+                file.LastWriteTimeUtc);
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static bool TryAcquireInactiveLease(
+        string leasePath,
+        DateTime staleBeforeUtc,
+        out FileStream? leaseStream)
+    {
+        leaseStream = null;
+        var leaseFile = new FileInfo(leasePath);
+        try
+        {
+            leaseFile.Refresh();
+            if (!leaseFile.Exists)
+            {
+                return true;
+            }
+
+            if (ArtifactStorageFileSystem.IsReparsePoint(leaseFile) ||
+                leaseFile.LastWriteTimeUtc > staleBeforeUtc)
+            {
+                return false;
+            }
+
+            leaseStream = new FileStream(
+                leasePath,
+                FileMode.Open,
+                FileAccess.ReadWrite,
+                FileShare.None);
+            if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
+                    leaseStream))
+            {
+                leaseStream.Dispose();
+                leaseStream = null;
+                return false;
+            }
+
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            leaseStream?.Dispose();
+            leaseStream = null;
+            return true;
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException)
+        {
+            leaseStream?.Dispose();
+            leaseStream = null;
+            return false;
+        }
+    }
+
+    private readonly record struct FileSnapshot(
+        long Length,
+        DateTime LastWriteTimeUtc);
+
     protected virtual bool ArtifactFileExists(string path) => File.Exists(path);
 
-    protected virtual void DeleteArtifactFile(string path) => File.Delete(path);
+    protected virtual void DeleteArtifactFile(string rootPath, string path) =>
+        ArtifactStorageFileSystem.DeleteFileNoFollow(rootPath, path);
 }
