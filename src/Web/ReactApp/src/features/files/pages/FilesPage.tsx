@@ -1143,11 +1143,10 @@ export function FilesPage() {
           <PrintablesImportModal
             isOpen={showPrintablesImportModal}
             initialUrl={selectedPrintablesUrl}
-            onClose={async () => {
+            onClose={() => {
               setShowPrintablesImportModal(false);
               setSelectedPrintablesUrl(null);
-              await handleRefresh();
-              printablesButtonRef.current?.focus();
+              void handleRefresh();
             }}
           />
         </LazyModalBoundary>
