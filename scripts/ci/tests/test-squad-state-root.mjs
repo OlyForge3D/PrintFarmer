@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import {
   access,
@@ -15,6 +15,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 const repositoryRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -22,6 +23,7 @@ const repositoryRoot = path.resolve(
 );
 
 const requestTimeoutMs = 120_000;
+const execFileAsync = promisify(execFile);
 
 async function exists(filePath) {
   try {
@@ -29,6 +31,25 @@ async function exists(filePath) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function getIgnoreProvenance(relativePath) {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['check-ignore', '-v', '--no-index', '--', relativePath],
+      {
+        cwd: repositoryRoot,
+        windowsHide: true,
+      },
+    );
+    return stdout.trim();
+  } catch (error) {
+    if (error?.code === 1) {
+      return undefined;
+    }
+    throw error;
   }
 }
 
@@ -398,4 +419,50 @@ test('Squad state MCP confines decision and state writes to .squad and rejects t
       ]);
     }
   }
+});
+
+test('root Squad quarantine exposes empty paths and preserves canonical state', async () => {
+  assert.match(
+    await getIgnoreProvenance('decisions/inbox/unrecovered.md'),
+    /\.gitignore:\d+:\/decisions\//,
+  );
+
+  for (const rootPath of [
+    'decisions.md',
+    'agents/parker/history.md',
+    'orchestration-log/session.md',
+    'log/session.md',
+  ]) {
+    assert.equal(
+      await getIgnoreProvenance(rootPath),
+      undefined,
+      `${rootPath} must be visible if Squad state is misplaced there`,
+    );
+  }
+
+  const { stdout: trackedState } = await execFileAsync(
+    'git',
+    [
+      'ls-files',
+      '--error-unmatch',
+      '--',
+      '.squad/decisions.md',
+      '.squad/agents/parker/history.md',
+    ],
+    {
+      cwd: repositoryRoot,
+      windowsHide: true,
+    },
+  );
+  assert.match(trackedState, /^\.squad\/decisions\.md$/m);
+  assert.match(trackedState, /^\.squad\/agents\/parker\/history\.md$/m);
+
+  assert.match(
+    await getIgnoreProvenance('.squad/orchestration-log/session.md'),
+    /\.gitignore:\d+:\.squad\/orchestration-log\//,
+  );
+  assert.match(
+    await getIgnoreProvenance('.squad/log/session.md'),
+    /\.gitignore:\d+:\.squad\/log\//,
+  );
 });

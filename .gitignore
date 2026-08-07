@@ -152,13 +152,8 @@ snapshots/
 layout_diff.txt
 /*.yaml
 
-# Quarantine misplaced Squad outputs. The state-root CI regression fails if
-# Squad writes here; keep stranded active-session records out of staging until
-# they can be inventoried and recovered deliberately under #1135.
+# Quarantine the 20 unique root decision records inventoried under #1135 until
+# the Squad coordinator can recover them without overwriting canonical state.
 /decisions/
-/decisions.md
-/agents/
 /memory/
-/orchestration-log/
-/log/
 /.impeccable/
