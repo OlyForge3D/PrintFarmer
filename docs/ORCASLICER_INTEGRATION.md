@@ -381,6 +381,44 @@ unset ORCA_ASSET_IMAGE
 Deployment scripts always request the repository-supported version/checksum
 pair; these build arguments are retained only as internal upgrade surfaces.
 
+### Stale-cache auto-recovery
+
+Images built by an older `Dockerfile.multistage` (before commit
+[`a9293ce97`](https://github.com/OlyForge3D/PrintFarmer/pull/1089), 2026-08-04)
+only carry `LABEL orcaslicer.version=...` — they lack `orcaslicer.sha256` and
+`orcaslicer.allow_stub`. On upgrade, `scripts/deploy-docker.sh` used to hard-exit:
+
+```text
+❌ Rejecting cached OrcaSlicer image 'orcaslicer-binaries:2.4.2': missing required label 'orcaslicer.sha256'.
+❌ ORCA_ASSET_IMAGE does not attest the requested OrcaSlicer release; refusing to retag it.
+```
+
+Since [issue #1164](https://github.com/OlyForge3D/PrintFarmer/issues/1164) the
+deploy script auto-recovers **only for local short tags** (`orcaslicer-binaries:*`
+with no registry host, no `.` in the name, and no `@digest`). When the strict
+validator rejects such a tag, the script:
+
+1. Warns that the local cache lacks strict attestation.
+2. Runs `docker image rm -f` on every matching `orcaslicer-binaries:*` tag
+   (helper: `remove_local_orcaslicer_binaries_tags`).
+3. Rebuilds the `orcaslicer-binaries` stage with `--no-cache` so BuildKit
+   does not reuse the stale intermediate layer. The new image gets the strict
+   `orcaslicer.sha256` and `orcaslicer.allow_stub=false` labels.
+
+**Registry-qualified `ORCA_ASSET_IMAGE` values (e.g. `ghcr.io/olyforge3d/orcaslicer-base:2.4.2`,
+`registry.local:5000/...`, or digest references) are never modified** — that is
+an operator-supplied pin and must be respected. The deploy script fails closed
+with actionable remediation.
+
+### Operator remediation for pre-existing installations
+
+| Situation | Action |
+|---|---|
+| Local `orcaslicer-binaries:*` cache built before PR #1089 (typical case) | **Nothing to do.** Rerun `./scripts/deploy-docker.sh`; the script removes the stale tag and rebuilds automatically. |
+| You want to force a clean OrcaSlicer rebuild every time | Add `--rebuild-orcaslicer` (or `ORCA_FORCE_REBUILD=1 ./scripts/deploy-docker.sh`). |
+| `ORCA_ASSET_IMAGE` points at a registry image without strict labels | Update the pinned registry image to a build produced by current `Dockerfile.multistage`, `unset ORCA_ASSET_IMAGE`, or override with `ORCA_FORCE_REBUILD=1`. |
+| You cannot let the script rebuild (offline / bandwidth-constrained) | Manually: `docker image rm -f orcaslicer-binaries:2.4.2 orcaslicer-binaries:latest`, obtain a strict image via `./scripts/deploy-docker.sh --prepare-offline` on a networked host, and reload the TAR. |
+
 ### Performance
 
 | Scenario | Before | After |
