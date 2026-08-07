@@ -88,4 +88,13 @@ describe('Slider', () => {
     const slider = screen.getByRole('slider');
     expect(slider).toHaveAttribute('type', 'range');
   });
+
+  it('uses live theme tokens for the filled and unfilled track', () => {
+    render(<Slider value={25} onChange={() => {}} />);
+
+    expect(screen.getByRole('slider')).toHaveStyle({
+      background:
+        'linear-gradient(to right, var(--pf-accent) 0%, var(--pf-accent) 25%, var(--pf-bg-2) 25%, var(--pf-bg-2) 100%)',
+    });
+  });
 });

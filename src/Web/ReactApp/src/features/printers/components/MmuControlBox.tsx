@@ -29,7 +29,7 @@ function SpoolIcon({ color, active, available, size = 56 }: SpoolProps) {
   // Default gray for empty/unknown, use filament color when available
   const windingColor = available && color ? color : 'var(--pf-text-tertiary, #555)';
   const rimColor = 'var(--pf-border, #888)';
-  const hubColor = 'var(--pf-surface-tertiary, #666)';
+  const hubColor = 'var(--pf-bg-2)';
 
   return (
     <svg
