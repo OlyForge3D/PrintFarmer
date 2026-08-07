@@ -88,8 +88,9 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
 
     await user.click(screen.getByRole('button', { name: /add tag/i }));
 
-    const preview = screen.getByRole('status', { name: 'Tag preview: Tag Preview' });
+    const preview = screen.getByLabelText('Tag preview: Tag Preview');
     expect(preview).toHaveAttribute('data-pf-radius', 'full');
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
   it('captures the tag revision when starting an edit and sends it as expectedRevision on save', async () => {

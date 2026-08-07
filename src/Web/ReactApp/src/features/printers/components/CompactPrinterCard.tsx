@@ -270,7 +270,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               <TagChip
                 key={tag.id}
                 label={tag.name}
+                color={tag.color}
                 appearance="overlay"
+                title={tag.description}
                 truncate
               />
             ))}

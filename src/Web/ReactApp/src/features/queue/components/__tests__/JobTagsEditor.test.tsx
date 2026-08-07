@@ -86,6 +86,7 @@ describe('JobTagsEditor', () => {
     fireEvent.click(removeButton);
 
     expect(mockOnTagsChange).toHaveBeenCalledWith(['Test']);
+    expect(screen.getByText('Removed tag PLA')).toHaveAttribute('aria-live', 'polite');
   });
 
   it('should show error for empty tag', () => {

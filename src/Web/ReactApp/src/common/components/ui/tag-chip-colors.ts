@@ -1,6 +1,6 @@
 import { getContrastRatio } from '@/common/utils/accessibility';
 
-function normalizeHexColor(color: string): string | null {
+export function normalizeTagChipColor(color: string): string | null {
   if (/^#[\da-f]{6}$/i.test(color)) {
     return color;
   }
@@ -12,9 +12,9 @@ function normalizeHexColor(color: string): string | null {
 }
 
 export function getTagChipForeground(color: string): '#000000' | '#ffffff' {
-  const normalizedColor = normalizeHexColor(color);
+  const normalizedColor = normalizeTagChipColor(color);
   if (!normalizedColor) {
-    return '#ffffff';
+    return '#000000';
   }
 
   return getContrastRatio('#000000', normalizedColor) >= getContrastRatio('#ffffff', normalizedColor)

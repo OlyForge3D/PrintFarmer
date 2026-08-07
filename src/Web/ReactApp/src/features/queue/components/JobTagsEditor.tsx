@@ -21,6 +21,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLUListElement>(null);
 
@@ -86,6 +87,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
       setInputValue('');
       setError(null);
       setShowSuggestions(false);
+      setAnnouncement(`Added tag ${trimmedTag}`);
       updateSuggestions('');
 
       // Refocus input
@@ -100,6 +102,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
       setLocalTags(newTags);
       onTagsChange(newTags);
       setError(null);
+      setAnnouncement(`Removed tag ${tagToRemove}`);
     },
     [localTags, onTagsChange]
   );
@@ -126,6 +129,9 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
   if (isEditing) {
     return (
       <div className="space-y-2">
+        <span className="sr-only" aria-live="polite" aria-atomic="true">
+          {announcement}
+        </span>
         <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">
             {localTags.map((tag) => (
@@ -133,7 +139,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
                 key={tag}
                 mode="removable"
                 label={tag}
-                statusLabel={`Tag: ${tag}`}
+                ariaLabel={`Tag: ${tag}`}
                 onRemove={() => removeTag(tag)}
                 removeLabel={`Remove tag ${tag}`}
               />

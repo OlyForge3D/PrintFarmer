@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { TagChip } from '@/common/components/ui/TagChip';
 import { getTagChipForeground } from '@/common/components/ui/tag-chip-colors';
@@ -10,7 +10,7 @@ describe('TagChip', () => {
     render(<TagChip label="Resin" />);
 
     const chip = screen.getByText('Resin').closest('[data-pf-radius="full"]');
-    expect(chip).toHaveClass('rounded-full', 'min-h-5', 'px-2', 'py-0.5');
+    expect(chip).toHaveClass('rounded-full', 'min-h-6', 'px-2', 'py-0.5');
   });
 
   it('applies a custom tag color with a readable foreground', () => {
@@ -25,9 +25,27 @@ describe('TagChip', () => {
     expect(getContrastRatio(getTagChipForeground('#ffff00'), '#ffff00')).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('exposes an accessible status name for announced display tags', () => {
-    render(<TagChip label="PLA" statusLabel="Tag: PLA" />);
-    expect(screen.getByRole('status', { name: 'Tag: PLA' })).toBeInTheDocument();
+  it('exposes an accessible name without turning static tags into live regions', () => {
+    render(<TagChip label="PLA" ariaLabel="Tag: PLA" />);
+    expect(screen.getByRole('img', { name: 'Tag: PLA' })).toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it.each(['yellow', 'rgb(255, 255, 0)', '#ffff0080', '#'])(
+    'falls back to token styling for unsupported color %s',
+    (color) => {
+      render(<TagChip label="Fallback" color={color} />);
+      const chip = screen.getByText('Fallback').closest('[data-pf-radius="full"]');
+      expect(chip).toHaveClass('bg-pf-bg-2', 'text-pf-text-primary');
+      expect(chip).not.toHaveAttribute('style');
+    },
+  );
+
+  it('keeps overlay paint while representing a valid tag color on the border', () => {
+    render(<TagChip label="Overlay" color="#ffff00" appearance="overlay" />);
+    const chip = screen.getByText('Overlay').closest('[data-pf-radius="full"]');
+    expect(chip).toHaveClass('bg-black/70', 'text-white');
+    expect(chip).toHaveStyle({ borderColor: '#ffff00' });
   });
 
   it('uses native keyboard activation for action tags', async () => {
@@ -86,6 +104,28 @@ describe('TagChip', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  it('does not bubble keyboard removal shortcuts to containing surfaces', () => {
+    const onParentKeyDown = vi.fn();
+    const onRemove = vi.fn();
+    render(
+      <div onKeyDown={onParentKeyDown}>
+        <TagChip
+          mode="removable"
+          label="Contained"
+          onClick={() => undefined}
+          onRemove={onRemove}
+          removeLabel="Remove Contained"
+        />
+      </div>,
+    );
+
+    const action = screen.getByRole('button', { name: 'Contained' });
+    action.focus();
+    fireEvent.keyDown(action, { key: 'Delete' });
+    expect(onRemove).toHaveBeenCalledOnce();
+    expect(onParentKeyDown).not.toHaveBeenCalled();
+  });
+
   it('disables activation and removal behavior', async () => {
     const onClick = vi.fn();
     const onRemove = vi.fn();
@@ -122,6 +162,34 @@ describe('TagChip', () => {
 
     expect(screen.getAllByRole('button')).toHaveLength(2);
     expect(container.querySelector('button button')).toBeNull();
+  });
+
+  it('applies the rich accessible name to the focused removable action', () => {
+    render(
+      <TagChip
+        mode="removable"
+        label="PLA"
+        ariaLabel="Tag: PLA - Polylactic acid"
+        onClick={() => undefined}
+        onRemove={() => undefined}
+        removeLabel="Remove PLA"
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Tag: PLA - Polylactic acid' })).toBeInTheDocument();
+  });
+
+  it('provides a 24px remove target and a block truncation box', () => {
+    render(
+      <TagChip
+        mode="removable"
+        label="A very long tag"
+        truncate
+        onRemove={() => undefined}
+        removeLabel="Remove long tag"
+      />,
+    );
+    expect(screen.getByText('A very long tag')).toHaveClass('block', 'max-w-full', 'truncate');
+    expect(screen.getByRole('button', { name: 'Remove long tag' })).toHaveClass('h-6', 'w-6');
   });
 
   it('does not bubble removal clicks to containing interactive surfaces', async () => {

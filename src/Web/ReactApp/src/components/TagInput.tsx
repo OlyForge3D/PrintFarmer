@@ -51,6 +51,7 @@ export const TagInput: React.FC<TagInputProps> = ({
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [announcement, setAnnouncement] = useState('');
 
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestionsRef = useRef<HTMLDivElement>(null);
@@ -157,13 +158,18 @@ export const TagInput: React.FC<TagInputProps> = ({
       setSuggestions([]);
       setShowSuggestions(false);
       setError(null);
+      setAnnouncement(`Added tag ${tagToAdd.name}`);
       inputRef.current?.focus();
     }
   };
 
   const removeTag = (tagId: string) => {
+    const removedTag = selectedTags.find(tag => tag.id === tagId);
     onChange(selectedTags.filter(t => t.id !== tagId));
     setError(null);
+    if (removedTag) {
+      setAnnouncement(`Removed tag ${removedTag.name}`);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -233,6 +239,9 @@ export const TagInput: React.FC<TagInputProps> = ({
 
   return (
     <div className={`w-full ${className}`}>
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {announcement}
+      </span>
       {/* Selected Tags */}
       {selectedTags.length > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-2 bg-pf-bg-2 rounded-md">

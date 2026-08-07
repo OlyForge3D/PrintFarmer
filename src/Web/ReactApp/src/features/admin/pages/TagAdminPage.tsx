@@ -745,7 +745,7 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                             appearance="solid"
                             size="md"
                             className="shadow-md"
-                            statusLabel={`Tag preview: ${createForm.values.name || 'Tag Preview'}`}
+                            ariaLabel={`Tag preview: ${createForm.values.name || 'Tag Preview'}`}
                         />
                         <p className="text-xs text-pf-text-tertiary mt-2">Preview of your new tag</p>
                     </div>

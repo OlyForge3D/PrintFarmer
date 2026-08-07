@@ -51,7 +51,7 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
         className={className}
         title={tag.description}
         disabled={disabled}
-        statusLabel={statusLabel}
+        ariaLabel={statusLabel}
         onClick={onClick ? () => onClick(tag) : undefined}
         onRemove={() => onRemove?.(tag.id)}
         removeLabel={`Remove tag ${tag.name}`}
@@ -83,7 +83,7 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
       className={className}
       title={tag.description}
       disabled={disabled}
-      statusLabel={statusLabel}
+      ariaLabel={statusLabel}
     />
   );
 };
