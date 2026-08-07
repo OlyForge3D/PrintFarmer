@@ -6,6 +6,7 @@ import { Button } from '@/common/components/ui/Button';
 import { ProgressBar } from '@/common/components/ui/ProgressBar';
 import { Modal } from '@/common/components/modals/Modal';
 import { slicerService, SlicerProfile, SliceRequest, SlicingProgress } from '@/services/slicerService';
+import { toast } from 'sonner';
 
 interface AvailablePrinter {
   id: string;
@@ -154,7 +155,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
           } else if (progress.status === 'error') {
             progressSource.close();
             setIsSlicing(false);
-            alert(`Slicing failed: ${progress.message}`);
+            toast.error(`Slicing failed: ${progress.message}`);
           }
         }
       );
@@ -166,7 +167,7 @@ export const SlicerConfigModal: React.FC<SlicerConfigModalProps> = ({
       console.error('Slicing failed:', error);
       setIsSlicing(false);
       setSlicingProgress(null);
-      alert(`Slicing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      toast.error(`Slicing failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 

@@ -14,7 +14,7 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
 
     public static string SectionKey => SectionName;
 
-    [SettingDisplay(Name = "Enable Discovery", Description = "Enable or disable network printer discovery.", InputType = SettingInputType.Boolean)]
+    [SettingDisplay(Name = "Enable discovery", Description = "Enable or disable network printer discovery.", InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enableDiscovery")]
     public bool EnableDiscovery { get; set; } = true;
 
@@ -34,24 +34,24 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     // — turning discovery off does not make the section saveable. Annotating a
     // gate the validator does not honour would tell the page a save is safe that
     // the server is about to reject with a 400.
-    [SettingDisplay(Name = "Discovery Subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
+    [SettingDisplay(Name = "Discovery subnets", Description = "List of subnets to scan (CIDR notation).", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
     [JsonPropertyName("discoverySubnets")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> DiscoverySubnets { get; set; } = new List<string>(DefaultSubnets);
 
-    [SettingDisplay(Name = "Client Timeout", Unit = "ms", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
+    [SettingDisplay(Name = "Client timeout", Unit = "ms", Description = "Timeout for each network scan request in milliseconds.", InputType = SettingInputType.Number, MinValue = 50, MaxValue = 60000)]
     [JsonPropertyName("clientTimeoutMs")]
     public int ClientTimeoutMs { get; set; } = 200; // Valid range: 50-60000
 
-    [SettingDisplay(Name = "Request Delay", Unit = "ms", MinValue = 0, MaxValue = 10000, Description = "Delay between network scan requests in milliseconds.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Request delay", Unit = "ms", MinValue = 0, MaxValue = 10000, Description = "Delay between network scan requests in milliseconds.", InputType = SettingInputType.Number)]
     [JsonPropertyName("requestDelayMs")]
     public int RequestDelayMs { get; set; } = 100; // Valid range: 0-10000
 
-    [SettingDisplay(Name = "Max Concurrent Requests", MinValue = 1, MaxValue = 100, Description = "Maximum number of concurrent network scan requests.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max concurrent requests", MinValue = 1, MaxValue = 100, Description = "Maximum number of concurrent network scan requests.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxConcurrentRequests")]
     public int MaxConcurrentRequests { get; set; } = 20; // Valid range: 1-100
 
-    [SettingDisplay(Name = "Max Retries", MinValue = 0, MaxValue = 10, Description = "Maximum number of retry attempts for failed requests.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max retries", MinValue = 0, MaxValue = 10, Description = "Maximum number of retry attempts for failed requests.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxRetries")]
     public int MaxRetries { get; set; } = 2; // Valid range: 0-10
 
@@ -59,14 +59,14 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     /// Enable or disable the background periodic discovery service.
     /// When enabled, the system will automatically scan for new printers at the configured interval.
     /// </summary>
-    [SettingDisplay(Name = "Enable Background Scanning", Description = "Automatically scan for new printers in the background.", InputType = SettingInputType.Boolean)]
+    [SettingDisplay(Name = "Enable background scanning", Description = "Automatically scan for new printers in the background.", InputType = SettingInputType.Boolean)]
     [JsonPropertyName("backgroundScanEnabled")]
     public bool BackgroundScanEnabled { get; set; } = false;
 
     /// <summary>
     /// Interval between background discovery scans in minutes.
     /// </summary>
-    [SettingDisplay(Name = "Scan Interval", Unit = "minutes", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Scan interval", Unit = "minutes", MinValue = 1, MaxValue = 1440, Description = "How often to scan for new printers (in minutes).", InputType = SettingInputType.Number)]
     [JsonPropertyName("backgroundScanIntervalMinutes")]
     public int BackgroundScanIntervalMinutes { get; set; } = 30;
 

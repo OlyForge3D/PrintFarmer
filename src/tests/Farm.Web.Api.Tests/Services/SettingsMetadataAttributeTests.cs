@@ -1,5 +1,6 @@
 ﻿using System.Reflection;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Settings;
 using Farm.Settings;
 using Xunit;
@@ -21,6 +22,39 @@ namespace Farm.Web.Api.Tests.Services;
 /// </remarks>
 public class SettingsMetadataAttributeTests
 {
+    private const int ExpectedDisplayLabelCount = 111;
+
+    private static readonly string[] CanonicalTerms =
+    [
+        "G-code",
+        "CIDR",
+        "PostgreSQL",
+        "SQL Server",
+        "URL",
+        "URI",
+        "API",
+        "MQTT",
+        "TLS",
+        "HTTP",
+        "HTTPS",
+        "IP",
+        "DNS",
+        "GPU",
+        "CPU",
+        "JWT",
+        "OAuth",
+        "SignalR",
+        "Spoolman",
+        "OrcaSlicer",
+        "PrusaSlicer",
+        "Moonraker",
+        "OctoPrint",
+        "PrintFarmer",
+        "Obico",
+        "ML",
+        "ID",
+    ];
+
     public static IEnumerable<object[]> SettingTypes()
     {
         foreach (Type type in typeof(SlicerSettings).Assembly.GetTypes()
@@ -60,5 +94,83 @@ public class SettingsMetadataAttributeTests
         // persisted/editable setting, and lacking [JsonPropertyName] it would otherwise break metadata.
         PropertyInfo prop = typeof(SlicerSettings).GetProperty(nameof(SlicerSettings.EffectiveEnabledModes))!;
         Assert.NotNull(prop.GetCustomAttribute<JsonIgnoreAttribute>());
+    }
+
+    [Fact]
+    public void EveryUserVisibleSettingDisplayLabel_UsesSentenceCase()
+    {
+        (Type Type, PropertyInfo Property, string Label)[] labels = SettingsAssemblies()
+            .SelectMany(GetLoadableTypes)
+            .Where(type => type.GetCustomAttribute<AppSettingAttribute>() is not null)
+            .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Select(property => (Type: type, Property: property, Display: property.GetCustomAttribute<SettingDisplayAttribute>())))
+            .Where(item => item.Display?.Name is not null)
+            .Select(item => (item.Type, item.Property, Label: item.Display!.Name!))
+            .OrderBy(item => item.Type.FullName, StringComparer.Ordinal)
+            .ThenBy(item => item.Property.Name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(ExpectedDisplayLabelCount, labels.Length);
+
+        string[] invalid = labels
+            .Select(item => $"{item.Type.Name}.{item.Property.Name}: \"{item.Label}\"")
+            .Where((_, index) => !UsesSentenceCase(labels[index].Label))
+            .ToArray();
+
+        Assert.True(
+            invalid.Length == 0,
+            "SettingDisplay field labels must use sentence case. Add only canonical proper nouns " +
+            $"or acronyms to {nameof(CanonicalTerms)}: {string.Join("; ", invalid)}");
+    }
+
+    private static bool UsesSentenceCase(string label)
+    {
+        foreach (string canonicalTerm in CanonicalTerms)
+        {
+            foreach (Match match in Regex.Matches(
+                label,
+                $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(canonicalTerm)}(?![\p{{L}}\p{{N}}])",
+                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+            {
+                if (!string.Equals(match.Value, canonicalTerm, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+            }
+        }
+
+        string withoutCanonicalTerms = CanonicalTerms.Aggregate(
+            label,
+            (current, term) => Regex.Replace(
+                current,
+                $@"(?<![\p{{L}}\p{{N}}]){Regex.Escape(term)}(?![\p{{L}}\p{{N}}])",
+                "canonical",
+                RegexOptions.CultureInvariant));
+        MatchCollection words = Regex.Matches(withoutCanonicalTerms, @"\p{L}[\p{L}\p{N}]*");
+
+        return words
+            .Skip(1)
+            .All(word => !char.IsUpper(word.Value[0]));
+    }
+
+    private static IEnumerable<Assembly> SettingsAssemblies() =>
+        Directory.EnumerateFiles(AppContext.BaseDirectory, "Farm.*.dll", SearchOption.AllDirectories)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(path => (Path: path, Name: AssemblyName.GetAssemblyName(path)))
+            .GroupBy(candidate => candidate.Name.FullName ?? candidate.Path, StringComparer.Ordinal)
+            .Select(group => Assembly.LoadFrom(group.First().Path))
+            .Where(assembly => GetLoadableTypes(assembly)
+                .Any(type => type.GetCustomAttribute<AppSettingAttribute>() is not null));
+
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException exception)
+        {
+            return exception.Types.OfType<Type>();
+        }
     }
 }

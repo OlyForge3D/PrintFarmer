@@ -16,7 +16,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
 
     public static string SectionKey => SectionName;
 
-    [SettingDisplay(Name = "Allowed Extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
+    [SettingDisplay(Name = "Allowed extensions", Description = "File extensions allowed for upload (e.g. .gcode)", InputType = SettingInputType.Array, IsMulti = true, Required = true)]
     [JsonPropertyName("allowedExtensions")]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1002:Do not expose generic lists", Justification = "Exposing as IList for serialization and API stability")]
     public IList<string> AllowedExtensions
@@ -25,7 +25,7 @@ public class GcodeUploadSettings : IAppSetting, IValidatableSetting
         set => _allowedExtensions = NormalizeExtensions(value);
     }
 
-    [SettingDisplay(Name = "Daily Upload Limit", Unit = "bytes", Description = "Maximum total bytes allowed for upload per day.", InputType = SettingInputType.Number, Required = true)]
+    [SettingDisplay(Name = "Daily upload limit", Unit = "bytes", Description = "Maximum total bytes allowed for upload per day.", InputType = SettingInputType.Number, Required = true)]
     [JsonPropertyName("dailyUploadLimitBytes")]
     public long DailyUploadLimitBytes { get; set; } = 2L * 1024 * 1024 * 1024;
 

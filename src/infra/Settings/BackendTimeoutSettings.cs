@@ -19,21 +19,21 @@ public class BackendTimeoutSettings : IAppSetting
     /// Timeout for quick status/health polling operations (seconds).
     /// Used by periodic status checks and connection probes.
     /// </summary>
-    [SettingDisplay(Name = "Status Poll Timeout", Unit = "s", Description = "Timeout for quick status and health polling operations.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 60)]
+    [SettingDisplay(Name = "Status poll timeout", Unit = "s", Description = "Timeout for quick status and health polling operations.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 60)]
     [JsonPropertyName("statusPollTimeoutSeconds")]
     public int StatusPollTimeoutSeconds { get; set; } = 10;
 
     /// <summary>
     /// Timeout for standard commands: metadata, file listing, temperature, movement (seconds).
     /// </summary>
-    [SettingDisplay(Name = "Command Timeout", Unit = "s", Description = "Timeout for standard printer commands, metadata, and file listing.", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 120)]
+    [SettingDisplay(Name = "Command timeout", Unit = "s", Description = "Timeout for standard printer commands, metadata, and file listing.", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 120)]
     [JsonPropertyName("commandTimeoutSeconds")]
     public int CommandTimeoutSeconds { get; set; } = 30;
 
     /// <summary>
     /// Timeout for print control operations: start, pause, resume, cancel (seconds).
     /// </summary>
-    [SettingDisplay(Name = "Print Control Timeout", Unit = "s", Description = "Timeout for start, pause, resume, and cancel print operations.", InputType = SettingInputType.Number, MinValue = 10, MaxValue = 300)]
+    [SettingDisplay(Name = "Print control timeout", Unit = "s", Description = "Timeout for start, pause, resume, and cancel print operations.", InputType = SettingInputType.Number, MinValue = 10, MaxValue = 300)]
     [JsonPropertyName("printControlTimeoutSeconds")]
     public int PrintControlTimeoutSeconds { get; set; } = 60;
 
@@ -41,7 +41,7 @@ public class BackendTimeoutSettings : IAppSetting
     /// Timeout for file upload operations (seconds).
     /// Large G-code files on slow networks may need generous values.
     /// </summary>
-    [SettingDisplay(Name = "File Upload Timeout", Unit = "s", Description = "Timeout for uploading G-code files to printers.", InputType = SettingInputType.Number, MinValue = 30, MaxValue = 1800)]
+    [SettingDisplay(Name = "File upload timeout", Unit = "s", Description = "Timeout for uploading G-code files to printers.", InputType = SettingInputType.Number, MinValue = 30, MaxValue = 1800)]
     [JsonPropertyName("fileUploadTimeoutSeconds")]
     public int FileUploadTimeoutSeconds { get; set; } = 300;
 
@@ -49,7 +49,7 @@ public class BackendTimeoutSettings : IAppSetting
     /// Timeout for file download operations (seconds).
     /// Downloading large files from printers over slow connections.
     /// </summary>
-    [SettingDisplay(Name = "File Download Timeout", Unit = "s", Description = "Timeout for downloading files from printers.", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 3600)]
+    [SettingDisplay(Name = "File download timeout", Unit = "s", Description = "Timeout for downloading files from printers.", InputType = SettingInputType.Number, MinValue = 60, MaxValue = 3600)]
     [JsonPropertyName("fileDownloadTimeoutSeconds")]
     public int FileDownloadTimeoutSeconds { get; set; } = 900;
 

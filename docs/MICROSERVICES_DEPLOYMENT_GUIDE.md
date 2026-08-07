@@ -320,6 +320,6 @@ docker compose up -d --scale orcaslicer-worker=4
 ## See Also
 
 - [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md) - General Docker deployment guide
-- [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) - Local development setup
+- [Development Guide](DEVELOPMENT.md#running-locally) - Local development setup
 - [SECURITY.md](../SECURITY.md) - Security hardening guide
 - [DEPLOYMENT_TESTING_CHECKLIST.md](DEPLOYMENT_TESTING_CHECKLIST.md) - Deployment validation

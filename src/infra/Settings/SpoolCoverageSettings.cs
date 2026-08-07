@@ -31,7 +31,7 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     /// anything shorter is too tight to be useful for a swap-response flow.
     /// </summary>
     [JsonPropertyName("runoutWarningLeadMinutes")]
-    [SettingDisplay(Name = "Runout Warning Lead Time", Unit = "minutes", Description = "Emit an attention warning when a predicted active-job runout is within this many minutes of now (5–1440).", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 1440, Order = 2)]
+    [SettingDisplay(Name = "Runout warning lead time", Unit = "minutes", Description = "Emit an attention warning when a predicted active-job runout is within this many minutes of now (5–1440).", InputType = SettingInputType.Number, MinValue = 5, MaxValue = 1440, Order = 2)]
     public int RunoutWarningLeadMinutes { get; set; } = 30;
 
     /// <summary>
@@ -42,7 +42,7 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     /// heavily churned but leaves active-job ETA-driven warnings in place.
     /// </summary>
     [JsonPropertyName("queuedShortageWarningsEnabled")]
-    [SettingDisplay(Name = "Queued Shortage Warnings", Description = "Warn when spool remaining cannot cover the assigned queue, even when no active-job runout ETA exists.", InputType = SettingInputType.Boolean, Order = 3)]
+    [SettingDisplay(Name = "Queued shortage warnings", Description = "Warn when spool remaining cannot cover the assigned queue, even when no active-job runout ETA exists.", InputType = SettingInputType.Boolean, Order = 3)]
     public bool QueuedShortageWarningsEnabled { get; set; } = true;
 
     /// <summary>
@@ -51,7 +51,7 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     /// spool weight in Spoolman.
     /// </summary>
     [JsonPropertyName("reserveGrams")]
-    [SettingDisplay(Name = "Reserve Grams", Description = "Grams held back from spool remaining weight as a safety margin.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1000, Order = 4)]
+    [SettingDisplay(Name = "Reserve grams", Description = "Grams held back from spool remaining weight as a safety margin.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 1000, Order = 4)]
     public double ReserveGrams { get; set; }
 
     /// <summary>
@@ -59,7 +59,7 @@ public class SpoolCoverageSettings : IAppSetting, IValidatableSetting
     /// The endpoint degrades gracefully to "unknown progress" when exceeded.
     /// </summary>
     [JsonPropertyName("liveProgressTimeoutMs")]
-    [SettingDisplay(Name = "Live Progress Timeout", Unit = "ms", Description = "How long the coverage endpoint waits for a live progress reading from each printer.", InputType = SettingInputType.Number, MinValue = 100, MaxValue = 30000, Order = 5)]
+    [SettingDisplay(Name = "Live progress timeout", Unit = "ms", Description = "How long the coverage endpoint waits for a live progress reading from each printer.", InputType = SettingInputType.Number, MinValue = 100, MaxValue = 30000, Order = 5)]
     public int LiveProgressTimeoutMs { get; set; } = 2000;
 
     public void Validate()
