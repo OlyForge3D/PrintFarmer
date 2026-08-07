@@ -170,7 +170,7 @@
 
   html,
   body,
-  #root,
+  html #root,
   [data-print-layout],
   [data-main-content],
   [data-page-fill] {
@@ -181,7 +181,7 @@
 
   html,
   body,
-  #root,
+  html #root,
   [data-main-content] {
     width: 100%;
     max-width: 100%;
@@ -205,6 +205,14 @@
     visibility: hidden;
   }
 
+  /* Driver.js marks the highlighted document element with important screen
+     effects, so these matching print declarations are intentionally required. */
+  html .driver-active-element {
+    outline: none !important;
+    outline-offset: 0 !important;
+    filter: none !important;
+  }
+
   [data-main-content] {
     display: block;
   }
@@ -215,6 +223,13 @@
 
   [data-main-content] :is(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-hidden) {
     overflow: visible;
+  }
+
+  [data-main-content] :is(.truncate, [class*='line-clamp-']) {
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    -webkit-line-clamp: unset;
   }
 
   *,
@@ -238,6 +253,42 @@
     text-shadow: none;
     filter: none;
     backdrop-filter: none;
+    animation: none;
+    transition: none;
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-total.bg-pf-success-bg,
+  html[data-theme='blueprint'] .dashboard-stat-icon-online.bg-pf-status-online-bg {
+    color: var(--pf-status-online-text);
+    background-color: var(--pf-status-online-bg);
+    border-color: var(--pf-status-online-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-printing.bg-pf-status-printing-bg {
+    color: var(--pf-status-printing-text);
+    background-color: var(--pf-status-printing-bg);
+    border-color: var(--pf-status-printing-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-paused.bg-pf-status-paused-bg {
+    color: var(--pf-status-paused-text);
+    background-color: var(--pf-status-paused-bg);
+    border-color: var(--pf-status-paused-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-gray.bg-pf-bg-2 {
+    color: var(--pf-text-secondary);
+    background-color: var(--pf-bg-2);
+    border-color: var(--pf-border);
+  }
+
+  .matrix-scanlines::before {
+    content: none;
+    background: none;
+  }
+
+  .blueprint-grid {
+    background-image: none;
   }
 
   [data-pf-card],

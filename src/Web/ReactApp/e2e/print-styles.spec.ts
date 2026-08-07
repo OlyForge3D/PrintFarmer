@@ -37,10 +37,14 @@ test.describe('print stylesheet contract (#1126)', () => {
   }
 
   test('hides only marked chrome and removes fixed content clipping', async ({ page }) => {
-    await page.setContent(`
-      <link rel="stylesheet" href="http://localhost:3000/src/index.css">
-      <body data-theme="forge">
-        <div id="root">
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      document.documentElement.setAttribute('data-theme', 'forge');
+      document.getElementById('root')?.remove();
+      const root = document.createElement('div');
+      root.id = 'root';
+      root.innerHTML = `
         <div data-print-layout>
           <nav data-print-hidden>Navigation</nav>
           <div class="tsqd-open-btn-container">Query devtools</div>
@@ -49,15 +53,16 @@ test.describe('print stylesheet contract (#1126)', () => {
           <main data-main-content>
             <h1 id="themed-heading">Printer status</h1>
             <div id="themed-progress" role="progressbar">42%</div>
-            <button id="meaningful-action">Retry failed job</button>
+            <button class="driver-active-element" id="meaningful-action">Retry failed job</button>
             <article data-pf-card id="card">Printer status</article>
             <div class="fixed overflow-x-auto" id="fixed-content">History details</div>
+            <div class="truncate" id="truncated-content">A meaningful printer label that must remain visible</div>
+            <div style="height: 1400px">Multi-page content</div>
           </main>
         </div>
-        </div>
-      </body>`);
-    await page.waitForFunction(() =>
-      getComputedStyle(document.documentElement).getPropertyValue('--pf-bg-0').trim().length > 0);
+      `;
+      document.body.append(root);
+    });
     await page.emulateMedia({ media: 'print' });
 
     await expect(page.locator('[data-print-hidden]')).toBeHidden();
@@ -70,5 +75,38 @@ test.describe('print stylesheet contract (#1126)', () => {
     await expect(page.locator('#card')).toHaveCSS('break-inside', 'avoid');
     await expect(page.locator('#themed-heading')).toHaveCSS('text-shadow', 'none');
     await expect(page.locator('#themed-progress')).toHaveCSS('box-shadow', 'none');
+    await expect(page.locator('#meaningful-action')).toHaveCSS('filter', 'none');
+    await expect(page.locator('#meaningful-action')).toHaveCSS('outline-style', 'none');
+    await expect(page.locator('#truncated-content')).toHaveCSS('white-space', 'normal');
+    await expect(page.locator('#root')).toHaveCSS('overflow', 'visible');
+
+    const rootMetrics = await page.locator('#root').evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(rootMetrics.clientHeight).toBe(rootMetrics.scrollHeight);
+  });
+
+  test('removes Blueprint literal dashboard colors in print', async ({ page }) => {
+    await page.goto('/');
+    await page.waitForLoadState('networkidle');
+    await page.evaluate(() => {
+      document.documentElement.setAttribute('data-theme', 'blueprint');
+      document.getElementById('root')?.remove();
+      const root = document.createElement('div');
+      root.id = 'root';
+      root.innerHTML = `
+        <main data-main-content>
+          <div id="blueprint-online"
+               class="dashboard-stat-icon-online bg-pf-status-online-bg">Online</div>
+        </main>
+      `;
+      document.body.append(root);
+    });
+    await page.emulateMedia({ media: 'print' });
+
+    await expect(page.locator('#blueprint-online')).toHaveCSS('color', 'rgb(20, 83, 45)');
+    await expect(page.locator('#blueprint-online')).toHaveCSS('background-color', 'rgb(240, 253, 244)');
+    await expect(page.locator('#blueprint-online')).toHaveCSS('border-color', 'rgb(21, 128, 61)');
   });
 });
