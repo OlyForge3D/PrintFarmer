@@ -801,11 +801,17 @@ export default {
     /** Build the replacement token, preserving variants and side. */
     function toLargeToken(rawToken) {
       const { variants, base, important } = splitToken(rawToken)
-      if (/^\[border-radius:/i.test(base)) {
-        const prefix = variants.length > 0 ? `${variants.join(':')}:` : ''
-        return `${prefix}${important ? '!' : ''}rounded-lg`
-      }
-      return rawToken.replace(/-(?:4xl|3xl|2xl|xl|full|\[[^\]]+\])$/, '-lg')
+      const prefix = variants.length > 0 ? `${variants.join(':')}:` : ''
+      const marked = rawToken.slice(prefix.length)
+      const leadingImportant = marked.startsWith('!') ? '!' : ''
+      const trailingImportant =
+        marked.endsWith('!') || (important && leadingImportant === '') ? '!' : ''
+      const replacement = /^\[border-radius:/i.test(base)
+        ? 'rounded-lg'
+        : base.replace(/-(?:4xl|3xl|2xl|xl|full|\[[^\]]+\])$/, '-lg')
+
+      if (replacement === base) return rawToken
+      return `${prefix}${leadingImportant}${replacement}${trailingImportant}`
     }
 
     function reportToken({ stringNode, quasi, rawToken, offset, messageId, data, autofix }) {

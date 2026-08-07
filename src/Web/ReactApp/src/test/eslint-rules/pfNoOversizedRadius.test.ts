@@ -267,6 +267,47 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
+    {
+      code: '<div className="rounded-2xl!" />',
+      output: '<div className="rounded-lg!" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="rounded-[12px]!" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="rounded-full!" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="rounded-[20px!important]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
     // Arbitrary-property syntax emits the same border-radius declaration without
     // using a rounded-* utility, so it is judged through the same value reader.
     {
