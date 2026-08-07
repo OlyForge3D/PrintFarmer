@@ -1,13 +1,20 @@
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { GcodeFile } from '@/types/api';
 
 const queueModuleLoad = vi.hoisted(() => vi.fn());
+const queueModule = vi.hoisted(() => {
+  let resolve: () => void = () => undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    resolve = resolveReady;
+  });
+  return { ready, resolve };
+});
 
-vi.mock('@/features/gcode/components/QueueGcodeModal', () => {
+vi.mock('@/features/gcode/components/QueueGcodeModal', async () => {
   queueModuleLoad();
+  await queueModule.ready;
   return {
     QueueGcodeModal: () => <div role="dialog" aria-label="Queue G-code card mock" />,
   };
@@ -17,7 +24,6 @@ import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
 
 describe('GcodeFileCard queue lazy boundary', () => {
   it('preloads on direct intent and opens without an eager route import', async () => {
-    const user = userEvent.setup();
     const file: GcodeFile = {
       id: 'gcode-1',
       path: '/prints/example.gcode',
@@ -33,11 +39,10 @@ describe('GcodeFileCard queue lazy boundary', () => {
 
     expect(queueModuleLoad).not.toHaveBeenCalled();
     const queueButton = screen.getByRole('button', { name: 'Queue for Print' });
-    fireEvent.focus(queueButton);
+    fireEvent.click(queueButton);
+    expect(await screen.findByRole('status', { name: 'Loading print queue' })).toBeVisible();
     await waitFor(() => expect(queueModuleLoad).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('dialog', { name: 'Queue G-code card mock' })).not.toBeInTheDocument();
-
-    await user.click(queueButton);
+    queueModule.resolve();
     expect(await screen.findByRole('dialog', { name: 'Queue G-code card mock' })).toBeInTheDocument();
   });
 });

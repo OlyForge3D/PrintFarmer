@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { TaggingModal } from '@/components/TaggingModal';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { ClipboardListIcon, LayersTripleOutlineIcon, CubeIcon } from '@/common/components/icons/MdiIcons';
+import { LazyModalFallback } from '@/common/components/LazyModalFallback';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 
 type QueueGcodeModalComponent = typeof import('./QueueGcodeModal')['QueueGcodeModal'];
@@ -314,7 +315,7 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
       </div>
     </div>
     {isQueueOpen && (
-      <React.Suspense fallback={null}>
+      <React.Suspense fallback={<LazyModalFallback label="Loading print queue" />}>
         <QueueGcodeModal file={file} isOpen={isQueueOpen} onClose={(added) => { setIsQueueOpen(false); if (added) { /* maybe show toast later */ } }} />
       </React.Suspense>
     )}

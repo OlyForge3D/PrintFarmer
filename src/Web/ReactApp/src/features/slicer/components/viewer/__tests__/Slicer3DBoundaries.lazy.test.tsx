@@ -6,6 +6,13 @@ const moduleLoads = vi.hoisted(() => ({
   workspace: vi.fn(),
   preview: vi.fn(),
 }));
+const previewModule = vi.hoisted(() => {
+  let resolve: () => void = () => undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    resolve = resolveReady;
+  });
+  return { ready, resolve };
+});
 
 vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => {
   moduleLoads.workspace();
@@ -14,8 +21,9 @@ vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => {
   };
 });
 
-vi.mock('@/features/models3d/components/3d/STLPreviewModal', () => {
+vi.mock('@/features/models3d/components/3d/STLPreviewModal', async () => {
   moduleLoads.preview();
+  await previewModule.ready;
   return {
     STLPreviewModal: () => <div role="dialog" aria-label="STL preview mock">Preview</div>,
   };
@@ -44,7 +52,9 @@ describe('slicer 3D lazy boundaries', () => {
         onClose={vi.fn()}
       />,
     );
+    expect(await screen.findByRole('status', { name: 'Loading 3D preview' })).toBeVisible();
+    await vi.waitFor(() => expect(moduleLoads.preview).toHaveBeenCalledTimes(1));
+    previewModule.resolve();
     expect(await screen.findByRole('dialog', { name: 'STL preview mock' })).toBeInTheDocument();
-    expect(moduleLoads.preview).toHaveBeenCalledTimes(1);
   });
 });

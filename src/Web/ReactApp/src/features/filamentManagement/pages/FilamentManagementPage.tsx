@@ -3,6 +3,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon, BarcodeScanIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { LazyModalFallback } from '@/common/components/LazyModalFallback';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import type { SpoolmanSpool } from '@/types/api';
 
@@ -167,7 +168,7 @@ export function FilamentManagementPage() {
       </div>
 
       {scanModalOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<LazyModalFallback label="Loading spool scanner" />}>
           <ScanSpoolModal
             isOpen={scanModalOpen}
             onClose={() => setScanModalOpen(false)}

@@ -4,6 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { LazyModalFallback } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
@@ -71,22 +72,6 @@ const QueueGcodeModal = lazyWithPreload<React.ComponentProps<QueueGcodeModalComp
   () => import('@/features/gcode/components/QueueGcodeModal').then((module) => ({ default: module.QueueGcodeModal })),
 );
 type SortOption = 'name' | 'size' | 'date';
-
-function LazyModalFallback({ label }: { label: string }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
-      role="status"
-      aria-live="polite"
-      aria-label={label}
-    >
-      <div className="flex items-center gap-3 rounded-lg border border-pf-border bg-pf-bg-1 px-5 py-4 text-pf-text">
-        <div className="pf-animate-spin h-6 w-6 rounded-full border-b-2 border-pf-accent" />
-        <span>{label}…</span>
-      </div>
-    </div>
-  );
-}
 
 type TagSummary = { id: string; name: string; color?: string };
 

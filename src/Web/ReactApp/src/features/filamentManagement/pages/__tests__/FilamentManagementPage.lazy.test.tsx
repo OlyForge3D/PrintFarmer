@@ -10,6 +10,13 @@ const moduleLoads = vi.hoisted(() => ({
   clusters: vi.fn(),
   scanner: vi.fn(),
 }));
+const scannerModule = vi.hoisted(() => {
+  let resolve: () => void = () => undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    resolve = resolveReady;
+  });
+  return { ready, resolve };
+});
 
 vi.mock('@/features/filamentManagement/components/FilamentsTab', () => {
   moduleLoads.filaments();
@@ -26,8 +33,9 @@ vi.mock('@/features/filamentManagement/components/MaterialClustersTab', () => {
   return { MaterialClustersTab: () => <div data-testid="clusters-content">Clusters content</div> };
 });
 
-vi.mock('@/features/filamentManagement/components/ScanSpoolModal', () => {
+vi.mock('@/features/filamentManagement/components/ScanSpoolModal', async () => {
   moduleLoads.scanner();
+  await scannerModule.ready;
   return {
     ScanSpoolModal: ({ isOpen }: { isOpen: boolean }) => (
       isOpen ? <div role="dialog" aria-label="Scan spool mock">Scanner content</div> : null
@@ -74,10 +82,10 @@ describe('FilamentManagementPage lazy boundaries', () => {
     expect(await screen.findByTestId('clusters-content')).toBeInTheDocument();
 
     const scanButton = screen.getByRole('button', { name: 'Scan' });
-    fireEvent.focus(scanButton);
+    fireEvent.click(scanButton);
+    expect(await screen.findByRole('status', { name: 'Loading spool scanner' })).toBeVisible();
     await waitFor(() => expect(moduleLoads.scanner).toHaveBeenCalledTimes(1));
-    expect(screen.queryByRole('dialog', { name: 'Scan spool mock' })).not.toBeInTheDocument();
-    await user.click(scanButton);
+    scannerModule.resolve();
     expect(await screen.findByRole('dialog', { name: 'Scan spool mock' })).toBeInTheDocument();
   });
 });

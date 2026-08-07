@@ -13,8 +13,11 @@ export function lazyWithPreload<P, T extends React.ComponentType<P>>(
   factory: () => Promise<{ default: T }>
 ): T & PreloadableComponent<P, T> {
   let modulePromise: Promise<{ default: T }> | undefined;
-  const load = () => {
-    modulePromise ??= factory();
+  const load = (): Promise<{ default: T }> => {
+    modulePromise ??= factory().catch((error: unknown) => {
+      modulePromise = undefined;
+      throw error;
+    });
     return modulePromise;
   };
   const LazyComp = React.lazy(load) as unknown as T & PreloadableComponent<P, T>;
