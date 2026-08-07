@@ -108,8 +108,9 @@ TSX, and CSS theme references. It covers ordinary `*-pf-*` utilities without a
 colour-prefix enumeration, variants, important and negative markers, opacity
 modifiers, direct `var(--pf-*)` and `var(--color-pf-*)` references, arbitrary
 values such as `bg-[var(--pf-card-bg)]`, and nested forms such as
-`ring-offset-[var(--pf-focus-ring-offset)]`. Aliases are followed transitively,
-and failures report the relative file, line, column, token, and source syntax.
+`ring-offset-[var(--pf-focus-ring-offset)]`. Aliases are followed transitively
+in an isolated resolution graph for each theme, and failures report the
+relative file, line, column, token, source syntax, and affected themes.
 
 CSS custom-property declarations are definitions, not usages. Runtime-assigned
 raw properties require an exact file-and-token allowance with a rationale.

@@ -5,7 +5,9 @@ import { dirname, join, resolve } from 'node:path';
 import {
   collectThemeSources,
   cssFacts,
+  cssFactsByTheme,
   deadThemeReferences,
+  deadThemeReferencesByTheme,
   formatThemeFinding,
   scanThemeText,
   type CssFacts,
@@ -205,9 +207,12 @@ describe('theme tokens used by utilities are registered in @theme (Vasquez #1)',
  * `*-pf-*` token except the documented non-colour namespace allowlist.
  *
  * Direct `var(--pf-*)` / `var(--color-pf-*)` references and arbitrary values
- * are checked through the same alias resolver. CSS declarations are facts, not
- * usages. Runtime-assigned bridge properties are allowed only at their exact
- * file/token sites, so the same spelling elsewhere remains actionable.
+ * are checked through the same alias resolver independently for every theme.
+ * Shared CSS facts are merged into each theme without allowing one theme's
+ * declaration or alias value to mask another's failure. CSS declarations are
+ * facts, not usages. Runtime-assigned bridge properties are allowed only at
+ * their exact file/token sites, so the same spelling elsewhere remains
+ * actionable.
  *
  * Explicit exclusions: dynamic custom-property names whose complete spelling
  * does not exist in one source literal cannot be resolved statically, and
@@ -218,9 +223,11 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
   const SRC = resolve(HERE, '../../..');
   const sources = collectThemeSources(SRC);
   const facts = cssFacts(sources);
+  const factsByTheme = cssFactsByTheme(sources);
 
   it('finds utilities to check', () => {
     const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
+    expect([...factsByTheme.keys()].sort()).toEqual([...themeFiles].sort());
     expect(references.filter((reference) => reference.kind === 'utility').length).toBeGreaterThan(50);
     expect(references.filter((reference) => reference.kind === 'arbitrary-value').length).toBeGreaterThan(10);
     expect(references.filter((reference) => reference.kind === 'custom-property').length).toBeGreaterThan(50);
@@ -241,7 +248,7 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
 
   it('detects a formerly unenumerated prefix through variants, modifiers, and negatives', () => {
     const references = scanThemeText(
-      "const classes = 'dark:enabled:hover:-drop-shadow-pf-missing/50!';",
+      "const classes = 'dark:enabled:hover:-mask-pf-missing/50!';",
       'Mutation.ts',
     );
     const findings = deadThemeReferences(references, facts, []);
@@ -250,7 +257,7 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
         file: 'Mutation.ts',
         token: 'pf-missing',
         kind: 'utility',
-        utilityPrefix: 'drop-shadow',
+        utilityPrefix: 'mask',
       },
     ]);
   });
@@ -340,6 +347,34 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
     ]);
   });
 
+  it('isolates alias resolution per theme without duplicating the occurrence', () => {
+    const references = scanThemeText("const classes = 'bg-pf-themed';", 'Themed.tsx');
+    const themedFacts = new Map<string, CssFacts>([
+      [
+        'healthy.css',
+        {
+          declarations: new Map([['--pf-themed', '#fff']]),
+          mappings: new Map([['--color-pf-themed', 'var(--pf-themed)']]),
+        },
+      ],
+      [
+        'cyclic.css',
+        {
+          declarations: new Map([
+            ['--pf-themed', 'var(--pf-cycle)'],
+            ['--pf-cycle', 'var(--pf-themed)'],
+          ]),
+          mappings: new Map([['--color-pf-themed', 'var(--pf-themed)']]),
+        },
+      ],
+    ]);
+
+    const findings = deadThemeReferencesByTheme(references, themedFacts, []);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].reason).toContain('unresolved in cyclic.css');
+    expect(findings[0].reason).not.toContain('healthy.css');
+  });
+
   it('reports each occurrence once with actionable location data', () => {
     const references = scanThemeText(
       "const classes = 'bg-[var(--pf-dead)] bg-[var(--pf-dead)]';",
@@ -355,6 +390,6 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
 
   it('has no unexplained dead theme reference in the current source tree', () => {
     const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
-    expect(deadThemeReferences(references, facts).map(formatThemeFinding)).toEqual([]);
+    expect(deadThemeReferencesByTheme(references, factsByTheme).map(formatThemeFinding)).toEqual([]);
   });
 });

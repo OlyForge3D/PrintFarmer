@@ -265,6 +265,35 @@ export function cssFacts(sources: readonly SourceText[]): CssFacts {
   return { declarations, mappings };
 }
 
+const THEME_SOURCE = /^design-system\/themes\/([^/]+\.css)$/;
+
+/**
+ * Builds one resolution graph per selectable theme. Shared CSS (including
+ * base.css and the @theme mappings in index.css) is merged into every graph;
+ * theme declarations remain isolated so one theme cannot mask another's
+ * missing token or alias cycle.
+ */
+export function cssFactsByTheme(sources: readonly SourceText[]): Map<string, CssFacts> {
+  const themedSources = sources.filter(
+    (source) => THEME_SOURCE.test(source.file) && !source.file.endsWith('/base.css'),
+  );
+  const themedFiles = new Set(themedSources.map((source) => source.file));
+  const shared = cssFacts(sources.filter((source) => !themedFiles.has(source.file)));
+
+  return new Map(
+    themedSources.map((source) => {
+      const themed = cssFacts([source]);
+      return [
+        source.file.replace(/^design-system\/themes\//, ''),
+        {
+          declarations: new Map([...shared.declarations, ...themed.declarations]),
+          mappings: new Map([...shared.mappings, ...themed.mappings]),
+        },
+      ];
+    }),
+  );
+}
+
 const allowanceFor = (
   reference: ThemeReference,
   allowlist: readonly RawCustomPropertyAllowance[],
@@ -329,6 +358,48 @@ export function deadThemeReferences(
         reference.kind === 'utility'
           ? `no resolvable Tailwind mapping for ${reference.source}`
           : `custom property ${reference.token} does not resolve to a declared value`,
+    });
+  }
+
+  return [...findings.values()].sort(
+    (left, right) =>
+      left.file.localeCompare(right.file) ||
+      left.line - right.line ||
+      left.column - right.column ||
+      left.token.localeCompare(right.token),
+  );
+}
+
+export function deadThemeReferencesByTheme(
+  references: readonly ThemeReference[],
+  factsByTheme: ReadonlyMap<string, CssFacts>,
+  allowlist: readonly RawCustomPropertyAllowance[] = RAW_CUSTOM_PROPERTY_ALLOWLIST,
+): ThemeFinding[] {
+  const findings = new Map<string, ThemeFinding>();
+
+  for (const reference of references) {
+    if (allowanceFor(reference, allowlist)) continue;
+    const candidates = mappingTokens(reference);
+    const unresolvedThemes = [...factsByTheme]
+      .filter(([, facts]) => !candidates.some((candidate) => resolvesCustomProperty(candidate, facts)))
+      .map(([theme]) => theme)
+      .sort();
+    if (unresolvedThemes.length === 0) continue;
+
+    const key = [
+      reference.file,
+      reference.line,
+      reference.column,
+      reference.token,
+      reference.kind,
+    ].join(':');
+    const baseReason =
+      reference.kind === 'utility'
+        ? `no resolvable Tailwind mapping for ${reference.source}`
+        : `custom property ${reference.token} does not resolve to a declared value`;
+    findings.set(key, {
+      ...reference,
+      reason: `${baseReason}; unresolved in ${unresolvedThemes.join(', ')}`,
     });
   }
 

@@ -762,10 +762,11 @@ The admin surface has no hardcoded colours. No hex, no `rgba()`, no Tailwind pal
 (`bg-gray-500` and friends) — only `--pf-*` tokens, so all seven themes stay coherent. The
 theme-safety test asserts the scan for literals, token parity across `dark`, `light`, `matrix`,
 `blueprint`, `ratos`, `voron`, `farm`, and `forge`, and resolution of ordinary utilities, direct
-`var()` references, and arbitrary-value classes through aliases. It excludes declarations and
-permits runtime-assigned raw properties only through exact, documented site allowances. Dynamic
-property names split across template expressions cannot be resolved statically and must use one of
-those documented bridges.
+`var()` references, and arbitrary-value classes through aliases independently in every theme. A
+valid declaration in one theme cannot mask a missing token or alias cycle in another. The scan
+excludes declarations and permits runtime-assigned raw properties only through exact, documented
+site allowances. Dynamic property names split across template expressions cannot be resolved
+statically and must use one of those documented bridges.
 
 ---
 
