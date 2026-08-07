@@ -130,11 +130,32 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
       'Could not load the deployment Spoolman URL. Enter it manually or scan the network.',
     );
     fireEvent.click(screen.getByLabelText('Enable Spoolman'));
+    fireEvent.click(screen.getByRole('button', { name: /Scan Network/ }));
+    await waitFor(() => expect(mockScanNetwork).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/Could not load the deployment Spoolman URL/)).not.toBeInTheDocument();
+
     fireEvent.change(screen.getByPlaceholderText('http://spoolman:7912'), {
       target: { value: 'http://manual-spoolman:7912' },
     });
     expect(screen.getByPlaceholderText('http://spoolman:7912')).toHaveValue('http://manual-spoolman:7912');
     expect(screen.getByRole('button', { name: /Scan Network/ })).toBeEnabled();
+    expect(screen.queryByText(/Could not load the deployment Spoolman URL/)).not.toBeInTheDocument();
+  });
+
+  it('does not restore the bootstrap warning when a late failure follows manual input', async () => {
+    let rejectBootstrap!: (reason: unknown) => void;
+    mockGetSetupBootstrap.mockReturnValue(new Promise((_resolve, reject) => {
+      rejectBootstrap = reject;
+    }));
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await advanceToSpoolmanStep();
+
+    fireEvent.click(screen.getByLabelText('Enable Spoolman'));
+    fireEvent.change(screen.getByPlaceholderText('http://spoolman:7912'), {
+      target: { value: 'http://manual-spoolman:7912' },
+    });
+    await act(async () => rejectBootstrap(new Error('Late network failure')));
+
     expect(screen.queryByText(/Could not load the deployment Spoolman URL/)).not.toBeInTheDocument();
   });
 

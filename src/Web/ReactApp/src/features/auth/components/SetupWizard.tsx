@@ -179,7 +179,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         }
       })
       .catch(error => {
-        if (active && !(isApiError(error) && error.statusCode === 404)) {
+        if (
+          active &&
+          !spoolmanSelectionChangedRef.current &&
+          !(isApiError(error) && error.statusCode === 404)
+        ) {
           setSpoolmanBootstrapError(
             'Could not load the deployment Spoolman URL. Enter it manually or scan the network.',
           );
@@ -402,6 +406,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const handleNetworkScan = async () => {
+    spoolmanSelectionChangedRef.current = true;
+    setSpoolmanBootstrapError(null);
     resetScan();
     await scanNetwork();
   };
