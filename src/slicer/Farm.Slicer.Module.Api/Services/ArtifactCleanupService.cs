@@ -236,8 +236,6 @@ public class ArtifactCleanupService(
 
         DateTime staleBeforeUtc = DateTime.UtcNow.AddMinutes(
             -Math.Max(1, _settings.CleanupReservationTimeoutMinutes));
-        IReadOnlyList<Artifact> committedArtifacts =
-            await _artifactsRepo.GetAllAsync(ct);
         bool usesCaseInsensitivePaths = OperatingSystem.IsWindows();
         StringComparer pathComparer = usesCaseInsensitivePaths
             ? StringComparer.OrdinalIgnoreCase
@@ -245,9 +243,6 @@ public class ArtifactCleanupService(
         StringComparison pathComparison = usesCaseInsensitivePaths
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-        var committedPaths = committedArtifacts
-            .Select(artifact => artifact.RelativePath.Replace('\\', '/'))
-            .ToHashSet(pathComparer);
 
         int reconciledCount = 0;
         foreach (string fullPath in ArtifactStorageFileSystem.EnumerateRegularFiles(rootPath))
@@ -255,10 +250,6 @@ public class ArtifactCleanupService(
             ct.ThrowIfCancellationRequested();
             string relativePath =
                 ArtifactStorageFileSystem.GetRelativePath(rootPath, fullPath);
-            if (committedPaths.Contains(relativePath))
-            {
-                continue;
-            }
 
             string? parentPath = Path.GetDirectoryName(fullPath);
             bool isDirectStagingFile = string.Equals(

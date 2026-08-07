@@ -13,7 +13,19 @@ internal static class ArtifactStorageFileSystem
         string root = Path.IsPathFullyQualified(configuredRoot)
             ? configuredRoot
             : Path.Combine(contentRootPath, configuredRoot);
-        return Path.GetFullPath(root);
+        string fullRoot = Path.GetFullPath(root);
+        var rootDirectory = new DirectoryInfo(fullRoot);
+        if (rootDirectory.Exists && IsReparsePoint(rootDirectory))
+        {
+            FileSystemInfo? resolvedRoot =
+                rootDirectory.ResolveLinkTarget(returnFinalTarget: true);
+            if (resolvedRoot is DirectoryInfo resolvedDirectory)
+            {
+                return Path.GetFullPath(resolvedDirectory.FullName);
+            }
+        }
+
+        return fullRoot;
     }
 
     internal static string GetStagingDirectory(string rootPath) =>
@@ -168,7 +180,9 @@ internal static class ArtifactStorageFileSystem
             return false;
         }
 
-        string rootPrefix = normalizedRoot + Path.DirectorySeparatorChar;
+        string rootPrefix = Path.EndsInDirectorySeparator(normalizedRoot)
+            ? normalizedRoot
+            : normalizedRoot + Path.DirectorySeparatorChar;
         return normalizedCandidate.StartsWith(
             rootPrefix,
             pathComparison);

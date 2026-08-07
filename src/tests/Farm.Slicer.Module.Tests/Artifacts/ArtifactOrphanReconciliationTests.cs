@@ -266,11 +266,20 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     private Mock<IArtifactsRepository> CreateRepository(
         IReadOnlyList<Artifact>? committedArtifacts = null)
     {
+        IReadOnlyList<Artifact> artifacts = committedArtifacts ?? [];
         var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
         repository
             .Setup(candidate => candidate.GetAllAsync(
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(committedArtifacts ?? []);
+            .ReturnsAsync(artifacts);
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, CancellationToken>(
+                (artifactId, _) => Task.FromResult(
+                    artifacts.FirstOrDefault(
+                        artifact => artifact.Id == artifactId)));
         repository
             .Setup(candidate => candidate.GetCleanupInProgressAsync(
                 It.IsAny<CancellationToken>()))

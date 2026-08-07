@@ -21,12 +21,14 @@ public class ArtifactCleanupHostedService(
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<ArtifactCleanupHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ArtifactStorageSettings _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
+    private readonly int _cleanupIntervalHours =
+        Math.Clamp(opts?.Value.CleanupIntervalHours ?? 24, 1, 8760);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation(
             "Artifact cleanup service started (Interval: {IntervalHours} hours, DryRun: {DryRun})",
-            _settings.CleanupIntervalHours,
+            _cleanupIntervalHours,
             _settings.EnableCleanupDryRun);
 
         while (!stoppingToken.IsCancellationRequested)
@@ -58,7 +60,7 @@ public class ArtifactCleanupHostedService(
             try
             {
                 await Task.Delay(
-                    TimeSpan.FromHours(_settings.CleanupIntervalHours),
+                    TimeSpan.FromHours(_cleanupIntervalHours),
                     stoppingToken);
             }
             catch (OperationCanceledException)
