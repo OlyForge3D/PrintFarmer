@@ -60,6 +60,28 @@ public sealed class RevisionConcurrencyProviderTests
         Assert.Contains("invalid revision 0", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task SaveChangesAsync_WhenTrackedOriginalRevisionCannotAdvance_ThrowsConcurrency()
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using AppDbContext context = new(options);
+        OutboxSequenceState state = new()
+        {
+            Id = 1,
+            NextSequence = 1,
+        };
+        context.OutboxSequenceStates.Add(state);
+        _ = await context.SaveChangesAsync();
+
+        state.NextSequence++;
+        context.Entry(state).Property(entity => entity.Revision).OriginalValue = long.MaxValue;
+
+        _ = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
+            () => context.SaveChangesAsync());
+    }
+
     private const string PostgresConnectionVariable = "PFARM_TEST_POSTGRES_CONN";
     private const string SqlServerConnectionVariable = "PFARM_TEST_SQLSERVER_CONN";
 
