@@ -128,6 +128,19 @@ assert_file_not_exists() {
     fi
 }
 
+assert_file_has_exact_line() {
+    local file="$1"
+    local expected_line="$2"
+    local message="${3:-Expected file '$file' to contain exact line '$expected_line'}"
+
+    if [[ -f "$file" ]] && grep -Fqx -- "$expected_line" "$file"; then
+        return 0
+    else
+        fail_test "$message"
+        return 1
+    fi
+}
+
 assert_dir_exists() {
     local dir="$1"
     local message="${2:-Expected directory '$dir' to exist}"

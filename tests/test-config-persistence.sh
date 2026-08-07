@@ -58,6 +58,7 @@ HTTPS_PORT=0
 SERVER_HOST=localhost
 API_PORT=5245
 ENVIRONMENT=Development
+OS=linux
 ENABLE_SWAGGER=true
 ENABLE_DETAILED_LOGGING=true
 ENABLE_PGADMIN=false
@@ -73,6 +74,17 @@ ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
 USE_EXTERNAL_STORAGE=no
 EOF
+}
+
+write_legacy_worker_config() {
+    local config_file="$1"
+    write_base_config "$config_file"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
+        -e '/^ENABLE_ORCA_WORKER=/d' \
+        -e '/^ORCA_WORKER_COUNT=/d' \
+        -e '/^ORCA_HOST_PORT=/d' \
+        "$config_file"
 }
 
 # Test that monitoring/telemetry/security settings are saved to config file
@@ -176,34 +188,28 @@ test_legacy_distributed_slicing_config_migrates_worker_defaults() {
 
     cd "$TEST_TEMP_DIR"
 
-    write_base_config ".deploy-config"
-    sed -i \
-        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
-        -e '/^ENABLE_ORCA_WORKER=/d' \
-        -e '/^ORCA_WORKER_COUNT=/d' \
-        ".deploy-config"
+    write_legacy_worker_config ".deploy-config"
 
     capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
     local exit_code
     exit_code=$(get_output_exit_code)
     local output
     output=$(get_output)
-    local persisted_config
-    persisted_config=$(cat ".deploy-config")
-    local generated_env
-    generated_env=$(cat ".env" 2>/dev/null || true)
+    local failures_before=$TESTS_FAILED
+    assert_equals "0" "$exit_code" "Legacy migration deployment should complete successfully" || true
+    assert_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should explain the legacy worker migration" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=yes, count=1" "Should display the effective migrated worker configuration" || true
+    assert_contains "$output" "Includes slicer-host service (distributed slicing orchestrator)" "Should select the OrcaSlicer service configuration" || true
+    assert_contains "$output" "--profile orca up -d" "Should activate the OrcaSlicer compose profile" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Should persist the inferred worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Should persist one inferred worker" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_HOST_PORT=8081" "Should persist the default worker host port" || true
+    assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=yes" "Generated environment should enable the inferred worker" || true
+    assert_file_has_exact_line ".env" "ORCA_WORKER_COUNT=1" "Generated environment should contain the inferred worker count" || true
 
-    assert_equals "0" "$exit_code" "Legacy migration deployment should complete successfully"
-    assert_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should explain the legacy worker migration"
-    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=yes, count=1" "Should display the effective migrated worker configuration"
-    assert_contains "$output" "Includes slicer-host service (distributed slicing orchestrator)" "Should select the OrcaSlicer service configuration"
-    assert_contains "$output" "--profile orca up -d" "Should activate the OrcaSlicer compose profile"
-    assert_contains "$persisted_config" "ENABLE_ORCA_WORKER=yes" "Should persist the inferred worker enablement"
-    assert_contains "$persisted_config" "ORCA_WORKER_COUNT=1" "Should persist one inferred worker"
-    assert_contains "$generated_env" "ENABLE_ORCA_WORKER=yes" "Generated environment should enable the inferred worker"
-    assert_contains "$generated_env" "ORCA_WORKER_COUNT=1" "Generated environment should contain the inferred worker count"
-
-    pass_test
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
 }
 
 test_explicit_worker_disable_remains_disabled() {
@@ -219,18 +225,171 @@ test_explicit_worker_disable_remains_disabled() {
     exit_code=$(get_output_exit_code)
     local output
     output=$(get_output)
-    local persisted_config
-    persisted_config=$(cat ".deploy-config")
+    local failures_before=$TESTS_FAILED
+    assert_equals "0" "$exit_code" "Explicit worker-disable deployment should complete successfully" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Should display the explicit disabled worker configuration" || true
+    assert_not_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should not migrate an explicit worker disable" || true
+    assert_contains "$output" "Slicer workers disabled" "Should omit the OrcaSlicer worker service configuration" || true
+    assert_not_contains "$output" "--profile orca" "Should not activate the OrcaSlicer compose profile" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=no" "Should preserve explicit worker disable" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=0" "Should preserve explicit zero worker count" || true
 
-    assert_equals "0" "$exit_code" "Explicit worker-disable deployment should complete successfully"
-    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Should display the explicit disabled worker configuration"
-    assert_not_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should not migrate an explicit worker disable"
-    assert_contains "$output" "Slicer workers disabled" "Should omit the OrcaSlicer worker service configuration"
-    assert_not_contains "$output" "--profile orca" "Should not activate the OrcaSlicer compose profile"
-    assert_contains "$persisted_config" "ENABLE_ORCA_WORKER=no" "Should preserve explicit worker disable"
-    assert_contains "$persisted_config" "ORCA_WORKER_COUNT=0" "Should preserve explicit zero worker count"
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
 
-    pass_test
+test_regenerate_config_migrates_legacy_worker_defaults() {
+    start_test "config regeneration migrates legacy worker defaults"
+
+    cd "$TEST_TEMP_DIR"
+    write_legacy_worker_config ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        test_info "Regeneration output: $output"
+    fi
+    assert_equals "0" "$exit_code" "Legacy config regeneration should complete successfully" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Regeneration should persist worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Regeneration should persist one worker" || true
+    assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=yes" "Regeneration should enable the generated worker environment" || true
+    assert_file_has_exact_line ".env" "ORCA_WORKER_COUNT=1" "Regeneration should generate one worker" || true
+    assert_file_has_exact_line "docker-compose.yml" "  orcaslicer-worker:" "Regeneration should include the OrcaSlicer worker service" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_redeploy_migrates_legacy_worker_defaults() {
+    start_test "redeploy migrates legacy worker defaults"
+
+    cd "$TEST_TEMP_DIR"
+    write_legacy_worker_config ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --redeploy --dry-run 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        test_info "Redeploy output: $output"
+    fi
+    assert_equals "0" "$exit_code" "Legacy redeploy should complete successfully" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Redeploy should persist worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Redeploy should persist one worker" || true
+    assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=yes" "Redeploy should enable the generated worker environment" || true
+    assert_file_has_exact_line "docker-compose.yml" "  orcaslicer-worker:" "Redeploy should include the OrcaSlicer worker service" || true
+    assert_contains "$output" "--profile orca up -d" "Redeploy should select the OrcaSlicer profile" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_worker_boolean_forms_and_exact_count_are_normalized() {
+    start_test "worker boolean forms and exact count are normalized"
+
+    cd "$TEST_TEMP_DIR"
+    write_base_config ".deploy-config"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=on/' \
+        -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=TRUE/' \
+        -e 's/^ORCA_WORKER_COUNT=.*/ORCA_WORKER_COUNT=10/' \
+        ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Supported boolean forms should deploy successfully" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_DISTRIBUTED_SLICING=true" "Distributed slicing should normalize to true" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Worker enablement should normalize to yes" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=10" "Worker count should remain exactly 10" || true
+    assert_file_has_exact_line ".env" "ORCA_WORKER_COUNT=10" "Generated worker count should remain exactly 10" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_malformed_and_empty_worker_booleans_fail_clearly() {
+    start_test "malformed and empty worker booleans fail clearly"
+
+    cd "$TEST_TEMP_DIR"
+    write_base_config ".deploy-config"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
+        -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=maybe/' \
+        ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    local malformed_exit_code
+    malformed_exit_code=$(get_output_exit_code)
+    local malformed_output
+    malformed_output=$(get_output)
+
+    sed -i 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=/' ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    local empty_exit_code
+    empty_exit_code=$(get_output_exit_code)
+    local empty_output
+    empty_output=$(get_output)
+
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=/' \
+        -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=no/' \
+        ".deploy-config"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    local empty_distributed_exit_code
+    empty_distributed_exit_code=$(get_output_exit_code)
+    local empty_distributed_output
+    empty_distributed_output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_not_equals "0" "$malformed_exit_code" "Malformed worker boolean should fail" || true
+    assert_contains "$malformed_output" "Unsupported boolean value 'maybe' for ENABLE_ORCA_WORKER" "Malformed worker boolean should explain accepted values" || true
+    assert_not_equals "0" "$empty_exit_code" "Empty worker boolean should fail" || true
+    assert_contains "$empty_output" "ENABLE_ORCA_WORKER cannot be empty" "Empty worker boolean should have a clear error" || true
+    assert_not_equals "0" "$empty_distributed_exit_code" "Empty distributed slicing boolean should fail" || true
+    assert_contains "$empty_distributed_output" "ENABLE_DISTRIBUTED_SLICING cannot be empty" "Empty distributed slicing boolean should have a clear error" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_force_disable_overrides_legacy_worker_inference() {
+    start_test "force-disable policy overrides legacy worker inference"
+
+    cd "$TEST_TEMP_DIR"
+    write_legacy_worker_config ".deploy-config"
+
+    capture_output "DISABLE_SLICER_BUILDS=true timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Force-disabled legacy deployment should complete successfully" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=no" "Force-disable should persist worker disablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=0" "Force-disable should persist zero workers" || true
+    assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=no" "Force-disable should generate disabled worker environment" || true
+    assert_not_contains "$output" "--profile orca" "Force-disable should not select the OrcaSlicer profile" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
 }
 
 test_orcaslicer_release_is_repository_controlled() {
@@ -297,6 +456,11 @@ run_all_tests() {
     test_config_loading_display
     test_legacy_distributed_slicing_config_migrates_worker_defaults
     test_explicit_worker_disable_remains_disabled
+    test_regenerate_config_migrates_legacy_worker_defaults
+    test_redeploy_migrates_legacy_worker_defaults
+    test_worker_boolean_forms_and_exact_count_are_normalized
+    test_malformed_and_empty_worker_booleans_fail_clearly
+    test_force_disable_overrides_legacy_worker_inference
     test_orcaslicer_release_is_repository_controlled
     test_regenerate_config_migrates_orcaslicer_release
     
