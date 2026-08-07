@@ -263,8 +263,9 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
-- the **verbatim report-and-stop clause** from SESSION LIFECYCLE AND REAPING, as the final
-  paragraph of the kickoff prompt. A kickoff prompt without it is malformed.
+- the **verbatim report-and-stop clause plus the closed-PR-and-attestation rider** from
+  SESSION LIFECYCLE AND REAPING, as the final two paragraphs of the kickoff prompt. A
+  kickoff prompt missing either block is malformed.
 
 ## ACCOUNT FOR EVERY ISSUE
 
@@ -331,10 +332,12 @@ automated paths are dead in practice:
   more than three hours later. By then the creator is long gone, so the message either
   goes nowhere or wakes a completed round purely for a cleanup call, re-running round
   logic as a side effect. **Never rely on this.**
-- **Ralph archiving its own children barely applies.** Ralph may archive a session it
-  spawned *this round*, but that requires the child to both start and finish inside the
-  same 2–6 minute round. For real implementation work that effectively never happens; it
-  covers the rare instant-failure case and nothing else. It is not a cleanup strategy.
+- **Ralph archiving its own children barely applies, and is forbidden anyway.** The
+  platform would technically permit Ralph to archive a session it spawned *this round*, but
+  that requires the child to both start and finish inside the same 2–6 minute round, which
+  for real implementation work never happens. **Policy forbids Ralph from making the call
+  regardless.** Ralph archives nothing, ever — every completed session goes through the
+  reap report.
 
 Therefore a dispatched session's last action is simply to **report and stop**. Every
 dispatch kickoff prompt Ralph writes MUST end with this clause, verbatim:
@@ -343,12 +346,19 @@ dispatch kickoff prompt Ralph writes MUST end with this clause, verbatim:
 When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled by Ralph's `🧹 Ready to reap` report.
 ```
 
-Quote the clause exactly as written above — it is kept verbatim in sync with the Ralph
-workflow prompt so the two cannot drift. Read its merge condition as covering both exits:
-a **merged** PR requires the squash-merge-safe verification below plus a closed linked
-issue; a **definitively closed** PR has no merge to verify, so verify instead that the PR
-state is `CLOSED`, it will not be reopened, and the linked issue is closed or explicitly
-left open with a reason. Either exit ends the session's ownership.
+That clause is held verbatim in sync with the Ralph workflow prompt so the two cannot
+drift — quote it exactly. It is necessary but **not sufficient** on its own: taken alone it
+asks a session whose PR closed *unmerged* to verify a merge that never happened, and it
+never asks the session to attest that its work is safely pushed. Ralph MUST therefore
+append this rider immediately after it, also verbatim:
+
+```
+If your PR was definitively closed without merging, there is no merge to verify — instead confirm the PR state is CLOSED and will not be reopened, and that the linked issue is closed or deliberately left open with a stated reason. In your final status report, state explicitly whether your branch is fully pushed and your worktree has no uncommitted changes, and name any work that is not pushed.
+```
+
+Both blocks together form the required kickoff ending. Any change to either must be
+mirrored into the PrintFarmer and PrintFarmerDesktop workflow prompts in the same change,
+or the two will drift.
 
 ### The reap report is the ONLY mechanism
 
@@ -362,12 +372,18 @@ under a `🧹 Ready to reap` heading:
 1. its PR is **merged** (verified per the squash-merge-safe procedure below) **or
    definitively closed**;
 2. its linked issue is closed, or deliberately left open with a stated reason;
-3. it holds **no uncommitted or unpushed work**;
+3. its final status report **positively attests** that the branch is fully pushed and the
+   worktree has no uncommitted changes;
 4. it has **no other open PR** and no active work in flight.
 
-A session failing any of these is **not** ready to reap and MUST NOT be listed — an open
-PR, unpushed commits, or unverified merge state each disqualify it on their own. Report it
-under `Sessions retained for open PRs` instead. For each listed session give:
+Ralph cannot inspect another session's worktree, so criterion 3 is satisfied **only** by
+that session's own attestation (which the rider above requires it to make). **Unknown state
+is disqualifying** — if no attestation exists, or it reports unpushed work, the session is
+not ready to reap. Never infer a clean worktree from a merged PR.
+
+A session failing any criterion MUST NOT be listed — an open PR, unpushed or unattested
+work, or unverified merge state each disqualify it on their own. Report it under
+`Sessions retained` with the criterion it failed. For each session that does qualify, give:
 
 - session name
 - branch
@@ -443,7 +459,8 @@ Report each round, in this order:
 4. **Analysis gate** — issues newly gated, Dallas sessions dispatched, gates satisfied
 5. Queue order (issue numbers in dispatch order)
 6. Sessions dispatched this round
-7. Sessions retained for open PRs
+7. **Sessions retained** — sessions still owning an open PR, plus any completed session that
+   failed a reap readiness criterion, each naming the criterion it failed
 8. **`🧹 Ready to reap`** — every session meeting all four readiness criteria in SESSION
    LIFECYCLE AND REAPING, with session name, branch, PR number, and merged/closed state.
    Report only, for a human to act on; emit the heading every round even when the list is
@@ -475,8 +492,10 @@ When nothing is eligible, report exactly:
 - Using `delete_item` to reap a session. It works cross-session, which is exactly why it is
   off-limits to autopilot — a false merge call destroys unpushed work.
 - Listing a session under `🧹 Ready to reap` that fails any readiness criterion — an open
-  PR, unpushed work, or unverified merge state each disqualify it.
-- Writing a kickoff prompt that omits the verbatim report-and-stop clause.
+  PR, unpushed or unattested work, or unverified merge state each disqualify it.
+- Inferring a clean worktree from a merged PR instead of the session's own attestation.
+- Writing a kickoff prompt that omits either the verbatim report-and-stop clause or the
+  verbatim closed-PR-and-attestation rider.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
 - Treating "this branch's commits are not on `development`" as proof the work is unmerged —
   squash merges never put branch commits on `development`.
