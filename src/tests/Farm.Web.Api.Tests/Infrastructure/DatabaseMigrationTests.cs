@@ -221,6 +221,46 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task ProgramHelpersInitialization_LegacySqlitePreStepFailure_PropagatesMigrationFailure()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using (AppDbContext context = CreateCoreContext(connection))
+        {
+            _ = await context.Database.EnsureCreatedAsync();
+        }
+
+        await using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText =
+                """
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE "DeviceTokens";
+                CREATE TABLE "DeviceTokens" ("Id" TEXT NOT NULL CONSTRAINT "PK_DeviceTokens" PRIMARY KEY);
+                PRAGMA foreign_keys = ON;
+                """;
+            _ = await command.ExecuteNonQueryAsync();
+        }
+
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        _ = builder.Services.AddLogging();
+        _ = builder.Services.AddDbContext<AppDbContext>(
+            options => options.UseSqlite(
+                connection,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
+        _ = builder.Services.AddScoped(_ => Mock.Of<IDatabaseInitializer>());
+        _ = builder.Services.AddSingleton<IStartupStatus, StartupStatus>();
+        await using WebApplication app = builder.Build();
+
+        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+
+        DatabaseMigrationContractException exception =
+            (await initialize.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
+        exception.Code.Should().Be("migration_failed");
+        exception.InnerException.Should().NotBeNull();
+        exception.InnerException!.Message.Should().Contain("no such column");
+    }
+
+    [Fact]
     public async Task ProgramHelpersInitialization_SeedingFailure_RemainsNonFatal()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();

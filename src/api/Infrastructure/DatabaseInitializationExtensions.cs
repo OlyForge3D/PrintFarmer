@@ -65,10 +65,22 @@ public static class DatabaseInitializationExtensions
                     logger,
                     startupCts.Token);
             }
+            catch (DatabaseMigrationContractException)
+            {
+                throw;
+            }
             catch (OperationCanceledException)
             {
                 logger.LogError("[Startup] FATAL: Schema operation exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds.ToString());
                 throw;
+            }
+            catch (Exception ex)
+            {
+                throw new DatabaseMigrationContractException(
+                    "migration_failed",
+                    DatabaseMigrationTarget.Core,
+                    "A legacy SQLite schema upgrade failed before migration history could be recorded.",
+                    ex);
             }
 
             // STEP 2: Optionally skip the heavy initialization/seeding for test runners
