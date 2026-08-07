@@ -56,7 +56,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
         (RenewalRecordingPoller poller, WorkerStateService workerState) = CreatePoller(handler, logger, leaseDurationSeconds: 30);
         workerState.SetRegisteredService(serviceId, apiKey);
 
-        await poller.RunAsync(jobId, jobDirectory, leaseToken, leaseFence);
+        await poller.RunAsync(jobId, jobDirectory, leaseToken, leaseFence, workerState);
 
         CapturedRequest? renewal = handler.Captured
             .FirstOrDefault(request => request.Path.EndsWith("/renew-lease", StringComparison.Ordinal));
@@ -99,6 +99,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             jobDirectory,
             leaseToken,
             leaseFence,
+            workerState,
             configureDefaults: defaults =>
             {
                 defaults.Add(WorkerLeaseHeaders.WorkerKey, apiKey);
@@ -144,6 +145,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             jobDirectory,
             leaseToken,
             leaseFence,
+            workerState,
             configureDefaults: defaults =>
             {
                 defaults.Add(WorkerLeaseHeaders.WorkerKey, "stale-worker-api-key");
@@ -179,7 +181,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
         // The pipeline runs until the job's own token is cancelled, standing in for a long slice.
         poller.WaitForCancellation = true;
 
-        Func<Task> act = () => poller.RunAsync(jobId, jobDirectory, leaseToken, leaseFence);
+        Func<Task> act = () => poller.RunAsync(jobId, jobDirectory, leaseToken, leaseFence, workerState);
 
         // Losing the lease is a handled terminal outcome, not an unhandled crash.
         _ = await act.Should().NotThrowAsync();
@@ -215,11 +217,17 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
 
         StubHandler handler = new(HttpStatusCode.NoContent);
         RecordingLogger<HttpJobPollerService> logger = new();
-        (RenewalRecordingPoller poller, _) = CreatePoller(handler, logger, leaseDurationSeconds: 30);
+        (RenewalRecordingPoller poller, WorkerStateService workerState) =
+            CreatePoller(handler, logger, leaseDurationSeconds: 30);
         poller.PipelineWaitTimeout = TimeSpan.FromSeconds(1);
 
         // No SetRegisteredService call: the worker has no credential to present.
-        await poller.RunAsync(jobId, jobDirectory, Guid.NewGuid(), leaseFence: 1);
+        await poller.RunAsync(
+            jobId,
+            jobDirectory,
+            Guid.NewGuid(),
+            leaseFence: 1,
+            workerStateService: workerState);
 
         _ = handler.Captured.Should().BeEmpty("an unauthenticated worker must not emit any job mutation");
         _ = Directory.Exists(jobDirectory).Should().BeTrue("nothing was acknowledged, so local work is retained");
@@ -273,7 +281,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
         return jobDirectory;
     }
 
-    private static (RenewalRecordingPoller Poller, WorkerStateService WorkerState) CreatePoller(
+    private (RenewalRecordingPoller Poller, WorkerStateService WorkerState) CreatePoller(
         StubHandler handler,
         RecordingLogger<HttpJobPollerService> logger,
         int leaseDurationSeconds)
@@ -286,6 +294,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Worker:LeaseDurationSeconds"] = leaseDurationSeconds.ToString(CultureInfo.InvariantCulture),
+                ["Worker:WorkingDirectory"] = _workingDirectory,
             })
             .Build();
 
@@ -329,9 +338,11 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             string jobDirectory,
             Guid leaseToken,
             long leaseFence,
+            IWorkerStateService workerStateService,
             Action<System.Net.Http.Headers.HttpRequestHeaders>? configureDefaults = null)
         {
             _jobDirectory = jobDirectory;
+            workerStateService.SetJobWorkDirectory(jobId, jobDirectory);
             using HttpClient client = new(handler, disposeHandler: false)
             {
                 BaseAddress = new Uri("http://localhost"),
