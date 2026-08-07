@@ -8,6 +8,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Xunit;
+using Xunit.Sdk;
 
 namespace Farm.Web.Api.Tests.Services.Statistics;
 
@@ -126,7 +127,7 @@ public class StatisticsServicePerformanceTests
         Assert.Equal(0.7m, result.TotalCost);
         Assert.Equal(17.5d, result.TotalFilamentGrams);
         Assert.Equal(3d, result.TotalPrintHours);
-        Assert.Equal(2, interceptor.NonSchemaCommandCount);
+        Assert.Equal(2, interceptor.CommandCount);
     }
 
     [Fact]
@@ -155,16 +156,45 @@ public class StatisticsServicePerformanceTests
         Assert.Equal(0m, result.TotalCost);
         Assert.Equal(0d, result.TotalFilamentGrams);
         Assert.Equal(0d, result.TotalPrintHours);
-        Assert.Equal(2, interceptor.NonSchemaCommandCount);
+        Assert.Equal(2, interceptor.CommandCount);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    public void SummaryAggregate_TranslatesAcrossSupportedProviders(string provider)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+        switch (provider)
+        {
+            case "sqlite":
+                optionsBuilder.UseSqlite("Data Source=:memory:");
+                break;
+            case "postgres":
+                optionsBuilder.UseNpgsql("Host=localhost;Database=printfarmer");
+                break;
+            case "sqlserver":
+                optionsBuilder.UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=printfarmer");
+                break;
+            default:
+                throw new XunitException($"Unsupported provider test case: {provider}");
+        }
+
+        using var db = new AppDbContext(optionsBuilder.Options);
+        string sql = StatisticsService.BuildSummaryAggregateQuery(db.Set<PrintJob>()).ToQueryString();
+
+        Assert.Contains("GROUP BY", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class CommandCountingInterceptor : DbCommandInterceptor
     {
-        public int NonSchemaCommandCount { get; private set; }
+        public int CommandCount { get; private set; }
 
         public void Reset()
         {
-            NonSchemaCommandCount = 0;
+            CommandCount = 0;
         }
 
         public override InterceptionResult<DbDataReader> ReaderExecuting(
@@ -172,7 +202,7 @@ public class StatisticsServicePerformanceTests
             CommandEventData eventData,
             InterceptionResult<DbDataReader> result)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
 
             return result;
         }
@@ -183,7 +213,7 @@ public class StatisticsServicePerformanceTests
             InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
 
             return ValueTask.FromResult(result);
         }
@@ -193,7 +223,7 @@ public class StatisticsServicePerformanceTests
             CommandEventData eventData,
             InterceptionResult<object> result)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
             return result;
         }
 
@@ -203,7 +233,7 @@ public class StatisticsServicePerformanceTests
             InterceptionResult<object> result,
             CancellationToken cancellationToken = default)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
             return ValueTask.FromResult(result);
         }
 
@@ -212,7 +242,7 @@ public class StatisticsServicePerformanceTests
             CommandEventData eventData,
             InterceptionResult<int> result)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
             return result;
         }
 
@@ -222,7 +252,7 @@ public class StatisticsServicePerformanceTests
             InterceptionResult<int> result,
             CancellationToken cancellationToken = default)
         {
-            NonSchemaCommandCount++;
+            CommandCount++;
             return ValueTask.FromResult(result);
         }
     }

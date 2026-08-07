@@ -53,17 +53,7 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        var aggregate = await query
-            .GroupBy(_ => 1)
-            .Select(g => new
-            {
-                TotalJobs = g.Count(),
-                Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
-                Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
-                Cancelled = g.Count(j => j.Status == PrintJobStatus.Cancelled),
-                TotalCost = g.Sum(j => j.ActualCost ?? 0m),
-                TotalFilamentGrams = g.Sum(j => j.ActualFilamentUsage ?? 0d),
-            })
+        StatisticsSummaryAggregate? aggregate = await BuildSummaryAggregateQuery(query)
             .SingleOrDefaultAsync(ct);
 
         // TimeSpan.Ticks is not translated consistently across supported providers, so stream
@@ -99,6 +89,27 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             TotalPrintHours = Math.Round(totalPrintHours, 1),
         };
     }
+
+    internal static IQueryable<StatisticsSummaryAggregate> BuildSummaryAggregateQuery(IQueryable<PrintJob> query)
+    {
+        return query
+            .GroupBy(_ => true)
+            .Select(g => new StatisticsSummaryAggregate(
+                g.Count(),
+                g.Count(j => j.Status == PrintJobStatus.Completed),
+                g.Count(j => j.Status == PrintJobStatus.Failed),
+                g.Count(j => j.Status == PrintJobStatus.Cancelled),
+                g.Sum(j => j.ActualCost ?? 0m),
+                g.Sum(j => j.ActualFilamentUsage ?? 0d)));
+    }
+
+    internal sealed record StatisticsSummaryAggregate(
+        int TotalJobs,
+        int Completed,
+        int Failed,
+        int Cancelled,
+        decimal TotalCost,
+        double TotalFilamentGrams);
 
     public async Task<List<DailyJobCountDto>> GetJobsOverTimeAsync(int? days = null, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {

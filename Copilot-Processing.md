@@ -60,4 +60,5 @@ Selected #1 because it removes five round trips from a frequently used analytics
 - `dotnet test .\tests\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj -c Debug --no-restore --filter 'FullyQualifiedName~StatisticsDateRangeTests|FullyQualifiedName~StatisticsServicePerformanceTests'`
 - Result: 18 tests passed.
 - Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics` asserts all status/total fields, the empty-result path, and exactly two database commands across reader/scalar/non-query interception. Print-time values are streamed to avoid an unbounded list while retaining provider-safe `TimeSpan` handling.
-- Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, and replaced print-time list materialization with scalar streaming in response to Hicks/Vasquez findings.
+- Provider proxy: `SummaryAggregate_TranslatesAcrossSupportedProviders` compiles the aggregate query for SQLite, PostgreSQL, and SQL Server without opening a database connection.
+- Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, replaced print-time list materialization with scalar streaming, and changed the constant grouping key to a provider-neutral boolean in response to Hicks/Vasquez findings.
