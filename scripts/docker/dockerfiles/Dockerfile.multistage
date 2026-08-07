@@ -617,7 +617,7 @@ USER appuser
 # Set environment
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+ENV Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
 ENV Worker__WorkingDirectory=/app/temp
 # Inject actual OrcaSlicer version for registration (overrides appsettings default).
 # Both keys are set from the single ORCASLICER_VERSION build arg so worker capability

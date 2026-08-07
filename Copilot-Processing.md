@@ -71,3 +71,27 @@ fully valid `bg-pf-missing` utility, so the regression now distinguishes
 syntax-aware AST scanning from lexical scanning. Preserved the positive
 legitimate string utility regression. The focused Vitest suite passed all 27
 tests, and focused ESLint completed successfully.
+
+## Issue #1231 Tracking
+
+### Request
+
+Fix the OrcaSlicer worker crash-loop caused by `Worker__OrcaSlicerPath` targeting
+the short AppRun wrapper instead of `/opt/orcaslicer/bin/orca-slicer`. Audit the
+Docker templates, compose generation, worker detector, slicing pipeline, and
+focused regression coverage, then complete the required PR and merge gates.
+
+### Action Plan
+
+- [x] Inspect issue, repository instructions, Docker template hierarchy, compose
+  generation, worker detector/pipeline, and existing tests.
+- [x] Update canonical Docker and compose sources and synchronize required copies.
+- [x] Add or update focused worker and deployment-generation regression coverage.
+- [x] Run focused validation and fix regressions.
+- [ ] Commit, push, open the PR with `Closes #1231`, and verify linkage.
+- [ ] Obtain unanimous Bishop/Hicks/Vasquez review and authoritative exact-head verdict.
+- [ ] Wait for CI, merge safely, and verify PR and issue closure.
+
+### Summary
+
+Pending.

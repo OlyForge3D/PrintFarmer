@@ -201,7 +201,7 @@ test_orcaslicer_worker_config() {
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend-runtime target"
     
     # Validate worker environment configuration
-    assert_contains "$compose_content" "Worker__OrcaSlicerPath" "Should set OrcaSlicer path"
+    assert_contains "$compose_content" "Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer" "Should launch the real OrcaSlicer binary"
     assert_contains "$compose_content" "Worker__WorkerId" "Should set worker ID"
     # Queue name may be present as Worker__QueueName or the worker may use API-based orchestration
     if echo "$compose_content" | grep -q "Worker__QueueName" || echo "$compose_content" | grep -q "Worker__ApiBaseUrl" || echo "$compose_content" | grep -q "SlicerOrchestrator__Workers__OrcaSlicer" || echo "$compose_content" | grep -q "ORCA_WORKER_ENDPOINT"; then

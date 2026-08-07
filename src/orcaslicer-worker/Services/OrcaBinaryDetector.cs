@@ -23,9 +23,11 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
     /// startup gate verifies the SAME executable that jobs will invoke
     /// (issue #578 / Hicks R4 finding #4).
     /// </summary>
-    private const string DefaultBinaryPath = "/opt/orcaslicer/bin/orca-slicer";
+    internal const string DefaultBinaryPath = "/opt/orcaslicer/bin/orca-slicer";
 
     private readonly string _binaryPath;
+
+    internal string BinaryPath => _binaryPath;
 
     public OrcaBinaryDetector(IConfiguration configuration)
     {
