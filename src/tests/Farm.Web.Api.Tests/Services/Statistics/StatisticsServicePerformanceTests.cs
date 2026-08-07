@@ -183,9 +183,14 @@ public class StatisticsServicePerformanceTests
 
         using var db = new AppDbContext(optionsBuilder.Options);
         string sql = StatisticsService.BuildSummaryAggregateQuery(db.Set<PrintJob>()).ToQueryString();
+        string ticksSql = db.Set<PrintJob>()
+            .Where(j => j.ActualPrintTime.HasValue)
+            .Select(j => j.ActualPrintTime!.Value.Ticks)
+            .ToQueryString();
 
         Assert.Contains("GROUP BY", sql, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ActualPrintTime", ticksSql, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class CommandCountingInterceptor : DbCommandInterceptor

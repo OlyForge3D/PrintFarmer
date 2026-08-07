@@ -53,13 +53,13 @@ Perform an evidence-based cross-stack performance audit, rank ten concrete oppor
 | 9 | Lazy-load additional slicer profile schemas only after selection | Medium | Medium | Low | Network transfer and route chunk size |
 | 10 | Stream large admin export responses instead of materializing full collections | Medium | High | Medium | Peak allocation and response timing |
 
-Selected #1 because it removes five round trips from a frequently used analytics KPI endpoint with no contract, schema, or authorization change.
+Selected #1 because it removes five round trips from a frequently used analytics KPI endpoint with no contract, schema, or authorization change. The provider-neutral `TimeSpan` conversion remains a scalar stream in the second round trip; a numeric companion-column migration would be a separate higher-effort follow-up.
 
 ### Validation Evidence
 
 - `dotnet test .\tests\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj -c Debug --no-restore --filter 'FullyQualifiedName~StatisticsDateRangeTests|FullyQualifiedName~StatisticsServicePerformanceTests'`
-- Result: 18 tests passed.
-- Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics` asserts all status/total fields, the empty-result path, and exactly two database commands across reader/scalar/non-query interception. Print-time values are streamed to avoid an unbounded list while retaining provider-safe `TimeSpan` handling.
+- Result: 22 tests passed.
+- Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics` asserts all status/total fields, the empty-result path, and exactly two database commands across reader/scalar/non-query interception. Print-time values are streamed to avoid an unbounded list while retaining provider-safe `TimeSpan` handling; the second command remains row-oriented by design.
 - Provider proxy: `SummaryAggregate_TranslatesAcrossSupportedProviders` compiles the aggregate query for SQLite, PostgreSQL, and SQL Server without opening a database connection.
-- Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, replaced print-time list materialization with scalar streaming, and changed the constant grouping key to a provider-neutral boolean in response to Hicks/Vasquez findings.
-- Final review follow-up: changed the grouping expression to use the non-empty primary-key invariant (`Id != Guid.Empty`) so SQL Server receives a column-bearing `GROUP BY` expression; focused tests: 22 passed; full solution build: 0 warnings, 0 errors.
+- Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, replaced print-time list materialization with scalar streaming, and changed the constant grouping key to a provider-safe column-bearing predicate in response to Hicks/Vasquez findings.
+- Final review follow-up: changed the grouping expression to use the non-empty primary-key invariant (`Id != Guid.Empty`) so SQL Server receives a column-bearing `GROUP BY` expression, folded any defensive extra group in memory, and compiled both aggregate and ticks projections for all supported providers; focused tests: 22 passed; full solution build: 0 warnings, 0 errors.

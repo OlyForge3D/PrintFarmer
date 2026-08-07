@@ -53,8 +53,8 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        StatisticsSummaryAggregate? aggregate = await BuildSummaryAggregateQuery(query)
-            .SingleOrDefaultAsync(ct);
+        List<StatisticsSummaryAggregate> aggregateParts = await BuildSummaryAggregateQuery(query)
+            .ToListAsync(ct);
 
         // TimeSpan.Ticks is not translated consistently across supported providers, so stream
         // only the scalar values instead of materializing the full result set in a list.
@@ -70,10 +70,10 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
 
         double totalPrintHours = TimeSpan.FromTicks(totalPrintTimeTicks).TotalHours;
 
-        int totalJobs = aggregate?.TotalJobs ?? 0;
-        int completed = aggregate?.Completed ?? 0;
-        int failed = aggregate?.Failed ?? 0;
-        int cancelled = aggregate?.Cancelled ?? 0;
+        int totalJobs = aggregateParts.Sum(part => part.TotalJobs);
+        int completed = aggregateParts.Sum(part => part.Completed);
+        int failed = aggregateParts.Sum(part => part.Failed);
+        int cancelled = aggregateParts.Sum(part => part.Cancelled);
         int finishedJobs = completed + failed + cancelled;
         double successRate = finishedJobs > 0 ? (double)completed / finishedJobs * 100 : 0;
 
@@ -84,14 +84,16 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             FailedJobs = failed,
             CancelledJobs = cancelled,
             SuccessRate = Math.Round(successRate, 1),
-            TotalCost = aggregate?.TotalCost ?? 0m,
-            TotalFilamentGrams = Math.Round(aggregate?.TotalFilamentGrams ?? 0d, 1),
+            TotalCost = aggregateParts.Sum(part => part.TotalCost),
+            TotalFilamentGrams = Math.Round(aggregateParts.Sum(part => part.TotalFilamentGrams), 1),
             TotalPrintHours = Math.Round(totalPrintHours, 1),
         };
     }
 
     internal static IQueryable<StatisticsSummaryAggregate> BuildSummaryAggregateQuery(IQueryable<PrintJob> query)
     {
+        // The key must reference a column because SQL Server rejects constant-only GROUP BY
+        // expressions. PrintJob IDs are generated non-empty keys, so this remains one bucket.
         return query
             .GroupBy(j => j.Id != Guid.Empty)
             .Select(g => new StatisticsSummaryAggregate(
