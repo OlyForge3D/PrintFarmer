@@ -426,6 +426,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       exports.set('Button', BUTTON_COMPONENT);
       exports.set('ControlPadButton', CONTROL_PAD_BUTTON_COMPONENT);
     } else if (moduleName === BUTTON_MODULE || resolvedImport === buttonPath) {
+      exports.set('default', BUTTON_COMPONENT);
       exports.set('Button', BUTTON_COMPONENT);
     } else if (
       moduleName === CONTROL_PAD_BUTTON_MODULE ||
@@ -451,7 +452,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       if (
         !ts.isImportDeclaration(statement) ||
         !ts.isStringLiteral(statement.moduleSpecifier) ||
-        !statement.importClause?.namedBindings
+        !statement.importClause
       ) {
         continue;
       }
@@ -459,7 +460,13 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       const moduleExports = exportsForModule(statement.moduleSpecifier.text, fileName);
       if (moduleExports.size === 0) continue;
 
+      if (statement.importClause.name) {
+        const component = moduleExports.get('default');
+        if (component) identifiers.set(statement.importClause.name.text, component);
+      }
+
       const bindings = statement.importClause.namedBindings;
+      if (!bindings) continue;
       if (ts.isNamespaceImport(bindings)) {
         namespaces.set(bindings.name.text, moduleExports);
         continue;
@@ -486,6 +493,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     let extendsButtonProps = false;
     let typedComponent = false;
     let forwardsVariant = false;
+    let defaultsToRegisteredVariant = false;
     let forwardsClassName = false;
     let forwardsRest = false;
 
@@ -500,6 +508,15 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       if (ts.isFunctionDeclaration(node) && node.name?.text === 'ControlPadButton') {
         typedComponent =
           node.parameters[0]?.type?.getText(sf) === 'ControlPadButtonProps';
+        const parameterName = node.parameters[0]?.name;
+        if (parameterName && ts.isObjectBindingPattern(parameterName)) {
+          defaultsToRegisteredVariant = parameterName.elements.some(
+            (element) =>
+              element.name.getText(sf) === 'variant' &&
+              element.initializer?.getText(sf) ===
+                `'${CONTROL_PAD_BUTTON_COMPONENT.defaultVariant}'`,
+          );
+        }
       }
 
       if (
@@ -525,6 +542,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     return [
       !extendsButtonProps && 'ControlPadButtonProps must extend ButtonProps',
       !typedComponent && 'ControlPadButton must consume ControlPadButtonProps',
+      !defaultsToRegisteredVariant &&
+        `ControlPadButton must default variant to ${CONTROL_PAD_BUTTON_COMPONENT.defaultVariant}`,
       !forwardsVariant && 'ControlPadButton must forward variant to Button',
       !forwardsClassName && 'ControlPadButton must forward className to Button',
       !forwardsRest && 'ControlPadButton must spread remaining ButtonProps onto Button',
@@ -1278,6 +1297,17 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     expect(buttonTags(source, 'Alias.tsx', { literalOnly: true })).toHaveLength(0);
     const [tag] = buttonTags(source, 'Alias.tsx', { allowImplicitButton: false });
+    expect(tag.disableable && isUnmasked(tag) && unguardedHover(tag.className)).toBe(true);
+  });
+
+  it('preserves default-imported shared Buttons in the production scan', () => {
+    const source = [
+      "import Button from '@/common/components/ui/Button';",
+      '<Button variant="subtle" disabled className="hover:bg-pf-bg-0">x</Button>',
+    ].join('\n');
+
+    expect(buttonTags(source, 'DefaultImport.tsx', { literalOnly: true })).toHaveLength(1);
+    const [tag] = buttonTags(source, 'DefaultImport.tsx', { allowImplicitButton: false });
     expect(tag.disableable && isUnmasked(tag) && unguardedHover(tag.className)).toBe(true);
   });
 
