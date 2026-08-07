@@ -1145,6 +1145,11 @@ The Phase 2 implementer should be aware of these deltas between the existing the
 4. **New tokens**. `--pf-space-*`, `--pf-radius-*`, `--pf-shadow-*`, `--pf-duration-*`, `--pf-ease-*`, `--pf-z-*`, `--pf-glow-*`, `--pf-modal-bg`, status triples for `printing`/`paused`/`error`/`idle`, `--pf-text-inverse`, `--pf-text-on-accent`, `--pf-accent-fg`, `--pf-selection-*`, `--pf-validation-warning-*`, and the full `info` semantic group are all new.
 5. **`forge` and `github-dark` themes**. ✅ Resolved. `github-dark` and `printfarmer-dark` were removed and now migrate to `dark`; both had been rendering the `dark` palette anyway, since their stylesheets sat in a cascade layer they could never win from. `forge` was migrated into `src/design-system/themes/forge.css` as a first-class supported theme with the full token contract — unlike the other two it carried real visual identity (heading and progress glows) that did render.
 6. **Default theme**. ✅ Resolved. The default is `dark`. There is no bare-`:root` default any more — `index.html` always sets an explicit `data-theme`, which is what made the old default so hard to reason about.
+7. **Print is an output theme**. `src/styles/print.css` is intentionally imported
+   unlayered after every selectable theme. Its light, ink-friendly token palette
+   must remain last so print media overrides theme colors. Use
+   `data-print-hidden` only for unequivocal application chrome and
+   `data-pf-card` for conservative card pagination.
 
 ---
 

@@ -31,6 +31,7 @@ export const Card: React.FC<CardProps> & {
 
   return (
     <div
+      data-pf-card
       className={clsx(
         'bg-pf-panel border border-pf-border overflow-hidden',
         !hasRadiusOverride(className) && 'rounded-lg',

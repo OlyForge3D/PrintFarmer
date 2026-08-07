@@ -417,6 +417,7 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
 
   return createPortal(
     <div
+      data-print-hidden
       className={clsx(
         'fixed inset-0 z-[60] flex items-start justify-center px-4 pt-[12vh] transition-opacity motion-reduce:transition-none',
         isVisible ? 'opacity-100' : 'opacity-0',

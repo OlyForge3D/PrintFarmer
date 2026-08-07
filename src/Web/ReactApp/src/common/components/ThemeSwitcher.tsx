@@ -309,7 +309,7 @@ export function ThemeSwitcher() {
   }, [moveSelection]);
 
   return (
-    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start lg:gap-5">
+    <div data-print-hidden className="lg:grid lg:grid-cols-[minmax(0,1fr)_300px] lg:items-start lg:gap-5">
       <div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" role="radiogroup" aria-label="Color theme">
           {THEME_OPTIONS.map((option, index) => {

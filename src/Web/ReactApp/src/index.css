@@ -11,6 +11,8 @@
 @import './design-system/themes/voron.css';
 @import './design-system/themes/farm.css';
 @import './design-system/themes/forge.css';
+/* Must remain unlayered and last: print values override every selectable theme. */
+@import './styles/print.css';
 
 @theme {
   /* PrintFarmer Colors — primary backgrounds */
