@@ -154,6 +154,52 @@ internal static class ArtifactStorageFileSystem
             new Win32Exception(error));
     }
 
+    internal static FileStream CreateStagingStream(string stagingPath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new FileStream(
+                stagingPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                FileOptions.Asynchronous | FileOptions.WriteThrough);
+        }
+
+        string stagingDirectory = Path.GetDirectoryName(stagingPath) ??
+            throw new IOException(
+                "The artifact staging path has no parent directory.");
+        int fileDescriptor = OpenAnonymousLinuxFile(
+            stagingDirectory,
+            LinuxAnonymousFileFlags,
+            LinuxOwnerReadWrite);
+        if (fileDescriptor < 0)
+        {
+            int error = Marshal.GetLastPInvokeError();
+            throw new IOException(
+                "Failed to create an anonymous artifact staging file.",
+                new Win32Exception(error));
+        }
+
+        var handle = new SafeFileHandle(
+            new IntPtr(fileDescriptor),
+            ownsHandle: true);
+        try
+        {
+            return new FileStream(
+                handle,
+                FileAccess.ReadWrite,
+                bufferSize: 81920,
+                isAsync: false);
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
+    }
+
     internal static bool TryGetProtocolArtifactId(string path, out Guid artifactId)
     {
         string fileName = Path.GetFileName(path);
@@ -363,6 +409,8 @@ internal static class ArtifactStorageFileSystem
 
     private const int LinuxCurrentWorkingDirectory = -100;
     private const int LinuxEmptyPath = 0x1000;
+    private const int LinuxAnonymousFileFlags = 0x4B0002;
+    private const uint LinuxOwnerReadWrite = 0x180;
 
     [DllImport(
         "libc",
@@ -380,6 +428,21 @@ internal static class ArtifactStorageFileSystem
         int newDirectoryFileDescriptor,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath,
         int flags);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "open",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [SuppressMessage(
+        "Security",
+        "CA2101:Specify marshaling for P/Invoke string arguments",
+        Justification = "POSIX open paths are explicitly marshaled as UTF-8.")]
+    private static extern int OpenAnonymousLinuxFile(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mode);
 }
 
 internal sealed class ArtifactWriteLease : IDisposable
@@ -443,13 +506,8 @@ internal sealed class ArtifactWriteLease : IDisposable
                 "The artifact staging stream is already open.");
         }
 
-        _stagingStream = new FileStream(
-            StagingPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 81920,
-            FileOptions.Asynchronous | FileOptions.WriteThrough);
+        _stagingStream =
+            ArtifactStorageFileSystem.CreateStagingStream(StagingPath);
         return _stagingStream;
     }
 
