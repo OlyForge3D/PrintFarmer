@@ -3,7 +3,7 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * User Management Admin E2E Tests — Emulator-backed
  *
- * Tests the /users route:
+ * Tests the canonical Admin > Users > Accounts route:
  *   - User list display with search
  *   - Create user modal (username, email, password, role)
  *   - Edit/delete users
@@ -19,7 +19,7 @@ test.describe('Admin Users — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/users');
+    await page.goto('/admin/manage?tab=users&sub=accounts');
     await page.waitForLoadState('networkidle');
   });
 

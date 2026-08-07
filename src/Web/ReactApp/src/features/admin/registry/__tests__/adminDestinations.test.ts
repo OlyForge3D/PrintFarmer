@@ -77,6 +77,10 @@ describe('adminDestinations registry', () => {
     expect(overviewEntries[0].path).toBe('/admin');
   });
 
+  it('uses the canonical Locations index route', () => {
+    expect(getDestinationById('hw-locations')?.path).toBe('/locations');
+  });
+
   it('has at least one hub-tile destination per operational group', () => {
     const requiredHubGroups: AdminDestinationGroup[] = [
       'operations',

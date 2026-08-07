@@ -281,8 +281,7 @@ function AuthenticatedAppRoutes() {
         <Route path="analytics" element={lazyRoute(<LazyAnalyticsHubPage />)} />
         <Route path="scheduling" element={lazyRoute(<LazySchedulingPage />)} />
         <Route path="locations" element={<Outlet />}>
-          <Route index element={<Navigate to="dashboard" replace />} />
-          <Route path="dashboard" element={lazyRoute(<LazyLocationDashboardPage />)} />
+          <Route index element={lazyRoute(<LazyLocationDashboardPage />)} />
         </Route>
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
         <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />

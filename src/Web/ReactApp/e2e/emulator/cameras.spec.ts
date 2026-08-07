@@ -3,7 +3,7 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * Cameras Page E2E Tests — Emulator-backed
  *
- * Tests the /cameras and /cameras/:tabId routes:
+ * Tests the canonical System Settings camera route:
  *   - Camera grid display with mock camera URLs from emulator
  *   - View/Manage tab switching
  *   - Camera cards with health badges
@@ -18,7 +18,7 @@ test.describe('Cameras — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/cameras');
+    await page.goto('/admin/settings?tab=hardware&sub=cameras');
     await page.waitForLoadState('networkidle');
   });
 

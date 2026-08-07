@@ -381,8 +381,8 @@ canonical slice-job list is
 `/admin/manage?tab=operations&sub=workers&workerTab=jobs`.
 
 Default children within a current route hierarchy use React Router index routes. For
-example, `/locations` selects `/locations/dashboard`; this is current navigation
-behavior, not a compatibility redirect.
+example, the Locations dashboard renders at the `/locations` index route without
+rewriting the URL.
 
 ## File Locations
 

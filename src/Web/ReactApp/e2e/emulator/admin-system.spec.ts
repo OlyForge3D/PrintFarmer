@@ -3,9 +3,7 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * Admin System Dashboard & Data Management E2E Tests — Emulator-backed
  *
- * Tests the admin system routes:
- *   /admin/system — System metrics, logs, monitoring, connections, file health, services
- *   /admin/data   — Export, backup status, download logs
+ * Tests the canonical Admin Operations and Data routes.
  */
 
 test.describe('Admin System Dashboard — Emulator', () => {
@@ -30,11 +28,11 @@ test.describe('Admin System Dashboard — Emulator', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // /admin/system
+  // Admin Operations
   // ---------------------------------------------------------------------------
 
   test('system dashboard loads with tabs', async ({ page }) => {
-    await page.goto('/admin/system');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -51,7 +49,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('logs tab displays log content', async ({ page }) => {
-    await page.goto('/admin/system?tab=logs');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -66,7 +64,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('monitoring tab shows metrics', async ({ page }) => {
-    await page.goto('/admin/system?tab=monitoring');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -77,7 +75,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('connections tab shows connection health', async ({ page }) => {
-    await page.goto('/admin/system?tab=connections');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -93,7 +91,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('file health tab loads', async ({ page }) => {
-    await page.goto('/admin/system?tab=file-health');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -104,7 +102,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('background services tab shows service status', async ({ page }) => {
-    await page.goto('/admin/system?tab=services');
+    await page.goto('/admin/manage?tab=operations&sub=workers');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -120,7 +118,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('can switch between tabs', async ({ page }) => {
-    await page.goto('/admin/system');
+    await page.goto('/admin/manage?tab=operations&sub=status');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -141,11 +139,11 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // /admin/data
+  // Admin Data
   // ---------------------------------------------------------------------------
 
   test('data management page loads', async ({ page }) => {
-    await page.goto('/admin/data');
+    await page.goto('/admin/manage?tab=data&sub=management');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -161,7 +159,7 @@ test.describe('Admin System Dashboard — Emulator', () => {
   });
 
   test('data management has export functionality', async ({ page }) => {
-    await page.goto('/admin/data');
+    await page.goto('/admin/manage?tab=data&sub=management');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -175,10 +173,9 @@ test.describe('Admin System Dashboard — Emulator', () => {
 
   test('no critical JS errors across system pages', async ({ page }) => {
     const systemPages = [
-      { path: '/admin/system', name: 'System Dashboard' },
-      { path: '/admin/system?tab=logs', name: 'System Logs' },
-      { path: '/admin/system?tab=monitoring', name: 'System Monitoring' },
-      { path: '/admin/data', name: 'Data Management' },
+      { path: '/admin/manage?tab=operations&sub=status', name: 'System Dashboard' },
+      { path: '/admin/manage?tab=operations&sub=workers', name: 'System Workers' },
+      { path: '/admin/manage?tab=data&sub=management', name: 'Data Management' },
     ];
 
     for (const pageConfig of systemPages) {

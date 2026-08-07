@@ -159,7 +159,7 @@ describe('App canonical admin routes', () => {
 
     expect(await screen.findByText('LocationDashboardMock')).toBeInTheDocument();
     await waitFor(() => {
-      expect(window.location.pathname).toBe('/locations/dashboard');
+      expect(window.location.pathname).toBe('/locations');
     });
   });
 });

@@ -272,12 +272,9 @@ describe('admin destination contract (#1016)', () => {
       const resolved = resolveSettingsNavigationTarget(tab, sub, routeScope);
 
       // Deliberately an identity check, not "resolves to *something*".
-      // `resolveSettingsNavigationTarget` remaps transitional aliases (`system` →
-      // `operations`, `notifications` → `profile`) and the with-subpage table,
-      // so a registry entry written against an alias would land somewhere other
-      // than the tab it names — reachable, but not where the tile says. That
-      // fails here, which is the intent: registry paths must use canonical
-      // category ids and reserve the alias table for transitional inputs.
+      // A non-canonical tab silently falls back to the route scope's default,
+      // landing somewhere other than the tab named by the tile. This identity
+      // assertion ensures registry paths use canonical category ids.
       expect(resolved.categoryId).toBe(tab);
       if (sub) {
         expect(resolved.subPageId).toBe(sub);
