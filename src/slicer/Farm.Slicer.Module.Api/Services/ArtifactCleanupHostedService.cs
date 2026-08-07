@@ -11,7 +11,7 @@ using Microsoft.Extensions.Options;
 namespace Farm.Slicer.Module.Api.Services;
 
 /// <summary>
-/// Background hosted service that periodically runs artifact cleanup.
+/// Background hosted service that runs artifact reconciliation at startup and cleanup periodically.
 /// </summary>
 public class ArtifactCleanupHostedService(
     IServiceProvider serviceProvider,
@@ -33,10 +33,7 @@ public class ArtifactCleanupHostedService(
         {
             try
             {
-                // Wait for the configured interval before first run
-                await Task.Delay(TimeSpan.FromHours(_settings.CleanupIntervalHours), stoppingToken);
-
-                _logger.LogInformation("Running scheduled artifact cleanup");
+                _logger.LogInformation("Running artifact cleanup");
 
                 // Create a scope to resolve scoped dependencies (DbContext)
                 using IServiceScope scope = _serviceProvider.CreateScope();
@@ -56,6 +53,18 @@ public class ArtifactCleanupHostedService(
                 _logger.LogError(ex, "Error during artifact cleanup cycle");
 
                 // Continue running despite errors
+            }
+
+            try
+            {
+                await Task.Delay(
+                    TimeSpan.FromHours(_settings.CleanupIntervalHours),
+                    stoppingToken);
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Artifact cleanup service is stopping");
+                break;
             }
         }
 
