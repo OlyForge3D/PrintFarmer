@@ -33,13 +33,14 @@ vi.mock('@/features/models3d/components/PrintablesBrowserModal', () => {
   };
 });
 
-vi.mock('@/features/models3d/components/PrintablesImportModal', () => {
+vi.mock('@/features/models3d/components/PrintablesImportModal', async () => {
   moduleLoads.printablesImport();
+  const { Modal } = await import('@/common/components/modals/Modal');
   return {
-    PrintablesImportModal: ({ onClose }: { onClose: () => void }) => (
-      <div role="dialog" aria-label="Printables import mock">
+    PrintablesImportModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => (
+      <Modal isOpen={isOpen} onClose={onClose} title="Printables import mock">
         <button type="button" onClick={onClose}>Close import</button>
-      </div>
+      </Modal>
     ),
   };
 });
