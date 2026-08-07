@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createPortal } from 'react-dom';
 import { describe, it, expect, vi } from 'vitest';
 import { DataTable, DataTableColumn } from '../DataTable';
 
@@ -203,6 +204,192 @@ describe('DataTable', () => {
     expect(onRowSelect).not.toHaveBeenCalled();
   });
 
+  it('should keep row activation bounded when the table has an interactive ancestor', () => {
+    const onRowSelect = vi.fn();
+
+    render(
+      <div role="button">
+        <DataTable
+          data={mockData}
+          columns={mockColumns}
+          getRowKey={(item) => item.id}
+          onRowSelect={onRowSelect}
+        />
+      </div>
+    );
+
+    fireEvent.click(screen.getByText('Item B'));
+
+    expect(onRowSelect).toHaveBeenCalledWith(mockData[1], 1);
+  });
+
+  it('should not select a row when a portaled descendant is clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => createPortal(
+        <button type="button">Portal action {item.name}</button>,
+        document.body,
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Portal action Item A' }));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should not select a row when a nested label or its control is clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => (
+        <label>
+          <input type="checkbox" aria-label={`Select ${item.name}`} />
+          <span>Toggle {item.name}</span>
+        </label>
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Toggle Item A'));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select Item A' }));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should not select a row when editable or explicitly tabbable descendants are clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => (
+        <>
+          <span contentEditable suppressContentEditableWarning>
+            Edit {item.name}
+          </span>
+          <span tabIndex={0}>Open {item.name}</span>
+        </>
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Edit Item A'));
+    fireEvent.click(screen.getByText('Open Item A'));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should not select a row when a tabbable SVG descendant is clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => (
+        <svg tabIndex={0} aria-label={`Inspect ${item.name}`}>
+          <title>Inspect {item.name}</title>
+        </svg>
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Inspect Item A'));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should preserve row activation for a descendant removed from the tab order', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'content',
+      header: 'Content',
+      render: (item) => <span tabIndex={-1}>Details {item.name}</span>,
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByText('Details Item A'));
+
+    expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
+  });
+
+  it.each([
+    'checkbox',
+    'combobox',
+    'menuitem',
+    'radio',
+    'slider',
+    'switch',
+    'tab',
+    'textbox',
+    'treeitem',
+  ] as const)('should not select a row when a descendant has the %s widget role', (role) => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => (
+        <span role={role} data-testid={`${role}-${item.id}`}>
+          {role} {item.name}
+        </span>
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId(`${role}-1`));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
   it('should not select the active row when a nested action is used by keyboard', async () => {
     const user = userEvent.setup();
     const onRowSelect = vi.fn();
@@ -236,6 +423,30 @@ describe('DataTable', () => {
     expect(onEdit).toHaveBeenCalledWith(mockData[0]);
     expect(onRowSelect).not.toHaveBeenCalled();
     expect(grid).toHaveAttribute('aria-activedescendant', activeRowId);
+  });
+
+  it('should honor explicit disabled keyboard navigation while preserving click selection', async () => {
+    const user = userEvent.setup();
+    const onRowSelect = vi.fn();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation={false}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    const table = screen.getByRole('table');
+    expect(table).not.toHaveAttribute('tabIndex');
+
+    await user.tab();
+    expect(table).not.toHaveFocus();
+
+    fireEvent.click(screen.getByText('Item C'));
+    expect(onRowSelect).toHaveBeenCalledWith(mockData[2], 2);
   });
 
   it('should enable keyboard navigation when specified', () => {
