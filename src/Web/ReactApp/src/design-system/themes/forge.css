@@ -48,6 +48,7 @@
 
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #d47e34;
+  --pf-accent-text:  #e69a55;
   --pf-accent-bg:    #8b4513;
   --pf-accent-hover: #a0522d;
   --pf-accent-fg:    var(--pf-on-accent);

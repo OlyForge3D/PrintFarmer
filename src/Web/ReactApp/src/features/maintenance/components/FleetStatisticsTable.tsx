@@ -211,7 +211,7 @@ export function FleetStatisticsTable({ maxRows }: FleetStatisticsTableProps) {
         <div className="text-center py-3 border-t border-pf-border">
           <Button 
             variant="link"
-            className="text-sm text-pf-accent hover:text-pf-accent-hover"
+            className="text-sm text-pf-accent hover:text-pf-accent-text"
             onClick={() => navigate('/maintenance?tab=statistics')}
           >
             View all {stats.length} printers →

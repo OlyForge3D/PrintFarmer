@@ -33,6 +33,7 @@
 
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #f97316;
+  --pf-accent-text:  #fb923c;
   --pf-accent-bg:    #ea580c;
   --pf-accent-hover: #f97316;
   --pf-accent-fg:    var(--pf-on-accent);

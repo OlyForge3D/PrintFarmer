@@ -591,13 +591,13 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
    * 4.41 rest / 4.06 hover in forge, and on `bg-pf-bg-1` at 4.22 — both below
    * AA. Retargeting to `--pf-error-text` lifts the worst palette to 7.52/7.82.
    *
-   * `accent` is deliberately absent from the map: no palette defines
-   * `--pf-accent-text`, so there is nothing to retarget to. Its remaining call
-   * sites are left alone rather than pointed at a token that does not exist.
-   * Their worst measured rest contrast is 4.65 — light, on `bg-pf-bg-0`, the
-   * alternating-row surface at `SystemLogsContent.tsx:245`. That still passes
-   * AA, but the margin is 0.15 rather than the 0.49 an earlier revision of this
-   * comment claimed from a surface those sites do not actually sit on.
+   * `accent` is deliberately absent from the map. #1142 introduces
+   * `--pf-accent-text` for the two failing hover states, but preserves their
+   * passing rest colour and does not expand into a repo-wide accent foreground
+   * migration. Their worst measured rest contrast is 4.65 — light, on
+   * `bg-pf-bg-0`, the alternating-row surface at `SystemLogsContent.tsx:245`.
+   * That still passes AA, but the margin is 0.15 rather than the 0.49 an earlier
+   * revision of this comment claimed from a surface those sites do not sit on.
    *
    * The count is 6 sites / 7 tokens lexically, of which 5 are reachable at
    * runtime: `TagInput.tsx:291` is a ternary whose accent branch is gated on
