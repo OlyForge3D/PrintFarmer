@@ -15,6 +15,7 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
+    "lint:inventory-inert-state": "node ./eslint-rules/inventory-inert-state-variants.js",
     "check:empty-attrs": "node ./scripts/check-empty-attrs.cjs",
     "check": "npm run check:empty-attrs",
     "preview": "vite preview",

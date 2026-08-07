@@ -24,9 +24,16 @@ repeats the hover background:
 <div className="bg-pf-border hover:bg-pf-accent active:bg-pf-accent" />
 ```
 
-The rule is intentionally background-only. A reproducible, class-order-independent AST
-inventory on 2026-08-07 found 21 current same-token base/state shapes: 8 text, 9 border,
-3 ring, and 1 background. All 21 are deliberate pins. The background case is
+The rule is intentionally background-only. Run the class-order-independent JSX inventory from
+the React root; its JSON output records the scanned scope, Git HEAD, dirty state, counts, and
+every matching site:
+
+```bash
+npm run lint:inventory-inert-state
+```
+
+The 2026-08-07 inventory found 21 current same-token base/state shapes: 8 text, 9 border,
+3 ring, and 1 background. All 21 were manually classified as deliberate pins. The background case is
 `disabled:hover:bg-pf-bg-1`, which preserves the disabled surface and is excluded. The
 selected direct `hover`/`active` background strategy therefore reports zero current source
 findings while still reproducing all three #1082 regressions.
@@ -39,10 +46,12 @@ green. Responsive and theme prefixes are retained as context, so
 the value, so `/55` to `/75` is a real change. Mutually exclusive ternary branches are analyzed
 separately.
 
-Class strings are read from plain JSX attributes, template literals, arrays, object keys, and
-helper calls such as `clsx()` and `cn()`. Important markers and color-typed arbitrary values are
-parsed without splitting colons inside brackets or functions. Negative background utilities
-are ignored because they are positioning utilities rather than colors.
+The lint rule analyzes only JSX `class`/`className` attributes; it does not resolve standalone
+class constants. Within those attributes, strings are read from literals, templates, arrays,
+object keys, and helper calls such as `clsx()` and `cn()`. Important markers, CSS-variable
+shorthand, and color-typed arbitrary values are parsed without splitting colons inside brackets
+or functions. Negative background utilities are ignored because they are positioning utilities
+rather than colors.
 
 If a direct hover or active background genuinely must stay pinned, document that exceptional
 intent at the element:

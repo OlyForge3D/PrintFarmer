@@ -39,12 +39,15 @@ const COLOR_PALETTES = new Set([
 const MAX_EXPRESSION_PATHS = 128
 const WAIVER_ATTRIBUTE = 'data-pf-allow-inert-bg'
 
-function combinePaths(left, right) {
-  if (left.length * right.length > MAX_EXPRESSION_PATHS) return []
+function combinePaths(left, right, analysis) {
+  if (left.length * right.length > MAX_EXPRESSION_PATHS) {
+    analysis.overflow = true
+    return []
+  }
   return left.flatMap(leftPath => right.map(rightPath => [...leftPath, ...rightPath]))
 }
 
-function collectExpressionPaths(node) {
+function collectExpressionPaths(node, analysis) {
   if (!node) return [[]]
 
   if (node.type === 'Literal') {
@@ -59,7 +62,7 @@ function collectExpressionPaths(node) {
         { node: node.quasis[index], text: node.quasis[index].value.cooked ?? '' },
       ])
       if (node.expressions[index]) {
-        paths = combinePaths(paths, collectExpressionPaths(node.expressions[index]))
+        paths = combinePaths(paths, collectExpressionPaths(node.expressions[index], analysis), analysis)
         if (paths.length === 0) return []
       }
     }
@@ -67,27 +70,42 @@ function collectExpressionPaths(node) {
   }
 
   if (node.type === 'ConditionalExpression') {
-    return [
-      ...collectExpressionPaths(node.consequent),
-      ...collectExpressionPaths(node.alternate),
-    ].slice(0, MAX_EXPRESSION_PATHS)
+    const paths = [
+      ...collectExpressionPaths(node.consequent, analysis),
+      ...collectExpressionPaths(node.alternate, analysis),
+    ]
+    if (paths.length > MAX_EXPRESSION_PATHS) {
+      analysis.overflow = true
+      return []
+    }
+    return paths
   }
 
   if (node.type === 'LogicalExpression') {
     if (node.operator === '&&') {
-      return [[], ...collectExpressionPaths(node.right)].slice(0, MAX_EXPRESSION_PATHS)
+      const paths = [[], ...collectExpressionPaths(node.right, analysis)]
+      if (paths.length > MAX_EXPRESSION_PATHS) {
+        analysis.overflow = true
+        return []
+      }
+      return paths
     }
-    return [
-      ...collectExpressionPaths(node.left),
-      ...collectExpressionPaths(node.right),
-    ].slice(0, MAX_EXPRESSION_PATHS)
+    const paths = [
+      ...collectExpressionPaths(node.left, analysis),
+      ...collectExpressionPaths(node.right, analysis),
+    ]
+    if (paths.length > MAX_EXPRESSION_PATHS) {
+      analysis.overflow = true
+      return []
+    }
+    return paths
   }
 
   if (node.type === 'CallExpression' || node.type === 'NewExpression') {
     let paths = [[]]
     for (const argument of node.arguments) {
       if (argument.type === 'SpreadElement') continue
-      paths = combinePaths(paths, collectExpressionPaths(argument))
+      paths = combinePaths(paths, collectExpressionPaths(argument, analysis), analysis)
       if (paths.length === 0) return []
     }
     return paths
@@ -97,7 +115,7 @@ function collectExpressionPaths(node) {
     let paths = [[]]
     for (const element of node.elements) {
       if (!element || element.type === 'SpreadElement') continue
-      paths = combinePaths(paths, collectExpressionPaths(element))
+      paths = combinePaths(paths, collectExpressionPaths(element, analysis), analysis)
       if (paths.length === 0) return []
     }
     return paths
@@ -107,8 +125,8 @@ function collectExpressionPaths(node) {
     let paths = [[]]
     for (const property of node.properties) {
       if (property.type !== 'Property' || property.computed) continue
-      const keyPaths = collectExpressionPaths(property.key)
-      paths = combinePaths(paths, keyPaths)
+      const keyPaths = collectExpressionPaths(property.key, analysis)
+      paths = combinePaths(paths, keyPaths, analysis)
       if (paths.length === 0) return []
     }
     return paths
@@ -116,8 +134,9 @@ function collectExpressionPaths(node) {
 
   if (node.type === 'BinaryExpression' && node.operator === '+') {
     return combinePaths(
-      collectExpressionPaths(node.left),
-      collectExpressionPaths(node.right),
+      collectExpressionPaths(node.left, analysis),
+      collectExpressionPaths(node.right, analysis),
+      analysis,
     )
   }
 
@@ -128,7 +147,7 @@ function collectExpressionPaths(node) {
     node.type === 'TSSatisfiesExpression' ||
     node.type === 'TSTypeAssertion'
   ) {
-    return collectExpressionPaths(node.expression)
+    return collectExpressionPaths(node.expression, analysis)
   }
 
   return [[]]
@@ -191,7 +210,10 @@ function isColorBackground(utility) {
 
   const value = splitModifier(withoutImportant.slice(3))
   if (value.startsWith('pf-') || COLOR_KEYWORDS.has(value)) return true
-  if (/^\[(?:color:)?(?:#|var\(|--|(?:rgb|hsl|hwb|lab|lch|oklab|oklch|color)\()/.test(value)) {
+  if (
+    /^\[(?:color:)?(?:#|var\(|--|(?:rgb|hsl|hwb|lab|lch|oklab|oklch|color)\()/.test(value) ||
+    /^\(--[^)]+\)$/.test(value)
+  ) {
     return true
   }
 
@@ -206,11 +228,14 @@ function parseBackgroundToken(raw, fragment) {
   const interactions = variants.filter(variant => INTERACTION_STAGES.has(variant))
   if (interactions.length > 1) return undefined
 
+  const important = utility.startsWith('!') || utility.endsWith('!')
   const interaction = interactions[0]
   return {
     raw,
     fragment,
     utility,
+    value: utility.replace(/^!/, '').replace(/!$/, ''),
+    important,
     stage: interaction ? INTERACTION_STAGES.get(interaction) : 0,
     state: interaction ?? 'base',
     context: variants
@@ -229,8 +254,21 @@ function tokenizePath(fragments) {
 
 function uniqueStageToken(tokens, stage) {
   const candidates = tokens.filter(token => token.stage === stage)
-  const utilities = new Set(candidates.map(token => token.utility))
-  return utilities.size === 1 ? candidates.at(-1) : undefined
+  const important = candidates.filter(token => token.important)
+  const winningCandidates = important.length > 0 ? important : candidates
+  const values = new Set(winningCandidates.map(token => token.value))
+  return values.size === 1 ? winningCandidates.at(-1) : undefined
+}
+
+function applyStage(previous, variant) {
+  if (!previous) return { winner: variant, inert: false }
+  if (previous.important && !variant.important) {
+    return { winner: previous, inert: true }
+  }
+  return {
+    winner: variant,
+    inert: previous.value === variant.value,
+  }
 }
 
 function findInertPairs(tokens) {
@@ -243,12 +281,14 @@ function findInertPairs(tokens) {
     const hover = uniqueStageToken(scoped, 1)
     const active = uniqueStageToken(scoped, 2)
 
-    if (base && hover && base.utility === hover.utility) {
+    const hoverResult = hover ? applyStage(base, hover) : undefined
+    if (hoverResult?.inert) {
       pairs.push({ base, variant: hover })
     }
 
-    const activeBase = hover ?? base
-    if (activeBase && active && activeBase.utility === active.utility) {
+    const activeBase = hoverResult?.winner ?? base
+    const activeResult = active ? applyStage(activeBase, active) : undefined
+    if (activeResult?.inert) {
       pairs.push({ base: activeBase, variant: active })
     }
   }
@@ -282,7 +322,9 @@ export default {
     },
     messages: {
       inert:
-        '"{{variant}}" repeats "{{base}}", so the {{state}} state has no background change. Use a distinct background utility or remove the inert variant. If this direct-state pin is intentional, document it with data-pf-allow-inert-bg.',
+        '"{{variant}}" leaves the same background established by "{{base}}", so the {{state}} state has no background change. Use a distinct effective background utility or remove the inert variant. If this direct-state pin is intentional, document it with data-pf-allow-inert-bg.',
+      analysisLimit:
+        'This class expression has more than 128 possible static paths, so inert background states cannot be analyzed safely. Simplify the expression or split it across components.',
     },
     schema: [],
   },
@@ -296,7 +338,12 @@ export default {
         const expression = node.value.type === 'JSXExpressionContainer'
           ? node.value.expression
           : node.value
-        const paths = collectExpressionPaths(expression)
+        const analysis = { overflow: false }
+        const paths = collectExpressionPaths(expression, analysis)
+        if (analysis.overflow) {
+          context.report({ node, messageId: 'analysisLimit' })
+          return
+        }
         const reported = new Set()
 
         for (const path of paths) {

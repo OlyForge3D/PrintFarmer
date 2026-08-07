@@ -13,6 +13,11 @@ const ruleTester = new RuleTester({
   },
 })
 
+const overflowingClassExpression = `<div className={clsx(${Array.from(
+  { length: 8 },
+  (_, index) => `condition${index} && "bg-pf-bg-${index}"`,
+).join(', ')})} />`
+
 ruleTester.run('pf-no-inert-state-bg', rule, {
   valid: [
     {
@@ -55,9 +60,6 @@ ruleTester.run('pf-no-inert-state-bg', rule, {
       code: '<button className="bg-pf-bg-1/50 hover:bg-pf-bg-1/[.75]" />',
     },
     {
-      code: '<button className="!bg-pf-bg-1 hover:bg-pf-bg-1" />',
-    },
-    {
       code: '<button className="-bg-[position:1px] hover:-bg-[position:1px]" />',
     },
     {
@@ -68,6 +70,9 @@ ruleTester.run('pf-no-inert-state-bg', rule, {
     },
     {
       code: '<button data-pf-allow-inert-bg={false} className="bg-pf-bg-1 hover:bg-pf-bg-2" />',
+    },
+    {
+      code: '<button className="bg-(--pf-surface) hover:bg-(--pf-surface-hover)" />',
     },
   ],
   invalid: [
@@ -140,6 +145,45 @@ ruleTester.run('pf-no-inert-state-bg', rule, {
       ],
     },
     {
+      code: '<button className="!bg-pf-bg-1 hover:bg-pf-bg-2" />',
+      errors: [
+        {
+          messageId: 'inert',
+          data: {
+            base: '!bg-pf-bg-1',
+            variant: 'hover:bg-pf-bg-2',
+            state: 'hover',
+          },
+        },
+      ],
+    },
+    {
+      code: '<button className="bg-pf-bg-1 hover:!bg-pf-bg-1" />',
+      errors: [
+        {
+          messageId: 'inert',
+          data: {
+            base: 'bg-pf-bg-1',
+            variant: 'hover:!bg-pf-bg-1',
+            state: 'hover',
+          },
+        },
+      ],
+    },
+    {
+      code: '<button className="bg-pf-bg-1! hover:bg-pf-bg-1!" />',
+      errors: [
+        {
+          messageId: 'inert',
+          data: {
+            base: 'bg-pf-bg-1!',
+            variant: 'hover:bg-pf-bg-1!',
+            state: 'hover',
+          },
+        },
+      ],
+    },
+    {
       code: '<button className="bg-[color:var(--pf-surface)] active:bg-[color:var(--pf-surface)]" />',
       errors: [
         {
@@ -164,6 +208,23 @@ ruleTester.run('pf-no-inert-state-bg', rule, {
           },
         },
       ],
+    },
+    {
+      code: '<button className="bg-(--pf-surface) hover:bg-(--pf-surface)" />',
+      errors: [
+        {
+          messageId: 'inert',
+          data: {
+            base: 'bg-(--pf-surface)',
+            variant: 'hover:bg-(--pf-surface)',
+            state: 'hover',
+          },
+        },
+      ],
+    },
+    {
+      code: overflowingClassExpression,
+      errors: [{ messageId: 'analysisLimit' }],
     },
   ],
 })
