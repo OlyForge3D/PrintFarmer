@@ -24,7 +24,7 @@ Ralph always appears in `team.md`: `| Ralph | Work Monitor | — | 🔄 Monitor 
 | "Ralph, idle" / "Take a break" / "Stop monitoring" | Fully deactivate (stop loop + idle-watch) |
 | "Ralph, scope: just issues" / "Ralph, skip CI" | Adjust what Ralph monitors this session |
 | References PR feedback or changes requested | Spawn agent to address PR review feedback |
-| "merge PR #N" / "merge it" (recent context) | Merge via `gh pr merge` |
+| "merge PR #N" / "merge it" (recent context) | Verify evidence, then merge with `gh pr merge --match-head-commit` |
 
 These are intent signals, not exact strings — match meaning, not words.
 
@@ -40,7 +40,7 @@ gh issue list --label "squad" --state open --json number,title,labels,assignees 
 gh issue list --state open --json number,title,labels,assignees --limit 20 | # filter for squad:* labels
 
 # Open PRs from squad members
-gh pr list --state open --json number,title,author,labels,isDraft,reviewDecision --limit 20
+gh pr list --state open --json number,title,author,labels,isDraft,reviewDecision,statusCheckRollup,headRefOid --limit 20
 
 # Draft PRs (agent work in progress)
 gh pr list --state open --draft --json number,title,author,labels,checks --limit 20
@@ -53,10 +53,43 @@ gh pr list --state open --draft --json number,title,author,labels,checks --limit
 | **Untriaged issues** | `squad` label, no `squad:{member}` label | Lead triages: reads issue, assigns `squad:{member}` label |
 | **Assigned but unstarted** | `squad:{member}` label, no assignee or no PR | Spawn the assigned agent to pick it up |
 | **Draft PRs** | PR in draft from squad member | Check if agent needs to continue; if stalled, nudge |
-| **Review feedback** | PR has `CHANGES_REQUESTED` review | Route feedback to PR author agent to address |
+| **Review feedback** | Current human or verified squad `CHANGES_REQUESTED` verdict | Route feedback to PR author agent to address |
 | **CI failures** | PR checks failing | Notify assigned agent to fix, or create a fix issue |
-| **Approved PRs** | PR approved, CI green, ready to merge | Merge and close related issue |
+| **Approved PRs** | Current human or verified squad approval, CI green | Merge and close related issue |
 | **No work found** | All clear | Report: "📋 Board is clear. Ralph is idling." Suggest `npx @bradygaster/squad-cli watch` for persistent polling. |
+
+**Squad merge evidence:** For each non-draft squad PR, run:
+
+```bash
+node scripts/ci/verify-squad-verdict.mjs \
+  --repo <owner>/<repository> \
+  --pr <number> \
+  --json
+```
+
+When Ralph already has a recorded reviewed SHA and the PR head may have moved,
+add `--expected-head <recorded-sha>`. This distinguishes a superseded approval
+or rejection from a PR that never had squad evidence.
+
+- `APPROVED` is valid merge evidence only for the PR's exact current head.
+- `CHANGES_REQUESTED` routes the findings back to the original author.
+- `SUPERSEDED`, `MISSING`, or `INVALID` is not approval and does not preserve
+  an old rejection. Require a new trio review record or a human GitHub
+  approval.
+- A current non-author human GitHub approval remains valid merge evidence.
+- Never infer approval from PR comments. The author can write an identical
+  comment, so comments have no provenance.
+- Until `.github/workflows/squad-review-verdict.yml` is operational on the
+  default branch with a non-author administrator, author-opened squad PRs require
+  human approval.
+- Merge an approved PR with
+  `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
+  leave a force-push window between evidence verification and merge.
+- Exit codes are `0` for `APPROVED`, `2` for `CHANGES_REQUESTED`, `3` for
+  missing, invalid, or superseded evidence, and `1` for verifier/tool failure.
+  Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3` means
+  squad evidence is unavailable and permits only a verified current
+  non-author human GitHub approval as fallback.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)
