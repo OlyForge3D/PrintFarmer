@@ -2,7 +2,61 @@ import React, { useState, useCallback, useId, useMemo } from 'react';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from './Table';
 import type { SortDirection } from '../../hooks/useTableSort';
 
-const INTERACTIVE_ROW_CHILD_SELECTOR = 'a, button, input, select, textarea, [role="button"], [role="link"]';
+const INTERACTIVE_ROW_CHILD_SELECTOR = [
+  'a',
+  'button',
+  'input',
+  'label',
+  'select',
+  'summary',
+  'textarea',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="combobox"]',
+  '[role="link"]',
+  '[role="menuitem"]',
+  '[role="menuitemcheckbox"]',
+  '[role="menuitemradio"]',
+  '[role="option"]',
+  '[role="radio"]',
+  '[role="scrollbar"]',
+  '[role="searchbox"]',
+  '[role="slider"]',
+  '[role="spinbutton"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="textbox"]',
+  '[role="treeitem"]',
+].join(', ');
+
+function isInteractiveRowDescendant(
+  target: EventTarget | null,
+  row: HTMLTableRowElement,
+): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  const interactiveDescendant = target.closest(INTERACTIVE_ROW_CHILD_SELECTOR);
+  if (interactiveDescendant && row.contains(interactiveDescendant)) {
+    return true;
+  }
+
+  let candidate: Element | null = target;
+  while (candidate && candidate !== row) {
+    if (
+      candidate instanceof HTMLElement
+      && candidate.hasAttribute('tabindex')
+      && candidate.tabIndex >= 0
+    ) {
+      return true;
+    }
+    candidate = candidate.parentElement;
+  }
+
+  return false;
+}
 
 /**
  * Column definition for DataTable
@@ -94,7 +148,7 @@ export function DataTable<T>({
   data,
   columns,
   getRowKey,
-  keyboardNavigation = false,
+  keyboardNavigation,
   defaultSortColumn,
   defaultSortDirection = 'asc',
   onRowSelect,
@@ -106,7 +160,7 @@ export function DataTable<T>({
   className,
   ariaLabel,
 }: DataTableProps<T>) {
-  const keyboardNavigationEnabled = keyboardNavigation || Boolean(onRowSelect);
+  const keyboardNavigationEnabled = keyboardNavigation ?? Boolean(onRowSelect);
   const rowIdPrefix = useId();
   const [activeRowKey, setActiveRowKey] = useState<string | number | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
@@ -174,10 +228,7 @@ export function DataTable<T>({
     event: React.MouseEvent<HTMLTableRowElement>,
     index: number,
   ) => {
-    if (
-      event.target instanceof Element
-      && event.target.closest(INTERACTIVE_ROW_CHILD_SELECTOR)
-    ) {
+    if (isInteractiveRowDescendant(event.target, event.currentTarget)) {
       return;
     }
 
