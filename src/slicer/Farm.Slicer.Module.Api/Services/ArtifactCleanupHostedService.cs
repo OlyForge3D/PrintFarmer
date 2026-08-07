@@ -28,6 +28,8 @@ public class ArtifactCleanupHostedService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await Task.Yield();
+
         if (_cleanupIntervalHours != _settings.CleanupIntervalHours)
         {
             _logger.LogWarning(

@@ -17,11 +17,19 @@ internal static class ArtifactStorageFileSystem
         var rootDirectory = new DirectoryInfo(fullRoot);
         if (rootDirectory.Exists && IsReparsePoint(rootDirectory))
         {
-            FileSystemInfo? resolvedRoot =
-                rootDirectory.ResolveLinkTarget(returnFinalTarget: true);
-            if (resolvedRoot is DirectoryInfo resolvedDirectory)
+            try
             {
-                return Path.GetFullPath(resolvedDirectory.FullName);
+                FileSystemInfo? resolvedRoot =
+                    rootDirectory.ResolveLinkTarget(returnFinalTarget: true);
+                if (resolvedRoot is DirectoryInfo resolvedDirectory)
+                {
+                    return Path.GetFullPath(resolvedDirectory.FullName);
+                }
+            }
+            catch (Exception exception) when (
+                exception is IOException or UnauthorizedAccessException)
+            {
+                return fullRoot;
             }
         }
 
