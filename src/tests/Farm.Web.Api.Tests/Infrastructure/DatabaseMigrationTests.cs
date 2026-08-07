@@ -84,6 +84,46 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_DifferentlyNamedFirstMigration_WritesHistoryRow()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        _ = await context.Database.EnsureCreatedAsync();
+        string firstMigration = context.Database.GetMigrations()
+            .OrderBy(migration => migration, StringComparer.Ordinal)
+            .First();
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        firstMigration.Should().EndWith("_InitialV2");
+        firstMigration.Should().NotContain("InitialCreate");
+        (await ReadAppliedMigrationIdsAsync(connection)).Should().Contain(firstMigration);
+    }
+
+    [Fact]
+    public async Task CoreMigration_PopulatedSchemaWithoutMigrationAssembly_FailsBeforeMigration()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContextWithoutMigrations(connection);
+        _ = await context.Database.EnsureCreatedAsync();
+
+        Func<Task> migrate = () => ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        DatabaseMigrationContractException exception =
+            (await migrate.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
+        exception.Code.Should().Be("migration_assembly_missing");
+        exception.Message.Should().Contain("No SQLite migrations were found");
+        (await TableExistsAsync(connection, "Printers")).Should().BeTrue();
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    [Fact]
     public async Task CoreMigration_BaselinePreservesPopulatedLegacyData()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
@@ -391,6 +431,14 @@ public sealed class DatabaseMigrationTests
         return new AppDbContext(options);
     }
 
+    private static AppDbContext CreateCoreContextWithoutMigrations(SqliteConnection connection)
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        return new AppDbContext(options);
+    }
+
     private static SlicerDbContext CreateSlicerContext(SqliteConnection connection)
     {
         DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
@@ -409,6 +457,22 @@ public sealed class DatabaseMigrationTests
         _ = command.Parameters.AddWithValue("@tableName", tableName);
         object? result = await command.ExecuteScalarAsync();
         return Convert.ToBoolean(result);
+    }
+
+    private static async Task<IReadOnlyList<string>> ReadAppliedMigrationIdsAsync(
+        SqliteConnection connection)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText =
+            """SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";""";
+        var migrationIds = new List<string>();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            migrationIds.Add(reader.GetString(0));
+        }
+
+        return migrationIds;
     }
 
     private static async Task AssertCorruptedLegacySchemaRejectedAsync(
