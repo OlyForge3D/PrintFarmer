@@ -1171,12 +1171,20 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 FileSystemInfo entry = Directory.Exists(currentPath)
                     ? new DirectoryInfo(currentPath)
                     : new FileInfo(currentPath);
-                if (entry.LinkTarget is null)
+                FileSystemInfo? linkTarget;
+                try
+                {
+                    linkTarget = entry.ResolveLinkTarget(returnFinalTarget: false);
+                }
+                catch (FileNotFoundException)
+                {
+                    continue;
+                }
+                catch (DirectoryNotFoundException)
                 {
                     continue;
                 }
 
-                FileSystemInfo? linkTarget = entry.ResolveLinkTarget(returnFinalTarget: false);
                 if (linkTarget is null)
                 {
                     continue;

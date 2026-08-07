@@ -151,11 +151,10 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task DownloadForViewer_WithMissingFile_Returns404()
+    public async Task DownloadForViewer_WithAuthenticatedMissingFile_Returns404()
     {
-        string fileName = $"missing-{Guid.NewGuid():N}.stl";
-
-        HttpResponseMessage response = await _client!.GetAsync(BuildViewerDownloadUrl(fileName));
+        HttpResponseMessage response = await _client!.GetAsync(
+            BuildViewerDownloadUrl($"missing-{Guid.NewGuid():N}.stl"));
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
