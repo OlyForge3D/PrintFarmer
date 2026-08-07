@@ -87,15 +87,15 @@ bash tests/test-user-scenario-complete.sh
 
 ### Compose Generator Tests
 
-✅ **Architectures**:
-- Monolithic (single container, SQLite)
-- Microservices (separate API, frontend, database)
+✅ **Architecture**:
+- Canonical Compose deployment (separate API, frontend, and database services)
 - Alternative advanced network configurations (API on host, others in bridge)
 
 ✅ **Database Providers**:
 - PostgreSQL (default)
 - SQL Server
 - MySQL rejection (unsupported without provider-correct migration assemblies)
+- SQLite rejection (native local development only)
 
 ✅ **Addon Stacks**:
 - Monitoring (Prometheus, Grafana, ELK)

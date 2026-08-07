@@ -97,26 +97,18 @@ Solutions to common issues in PrintFarmer.
    # SQL Server
    sqlcmd -S localhost -U sa -P <password>
    
-   # Unsupported in the current release: MySQL
-   mysql -h localhost -u root -p
+   # MySQL is unsupported in the current release.
    ```
 
 3. **Check Database Permissions**
    - Ensure user has CREATE/DROP privileges for migrations
-   - Check file permissions for SQLite
+   - Check file permissions for native local SQLite
    - Verify port is accessible for remote databases
 
-4. **Reinitialize Database**
-   ```bash
-   # Stop container
-   docker stop printfarmer-api
-   
-   # Remove database (SQLite)
-   rm farm.db
-   
-   # Restart (will recreate database)
-   docker start printfarmer-api
-   ```
+4. **Restore the Database**
+   - Stop all application writers.
+   - Restore a provider-native PostgreSQL or SQL Server backup.
+   - Restart only after the provider-specific migrations validate.
 
 ### Slow Queries
 

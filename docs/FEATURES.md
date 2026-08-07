@@ -478,10 +478,19 @@ export DB_CONNECTION_STRING="Host=localhost;Database=printfarmer;Username=postgr
 export DB_PROVIDER=sqlserver
 export DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;User Id=sa;Password=YourPassword123"
 
-# MySQL is rejected in this release.
+```
+
+MySQL is unavailable until provider-correct application and slicer migrations
+exist. The obsolete example is retained only in source history.
+
+<!--
+# MySQL is unavailable in this release.
 # export DB_PROVIDER=mysql
 export DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Uid=root;Pwd=password"
 
+-->
+
+```bash
 # SQLite (default)
 export DB_PROVIDER=sqlite
 # Uses farm.db file in current directory

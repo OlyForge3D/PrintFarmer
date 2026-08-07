@@ -765,7 +765,7 @@ src/Web/ReactApp/src/
 Docker Container (All services)
 ├── API (port 5245)
 ├── React (port 3000, served by Nginx)
-├── Database (SQLite file or container)
+├── Database Container (PostgreSQL/SQL Server)
 └── Health checks
 ```
 
