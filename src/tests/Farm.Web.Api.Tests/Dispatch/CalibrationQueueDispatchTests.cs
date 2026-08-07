@@ -632,7 +632,7 @@ public class CalibrationQueueDispatchTests
         job.CalibrationManifestSha256 = gcode.CalibrationManifestSha256;
         db.Printers.Add(claimPrinter);
         db.Spools.Add(claimSpool);
-        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
+        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId });
         await db.SaveChangesAsync();
 
         // Provide a fresh online/idle telemetry snapshot so the claim reaches the ack check.
@@ -865,7 +865,7 @@ public class CalibrationQueueDispatchTests
         };
 
         db.PrintJobs.Add(job);
-        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId, RowVersion = [] });
+        db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId });
         await db.SaveChangesAsync();
 
         // Read the current RowVersion so the If-Match header matches.

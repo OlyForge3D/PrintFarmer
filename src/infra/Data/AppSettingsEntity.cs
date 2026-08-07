@@ -19,11 +19,7 @@ public class AppSettingsEntity : IRevisionedEntity
     /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
     [NotMapped]
-    public byte[] RowVersion
-    {
-        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : [];
-        set => Revision = RevisionETag.Decode(value);
-    }
+    public byte[] RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : [];
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;

@@ -23,8 +23,9 @@ public static class RevisionConcurrency
         IEnumerable<IMutableEntityType> revisionedTypes = modelBuilder.Model
             .GetEntityTypes()
             .Where(entityType =>
-                entityType.BaseType is null &&
-                typeof(IRevisionedEntity).IsAssignableFrom(entityType.ClrType));
+                typeof(IRevisionedEntity).IsAssignableFrom(entityType.ClrType) &&
+                (entityType.BaseType is null ||
+                    !typeof(IRevisionedEntity).IsAssignableFrom(entityType.BaseType.ClrType)));
 
         foreach (IMutableEntityType entityType in revisionedTypes)
         {
@@ -52,7 +53,7 @@ public static class RevisionConcurrency
             PropertyEntry revision = entry.Property(nameof(IRevisionedEntity.Revision));
             if (entry.State == EntityState.Added)
             {
-                revision.CurrentValue = Math.Max(InitialRevision, revisionedEntity.Revision);
+                revision.CurrentValue = InitialRevision;
                 continue;
             }
 
@@ -62,9 +63,13 @@ public static class RevisionConcurrency
             }
 
             long originalRevision = (long)revision.OriginalValue!;
-            revision.CurrentValue = originalRevision < InitialRevision
-                ? InitialRevision
-                : checked(originalRevision + 1);
+            if (originalRevision < InitialRevision)
+            {
+                throw new InvalidOperationException(
+                    $"Tracked {entry.Metadata.ClrType.Name} has invalid revision {originalRevision}.");
+            }
+
+            revision.CurrentValue = checked(originalRevision + 1);
             revision.IsModified = true;
         }
     }

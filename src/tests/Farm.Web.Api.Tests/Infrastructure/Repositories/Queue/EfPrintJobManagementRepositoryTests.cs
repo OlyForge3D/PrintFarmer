@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Web.Api.Tests.Builders;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Web.Api.Tests.Infrastructure.Repositories.Queue;
@@ -53,6 +54,63 @@ public class EfPrintJobManagementRepositoryTests
         Printer loaded = Assert.Single(printers);
         Assert.NotNull(loaded.ServiceState);
         Assert.Equal(watermarkUtc, loaded.ServiceState!.LastHistorySeedUtc);
+    }
+
+    [Fact]
+    public async Task UpdatePrinterLastHistorySeedAsync_IncrementsServiceStateRevision()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        Guid printerId = Guid.NewGuid();
+        DateTime watermarkUtc = DateTime.UtcNow.AddMinutes(-5);
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            Guid manufacturerId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedContext.Manufacturers.Add(new Manufacturer
+            {
+                Id = manufacturerId,
+                Name = "Revision Manufacturer",
+            });
+            seedContext.PrinterModels.Add(new PrinterModel
+            {
+                Id = modelId,
+                ManufacturerId = manufacturerId,
+                Name = "Revision Model",
+            });
+            seedContext.Printers.Add(new Printer
+            {
+                Id = printerId,
+                Name = "Revision Printer",
+                ServerUrl = "http://printer.local",
+                BackendPort = 80,
+                Backend = (int)PrinterBackend.PrusaLink,
+                IsEnabled = true,
+                ManufacturerId = manufacturerId,
+                ModelId = modelId,
+            });
+            seedContext.PrinterServiceStates.Add(new PrinterServiceState
+            {
+                PrinterId = printerId,
+            });
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using (AppDbContext updateContext = new(options))
+        {
+            EfPrintJobManagementRepository repository = new(updateContext);
+            await repository.UpdatePrinterLastHistorySeedAsync(printerId, watermarkUtc);
+        }
+
+        await using AppDbContext verifyContext = new(options);
+        PrinterServiceState state = await verifyContext.PrinterServiceStates.SingleAsync();
+        Assert.Equal(watermarkUtc, state.LastHistorySeedUtc);
+        Assert.Equal(2, state.Revision);
     }
 
     private static DbContextOptions<AppDbContext> CreateInMemoryOptions(string testName) =>

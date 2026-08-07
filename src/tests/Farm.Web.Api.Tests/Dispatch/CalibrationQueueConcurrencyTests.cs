@@ -570,7 +570,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         ctx.PrintJobs.Add(job);
         await ctx.SaveChangesAsync();
 
-        job.RowVersion.Should().NotBeNull("StampRowVersions must generate a non-null token for SQLite");
+        job.RowVersion.Should().NotBeNull("portable revisions must produce an ETag token for SQLite");
         job.RowVersion!.Length.Should().BeGreaterThan(0);
     }
 
@@ -747,6 +747,50 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be("acknowledgement_missing",
             "calibration must fail closed when no persisted ack exists in dispatch state");
+    }
+
+    [Fact]
+    public async Task ClaimService_CalibrationWithLegacyAcknowledgedJobToken_RejectsAsStale()
+    {
+        await using AppDbContext seedCtx = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+
+        await using (AppDbContext ackCtx = CreateContext())
+        {
+            await PersistAcknowledgementAsync(
+                ackCtx,
+                printerId,
+                jobId,
+                "legacy-ack-key");
+        }
+
+        await using (AppDbContext legacyCtx = CreateContext())
+        {
+            PrinterDispatchState state = await legacyCtx.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            state.AcknowledgedJobRowVersion = Convert.FromHexString("000000000000002A");
+            await legacyCtx.SaveChangesAsync();
+        }
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimService claimService = CreateClaimService(
+            claimCtx,
+            MakeOnlineIdleReader(printerId));
+
+        DispatchClaimResult result = await claimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                jobId,
+                printerId,
+                "actor",
+                "Manual",
+                "legacy-ack-key",
+                null,
+                null));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(
+            "acknowledgement_job_revision_stale",
+            "an unversioned SQL Server rowversion snapshot must never authorize dispatch");
     }
 
     // =========================================================================
@@ -1294,6 +1338,6 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         updated.NextSequence.Should().Be(1);
         updated.Revision.Should().Be(2);
         updated.RowVersion.Should().Equal(RevisionETag.EncodeBytes(2));
-        updated.RowVersion!.Length.Should().Be(sizeof(long));
+        updated.RowVersion!.Length.Should().Be(sizeof(byte) + sizeof(long));
     }
 }

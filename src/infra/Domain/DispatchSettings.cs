@@ -18,11 +18,7 @@ public class DispatchSettings : IRevisionedEntity
 
     /// <summary>Opaque compatibility token returned as an ETag.</summary>
     [NotMapped]
-    public byte[]? RowVersion
-    {
-        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
-        set => Revision = value is null ? 0 : RevisionETag.Decode(value);
-    }
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <summary>Provider-independent logical revision.</summary>
     public long Revision { get; set; } = 1;

@@ -33,11 +33,7 @@ public sealed class OutboxSequenceState : IRevisionedEntity
     /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
     [NotMapped]
-    public byte[]? RowVersion
-    {
-        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
-        set => Revision = value is null ? 0 : RevisionETag.Decode(value);
-    }
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;
@@ -66,11 +62,7 @@ public sealed class QueueDispatchOutbox : IRevisionedEntity
     /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
     [NotMapped]
-    public byte[]? RowVersion
-    {
-        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
-        set => Revision = value is null ? 0 : RevisionETag.Decode(value);
-    }
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;
@@ -202,11 +194,7 @@ public sealed class QueueDispatchAttempt : IRevisionedEntity
 
     /// <summary>Opaque compatibility token derived from <see cref="Revision"/>.</summary>
     [NotMapped]
-    public byte[]? RowVersion
-    {
-        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
-        set => Revision = value is null ? 0 : RevisionETag.Decode(value);
-    }
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <inheritdoc/>
     public long Revision { get; set; } = 1;

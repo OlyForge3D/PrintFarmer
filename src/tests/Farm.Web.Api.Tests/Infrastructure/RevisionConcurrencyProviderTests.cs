@@ -17,6 +17,49 @@ namespace Farm.Web.Api.Tests.Infrastructure;
 [Collection(ProviderDatabaseTestCollection.Name)]
 public sealed class RevisionConcurrencyProviderTests
 {
+    [Fact]
+    public async Task SaveChangesAsync_WhenAddedEntitySuppliesRevision_InitializesAtOne()
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using AppDbContext context = new(options);
+        OutboxSequenceState state = new()
+        {
+            Id = 1,
+            NextSequence = 1,
+            Revision = 999,
+        };
+        context.OutboxSequenceStates.Add(state);
+
+        _ = await context.SaveChangesAsync();
+
+        Assert.Equal(1, state.Revision);
+    }
+
+    [Fact]
+    public async Task SaveChangesAsync_WhenTrackedOriginalRevisionIsInvalid_Throws()
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        await using AppDbContext context = new(options);
+        OutboxSequenceState state = new()
+        {
+            Id = 1,
+            NextSequence = 1,
+        };
+        context.OutboxSequenceStates.Add(state);
+        _ = await context.SaveChangesAsync();
+
+        state.NextSequence++;
+        context.Entry(state).Property(entity => entity.Revision).OriginalValue = 0;
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => context.SaveChangesAsync());
+        Assert.Contains("invalid revision 0", exception.Message, StringComparison.Ordinal);
+    }
+
     private const string PostgresConnectionVariable = "PFARM_TEST_POSTGRES_CONN";
     private const string SqlServerConnectionVariable = "PFARM_TEST_SQLSERVER_CONN";
 
@@ -67,10 +110,13 @@ public sealed class RevisionConcurrencyProviderTests
     [Fact]
     public void RevisionETag_WhenLegacyTokenIsDecoded_TreatsItAsStale()
     {
-        byte[] legacyToken = Guid.NewGuid().ToByteArray();
+        byte[] legacyGuidToken = Guid.NewGuid().ToByteArray();
+        byte[] legacySqlServerToken = [0, 0, 0, 0, 0, 0, 0, 1];
 
-        Assert.Equal(0, RevisionETag.Decode(legacyToken));
+        Assert.Equal(0, RevisionETag.Decode(legacyGuidToken));
+        Assert.Equal(0, RevisionETag.Decode(legacySqlServerToken));
         Assert.Equal(7, RevisionETag.Decode(RevisionETag.EncodeBytes(7)));
+        Assert.Equal(sizeof(byte) + sizeof(long), RevisionETag.EncodeBytes(7).Length);
     }
 
     [Fact]

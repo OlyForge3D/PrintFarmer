@@ -7,7 +7,8 @@ namespace Farm.Infrastructure;
 /// </summary>
 public static class RevisionETag
 {
-    private const int EncodedByteCount = sizeof(long);
+    private const byte TokenVersion = 1;
+    private const int EncodedByteCount = sizeof(byte) + sizeof(long);
 
     /// <summary>Encodes a positive revision as an unquoted base-64 token.</summary>
     public static string Encode(long revision) => Convert.ToBase64String(EncodeBytes(revision));
@@ -15,7 +16,7 @@ public static class RevisionETag
     /// <summary>Encodes a positive revision as a quoted strong ETag header value.</summary>
     public static string EncodeQuoted(long revision) => $"\"{Encode(revision)}\"";
 
-    /// <summary>Encodes a positive revision as its stable big-endian byte representation.</summary>
+    /// <summary>Encodes a positive revision as a versioned big-endian byte representation.</summary>
     public static byte[] EncodeBytes(long revision)
     {
         if (revision < 1)
@@ -27,7 +28,8 @@ public static class RevisionETag
         }
 
         byte[] bytes = new byte[EncodedByteCount];
-        BinaryPrimitives.WriteInt64BigEndian(bytes, revision);
+        bytes[0] = TokenVersion;
+        BinaryPrimitives.WriteInt64BigEndian(bytes.AsSpan(sizeof(byte)), revision);
         return bytes;
     }
 
@@ -37,12 +39,12 @@ public static class RevisionETag
     /// </summary>
     public static long Decode(ReadOnlySpan<byte> bytes)
     {
-        if (bytes.Length != EncodedByteCount)
+        if (bytes.Length != EncodedByteCount || bytes[0] != TokenVersion)
         {
             return 0;
         }
 
-        long revision = BinaryPrimitives.ReadInt64BigEndian(bytes);
+        long revision = BinaryPrimitives.ReadInt64BigEndian(bytes[sizeof(byte)..]);
         return revision > 0 ? revision : 0;
     }
 }
