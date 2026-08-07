@@ -207,6 +207,78 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     }
 
     [Fact]
+    public async Task UploadAsync_StagingDirectoryReplacement_DoesNotDeleteOutsideLease()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var repositoryEntered = new TaskCompletionSource<Artifact>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowRepositoryCommit = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        repository
+            .Setup(candidate => candidate.AddAsync(
+                It.IsAny<Artifact>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<Artifact, CancellationToken>(
+                async (artifact, _) =>
+                {
+                    repositoryEntered.SetResult(artifact);
+                    await allowRepositoryCommit.Task;
+                    return artifact;
+                });
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService artifactsService =
+            CreateArtifactsService(repository.Object, metrics);
+        IFormFile formFile = CreateFormFile("staging-race.gcode", "artifact");
+
+        Task<Artifact> uploadTask = artifactsService.UploadAsync(
+            formFile,
+            Guid.NewGuid(),
+            workerId: null,
+            "gcode",
+            CancellationToken.None);
+        Artifact pendingArtifact = await repositoryEntered.Task;
+        string stagingDirectory =
+            ArtifactStorageFileSystem.GetStagingDirectory(_root);
+        string movedStagingDirectory =
+            Path.Combine(_root, ".staging-moved");
+        string outsideLeasePath = Path.Combine(
+            _outsideRoot,
+            pendingArtifact.Id.ToString("N") +
+                ArtifactStorageFileSystem.LeaseFileExtension);
+        Directory.CreateDirectory(_outsideRoot);
+        await File.WriteAllTextAsync(outsideLeasePath, "outside");
+        Directory.Move(stagingDirectory, movedStagingDirectory);
+        _ = Directory.CreateSymbolicLink(
+            stagingDirectory,
+            _outsideRoot);
+
+        try
+        {
+            allowRepositoryCommit.SetResult();
+            _ = await uploadTask;
+
+            File.Exists(outsideLeasePath).Should().BeTrue();
+            File.Exists(Path.Combine(
+                    movedStagingDirectory,
+                    pendingArtifact.Id.ToString("N") +
+                        ArtifactStorageFileSystem.LeaseFileExtension))
+                .Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(stagingDirectory))
+            {
+                Directory.Delete(stagingDirectory);
+            }
+        }
+    }
+
+    [Fact]
     public async Task ScanAndCleanupAsync_HostileAndOutsideEntries_PreservesEntries()
     {
         Directory.CreateDirectory(_root);

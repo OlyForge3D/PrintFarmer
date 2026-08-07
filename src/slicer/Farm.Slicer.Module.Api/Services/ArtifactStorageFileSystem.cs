@@ -245,8 +245,13 @@ internal static class ArtifactStorageFileSystem
 
     internal static FileStream CreateStagingStream(string stagingPath)
     {
-        if (!OperatingSystem.IsLinux())
+        if (OperatingSystem.IsWindows())
         {
+            string windowsStagingDirectory = Path.GetDirectoryName(stagingPath) ??
+                throw new IOException(
+                    "The artifact staging path has no parent directory.");
+            using SafeFileHandle stagingDirectoryHandle =
+                OpenPinnedWindowsDirectory(windowsStagingDirectory);
             return new FileStream(
                 stagingPath,
                 FileMode.CreateNew,
@@ -254,6 +259,12 @@ internal static class ArtifactStorageFileSystem
                 FileShare.None,
                 bufferSize: 81920,
                 FileOptions.Asynchronous | FileOptions.WriteThrough);
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException(
+                "Artifact staging is not supported on this platform.");
         }
 
         string stagingDirectory = Path.GetDirectoryName(stagingPath) ??
@@ -279,6 +290,33 @@ internal static class ArtifactStorageFileSystem
         }
 
         return CreateLinuxFileStream(fileDescriptor);
+    }
+
+    internal static FileStream CreateLeaseStream(string leasePath)
+    {
+        if (OperatingSystem.IsLinux())
+        {
+            return CreateNamedLinuxStagingStream(leasePath);
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            throw new PlatformNotSupportedException(
+                "Artifact leases are not supported on this platform.");
+        }
+
+        string stagingDirectory = Path.GetDirectoryName(leasePath) ??
+            throw new IOException(
+                "The artifact lease path has no parent directory.");
+        using SafeFileHandle stagingDirectoryHandle =
+            OpenPinnedWindowsDirectory(stagingDirectory);
+        return new FileStream(
+            leasePath,
+            FileMode.CreateNew,
+            FileAccess.ReadWrite,
+            FileShare.None,
+            bufferSize: 1,
+            FileOptions.WriteThrough);
     }
 
     internal static FileStream CreateNamedLinuxStagingStream(
@@ -1002,6 +1040,7 @@ internal static class ArtifactStorageFileSystem
 
 internal sealed class ArtifactWriteLease : IDisposable
 {
+    private readonly string _rootPath;
     private readonly FileStream _leaseStream;
     private FileStream? _stagingStream;
     private bool _committed;
@@ -1010,11 +1049,13 @@ internal sealed class ArtifactWriteLease : IDisposable
 
     private ArtifactWriteLease(
         Guid artifactId,
+        string rootPath,
         string stagingPath,
         string leasePath,
         FileStream leaseStream)
     {
         ArtifactId = artifactId;
+        _rootPath = rootPath;
         StagingPath = stagingPath;
         LeasePath = leasePath;
         _leaseStream = leaseStream;
@@ -1032,6 +1073,9 @@ internal sealed class ArtifactWriteLease : IDisposable
     {
         string stagingDirectory =
             ArtifactStorageFileSystem.EnsureStagingDirectory(rootPath);
+        string normalizedRoot = Path.GetDirectoryName(stagingDirectory) ??
+            throw new IOException(
+                "The artifact staging directory has no parent directory.");
         string identity = artifactId.ToString("N", CultureInfo.InvariantCulture);
         string stagingPath = Path.Combine(
             stagingDirectory,
@@ -1039,15 +1083,11 @@ internal sealed class ArtifactWriteLease : IDisposable
         string leasePath = Path.Combine(
             stagingDirectory,
             identity + ArtifactStorageFileSystem.LeaseFileExtension);
-        var leaseStream = new FileStream(
-            leasePath,
-            FileMode.CreateNew,
-            FileAccess.ReadWrite,
-            FileShare.None,
-            bufferSize: 1,
-            FileOptions.WriteThrough);
+        FileStream leaseStream =
+            ArtifactStorageFileSystem.CreateLeaseStream(leasePath);
         return new ArtifactWriteLease(
             artifactId,
+            normalizedRoot,
             stagingPath,
             leasePath,
             leaseStream);
@@ -1079,6 +1119,10 @@ internal sealed class ArtifactWriteLease : IDisposable
         SafeFileHandle stagingHandle = _stagingStream?.SafeFileHandle ??
             throw new InvalidOperationException(
                 "The artifact staging stream is not open.");
+        File.SetLastWriteTimeUtc(stagingHandle, publishedAtUtc);
+        File.SetLastWriteTimeUtc(
+            _leaseStream.SafeFileHandle,
+            publishedAtUtc);
         ArtifactStorageFileSystem.CreateAtomicHardLink(
             publicationPath,
             StagingPath,
@@ -1086,9 +1130,9 @@ internal sealed class ArtifactWriteLease : IDisposable
         PublishedPath = publicationPath;
         _stagingStream.Dispose();
         _stagingStream = null;
-        File.Delete(StagingPath);
-        File.SetLastWriteTimeUtc(publicationPath, publishedAtUtc);
-        File.SetLastWriteTimeUtc(LeasePath, publishedAtUtc);
+        ArtifactStorageFileSystem.DeleteFileNoFollow(
+            _rootPath,
+            StagingPath);
     }
 
     internal void Commit()
@@ -1123,11 +1167,13 @@ internal sealed class ArtifactWriteLease : IDisposable
         TryDelete(LeasePath);
     }
 
-    private static void TryDelete(string path)
+    private void TryDelete(string path)
     {
         try
         {
-            File.Delete(path);
+            ArtifactStorageFileSystem.DeleteFileNoFollow(
+                _rootPath,
+                path);
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
