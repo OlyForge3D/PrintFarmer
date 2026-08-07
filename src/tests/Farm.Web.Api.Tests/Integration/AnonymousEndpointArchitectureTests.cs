@@ -31,6 +31,8 @@ public sealed class AnonymousEndpointArchitectureTests
                 "POST /api/auth/passkey/login/complete - verifies the signed passkey assertion.",
             ["Farm.Web.Api.Controllers.SetupController.GetSetupStatusAsync [api/setup/status]"] =
                 "GET /api/setup/status - reports whether the installation has an account yet.",
+            ["Farm.Web.Api.Controllers.SetupController.GetBootstrapAsync [api/setup/bootstrap]"] =
+                "GET /api/setup/bootstrap - exposes only the Spoolman base URL while first-run setup is required.",
             ["Farm.Web.Api.Controllers.SetupController.CreateInitialAdminAsync [api/setup/initial-admin]"] =
                 "POST /api/setup/initial-admin - creates the installation's first authenticated account.",
             ["Farm.Web.Api.Controllers.SetupController.GetConfigurationOptions [api/setup/config-options]"] =
