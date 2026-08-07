@@ -8,7 +8,7 @@ import { Alert, Button, Badge } from '@/common/components/ui';
 import { CameraIcon, DeleteIcon, EditIcon, ExternalLinkIcon, ImageIcon, VideoIcon, SettingsIcon } from '@/common/components/icons/MdiIcons';
 import { cameraService } from '@/services/cameraService';
 import type { DisplayCameraDto, CameraSource, CameraType } from '@/types/api';
-import { useSearchParams, useParams, useNavigate } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { CameraManagementPanel } from '@/features/cameras/components/CameraManagementPanel';
 import { CameraHealthBadge } from '@/features/cameras/components/CameraHealthBadge';
@@ -42,17 +42,13 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const [cameraToDelete, setCameraToDelete] = useState<DisplayCameraDto | null>(null);
   const [isDeletingCamera, setIsDeletingCamera] = useState(false);
 
-  const [searchParams] = useSearchParams();
-  const { tabId } = useParams<{ tabId?: string }>();
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const canManageCameras = auth.hasRole('farm_admin');
   const activeTab = useMemo<'view' | 'manage'>(() => {
-    if (tabId === 'manage' && canManageCameras) return 'manage';
-    if (tabId === 'view') return 'view';
-    const requestedTab = searchParams.get('tab');
+    const requestedTab = searchParams.get('cameraTab');
     if (requestedTab === 'manage' && canManageCameras) return 'manage';
     return 'view';
-  }, [canManageCameras, searchParams, tabId]);
+  }, [canManageCameras, searchParams]);
 
   useEffect(() => {
     loadCameras();
@@ -74,7 +70,9 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   };
 
   const setTab = (nextTab: 'view' | 'manage') => {
-    navigate(`/cameras/${nextTab}`, { replace: true });
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set('cameraTab', nextTab);
+    setSearchParams(nextSearchParams, { replace: true });
   };
 
   const handleEditSuccess = async () => {

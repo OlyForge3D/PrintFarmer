@@ -81,40 +81,6 @@ export interface ResolvedSettingsNavigationTarget {
   subPageId?: string;
 }
 
-const LEGACY_CATEGORY_ALIASES: Record<string, ResolvedSettingsNavigationTarget> = {
-  notifications: { scopeId: 'user', categoryId: 'profile', subPageId: 'notifications' },
-  system: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
-};
-
-const LEGACY_CATEGORY_WITH_SUBPAGE_ALIASES: Record<string, Partial<Record<string, ResolvedSettingsNavigationTarget>>> = {
-  system: {
-    status: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
-    workers: { scopeId: 'admin', categoryId: 'operations', subPageId: 'workers' },
-    monitoring: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
-    'file-health': { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
-  },
-  users: {
-    'api-keys': { scopeId: 'user', categoryId: 'profile', subPageId: 'api-keys' },
-    accounts: { scopeId: 'admin', categoryId: 'users', subPageId: 'accounts' },
-    audit: { scopeId: 'admin', categoryId: 'users', subPageId: 'audit' },
-  },
-  data: {
-    quotas: { scopeId: 'system', categoryId: 'quotas' },
-    tags: { scopeId: 'admin', categoryId: 'data', subPageId: 'tags' },
-    management: { scopeId: 'admin', categoryId: 'data', subPageId: 'management' },
-  },
-  profile: {
-    notifications: { scopeId: 'user', categoryId: 'profile', subPageId: 'notifications' },
-    'api-keys': { scopeId: 'user', categoryId: 'profile', subPageId: 'api-keys' },
-    passkeys: { scopeId: 'user', categoryId: 'profile', subPageId: 'passkeys' },
-    preferences: { scopeId: 'user', categoryId: 'profile', subPageId: 'preferences' },
-  },
-  operations: {
-    status: { scopeId: 'admin', categoryId: 'operations', subPageId: 'status' },
-    workers: { scopeId: 'admin', categoryId: 'operations', subPageId: 'workers' },
-  },
-};
-
 export const SETTINGS_CATEGORY_ICONS: Record<string, SettingsCategoryIcon> = {
   profile: AccountIcon,
   general: GearIcon,
@@ -153,19 +119,7 @@ export function resolveSettingsNavigationTarget(
 ): ResolvedSettingsNavigationTarget {
   const scopedFallback = isSettingsScope(scopeId) ? scopeId : DEFAULT_SCOPE;
 
-  if (categoryId && subPageId) {
-    const legacyTarget = LEGACY_CATEGORY_WITH_SUBPAGE_ALIASES[categoryId]?.[subPageId];
-    if (legacyTarget) {
-      return legacyTarget;
-    }
-  }
-
   if (categoryId) {
-    const legacyCategoryTarget = LEGACY_CATEGORY_ALIASES[categoryId];
-    if (legacyCategoryTarget) {
-      return legacyCategoryTarget;
-    }
-
     const directCategory = getSettingsCategory(categoryId);
     if (directCategory) {
       const resolvedSubPageId = subPageId && directCategory.subPages.some((subPage) => subPage.id === subPageId)
@@ -390,4 +344,3 @@ export function buildSettingCommandItems(
 
   return items;
 }
-

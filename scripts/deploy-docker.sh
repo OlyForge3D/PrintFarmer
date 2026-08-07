@@ -552,8 +552,12 @@ auto_load_orcaslicer() {
 # shadowing. Keep a single canonical implementation (the later one) so behavior
 # is deterministic.
 
-# Global guard: disable all slicer-related automatic builds when requested
+# Global guard: disable all slicer-related automatic builds when requested.
+# Preserve the environment policy before a stored config is sourced so config
+# values cannot re-enable workers later.
+SLICER_BUILDS_FORCE_DISABLED=false
 if [ "${DISABLE_SLICER_BUILDS:-}" = "true" ] || [ "${DISABLE_SLICER_BUILDS:-}" = "1" ]; then
+    SLICER_BUILDS_FORCE_DISABLED=true
     print_warning "DISABLE_SLICER_BUILDS is set; automatic OrcaSlicer worker builds will be disabled."
     # Ensure variables exist so downstream logic respects the disable
     ENABLE_ORCA_WORKER=no
@@ -3264,6 +3268,122 @@ is_positive_int() {
     [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 0 ]
 }
 
+# Normalize a supported boolean to the representation expected by its consumer.
+normalize_boolean_value() {
+    local variable_name="$1"
+    local value="$2"
+    local true_value="$3"
+    local false_value="$4"
+    local normalized_value
+
+    normalized_value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+
+    case "$normalized_value" in
+        yes|true|1|on)
+            NORMALIZED_BOOLEAN_VALUE="$true_value"
+            ;;
+        no|false|0|off)
+            NORMALIZED_BOOLEAN_VALUE="$false_value"
+            ;;
+        *)
+            print_error "Unsupported boolean value '$value' for $variable_name. Use yes/no, true/false, 1/0, or on/off."
+            return 1
+            ;;
+    esac
+}
+
+# Normalize worker settings after loading config and before validation or output.
+normalize_worker_configuration() {
+    local distributed_is_set=false
+    local worker_enable_is_set=false
+    local worker_count_is_set=false
+    local worker_host_is_set=false
+    local force_disable="$SLICER_BUILDS_FORCE_DISABLED"
+
+    [ "${ENABLE_DISTRIBUTED_SLICING+x}" = "x" ] && distributed_is_set=true
+    [ "${ENABLE_ORCA_WORKER+x}" = "x" ] && worker_enable_is_set=true
+    [ "${ORCA_WORKER_COUNT+x}" = "x" ] && worker_count_is_set=true
+    [ "${ORCA_HOST_PORT+x}" = "x" ] && worker_host_is_set=true
+
+    if [[ -n "${DISABLE_SLICER_BUILDS:-}" ]]; then
+        if ! normalize_boolean_value "DISABLE_SLICER_BUILDS" "$DISABLE_SLICER_BUILDS" "true" "false"; then
+            return 1
+        fi
+        if [[ "$NORMALIZED_BOOLEAN_VALUE" == "true" ]]; then
+            force_disable=true
+        fi
+    fi
+
+    if [[ "$distributed_is_set" == "true" && -z "$ENABLE_DISTRIBUTED_SLICING" ]]; then
+        print_error "ENABLE_DISTRIBUTED_SLICING cannot be empty."
+        return 1
+    fi
+    if ! normalize_boolean_value \
+        "ENABLE_DISTRIBUTED_SLICING" \
+        "${ENABLE_DISTRIBUTED_SLICING:-false}" \
+        "true" \
+        "false"; then
+        return 1
+    fi
+    ENABLE_DISTRIBUTED_SLICING="$NORMALIZED_BOOLEAN_VALUE"
+
+    if [[ "$worker_enable_is_set" == "true" ]]; then
+        if [[ -z "$ENABLE_ORCA_WORKER" ]]; then
+            print_error "ENABLE_ORCA_WORKER cannot be empty."
+            return 1
+        fi
+        if ! normalize_boolean_value "ENABLE_ORCA_WORKER" "$ENABLE_ORCA_WORKER" "yes" "no"; then
+            return 1
+        fi
+        ENABLE_ORCA_WORKER="$NORMALIZED_BOOLEAN_VALUE"
+    fi
+
+    if [[ "$worker_count_is_set" == "true" ]]; then
+        if [[ -z "$ORCA_WORKER_COUNT" ]] || ! is_positive_int "$ORCA_WORKER_COUNT"; then
+            print_error "ORCA_WORKER_COUNT must be a non-negative integer."
+            return 1
+        fi
+    fi
+
+    if [[ "$worker_host_is_set" == "true" ]]; then
+        if [[ -z "$ORCA_HOST_PORT" ]] || ! is_positive_int "$ORCA_HOST_PORT" ||
+            [[ "$ORCA_HOST_PORT" -lt 1 || "$ORCA_HOST_PORT" -gt 65535 ]]; then
+            print_error "ORCA_HOST_PORT must be an integer from 1 through 65535."
+            return 1
+        fi
+    else
+        ORCA_HOST_PORT=8081
+    fi
+
+    if [[ "$force_disable" == "true" ]]; then
+        ENABLE_ORCA_WORKER=no
+        ORCA_WORKER_COUNT=0
+        return 0
+    fi
+
+    if [[ "$ENABLE_DISTRIBUTED_SLICING" != "true" ]]; then
+        ENABLE_ORCA_WORKER=no
+        ORCA_WORKER_COUNT=0
+        return 0
+    fi
+
+    if [[ "$worker_enable_is_set" == "false" && "$worker_count_is_set" == "false" ]]; then
+        print_warning "Legacy distributed slicing configuration has no OrcaSlicer worker settings; enabling one worker to preserve the intended slicing service."
+        ENABLE_ORCA_WORKER=yes
+        ORCA_WORKER_COUNT=1
+    elif [[ "$worker_enable_is_set" == "false" ]]; then
+        if [[ "$ORCA_WORKER_COUNT" -eq 0 ]]; then
+            ENABLE_ORCA_WORKER=no
+        else
+            ENABLE_ORCA_WORKER=yes
+        fi
+    elif [[ "$ENABLE_ORCA_WORKER" == "yes" ]]; then
+        ORCA_WORKER_COUNT="${ORCA_WORKER_COUNT:-1}"
+    else
+        ORCA_WORKER_COUNT=0
+    fi
+}
+
 # Utility: check if TCP port is already in use on host
 port_in_use() {
     local port=$1
@@ -3296,6 +3416,10 @@ find_next_free_port() {
 # Validate configuration & enforce safe constraints (ports, scaling, numeric values)
 validate_configuration() {
     print_header "🧪 Validating Configuration"
+
+    : "${ENABLE_DISTRIBUTED_SLICING:=false}"
+    : "${ENABLE_ORCA_WORKER:=no}"
+    : "${ORCA_WORKER_COUNT:=0}"
 
     case "${DB_PROVIDER:-}" in
         postgres|sqlserver)
@@ -3375,6 +3499,10 @@ validate_configuration() {
         print_warning "Workers enabled but distributed slicing disabled. Forcing workers off."
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
+    fi
+
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        print_info "Effective OrcaSlicer worker configuration: enabled=$ENABLE_ORCA_WORKER, count=$ORCA_WORKER_COUNT"
     fi
 
     print_success "Validation complete."
@@ -3579,34 +3707,10 @@ adjust_connection_strings_for_network_mode() {
 # conditionally show model/profile paths when slicing is enabled.
 configure_slicing() {
     # In non-interactive mode, use pre-loaded config if available
-    if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENABLE_DISTRIBUTED_SLICING:-}" ]; then
-        # Issue #1227: honor .deploy-config intent for the OrcaSlicer worker
-        # instead of silently defaulting ENABLE_ORCA_WORKER=no via
-        # save_deployment_config's `${ENABLE_ORCA_WORKER:-no}` fallback. Older
-        # configs may pre-date the current worker keys entirely; in that case
-        # we cannot tell whether the operator was running a worker, so emit an
-        # actionable warning and apply a safe default rather than a silent
-        # destructive rewrite.
-        if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ] && [ -z "${ENABLE_ORCA_WORKER:-}" ]; then
-            print_warning "ENABLE_ORCA_WORKER is not set in $CONFIG_FILE."
-            print_warning "Defaulting to 'no' to avoid unintended worker enablement."
-            print_warning "If this is a redeploy of an existing farm with an OrcaSlicer worker,"
-            print_warning "re-run with the worker keys set explicitly, for example:"
-            print_warning "  ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 $0 --non-interactive ..."
-            ENABLE_ORCA_WORKER=no
-            ORCA_WORKER_COUNT=0
-        fi
-        # If the operator asked for the worker but did not specify a count,
-        # default to a single replica (matching validate_configuration()'s
-        # later self-heal) so the effective summary reflects the real state.
-        if [ "${ENABLE_ORCA_WORKER:-no}" = "yes" ]; then
-            if [ -z "${ORCA_WORKER_COUNT:-}" ] || [ "${ORCA_WORKER_COUNT:-0}" -eq 0 ] 2>/dev/null; then
-                print_warning "ENABLE_ORCA_WORKER=yes but ORCA_WORKER_COUNT is unset or 0; defaulting to 1."
-                ORCA_WORKER_COUNT=1
-            fi
-        fi
-        print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING (orca=${ENABLE_ORCA_WORKER:-no}, count=${ORCA_WORKER_COUNT:-0})"
-        return 0
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        print_info "Using configured distributed slicing: ${ENABLE_DISTRIBUTED_SLICING:-false}"
+        normalize_worker_configuration
+        return $?
     fi
 
     print_header "🔪 Distributed Slicing Configuration"
@@ -3643,6 +3747,8 @@ configure_slicing() {
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
     fi
+
+    normalize_worker_configuration
 }
 
 # Configure additional settings
@@ -6627,6 +6733,10 @@ redeploy_existing() {
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
     enforce_supported_orcaslicer_release
+    if ! normalize_worker_configuration; then
+        print_error "Stored worker configuration is invalid."
+        exit 1
+    fi
     
     print_success "Loaded configuration:"
     echo -e "  ${BLUE}Architecture:${NC} $ARCHITECTURE"
@@ -6800,6 +6910,10 @@ main() {
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
         enforce_supported_orcaslicer_release
+        if ! normalize_worker_configuration; then
+            print_error "Stored worker configuration is invalid."
+            exit 1
+        fi
 
         resolve_worker_shared_api_key || {
             print_error "Unable to resolve a worker bootstrap registration key"

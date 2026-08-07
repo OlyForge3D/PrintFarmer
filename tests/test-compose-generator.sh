@@ -201,7 +201,6 @@ test_orcaslicer_worker_config() {
     assert_contains "$compose_content" "target: frontend-runtime" "Should contain frontend-runtime target"
     
     # Validate worker environment configuration
-    assert_contains "$compose_content" "Worker__OrcaSlicerPath" "Should set OrcaSlicer path"
     # Issue #1231: worker must point at the real ~129MB binary, not the sub-2048-byte
     # /usr/local/bin/orcaslicer AppRun wrapper that trips OrcaBinaryDetector's stub guard.
     assert_contains "$compose_content" "Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer" "OrcaSlicer path must point at the real binary that passes the 2048-byte detector threshold (issue #1231)"

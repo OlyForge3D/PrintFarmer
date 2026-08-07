@@ -4,11 +4,11 @@ const API_URL = 'http://localhost:5245';
 
 test.describe('Location Dashboard', () => {
   test('locations dashboard route is accessible', async ({ page }) => {
-    const response = await page.goto('/locations/dashboard');
+    const response = await page.goto('/locations');
     // Should not 500. 401/redirect is acceptable (auth required).
     expect(
       response?.status(),
-      `Route /locations/dashboard returned ${response?.status()}`,
+      `Route /locations returned ${response?.status()}`,
     ).toBeLessThan(500);
   });
 
@@ -22,7 +22,7 @@ test.describe('Location Dashboard', () => {
   });
 
   test('location dashboard renders content in #root', async ({ page }) => {
-    await page.goto('/locations/dashboard');
+    await page.goto('/locations');
     await page.waitForLoadState('networkidle');
 
     await page.waitForSelector('#root *', { timeout: 10_000 });
@@ -35,7 +35,7 @@ test.describe('Location Dashboard', () => {
   });
 
   test('location dashboard shows page title or loading state', async ({ page }) => {
-    await page.goto('/locations/dashboard');
+    await page.goto('/locations');
     await page.waitForLoadState('networkidle');
 
     // The page should show "Location Dashboard" title, a loading spinner,

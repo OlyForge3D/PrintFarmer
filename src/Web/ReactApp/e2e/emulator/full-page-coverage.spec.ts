@@ -131,7 +131,7 @@ test.describe('Full Page Coverage — Emulator', () => {
       { path: '/printQueue', name: 'Print Queue' },
       { path: '/settings', name: 'Settings' },
       { path: '/spools', name: 'Filament Management' },
-      { path: '/statistics', name: 'Statistics' },
+      { path: '/analytics?lens=production', name: 'Statistics' },
     ];
 
     for (const pageConfig of pagesToVisit) {

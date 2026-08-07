@@ -3,7 +3,7 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * Admin Tags CRUD E2E Tests — Emulator-backed
  *
- * Tests the /admin/tags route:
+ * Tests the canonical Admin > Data > Tags route:
  *   - Tag management tab (create, edit, delete, color picker)
  *   - Analytics tab (usage metrics)
  *   - Requires admin auth
@@ -17,7 +17,7 @@ test.describe('Admin Tags — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/admin/tags');
+    await page.goto('/admin/manage?tab=data&sub=tags');
     await page.waitForLoadState('networkidle');
   });
 

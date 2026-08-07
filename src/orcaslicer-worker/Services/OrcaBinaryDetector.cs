@@ -23,14 +23,22 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
     /// startup gate verifies the SAME executable that jobs will invoke
     /// (issue #578 / Hicks R4 finding #4).
     /// </summary>
-    private const string DefaultBinaryPath = "/opt/orcaslicer/bin/orca-slicer";
+    internal const string DefaultBinaryPath = "/opt/orcaslicer/bin/orca-slicer";
+    private const string LegacyLauncherPath = "/usr/local/bin/orcaslicer";
 
     private readonly string _binaryPath;
+
+    internal string BinaryPath => _binaryPath;
+
+    internal static string ResolveExecutablePath(string configuredPath) =>
+        string.Equals(configuredPath, LegacyLauncherPath, StringComparison.Ordinal)
+            ? DefaultBinaryPath
+            : configuredPath;
 
     public OrcaBinaryDetector(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);
-        _binaryPath = configuration["Worker:OrcaSlicerPath"] ?? DefaultBinaryPath;
+        _binaryPath = ResolveExecutablePath(configuration["Worker:OrcaSlicerPath"] ?? DefaultBinaryPath);
     }
 
     public bool IsRealBinaryPresent()

@@ -53,24 +53,25 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        int totalJobs = await query.CountAsync(ct);
-        int completed = await query.CountAsync(j => j.Status == PrintJobStatus.Completed, ct);
-        int failed = await query.CountAsync(j => j.Status == PrintJobStatus.Failed, ct);
-        int cancelled = await query.CountAsync(j => j.Status == PrintJobStatus.Cancelled, ct);
+        List<StatisticsSummaryAggregate> aggregateParts = await BuildSummaryAggregateQuery(query)
+            .ToListAsync(ct);
 
-        decimal totalCost = await query
-            .Where(j => j.ActualCost.HasValue)
-            .SumAsync(j => j.ActualCost!.Value, ct);
-        double totalFilamentGrams = await query
-            .Where(j => j.ActualFilamentUsage.HasValue)
-            .SumAsync(j => j.ActualFilamentUsage!.Value, ct);
-
-        var ticksList = await query
+        // Value-converted TimeSpan ticks are not provider-translatable as a SUM, so stream
+        // scalar durations without materializing the full result set or overflowing a long total.
+        double totalPrintHours = 0;
+        await foreach (long ticks in query
             .Where(j => j.ActualPrintTime.HasValue)
             .Select(j => j.ActualPrintTime!.Value.Ticks)
-            .ToListAsync(ct);
-        double totalPrintHours = ticksList.Sum(t => TimeSpan.FromTicks(t).TotalHours);
+            .AsAsyncEnumerable()
+            .WithCancellation(ct))
+        {
+            totalPrintHours += TimeSpan.FromTicks(ticks).TotalHours;
+        }
 
+        int totalJobs = aggregateParts.Sum(part => part.TotalJobs);
+        int completed = aggregateParts.Sum(part => part.Completed);
+        int failed = aggregateParts.Sum(part => part.Failed);
+        int cancelled = aggregateParts.Sum(part => part.Cancelled);
         int finishedJobs = completed + failed + cancelled;
         double successRate = finishedJobs > 0 ? (double)completed / finishedJobs * 100 : 0;
 
@@ -81,10 +82,25 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             FailedJobs = failed,
             CancelledJobs = cancelled,
             SuccessRate = Math.Round(successRate, 1),
-            TotalCost = totalCost,
-            TotalFilamentGrams = Math.Round(totalFilamentGrams, 1),
+            TotalCost = aggregateParts.Sum(part => part.TotalCost),
+            TotalFilamentGrams = Math.Round(aggregateParts.Sum(part => part.TotalFilamentGrams), 1),
             TotalPrintHours = Math.Round(totalPrintHours, 1),
         };
+    }
+
+    internal static IQueryable<StatisticsSummaryAggregate> BuildSummaryAggregateQuery(IQueryable<PrintJob> query)
+    {
+        // The key must reference a column because SQL Server rejects constant-only GROUP BY
+        // expressions. PrintJob IDs are generated non-empty keys, so this remains one bucket.
+        return query
+            .GroupBy(j => j.Id != Guid.Empty)
+            .Select(g => new StatisticsSummaryAggregate(
+                g.Count(),
+                g.Count(j => j.Status == PrintJobStatus.Completed),
+                g.Count(j => j.Status == PrintJobStatus.Failed),
+                g.Count(j => j.Status == PrintJobStatus.Cancelled),
+                g.Sum(j => j.ActualCost ?? 0m),
+                g.Sum(j => j.ActualFilamentUsage ?? 0d)));
     }
 
     public async Task<List<DailyJobCountDto>> GetJobsOverTimeAsync(int? days = null, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
@@ -489,4 +505,12 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             CompletedAt = j.ActualEndTime,
         }).ToList();
     }
+
+    internal sealed record StatisticsSummaryAggregate(
+        int TotalJobs,
+        int Completed,
+        int Failed,
+        int Cancelled,
+        decimal TotalCost,
+        double TotalFilamentGrams);
 }

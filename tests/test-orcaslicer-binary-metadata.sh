@@ -606,6 +606,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$multistage" '/orcaslicer-dist/orcaslicer.version' "Multistage binary layer should embed its version"
     assert_contains "$multistage" 'cached OrcaSlicer binary version' "Worker build should reject mismatched embedded versions"
     assert_contains "$multistage" 'ln -s /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer' "Worker launcher should preserve AppRun-relative paths"
+    assert_contains "$multistage" 'ENV Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer' "Worker startup should validate the real OrcaSlicer binary"
     assert_contains "$base_dockerfile" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Precache image should label its version"
     assert_contains "$base_dockerfile" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Precache image should label its checksum"
     assert_contains "$deploy_script" 'prepare_orcaslicer_binary_cache "${ORCA_ASSET_IMAGE}"' "Supplied cache images should be validated"

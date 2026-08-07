@@ -21,6 +21,7 @@ CURRENT_TEST=""
 
 # Test output
 TEST_OUTPUT=""
+TEST_OUTPUT_EXIT_CODE=0
 
 # Test logging functions
 test_log() { echo -e "${BLUE}[TEST]${NC} $1" >&2; }
@@ -127,6 +128,19 @@ assert_file_not_exists() {
     fi
 }
 
+assert_file_has_exact_line() {
+    local file="$1"
+    local expected_line="$2"
+    local message="${3:-Expected file '$file' to contain exact line '$expected_line'}"
+
+    if [[ -f "$file" ]] && grep -Fqx -- "$expected_line" "$file"; then
+        return 0
+    else
+        fail_test "$message"
+        return 1
+    fi
+}
+
 assert_dir_exists() {
     local dir="$1"
     local message="${2:-Expected directory '$dir' to exist}"
@@ -182,12 +196,18 @@ assert_exit_code() {
 # Capture command output for testing
 capture_output() {
     local command="$1"
-    TEST_OUTPUT=$(eval "$command" 2>&1 || true)
+    TEST_OUTPUT_EXIT_CODE=0
+    TEST_OUTPUT=$(eval "$command" 2>&1) || TEST_OUTPUT_EXIT_CODE=$?
 }
 
 # Get the captured output
 get_output() {
     echo "$TEST_OUTPUT"
+}
+
+# Get the captured command's exit code
+get_output_exit_code() {
+    echo "$TEST_OUTPUT_EXIT_CODE"
 }
 
 # Test suite management

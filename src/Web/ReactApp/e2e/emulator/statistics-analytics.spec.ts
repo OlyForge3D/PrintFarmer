@@ -3,10 +3,10 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * Statistics & Analytics Page E2E Tests — Emulator-backed
  *
- * Tests the statistics routes:
- *   /statistics       — KPI cards, charts, time period filter
- *   /statistics/costs — Cost dashboard
- *   /analytics        — Business analytics with predictive alerts
+ * Tests the canonical analytics lenses:
+ *   /analytics?lens=production — KPI cards, charts, time period filter
+ *   /analytics?lens=cost       — Cost dashboard
+ *   /analytics                 — Business analytics with predictive alerts
  */
 
 test.describe('Statistics & Analytics — Emulator', () => {
@@ -31,11 +31,11 @@ test.describe('Statistics & Analytics — Emulator', () => {
   }
 
   // ---------------------------------------------------------------------------
-  // /statistics
+  // Production analytics lens
   // ---------------------------------------------------------------------------
 
   test('statistics page loads with KPI cards', async ({ page }) => {
-    await page.goto('/statistics');
+    await page.goto('/analytics?lens=production');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -47,7 +47,7 @@ test.describe('Statistics & Analytics — Emulator', () => {
   });
 
   test('statistics page has time period filter', async ({ page }) => {
-    await page.goto('/statistics');
+    await page.goto('/analytics?lens=production');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -59,7 +59,7 @@ test.describe('Statistics & Analytics — Emulator', () => {
   });
 
   test('statistics page renders chart areas', async ({ page }) => {
-    await page.goto('/statistics');
+    await page.goto('/analytics?lens=production');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_500);
 
@@ -71,11 +71,11 @@ test.describe('Statistics & Analytics — Emulator', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // /statistics/costs
+  // Cost analytics lens
   // ---------------------------------------------------------------------------
 
   test('cost dashboard page loads', async ({ page }) => {
-    await page.goto('/statistics/costs');
+    await page.goto('/analytics?lens=cost');
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(1_000);
 
@@ -128,8 +128,8 @@ test.describe('Statistics & Analytics — Emulator', () => {
 
   test('no critical JS errors across statistics pages', async ({ page }) => {
     const statsPages = [
-      { path: '/statistics', name: 'Statistics' },
-      { path: '/statistics/costs', name: 'Cost Dashboard' },
+      { path: '/analytics?lens=production', name: 'Statistics' },
+      { path: '/analytics?lens=cost', name: 'Cost Dashboard' },
       { path: '/analytics', name: 'Analytics' },
     ];
 

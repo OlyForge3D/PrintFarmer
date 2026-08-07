@@ -41,6 +41,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     internal TimeSpan ModelDownloadHttpClientTimeout => _httpClient.Timeout;
 
+    internal string OrcaSlicerBinaryPath => _orcaSlicerBinaryPath;
+
     public OrcaSlicingPipelineService(HttpClient httpClient, IProgressReporter progressReporter, ILogger<OrcaSlicingPipelineService> logger, IConfiguration configuration, IWorkerStateService workerState)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -51,7 +53,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 #pragma warning disable S5443 // Worker default is a container-local scratch directory; deployments can override Worker:WorkingDirectory.
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
-        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? "/opt/orcaslicer/bin/orca-slicer";
+        _orcaSlicerBinaryPath = OrcaBinaryDetector.ResolveExecutablePath(
+            configuration["Worker:OrcaSlicerPath"] ?? OrcaBinaryDetector.DefaultBinaryPath);
         _engineVersion = (configuration["Worker:EngineVersion"]
             ?? configuration["SlicerRegistry:Version"]
             ?? WorkerConstants.SlicerVersion).Trim();
