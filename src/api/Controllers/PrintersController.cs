@@ -2896,40 +2896,6 @@ public class PrintersController(
             ct);
     }
 
-    /// <summary>
-    /// Rejects the retired generic raw G-code surface.
-    /// </summary>
-    /// <param name="id">The unique identifier of the printer.</param>
-    /// <param name="request">The G-code command request containing the script to execute.</param>
-    /// <param name="ct">Cancellation token for the operation.</param>
-    /// <returns>A typed error directing callers to bounded printer-control endpoints.</returns>
-    /// <response code="400">If the request body is missing or the gcode string is empty.</response>
-    /// <response code="410">The generic raw G-code route is permanently disabled.</response>
-    /// <remarks>
-    /// Raw scripts cannot be proven non-starting across firmware dialects, macros, case variants,
-    /// comments, or multiline payloads. Use typed home, movement, temperature, filament, MMU,
-    /// lifecycle, and dispatch endpoints instead.
-    /// </remarks>
-    [HttpPost("{id:guid}/gcode")]
-    [RequirePermission(PrintFarmerPermissions.Queue.Start)]
-    [ProducesResponseType(400)]
-    [ProducesResponseType(typeof(CommandResult), StatusCodes.Status410Gone)]
-    public Task<ActionResult<CommandResult>> SendGcodeAsync(Guid id, [FromBody] GcodeCommandRequest request, CancellationToken ct)
-    {
-        if (request is null || string.IsNullOrWhiteSpace(request.Command))
-        {
-            return Task.FromResult<ActionResult<CommandResult>>(
-                BadRequest(new CommandResult(false, "G-code command is required.")));
-        }
-
-        return Task.FromResult<ActionResult<CommandResult>>(
-            StatusCode(
-                StatusCodes.Status410Gone,
-                new CommandResult(
-                    false,
-                    "Generic raw G-code is disabled. Use a typed printer-control or queue dispatch endpoint.")));
-    }
-
     // Z-offset calibration endpoint
 
     /// <summary>
