@@ -1,5 +1,5 @@
-import React, { Suspense } from 'react';
-import { LazyModalFallback } from '@/common/components/LazyModalFallback';
+import React from 'react';
+import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 
 type STLPreviewModalComponent = typeof import(
@@ -17,8 +17,12 @@ const STLPreviewModal = lazyWithPreload<
 
 export function STLPreviewModalBoundary(props: STLPreviewModalProps) {
   return (
-    <Suspense fallback={<LazyModalFallback label="Loading 3D preview" />}>
+    <LazyModalBoundary
+      label="3D preview"
+      onCancel={props.onClose}
+      onRetry={STLPreviewModal.retry}
+    >
       <STLPreviewModal {...props} />
-    </Suspense>
+    </LazyModalBoundary>
   );
 }

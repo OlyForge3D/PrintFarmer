@@ -3,7 +3,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon, BarcodeScanIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { LazyModalFallback } from '@/common/components/LazyModalFallback';
+import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import type { SpoolmanSpool } from '@/types/api';
 
@@ -13,13 +13,13 @@ type SpoolsTabComponent = typeof import('@/features/filamentManagement/component
 type MaterialClustersTabComponent = typeof import('@/features/filamentManagement/components/MaterialClustersTab')['MaterialClustersTab'];
 type ScanSpoolModalComponent = typeof import('@/features/filamentManagement/components/ScanSpoolModal')['ScanSpoolModal'];
 
-const FilamentsTab = lazyWithPreload<React.ComponentProps<FilamentsTabComponent>, FilamentsTabComponent>(
+const FilamentsTab = lazyWithPreload<Record<string, never>, FilamentsTabComponent>(
   () => import('@/features/filamentManagement/components/FilamentsTab').then((module) => ({ default: module.FilamentsTab })),
 );
-const SpoolsTab = lazyWithPreload<React.ComponentProps<SpoolsTabComponent>, SpoolsTabComponent>(
+const SpoolsTab = lazyWithPreload<Record<string, never>, SpoolsTabComponent>(
   () => import('@/features/filamentManagement/components/SpoolsTab').then((module) => ({ default: module.SpoolsTab })),
 );
-const MaterialClustersTab = lazyWithPreload<React.ComponentProps<MaterialClustersTabComponent>, MaterialClustersTabComponent>(
+const MaterialClustersTab = lazyWithPreload<Record<string, never>, MaterialClustersTabComponent>(
   () => import('@/features/filamentManagement/components/MaterialClustersTab').then((module) => ({ default: module.MaterialClustersTab })),
 );
 const ScanSpoolModal = lazyWithPreload<React.ComponentProps<ScanSpoolModalComponent>, ScanSpoolModalComponent>(
@@ -168,13 +168,17 @@ export function FilamentManagementPage() {
       </div>
 
       {scanModalOpen && (
-        <Suspense fallback={<LazyModalFallback label="Loading spool scanner" />}>
+        <LazyModalBoundary
+          label="spool scanner"
+          onCancel={() => setScanModalOpen(false)}
+          onRetry={ScanSpoolModal.retry}
+        >
           <ScanSpoolModal
             isOpen={scanModalOpen}
             onClose={() => setScanModalOpen(false)}
             onSpoolFound={handleSpoolFound}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
     </PageTemplate>
   );

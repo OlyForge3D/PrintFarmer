@@ -4,7 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { LazyModalFallback } from '@/common/components/LazyModalFallback';
+import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
@@ -1110,7 +1110,11 @@ export function FilesPage() {
         }}
       />
       {showPrintablesBrowserModal && (
-        <Suspense fallback={<LazyModalFallback label="Loading Printables browser" />}>
+        <LazyModalBoundary
+          label="printables browser"
+          onCancel={() => setShowPrintablesBrowserModal(false)}
+          onRetry={PrintablesBrowserModal.retry}
+        >
           <PrintablesBrowserModal
             isOpen={showPrintablesBrowserModal}
             onClose={() => setShowPrintablesBrowserModal(false)}
@@ -1121,10 +1125,17 @@ export function FilesPage() {
               setShowPrintablesImportModal(true);
             }}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
       {showPrintablesImportModal && (
-        <Suspense fallback={<LazyModalFallback label="Loading Printables import" />}>
+        <LazyModalBoundary
+          label="printables import"
+          onCancel={() => {
+            setShowPrintablesImportModal(false);
+            setSelectedPrintablesUrl(null);
+          }}
+          onRetry={PrintablesImportModal.retry}
+        >
           <PrintablesImportModal
             isOpen={showPrintablesImportModal}
             initialUrl={selectedPrintablesUrl}
@@ -1134,10 +1145,14 @@ export function FilesPage() {
               void handleRefresh();
             }}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
       {showHarvestModal && (
-        <Suspense fallback={<LazyModalFallback label="Loading harvest wizard" />}>
+        <LazyModalBoundary
+          label="harvest wizard"
+          onCancel={() => setShowHarvestModal(false)}
+          onRetry={HarvestWizardModal.retry}
+        >
           <HarvestWizardModal
             isOpen={showHarvestModal}
             onClose={() => setShowHarvestModal(false)}
@@ -1148,7 +1163,7 @@ export function FilesPage() {
               handleRefresh();
             }}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
       <BulkTagAssignmentModal
         isOpen={showBulkTagModal}
@@ -1176,22 +1191,30 @@ export function FilesPage() {
         />
       )}
       {queueFile && (
-        <Suspense fallback={<LazyModalFallback label="Loading print queue" />}>
+        <LazyModalBoundary
+          label="print queue"
+          onCancel={() => setQueueFile(null)}
+          onRetry={QueueGcodeModal.retry}
+        >
           <QueueGcodeModal
             file={queueFile}
             isOpen
             onClose={() => setQueueFile(null)}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
       {quickSliceModel && (
-        <Suspense fallback={<LazyModalFallback label="Loading quick slice" />}>
+        <LazyModalBoundary
+          label="quick slice"
+          onCancel={() => setQuickSliceModel(null)}
+          onRetry={QuickSliceModal.retry}
+        >
           <QuickSliceModal
             isOpen
             onClose={() => setQuickSliceModel(null)}
             model={quickSliceModel}
           />
-        </Suspense>
+        </LazyModalBoundary>
       )}
       <ConfirmationModal
         isOpen={deleteMode === 'single' && deleteTarget !== null}
