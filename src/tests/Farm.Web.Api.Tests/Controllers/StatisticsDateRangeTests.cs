@@ -166,18 +166,6 @@ public class StatisticsDateRangeTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Summary_EndDateWithoutStartDate_Returns400()
-    {
-        string endDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
-
-        HttpResponseMessage response = await _client!.GetAsync($"/api/statistics/summary?endDate={endDate}");
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        string body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("endDate requires startDate");
-    }
-
-    [Fact]
     public async Task CostsSummary_RangeExceeds730Days_Returns400()
     {
         var startDate = DateTime.UtcNow.AddDays(-800).ToString("yyyy-MM-dd");

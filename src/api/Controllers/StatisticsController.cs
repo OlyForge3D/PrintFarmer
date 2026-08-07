@@ -40,10 +40,6 @@ public class StatisticsController(IStatisticsService statisticsService) : Contro
                 return new BadRequestObjectResult(new { error = $"Date range cannot exceed {MaxDateRangeDays} days (2 years)" });
             }
         }
-        else if (endDate.HasValue)
-        {
-            return new BadRequestObjectResult(new { error = "endDate requires startDate to bound the date range" });
-        }
         else if (startDate.HasValue &&
             (DateTime.UtcNow - startDate.Value).TotalDays > MaxDateRangeDays)
         {
