@@ -37,6 +37,16 @@ function rect(top: number, width: number, height: number): DOMRect {
 
 describe('PrinterCardGrid with the real TanStack element virtualizer', () => {
   beforeEach(() => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
       return this.hasAttribute('data-main-content') || this.dataset.testid === 'virtualized-printer-grid'
         ? GRID_WIDTH_PX

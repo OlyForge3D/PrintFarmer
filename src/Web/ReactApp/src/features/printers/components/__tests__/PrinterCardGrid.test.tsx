@@ -40,6 +40,7 @@ vi.mock('@tanstack/react-virtual', () => ({
 const observedResizes: Array<() => void> = [];
 let containerWidth = 1000;
 let gridOffset = 0;
+let multiColumnViewport = true;
 
 function createPrinters(count: number): Printer[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -74,8 +75,19 @@ describe('PrinterCardGrid', () => {
     observedResizes.length = 0;
     containerWidth = 1000;
     gridOffset = 0;
+    multiColumnViewport = true;
     document.documentElement.style.fontSize = '16px';
 
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+      matches: multiColumnViewport,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => containerWidth);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       const top = this.hasAttribute('data-main-content') ? 0 : gridOffset;
@@ -142,6 +154,19 @@ describe('PrinterCardGrid', () => {
 
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
     expect(screen.getAllByRole('button')).toHaveLength(4);
+  });
+
+  it('preserves the compact single-column layout below the 640px breakpoint', async () => {
+    const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
+    containerWidth = 600;
+    multiColumnViewport = false;
+    render(<PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />);
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
+
+    multiColumnViewport = true;
+    act(() => observedResizes.forEach((notify) => notify()));
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(30));
   });
 
   it('derives rem card widths and gaps from the custom root font size', async () => {

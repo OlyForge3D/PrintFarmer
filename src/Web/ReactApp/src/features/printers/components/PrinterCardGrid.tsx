@@ -16,6 +16,7 @@ const GRID_GAP_REM = 1;
 const COMPACT_CARD_WIDTH_REM = 18;
 const DETAILED_CARD_WIDTH_REM = 26;
 const DEFAULT_ROOT_FONT_SIZE_PX = 16;
+const MULTI_COLUMN_MEDIA_QUERY = '(min-width: 640px)';
 const ROW_OVERSCAN = 2;
 const COMPACT_ESTIMATED_ROW_HEIGHT_PX = 360;
 const DETAILED_ESTIMATED_ROW_HEIGHT_PX = 720;
@@ -101,7 +102,9 @@ function VirtualizedPrinterCardGrid({
       const nextGridGap = GRID_GAP_REM * rootFontSize;
       setCardWidthPx(nextCardWidth);
       setGridGapPx(nextGridGap);
-      setColumnCount(getColumnCount(container.clientWidth, nextCardWidth, nextGridGap));
+      setColumnCount(window.matchMedia(MULTI_COLUMN_MEDIA_QUERY).matches
+        ? getColumnCount(container.clientWidth, nextCardWidth, nextGridGap)
+        : 1);
       if (!nextScrollElement) return;
       const containerRect = container.getBoundingClientRect();
       const scrollRect = nextScrollElement.getBoundingClientRect();
@@ -170,6 +173,8 @@ function VirtualizedPrinterCardGrid({
     layoutRoot?.addEventListener('transitionrun', handleTransitionRun, true);
     layoutRoot?.addEventListener('transitionend', handleTransitionFinished, true);
     layoutRoot?.addEventListener('transitioncancel', handleTransitionFinished, true);
+    const multiColumnMedia = window.matchMedia(MULTI_COLUMN_MEDIA_QUERY);
+    multiColumnMedia.addEventListener('change', scheduleMeasure);
     window.addEventListener('resize', scheduleMeasure);
 
     let layoutShiftObserver: PerformanceObserver | undefined;
@@ -193,6 +198,7 @@ function VirtualizedPrinterCardGrid({
       layoutRoot?.removeEventListener('transitionrun', handleTransitionRun, true);
       layoutRoot?.removeEventListener('transitionend', handleTransitionFinished, true);
       layoutRoot?.removeEventListener('transitioncancel', handleTransitionFinished, true);
+      multiColumnMedia.removeEventListener('change', scheduleMeasure);
       window.removeEventListener('resize', scheduleMeasure);
     };
   }, [mode]);
@@ -247,11 +253,10 @@ function VirtualizedPrinterCardGrid({
   });
 
   useEffect(() => {
-    if (!activePrinterId) {
+    if (!activePrinterId || !scrollElement) {
       lastScrollTargetRef.current = undefined;
       return;
     }
-    if (!scrollElement) return;
 
     const printerIndex = printers.findIndex((printer) => printer.id === activePrinterId);
     if (printerIndex < 0) return;
