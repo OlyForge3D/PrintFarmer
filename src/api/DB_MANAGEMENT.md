@@ -1,37 +1,37 @@
-# Database Management for PrintFarmer MVP
+# Database Management
 
-## Current Approach: EnsureCreated for Development
+## Migration-Managed Startup
 
-For the MVP phase, we're using `EnsureCreated()` instead of migrations to simplify schema changes during rapid development.
+PrintFarmer applies EF Core migrations during startup through
+`ProviderAwareMigrationRunner`. Database migration and schema validation failures are
+fatal: the API does not start against an unsafe or partial schema.
 
-> NOTE (2025-09-06): A temporary initial EF Core migration (`InitialCreate`) was generated for evaluation and then removed per project direction. We have reverted to the pure `EnsureCreated()` workflow (deleted `Data/Migrations/` and recreated the SQLite database). Continue treating the schema as disposable during active development.
+Migration projects are provider- and context-specific:
 
-### Benefits:
-- Faster iteration on schema changes
-- No need to manage migration files
-- Schema automatically matches entity definitions
-- Simplifies development workflow
+- `Farm.Migrations.PostgreSQL` and `Farm.Migrations.SqlServer` manage the core
+  `AppDbContext`.
+- `Farm.Slicer.Migrations.PostgreSQL` and
+  `Farm.Slicer.Migrations.SqlServer` manage `SlicerDbContext`.
+- The corresponding SQLite migration projects support local and embedded
+  deployments.
 
-### How It Works:
-- The `DatabaseInitializer` service calls `EnsureCreated()` on startup
-- Any schema changes are applied automatically when the application restarts
-- Original migrations are archived in `Migrations_Archive` folder
-- If a migration folder appears unintentionally, delete it and remove the SQLite file (`farm.db*`) to realign with the current entity model
+## Legacy SQLite Adoption
 
-### Important Notes:
-1. This approach is suitable for development only
-2. **Data will be lost when schema changes**
-3. Before deploying to production, we'll need to switch back to migrations
+SQLite databases previously created without `__EFMigrationsHistory` can be adopted
+only after their schema exactly matches the expected relational model. The runner
+records the ordered migration set without relying on a migration-name convention,
+then applies any remaining migrations.
 
-## Returning to Migrations for Production
+If no migration baseline is available or the schema fingerprint does not match,
+startup fails with a `DatabaseMigrationContractException`. Back up the database
+before recovery; restore a compatible or known-good backup rather than deleting the
+migration history or forcing migrations against populated tables.
 
-When ready for production deployment:
+PostgreSQL and SQL Server databases without migration history are not adopted
+automatically. Restore a migration-managed backup before upgrading.
 
-1. Generate a consolidated migration:
-   ```
-   dotnet ef migrations add ProductionSchema --project src/api/Farm.Web.Api.csproj
-   ```
+## Adding Migrations
 
-2. Update the `DatabaseInitializer` to use `MigrateAsync()` instead of `EnsureCreatedAsync()`
-
-3. Test the migration process thoroughly before deployment
+Run EF commands from `src/` and create migrations for every affected provider and
+context pair. See the repository's `.github/copilot-instructions.md` for the current
+commands and validation requirements.
