@@ -12,7 +12,7 @@ export function InstallBanner() {
   };
 
   return (
-    <div className="bg-pf-accent-bg border-b border-pf-accent text-pf-text-primary p-3">
+    <div data-print-hidden className="bg-pf-accent-bg border-b border-pf-accent text-pf-text-primary p-3">
       <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 flex-1">
           <span className="text-2xl">📱</span>

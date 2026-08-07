@@ -41,6 +41,7 @@ export const FloatingActionButton = React.forwardRef<
 }, ref) => {
   return (
     <Button
+      data-print-hidden
       ref={ref}
       onClick={onClick}
       disabled={disabled || loading}

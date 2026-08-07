@@ -907,7 +907,7 @@ export function Layout() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
+    <div data-print-layout className="h-screen overflow-hidden bg-pf-bg-0 text-pf-text-primary">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[80] focus:rounded-md focus:bg-pf-bg-1 focus:px-3 focus:py-2 focus:text-sm focus:text-pf-text-primary focus:shadow-lg focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent"
@@ -921,6 +921,7 @@ export function Layout() {
 
       <div className="flex h-full min-h-0 flex-col">
         <header
+          data-print-hidden
           inert={sidebarOpen || undefined}
           className="hidden shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-4 py-2 lg:flex"
         >
@@ -953,6 +954,7 @@ export function Layout() {
 
         <div className="flex flex-col lg:flex-row min-h-0 flex-1">
         <header
+          data-print-hidden
           inert={sidebarOpen || undefined}
           className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
         >
@@ -1018,6 +1020,7 @@ export function Layout() {
         </header>
 
         <div
+          data-print-hidden
           className={clsx(
             'fixed inset-x-0 top-12 bottom-0 z-50 lg:hidden',
             sidebarOpen ? 'pointer-events-auto' : 'pointer-events-none'
@@ -1085,6 +1088,7 @@ export function Layout() {
         </div>
 
         <aside
+          data-print-hidden
           ref={desktopRailRef}
           className={clsx('hidden h-full max-h-full min-h-0 overflow-hidden border-r border-pf-border bg-pf-bg-1 shadow-[12px_0_32px_rgba(0,0,0,0.16)] lg:flex lg:shrink-0', desktopRailWidthClassName)}
         >
@@ -1216,6 +1220,7 @@ export function Layout() {
 
       {userMenuOpen && (
         <div
+          data-print-hidden
           className="fixed inset-0 z-10 pointer-events-auto lg:z-30"
           onClick={() => setUserMenuOpen(false)}
           aria-hidden="true"

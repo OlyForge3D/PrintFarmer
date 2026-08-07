@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
+import postcss from 'postcss';
 import ts from 'typescript';
 
 export type ThemeReferenceKind = 'utility' | 'arbitrary-value' | 'custom-property';
@@ -266,6 +267,31 @@ export function cssFacts(sources: readonly SourceText[]): CssFacts {
 }
 
 const THEME_SOURCE = /^design-system\/themes\/([^/]+\.css)$/;
+export const NON_SCREEN_STYLESHEETS = new Set(['styles/print.css']);
+
+export function isPrintOnlyStylesheet(text: string, file?: string): boolean {
+  const root = postcss.parse(text, { from: file });
+  const nodes = root.nodes.filter((node) => node.type !== 'comment');
+  if (nodes.length !== 1) return false;
+
+  const [media] = nodes;
+  return (
+    media.type === 'atrule' &&
+    media.name.toLowerCase() === 'media' &&
+    media.params.trim().toLowerCase() === 'print'
+  );
+}
+
+export function hasThemeSelector(text: string, file?: string): boolean {
+  const root = postcss.parse(text, { from: file });
+  let found = false;
+  root.walkRules((rule) => {
+    if (/\[\s*data-theme(?:\s|[~|^$*]?=|\])/i.test(rule.selector)) {
+      found = true;
+    }
+  });
+  return found;
+}
 
 /**
  * Builds one resolution graph per selectable theme. Shared CSS (including
@@ -278,7 +304,13 @@ export function cssFactsByTheme(sources: readonly SourceText[]): Map<string, Css
     (source) => THEME_SOURCE.test(source.file) && !source.file.endsWith('/base.css'),
   );
   const themedFiles = new Set(themedSources.map((source) => source.file));
-  const shared = cssFacts(sources.filter((source) => !themedFiles.has(source.file)));
+  const shared = cssFacts(
+    sources.filter(
+      (source) =>
+        !themedFiles.has(source.file) &&
+        !NON_SCREEN_STYLESHEETS.has(source.file),
+    ),
+  );
 
   return new Map(
     themedSources.map((source) => {
