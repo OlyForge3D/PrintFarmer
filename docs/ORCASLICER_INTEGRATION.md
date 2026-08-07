@@ -1139,8 +1139,14 @@ docker ps | grep orcaslicer
 docker logs printfarmer-orcaslicer-worker
 
 # Check if OrcaSlicer binary exists (not stub)
-docker exec printfarmer-orcaslicer-worker ls -la /usr/local/bin/orcaslicer
-docker exec printfarmer-orcaslicer-worker /usr/local/bin/orcaslicer --version
+# The runtime binary the worker executes is the real ~129MB binary at
+# /opt/orcaslicer/bin/orca-slicer (see Worker__OrcaSlicerPath in the compose
+# template). /usr/local/bin/orcaslicer remains as a symlink to
+# /opt/orcaslicer/AppRun for manual invocation, but pointing the worker at
+# that ~1.3KB bash wrapper trips OrcaBinaryDetector's 2048-byte stub guard
+# and crash-loops the container (issue #1231).
+docker exec printfarmer-orcaslicer-worker ls -la /opt/orcaslicer/bin/orca-slicer
+docker exec printfarmer-orcaslicer-worker /opt/orcaslicer/bin/orca-slicer --version
 
 # Check health endpoints
 docker exec printfarmer-orcaslicer-worker curl http://localhost:8080/healthz

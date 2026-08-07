@@ -19,7 +19,7 @@ Earlier each worker had its own copy of Docker command + polling logic. These we
 These cover binary presence, executability, env var correctness, and (best‑effort) help/version output for both workers. The matrix currently includes:
 ```
 prusaslicer-worker (port 8082, /usr/local/bin/prusa-slicer)
-orcaslicer-worker (port 8081, /usr/local/bin/orcaslicer)
+orcaslicer-worker (port 8081, /opt/orcaslicer/bin/orca-slicer)
 ```
 
 ### Per-Worker Tests

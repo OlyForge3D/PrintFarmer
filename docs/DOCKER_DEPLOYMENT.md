@@ -257,6 +257,37 @@ export ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive
 ```
 
+### OrcaSlicer Worker Non-Interactive Behavior
+
+When redeploying non-interactively, `configure_slicing()` honors what
+`.deploy-config` (or the exported environment) actually says instead of
+silently guessing:
+
+- **Explicit `ENABLE_ORCA_WORKER=yes` (with or without `ORCA_WORKER_COUNT`)** —
+  preserved. A missing or zero `ORCA_WORKER_COUNT` is normalized to `1` with a
+  warning so the deployment summary matches reality.
+- **Explicit `ENABLE_ORCA_WORKER=no`** — preserved as-is; no worker service is
+  brought up.
+- **`ENABLE_DISTRIBUTED_SLICING=true` but `ENABLE_ORCA_WORKER` completely
+  absent from `.deploy-config`** — this is the ambiguous case created by
+  older configs that predate the current worker keys. The script now emits a
+  clear warning naming the missing key and printing the exact recovery
+  command, then applies safe defaults (`no` / `0`) rather than silently
+  removing a running worker on the next redeploy (issue #1227). The
+  effective slicing configuration is always logged on this path:
+
+  ```
+  [WARN] ENABLE_ORCA_WORKER is not set in .deploy-config.
+  [WARN] Defaulting to 'no' to avoid unintended worker enablement.
+  [WARN] If this is a redeploy of an existing farm with an OrcaSlicer worker,
+  [WARN] re-run with the worker keys set explicitly, for example:
+  [WARN]   ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ./scripts/deploy-docker.sh --non-interactive ...
+  [INFO] Using configured distributed slicing: true (orca=no, count=0)
+  ```
+
+  If you see this warning during a redeploy of an existing farm that should
+  keep its OrcaSlicer worker, re-run with the explicit values shown above.
+
 ### Port Remapping Behavior
 
 - In **interactive** mode, if a requested host port is busy you are prompted to accept a suggested alternative.

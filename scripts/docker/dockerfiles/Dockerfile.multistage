@@ -617,7 +617,14 @@ USER appuser
 # Set environment
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
-ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+# Issue #1231: point the worker at the real ~129 MB binary rather than the
+# /usr/local/bin/orcaslicer symlink (which resolves to /opt/orcaslicer/AppRun,
+# a ~1.3 KB bash wrapper). The OrcaBinaryDetector's 2048-byte threshold in
+# src/orcaslicer-worker/Services/OrcaBinaryDetector.cs treats anything below
+# it as a stub, so the AppRun wrapper made the worker crash-loop on start.
+# The compose template overrides this value in production; the default here
+# matches so `docker run` outside the compose stack behaves identically.
+ENV Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
 ENV Worker__WorkingDirectory=/app/temp
 # Inject actual OrcaSlicer version for registration (overrides appsettings default).
 # Both keys are set from the single ORCASLICER_VERSION build arg so worker capability

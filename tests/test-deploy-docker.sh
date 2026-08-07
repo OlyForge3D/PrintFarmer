@@ -284,6 +284,154 @@ EOF
     pass_test
 }
 
+# Issue #1227: non-interactive redeploy with a legacy .deploy-config that has
+# ENABLE_DISTRIBUTED_SLICING=true but no ENABLE_ORCA_WORKER key must NOT
+# silently persist ENABLE_ORCA_WORKER=no. It must:
+#   1. Emit a clear warning naming the missing key.
+#   2. Emit an actionable recovery instruction for the operator.
+#   3. Log the effective worker configuration on the short-circuit path.
+#   4. Apply safe defaults (no / 0) rather than a random guess.
+test_worker_config_missing_key_warns_and_defaults_safe() {
+    start_test "Issue #1227: missing ENABLE_ORCA_WORKER key warns and defaults safely"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Simulate a legacy .deploy-config that predates the current worker keys:
+    # distributed slicing is enabled but ENABLE_ORCA_WORKER and
+    # ORCA_WORKER_COUNT are both absent.
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+    local output
+    output=$(get_output)
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "ENABLE_ORCA_WORKER is not set" "Missing worker key should trigger an explicit warning"
+    assert_contains "$output" "re-run with the worker keys set explicitly" "Warning must include actionable recovery instructions"
+    assert_contains "$output" "orca=no, count=0" "Short-circuit path must log the effective worker configuration"
+
+    pass_test
+}
+
+# Issue #1227: when the operator explicitly enabled the worker in
+# .deploy-config, configure_slicing must honor that intent instead of
+# short-circuiting silently.
+test_worker_config_explicit_yes_preserved() {
+    start_test "Issue #1227: explicit ENABLE_ORCA_WORKER=yes preserved on redeploy"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=1
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+    local output
+    output=$(get_output)
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "orca=yes, count=1" "Explicit worker enablement must be logged and preserved"
+    assert_not_contains "$output" "ENABLE_ORCA_WORKER is not set" "Explicit config must not trigger the missing-key warning"
+    assert_contains "$output" "Orca Workers: 1 (enabled: yes)" "Deployment summary must show worker as enabled"
+
+    pass_test
+}
+
+# Issue #1227: when the operator explicitly disabled the worker in
+# .deploy-config, configure_slicing must preserve that decision without
+# emitting the missing-key warning.
+test_worker_config_explicit_no_preserved() {
+    start_test "Issue #1227: explicit ENABLE_ORCA_WORKER=no preserved on redeploy"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+    local output
+    output=$(get_output)
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "orca=no, count=0" "Explicit disabled state must be logged as-is"
+    assert_not_contains "$output" "ENABLE_ORCA_WORKER is not set" "Explicit no must not trigger the missing-key warning"
+
+    pass_test
+}
+
+# Issue #1227: ENABLE_ORCA_WORKER=yes with ORCA_WORKER_COUNT missing or zero
+# should auto-repair to count=1 (matching validate_configuration's later
+# self-heal) so the effective summary reflects the actual worker deployment.
+test_worker_config_yes_with_missing_count_defaults_to_one() {
+    start_test "Issue #1227: ENABLE_ORCA_WORKER=yes with missing count defaults to 1"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+    local output
+    output=$(get_output)
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "ORCA_WORKER_COUNT is unset or 0" "Missing count with worker enabled should warn"
+    assert_contains "$output" "orca=yes, count=1" "Effective config should reflect the auto-repaired count"
+
+    pass_test
+}
+
+# Issue #1227: after configure_slicing repairs a legacy config,
+# save_deployment_config must persist the effective values so the next
+# redeploy does not repeat the warning path.
+test_worker_config_persisted_after_redeploy() {
+    start_test "Issue #1227: effective worker config is persisted for future redeploys"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Explicit yes/count values — persistence path
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=3
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+
+    local persisted
+    persisted=$(cat "$REPO_ROOT/.deploy-config" 2>/dev/null || echo "")
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$persisted" "ENABLE_ORCA_WORKER=yes" "Persisted config must retain worker enablement"
+    assert_contains "$persisted" "ORCA_WORKER_COUNT=3" "Persisted config must retain worker count"
+
+    pass_test
+}
+
 # Test network configuration
 test_network_configuration() {
     start_test "network configuration"
@@ -1644,6 +1792,11 @@ run_all_tests() {
     test_port_validation
     test_deployment_config_output
     test_worker_configuration
+    test_worker_config_missing_key_warns_and_defaults_safe
+    test_worker_config_explicit_yes_preserved
+    test_worker_config_explicit_no_preserved
+    test_worker_config_yes_with_missing_count_defaults_to_one
+    test_worker_config_persisted_after_redeploy
     test_network_configuration  
     test_database_configuration
     test_all_database_combinations

@@ -3537,7 +3537,32 @@ adjust_connection_strings_for_network_mode() {
 configure_slicing() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENABLE_DISTRIBUTED_SLICING:-}" ]; then
-        print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING"
+        # Issue #1227: honor .deploy-config intent for the OrcaSlicer worker
+        # instead of silently defaulting ENABLE_ORCA_WORKER=no via
+        # save_deployment_config's `${ENABLE_ORCA_WORKER:-no}` fallback. Older
+        # configs may pre-date the current worker keys entirely; in that case
+        # we cannot tell whether the operator was running a worker, so emit an
+        # actionable warning and apply a safe default rather than a silent
+        # destructive rewrite.
+        if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ] && [ -z "${ENABLE_ORCA_WORKER:-}" ]; then
+            print_warning "ENABLE_ORCA_WORKER is not set in $CONFIG_FILE."
+            print_warning "Defaulting to 'no' to avoid unintended worker enablement."
+            print_warning "If this is a redeploy of an existing farm with an OrcaSlicer worker,"
+            print_warning "re-run with the worker keys set explicitly, for example:"
+            print_warning "  ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 $0 --non-interactive ..."
+            ENABLE_ORCA_WORKER=no
+            ORCA_WORKER_COUNT=0
+        fi
+        # If the operator asked for the worker but did not specify a count,
+        # default to a single replica (matching validate_configuration()'s
+        # later self-heal) so the effective summary reflects the real state.
+        if [ "${ENABLE_ORCA_WORKER:-no}" = "yes" ]; then
+            if [ -z "${ORCA_WORKER_COUNT:-}" ] || [ "${ORCA_WORKER_COUNT:-0}" -eq 0 ] 2>/dev/null; then
+                print_warning "ENABLE_ORCA_WORKER=yes but ORCA_WORKER_COUNT is unset or 0; defaulting to 1."
+                ORCA_WORKER_COUNT=1
+            fi
+        fi
+        print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING (orca=${ENABLE_ORCA_WORKER:-no}, count=${ORCA_WORKER_COUNT:-0})"
         return 0
     fi
 

@@ -202,6 +202,10 @@ test_orcaslicer_worker_config() {
     
     # Validate worker environment configuration
     assert_contains "$compose_content" "Worker__OrcaSlicerPath" "Should set OrcaSlicer path"
+    # Issue #1231: worker must point at the real ~129MB binary, not the sub-2048-byte
+    # /usr/local/bin/orcaslicer AppRun wrapper that trips OrcaBinaryDetector's stub guard.
+    assert_contains "$compose_content" "Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer" "OrcaSlicer path must point at the real binary that passes the 2048-byte detector threshold (issue #1231)"
+    assert_not_contains "$compose_content" "Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer" "OrcaSlicer path must not use the AppRun wrapper symlink that crash-loops the worker (issue #1231)"
     assert_contains "$compose_content" "Worker__WorkerId" "Should set worker ID"
     # Queue name may be present as Worker__QueueName or the worker may use API-based orchestration
     if echo "$compose_content" | grep -q "Worker__QueueName" || echo "$compose_content" | grep -q "Worker__ApiBaseUrl" || echo "$compose_content" | grep -q "SlicerOrchestrator__Workers__OrcaSlicer" || echo "$compose_content" | grep -q "ORCA_WORKER_ENDPOINT"; then

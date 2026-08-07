@@ -633,7 +633,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$publish_workflow" 'FROM ${{ needs.ensure-orca-base.outputs.base_image }}' "Worker builds should consume the verified digest reference"
     assert_not_contains "$publish_workflow" 'EMBEDDED_VERSION=$(docker run' "Publishing must not execute an untrusted cached image"
     assert_not_contains "$publish_workflow" 'execSync(`docker run' "Publishing polls must not execute an untrusted cached image"
-    assert_contains "$publish_workflow" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Published workers should launch through AppRun"
+    assert_contains "$publish_workflow" 'Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer' "Published workers should launch the real ~129MB binary directly (issue #1231)"
     assert_contains "$publish_workflow" 'Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256' "Published workers should expose binary attestation"
     assert_contains "$base_workflow" 'source scripts/docker-utils.sh' "Base image workflow should use shared cache validation"
     assert_contains "$base_workflow" 'validate_orcaslicer_binary_image "$IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Base image workflow should reject stale metadata"
@@ -649,7 +649,8 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$preseed_workflow" 'VERSION_IN="$ORCASLICER_VERSION"' "Default Orca preseed should use the repository-pinned release"
     assert_contains "$strict_workflow" 'ORCASLICER_VERSION: 2.4.2' "Calibration publication should track the latest supported worker"
     assert_contains "$strict_workflow" 'ORCASLICER_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd' "Calibration publication should pin the official checksum"
-    assert_contains "$worker_compose" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Compose should not bypass the AppRun launcher"
+    assert_contains "$worker_compose" 'Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer' "Compose should point at the real binary, not the AppRun wrapper which is below the 2048-byte stub threshold (issue #1231)"
+    assert_not_contains "$worker_compose" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Compose should not resurrect the sub-2048-byte AppRun wrapper path (issue #1231)"
     assert_contains "$api_docs" '"requiredVersion": "2.4.2"' "Calibration API docs should track the latest supported worker"
     assert_not_contains "$api_docs" '2.3.1' "Current calibration API docs should not advertise the previous worker version"
 

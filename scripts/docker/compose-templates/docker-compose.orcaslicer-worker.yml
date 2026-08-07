@@ -63,7 +63,15 @@ services:
       - Worker__ApiBaseUrl=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
-      - Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
+      # The OrcaSlicer worker's binary detector rejects executables smaller
+      # than 2048 bytes as "stub only" to guard against half-built images
+      # (see src/orcaslicer-worker/Services/OrcaBinaryDetector.cs). The
+      # /usr/local/bin/orcaslicer wrapper is a symlink to /opt/orcaslicer/AppRun,
+      # a ~1.3 KB bash script that is below that threshold, so pointing the
+      # worker at it makes it crash-loop on start. Point at the real ~129 MB
+      # binary directly, matching the detector's default and the previous
+      # dual-engine template (issue #1231).
+      - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
       - Worker__WorkerId=orcaslicer-worker-1
       - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
       # Inject the immutable image digest after build/pull. It cannot be embedded while
