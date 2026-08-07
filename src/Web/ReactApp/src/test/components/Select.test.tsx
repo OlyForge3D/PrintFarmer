@@ -118,10 +118,10 @@ describe('Select', () => {
       );
 
       const select = screen.getByRole('combobox');
-      expect(select.className).toContain('bg-pf-bg-0');
-      expect(select.className).toContain('text-pf-text-primary');
-      expect(select.className).toContain('border-pf-border');
-      expect(select.className).toContain('focus:ring-pf-accent');
+      expect(select.className).toContain('bg-pf-control-bg');
+      expect(select.className).toContain('text-pf-control-text');
+      expect(select.className).toContain('border-pf-control-border');
+      expect(select.className).toContain('focus:ring-pf-control-border-focus');
     });
 
     it('does not use hardcoded gray-* or slate-* Tailwind classes', () => {
