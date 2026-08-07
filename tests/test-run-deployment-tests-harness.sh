@@ -70,12 +70,13 @@ chmod +x "$mock_tests_dir/run-deployment-tests.sh"
 marker_dir="$TMP_ROOT/markers"
 mkdir -p "$marker_dir"
 
-# The five sub-suite scripts referenced by run_full_tests. Order matters:
+# The six required sub-suite scripts referenced by run_full_tests. Order matters:
 # the historical bug aborted after the first one succeeded, so seeing every
 # marker present proves the orchestrator kept going.
 suites=(
     test-compose-generator.sh
     test-deploy-docker.sh
+    test-validate-deployment-scripts.sh
     test-config-persistence.sh
     test-integration.sh
     test-user-scenario-complete.sh
@@ -130,19 +131,19 @@ if ! echo "$plain_out" | grep -q "ALL TESTS PASSED"; then
 fi
 pass "Dynamic: success banner emitted"
 
-# Sanity: with 5 mocked suites, the summary must report exactly 5 passed,
-# 5 total run, 0 failed. This proves the counters preserved their values.
-if ! echo "$plain_out" | grep -Eq "Total Tests Run:[[:space:]]+5( |$)"; then
+# Sanity: with 6 mocked suites, the summary must report exactly 6 passed,
+# 6 total run, 0 failed. This proves the counters preserved their values.
+if ! echo "$plain_out" | grep -Eq "Total Tests Run:[[:space:]]+6( |$)"; then
     echo "$plain_out"
-    fail "Summary did not report Total Tests Run: 5."
+    fail "Summary did not report Total Tests Run: 6."
 fi
-pass "Dynamic: summary reports 5 total tests run"
+pass "Dynamic: summary reports 6 total tests run"
 
-if ! echo "$plain_out" | grep -Eq "Passed:[[:space:]]+5( |$)"; then
+if ! echo "$plain_out" | grep -Eq "Passed:[[:space:]]+6( |$)"; then
     echo "$plain_out"
-    fail "Summary did not report Passed: 5."
+    fail "Summary did not report Passed: 6."
 fi
-pass "Dynamic: summary reports 5 passed"
+pass "Dynamic: summary reports 6 passed"
 
 if ! echo "$plain_out" | grep -Eq "Failed:[[:space:]]+0( |$)"; then
     echo "$plain_out"
@@ -220,11 +221,11 @@ if ! echo "$plain_out2" | grep -Eq "Failed:[[:space:]]+1( |$)"; then
 fi
 pass "Dynamic-fail: summary reports 1 failed"
 
-if ! echo "$plain_out2" | grep -Eq "Passed:[[:space:]]+4( |$)"; then
+if ! echo "$plain_out2" | grep -Eq "Passed:[[:space:]]+5( |$)"; then
     echo "$plain_out2"
-    fail "Summary did not report Passed: 4 with four passing suites."
+    fail "Summary did not report Passed: 5 with five passing suites."
 fi
-pass "Dynamic-fail: summary reports 4 passed"
+pass "Dynamic-fail: summary reports 5 passed"
 
 # ----------------------------------------------------------------------------
 # Static regression: test-compose-generator.sh must guard `wait $pid` in
