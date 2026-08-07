@@ -44,7 +44,12 @@ const ACCENT_SURFACES = [
   'button-primary-bg',
   'button-primary-hover',
 ] as const;
+const ACCENT_TEXT_SURFACES = ['bg-0', 'bg-1', 'bg-2', 'panel', 'card-bg'] as const;
 const STANDARD_SURFACES = ['bg-0', 'bg-1', 'bg-2', 'panel', 'card-bg'] as const;
+const ACCENT_TEXT_CALL_SITES = [
+  'features/admin/components/SystemLogsContent.tsx',
+  'features/maintenance/components/FleetStatisticsTable.tsx',
+] as const;
 
 const parseTokens = (path: string): ReadonlyMap<string, string> => {
   const source = readFileSync(path, 'utf8');
@@ -150,6 +155,30 @@ describe('semantic foregrounds on themed surfaces (#1101, #1103, #1110)', () => 
     expect(tokens.get('button-primary-bg')).toBe(tokens.get('accent-bg'));
     expect(tokens.get('button-primary-hover')).toBe(tokens.get('accent-hover'));
     expect(failures).toEqual([]);
+  });
+
+  it.each(SELECTABLE_THEMES)('%s accent text clears WCAG AA on page and panel surfaces', (theme) => {
+    const tokens = parseThemeTokens(theme);
+    const foreground = requireToken(tokens, theme, 'accent-text');
+    const failures = ACCENT_TEXT_SURFACES.flatMap((background) => {
+      const ratio = contrastRatio(requireToken(tokens, theme, background), foreground);
+      return ratio < AA_NORMAL_TEXT
+        ? [`accent-text/${background}: ${ratio.toFixed(2)}:1`]
+        : [];
+    });
+
+    expect(failures).toEqual([]);
+  });
+
+  it('exposes accent text through Tailwind and uses it only at the two affected Button hovers', () => {
+    const indexCss = readFileSync(resolve(SOURCE_ROOT, 'index.css'), 'utf8');
+    expect(indexCss).toContain('--color-pf-accent-text: var(--pf-accent-text);');
+
+    for (const path of ACCENT_TEXT_CALL_SITES) {
+      const source = readFileSync(resolve(SOURCE_ROOT, path), 'utf8');
+      expect(source, path).toContain('hover:text-pf-accent-text');
+      expect(source, path).not.toContain('hover:text-pf-accent-hover');
+    }
   });
 
   it.each(SELECTABLE_THEMES)('%s interactive status states clear WCAG AA', (theme) => {

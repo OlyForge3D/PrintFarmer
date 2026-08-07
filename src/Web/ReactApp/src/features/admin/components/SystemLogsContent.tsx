@@ -246,7 +246,7 @@ export function SystemLogsContent() {
                       variant="subtle"
                       size="sm"
                       onClick={() => setExpandedRowId(expandedRowId === log.id ? null : log.id)}
-                      className="text-pf-accent hover:text-pf-accent-hover"
+                      className="text-pf-accent hover:text-pf-accent-text"
                       aria-label={expandedRowId === log.id ? 'Collapse row' : 'Expand row'}
                     >
                       {expandedRowId === log.id ? '▼' : '▶'}
