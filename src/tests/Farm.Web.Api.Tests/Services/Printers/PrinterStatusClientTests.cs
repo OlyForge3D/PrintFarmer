@@ -32,7 +32,6 @@ public class PrinterStatusClientTests
 
     private static ManagedSpoolProviderHelper CreateSpoolProvider() =>
         new(
-            Mock.Of<ISpoolmanService>(),
             Mock.Of<ISpoolmanStatusCache>(),
             NullLogger<ManagedSpoolProviderHelper>.Instance);
 

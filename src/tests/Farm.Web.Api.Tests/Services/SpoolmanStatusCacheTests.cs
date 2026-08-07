@@ -7,6 +7,7 @@ using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests.TestHelpers;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -22,30 +23,38 @@ public sealed class SpoolmanStatusCacheTests
     {
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var timeProvider = new MutableTimeProvider(Now);
-        var cache = new SpoolmanStatusCache(memoryCache, timeProvider);
         var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var releaseRequest = new TaskCompletionSource<SpoolmanSpoolDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        int requestCount = 0;
+        Mock<ISpoolmanService> spoolman = new();
+        _ = spoolman
+            .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                requestStarted.SetResult();
+                return releaseRequest.Task;
+            });
+        using ServiceProvider services = BuildServices(spoolman.Object);
+        var cache = new SpoolmanStatusCache(
+            memoryCache,
+            timeProvider,
+            services.GetRequiredService<IServiceScopeFactory>());
 
-        Task<SpoolmanSpoolDto?> FetchAsync(int spoolId, CancellationToken ct)
-        {
-            _ = Interlocked.Increment(ref requestCount);
-            requestStarted.SetResult();
-            return releaseRequest.Task;
-        }
-
-        Task<SpoolmanSpoolDto?> first = cache.GetSpoolAsync(42, FetchAsync, CancellationToken.None);
+        Task<SpoolmanSpoolDto?> first = cache.GetSpoolAsync(42, CancellationToken.None);
         await requestStarted.Task;
-        Task<SpoolmanSpoolDto?> second = cache.GetSpoolAsync(42, FetchAsync, CancellationToken.None);
+        Task<SpoolmanSpoolDto?> second = cache.GetSpoolAsync(42, CancellationToken.None);
 
-        Assert.Equal(1, Volatile.Read(ref requestCount));
+        spoolman.Verify(
+            service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()),
+            Times.Once);
 
         var expected = new SpoolmanSpoolDto(42, "PLA", "PLA", 900, null, false);
         releaseRequest.SetResult(expected);
 
         SpoolmanSpoolDto?[] results = await Task.WhenAll(first, second);
         Assert.All(results, result => Assert.Same(expected, result));
-        Assert.Equal(1, requestCount);
+        spoolman.Verify(
+            service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -53,24 +62,91 @@ public sealed class SpoolmanStatusCacheTests
     {
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
         var timeProvider = new MutableTimeProvider(Now);
-        var cache = new SpoolmanStatusCache(memoryCache, timeProvider);
         var first = new SpoolmanSpoolDto(7, "First", "PLA", 900, null, false);
         var refreshed = new SpoolmanSpoolDto(7, "Refreshed", "PLA", 850, null, false);
-        int requestCount = 0;
+        Mock<ISpoolmanService> spoolman = new();
+        _ = spoolman
+            .SetupSequence(service => service.GetSpoolByIdAsync(7, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(first)
+            .ReturnsAsync(refreshed);
+        using ServiceProvider services = BuildServices(spoolman.Object);
+        var cache = new SpoolmanStatusCache(
+            memoryCache,
+            timeProvider,
+            services.GetRequiredService<IServiceScopeFactory>());
 
-        Task<SpoolmanSpoolDto?> FetchAsync(int spoolId, CancellationToken ct)
-        {
-            int currentRequest = Interlocked.Increment(ref requestCount);
-            return Task.FromResult<SpoolmanSpoolDto?>(currentRequest == 1 ? first : refreshed);
-        }
-
-        SpoolmanSpoolDto? cached = await cache.GetSpoolAsync(7, FetchAsync, CancellationToken.None);
+        SpoolmanSpoolDto? cached = await cache.GetSpoolAsync(7, CancellationToken.None);
         timeProvider.Advance(SpoolmanStatusCache.CacheTtl.Add(TimeSpan.FromMilliseconds(1)));
-        SpoolmanSpoolDto? afterExpiry = await cache.GetSpoolAsync(7, FetchAsync, CancellationToken.None);
+        SpoolmanSpoolDto? afterExpiry = await cache.GetSpoolAsync(7, CancellationToken.None);
 
         Assert.Same(first, cached);
         Assert.Same(refreshed, afterExpiry);
-        Assert.Equal(2, requestCount);
+        spoolman.Verify(
+            service => service.GetSpoolByIdAsync(7, It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task GetSpoolAsync_LeaderCancels_FollowerReceivesSharedResult()
+    {
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var requestStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRequest = new TaskCompletionSource<SpoolmanSpoolDto?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Mock<ISpoolmanService> spoolman = new();
+        _ = spoolman
+            .Setup(service => service.GetSpoolByIdAsync(21, It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                requestStarted.SetResult();
+                return releaseRequest.Task;
+            });
+        using ServiceProvider services = BuildServices(spoolman.Object);
+        var cache = new SpoolmanStatusCache(
+            memoryCache,
+            new MutableTimeProvider(Now),
+            services.GetRequiredService<IServiceScopeFactory>());
+        using var leaderCancellation = new CancellationTokenSource();
+
+        Task<SpoolmanSpoolDto?> leader = cache.GetSpoolAsync(21, leaderCancellation.Token);
+        await requestStarted.Task;
+        Task<SpoolmanSpoolDto?> follower = cache.GetSpoolAsync(21, CancellationToken.None);
+        leaderCancellation.Cancel();
+
+        _ = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => leader);
+
+        var expected = new SpoolmanSpoolDto(21, "PETG", "PETG", 600, null, false);
+        releaseRequest.SetResult(expected);
+
+        Assert.Same(expected, await follower);
+        spoolman.Verify(
+            service => service.GetSpoolByIdAsync(21, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task GetSpoolAsync_UpstreamReturnsNull_RetriesNextRequest()
+    {
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var expected = new SpoolmanSpoolDto(31, "ABS", "ABS", 700, null, false);
+        Mock<ISpoolmanService> spoolman = new();
+        _ = spoolman
+            .SetupSequence(service => service.GetSpoolByIdAsync(31, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SpoolmanSpoolDto?)null)
+            .ReturnsAsync(expected);
+        using ServiceProvider services = BuildServices(spoolman.Object);
+        var cache = new SpoolmanStatusCache(
+            memoryCache,
+            new MutableTimeProvider(Now),
+            services.GetRequiredService<IServiceScopeFactory>());
+
+        SpoolmanSpoolDto? missing = await cache.GetSpoolAsync(31, CancellationToken.None);
+        SpoolmanSpoolDto? retried = await cache.GetSpoolAsync(31, CancellationToken.None);
+
+        Assert.Null(missing);
+        Assert.Same(expected, retried);
+        spoolman.Verify(
+            service => service.GetSpoolByIdAsync(31, It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
     }
 
     [Fact]
@@ -114,12 +190,13 @@ public sealed class SpoolmanStatusCacheTests
             .Returns(new SpoolmanSettings { BaseUrl = "http://spoolman.local" });
         var service = new SpoolmanService(http, settings.Object, NullLogger<SpoolmanService>.Instance);
         using var memoryCache = new MemoryCache(new MemoryCacheOptions());
-        var statusCache = new SpoolmanStatusCache(memoryCache, new MutableTimeProvider(Now));
+        using ServiceProvider services = BuildServices(service);
+        var statusCache = new SpoolmanStatusCache(
+            memoryCache,
+            new MutableTimeProvider(Now),
+            services.GetRequiredService<IServiceScopeFactory>());
 
-        SpoolmanSpoolDto? cachedStatus = await statusCache.GetSpoolAsync(
-            SpoolId,
-            service.GetSpoolByIdAsync,
-            CancellationToken.None);
+        SpoolmanSpoolDto? cachedStatus = await statusCache.GetSpoolAsync(SpoolId, CancellationToken.None);
         upstreamUsedWeight = 25;
         bool consumed = await service.ConsumeFilamentAsync(SpoolId, 5, CancellationToken.None);
 
@@ -131,6 +208,13 @@ public sealed class SpoolmanStatusCacheTests
 
         using JsonDocument patch = JsonDocument.Parse(patchBody);
         Assert.Equal(30, patch.RootElement.GetProperty("used_weight").GetDouble());
+    }
+
+    private static ServiceProvider BuildServices(ISpoolmanService spoolmanService)
+    {
+        var services = new ServiceCollection();
+        _ = services.AddScoped(_ => spoolmanService);
+        return services.BuildServiceProvider();
     }
 
     private sealed class MutableTimeProvider(DateTimeOffset utcNow) : TimeProvider

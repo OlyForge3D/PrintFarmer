@@ -1,5 +1,4 @@
 ﻿using Farm.Infrastructure.Domain;
-using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.Extensions.Logging;
 
@@ -11,11 +10,9 @@ namespace Farm.Infrastructure.Services.Printers;
 /// Injected into non-Moonraker status clients to avoid duplicating spool resolution logic.
 /// </summary>
 public class ManagedSpoolProviderHelper(
-    ISpoolmanService spoolmanService,
     ISpoolmanStatusCache statusCache,
     ILogger<ManagedSpoolProviderHelper> logger)
 {
-    private readonly ISpoolmanService _spoolmanService = spoolmanService;
     private readonly ISpoolmanStatusCache _statusCache = statusCache;
     private readonly ILogger<ManagedSpoolProviderHelper> _logger = logger;
 
@@ -32,7 +29,7 @@ public class ManagedSpoolProviderHelper(
         try
         {
             SpoolmanSpoolDto? spool = await _statusCache
-                .GetSpoolAsync(spoolId, _spoolmanService.GetSpoolByIdAsync, ct)
+                .GetSpoolAsync(spoolId, ct)
                 .ConfigureAwait(false);
             if (spool is null)
             {
