@@ -688,7 +688,7 @@ export const GcodeFileBrowser = ({
           type="button"
           variant="secondary"
           size="sm"
-          className="text-pf-error hover:text-pf-error hover:bg-pf-error/10"
+          className="text-pf-error-text!"
           onClick={handleBulkDeleteClick}
           title={`Delete ${selection.length} selected file${selection.length > 1 ? 's' : ''}`}
           iconLeft={<DeleteIcon className="h-4 w-4" />}
