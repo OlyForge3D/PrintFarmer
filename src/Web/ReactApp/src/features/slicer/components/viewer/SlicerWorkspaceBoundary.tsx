@@ -1,4 +1,5 @@
-import React, { Suspense } from 'react';
+import React from 'react';
+import { LazyContentBoundary } from '@/common/components/LazyContentBoundary';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import type { SlicerWorkspaceProps } from '@/features/slicer/components/viewer/SlicerWorkspace';
 
@@ -16,7 +17,9 @@ const SlicerWorkspace = lazyWithPreload<
 
 export function SlicerWorkspaceBoundary(props: SlicerWorkspaceProps) {
   return (
-    <Suspense
+    <LazyContentBoundary
+      label="slicer workspace"
+      onRetry={SlicerWorkspace.retry}
       fallback={(
         <div
           className="flex h-full w-full items-center justify-center"
@@ -28,6 +31,6 @@ export function SlicerWorkspaceBoundary(props: SlicerWorkspaceProps) {
       )}
     >
       <SlicerWorkspace {...props} />
-    </Suspense>
+    </LazyContentBoundary>
   );
 }

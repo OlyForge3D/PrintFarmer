@@ -1,8 +1,9 @@
-import React, { Suspense, useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router';
 import { PackageIcon, BarcodeScanIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { LazyContentBoundary } from '@/common/components/LazyContentBoundary';
 import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import type { SpoolmanSpool } from '@/types/api';
@@ -156,7 +157,9 @@ export function FilamentManagementPage() {
         aria-labelledby={`tab-${activeTab}`}
         className="transition-opacity duration-200 motion-reduce:transition-none"
       >
-        <Suspense
+        <LazyContentBoundary
+          label={currentTab.label.toLowerCase()}
+          onRetry={ActiveTab.retry}
           fallback={(
             <div className="flex min-h-48 items-center justify-center" role="status" aria-label={`Loading ${currentTab.label}`}>
               <div className="pf-animate-spin h-8 w-8 rounded-full border-b-2 border-pf-accent" />
@@ -164,7 +167,7 @@ export function FilamentManagementPage() {
           )}
         >
           <ActiveTab />
-        </Suspense>
+        </LazyContentBoundary>
       </div>
 
       {scanModalOpen && (

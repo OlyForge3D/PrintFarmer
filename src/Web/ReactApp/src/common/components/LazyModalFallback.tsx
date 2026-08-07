@@ -18,7 +18,12 @@ interface LazyModalSurfaceProps {
 function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const onCancelRef = useRef(onCancel);
   const titleId = useId();
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement instanceof HTMLElement
@@ -39,7 +44,7 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
-        onCancel();
+        onCancelRef.current();
         return;
       }
       if (event.key !== 'Tab') {
@@ -68,7 +73,7 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
       document.removeEventListener('keydown', handleKeyDown);
       previousFocusRef.current?.focus();
     };
-  }, [onCancel]);
+  }, []);
 
   return (
     <div
