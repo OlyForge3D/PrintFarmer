@@ -300,7 +300,7 @@ While a PR is open, keep the owning session alive. If checks fail or changes are
 requested, message that session to address them.
 
 Ownership decides **when** a session ends. SESSION LIFECYCLE AND REAPING decides how a
-finished session is surfaced for removal — there is no automated archival path, so the
+finished session is surfaced for removal — no automated archival path reaches it, so the
 session simply reports its final status and stops.
 
 ## SESSION LIFECYCLE AND REAPING
@@ -315,9 +315,14 @@ Two platform limits, both verified against the live runtime:
 2. **A session cannot archive itself.** `archive_session` on your own session id returns
    `Cannot archive the current session`. True self-archiving does not exist.
 
-Together these close **every** automatic route: a round cannot archive a prior round's
-sessions, and no session can clean up after itself. There is no automated archival path.
-Ralph must never attempt either failing call.
+Together these close every automatic route for any session that outlives the round that
+spawned it — which, because rounds exit within minutes, is every real implementation
+session. Ralph must never attempt either failing call.
+
+The sole archivable case is a child that both started **and** finished inside the round
+that spawned it — effectively only instant-failure sessions. Normal implementation work
+never completes that fast, so this is never a cleanup mechanism and nothing may depend
+on it.
 
 ### Why hand-off was tried and removed
 
@@ -333,26 +338,21 @@ archival. It does not work, and it is actively harmful:
 
 Do not reintroduce hand-off in any form.
 
-### What a finished session does instead
+### The closing clause a finished session gets instead
 
-Every dispatch kickoff prompt Ralph writes MUST end with this clause, verbatim, as its
-final paragraph. It must match Ralph's workflow prompt word-for-word; the two must not
-drift.
+Every dispatch kickoff prompt Ralph writes MUST end with this **closing clause**, verbatim,
+as its final paragraph. It must match Ralph's workflow prompt word-for-word; the two must
+not drift.
 
 ```
 When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled by Ralph's `🧹 Ready to reap` report.
 ```
 
-The one remaining case where Ralph may call `archive_session` is a child that both started
-**and** finished inside the same round — effectively only instant-failure sessions. Normal
-implementation work never completes that fast, so this must never be relied on as a
-cleanup mechanism.
-
 ### The reap report is the ONLY mechanism
 
-Because no automated archival path exists, the `🧹 Ready to reap` report is not one safety
-net among several — it is the only way a finished session ever gets cleaned up, and **a
-human performs the removal**. Treat it as load-bearing.
+Because no automated path reaches a session that outlives its round, the `🧹 Ready to reap`
+report is not one safety net among several — it is the only way a finished session ever
+gets cleaned up, and **a human performs the removal**. Treat it as load-bearing.
 
 Each round, call `list_sessions_and_chats` and list **every session in the project whose PR
 is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
@@ -453,15 +453,13 @@ When nothing is eligible, report exactly:
 - Reading `.github/agents/squad.agent.md` wholesale for label or member lookups.
 - Deep-inspecting issues or PRs whose comparison fields did not change.
 - Archiving a session while its PR is still open.
-- Calling `archive_session` on a session created by a previous round — the call fails; there
-  is no automated path, and a human does the removal.
+- Calling `archive_session` on a session created by a previous round — the call fails.
 - Instructing a session to archive itself — `archive_session` on your own id returns
   `Cannot archive the current session`.
 - Instructing a finished session to message its creating session to request archival — the
   creating round has already exited, and waking an idle round can make it re-run its logic.
-- Assuming any automation reaps sessions. Nothing does; the `🧹 Ready to reap` report plus a
-  human is the whole mechanism.
-- Calling `delete_item` on a session. It works, but reaping is a human decision.
+- Assuming any automation reaps sessions, or calling `delete_item` on one. Nothing reaps
+  automatically; the `🧹 Ready to reap` report plus a human is the whole mechanism.
 - Writing a kickoff prompt that omits the verbatim closing clause.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
 - Treating "this branch's commits are not on `development`" as proof the work is unmerged —
