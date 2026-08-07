@@ -77,7 +77,7 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
       aria-modal="true"
       aria-labelledby={titleId}
     >
-      <div className="rounded-lg border border-pf-border bg-pf-bg-1 px-5 py-4 text-pf-text shadow-xl">
+      <div className="rounded-lg border border-pf-border bg-pf-bg-1 px-5 py-4 text-pf-text-primary shadow-xl">
         <h2 id={titleId} className="sr-only">{label}</h2>
         {children}
       </div>
