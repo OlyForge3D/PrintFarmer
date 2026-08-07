@@ -145,6 +145,8 @@ snapshots/
 .squad/.cache/
 # Machine-local Squad scope overrides (per-dev-machine, never shared)
 .squad/machine-local.md
+# Ralph's per-round delta-scan state (runtime cache, never shared)
+.copilot/skills/ralph-loop/.state.json
 
 # Temp/debug artifacts
 .tmp-*
