@@ -772,7 +772,7 @@ NON_INTERACTIVE=1 ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WO
 ### Database Management
 ```bash
 # Access database container (PostgreSQL)
-docker compose exec postgres psql -U postgres -d printfarmer
+docker compose exec database psql -U postgres -d printfarmer
 
 # Reset database (WARNING: destroys data)
 docker compose down -v
@@ -825,7 +825,7 @@ docker compose exec api ping 192.168.1.1
 **Database connection issues:**
 ```bash
 # Check database container
-docker compose logs postgres
+docker compose logs database
 
 # Verify connection string
 docker compose exec api env | grep Connection

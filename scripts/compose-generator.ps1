@@ -273,21 +273,49 @@ if ($Architecture -eq "microservices") {
     # Read database configuration
     $DbConfig = Get-Content -Path $DbTemplate -Raw
 
-    # Simple replacement: replace the ##DATABASE_SERVICE## marker or similar
-    # Look for common markers in the compose file
-    if ($ComposeContent -match '##DATABASE_SERVICE##|services:.*?db:' -or $ComposeContent -match 'postgres:' -or $ComposeContent -match 'sqlserver:') {
-        Write-Info "Updating database service configuration..."
+    $PythonCommand = $null
+    foreach ($Candidate in @("python3", "python")) {
+        $CandidateCommand = Get-Command $Candidate -ErrorAction SilentlyContinue
+        if (-not $CandidateCommand) {
+            continue
+        }
 
-        # Extract just the service definition from the database template
-        # For now, we'll use a simple approach: append if not found
-        if (-not ($ComposeContent -match 'db:|database:|postgres:|sqlserver:')) {
-            # Simple append to services section - this is a limitation without full YAML parsing
-            Write-Warning "Database configuration requires manual YAML merging"
-            Write-Info "Using basic text replacement approach..."
+        & $CandidateCommand.Source -c "from ruamel.yaml import YAML" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $PythonCommand = $CandidateCommand
+            break
         }
     }
+    if (-not $PythonCommand) {
+        Write-ErrorMsg "Python 3 with the 'ruamel.yaml' module is required for database service configuration"
+        exit 1
+    }
 
-    Write-Success "Database service configured for $DbProvider"
+    $ReplacementScript = Join-Path $ScriptDir "docker" "compose-replace-db.py"
+    if (-not (Test-Path $ReplacementScript)) {
+        Write-ErrorMsg "Database replacement script not found: $ReplacementScript"
+        exit 1
+    }
+
+    $TemporaryCompose = [System.IO.Path]::GetTempFileName()
+    $PythonErrors = [System.IO.Path]::GetTempFileName()
+    try {
+        & $PythonCommand.Source $ReplacementScript $ComposeFile $DbConfig 1> $TemporaryCompose 2> $PythonErrors
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorDetail = Get-Content -Path $PythonErrors -Raw
+            Write-ErrorMsg "Failed to configure $DbProvider database service: $ErrorDetail"
+            exit 1
+        }
+        if ((Get-Item $TemporaryCompose).Length -eq 0) {
+            Write-ErrorMsg "Database replacement produced an empty Compose file"
+            exit 1
+        }
+
+        Move-Item -Path $TemporaryCompose -Destination $ComposeFile -Force
+        Write-Success "Database service configured for $DbProvider"
+    } finally {
+        Remove-Item -Path $TemporaryCompose, $PythonErrors -Force -ErrorAction SilentlyContinue
+    }
 }
 
 # Merge addon services if requested
