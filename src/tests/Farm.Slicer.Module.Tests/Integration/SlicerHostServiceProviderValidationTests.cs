@@ -28,10 +28,15 @@ namespace Farm.Slicer.Module.Tests.Integration;
 /// The existing <c>StandaloneSlicerHostApplicationFactory</c>-based tests hosted the same
 /// <c>Program.cs</c> under environment <c>Testing</c>, which turns
 /// <c>ServiceProviderOptions.ValidateOnBuild</c> and <c>ValidateScopes</c> off (both default
-/// to <c>true</c> only in <c>Development</c>). That is why the lifetime bug slipped past CI —
-/// it is only observable when scope validation is on, which is exactly what runs inside the
-/// slicer-host container image (see <c>Dockerfile</c> — <c>ASPNETCORE_ENVIRONMENT</c> is set
-/// to <c>Development</c> for deploys).
+/// to <c>true</c> only in <c>Development</c> when the host is built via
+/// <c>WebApplication.CreateBuilder</c>; in <c>Production</c> they both default to
+/// <c>false</c>). That is why the lifetime bug slipped past CI — it is only observable when
+/// scope validation is on, which is exactly what runs inside the slicer-host container when
+/// operators use PrintFarmer's default deployment. The container image's
+/// <c>Dockerfile</c> stages set <c>ASPNETCORE_ENVIRONMENT=Production</c>, but
+/// <c>deploy-docker.sh</c> writes <c>ASPNETCORE_ENVIRONMENT=Development</c> into the
+/// generated <c>.env</c> file (default answer to the interactive environment prompt), and
+/// <c>docker-compose.slicer-host.yml</c> overrides the image default from that <c>.env</c>.
 /// </para>
 /// <para>
 /// This test forces <c>ValidateOnBuild = true</c> and <c>ValidateScopes = true</c> so any
@@ -55,15 +60,16 @@ public sealed class SlicerHostServiceProviderValidationTests
     }
 
     [Fact]
-    public void SlicerHost_ResolvesAppDbContextFactoryFromRootProvider()
+    public void SlicerHost_ResolvesAppDbContextFactoryFromScopedProvider()
     {
         using ValidatingSlicerHostFactory factory = new();
 
         // AppDbContext-backed services (settings, catalog, etc.) resolve
-        // IDbContextFactory<AppDbContext> per request. Before the fix this
-        // graph was itself invalid — the singleton IDbContextFactory<AppDbContext>
-        // captured a scoped DbContextOptions<AppDbContext>, so ValidateOnBuild
-        // never even got as far as letting anything ask for the factory.
+        // IDbContextFactory<AppDbContext> per request from a request scope.
+        // Before the fix this graph was itself invalid — the singleton
+        // IDbContextFactory<AppDbContext> captured a scoped
+        // DbContextOptions<AppDbContext>, so ValidateOnBuild never even got
+        // as far as letting anything ask for the factory from a scope.
         using IServiceScope scope = factory.Services.CreateScope();
 
         IDbContextFactory<AppDbContext> appFactory =

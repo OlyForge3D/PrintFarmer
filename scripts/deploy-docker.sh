@@ -2742,11 +2742,54 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 load_previous_config() {
     if [ -f "$CONFIG_FILE" ]; then
         print_info "Found previous deployment configuration"
-        
+
+        # Issue #1227: capture explicit environment overrides for distributed
+        # slicing / OrcaSlicer worker intent BEFORE sourcing the config so
+        # persisted values cannot clobber a caller's documented recovery. The
+        # `${VAR+x}` operator distinguishes "unset" from "explicitly empty";
+        # this branch only fires for real callers because these variables are
+        # not initialised to a script default earlier in main (see the
+        # DISABLE_SLICER_BUILDS branch above, which is the one intentional
+        # script-side write that must also survive sourcing).
+        local _env_had_enable_orca_worker=0
+        local _env_had_orca_worker_count=0
+        local _env_had_enable_distributed_slicing=0
+        local _env_enable_orca_worker=""
+        local _env_orca_worker_count=""
+        local _env_enable_distributed_slicing=""
+        if [ -n "${ENABLE_ORCA_WORKER+x}" ]; then
+            _env_had_enable_orca_worker=1
+            _env_enable_orca_worker="$ENABLE_ORCA_WORKER"
+        fi
+        if [ -n "${ORCA_WORKER_COUNT+x}" ]; then
+            _env_had_orca_worker_count=1
+            _env_orca_worker_count="$ORCA_WORKER_COUNT"
+        fi
+        if [ -n "${ENABLE_DISTRIBUTED_SLICING+x}" ]; then
+            _env_had_enable_distributed_slicing=1
+            _env_enable_distributed_slicing="$ENABLE_DISTRIBUTED_SLICING"
+        fi
+
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
         enforce_supported_orcaslicer_release
+
+        # Issue #1227: restore the explicit environment overrides so they win
+        # over persisted values. Without this, a prior destructive save (e.g.
+        # save_deployment_config's `${ENABLE_ORCA_WORKER:-no}` fallback stamping
+        # `no`/`0` for a legacy config) would silently negate the documented
+        # non-interactive recovery command
+        # `ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ./scripts/deploy-docker.sh ...`.
+        if [ "$_env_had_enable_orca_worker" = "1" ]; then
+            ENABLE_ORCA_WORKER="$_env_enable_orca_worker"
+        fi
+        if [ "$_env_had_orca_worker_count" = "1" ]; then
+            ORCA_WORKER_COUNT="$_env_orca_worker_count"
+        fi
+        if [ "$_env_had_enable_distributed_slicing" = "1" ]; then
+            ENABLE_DISTRIBUTED_SLICING="$_env_enable_distributed_slicing"
+        fi
 
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.

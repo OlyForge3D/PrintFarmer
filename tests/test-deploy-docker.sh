@@ -432,6 +432,151 @@ EOF
     pass_test
 }
 
+# Issue #1227: full recovery flow — the documented non-interactive recovery
+# command
+#     ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ./scripts/deploy-docker.sh --non-interactive ...
+# must actually recover from a previously destructive persist. The pre-fix
+# behaviour was that load_previous_config sourced .deploy-config AFTER the
+# operator's environment was already established, silently overwriting the
+# explicit ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 with the persisted
+# no/0. This regression test exercises the two-step flow end-to-end:
+#   Step 1: ambiguous legacy config (ENABLE_DISTRIBUTED_SLICING=true with no
+#           worker keys) is safely defaulted and persisted as no/0.
+#   Step 2: caller supplies explicit ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1
+#           in the environment; the explicit values must override the
+#           persisted no/0 both in the effective config log line and in the
+#           updated .deploy-config on disk.
+test_worker_config_env_override_recovers_persisted_no() {
+    start_test "Issue #1227: explicit env recovers after destructive persist"
+
+    cd "$TEST_TEMP_DIR"
+
+    # ---- Step 1: legacy ambiguous config -> safe default, persist no/0 ----
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+EOF
+
+    capture_output "$(get_deploy_script_command --dry-run --batch --non-interactive)"
+    local step1_output
+    step1_output=$(get_output)
+
+    local step1_persisted
+    step1_persisted=$(cat "$REPO_ROOT/.deploy-config" 2>/dev/null || echo "")
+
+    assert_contains "$step1_output" "ENABLE_ORCA_WORKER is not set" \
+        "Step 1: missing key should still emit the safety warning"
+    assert_contains "$step1_output" "orca=no, count=0" \
+        "Step 1: effective config should be safely defaulted to no/0"
+    assert_contains "$step1_persisted" "ENABLE_ORCA_WORKER=no" \
+        "Step 1: persisted config should reflect the safe default"
+    assert_contains "$step1_persisted" "ORCA_WORKER_COUNT=0" \
+        "Step 1: persisted count should be zero"
+
+    # ---- Step 2: explicit env vars must override the persisted no/0 -------
+    # Prefix env vars into the eval'd command so they are present when the
+    # deploy script sources .deploy-config. Do NOT modify .deploy-config
+    # between steps — this is the exact recovery flow documented in the
+    # short-circuit warning message.
+    capture_output "cd '$REPO_ROOT' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 120 '$REPO_ROOT/scripts/deploy-docker.sh' --dry-run --batch --non-interactive 2>&1 || true"
+    local step2_output
+    step2_output=$(get_output)
+
+    local step2_persisted
+    step2_persisted=$(cat "$REPO_ROOT/.deploy-config" 2>/dev/null || echo "")
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$step2_output" "orca=yes, count=1" \
+        "Step 2: explicit env vars must win over persisted no/0"
+    assert_not_contains "$step2_output" "ENABLE_ORCA_WORKER is not set" \
+        "Step 2: explicit env vars must suppress the missing-key warning"
+    assert_contains "$step2_persisted" "ENABLE_ORCA_WORKER=yes" \
+        "Step 2: persisted config must be rewritten with the explicit yes"
+    assert_contains "$step2_persisted" "ORCA_WORKER_COUNT=1" \
+        "Step 2: persisted config must be rewritten with the explicit count"
+
+    pass_test
+}
+
+# Issue #1227: with no environment overrides, load_previous_config must not
+# clobber an existing well-formed .deploy-config. This is the "happy path"
+# for repeat redeploys where the operator wants the persisted intent
+# honored verbatim.
+test_worker_config_no_env_preserves_persisted() {
+    start_test "Issue #1227: no env overrides preserves existing .deploy-config"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=2
+EOF
+
+    # Explicitly unset any inherited env vars so this test is deterministic
+    # regardless of the shell environment the test runner inherits.
+    capture_output "cd '$REPO_ROOT' && unset ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ENABLE_DISTRIBUTED_SLICING && timeout 120 '$REPO_ROOT/scripts/deploy-docker.sh' --dry-run --batch --non-interactive 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    local persisted
+    persisted=$(cat "$REPO_ROOT/.deploy-config" 2>/dev/null || echo "")
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "orca=yes, count=2" \
+        "No-env redeploy must honor the persisted worker state"
+    assert_not_contains "$output" "ENABLE_ORCA_WORKER is not set" \
+        "No-env redeploy on a well-formed config must not warn"
+    assert_contains "$persisted" "ENABLE_ORCA_WORKER=yes" \
+        "No-env redeploy must not degrade the persisted worker state"
+    assert_contains "$persisted" "ORCA_WORKER_COUNT=2" \
+        "No-env redeploy must not degrade the persisted worker count"
+
+    pass_test
+}
+
+# Issue #1227: symmetric case — explicit ENABLE_ORCA_WORKER=no in the
+# environment must win over a persisted ENABLE_ORCA_WORKER=yes so operators
+# can disable the worker on redeploy without editing .deploy-config by hand.
+# This is within the documented contract of the recovery command (the
+# operator supplies the desired worker intent as env vars).
+test_worker_config_explicit_env_disable_overrides_persisted_yes() {
+    start_test "Issue #1227: explicit ENABLE_ORCA_WORKER=no overrides persisted yes"
+
+    cd "$TEST_TEMP_DIR"
+
+    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+ARCHITECTURE=microservices
+DB_PROVIDER=postgres
+ENABLE_DISTRIBUTED_SLICING=true
+ENABLE_ORCA_WORKER=yes
+ORCA_WORKER_COUNT=2
+EOF
+
+    capture_output "cd '$REPO_ROOT' && ENABLE_ORCA_WORKER=no ORCA_WORKER_COUNT=0 timeout 120 '$REPO_ROOT/scripts/deploy-docker.sh' --dry-run --batch --non-interactive 2>&1 || true"
+    local output
+    output=$(get_output)
+
+    local persisted
+    persisted=$(cat "$REPO_ROOT/.deploy-config" 2>/dev/null || echo "")
+
+    rm -f "$REPO_ROOT/.deploy-config"
+
+    assert_contains "$output" "orca=no, count=0" \
+        "Explicit ENABLE_ORCA_WORKER=no must override persisted yes"
+    assert_contains "$persisted" "ENABLE_ORCA_WORKER=no" \
+        "Persisted config must be rewritten to no"
+    assert_contains "$persisted" "ORCA_WORKER_COUNT=0" \
+        "Persisted count must be rewritten to 0"
+
+    pass_test
+}
+
 # Test network configuration
 test_network_configuration() {
     start_test "network configuration"
@@ -1797,6 +1942,9 @@ run_all_tests() {
     test_worker_config_explicit_no_preserved
     test_worker_config_yes_with_missing_count_defaults_to_one
     test_worker_config_persisted_after_redeploy
+    test_worker_config_env_override_recovers_persisted_no
+    test_worker_config_no_env_preserves_persisted
+    test_worker_config_explicit_env_disable_overrides_persisted_yes
     test_network_configuration  
     test_database_configuration
     test_all_database_combinations
