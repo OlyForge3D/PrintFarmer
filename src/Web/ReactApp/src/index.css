@@ -42,6 +42,7 @@
   /* Form controls */
   --color-pf-control-bg: var(--pf-control-bg);
   --color-pf-control-border: var(--pf-control-border);
+  --color-pf-control-boundary: var(--pf-control-boundary);
   --color-pf-control-border-focus: var(--pf-control-border-focus);
   --color-pf-control-text: var(--pf-control-text);
   --color-pf-control-placeholder: var(--pf-control-placeholder);
