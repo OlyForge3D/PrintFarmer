@@ -800,6 +800,11 @@ export default {
 
     /** Build the replacement token, preserving variants and side. */
     function toLargeToken(rawToken) {
+      const { variants, base, important } = splitToken(rawToken)
+      if (/^\[border-radius:/i.test(base)) {
+        const prefix = variants.length > 0 ? `${variants.join(':')}:` : ''
+        return `${prefix}${important ? '!' : ''}rounded-lg`
+      }
       return rawToken.replace(/-(?:4xl|3xl|2xl|xl|full|\[[^\]]+\])$/, '-lg')
     }
 

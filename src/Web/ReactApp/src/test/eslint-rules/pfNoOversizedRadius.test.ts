@@ -272,17 +272,40 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<div className="[border-radius:12px]" />',
       output: null,
-      errors: [{ messageId: 'oversized', data: { token: '[border-radius:12px]', px: 12 } }],
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: '[border-radius:12px]', px: 12 },
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
+          ],
+        },
+      ],
     },
     {
       code: '<div className="md:[border-radius:1.5rem]" />',
       output: null,
-      errors: [{ messageId: 'oversized', data: { token: 'md:[border-radius:1.5rem]', px: 24 } }],
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'md:[border-radius:1.5rem]', px: 24 },
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="md:rounded-lg" />' },
+          ],
+        },
+      ],
     },
     {
       code: '<div className="[border-radius:9999px]" />',
       output: null,
-      errors: [{ messageId: 'fullRound' }],
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
+          ],
+        },
+      ],
     },
     // Radius values follow CSS number spelling and comment rules.
     ...[
