@@ -3231,8 +3231,11 @@ normalize_boolean_value() {
     local value="$2"
     local true_value="$3"
     local false_value="$4"
+    local normalized_value
 
-    case "${value,,}" in
+    normalized_value=$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')
+
+    case "$normalized_value" in
         yes|true|1|on)
             NORMALIZED_BOOLEAN_VALUE="$true_value"
             ;;
@@ -3254,10 +3257,10 @@ normalize_worker_configuration() {
     local worker_host_is_set=false
     local force_disable="$SLICER_BUILDS_FORCE_DISABLED"
 
-    [[ -v ENABLE_DISTRIBUTED_SLICING ]] && distributed_is_set=true
-    [[ -v ENABLE_ORCA_WORKER ]] && worker_enable_is_set=true
-    [[ -v ORCA_WORKER_COUNT ]] && worker_count_is_set=true
-    [[ -v ORCA_HOST_PORT ]] && worker_host_is_set=true
+    [ "${ENABLE_DISTRIBUTED_SLICING+x}" = "x" ] && distributed_is_set=true
+    [ "${ENABLE_ORCA_WORKER+x}" = "x" ] && worker_enable_is_set=true
+    [ "${ORCA_WORKER_COUNT+x}" = "x" ] && worker_count_is_set=true
+    [ "${ORCA_HOST_PORT+x}" = "x" ] && worker_host_is_set=true
 
     if [[ -n "${DISABLE_SLICER_BUILDS:-}" ]]; then
         if ! normalize_boolean_value "DISABLE_SLICER_BUILDS" "$DISABLE_SLICER_BUILDS" "true" "false"; then

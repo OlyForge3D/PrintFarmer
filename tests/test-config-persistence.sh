@@ -87,6 +87,23 @@ write_legacy_worker_config() {
         "$config_file"
 }
 
+test_worker_normalization_is_bash_3_2_compatible() {
+    start_test "worker normalization avoids Bash 4-only syntax"
+
+    local failures_before=$TESTS_FAILED
+
+    if grep -Eq '\$\{[^}]*,,\}' "$DEPLOY_SCRIPT"; then
+        fail_test "Deployment script must not use Bash 4 lowercase expansion"
+    fi
+    if grep -Eq '\[\[[[:space:]]+-v[[:space:]]' "$DEPLOY_SCRIPT"; then
+        fail_test "Deployment script must not use Bash 4.2 variable-presence checks"
+    fi
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Test that monitoring/telemetry/security settings are saved to config file
 test_monitoring_config_persistence() {
     start_test "monitoring/telemetry/security configuration persistence"
@@ -272,6 +289,7 @@ test_redeploy_migrates_legacy_worker_defaults() {
 
     cd "$TEST_TEMP_DIR"
     write_legacy_worker_config ".deploy-config"
+    rm -f docker-compose.yml docker-compose.override.yml
 
     capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --redeploy --dry-run 2>&1"
     local exit_code
@@ -287,7 +305,8 @@ test_redeploy_migrates_legacy_worker_defaults() {
     assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Redeploy should persist worker enablement" || true
     assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Redeploy should persist one worker" || true
     assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=yes" "Redeploy should enable the generated worker environment" || true
-    assert_file_has_exact_line "docker-compose.yml" "  orcaslicer-worker:" "Redeploy should include the OrcaSlicer worker service" || true
+    assert_file_has_exact_line ".env" "ORCA_WORKER_COUNT=1" "Redeploy should generate one worker" || true
+    assert_file_not_exists "docker-compose.yml" "Dry-run redeploy should not create a compose artifact" || true
     assert_contains "$output" "--profile orca up -d" "Redeploy should select the OrcaSlicer profile" || true
 
     if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
@@ -450,7 +469,8 @@ EOF
 # Run all tests
 run_all_tests() {
     setup
-    
+
+    test_worker_normalization_is_bash_3_2_compatible
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
