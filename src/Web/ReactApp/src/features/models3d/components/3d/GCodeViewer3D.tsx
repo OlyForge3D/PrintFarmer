@@ -313,7 +313,7 @@ export const GCodeViewer: React.FC<GCodeViewerProps> = ({
                 variant="subtle"
                 size="sm"
                 onClick={() => setShowSettings(!showSettings)}
-                className="p-2 rounded-md text-pf-text-secondary hover:text-white border-none shadow-none focus:ring-0"
+                className="p-2 rounded-md enabled:hover:text-pf-text-primary border-none shadow-none focus:ring-0"
                 title="Settings"
               >
                 <GearIcon className="w-5 h-5" />
