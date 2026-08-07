@@ -48,7 +48,7 @@ public sealed class CalibrationSlicerCompatibilityPolicy
         SupportedVersions = versions;
     }
 
-    /// <summary>Gets the configured versions in stable ordinal order.</summary>
+    /// <summary>Gets the distinct versions in configured order.</summary>
     public IReadOnlyList<string> SupportedVersions { get; }
 
     /// <summary>Gets the legacy primary required version retained for client compatibility.</summary>

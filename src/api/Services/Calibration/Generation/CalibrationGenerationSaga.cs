@@ -528,8 +528,45 @@ public sealed class CalibrationGenerationSaga(
             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
         }
 
+        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
+                cancellationToken);
+        if (snapshot is null)
+        {
+            await FailTerminallyAsync(
+                project,
+                orchestration,
+                CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                [
+                    new(
+                        CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                        "attempt.printerConfigurationSnapshotId",
+                        "The immutable printer configuration snapshot is missing."),
+                ],
+                cancellationToken);
+            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.SlicerVersion))
+        {
+            await FailTerminallyAsync(
+                project,
+                orchestration,
+                CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                [
+                    new(
+                        CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                        "attempt.printerConfigurationSnapshot.slicerVersion",
+                        "The immutable printer configuration snapshot has no slicer version."),
+                ],
+                cancellationToken);
+            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+        }
+
         CalibrationPinnedSlicerIdentity? pinned =
-            await _capabilityProbe.FindPinnedWorkerAsync(cancellationToken);
+            await _capabilityProbe.FindPinnedWorkerAsync(snapshot.SlicerVersion, cancellationToken);
         if (pinned is null)
         {
             CalibrationGenerationCapabilityDto capability =
@@ -557,7 +594,7 @@ public sealed class CalibrationGenerationSaga(
         }
 
         CalibrationGenerationResult<CalibrationRunContext> prepared =
-            await PrepareAsync(project, attempt, orchestration, pinned, cancellationToken);
+            await PrepareAsync(project, attempt, orchestration, snapshot, pinned, cancellationToken);
         if (!prepared.IsValid)
         {
             await FailTerminallyAsync(
@@ -726,22 +763,10 @@ public sealed class CalibrationGenerationSaga(
         CalibrationProject project,
         CalibrationAttempt attempt,
         CalibrationOrchestration orchestration,
+        PrinterConfigurationSnapshot snapshot,
         CalibrationPinnedSlicerIdentity pinned,
         CancellationToken cancellationToken)
     {
-        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
-                cancellationToken);
-        if (snapshot is null)
-        {
-            return CalibrationGenerationResults.Failure<CalibrationRunContext>(
-                CalibrationGenerationProblemCodes.ContextIdentityMissing,
-                "attempt.printerConfigurationSnapshotId",
-                "The immutable printer configuration snapshot is missing.");
-        }
-
         long currentRevision = await _dbContext.Printers
             .AsNoTracking()
             .Where(printer => printer.Id == snapshot.PrinterId)

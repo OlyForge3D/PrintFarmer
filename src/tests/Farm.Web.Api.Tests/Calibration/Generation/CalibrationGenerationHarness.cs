@@ -117,6 +117,8 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     public ICalibrationGenerationSaga CreateSaga(CalibrationGenerationHarnessOptions? options = null)
     {
         CalibrationGenerationHarnessOptions resolved = options ?? new CalibrationGenerationHarnessOptions();
+        CalibrationSlicerCompatibilityPolicy compatibilityPolicy =
+            new(resolved.SupportedSlicerVersions);
         AppDbContext core = CreateCoreContext();
         SlicerContextFactory slicerFactory = new(_slicerConnectionString);
         IArtifactsRepository artifactsRepository = new EfArtifactsRepository(slicerFactory);
@@ -146,12 +148,12 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         return new CalibrationGenerationSaga(
             core,
             CreateProjectService(core),
-            new CalibrationSpecificationCompiler(TimeProvider.System),
+            new CalibrationSpecificationCompiler(TimeProvider.System, compatibilityPolicy),
             new CalibrationModelValidator(),
-            resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(),
-            new KlipperCalibrationGcodeGenerator(),
+            resolved.PlanCompiler ?? new OrcaCalibrationPlanCompiler(compatibilityPolicy),
+            new KlipperCalibrationGcodeGenerator(compatibilityPolicy),
             new CalibrationGcodeAnnotator(),
-            new CalibrationGcodeSafetyValidator(),
+            new CalibrationGcodeSafetyValidator(compatibilityPolicy),
             BuildProbe(resolved, core, slicerFactory, promoter, modelStorage, sliceJobs, artifacts, artifactsRepository),
             promoter,
             storagePaths,
@@ -211,13 +213,15 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         string method = CalibrationMethodNames.Temperature,
         Guid? ownerId = null,
         bool tamperSpecification = false,
-        CalibrationGenerationSeed.ProfileSet? profiles = null) =>
+        CalibrationGenerationSeed.ProfileSet? profiles = null,
+        CalibrationPinnedSlicerIdentity? pinnedIdentity = null) =>
         CalibrationGenerationSeed.SeedAsync(
             CreateCoreContext,
             method,
             ownerId ?? Guid.NewGuid(),
             tamperSpecification,
-            profiles);
+            profiles,
+            pinnedIdentity: pinnedIdentity);
 
     /// <summary>Registers an online worker that attests the pinned upstream build identity.</summary>
     /// <param name="containerDigest">Container digest published by the worker's service.</param>
@@ -231,7 +235,10 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     {
         Guid serviceId = Guid.NewGuid();
         Guid workerId = Guid.NewGuid();
-        string capabilities = CalibrationGenerationSeed.BuildAttestationJson(containerDigest, binaryDigest);
+        string capabilities = CalibrationGenerationSeed.BuildAttestationJson(
+            containerDigest,
+            binaryDigest,
+            version);
 
         await using SlicerDbContext slicer = CreateSlicerContext();
         _ = slicer.SlicerServices.Add(new SlicerService
@@ -267,6 +274,21 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         });
         _ = await slicer.SaveChangesAsync();
         return workerId;
+    }
+
+    /// <summary>Claims the next compatible slice job as the registered worker.</summary>
+    /// <param name="workerId">Registered worker identity.</param>
+    /// <returns>The claimed job, or <see langword="null"/> when no compatible job exists.</returns>
+    public async Task<SliceJob?> ClaimNextSliceJobAsync(Guid workerId)
+    {
+        await using SlicerDbContext slicer = CreateSlicerContext();
+        Worker worker = await slicer.Workers.SingleAsync(candidate => candidate.Id == workerId);
+        EfSliceJobRepository repository = new(slicer);
+        return await repository.ClaimNextJobAsync(
+            WorkerClaimIdentity.FromRegisteredWorker(worker),
+            leaseDurationSeconds: 300,
+            maxRetries: 3,
+            ct: CancellationToken.None);
     }
 
     /// <summary>Completes the submitted slice job the way an authenticated worker would.</summary>

@@ -68,6 +68,14 @@ public interface ICalibrationGenerationCapabilityProbe
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The attested identity, or <see langword="null"/> when none is eligible.</returns>
     Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(CancellationToken cancellationToken);
+
+    /// <summary>Finds a registered worker that exactly matches an immutable attempt's slicer version.</summary>
+    /// <param name="requiredSlicerVersion">Exact slicer version recorded by the attempt snapshot.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The attested identity, or <see langword="null"/> when none is eligible.</returns>
+    Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(
+        string requiredSlicerVersion,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>Shared health of the calibration generation recovery service.</summary>
@@ -141,7 +149,7 @@ public sealed class CalibrationGenerationCapabilityProbe(
         bool sliceSubmission = await IsSliceSubmissionRoutableAsync(cancellationToken);
         bool artifactSource = await IsArtifactSourceRoutableAsync(cancellationToken);
         WorkerCompatibilitySnapshot workerCompatibility =
-            await FindWorkerCompatibilityAsync(cancellationToken);
+            await FindWorkerCompatibilityAsync(null, cancellationToken);
         CalibrationPinnedSlicerIdentity? pinned = workerCompatibility.PinnedIdentity;
         bool promotion = await IsPromotionOperationalAsync(cancellationToken);
         bool orchestrationStore = await IsOrchestrationStoreAvailableAsync(cancellationToken);
@@ -203,9 +211,20 @@ public sealed class CalibrationGenerationCapabilityProbe(
     /// <inheritdoc/>
     public async Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(
         CancellationToken cancellationToken) =>
-        (await FindWorkerCompatibilityAsync(cancellationToken)).PinnedIdentity;
+        (await FindWorkerCompatibilityAsync(null, cancellationToken)).PinnedIdentity;
+
+    /// <inheritdoc/>
+    public async Task<CalibrationPinnedSlicerIdentity?> FindPinnedWorkerAsync(
+        string requiredSlicerVersion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requiredSlicerVersion);
+        return (await FindWorkerCompatibilityAsync(requiredSlicerVersion, cancellationToken))
+            .PinnedIdentity;
+    }
 
     private async Task<WorkerCompatibilitySnapshot> FindWorkerCompatibilityAsync(
+        string? requiredSlicerVersion,
         CancellationToken cancellationToken)
     {
         if (!_configuration.GetValue("Slicer:Enabled", false))
@@ -251,6 +270,11 @@ public sealed class CalibrationGenerationCapabilityProbe(
             string[] eligibleServiceIds = services
                 .Where(service =>
                     _compatibilityPolicy.IsSupported(service.Version) &&
+                    (requiredSlicerVersion is null ||
+                     string.Equals(
+                         service.Version,
+                         requiredSlicerVersion,
+                         StringComparison.Ordinal)) &&
                     CalibrationContractConstants.AttestsUpstreamSlicer(service.CapabilitiesJson) &&
                     CalibrationSlicerAttestation.TryRead(service.CapabilitiesJson, out _, out _))
                 .Select(service => service.Id.ToString())
@@ -278,6 +302,7 @@ public sealed class CalibrationGenerationCapabilityProbe(
                 .Select(worker => new WorkerAttestation(
                     worker.Id,
                     worker.ServiceId,
+                    worker.Version,
                     worker.CapabilitiesJson))
                 .ToListAsync(cancellationToken);
 
@@ -290,6 +315,11 @@ public sealed class CalibrationGenerationCapabilityProbe(
 
                 ServiceAttestation service = services.First(
                     candidate => candidate.Id.ToString() == worker.ServiceId);
+                if (!string.Equals(worker.Version, service.Version, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
                 if (!CalibrationSlicerAttestation.TryRead(
                         service.CapabilitiesJson,
                         out string? containerDigest,
@@ -449,7 +479,11 @@ public sealed class CalibrationGenerationCapabilityProbe(
 
     private sealed record ServiceAttestation(Guid Id, string? Version, string? CapabilitiesJson);
 
-    private sealed record WorkerAttestation(Guid Id, string ServiceId, string? CapabilitiesJson);
+    private sealed record WorkerAttestation(
+        Guid Id,
+        string ServiceId,
+        string? Version,
+        string? CapabilitiesJson);
 
     private sealed record WorkerCompatibilitySnapshot(
         CalibrationPinnedSlicerIdentity? PinnedIdentity,

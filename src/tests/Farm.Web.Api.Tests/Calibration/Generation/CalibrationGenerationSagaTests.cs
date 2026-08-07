@@ -354,6 +354,40 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = job.ModelFileUrl.Should().NotContain(_harness.ModelRoot);
     }
 
+    [Fact(DisplayName = "A configured non-default slicer worker can claim its pinned calibration job")]
+    public async Task ResumeAsync_WithConfiguredNonDefaultSlicerVersion_SubmitsClaimableJob()
+    {
+        const string supportedNonDefaultVersion = "2.5.0";
+        Guid workerId = await _harness.AddAttestedWorkerAsync(version: supportedNonDefaultVersion);
+        CalibrationPinnedSlicerIdentity pinned = new(
+            supportedNonDefaultVersion,
+            CalibrationContractConstants.SlicerDistribution,
+            CalibrationGenerationHarness.ContainerDigest,
+            CalibrationGenerationHarness.BinaryDigest,
+            workerId);
+        CalibrationGenerationFixture fixture = await _harness.SeedAttemptAsync(pinnedIdentity: pinned);
+        CalibrationGenerationHarnessOptions options = new()
+        {
+            SupportedSlicerVersions =
+            [
+                CalibrationContractConstants.SlicerVersion,
+                supportedNonDefaultVersion,
+            ],
+        };
+        await AcceptAsync(fixture, "generate-non-default-version", options);
+
+        _ = await _harness.CreateSaga(options)
+            .ResumeAsync(fixture.OrchestrationId, CancellationToken.None);
+
+        SliceJob? submitted = await _harness.FindSliceJobAsync(fixture.OrchestrationId);
+        SliceJob? claimed = await _harness.ClaimNextSliceJobAsync(workerId);
+        _ = submitted.Should().NotBeNull();
+        _ = submitted!.SlicerVersion.Should().Be(supportedNonDefaultVersion);
+        _ = submitted.PinnedWorkerId.Should().Be(workerId);
+        _ = claimed.Should().NotBeNull();
+        _ = claimed!.Id.Should().Be(submitted.Id);
+    }
+
     [Fact(DisplayName = "An upstream profile's command fields are neutralized before the worker sees them")]
     public async Task ResumeAsync_WithUpstreamCommandFields_DeliversNeutralizedProfilesOnly()
     {
@@ -1618,10 +1652,13 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         }
     }
 
-    private async Task AcceptAsync(CalibrationGenerationFixture fixture, string operationId)
+    private async Task AcceptAsync(
+        CalibrationGenerationFixture fixture,
+        string operationId,
+        CalibrationGenerationHarnessOptions? options = null)
     {
         CalibrationApiResult<CalibrationOrchestrationStatusDto> accepted =
-            await _harness.CreateSaga().CreateOrResumeAsync(
+            await _harness.CreateSaga(options).CreateOrResumeAsync(
                 fixture.ProjectId,
                 fixture.AttemptId,
                 operationId,
