@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createPortal } from 'react-dom';
 import { describe, it, expect, vi } from 'vitest';
 import { DataTable, DataTableColumn } from '../DataTable';
 
@@ -222,6 +223,31 @@ describe('DataTable', () => {
     expect(onRowSelect).toHaveBeenCalledWith(mockData[1], 1);
   });
 
+  it('should not select a row when a portaled descendant is clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => createPortal(
+        <button type="button">Portal action {item.name}</button>,
+        document.body,
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Portal action Item A' }));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
   it('should not select a row when a nested label or its control is clicked', () => {
     const onRowSelect = vi.fn();
     const columns: DataTableColumn<TestItem>[] = [{
@@ -276,6 +302,32 @@ describe('DataTable', () => {
 
     fireEvent.click(screen.getByText('Edit Item A'));
     fireEvent.click(screen.getByText('Open Item A'));
+
+    expect(onRowSelect).not.toHaveBeenCalled();
+  });
+
+  it('should not select a row when a tabbable SVG descendant is clicked', () => {
+    const onRowSelect = vi.fn();
+    const columns: DataTableColumn<TestItem>[] = [{
+      key: 'control',
+      header: 'Control',
+      render: (item) => (
+        <svg tabIndex={0} aria-label={`Inspect ${item.name}`}>
+          <title>Inspect {item.name}</title>
+        </svg>
+      ),
+    }];
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={columns}
+        getRowKey={(item) => item.id}
+        onRowSelect={onRowSelect}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Inspect Item A'));
 
     expect(onRowSelect).not.toHaveBeenCalled();
   });

@@ -38,6 +38,10 @@ function isInteractiveRowDescendant(
     return false;
   }
 
+  if (!row.contains(target)) {
+    return true;
+  }
+
   const interactiveDescendant = target.closest(INTERACTIVE_ROW_CHILD_SELECTOR);
   if (interactiveDescendant && row.contains(interactiveDescendant)) {
     return true;
@@ -46,7 +50,7 @@ function isInteractiveRowDescendant(
   let candidate: Element | null = target;
   while (candidate && candidate !== row) {
     if (
-      candidate instanceof HTMLElement
+      (candidate instanceof HTMLElement || candidate instanceof SVGElement)
       && candidate.hasAttribute('tabindex')
       && candidate.tabIndex >= 0
     ) {
@@ -88,7 +92,7 @@ export interface DataTableProps<T> {
   columns: DataTableColumn<T>[];
   /** Function to get unique key for each row */
   getRowKey: (item: T) => string | number;
-  /** Enable keyboard navigation; row selection enables it automatically */
+  /** Enable keyboard navigation; inferred from row selection only when omitted */
   keyboardNavigation?: boolean;
   /** Default sort column key */
   defaultSortColumn?: string;
