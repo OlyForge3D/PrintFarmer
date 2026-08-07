@@ -256,6 +256,64 @@ test_explicit_worker_disable_remains_disabled() {
     fi
 }
 
+test_disabled_slicing_defaults_missing_worker_settings() {
+    start_test "disabled slicing defaults omitted worker settings"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    sed -i \
+        -e '/^ENABLE_ORCA_WORKER=/d' \
+        -e '/^ORCA_WORKER_COUNT=/d' \
+        ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Partial disabled-slicing config should complete successfully" || true
+    assert_not_contains "$output" "unbound variable" "Partial disabled-slicing config should not dereference omitted worker settings" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Omitted worker settings should use disabled defaults" || true
+    assert_not_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Disabled slicing should not trigger enabled-worker migration" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_DISTRIBUTED_SLICING=false" "Should preserve the operator's disabled slicing setting" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=no" "Should persist the safe worker default" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=0" "Should persist the safe worker count" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_disabled_worker_defaults_missing_count() {
+    start_test "disabled worker defaults omitted worker count"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    sed -i '/^ORCA_WORKER_COUNT=/d' ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Partial disabled-worker config should complete successfully" || true
+    assert_not_contains "$output" "unbound variable" "Partial disabled-worker config should not dereference an omitted worker count" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Omitted worker count should use the disabled default" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_DISTRIBUTED_SLICING=false" "Should preserve the operator's disabled slicing setting" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=no" "Should preserve the operator's disabled worker setting" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=0" "Should persist the safe worker count" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 test_regenerate_config_migrates_legacy_worker_defaults() {
     start_test "config regeneration migrates legacy worker defaults"
 
@@ -476,6 +534,8 @@ run_all_tests() {
     test_config_loading_display
     test_legacy_distributed_slicing_config_migrates_worker_defaults
     test_explicit_worker_disable_remains_disabled
+    test_disabled_slicing_defaults_missing_worker_settings
+    test_disabled_worker_defaults_missing_count
     test_regenerate_config_migrates_legacy_worker_defaults
     test_redeploy_migrates_legacy_worker_defaults
     test_worker_boolean_forms_and_exact_count_are_normalized

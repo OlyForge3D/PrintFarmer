@@ -3374,6 +3374,10 @@ find_next_free_port() {
 validate_configuration() {
     print_header "🧪 Validating Configuration"
 
+    : "${ENABLE_DISTRIBUTED_SLICING:=false}"
+    : "${ENABLE_ORCA_WORKER:=no}"
+    : "${ORCA_WORKER_COUNT:=0}"
+
     case "${DB_PROVIDER:-}" in
         postgres|sqlserver)
             ;;
