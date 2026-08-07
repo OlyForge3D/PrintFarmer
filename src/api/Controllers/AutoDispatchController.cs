@@ -469,16 +469,17 @@ public class AutoDispatchController(
                 new { error = "precondition_required", detail = "If-Match is required." });
         }
 
-        byte[]? actual = await db.PrinterDispatchStates
+        long? actualRevision = await db.PrinterDispatchStates
             .AsNoTracking()
             .Where(state => state.PrinterId == printerId)
-            .Select(state => state.RowVersion)
+            .Select(state => (long?)state.Revision)
             .SingleOrDefaultAsync(ct);
-        if (actual is null)
+        if (actualRevision is null)
         {
             return NotFound(new { error = "printer_not_found" });
         }
 
+        byte[] actual = RevisionETag.EncodeBytes(actualRevision.Value);
         try
         {
             byte[] expected = Convert.FromBase64String(
@@ -516,20 +517,21 @@ public class AutoDispatchController(
                 });
         }
 
-        byte[]? actual = await db.PrintJobs
+        long? actualRevision = await db.PrintJobs
             .AsNoTracking()
             .Where(job =>
                 job.AssignedPrinterId == printerId &&
                 (job.Status == PrintJobStatus.Queued ||
                  job.Status == PrintJobStatus.Assigned))
             .OrderByPriorityDescending()
-            .Select(job => job.RowVersion)
+            .Select(job => (long?)job.Revision)
             .FirstOrDefaultAsync(ct);
-        if (actual is null)
+        if (actualRevision is null)
         {
             return Conflict(new { error = "queue_empty" });
         }
 
+        byte[] actual = RevisionETag.EncodeBytes(actualRevision.Value);
         try
         {
             byte[] expected = Convert.FromBase64String(
@@ -570,16 +572,17 @@ public class AutoDispatchController(
                 });
         }
 
-        byte[]? actual = await db.Printers
+        long? actualRevision = await db.Printers
             .AsNoTracking()
             .Where(printer => printer.Id == printerId)
-            .Select(printer => printer.RowVersion)
+            .Select(printer => (long?)printer.Revision)
             .SingleOrDefaultAsync(ct);
-        if (actual is null)
+        if (actualRevision is null)
         {
             return NotFound(new { error = "printer_not_found" });
         }
 
+        byte[] actual = RevisionETag.EncodeBytes(actualRevision.Value);
         try
         {
             byte[] expected = Convert.FromBase64String(

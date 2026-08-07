@@ -16,9 +16,6 @@ public class PrintJobConfiguration : IEntityTypeConfiguration<PrintJob>
     {
         builder.HasKey(pj => pj.Id);
 
-        // Concurrency token for optimistic locking - critical for job queue operations
-        builder.Property(pj => pj.RowVersion).IsRowVersion();
-
         // Basic properties
         builder.Property(pj => pj.Name).IsRequired().HasMaxLength(255);
         builder.Property(pj => pj.Priority)

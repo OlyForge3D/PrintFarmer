@@ -96,10 +96,10 @@ public class PrintersControllerSwapFlowTests
         Mock<IPrintersService> printers,
         PrintersController controller)
     {
-        byte[] rowVersion = Guid.NewGuid().ToByteArray();
+        byte[] rowVersion = RevisionETag.EncodeBytes(1);
         printers
             .Setup(s => s.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new Printer { Id = printerId, Name = "T", RowVersion = rowVersion });
+            .ReturnsAsync(new Printer { Id = printerId, Name = "T", Revision = 1 });
         controller.Request.Headers.IfMatch = $"\"{Convert.ToBase64String(rowVersion)}\"";
     }
 

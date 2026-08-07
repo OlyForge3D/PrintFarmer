@@ -6,13 +6,12 @@ using Farm.Infrastructure.Annotations;
 
 namespace Farm.Infrastructure.Domain;
 
-public class Spool
+public class Spool : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token for optimistic locking during concurrent printer assignment.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     public string Material { get; set; } = string.Empty;
 

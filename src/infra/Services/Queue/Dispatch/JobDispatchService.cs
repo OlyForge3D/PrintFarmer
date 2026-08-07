@@ -208,11 +208,14 @@ public class JobDispatchService(
             }
             catch (QueueRevisionConflictException ex)
             {
-                byte[]? dispatchStateRowVersion = await db.PrinterDispatchStates
+                long? dispatchStateRevision = await db.PrinterDispatchStates
                     .AsNoTracking()
                     .Where(state => state.PrinterId == printerId)
-                    .Select(state => state.RowVersion)
+                    .Select(state => (long?)state.Revision)
                     .SingleOrDefaultAsync(ct);
+                byte[]? dispatchStateRowVersion = dispatchStateRevision.HasValue
+                    ? RevisionETag.EncodeBytes(dispatchStateRevision.Value)
+                    : null;
                 throw new QueueRevisionConflictException(
                     ex.Message,
                     job.RowVersion,
@@ -235,8 +238,8 @@ public class JobDispatchService(
             }
 
             db.Entry(reviewedDispatchState)
-                .Property(state => state.RowVersion)
-                .OriginalValue = expectedDispatchStateRowVersion;
+                .Property(state => state.Revision)
+                .OriginalValue = RevisionETag.Decode(expectedDispatchStateRowVersion);
         }
 
         if (printerScore is { Eliminated: true })
@@ -360,17 +363,23 @@ public class JobDispatchService(
                 jobId,
                 printerId);
             db.ChangeTracker.Clear();
-            byte[]? currentJobRowVersion = await db.PrintJobs
+            long? currentJobRevision = await db.PrintJobs
                 .AsNoTracking()
                 .Where(candidate => candidate.Id == jobId)
-                .Select(candidate => candidate.RowVersion)
+                .Select(candidate => (long?)candidate.Revision)
                 .SingleOrDefaultAsync(ct);
-            byte[]? currentDispatchStateRowVersion =
+            long? currentDispatchStateRevision =
                 await db.PrinterDispatchStates
                     .AsNoTracking()
                     .Where(state => state.PrinterId == printerId)
-                    .Select(state => state.RowVersion)
+                    .Select(state => (long?)state.Revision)
                     .SingleOrDefaultAsync(ct);
+            byte[]? currentJobRowVersion = currentJobRevision.HasValue
+                ? RevisionETag.EncodeBytes(currentJobRevision.Value)
+                : null;
+            byte[]? currentDispatchStateRowVersion = currentDispatchStateRevision.HasValue
+                ? RevisionETag.EncodeBytes(currentDispatchStateRevision.Value)
+                : null;
             throw new QueueRevisionConflictException(
                 "The print job or printer dispatch revision changed during scored dispatch.",
                 currentJobRowVersion,

@@ -242,9 +242,8 @@ public class PrintJobBuilder
         {
             Id = _id,
 
-            // Production always stamps a concurrency token on save; tests must exercise the
-            // same If-Match contract, so the builder emits a deterministic non-empty token.
-            RowVersion = _id.ToByteArray(),
+            // Production initializes persisted revisions at one.
+            Revision = 1,
             Name = _name,
             GcodeFileId = _gcodeFileId,
             AssignedPrinterId = _assignedPrinterId,

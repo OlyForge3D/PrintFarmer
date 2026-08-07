@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -179,7 +179,7 @@ public class JobQueueAnalyticsPriorityTests
         new()
         {
             Id = Guid.NewGuid(),
-            RowVersion = [1, 2, 3, 4, 5, 6, 7, 8],
+            Revision = 1,
             Name = "priority.gcode",
             Priority = (int)PrintJobPriority.Normal,
             Status = PrintJobStatus.Queued,

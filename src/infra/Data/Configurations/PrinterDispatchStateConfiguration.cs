@@ -18,7 +18,5 @@ public class PrinterDispatchStateConfiguration : IEntityTypeConfiguration<Printe
             .WithOne(p => p.DispatchState)
             .HasForeignKey<PrinterDispatchState>(e => e.PrinterId)
             .OnDelete(DeleteBehavior.Cascade);
-
-        builder.Property(e => e.RowVersion).IsRowVersion();
     }
 }

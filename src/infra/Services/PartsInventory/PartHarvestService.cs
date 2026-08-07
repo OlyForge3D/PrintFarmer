@@ -195,7 +195,8 @@ public class PartHarvestService(
                             .SetProperty(value => value.HarvestedAt, now)
                             .SetProperty(value => value.HarvestOperationKey, operationKey)
                             .SetProperty(value => value.HarvestedByUserId, userId)
-                            .SetProperty(value => value.HarvestedIntoBinId, commonBinId),
+                            .SetProperty(value => value.HarvestedIntoBinId, commonBinId)
+                            .SetProperty(value => value.Revision, value => value.Revision + 1),
                         ct);
             }
             else

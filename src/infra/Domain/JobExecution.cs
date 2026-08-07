@@ -10,13 +10,12 @@ namespace Farm.Infrastructure.Domain;
 /// Phase 4.1: Job Execution Tracking
 /// Tracks execution history for scheduled jobs (especially recurring ones)
 /// </summary>
-public class JobExecution
+public class JobExecution : IRevisionedEntity
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
-    /// <summary>Concurrency token for optimistic locking during scheduler/worker updates.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>
     /// Foreign key to JobSchedule

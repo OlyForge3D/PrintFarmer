@@ -350,6 +350,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         // This enables separation of entity configurations into individual files
         // in the Data/Configurations folder for better maintainability
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AppDbContext).Assembly);
+        RevisionConcurrency.Configure(modelBuilder);
         ConfigureCalibrationProviderSpecificIndexes(modelBuilder);
         ConfigureDeviceTokenProviderSpecificIndexes(modelBuilder);
         ConfigureQueueDispatchIndexes(modelBuilder);
@@ -517,70 +518,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                     .UseCollation(caseSensitiveCollation));
         }
 
-        // For SQLite and PostgreSQL, row-version columns are application-managed (the DB does not
-        // auto-generate them). Override the IsRowVersion() store-generated setting so
-        // EF Core does not try to round-trip the DB value after each save, allowing
-        // StampRowVersions() to write a non-null GUID token on every Add/Modify.
-        // SQL Server uses a native ROWVERSION column that the DB generates and returns.
-        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
-        {
-            _ = modelBuilder.Entity<Printer>()
-                .Property(printer => printer.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-            _ = modelBuilder.Entity<PrintJob>()
-                .Property(j => j.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-            _ = modelBuilder.Entity<PrinterDispatchState>()
-                .Property(s => s.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-
-            // Outbox event RowVersion: application-managed on SQLite/PostgreSQL.
-            _ = modelBuilder.Entity<QueueDispatchOutbox>()
-                .Property(o => o.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-
-            // OutboxSequenceState RowVersion: application-managed on SQLite/PostgreSQL.
-            _ = modelBuilder.Entity<OutboxSequenceState>()
-                .Property(s => s.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-            _ = modelBuilder.Entity<QueueDispatchAttempt>()
-                .Property(a => a.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-            _ = modelBuilder.Entity<DispatchSettings>()
-                .Property(s => s.RowVersion)
-                .HasMaxLength(16)
-                .IsConcurrencyToken()
-                .ValueGeneratedNever();
-        }
-        else
-        {
-            // SQL Server: RowVersion is a native database-generated ROWVERSION column.
-            _ = modelBuilder.Entity<QueueDispatchOutbox>()
-                .Property(o => o.RowVersion)
-                .IsRowVersion();
-            _ = modelBuilder.Entity<OutboxSequenceState>()
-                .Property(s => s.RowVersion)
-                .IsRowVersion();
-            _ = modelBuilder.Entity<QueueDispatchAttempt>()
-                .Property(a => a.RowVersion)
-                .IsRowVersion();
-            _ = modelBuilder.Entity<DispatchSettings>()
-                .Property(s => s.RowVersion)
-                .IsRowVersion();
-        }
-
         // Seed the single OutboxSequenceState row (Id = 1, NextSequence = 0).
         // This row must exist before any outbox event can be written.
         _ = modelBuilder.Entity<OutboxSequenceState>()
@@ -742,8 +679,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         NormalizeActiveExternalPrintKeys();
-        AdvanceLogicalQueueRevisions();
-        StampRowVersions();
+        RevisionConcurrency.Advance(ChangeTracker);
+        PopulateQueueRevisionSnapshots();
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
@@ -757,8 +694,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         UpdateCalibrationConfigurationRevisions();
         PopulateCaseInsensitiveShadowColumns();
         NormalizeActiveExternalPrintKeys();
-        AdvanceLogicalQueueRevisions();
-        StampRowVersions();
+        RevisionConcurrency.Advance(ChangeTracker);
+        PopulateQueueRevisionSnapshots();
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
@@ -1119,93 +1056,6 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         }
     }
 
-    private void StampRowVersions()
-    {
-        byte[] newVersion = Guid.NewGuid().ToByteArray();
-
-        foreach (EntityEntry<UserSettings> entry in ChangeTracker.Entries<UserSettings>())
-        {
-            if (entry.State is EntityState.Added or EntityState.Modified)
-            {
-                entry.Entity.RowVersion = newVersion;
-            }
-        }
-
-        foreach (EntityEntry<AppSettingsEntity> entry in ChangeTracker.Entries<AppSettingsEntity>())
-        {
-            if (entry.State is EntityState.Added or EntityState.Modified)
-            {
-                entry.Entity.RowVersion = newVersion;
-            }
-        }
-
-        // Provider-correct non-null application-managed concurrency tokens.
-        // SQL Server uses a native ROWVERSION column (stamped automatically by the database);
-        // SQLite and PostgreSQL do NOT generate non-null tokens from [Timestamp] alone, so we
-        // stamp a fresh GUID-derived byte array on every write so the concurrency check never
-        // compares NULL == NULL (which would allow multiple concurrent winners).
-        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.SqlServer")
-        {
-            foreach (EntityEntry<Printer> entry in ChangeTracker.Entries<Printer>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            foreach (EntityEntry<PrinterDispatchState> entry in ChangeTracker.Entries<PrinterDispatchState>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            // Outbox events: stamp on every write for atomic lease detection.
-            foreach (EntityEntry<QueueDispatchOutbox> entry in ChangeTracker.Entries<QueueDispatchOutbox>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            // Sequence counter: stamp on every write so the concurrency check fires.
-            foreach (EntityEntry<OutboxSequenceState> entry in ChangeTracker.Entries<OutboxSequenceState>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            foreach (EntityEntry<QueueDispatchAttempt> entry in ChangeTracker.Entries<QueueDispatchAttempt>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-
-            foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
-            {
-                if (entry.State is EntityState.Added or EntityState.Modified)
-                {
-                    entry.Entity.RowVersion = newVersion;
-                }
-            }
-        }
-    }
-
     private void NormalizeActiveExternalPrintKeys()
     {
         foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>()
@@ -1221,51 +1071,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         }
     }
 
-    private void AdvanceLogicalQueueRevisions()
+    private void PopulateQueueRevisionSnapshots()
     {
-        foreach (EntityEntry<PrintJob> entry in ChangeTracker.Entries<PrintJob>())
-        {
-            if (entry.State == EntityState.Added)
-            {
-                entry.Entity.Revision = 1;
-            }
-            else if (entry.State == EntityState.Modified)
-            {
-                long originalRevision = entry.Property(job => job.Revision).OriginalValue;
-                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
-                entry.Property(job => job.Revision).IsModified = true;
-            }
-        }
-
-        foreach (EntityEntry<PrinterDispatchState> entry in
-                 ChangeTracker.Entries<PrinterDispatchState>())
-        {
-            if (entry.State == EntityState.Added)
-            {
-                entry.Entity.Revision = 1;
-            }
-            else if (entry.State == EntityState.Modified)
-            {
-                long originalRevision = entry.Property(state => state.Revision).OriginalValue;
-                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
-                entry.Property(state => state.Revision).IsModified = true;
-            }
-        }
-
-        foreach (EntityEntry<DispatchSettings> entry in ChangeTracker.Entries<DispatchSettings>())
-        {
-            if (entry.State == EntityState.Added)
-            {
-                entry.Entity.Revision = 1;
-            }
-            else if (entry.State == EntityState.Modified)
-            {
-                long originalRevision = entry.Property(settings => settings.Revision).OriginalValue;
-                entry.Entity.Revision = Math.Max(1, originalRevision) + 1;
-                entry.Property(settings => settings.Revision).IsModified = true;
-            }
-        }
-
         foreach (EntityEntry<QueueDispatchOutbox> eventEntry in
                  ChangeTracker.Entries<QueueDispatchOutbox>()
                      .Where(entry => entry.State == EntityState.Added))

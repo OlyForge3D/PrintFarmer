@@ -6,7 +6,7 @@ namespace Farm.Infrastructure.Domain;
 /// <summary>
 /// Per-user preferences stored in the database. One row per user.
 /// </summary>
-public class UserSettings
+public class UserSettings : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
@@ -50,7 +50,11 @@ public class UserSettings
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Optimistic concurrency token. Prevents silent overwrites from concurrent writers.
+    /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
-    public byte[] RowVersion { get; set; } = [];
+    [NotMapped]
+    public byte[] RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : [];
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 }

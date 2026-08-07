@@ -35,10 +35,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("character varying(128)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SettingsJson")
                         .IsRequired()
@@ -1667,12 +1667,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("double precision");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
@@ -2288,10 +2285,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<double?>("RetractionSpeed")
                         .HasColumnType("double precision");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
@@ -2459,10 +2456,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uuid");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("timestamp with time zone");
@@ -2537,10 +2534,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime>("QueuedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
@@ -3075,10 +3072,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("OccurrencePrintJobId")
                         .HasColumnType("uuid");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("ScheduledExecutionTime")
                         .HasColumnType("timestamp with time zone");
@@ -4623,10 +4620,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<long>("NextSequence")
                         .HasColumnType("bigint");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("Id");
 
@@ -4636,7 +4633,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         new
                         {
                             Id = 1,
-                            NextSequence = 0L
+                            NextSequence = 0L,
+                            Revision = 1L
                         });
                 });
 
@@ -5411,12 +5409,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<Guid?>("SliceJobId")
                         .HasColumnType("uuid");
@@ -5732,10 +5727,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
@@ -5804,10 +5799,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()
@@ -5876,10 +5871,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("character varying(255)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
@@ -6233,10 +6228,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("PrinterGroupId")
                         .HasColumnType("uuid");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("ServerUrl")
                         .IsRequired()
@@ -6477,12 +6472,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -6846,10 +6838,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uuid");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -7004,10 +6996,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("boolean");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("StartPathKind")
                         .IsRequired()
@@ -7135,10 +7127,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<DateTime?>("RetryAfterUtc")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SchemaVersion")
                         .IsRequired()
@@ -7547,10 +7539,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Sku")
                         .HasMaxLength(256)
@@ -8206,10 +8198,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("bytea");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Theme")
                         .IsRequired()

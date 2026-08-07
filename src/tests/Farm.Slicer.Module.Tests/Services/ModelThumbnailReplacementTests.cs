@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.FolderManagement;
@@ -31,7 +32,7 @@ public class ModelThumbnailReplacementTests
             CreateFormFile(replacementBytes),
             fixture.Model.UploadedByUserId,
             isAdmin: false,
-            ifMatch: "\"0102\"",
+            ifMatch: RevisionETag.EncodeQuoted(fixture.Model.Revision),
             CancellationToken.None);
 
         Assert.Equal(fixture.Model.Id, result.Id);
@@ -239,7 +240,7 @@ public class ModelThumbnailReplacementTests
             IsValid = true,
             ThumbnailFileName = thumbnailFileName,
             UpdatedAt = DateTime.UtcNow.AddMinutes(-1),
-            RowVersion = [0x01, 0x02]
+            Revision = 2
         };
 
         Mock<IModel3DFileRepository> repository = new(MockBehavior.Strict);

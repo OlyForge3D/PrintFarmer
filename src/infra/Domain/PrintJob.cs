@@ -9,16 +9,13 @@ using Farm.Infrastructure.Domain;
 namespace Farm.Infrastructure.Domain;
 
 // Job Queue System
-public class PrintJob
+public class PrintJob : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    /// <summary>
-    /// Optimistic concurrency token for EF Core.
-    /// Critical for job queue operations where multiple processes may claim jobs.
-    /// </summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <summary>Opaque compatibility token derived from <see cref="Revision"/>.</summary>
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <summary>Provider-independent logical revision incremented on every mutation.</summary>
     public long Revision { get; set; } = 1;

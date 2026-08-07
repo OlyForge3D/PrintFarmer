@@ -458,10 +458,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SourceCreator")
                         .HasMaxLength(256)
@@ -483,7 +483,6 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("int");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("UploadedAt")
@@ -698,7 +697,7 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<Guid>("IdempotencyScopeId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier")
-                        .HasDefaultValue(Guid.Empty);
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
 
                     b.Property<DateTime?>("LeaseExpiresAt")
                         .HasColumnType("datetime2");
