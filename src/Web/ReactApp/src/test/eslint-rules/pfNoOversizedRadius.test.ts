@@ -415,7 +415,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       errors: [
         {
           messageId: 'oversized',
-          data: { token: 'rounded-[16px/*c]', px: 16 },
+          data: { token: `rounded-[16px${OPEN_CSS_COMMENT}]`, px: 16 },
           suggestions: 1,
         },
       ],
@@ -447,7 +447,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       errors: [
         {
           messageId: 'oversized',
-          data: { token: 'rounded-[16px/*c]', px: 16 },
+          data: { token: `rounded-[16px${OPEN_CSS_COMMENT}]`, px: 16 },
           suggestions: 1,
         },
       ],
@@ -456,7 +456,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // hide that base violation.
     {
       code: `<div className="hover:rounded-[8px${OPEN_CSS_COMMENT}] rounded-3xl" />`,
-      output: '<div className="hover:rounded-[8px/*c] rounded-lg" />',
+      output: `<div className="hover:rounded-[8px${OPEN_CSS_COMMENT}] rounded-lg" />`,
       errors: [{ messageId: 'oversized' }],
     },
     // A content box with no shape evidence is the "bubble button" case.
