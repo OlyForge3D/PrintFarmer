@@ -268,7 +268,10 @@ public class Model3DFilesController(
     /// <param name="id">The model's unique identifier.</param>
     /// <param name="forceStl">If true and the file is a 3MF, convert to STL for the response.</param>
     [HttpGet("file/{id:guid}")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
 #pragma warning disable CA3003 // File path from DB lookup by Guid — no injection risk
     public async Task<IActionResult> GetModelFileAsync(Guid id, [FromQuery] bool forceStl = false)
@@ -349,13 +352,18 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="path">Relative path to the file.</param>
     /// <param name="forceStl">Convert 3MF to STL if true.</param>
+    /// <param name="ct">Cancellation token for the request.</param>
     [HttpGet("download-for-viewer")]
+    [Authorize(Policy = "ModelRead")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DownloadForViewerAsync(
         [FromQuery] string path,
-        [FromQuery] bool forceStl = false)
+        [FromQuery] bool forceStl = false,
+        CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -364,7 +372,7 @@ public class Model3DFilesController(
 
         try
         {
-            (byte[] Bytes, string FileName)? result = await _modelService.DownloadFileAsync(path, CancellationToken.None);
+            (byte[] Bytes, string FileName)? result = await _modelService.DownloadFileAsync(path, ct);
             if (result is null)
             {
                 return NotFound("File not found");
@@ -390,6 +398,20 @@ public class Model3DFilesController(
 
             string contentType = GetContentType(result.Value.FileName);
             return File(result.Value.Bytes, contentType, result.Value.FileName);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Rejected invalid viewer download path");
+            return BadRequest("Invalid model path.");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            _logger.LogWarning(ex, "Rejected viewer download path outside model storage");
+            return Forbid();
         }
         catch (Exception ex)
         {

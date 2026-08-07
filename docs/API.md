@@ -204,6 +204,10 @@ same-origin paths and never disclose internal service addresses.
   profiles delivered with the claim, or records all three worker-computed
   digests when a legacy named selection is resolved inside the worker.
 
+The optional `/artifacts/*` static-file middleware is disabled by default with
+`ArtifactStorage:EnableStaticServing=false`. Keep it disabled to preserve the
+authenticated artifact download contract.
+
 The `/api/slicer/slice`, `/api/slicer/slice-model/{modelId}` and
 `/api/slicer/jobs` routes are superseded. They keep working for existing
 non-calibration callers and return `Deprecation`, `Sunset` and successor `Link`
@@ -1431,7 +1435,7 @@ GET /api/catalog/models?manufacturerId=mfg-uuid
 ]
 ```
 
-## 3D Model Upload API
+## 3D Model API
 
 ### Upload a Model
 
@@ -1447,6 +1451,28 @@ authenticated user account.
 
 Successful responses include `thumbnailUrl`, `wasExisting`, `clientUploadId`,
 and `etag`. The same ETag is returned in the `ETag` response header.
+
+### Download Model Bytes
+
+```http
+GET /api/3d-models/file/{id}
+Authorization: Bearer <token>
+```
+
+The canonical ID-based route requires an authenticated principal with model-read
+access. The authenticated React viewer fetches this route through the shared API
+client before creating a browser object URL.
+
+The compatibility viewer route is also authenticated:
+
+```http
+GET /api/3d-models/download-for-viewer?path=relative/model.stl
+Authorization: Bearer <token>
+```
+
+`path` must be relative to the configured model upload root. Absolute paths and
+lexical traversal return `400 Bad Request`; filesystem links that resolve outside
+the storage root return `403 Forbidden`.
 
 ### Replace a Model Thumbnail
 

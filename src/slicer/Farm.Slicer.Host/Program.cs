@@ -77,9 +77,21 @@ builder.Services.AddAuthorization(options =>
     });
 
     // Desktop exchange tokens remain scope-gated; regular JWTs pass these policies.
-    options.AddPolicy("ModelRead", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelRead")));
-    options.AddPolicy("ModelWrite", policy => policy.AddRequirements(new DesktopScopeRequirement("ModelWrite")));
-    options.AddPolicy("LibrarySync", policy => policy.AddRequirements(new DesktopScopeRequirement("LibrarySync")));
+    options.AddPolicy("ModelRead", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelRead"));
+    });
+    options.AddPolicy("ModelWrite", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelWrite"));
+    });
+    options.AddPolicy("LibrarySync", policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
+    });
 });
 builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
 

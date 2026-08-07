@@ -120,6 +120,8 @@ public interface IModel3DFileService
     /// <summary>Downloads a file from the model storage directory by relative path.</summary>
     /// <param name="path">Relative path to the file within model storage.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is absolute or escapes the storage root lexically.</exception>
+    /// <exception cref="UnauthorizedAccessException">Thrown when filesystem links resolve outside the storage root.</exception>
     Task<(byte[] Bytes, string FileName)?> DownloadFileAsync(string path, CancellationToken ct);
 
     /// <summary>
