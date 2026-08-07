@@ -1,0 +1,336 @@
+/* Print is a theme-independent output medium. This file is intentionally
+   unlayered and imported after every theme so its tokens win the cascade. */
+@media print {
+  :root {
+    color-scheme: light;
+
+    --pf-bg-0: #ffffff;
+    --pf-bg-1: #ffffff;
+    --pf-bg-2: #f3f4f6;
+    --pf-panel: #ffffff;
+    --pf-card-bg: #ffffff;
+    --pf-sidebar-bg: #ffffff;
+    --pf-modal-bg: #ffffff;
+
+    --pf-border: #767676;
+    --pf-border-strong: #4b5563;
+    --pf-border-subtle: #9ca3af;
+    --pf-border-divider: #767676;
+    --pf-border-light: #767676;
+    --pf-border-medium: #767676;
+    --pf-border-dark: #4b5563;
+    --pf-border-gray: #767676;
+
+    --pf-text-primary: #111827;
+    --pf-text-secondary: #374151;
+    --pf-text-tertiary: #4b5563;
+    --pf-text-muted: #5f6977;
+    --pf-text-light: #374151;
+    --pf-text-inverse: #ffffff;
+    --pf-on-accent: #ffffff;
+    --pf-text-on-accent: #ffffff;
+
+    --pf-accent: #075985;
+    --pf-accent-text: #075985;
+    --pf-accent-bg: #075985;
+    --pf-accent-hover: #075985;
+    --pf-accent-fg: #ffffff;
+    --pf-accent-2: #1d4ed8;
+    --pf-link: #075985;
+    --pf-progress-track: #d1d5db;
+    --pf-progress-fill: #075985;
+
+    --pf-success: #166534;
+    --pf-success-bg: #f0fdf4;
+    --pf-success-border: #15803d;
+    --pf-success-fg: #14532d;
+    --pf-success-text: #14532d;
+    --pf-success-hover: #166534;
+    --pf-warning: #854d0e;
+    --pf-warning-bg: #fffbeb;
+    --pf-warning-border: #a16207;
+    --pf-warning-fg: #713f12;
+    --pf-warning-text: #713f12;
+    --pf-error: #991b1b;
+    --pf-error-bg: #fff1f2;
+    --pf-error-border: #b91c1c;
+    --pf-error-fg: #7f1d1d;
+    --pf-error-text: #7f1d1d;
+    --pf-error-hover: #991b1b;
+    --pf-on-danger: #7f1d1d;
+    --pf-info: #1e40af;
+    --pf-info-bg: #eff6ff;
+    --pf-info-border: #1d4ed8;
+    --pf-info-fg: #1e3a8a;
+
+    --pf-status-online-bg: #f0fdf4;
+    --pf-status-online-text: #14532d;
+    --pf-status-online-border: #15803d;
+    --pf-status-offline-bg: #fff1f2;
+    --pf-status-offline-text: #7f1d1d;
+    --pf-status-offline-border: #b91c1c;
+    --pf-status-printing-bg: #ecfeff;
+    --pf-status-printing-text: #155e75;
+    --pf-status-printing-border: #0e7490;
+    --pf-status-paused-bg: #fffbeb;
+    --pf-status-paused-text: #713f12;
+    --pf-status-paused-border: #a16207;
+    --pf-status-error-bg: #fff1f2;
+    --pf-status-error-text: #7f1d1d;
+    --pf-status-error-border: #b91c1c;
+    --pf-status-idle-bg: #f3f4f6;
+    --pf-status-idle-text: #374151;
+    --pf-status-idle-border: #767676;
+
+    --pf-control-bg: #ffffff;
+    --pf-control-border: #767676;
+    --pf-control-border-hover: #4b5563;
+    --pf-control-border-focus: #075985;
+    --pf-control-text: #111827;
+    --pf-control-placeholder: #4b5563;
+    --pf-control-disabled-bg: #f3f4f6;
+    --pf-control-disabled-text: #5f6977;
+    --pf-disabled: #5f6977;
+
+    --pf-button-primary-bg: #075985;
+    --pf-button-primary-hover: #075985;
+    --pf-button-primary-active: #075985;
+    --pf-button-primary-text: #ffffff;
+    --pf-button-primary-border: #075985;
+    --pf-button-secondary-bg: #ffffff;
+    --pf-button-secondary-hover: #f3f4f6;
+    --pf-button-secondary-active: #e5e7eb;
+    --pf-button-secondary-text: #111827;
+    --pf-button-secondary-border: #767676;
+    --pf-button-danger-bg: #fff1f2;
+    --pf-button-danger-hover: #fff1f2;
+    --pf-button-danger-active: #ffe4e6;
+    --pf-button-danger-text: #7f1d1d;
+    --pf-button-danger-border: #b91c1c;
+    --pf-button-success-bg: #f0fdf4;
+    --pf-button-success-hover: #f0fdf4;
+    --pf-button-success-active: #dcfce7;
+    --pf-button-success-text: #14532d;
+    --pf-button-success-border: #15803d;
+
+    --pf-validation-error-bg: #fff1f2;
+    --pf-validation-error-border: #b91c1c;
+    --pf-validation-error-text: #7f1d1d;
+    --pf-validation-success-bg: #f0fdf4;
+    --pf-validation-success-border: #15803d;
+    --pf-validation-success-text: #14532d;
+    --pf-validation-warning-bg: #fffbeb;
+    --pf-validation-warning-border: #a16207;
+    --pf-validation-warning-text: #713f12;
+
+    --pf-focus-ring: #075985;
+    --pf-focus-ring-offset: #ffffff;
+    --pf-hover-overlay: transparent;
+    --pf-active-overlay: transparent;
+    --pf-selection-bg: #dbeafe;
+    --pf-selection-text: #111827;
+    --pf-skeleton-bg: #e5e7eb;
+    --pf-skeleton-bg-alt: #f3f4f6;
+    --pf-skeleton-accent: #9ca3af;
+    --pf-loading: #075985;
+    --pf-loading-border: #075985;
+
+    --pf-glow-accent: none;
+    --pf-glow-success: none;
+    --pf-glow-warning: none;
+    --pf-glow-error: none;
+    --pf-btn-glow: none;
+    --pf-shadow-xs: none;
+    --pf-shadow-sm: none;
+    --pf-shadow-md: none;
+    --pf-shadow-lg: none;
+    --pf-shadow-xl: none;
+
+    --pf-home-homed-bg: #f0fdf4;
+    --pf-home-not-homed-bg: #fffbeb;
+    --pf-gradient-primary-start: #ffffff;
+    --pf-gradient-primary-end: #ffffff;
+    --pf-gradient-secondary-start: #f3f4f6;
+    --pf-gradient-secondary-end: #f3f4f6;
+    --pf-gradient-success-start: #f0fdf4;
+    --pf-gradient-success-end: #f0fdf4;
+    --pf-gradient-green-start: #f0fdf4;
+    --pf-gradient-green-end: #f0fdf4;
+    --pf-gradient-green-active-start: #dcfce7;
+    --pf-gradient-green-active-end: #dcfce7;
+    --pf-gradient-gray-start: #e5e7eb;
+    --pf-gradient-gray-end: #f3f4f6;
+    --pf-gradient-gray-dark-start: #d1d5db;
+    --pf-gradient-gray-dark-end: #e5e7eb;
+  }
+
+  @page {
+    margin: 12mm;
+  }
+
+  html,
+  body,
+  html #root,
+  [data-print-layout],
+  [data-main-content],
+  [data-page-fill] {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  html,
+  body,
+  html #root,
+  [data-main-content] {
+    width: 100%;
+    max-width: 100%;
+    background: #ffffff;
+  }
+
+  body {
+    color: var(--pf-text-primary);
+    print-color-adjust: economy;
+    -webkit-print-color-adjust: economy;
+  }
+
+  [data-print-hidden],
+  [data-sonner-toaster],
+  html .tsqd-open-btn-container {
+    display: none;
+  }
+
+  html .driver-popover,
+  html .driver-overlay {
+    visibility: hidden;
+  }
+
+  /* Driver.js marks the highlighted document element with important screen
+     effects, so these matching print declarations are intentionally required. */
+  html .driver-active-element {
+    outline: none !important;
+    outline-offset: 0 !important;
+    filter: none !important;
+  }
+
+  [data-main-content] {
+    display: block;
+  }
+
+  [data-main-content] :is(.fixed, .sticky) {
+    position: static;
+  }
+
+  [data-main-content] :is(.overflow-auto, .overflow-x-auto, .overflow-y-auto, .overflow-hidden) {
+    overflow: visible;
+  }
+
+  [data-main-content] :is(.truncate, [class*='line-clamp-']) {
+    display: block;
+    overflow: visible;
+    white-space: normal;
+    text-overflow: clip;
+    -webkit-line-clamp: unset;
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-shadow: none;
+    text-shadow: none;
+    filter: none;
+    backdrop-filter: none;
+    animation: none;
+    transition: none;
+  }
+
+  /* Theme-specific glow selectors carry more specificity than a universal
+     reset. The stable application root lets print neutralize them without
+     escalating individual declarations. */
+  #root *,
+  #root *::before,
+  #root *::after {
+    box-shadow: none;
+    text-shadow: none;
+    filter: none;
+    backdrop-filter: none;
+    animation: none;
+    transition: none;
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-total.bg-pf-success-bg,
+  html[data-theme='blueprint'] .dashboard-stat-icon-online.bg-pf-status-online-bg {
+    color: var(--pf-status-online-text);
+    background-color: var(--pf-status-online-bg);
+    border-color: var(--pf-status-online-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-printing.bg-pf-status-printing-bg {
+    color: var(--pf-status-printing-text);
+    background-color: var(--pf-status-printing-bg);
+    border-color: var(--pf-status-printing-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-paused.bg-pf-status-paused-bg {
+    color: var(--pf-status-paused-text);
+    background-color: var(--pf-status-paused-bg);
+    border-color: var(--pf-status-paused-border);
+  }
+
+  html[data-theme='blueprint'] .dashboard-stat-icon-gray.bg-pf-bg-2 {
+    color: var(--pf-text-secondary);
+    background-color: var(--pf-bg-2);
+    border-color: var(--pf-border);
+  }
+
+  .matrix-scanlines::before {
+    content: none;
+    background: none;
+  }
+
+  .blueprint-grid {
+    background-image: none;
+  }
+
+  [data-pf-card],
+  tr,
+  pre,
+  blockquote {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  table {
+    width: 100%;
+    max-width: 100%;
+    table-layout: auto;
+  }
+
+  th,
+  td,
+  pre,
+  code {
+    overflow-wrap: anywhere;
+  }
+
+  pre,
+  code {
+    color: #111827;
+    background: #f3f4f6;
+    border-color: #767676;
+  }
+
+  pre {
+    white-space: pre-wrap;
+  }
+
+  [data-main-content] a[href^='http']::after {
+    content: ' (' attr(href) ')';
+    overflow-wrap: anywhere;
+    font-size: 0.85em;
+  }
+}

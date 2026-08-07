@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 
 // Mock OpenTelemetry modules
 vi.mock('@opentelemetry/sdk-trace-web', () => ({
@@ -27,21 +27,24 @@ vi.mock('@opentelemetry/instrumentation', () => ({
 
 vi.mock('../services/unifiedLogging', () => ({}));
 
+let initializeTelemetry: typeof import('../config')['initializeTelemetry'];
+let resourceFromAttributes: typeof import('@opentelemetry/resources')['resourceFromAttributes'];
+
+beforeAll(async () => {
+  ({ initializeTelemetry } = await import('../config'));
+  ({ resourceFromAttributes } = await import('@opentelemetry/resources'));
+}, 60_000);
+
 describe('telemetry config', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('should initialize telemetry module', async () => {
-    // Just test that the module can be imported without errors
-    const { initializeTelemetry } = await import('../config');
+  it('should initialize telemetry module', () => {
     expect(typeof initializeTelemetry).toBe('function');
   });
 
-  it('should create WebTracerProvider with correct resource attributes', async () => {
-    const { resourceFromAttributes } = await import('@opentelemetry/resources');
-    const { initializeTelemetry } = await import('../config');
-    
+  it('should create WebTracerProvider with correct resource attributes', () => {
     vi.clearAllMocks();
     initializeTelemetry();
 

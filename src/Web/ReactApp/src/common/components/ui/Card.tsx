@@ -40,6 +40,7 @@ export const Card: React.FC<CardProps> & {
         className
       )}
       {...dataAttributes}
+      data-pf-card
       onClick={onClick}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}

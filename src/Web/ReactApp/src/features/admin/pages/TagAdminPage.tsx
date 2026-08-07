@@ -5,7 +5,7 @@ import { DeleteIcon, CloseIcon, TagIcon, EditIcon, LoadingIcon, PlusIcon, Refres
 import { Modal } from '@/common/components/modals/Modal';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
-import { Button, Input, FormField, Tabs } from '@/common/components/ui';
+import { Button, Input, FormField, Tabs, TagChip } from '@/common/components/ui';
 import { RevisionConflictDialog, type RevisionConflictField } from '@/common/components/RevisionConflictDialog';
 import {
     AdminEmpty,
@@ -739,13 +739,14 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 <div className="space-y-6">
                     {/* Tag Preview */}
                     <div className="flex flex-col items-center py-4 bg-pf-bg-2 rounded-lg">
-                        <div
-                            data-pf-radius="full"
-                            className="px-4 py-2 rounded-full text-white font-medium shadow-md transition-all duration-200"
-                            style={{ backgroundColor: createForm.values.color }}
-                        >
-                            {createForm.values.name || 'Tag Preview'}
-                        </div>
+                        <TagChip
+                            label={createForm.values.name || 'Tag Preview'}
+                            color={createForm.values.color}
+                            appearance="solid"
+                            size="md"
+                            className="shadow-md"
+                            ariaLabel={`Tag preview: ${createForm.values.name || 'Tag Preview'}`}
+                        />
                         <p className="text-xs text-pf-text-tertiary mt-2">Preview of your new tag</p>
                     </div>
 

@@ -551,8 +551,38 @@ function resolveDeclaration(declarations, target) {
   }
 }
 
+const CSS_MATH_FUNCTIONS = new Set([
+  'abs',
+  'calc',
+  'clamp',
+  'hypot',
+  'max',
+  'min',
+  'mod',
+  'rem',
+  'round',
+])
+
+function hasInvalidMathSemicolon(value) {
+  const functionStack = []
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === '(') {
+      const functionName = /([a-z][\w-]*)$/i.exec(value.slice(0, index))?.[1]
+      functionStack.push(functionName?.toLowerCase() ?? functionStack.at(-1))
+    } else if (character === ')') {
+      functionStack.pop()
+    } else if (character === ';' && CSS_MATH_FUNCTIONS.has(functionStack.at(-1))) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function isUnresolvedDimension(value) {
-  return /(?:var|calc|min|max|clamp)\(/.test(value) || value.startsWith('(--')
+  return /(?:var|if|calc|min|max|clamp)\(/i.test(value) || value.startsWith('(--')
 }
 
 function dimensionSourceOrder(value) {
@@ -611,7 +641,7 @@ function circularAt(classText) {
     const condition = parseCondition(variants)
 
     const size = /^size-(\S+)$/.exec(base)
-    if (size) {
+    if (size && !hasInvalidMathSemicolon(size[1])) {
       const value = normalizeDimension(size[1])
       if (value !== undefined) {
         add(widths, condition, value, 0, dimensionSourceOrder(value), important)
@@ -619,14 +649,14 @@ function circularAt(classText) {
       }
     }
     const width = /^w-(\S+)$/.exec(base)
-    if (width) {
+    if (width && !hasInvalidMathSemicolon(width[1])) {
       const value = normalizeDimension(width[1])
       if (value !== undefined) {
         add(widths, condition, value, 1, dimensionSourceOrder(value), important)
       }
     }
     const height = /^h-(\S+)$/.exec(base)
-    if (height) {
+    if (height && !hasInvalidMathSemicolon(height[1])) {
       const value = normalizeDimension(height[1])
       if (value !== undefined) {
         add(heights, condition, value, 1, dimensionSourceOrder(value), important)

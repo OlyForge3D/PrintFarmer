@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
@@ -20,6 +20,12 @@ vi.mock('sonner', () => ({
     info: vi.fn()
   }
 }));
+
+let toast: typeof import('sonner')['toast'];
+
+beforeAll(async () => {
+  ({ toast } = await import('sonner'));
+}, 60_000);
 
 describe('ModelUploadModal', () => {
   let queryClient: QueryClient;
@@ -101,7 +107,6 @@ describe('ModelUploadModal', () => {
 
     it('should only show success toast after backend completes processing', async () => {
       const mockFile = new File(['test content'], 'test.stl', { type: 'model/stl' });
-      const { toast } = await import('sonner');
 
       vi.mocked(slicerService.uploadModel).mockImplementation((_file, onProgress) => {
         onProgress?.(100);
@@ -206,7 +211,6 @@ describe('ModelUploadModal', () => {
 
   describe('File Validation', () => {
     it('should only accept valid 3D model file types', async () => {
-      const { toast } = await import('sonner');
       const invalidFile = new File(['test'], 'test.txt', { type: 'text/plain' });
 
       renderModal();
@@ -257,7 +261,6 @@ describe('ModelUploadModal', () => {
 
   describe('Error Handling', () => {
     it('should show error toast and status when upload fails', async () => {
-      const { toast } = await import('sonner');
       const mockFile = new File(['test'], 'test.stl', { type: 'model/stl' });
       const errorMessage = 'Network error during upload';
 

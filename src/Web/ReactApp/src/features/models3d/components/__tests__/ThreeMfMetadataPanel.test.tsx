@@ -66,7 +66,10 @@ describe('ThreeMfMetadataPanel', () => {
   it('calls onAcceptTag when a tag is clicked', () => {
     const onAcceptTag = vi.fn();
     render(<ThreeMfMetadataPanel metadata={mockMetadata} onAcceptTag={onAcceptTag} />);
-    fireEvent.click(screen.getByText('+ designer:Jane Doe'));
+    const tagChip = screen.getByRole('button', { name: '+ designer:Jane Doe' });
+    expect(tagChip).toHaveAttribute('data-pf-radius', 'full');
+    expect(tagChip).toHaveAttribute('title', 'Apply tag "designer:Jane Doe"');
+    fireEvent.click(tagChip);
     expect(onAcceptTag).toHaveBeenCalledWith('designer:Jane Doe');
   });
 });

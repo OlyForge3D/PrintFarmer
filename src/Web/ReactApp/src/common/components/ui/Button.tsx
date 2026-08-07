@@ -19,9 +19,9 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: 'bg-[var(--pf-button-primary-bg)] enabled:hover:bg-[var(--pf-button-primary-hover)] text-[var(--pf-on-accent)] border border-[var(--pf-button-primary-border)] shadow-md font-semibold',
+  primary: 'bg-[var(--pf-button-primary-bg)] enabled:hover:bg-[var(--pf-button-primary-hover)] text-[var(--pf-on-accent)] border border-[var(--pf-button-primary-border)] font-semibold',
   secondary: 'bg-pf-bg-2 enabled:hover:bg-pf-bg-1 text-pf-text-primary border border-pf-border-light enabled:hover:border-pf-border',
-  danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] shadow-md font-semibold',
+  danger: 'bg-[var(--pf-button-danger-bg)] enabled:hover:bg-[var(--pf-button-danger-hover)] text-[var(--pf-on-danger)] border border-[var(--pf-button-danger-border)] font-semibold',
   // `subtle` declares only the border *width*. Its paint — surface, hover overlay,
   // text colour and border colour — lives in the components layer, for the same
   // reason as ghost below. See #1102.
@@ -32,7 +32,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   // `[data-pf-variant='ghost']`, so that anything a caller passes through
   // `className` wins on layer order instead of losing on source order. See #1087.
   ghost: '',
-  success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] shadow-md font-semibold',
+  success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] font-semibold',
   // tab/toggle/link keep only their structural utilities; their paint lives in the
   // components layer alongside subtle's and ghost's. See #1102.
   tab: 'border-b-2 focus:ring-0',
@@ -72,10 +72,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
 
   // Link variant should not apply size padding classes
   // Unstyled variant should not apply any base styles
-  // Ghost variant should not apply shadow or ring-offset (needs to blend into any background)
+  // Ghost variant should not apply ring-offset (needs to blend into any background)
   const applySizeClasses = variant !== 'link' && variant !== 'unstyled';
   const applyBaseStyles = variant !== 'unstyled';
-  const applyShadow = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
+  const applyRingOffset = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
   const defaultRadiusClass = variant === 'tab' ? 'rounded-none' : 'rounded-xs';
 
   return (
@@ -88,7 +88,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         applyBaseStyles &&
           'font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
         applyBaseStyles && !hasRadiusOverride(className) && defaultRadiusClass,
-        applyShadow && 'shadow-xs focus-visible:ring-offset-2',
+        applyRingOffset && 'focus-visible:ring-offset-2',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],
         // center icon style when iconCenter provided

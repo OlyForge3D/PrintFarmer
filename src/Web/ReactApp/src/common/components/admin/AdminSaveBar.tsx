@@ -105,6 +105,7 @@ export function AdminSaveBar({
     <div
       role="region"
       aria-label="Unsaved changes"
+      data-print-hidden
       className={clsx(
         // Docked by the shell below its scroll pane, not floating inside it.
         // `sticky bottom-0` used to live here and never once pinned — the pane

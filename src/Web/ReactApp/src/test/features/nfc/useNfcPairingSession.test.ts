@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { NfcTagUnknownEvent } from '@/features/nfc/types';
 
@@ -42,6 +42,13 @@ vi.mock('@/services/nfcHubService', () => ({
   },
 }));
 
+let useNfcPairingSession:
+  typeof import('@/features/nfc/hooks/useNfcPairingSession')['useNfcPairingSession'];
+
+beforeAll(async () => {
+  ({ useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession'));
+}, 60_000);
+
 function makeTagEvent(overrides: Partial<NfcTagUnknownEvent> = {}): NfcTagUnknownEvent {
   return {
     tagUid: 'AABBCCDD',
@@ -58,9 +65,7 @@ describe('useNfcPairingSession', () => {
     mockState.connected = false;
   });
 
-  it('starts with modal closed and no tag event', async () => {
-    // Lazy import to pick up fresh mock
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('starts with modal closed and no tag event', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     expect(result.current.isOpen).toBe(false);
@@ -68,14 +73,12 @@ describe('useNfcPairingSession', () => {
     expect(result.current.isUnavailable).toBe(false);
   });
 
-  it('calls ensureConnected on mount', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('calls ensureConnected on mount', () => {
     renderHook(() => useNfcPairingSession());
     expect(mockState.ensureConnected).toHaveBeenCalledOnce();
   });
 
-  it('opens modal and captures tag when nfctagunknown fires', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('opens modal and captures tag when nfctagunknown fires', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     const tagEvent = makeTagEvent({ tagUid: 'DEADBEEF', printerId: 'printer-1' });
@@ -89,8 +92,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.isUnavailable).toBe(false);
   });
 
-  it('replaces tag event when a second nfctagunknown fires', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('replaces tag event when a second nfctagunknown fires', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     act(() => { mockState.tagUnknownHandler?.(makeTagEvent({ tagUid: 'FIRST' })); });
@@ -99,8 +101,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.tagEvent?.tagUid).toBe('SECOND');
   });
 
-  it('startScanning opens modal without a tag event', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('startScanning opens modal without a tag event', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     act(() => { result.current.startScanning(); });
@@ -109,8 +110,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.tagEvent).toBeNull();
   });
 
-  it('close resets isOpen, tagEvent, and isUnavailable', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('close resets isOpen, tagEvent, and isUnavailable', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     act(() => { mockState.tagUnknownHandler?.(makeTagEvent()); });
@@ -123,8 +123,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.isUnavailable).toBe(false);
   });
 
-  it('sets isUnavailable when hub drops while modal is open', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('sets isUnavailable when hub drops while modal is open', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     // Open the modal first
@@ -138,8 +137,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.isConnected).toBe(false);
   });
 
-  it('does NOT set isUnavailable when hub drops while modal is closed', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('does NOT set isUnavailable when hub drops while modal is closed', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     // Modal is closed (default)
@@ -151,8 +149,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.isConnected).toBe(false);
   });
 
-  it('clears isUnavailable and re-opens when a new tag fires after reconnect', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('clears isUnavailable and re-opens when a new tag fires after reconnect', () => {
     const { result } = renderHook(() => useNfcPairingSession());
 
     // Open → drop → tag arrives again
@@ -166,8 +163,7 @@ describe('useNfcPairingSession', () => {
     expect(result.current.tagEvent?.tagUid).toBe('RECONNECTED');
   });
 
-  it('unsubscribes from hub events on unmount', async () => {
-    const { useNfcPairingSession } = await import('@/features/nfc/hooks/useNfcPairingSession');
+  it('unsubscribes from hub events on unmount', () => {
     const { unmount } = renderHook(() => useNfcPairingSession());
 
     unmount();

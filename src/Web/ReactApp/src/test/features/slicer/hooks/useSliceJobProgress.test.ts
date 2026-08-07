@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import type { SliceJobEvent } from '@/services/slicerHubService';
 
@@ -36,6 +36,13 @@ vi.mock('@/services/slicerHubService', () => ({
   },
 }));
 
+let useSliceJobProgress:
+  typeof import('@/features/slicer/hooks/useSliceJobProgress')['useSliceJobProgress'];
+
+beforeAll(async () => {
+  ({ useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress'));
+}, 60_000);
+
 function emitJobEvent(jobId: string, event: SliceJobEvent) {
   const handler = mockState.jobEventHandlers.get(`SliceJob_${jobId}`);
   handler?.(event);
@@ -59,8 +66,7 @@ describe('useSliceJobProgress', () => {
     mockState.connected = false;
   });
 
-  it('returns initial state when jobId is null', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
+  it('returns initial state when jobId is null', () => {
     const { result } = renderHook(() => useSliceJobProgress(null));
 
     expect(result.current.progressPercent).toBe(0);
@@ -69,7 +75,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('connects and subscribes when given a jobId', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     renderHook(() => useSliceJobProgress('job-1'));
 
     await waitFor(() => {
@@ -80,7 +85,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('updates state on progress events', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     const { result } = renderHook(() => useSliceJobProgress('job-1'));
 
     await waitFor(() => {
@@ -100,7 +104,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('updates state on completion', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     const { result } = renderHook(() => useSliceJobProgress('job-1'));
 
     await waitFor(() => {
@@ -126,7 +129,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('updates state on failure', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     const { result } = renderHook(() => useSliceJobProgress('job-1'));
 
     await waitFor(() => {
@@ -146,7 +148,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('unsubscribes on unmount', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     const { unmount } = renderHook(() => useSliceJobProgress('job-1'));
 
     await waitFor(() => {
@@ -160,7 +161,6 @@ describe('useSliceJobProgress', () => {
   });
 
   it('resets state when jobId changes to null', async () => {
-    const { useSliceJobProgress } = await import('@/features/slicer/hooks/useSliceJobProgress');
     const { result, rerender } = renderHook(
       ({ jobId }: { jobId: string | null }) => useSliceJobProgress(jobId),
       { initialProps: { jobId: 'job-1' as string | null } },

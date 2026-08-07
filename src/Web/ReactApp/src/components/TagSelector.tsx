@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import { Button, Input } from '@/common/components/ui';
+import { Button, Input, TagChip } from '@/common/components/ui';
 import { XMarkIcon, PlusIcon } from '@heroicons/react/24/solid';
 
 interface TagOption {
@@ -93,22 +93,16 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
       {/* Selected Tags */}
       <div className="flex flex-wrap gap-2">
         {selectedTags.map(tag => (
-          <div
+          <TagChip
             key={tag.id}
-            data-pf-radius="full"
-            className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium text-white"
-            style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
-          >
-            {tag.name}
-            <Button
-              onClick={() => handleRemoveTag(tag.id)}
-              className="hover:opacity-80 transition-opacity"
-              title={`Remove ${tag.name} tag`}
-              variant="subtle"
-              size="sm"
-              iconCenter={<XMarkIcon className="w-4 h-4" />}
-            />
-          </div>
+            mode="removable"
+            label={tag.name}
+            color={tag.color}
+            appearance="solid"
+            size="md"
+            onRemove={() => handleRemoveTag(tag.id)}
+            removeLabel={`Remove ${tag.name} tag`}
+          />
         ))}
       </div>
 
