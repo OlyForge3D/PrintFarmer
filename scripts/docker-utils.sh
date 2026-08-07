@@ -173,33 +173,117 @@ is_local_orcaslicer_binaries_image() {
     [[ "$image_name" =~ ^orcaslicer-binaries:[^/[:space:]@]+$ ]]
 }
 
-# Remove every local tag for the OrcaSlicer binary cache so a subsequent
-# no-cache build cannot retain a stale `latest` or version alias.
-remove_local_orcaslicer_binaries_tags() {
-    local image_name
-    local image_list
-    local -a matching_images=()
+# Hardened classifier: same intent as `is_local_orcaslicer_binaries_image` but
+# explicitly parses the reference so it rejects registry hosts (name portion
+# containing `.` or `/`) and `@digest` references. Used by the deploy path when
+# deciding whether an operator-supplied ORCA_ASSET_IMAGE is safe to auto-reset.
+# The tag portion is ignored — `orcaslicer-binaries:2.4.2` is local even though
+# `2.4.2` has dots.
+is_local_orcaslicer_binaries_ref() {
+    local image_ref="$1"
+    local name_portion="${image_ref%@*}"
+    name_portion="${name_portion%%:*}"
 
-    if ! image_list=$(docker image ls \
-        --filter "reference=orcaslicer-binaries:*" \
-        --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); then
+    if [[ "$image_ref" == *"@"* ]]; then
+        return 1
+    fi
+    if [[ "$name_portion" != "orcaslicer-binaries" ]]; then
+        return 1
+    fi
+    if [[ "$name_portion" == *"/"* || "$name_portion" == *"."* ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# Reset every local `orcaslicer-binaries[:...]` tag so a subsequent `docker build`
+# produces a strictly-labelled cache image. This is only ever called *after*
+# `validate_orcaslicer_binary_image` has failed, so no valid cache is discarded.
+# Usage: remove_local_orcaslicer_binaries_tags ["expected-version"]
+#
+# The expected-version argument is optional; callers that know which release is
+# being (re)built pass it so an explicit `orcaslicer-binaries:<version>` tag is
+# always considered even if `docker image ls` cannot enumerate it. Backwards
+# compatible with callers that pass no argument (the sweep still catches any
+# existing `orcaslicer-binaries:*` tags).
+remove_local_orcaslicer_binaries_tags() {
+    local expected_version="${1:-}"
+    local tag
+    local removed=0
+
+    local candidate_tags=()
+    if [[ -n "$expected_version" ]]; then
+        candidate_tags+=("orcaslicer-binaries:${expected_version}")
+    fi
+    candidate_tags+=("orcaslicer-binaries:latest")
+
+    # Additionally sweep any other `orcaslicer-binaries:*` tags docker knows about;
+    # a stale `:latest` alias or a prior-version tag can still be the source of a
+    # rejected cache reused by BuildKit `additional_contexts`.
+    local existing_tags
+    if ! existing_tags=$(docker image ls --filter 'reference=orcaslicer-binaries:*' --format '{{.Repository}}:{{.Tag}}' 2>/dev/null); then
         print_error "Failed to enumerate local OrcaSlicer binary cache tags."
         return 1
     fi
-    image_list="${image_list//$'\r'/}"
-
-    while IFS= read -r image_name; do
-        if is_local_orcaslicer_binaries_image "$image_name"; then
-            matching_images+=("$image_name")
-        fi
-    done <<< "$image_list"
-
-    if (( ${#matching_images[@]} == 0 )); then
-        return 0
+    if [[ -n "$existing_tags" ]]; then
+        while IFS= read -r existing; do
+            [[ -z "$existing" ]] && continue
+            candidate_tags+=("$existing")
+        done <<< "$existing_tags"
     fi
 
-    print_warning "Removing stale local OrcaSlicer binary cache tags: ${matching_images[*]}"
-    docker rmi -f "${matching_images[@]}"
+    # De-duplicate while preserving order. This helper is intentionally
+    # Bash-3.2 compatible so it works under macOS's system /bin/bash (3.2.57),
+    # which never gained associative arrays (`declare -A` / `local -A`) — those
+    # only landed in Bash 4.0. The candidate list is at most a handful of tags
+    # (an explicit `:version`, `:latest`, plus whatever `docker image ls`
+    # returned), so an O(n²) linear-scan dedup is fine and avoids the need for
+    # any Bash-4-only features.
+    local deduped=()
+    local existing
+    local already
+    for tag in "${candidate_tags[@]}"; do
+        [[ -z "$tag" ]] && continue
+        already=0
+        if [[ ${#deduped[@]} -gt 0 ]]; then
+            for existing in "${deduped[@]}"; do
+                if [[ "$existing" == "$tag" ]]; then
+                    already=1
+                    break
+                fi
+            done
+        fi
+        if [[ "$already" -eq 0 ]]; then
+            deduped+=("$tag")
+        fi
+    done
+
+    for tag in "${deduped[@]}"; do
+        # Defense-in-depth: `docker image ls --filter 'reference=orcaslicer-binaries:*'`
+        # is expected to only return local short tags, but callers on legacy
+        # docker versions or through mocked mirrors have been observed to return
+        # registry-qualified references too. Explicitly re-classify each
+        # candidate via `is_local_orcaslicer_binaries_ref` so we never `docker
+        # image rm` an operator-supplied registry-qualified pin — that would
+        # violate #1166's contract that only local `orcaslicer-binaries:*` short
+        # tags are auto-recovered.
+        if ! is_local_orcaslicer_binaries_ref "$tag"; then
+            continue
+        fi
+        if docker image inspect "$tag" >/dev/null 2>&1; then
+            if docker image rm -f "$tag" >/dev/null 2>&1; then
+                print_info "Removed stale OrcaSlicer cache tag: $tag"
+                removed=$((removed + 1))
+            else
+                print_warning "Could not remove OrcaSlicer cache tag: $tag"
+            fi
+        fi
+    done
+
+    if [[ $removed -eq 0 ]]; then
+        print_info "No local orcaslicer-binaries tags to remove"
+    fi
+    return 0
 }
 
 # Return 0 for a verified reusable image, 10 when a local image must be
@@ -216,7 +300,7 @@ prepare_orcaslicer_binary_cache() {
 
         if is_local_orcaslicer_binaries_image "$image_name"; then
             print_warning "Local OrcaSlicer binary cache '$image_name' is stale or unverifiable; rebuilding the pinned release."
-            if ! remove_local_orcaslicer_binaries_tags; then
+            if ! remove_local_orcaslicer_binaries_tags "$expected_version"; then
                 print_error "Unable to remove the stale local OrcaSlicer binary cache."
                 return 1
             fi
@@ -239,7 +323,9 @@ validate_orcaslicer_rebuild_request() {
     local worker_enabled="$2"
     local is_arm_platform="$3"
 
-    if [[ "$force_rebuild" == "1" ]] &&
+    # Accept both documented truthy values (`1` from ORCA_FORCE_REBUILD=1 and
+    # `true` from --rebuild-orcaslicer). Any other value is treated as false.
+    if { [[ "$force_rebuild" == "1" ]] || [[ "$force_rebuild" == "true" ]]; } &&
        { [[ "$worker_enabled" != "yes" ]] || [[ "$is_arm_platform" == "true" ]]; }; then
         print_error "Cannot rebuild OrcaSlicer because its worker is disabled or unsupported on this host."
         return 1

@@ -64,6 +64,15 @@ SHOW_HELP=false
 REDEPLOY=false
 PREPULL=false
 NO_CACHE=false
+# When true (also set by --rebuild-orcaslicer / ORCA_FORCE_REBUILD=1), remove any
+# local orcaslicer-binaries:* tags before validation so the build path produces a
+# fresh, strictly-labelled cache. Kept off by default: strict attestation is
+# preserved, but operators upgrading through PR #1089 no longer see the deploy
+# hard-fail on a legacy image that only has `orcaslicer.version`.
+#
+# Both `"1"` (documented env-var value) and `"true"` (set by --rebuild-orcaslicer)
+# are accepted downstream. Callers matching against this variable MUST accept
+# both forms; see `is_orca_force_rebuild_enabled` helper below.
 ORCA_FORCE_REBUILD="${ORCA_FORCE_REBUILD:-0}"
 AUTO_ADMIN=false
 AUTO_ADMIN_USERNAME=""
@@ -1292,6 +1301,17 @@ save_images_to_tar() {
     local fail_count=0
     local total_size=0
     local exported_images=()
+    # Track OrcaSlicer strict-attestation refusals separately so the caller can
+    # distinguish "some optional base image failed to save" (soft warning,
+    # return 0 to preserve partial-success semantics) from "the required
+    # OrcaSlicer binary layer refused strict attestation and MUST NOT ship in
+    # the offline bundle" (hard failure, propagate a non-zero return so the
+    # `--save-images` and `--pull-images --save-images` CLI paths exit non-
+    # zero as well). Without this split, a bad orcaslicer-binaries:* tag was
+    # silently downgraded to a warning and the outer script printed
+    # "Images exported successfully!" and returned 0, hiding a security-
+    # critical refusal from operators and CI.
+    local orca_attestation_refused=false
     
     # Export upgraded base images first (preferred)
     print_info "Exporting pre-upgraded base images (with tools pre-installed)..."
@@ -1364,12 +1384,50 @@ save_images_to_tar() {
     
     # Export OrcaSlicer binaries image if it exists
     for image in "${DOCKER_LOCAL_IMAGES[@]}"; do
-        # Check if image exists locally
-        if ! docker images --quiet "$image" >/dev/null 2>&1; then
+        # Check if image exists locally. `docker images --quiet <ref>` is NOT
+        # a reliable presence test: it returns exit status 0 even when the
+        # reference is missing (it just prints an empty line). Because
+        # `DOCKER_LOCAL_IMAGES` always includes `orcaslicer-binaries:*`, a
+        # fresh host with no OrcaSlicer image cached would fall through to
+        # the strict-attestation guard below, `validate_orcaslicer_binary_image`
+        # would (correctly) fail because the tag does not exist, and this
+        # function would return rc 2 — misclassifying "image not present" as
+        # "unattested image refused". Use `docker image inspect` instead: it
+        # exits non-zero when the reference is not resolvable locally, giving
+        # us honest presence detection while preserving the rc 2 refusal for
+        # present-but-unattested Orca tags.
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
             print_info "Skipping $image (not built locally)"
             continue
         fi
-        
+
+        # Defense-in-depth: refuse to export unattested orcaslicer-binaries:*.
+        # build_base_images already refuses to complete when the strict-
+        # attestation guard trips, and prepare_offline_deployment aborts before
+        # calling save_images_to_tar in that case. However, this function is
+        # also reachable from the direct --save-images and
+        # --pull-images --save-images CLI paths, which do not run
+        # build_base_images at all. Enforce the same attestation contract at
+        # the export boundary itself so no code path can ship an unattested
+        # OrcaSlicer binary layer through DOCKER_LOCAL_IMAGES.
+        if [[ "$image" == orcaslicer-binaries:* ]]; then
+            if ! validate_orcaslicer_binary_image "$image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256" >/dev/null 2>&1; then
+                print_error "Refusing to export unattested $image (strict OrcaSlicer attestation missing)."
+                print_error "The exported tarball would let an offline deployment install an unverifiable OrcaSlicer binary layer."
+                print_error "Remediate: rerun with --rebuild-orcaslicer / ORCA_FORCE_REBUILD=1, or remove the stale tag:"
+                print_error "  docker rmi $image"
+                fail_count=$((fail_count + 1))
+                # Distinguish OrcaSlicer strict-attestation refusal from a
+                # generic "optional image failed to save" so the outer
+                # accounting can propagate a hard non-zero exit. Missing this
+                # flag was the exact bug the pre-PR review flagged: without
+                # it the summary block still prints "Images exported
+                # successfully!" and returns 0.
+                orca_attestation_refused=true
+                continue
+            fi
+        fi
+
         # Replace special characters in image name for filename, add platform suffix
         local safe_name
         safe_name=$(echo "$image" | sed 's|[:/ ]|-|g')
@@ -1402,7 +1460,33 @@ save_images_to_tar() {
         print_warning "Failed to export: $fail_count images"
         # Don't fail completely if some export fails
     fi
-    
+
+    # OrcaSlicer strict-attestation refusal MUST propagate as a hard failure.
+    # Preserve the partial-success semantics for other optional base images
+    # (which just warn and continue), but any orcaslicer-binaries:* rejection
+    # is security-critical: the offline bundle would otherwise ship an
+    # unverifiable OrcaSlicer binary layer. Return 2 to match the strict-
+    # attestation status code used by `prepare_offline_deployment` and
+    # `build_base_images`, and to give operator-facing callers (`--save-images`
+    # / `--pull-images --save-images`) a distinguishable non-zero exit.
+    if [ "$orca_attestation_refused" = "true" ]; then
+        echo
+        print_error "Refusing to complete image export: OrcaSlicer strict-attestation refusal detected above."
+        print_error "The offline bundle will NOT be marked as successfully exported."
+        print_info "TAR files (excluding the refused OrcaSlicer layer) remain at: $target_dir"
+        # Still write the manifest of what did export cleanly so the failure
+        # is auditable — but do not print the "Images exported successfully!"
+        # banner, and do not return 0.
+        local manifest_path="$target_dir/manifest.txt"
+        if [ "${#exported_images[@]}" -gt 0 ]; then
+            {
+                printf "%s\n" "${exported_images[@]}"
+            } > "$manifest_path"
+            print_info "Created partial manifest file (excludes refused images): $manifest_path"
+        fi
+        return 2
+    fi
+
     print_success "Images exported successfully!"
     print_info "TAR files location: $target_dir"
     print_info "You can now transfer this folder to offline machines"
@@ -1654,9 +1738,12 @@ build_base_images() {
     
     local orca_binary_image="orcaslicer-binaries:${ORCASLICER_VERSION}"
     local rebuild_orca_binary=false
-    if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
-        print_info "Forcing a clean OrcaSlicer binary cache rebuild."
-        if ! remove_local_orcaslicer_binaries_tags; then
+    # Accept both documented truthy values (`true` from --rebuild-orcaslicer,
+    # `1` from `ORCA_FORCE_REBUILD=1`) so operator-facing docs, help text, and
+    # remediation messages remain accurate.
+    if [[ "$ORCA_FORCE_REBUILD" == "1" || "$ORCA_FORCE_REBUILD" == "true" ]]; then
+        print_info "ORCA_FORCE_REBUILD is set — clearing local orcaslicer-binaries:* tags before rebuild."
+        if ! remove_local_orcaslicer_binaries_tags "$ORCASLICER_VERSION"; then
             return 2
         fi
         rebuild_orca_binary=true
@@ -1673,6 +1760,35 @@ build_base_images() {
                 return 2
             fi
         fi
+    fi
+
+    # Guard against silent-recovery failure. `remove_local_orcaslicer_binaries_tags`
+    # logs a warning per un-removable tag but always returns 0 so other callers can
+    # keep composing on top of it. In this offline path the subsequent rebuild
+    # branch is gated only on the `rebuild_orca_binary` flag; if the specific
+    # offline-target tag still exists after recovery (e.g. a running container is
+    # holding the reference, or the daemon returned an error), the rebuilt image
+    # can silently reuse the stale layer and the offline export would ship an
+    # unattested OrcaSlicer binary layer. Refuse to proceed so strict attestation
+    # cannot be silently bypassed.
+    #
+    # This guard returns exit code 2 (not 1) so callers can distinguish an
+    # OrcaSlicer strict-attestation failure — where the offline bundle MUST NOT
+    # be exported — from soft non-Orca base-image build failures (return 1),
+    # which have a documented fallback via standard image pulls.
+    #
+    # Regardless of whether the persisting image would pass strict validation,
+    # a caller-requested rebuild that leaves the tag in place means the daemon
+    # refused the removal (running container, layer share, etc.). The
+    # subsequent `docker build` may reuse the stale layer, so we must refuse.
+    if [[ "$rebuild_orca_binary" == "true" ]] && docker image inspect "$orca_binary_image" >/dev/null 2>&1; then
+        print_error "Refusing to proceed with offline preparation: stale $orca_binary_image could not be removed after recovery."
+        print_error "Strict attestation cannot be re-established while the unattested tag persists on this host."
+        print_error "Investigate what is holding the reference:"
+        print_error "  docker ps -a --filter ancestor=$orca_binary_image"
+        print_error "  docker image ls --filter reference=$orca_binary_image --digests"
+        print_error "Remove the reference and rerun with --rebuild-orcaslicer / ORCA_FORCE_REBUILD=1."
+        return 2
     fi
 
     if [[ "$rebuild_orca_binary" == "true" ]]; then
@@ -1708,14 +1824,21 @@ build_base_images() {
         if docker build "${build_args[@]}" > /dev/null 2>&1; then
             if ! validate_orcaslicer_binary_image "$orca_binary_image" "$ORCASLICER_VERSION" "$ORCASLICER_SHA256"; then
                 print_error "Built OrcaSlicer binary layer failed identity validation."
-                remove_local_orcaslicer_binaries_tags || true
+                # Strict-attestation failure — remove the failed cache so a retry
+                # can succeed, then return 2 so prepare_offline_deployment aborts
+                # before save_images_to_tar can export the freshly-built but
+                # unattested image (see guard above for full rationale).
+                remove_local_orcaslicer_binaries_tags "$ORCASLICER_VERSION" || true
                 return 2
             fi
             print_success "✓ Build successful: $orca_binary_image"
             ((successful++))
         else
             print_error "✗ Build failed: $orca_binary_image"
-            remove_local_orcaslicer_binaries_tags || true
+            # No attested OrcaSlicer binary layer is available; refuse to let the
+            # offline bundle ship without one. Clean up any partial cache first
+            # so subsequent runs start from a known-empty state.
+            remove_local_orcaslicer_binaries_tags "$ORCASLICER_VERSION" || true
             return 2
         fi
     fi
@@ -1771,18 +1894,28 @@ prepare_offline_deployment() {
     
     # Step 1: Build pre-upgraded base images (including OrcaSlicer binaries)
     print_header "STEP 1/4: Building Pre-Upgraded Base Images & OrcaSlicer Binary Layer"
-    local build_status
-    if build_base_images "$target_dir"; then
+    # Capture build_base_images return code so we can distinguish:
+    #   0 → all base images and OrcaSlicer layer built and strictly attested
+    #   1 → some non-Orca base image builds failed; documented soft fallback via
+    #       standard image pulls in Step 2
+    #   2 → OrcaSlicer strict-attestation guard tripped (stale unattested tag on
+    #       host, build failed, or freshly-built layer failed identity check).
+    #       In this case save_images_to_tar would otherwise ship an unattested
+    #       orcaslicer-binaries:* layer via DOCKER_LOCAL_IMAGES, so the offline
+    #       export path is aborted here.
+    local build_rc=0
+    build_base_images "$target_dir" || build_rc=$?
+    if [ "$build_rc" -eq 0 ]; then
         upgraded_built=true
         print_success "Pre-upgraded base images built successfully"
+    elif [ "$build_rc" -eq 2 ]; then
+        echo
+        print_error "Base image preparation failed with strict OrcaSlicer attestation guard triggered (build_base_images rc=$build_rc)."
+        print_error "Refusing to continue offline preparation — the offline bundle would otherwise ship an unattested OrcaSlicer binary layer via DOCKER_LOCAL_IMAGES."
+        print_error "Remediate the failure above (typically a stale local orcaslicer-binaries:* tag) and rerun."
+        return 1
     else
-        build_status=$?
-        if [[ "$build_status" -eq 2 ]]; then
-            print_error "OrcaSlicer binary preparation failed strict validation; offline preparation cannot continue."
-            succeeded=false
-        else
-            print_warning "Some base images failed to build, will use standard images as fallback"
-        fi
+        print_warning "Some base images failed to build, will use standard images as fallback"
     fi
     
     # Step 2: Only pull standard base images if upgraded versions weren't built
@@ -2343,8 +2476,16 @@ OPTIONS:
         --clean             Useful for starting completely fresh.
     --no-cache              Build Docker images without using cache. Use when NuGet
                             packages are corrupted from .NET version migrations.
-    --rebuild-orcaslicer    Remove local orcaslicer-binaries:* tags and rebuild the
-                            strict binary layer with --no-cache.
+    --rebuild-orcaslicer    Delete any local orcaslicer-binaries:* tags before
+                            deploying and force a strict, freshly-labelled rebuild
+                            with --no-cache. Equivalent to ORCA_FORCE_REBUILD=1.
+                            Use when upgrading through PR #1089 and the local
+                            cache carries only the pre-#1089 `orcaslicer.version`
+                            label (missing `orcaslicer.sha256`). The strict
+                            validator is preserved; only local
+                            `orcaslicer-binaries:...` short tags are touched —
+                            registry-qualified ORCA_ASSET_IMAGE values
+                            (containing '/', '.', or '@') are never modified.
     --build-verbosity LEVEL Set Docker build verbosity: quiet (default), minimal, normal, detailed
         --verbose-build     Shorthand for --build-verbosity detailed
         --cleanup-generated Remove generated Docker files after deployment (default keeps them)
@@ -4608,7 +4749,7 @@ EOF
         ORCA_ASSET_URL=${ORCA_ASSET_URL:-}
         local orca_clean_rebuild=false
 
-        if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
+        if [[ "$ORCA_FORCE_REBUILD" == "1" || "$ORCA_FORCE_REBUILD" == "true" ]]; then
             ORCA_ASSET_IMAGE=""
         fi
 
@@ -4701,9 +4842,18 @@ EOF
                 BUILD_ARGS="$BUILD_ARGS --build-arg GITHUB_TOKEN=${GITHUB_TOKEN}"
             fi
 
-            if [[ "$ORCA_FORCE_REBUILD" == "1" ]]; then
+            # Optional escape hatch: --rebuild-orcaslicer / ORCA_FORCE_REBUILD=1
+            # unconditionally clears any local orcaslicer-binaries:* tags before we
+            # try to reuse them. Preserves strict validation on whatever is built
+            # next while eliminating the "legacy label" surprise for operators
+            # upgrading through PR #1089.
+            #
+            # Truthy set: "true" (set by --rebuild-orcaslicer) and "1" (documented
+            # env value). Anything else is treated as false so operators don't
+            # get silent partial activations.
+            if [[ "$ORCA_FORCE_REBUILD" == "1" || "$ORCA_FORCE_REBUILD" == "true" ]]; then
                 print_info "Forcing a clean OrcaSlicer binary cache rebuild."
-                if ! remove_local_orcaslicer_binaries_tags; then
+                if ! remove_local_orcaslicer_binaries_tags "$ORCA_VERSION"; then
                     exit 1
                 fi
                 ORCA_ASSET_IMAGE=""
@@ -6654,22 +6804,33 @@ main() {
         fi
     fi
     
-    # Handle image management options (these exit early if used)
+    # Handle image management options (these exit early if used).
+    #
+    # Both `--pull-images --save-images` and the direct `--save-images` path
+    # must propagate `save_images_to_tar`'s return code. Previously both paths
+    # `exit 0` unconditionally, so an OrcaSlicer strict-attestation refusal
+    # inside `save_images_to_tar` was invisible to operators and CI: the
+    # exported tarball was missing but the CLI still reported success. Return
+    # the actual save status so a refusal surfaces as a non-zero exit.
     if [ "$PULL_IMAGES" = "true" ]; then
+        local save_rc=0
         if pull_base_images; then
             if [ "$SAVE_IMAGES" = "true" ]; then
-                save_images_to_tar "$IMAGES_DIR"
+                save_images_to_tar "$IMAGES_DIR" || save_rc=$?
             fi
+        else
+            save_rc=1
         fi
-        exit 0
+        exit "$save_rc"
     fi
-    
+
     if [ "$SAVE_IMAGES" = "true" ]; then
         if [ "$PULL_IMAGES" != "true" ]; then
             print_info "Saving already downloaded images..."
         fi
-        save_images_to_tar "$IMAGES_DIR"
-        exit 0
+        local save_rc=0
+        save_images_to_tar "$IMAGES_DIR" || save_rc=$?
+        exit "$save_rc"
     fi
     
     if [ "$LOAD_IMAGES" = "true" ]; then
@@ -6907,7 +7068,7 @@ while [ $# -gt 0 ]; do
             NO_CACHE=true
             shift
             ;;
-        --rebuild-orcaslicer)
+        --rebuild-orcaslicer|--force-orca-rebuild)
             ORCA_FORCE_REBUILD=1
             shift
             ;;
