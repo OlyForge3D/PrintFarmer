@@ -6734,9 +6734,14 @@ redeploy_existing() {
     fi
     
     print_info "Loading previous deployment configuration..."
+    # Explicit caller overrides must survive the source here too, otherwise
+    # `ENABLE_ORCA_WORKER=yes ... --redeploy` is silently ignored and the stale
+    # value is written straight back out by save_deployment_config (issue #1258).
+    capture_config_overrides
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
     enforce_supported_orcaslicer_release
+    restore_config_overrides
     if ! normalize_worker_configuration; then
         print_error "Stored worker configuration is invalid."
         exit 1
@@ -6911,9 +6916,13 @@ main() {
         fi
         print_header "🔄 Regenerating Configuration Files"
         print_info "Loading stored configuration from $CONFIG_FILE"
+        # As with redeploy, explicit caller overrides must outlive this source
+        # so --regenerate-config does not rewrite the stale worker values.
+        capture_config_overrides
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
         enforce_supported_orcaslicer_release
+        restore_config_overrides
         if ! normalize_worker_configuration; then
             print_error "Stored worker configuration is invalid."
             exit 1
