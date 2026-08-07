@@ -524,6 +524,164 @@ EOF
     pass_test
 }
 
+test_explicit_env_overrides_persisted_worker_disable() {
+    start_test "explicit worker env vars override persisted values"
+
+    cd "$TEST_TEMP_DIR"
+
+    # A previously persisted config that disables the worker. This is the state
+    # a farm lands in after any redeploy that could not infer worker intent, and
+    # it is exactly the state the operator is trying to recover from.
+    write_base_config ".deploy-config"
+    sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
+
+    # The documented recovery path: pass the worker keys explicitly on the
+    # command line. These must beat the persisted ENABLE_ORCA_WORKER=no rather
+    # than being silently clobbered when the config file is sourced.
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Env-override recovery deployment should complete successfully" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=yes, count=1" "Explicit env vars should win over the persisted worker disable" || true
+    assert_contains "$output" "--profile orca up -d" "Env-override recovery should activate the OrcaSlicer compose profile" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Should persist the env-supplied worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Should persist the env-supplied worker count" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_absent_env_preserves_persisted_worker_settings() {
+    start_test "absent worker env vars preserve persisted values"
+
+    cd "$TEST_TEMP_DIR"
+
+    # Guard the inverse of the override: when the operator supplies no worker
+    # env vars, the persisted configuration must still win. This keeps the
+    # override fix from turning into an unconditional reset.
+    write_base_config ".deploy-config"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
+        -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=yes/' \
+        -e 's/^ORCA_WORKER_COUNT=.*/ORCA_WORKER_COUNT=3/' \
+        ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Persisted worker deployment should complete successfully" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=yes, count=3" "Persisted worker settings should survive when no env override is supplied" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=3" "Should preserve the persisted worker count" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_explicit_env_disable_overrides_persisted_worker_enable() {
+    start_test "explicit worker env disable overrides persisted enable"
+
+    cd "$TEST_TEMP_DIR"
+
+    # The override must be symmetric: an operator disabling a running worker
+    # from the command line must not be overridden by the persisted enable.
+    write_base_config ".deploy-config"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
+        -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=yes/' \
+        -e 's/^ORCA_WORKER_COUNT=.*/ORCA_WORKER_COUNT=2/' \
+        ".deploy-config"
+
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=no timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Env-override disable deployment should complete successfully" || true
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Explicit env disable should win over the persisted worker enable" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=no" "Should persist the env-supplied worker disable" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_explicit_env_overrides_persisted_worker_disable_on_redeploy() {
+    start_test "explicit worker env vars override persisted values on redeploy"
+
+    cd "$TEST_TEMP_DIR"
+
+    # --redeploy sources .deploy-config on its own path, before
+    # load_previous_config is ever reached. Without the same override
+    # protection the recovery command is silently ignored here and
+    # save_deployment_config writes the stale value straight back out.
+    write_base_config ".deploy-config"
+    sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
+    rm -f docker-compose.yml docker-compose.override.yml
+
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --redeploy --dry-run 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        test_info "Redeploy override output: $output"
+    fi
+    assert_equals "0" "$exit_code" "Env-override redeploy should complete successfully" || true
+    assert_contains "$output" "--profile orca up -d" "Explicit env vars should win over the persisted worker disable and activate the OrcaSlicer profile on redeploy" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Redeploy should persist the env-supplied worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Redeploy should persist the env-supplied worker count" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_explicit_env_overrides_persisted_worker_disable_on_regenerate() {
+    start_test "explicit worker env vars override persisted values on regenerate-config"
+
+    cd "$TEST_TEMP_DIR"
+
+    # --regenerate-config is the third independent source site and, like
+    # redeploy, persists whatever it resolves. It must honour the same
+    # explicit override rather than rewriting the stale worker values.
+    write_base_config ".deploy-config"
+    sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
+
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        test_info "Regeneration override output: $output"
+    fi
+    assert_equals "0" "$exit_code" "Env-override regeneration should complete successfully" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_ORCA_WORKER=yes" "Regeneration should persist the env-supplied worker enablement" || true
+    assert_file_has_exact_line ".deploy-config" "ORCA_WORKER_COUNT=1" "Regeneration should persist the env-supplied worker count" || true
+    assert_file_has_exact_line ".env" "ENABLE_ORCA_WORKER=yes" "Regeneration should enable the generated worker environment" || true
+    assert_file_has_exact_line ".env" "ORCA_WORKER_COUNT=1" "Regeneration should generate one worker" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -541,6 +699,11 @@ run_all_tests() {
     test_worker_boolean_forms_and_exact_count_are_normalized
     test_malformed_and_empty_worker_booleans_fail_clearly
     test_force_disable_overrides_legacy_worker_inference
+    test_explicit_env_overrides_persisted_worker_disable
+    test_absent_env_preserves_persisted_worker_settings
+    test_explicit_env_disable_overrides_persisted_worker_enable
+    test_explicit_env_overrides_persisted_worker_disable_on_redeploy
+    test_explicit_env_overrides_persisted_worker_disable_on_regenerate
     test_orcaslicer_release_is_repository_controlled
     test_regenerate_config_migrates_orcaslicer_release
     
