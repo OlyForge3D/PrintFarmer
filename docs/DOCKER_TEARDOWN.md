@@ -227,5 +227,5 @@ sudo kill -9 <PID>
 ## See Also
 
 - [Docker Deployment Guide](DOCKER_DEPLOYMENT.md)
-- [Local Development Guide](../LOCAL_DEVELOPMENT.md)
+- [Local Development Guide](DEVELOPMENT.md#running-locally)
 - [Troubleshooting Guide](DOCKER_DEPLOYMENT.md#troubleshooting)

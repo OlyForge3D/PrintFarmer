@@ -1,0 +1,39 @@
+name: Documentation health
+
+on:
+  push:
+    branches: [development]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs-health.yml'
+  pull_request:
+    branches: [development]
+    paths:
+      - 'README.md'
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs-health.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  docs-health:
+    name: Relative links and structure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
+      - name: Test checker
+        run: node --test scripts/docs/tests/check-markdown.test.mjs
+
+      - name: Check documentation
+        run: node scripts/docs/check-markdown.mjs

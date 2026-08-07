@@ -1,6 +1,8 @@
 # PrintFarmer - Docker Deployment Guide
 
-This guide covers deploying PrintFarmer using Docker containers for production or testing environments. For local development, see [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md).
+This guide covers deploying PrintFarmer using Docker containers for production or
+testing environments. For local development, see
+[Running Locally](DEVELOPMENT.md#running-locally).
 
 Production and hosted deployments must keep the unauthenticated
 `GET /api/system/source` endpoint reachable and publish the exact corresponding
@@ -1141,6 +1143,9 @@ Docker automatically pulls the ARM64 variant when running on an ARM64 host.
 
 ## Next Steps
 
-- **Local Development:** See [LOCAL_DEVELOPMENT.md](LOCAL_DEVELOPMENT.md) for development setup
-- **Contributing:** See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines
-- **Advanced Configuration:** See [DOCKER_NETWORK_CONFIG.md](DOCKER_NETWORK_CONFIG.md) for network details
+- **Local Development:** See [Running Locally](DEVELOPMENT.md#running-locally)
+  for development setup
+- **Contributing:** See [Development Guide](DEVELOPMENT.md) for contribution
+  guidelines
+- **Advanced Configuration:** See
+  [Network Configuration](#network-configuration) for network details
