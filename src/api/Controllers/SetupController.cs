@@ -12,10 +12,9 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/setup")]
-public class SetupController(ISetupService setupService, ISettingsService settingsService) : ControllerBase
+public class SetupController(ISetupService setupService) : ControllerBase
 {
     private readonly ISetupService _setupService = setupService;
-    private readonly ISettingsService _settingsService = settingsService;
 
     /// <summary>
     /// Checks if the application needs initial setup.
@@ -38,20 +37,23 @@ public class SetupController(ISetupService setupService, ISettingsService settin
     /// administrator exists. The authenticated settings endpoint remains the canonical settings
     /// surface after setup.
     /// </remarks>
+    /// <param name="settingsService">Settings provider resolved only for this bootstrap action.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     [HttpGet("bootstrap")]
     [AllowAnonymous] // Public only while no account exists; the response contains one non-secret setup default.
     [ProducesResponseType<SetupBootstrapResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<SetupBootstrapResponse>> GetBootstrapAsync(CancellationToken ct)
+    public async Task<ActionResult<SetupBootstrapResponse>> GetBootstrapAsync(
+        [FromServices] ISettingsService settingsService,
+        CancellationToken ct)
     {
         if (!await _setupService.NeedsSetupAsync(ct))
         {
             return NotFound();
         }
 
-        SpoolmanSettings settings = _settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
-        return Ok(new SetupBootstrapResponse(settings.BaseUrl));
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        return Ok(new SetupBootstrapResponse(settings.BaseUrl ?? string.Empty));
     }
 
     /// <summary>

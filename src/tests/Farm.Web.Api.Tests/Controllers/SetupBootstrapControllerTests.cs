@@ -1,6 +1,12 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Contracts.Setup;
+using Farm.Infrastructure.Services.Setup;
+using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Controllers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Controllers;
 
@@ -65,5 +71,40 @@ public sealed class SetupBootstrapControllerTests : IAsyncLifetime
         HttpResponseMessage response = await anonymousClient.GetAsync("/api/settings/Spoolman");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetSetupStatusAsync_ControllerActivation_DoesNotRequireSettingsService()
+    {
+        var setupService = new Mock<ISetupService>();
+        setupService.Setup(service => service.NeedsSetupAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var controller = new SetupController(setupService.Object);
+
+        ActionResult<object> result = await controller.GetSetupStatusAsync(CancellationToken.None);
+
+        OkObjectResult response = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+        response.Value.Should().NotBeNull();
+        JsonElement body = JsonSerializer.SerializeToElement(response.Value);
+        body.GetProperty("needsSetup").GetBoolean().Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetBootstrapAsync_StoredBaseUrlIsNull_ReturnsRequiredEmptyStringProperty()
+    {
+        var setupService = new Mock<ISetupService>();
+        setupService.Setup(service => service.NeedsSetupAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var settingsService = new Mock<ISettingsService>();
+        settingsService.Setup(service => service.Get<SpoolmanSettings>())
+            .Returns(new SpoolmanSettings { BaseUrl = null! });
+        var controller = new SetupController(setupService.Object);
+
+        ActionResult<SetupBootstrapResponse> result =
+            await controller.GetBootstrapAsync(settingsService.Object, CancellationToken.None);
+
+        OkObjectResult response = result.Result.Should().BeOfType<OkObjectResult>().Subject;
+        SetupBootstrapResponse body = response.Value.Should().BeOfType<SetupBootstrapResponse>().Subject;
+        body.BaseUrl.Should().BeEmpty();
     }
 }

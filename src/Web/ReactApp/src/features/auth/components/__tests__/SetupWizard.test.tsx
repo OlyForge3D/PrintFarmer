@@ -10,6 +10,7 @@ const {
   mockGetSetupBootstrap,
   mockGetSetupStatus,
   mockLogin,
+  mockNetworkScanState,
   mockScanNetwork,
   mockTestSpoolmanConnection,
 } = vi.hoisted(() => ({
@@ -19,6 +20,7 @@ const {
   mockGetSetupBootstrap: vi.fn(),
   mockGetSetupStatus: vi.fn(),
   mockLogin: vi.fn(),
+  mockNetworkScanState: { availableInstances: [] as Array<{ url: string; version?: string }> },
   mockScanNetwork: vi.fn(),
   mockTestSpoolmanConnection: vi.fn(),
 }));
@@ -51,7 +53,7 @@ vi.mock('@/common/hooks/useSpoolmanNetworkScan', () => ({
     error: null,
     scanNetwork: mockScanNetwork,
     reset: vi.fn(),
-    availableInstances: [],
+    availableInstances: mockNetworkScanState.availableInstances,
   }),
 }));
 
@@ -84,6 +86,7 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuthState.isAuthenticated = false;
+    mockNetworkScanState.availableInstances = [];
     mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
     mockGetSetupBootstrap.mockResolvedValue({ baseUrl: '' });
     mockGetSettings.mockResolvedValue({
@@ -132,6 +135,7 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
     });
     expect(screen.getByPlaceholderText('http://spoolman:7912')).toHaveValue('http://manual-spoolman:7912');
     expect(screen.getByRole('button', { name: /Scan Network/ })).toBeEnabled();
+    expect(screen.queryByText(/Could not load the deployment Spoolman URL/)).not.toBeInTheDocument();
   });
 
   it('does not overwrite a manual selection when the bootstrap response arrives late', async () => {
@@ -150,6 +154,31 @@ describe('SetupWizard first-run Spoolman bootstrap', () => {
 
     expect(screen.getByLabelText('Enable Spoolman')).toBeChecked();
     expect(screen.getByPlaceholderText('http://spoolman:7912')).toHaveValue('http://manual-spoolman:7912');
+  });
+
+  it('does not overwrite a scanned instance when the bootstrap response arrives late', async () => {
+    let resolveBootstrap!: (value: { baseUrl: string }) => void;
+    mockGetSetupBootstrap.mockReturnValue(new Promise(resolve => {
+      resolveBootstrap = resolve;
+    }));
+    mockNetworkScanState.availableInstances = [{ url: 'http://scanned-spoolman:7912', version: '0.22.1' }];
+    render(<SetupWizard onComplete={vi.fn()} />);
+    await advanceToSpoolmanStep();
+
+    fireEvent.click(screen.getByLabelText('Enable Spoolman'));
+    fireEvent.click(screen.getByRole('button', { name: /http:\/\/scanned-spoolman:7912/ }));
+    await act(async () => resolveBootstrap({ baseUrl: 'http://late-deployment-spoolman:7912' }));
+
+    expect(screen.getByPlaceholderText('http://spoolman:7912')).toHaveValue('http://scanned-spoolman:7912');
+  });
+
+  it('does not warn when setup completion makes the bootstrap endpoint unavailable', async () => {
+    mockGetSetupBootstrap.mockRejectedValue({ statusCode: 404, message: 'Not Found' });
+    render(<SetupWizard onComplete={vi.fn()} />);
+
+    await advanceToSpoolmanStep();
+
+    expect(screen.queryByText(/Could not load the deployment Spoolman URL/)).not.toBeInTheDocument();
   });
 
   it('aborts the bootstrap request and ignores its completion after unmount', async () => {

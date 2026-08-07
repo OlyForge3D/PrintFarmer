@@ -8,6 +8,7 @@ import { Button } from '@/common/components/ui';
 import { useHealthStatus } from '@/common/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
+import { isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 
@@ -177,8 +178,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           setSpoolmanEnabled(true);
         }
       })
-      .catch(() => {
-        if (active) {
+      .catch(error => {
+        if (active && !(isApiError(error) && error.statusCode === 404)) {
           setSpoolmanBootstrapError(
             'Could not load the deployment Spoolman URL. Enter it manually or scan the network.',
           );
@@ -393,6 +394,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const selectSpoolmanInstance = (url: string) => {
     spoolmanSelectionChangedRef.current = true;
+    setSpoolmanBootstrapError(null);
     setSpoolmanUrl(url);
     setSpoolmanBaseUrlCtx(url);
     // Auto-test the selected instance
@@ -719,7 +721,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input
               type="url"
               value={spoolmanUrl}
-              onChange={e => { spoolmanSelectionChangedRef.current = true; setSpoolmanUrl(e.target.value); }}
+              onChange={e => { spoolmanSelectionChangedRef.current = true; setSpoolmanBootstrapError(null); setSpoolmanUrl(e.target.value); }}
               placeholder="http://spoolman:7912"
               className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-sm"
             />
