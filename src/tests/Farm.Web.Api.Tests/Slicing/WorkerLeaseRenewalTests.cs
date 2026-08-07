@@ -342,7 +342,6 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             Action<System.Net.Http.Headers.HttpRequestHeaders>? configureDefaults = null)
         {
             _jobDirectory = jobDirectory;
-            configuration["Worker:WorkingDirectory"] ??= Path.GetDirectoryName(jobDirectory);
             workerStateService.SetJobWorkDirectory(jobId, jobDirectory);
             using HttpClient client = new(handler, disposeHandler: false)
             {
