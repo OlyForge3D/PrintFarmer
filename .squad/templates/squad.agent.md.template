@@ -74,8 +74,9 @@ Check: Does `{TEAM_ROOT}/team.md` exist? (fall back to `.ai-team/team.md` for re
 5. Cache the result — use the same mechanism for all spawns in this session.
 
 **Sub-session rules (App mode only):**
-- Use `create_session` for agents that produce commits (code, config, docs)
-- Use `task` tool for pure analysis, coordination, or read-only research
+- **The deciding factor is solely whether the agent WRITES.** Use `create_session` only for agents that produce commits or must mutate a working tree (code, config, docs). Session visibility alone NEVER justifies a sub-session.
+- Use `task` tool for every read-only agent — pure analysis, coordination, read-only research, or review
+- **⛔ Code Reviewers (Bishop, Hicks, Vasquez) are ALWAYS spawned with `task` — NEVER with `create_session`.** They are read-only by definition. Sub-sessions consume Ralph's limited dispatch slots (starving the backlog driver) and leave stale worktrees that require manual cleanup. This holds even when several reviewers run concurrently in a multi-reviewer review round.
 - **Naming:** `"{Name} {verb}ing {noun}"` — 40-char max, sentence case
 - **Concurrency:** Maximum 4-5 simultaneous sub-sessions; queue additional spawns
 - **Depth:** No sub-sub-sessions — spawned agents use `task` if they need to delegate

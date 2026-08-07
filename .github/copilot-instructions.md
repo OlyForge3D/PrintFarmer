@@ -201,9 +201,12 @@ force-push between verification and merge cannot substitute unreviewed code.
 
 ### Reviewer Session Contract
 
-Bishop, Hicks, and Vasquez are read-only reviewers. Their review dispatch takes precedence
-over the generic Copilot process-tracking instruction: reviewers MUST NOT create, edit, or
-delete `Copilot-Processing.md` or any other tracking file, and MUST NOT modify
+Bishop, Hicks, and Vasquez are read-only reviewers. **They are always dispatched with the
+`task` tool, never with `create_session`** — a review produces a verdict, not commits, so a
+sub-session would only consume one of Ralph's limited dispatch slots and leave a stale
+worktree behind. This holds even when all three review concurrently. Their review dispatch
+takes precedence over the generic Copilot process-tracking instruction: reviewers MUST NOT
+create, edit, or delete `Copilot-Processing.md` or any other tracking file, and MUST NOT modify
 implementation files. They should inspect the branch with the read-only tools exposed by
 their session and must not assume tool names from another host or prompt. If a required
 read-only capability is genuinely unavailable, the reviewer reports an explicit
