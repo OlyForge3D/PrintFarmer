@@ -29,14 +29,21 @@ test('accepts files, fragments, encoded paths, and directory index targets', asy
   await withFixture({
     'README.md': [
       '[guide](docs/Guide.md#repeated-heading-1)',
+      '[inline code heading](docs/Guide.md#worker-auth-setup)',
       '[encoded](docs/Encoded%20Name.md)',
       '[directory](docs/reference/#directory-index)',
     ].join('\n'),
-    'docs/Guide.md': '# Repeated heading\n\n## Repeated heading\n',
+    'docs/Guide.md': [
+      '# Repeated heading',
+      '',
+      '## Repeated heading',
+      '',
+      '## `Worker Auth` setup',
+    ].join('\n'),
     'docs/Encoded Name.md': '# Encoded\n',
     'docs/reference/INDEX.md': '# Directory index\n',
   }, (result) => {
-    assert.equal(result.inventory.length, 3);
+    assert.equal(result.inventory.length, 4);
     assert.deepEqual(result.issues, []);
   });
 });

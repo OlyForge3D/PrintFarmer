@@ -135,15 +135,15 @@ function scanMarkdown(source, sourcePath) {
     }
 
     const contentLine = stripInlineCode(line);
-    const atxHeading = contentLine.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
+    const atxHeading = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/);
     if (atxHeading) {
       headingLines.push(atxHeading[1]);
     } else if (
       index + 1 < lines.length
-      && contentLine.trim()
+      && line.trim()
       && /^\s{0,3}(=+|-+)\s*$/.test(lines[index + 1])
     ) {
-      headingLines.push(contentLine.trim());
+      headingLines.push(line.trim());
     }
 
     for (const match of contentLine.matchAll(/<a\s+[^>]*(?:id|name)=["']([^"']+)["'][^>]*>/gi)) {
