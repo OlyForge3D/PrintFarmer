@@ -30,6 +30,9 @@ worker settings, every path migrates the file to `ENABLE_ORCA_WORKER=yes` and
 `ORCA_WORKER_COUNT=1`. Explicit disables remain disabled. Setting
 `DISABLE_SLICER_BUILDS=true` or `1` always forces the effective worker values to
 `no` and `0`, including when the legacy migration would otherwise enable one.
+When distributed slicing or the OrcaSlicer worker is explicitly disabled,
+omitted dependent worker settings default to `ENABLE_ORCA_WORKER=no` and
+`ORCA_WORKER_COUNT=0`.
 
 ### Re-Deployment (Update Settings)
 ```bash
