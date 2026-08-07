@@ -12,6 +12,13 @@ const moduleLoads = vi.hoisted(() => ({
   queue: vi.fn(),
   quickSlice: vi.fn(),
 }));
+const quickSliceModule = vi.hoisted(() => {
+  let resolve: () => void = () => undefined;
+  const ready = new Promise<void>((resolveReady) => {
+    resolve = resolveReady;
+  });
+  return { ready, resolve };
+});
 
 vi.mock('@/features/models3d/components/PrintablesBrowserModal', () => {
   moduleLoads.printablesBrowser();
@@ -47,8 +54,9 @@ vi.mock('@/features/gcode/components/QueueGcodeModal', () => {
   };
 });
 
-vi.mock('@/features/slicer/components/QuickSliceModal', () => {
+vi.mock('@/features/slicer/components/QuickSliceModal', async () => {
   moduleLoads.quickSlice();
+  await quickSliceModule.ready;
   return {
     QuickSliceModal: () => <div role="dialog" aria-label="Quick slice mock" />,
   };
@@ -138,6 +146,12 @@ describe('FilesPage lazy interactions', () => {
     expect(moduleLoads.queue).not.toHaveBeenCalled();
     expect(moduleLoads.quickSlice).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByTitle('Quick slice'));
+    expect(await screen.findByRole('status', { name: 'Loading quick slice' })).toBeVisible();
+    await waitFor(() => expect(moduleLoads.quickSlice).toHaveBeenCalledTimes(1));
+    quickSliceModule.resolve();
+    expect(await screen.findByRole('dialog', { name: 'Quick slice mock' })).toBeInTheDocument();
+
     const printablesButton = screen.getByRole('button', { name: 'Printables' });
     fireEvent.focus(printablesButton);
     await waitFor(() => expect(moduleLoads.printablesBrowser).toHaveBeenCalledTimes(1));
@@ -154,8 +168,5 @@ describe('FilesPage lazy interactions', () => {
     expect(await screen.findByRole('dialog', { name: 'Queue G-code mock' })).toBeInTheDocument();
     expect(moduleLoads.queue).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByTitle('Quick slice'));
-    expect(await screen.findByRole('dialog', { name: 'Quick slice mock' })).toBeInTheDocument();
-    expect(moduleLoads.quickSlice).toHaveBeenCalledTimes(1);
   });
 });
