@@ -18,14 +18,24 @@ public class ArtifactCleanupHostedService(
     IOptions<ArtifactStorageSettings> opts,
     ILogger<ArtifactCleanupHostedService> logger) : BackgroundService
 {
+    private const int MaximumCleanupIntervalHours = 24 * 7;
+
     private readonly IServiceProvider _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
     private readonly ILogger<ArtifactCleanupHostedService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly ArtifactStorageSettings _settings = opts?.Value ?? throw new ArgumentNullException(nameof(opts));
     private readonly int _cleanupIntervalHours =
-        Math.Clamp(opts?.Value.CleanupIntervalHours ?? 24, 1, 8760);
+        NormalizeCleanupIntervalHours(opts?.Value.CleanupIntervalHours ?? 24);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        if (_cleanupIntervalHours != _settings.CleanupIntervalHours)
+        {
+            _logger.LogWarning(
+                "Artifact cleanup interval {ConfiguredHours} hours is outside the supported range; using {EffectiveHours} hours",
+                _settings.CleanupIntervalHours,
+                _cleanupIntervalHours);
+        }
+
         _logger.LogInformation(
             "Artifact cleanup service started (Interval: {IntervalHours} hours, DryRun: {DryRun})",
             _cleanupIntervalHours,
@@ -72,4 +82,7 @@ public class ArtifactCleanupHostedService(
 
         _logger.LogInformation("Artifact cleanup service stopped");
     }
+
+    internal static int NormalizeCleanupIntervalHours(int configuredHours) =>
+        Math.Clamp(configuredHours, 1, MaximumCleanupIntervalHours);
 }
