@@ -165,7 +165,8 @@ describe('FilesPage lazy interactions', () => {
     expect(await screen.findByRole('dialog', { name: 'Printables import mock' })).toBeInTheDocument();
     expect(moduleLoads.printablesImport).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: 'Close import' }));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Printables' })).toHaveFocus());
+    await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    expect(screen.getByRole('button', { name: 'Printables' })).toHaveFocus();
 
     await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
     expect(await screen.findByRole('dialog', { name: 'Harvest wizard mock' })).toBeInTheDocument();
