@@ -20,6 +20,7 @@ echo "=============================================="
 
 # Create temp directory for testing
 TEMP_DIR=$(mktemp -d -t "printfarmer-validation-XXXXXX")
+trap 'rm -rf "$TEMP_DIR"' EXIT
 echo "Using temp directory: $TEMP_DIR"
 
 # Record an explicit assertion result without aborting the remaining validations.
@@ -137,7 +138,8 @@ if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.s
     --config-file "$MS_DIR/.deploy-config" \
     --env-file "$MS_DIR/.env" \
     --output-dir "$MS_DIR/generated" \
-    --dry-run --batch 2>&1); then
+    --dry-run \
+    --batch 2>&1); then
     host_checks_pass=true
 
     if [ ! -f ".env" ]; then
@@ -146,6 +148,12 @@ if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.s
     elif ! grep -q 'DB_PROVIDER=postgres' ".env" 2>/dev/null; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  Database provider not set in .env${NC}"
+    fi
+
+    react_env_path="$MS_DIR/generated/src/Web/ReactApp/.env.production"
+    if [ ! -f "$react_env_path" ]; then
+        host_checks_pass=false
+        echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
     fi
 
     if [ "$host_checks_pass" = true ]; then
@@ -224,6 +232,7 @@ fi
 echo
 echo "🧹 Cleaning up test directory: $TEMP_DIR"
 rm -rf "$TEMP_DIR"
+trap - EXIT
 
 echo
 echo "=============================================="

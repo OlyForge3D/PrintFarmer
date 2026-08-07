@@ -48,6 +48,24 @@ HELP
     exit 0
 fi
 
+output_dir=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --output-dir)
+            output_dir="$2"
+            shift 2
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+if [[ -n "$output_dir" ]]; then
+    mkdir -p "$output_dir/src/Web/ReactApp"
+    : > "$output_dir/src/Web/ReactApp/.env.production"
+fi
+
 if grep -q '^DB_PROVIDER=sqlserver$' .deploy-config; then
     printf '%s\n' \
         'DB_PROVIDER=sqlserver' \

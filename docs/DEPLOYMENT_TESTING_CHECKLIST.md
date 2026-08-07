@@ -18,6 +18,26 @@ Always run tests AFTER making changes to:
 
 **Expected Result**: ✅ ALL TESTS PASSED - Ready to commit!
 
+## Test Isolation Requirement
+
+Deployment tests must never read, write, source, or delete deployment artifacts
+in the repository root. Each test must use a dedicated `mktemp -d` directory
+and pass explicit paths to the deployment script:
+
+```bash
+./scripts/deploy-docker.sh \
+  --config-file "$TEST_TEMP_DIR/.deploy-config" \
+  --env-file "$TEST_TEMP_DIR/.env" \
+  --output-dir "$TEST_TEMP_DIR/generated" \
+  --dry-run \
+  --batch
+```
+
+Cleanup handlers may remove only paths inside the test temp directory. The
+deployment test harness fingerprints repo-root configuration, environment, and
+generated compose artifacts before and after the run. Any content, size,
+permission, or modification-time change fails the suite.
+
 ## Step-by-Step Workflow
 
 ### 1️⃣ Make Your Changes
@@ -146,6 +166,7 @@ bash tests/test-integration.sh
 - ❌ Don't ignore test failures
 - ❌ Don't run tests on old code versions
 - ❌ Don't modify test files to "fix" failures
+- ❌ Don't use repo-root `.deploy-config`, `.env`, or generated compose files
 
 ## What TO Do ✅
 
@@ -154,6 +175,7 @@ bash tests/test-integration.sh
 - ✅ Run tests again after fixing
 - ✅ Commit only when all tests pass
 - ✅ Use `--verbose` if you're confused
+- ✅ Pass explicit temp paths for config, environment, and generated output
 
 ## Test Execution Times
 

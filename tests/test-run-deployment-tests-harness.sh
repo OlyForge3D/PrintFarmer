@@ -70,13 +70,14 @@ chmod +x "$mock_tests_dir/run-deployment-tests.sh"
 marker_dir="$TMP_ROOT/markers"
 mkdir -p "$marker_dir"
 
-# The six required sub-suite scripts referenced by run_full_tests. Order matters:
+# The sub-suite scripts referenced by run_full_tests. Order matters:
 # the historical bug aborted after the first one succeeded, so seeing every
 # marker present proves the orchestrator kept going.
 suites=(
     test-compose-generator.sh
     test-deploy-docker.sh
     test-validate-deployment-scripts.sh
+    test-orcaslicer-binary-metadata.sh
     test-config-persistence.sh
     test-integration.sh
     test-user-scenario-complete.sh
@@ -93,13 +94,87 @@ EOF
     chmod +x "$mock_tests_dir/$suite"
 done
 
+# The static layer must reject the historical root-relative access pattern,
+# including a transient create/delete that would leave no final-state delta.
+root_relative_test="$mock_tests_dir/test-root-relative-access.sh"
+cat > "$root_relative_test" <<'EOF'
+#!/bin/bash
+cd "$REPO_ROOT"
+source .deploy-config
+: > .env
+rm -f .env
+EOF
+chmod +x "$root_relative_test"
+
+root_relative_out="$TMP_ROOT/root-relative.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --quick >"$root_relative_out" 2>&1
+root_relative_rc=$?
+set -e
+
+if [[ $root_relative_rc -eq 0 ]]; then
+    cat "$root_relative_out"
+    fail "Static isolation guard accepted repo-root-relative artifact access."
+fi
+if ! grep -q "forbidden repo-root artifact access" "$root_relative_out"; then
+    cat "$root_relative_out"
+    fail "Static isolation failure did not identify repo-root-relative access."
+fi
+rm -f "$root_relative_test"
+pass "Static-isolation: repo-root-relative source and transient mutation are rejected"
+
+# The same access embedded in a quoted command string is the historical suite
+# pattern and must be rejected independently of the bare-shell form above.
+quoted_root_relative_test="$mock_tests_dir/test-quoted-root-relative-access.sh"
+cat > "$quoted_root_relative_test" <<'EOF'
+#!/bin/bash
+capture_output "cd '$REPO_ROOT' && source .deploy-config; : > .env; rm -f .env"
+EOF
+chmod +x "$quoted_root_relative_test"
+
+quoted_root_relative_out="$TMP_ROOT/quoted-root-relative.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --quick >"$quoted_root_relative_out" 2>&1
+quoted_root_relative_rc=$?
+set -e
+
+if [[ $quoted_root_relative_rc -eq 0 ]]; then
+    cat "$quoted_root_relative_out"
+    fail "Static isolation guard accepted quoted repo-root-relative artifact access."
+fi
+if ! grep -q "forbidden repo-root artifact access" "$quoted_root_relative_out"; then
+    cat "$quoted_root_relative_out"
+    fail "Static isolation failure did not identify quoted repo-root-relative access."
+fi
+rm -f "$quoted_root_relative_test"
+pass "Static-isolation: quoted repo-root-relative command strings are rejected"
+
 harness_out="$TMP_ROOT/harness.out"
+sentinel_config="$TMP_ROOT/.deploy-config"
+printf '%s\n' \
+    "ARCHITECTURE=microservices" \
+    "ENABLE_ORCA_WORKER=yes" \
+    "ORCA_WORKER_COUNT=1" > "$sentinel_config"
+sentinel_hash_before=$(sha256sum "$sentinel_config" | awk '{print $1}')
+sentinel_size_before=$(wc -c < "$sentinel_config" | tr -d ' ')
+sentinel_mtime_before=$(stat -c '%y' "$sentinel_config")
+
 if ! bash "$mock_tests_dir/run-deployment-tests.sh" --verbose >"$harness_out" 2>&1; then
     echo "Harness exit non-zero with mocked (always-passing) sub-suites. Output:"
     cat "$harness_out"
     fail "Orchestrator aborted with mocked passing sub-suites; likely a set -e counter regression."
 fi
 pass "Dynamic: orchestrator exited 0 with mocked passing sub-suites"
+
+sentinel_hash_after=$(sha256sum "$sentinel_config" | awk '{print $1}')
+sentinel_size_after=$(wc -c < "$sentinel_config" | tr -d ' ')
+sentinel_mtime_after=$(stat -c '%y' "$sentinel_config")
+if [[ "$sentinel_hash_after" != "$sentinel_hash_before" \
+    || "$sentinel_size_after" != "$sentinel_size_before" \
+    || "$sentinel_mtime_after" != "$sentinel_mtime_before" ]]; then
+    fail "Passing deployment suites changed the pre-existing repo-root .deploy-config sentinel."
+fi
+pass "Dynamic: pre-existing repo-root .deploy-config remains byte- and mtime-identical"
 
 missing=()
 for suite in "${suites[@]}"; do
@@ -131,19 +206,19 @@ if ! echo "$plain_out" | grep -q "ALL TESTS PASSED"; then
 fi
 pass "Dynamic: success banner emitted"
 
-# Sanity: with 6 mocked suites, the summary must report exactly 6 passed,
-# 6 total run, 0 failed. This proves the counters preserved their values.
-if ! echo "$plain_out" | grep -Eq "Total Tests Run:[[:space:]]+6( |$)"; then
+# Sanity: the summary must report every mocked suite passed with none failed.
+suite_count=${#suites[@]}
+if ! echo "$plain_out" | grep -Eq "Total Tests Run:[[:space:]]+${suite_count}( |$)"; then
     echo "$plain_out"
-    fail "Summary did not report Total Tests Run: 6."
+    fail "Summary did not report Total Tests Run: ${suite_count}."
 fi
-pass "Dynamic: summary reports 6 total tests run"
+pass "Dynamic: summary reports ${suite_count} total tests run"
 
-if ! echo "$plain_out" | grep -Eq "Passed:[[:space:]]+6( |$)"; then
+if ! echo "$plain_out" | grep -Eq "Passed:[[:space:]]+${suite_count}( |$)"; then
     echo "$plain_out"
-    fail "Summary did not report Passed: 6."
+    fail "Summary did not report Passed: ${suite_count}."
 fi
-pass "Dynamic: summary reports 6 passed"
+pass "Dynamic: summary reports ${suite_count} passed"
 
 if ! echo "$plain_out" | grep -Eq "Failed:[[:space:]]+0( |$)"; then
     echo "$plain_out"
@@ -152,7 +227,7 @@ fi
 pass "Dynamic: summary reports 0 failed"
 
 # ----------------------------------------------------------------------------
-# Dynamic regression #2: mixed pass/fail. The orchestrator must run all five
+# Dynamic regression #2: mixed pass/fail. The orchestrator must run all
 # suites even when the first one fails. Historical variant of the same
 # set-e harness defect: run_test_suite returning 1 tripped errexit in
 # run_full_tests and skipped the remaining suites. FAILED_TESTS and
@@ -163,7 +238,7 @@ pass "Dynamic: summary reports 0 failed"
 marker_dir2="$TMP_ROOT/markers2"
 mkdir -p "$marker_dir2"
 
-# Suite #1 drops its marker then exits non-zero; the other four pass.
+# Suite #1 drops its marker then exits non-zero; every other suite passes.
 for i in "${!suites[@]}"; do
     suite="${suites[$i]}"
     marker_path="$marker_dir2/${suite%.sh}.marker"
@@ -221,11 +296,90 @@ if ! echo "$plain_out2" | grep -Eq "Failed:[[:space:]]+1( |$)"; then
 fi
 pass "Dynamic-fail: summary reports 1 failed"
 
-if ! echo "$plain_out2" | grep -Eq "Passed:[[:space:]]+5( |$)"; then
+expected_passes=$((suite_count - 1))
+if ! echo "$plain_out2" | grep -Eq "Passed:[[:space:]]+${expected_passes}( |$)"; then
     echo "$plain_out2"
-    fail "Summary did not report Passed: 5 with five passing suites."
+    fail "Summary did not report Passed: ${expected_passes}."
 fi
-pass "Dynamic-fail: summary reports 5 passed"
+pass "Dynamic-fail: summary reports ${expected_passes} passed"
+
+# ----------------------------------------------------------------------------
+# Dynamic regression #3: a downstream suite that mutates a protected
+# repo-root deployment artifact must make the orchestrator fail, even if the
+# suite itself exits successfully.
+# ----------------------------------------------------------------------------
+
+for suite in "${suites[@]}"; do
+    cat > "$mock_tests_dir/$suite" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$mock_tests_dir/$suite"
+done
+
+cat > "$mock_tests_dir/test-deploy-docker.sh" <<EOF
+#!/bin/bash
+printf '%s\n' 'ORCA_WORKER_COUNT=99' > "$sentinel_config"
+exit 0
+EOF
+chmod +x "$mock_tests_dir/test-deploy-docker.sh"
+
+harness_out3="$TMP_ROOT/harness3.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --verbose >"$harness_out3" 2>&1
+harness_rc3=$?
+set -e
+
+if [[ $harness_rc3 -eq 0 ]]; then
+    cat "$harness_out3"
+    fail "Repository artifact isolation guard accepted a mutating suite."
+fi
+if ! grep -q "mutated repo-root deployment artifacts" "$harness_out3"; then
+    cat "$harness_out3"
+    fail "Repository artifact isolation failure did not identify the mutation."
+fi
+pass "Dynamic-isolation: repo-root deployment artifact mutation fails the orchestrator"
+
+# ----------------------------------------------------------------------------
+# Dynamic regression #4: protected generated directories must be recursively
+# fingerprinted so in-place descendant edits cannot hide behind directory stat.
+# ----------------------------------------------------------------------------
+
+for suite in "${suites[@]}"; do
+    cat > "$mock_tests_dir/$suite" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$mock_tests_dir/$suite"
+done
+
+nested_artifact="$TMP_ROOT/monitoring/prometheus/prometheus.yml"
+mkdir -p "$(dirname "$nested_artifact")"
+printf '%s\n' 'global: baseline' > "$nested_artifact"
+
+cat > "$mock_tests_dir/test-deploy-docker.sh" <<EOF
+#!/bin/bash
+printf '%s\n' 'global: mutated' > "$nested_artifact"
+exit 0
+EOF
+chmod +x "$mock_tests_dir/test-deploy-docker.sh"
+
+harness_out4="$TMP_ROOT/harness4.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --verbose >"$harness_out4" 2>&1
+harness_rc4=$?
+set -e
+
+if [[ $harness_rc4 -eq 0 ]]; then
+    cat "$harness_out4"
+    fail "Repository artifact isolation guard accepted a nested artifact mutation."
+fi
+if ! grep -q "monitoring/prometheus/prometheus.yml" "$harness_out4"; then
+    cat "$harness_out4"
+    fail "Repository artifact isolation failure did not identify the nested mutation."
+fi
+rm -rf "$TMP_ROOT/monitoring"
+pass "Dynamic-isolation: nested protected artifact mutation fails the orchestrator"
 
 # ----------------------------------------------------------------------------
 # Static regression: test-compose-generator.sh must guard `wait $pid` in
