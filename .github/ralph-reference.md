@@ -76,14 +76,16 @@ node scripts/ci/verify-squad-verdict.mjs \
 - Never infer approval from PR comments. The author can write an identical
   comment, so comments have no provenance.
 - Until `.github/workflows/squad-review-verdict.yml` is operational on the
-  default branch with a non-author recorder, author-opened squad PRs require
+  default branch with a non-author administrator, author-opened squad PRs require
   human approval.
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
 - Exit codes are `0` for `APPROVED`, `2` for `CHANGES_REQUESTED`, `3` for
   missing, invalid, or superseded evidence, and `1` for verifier/tool failure.
-  Prefer parsing `--json`; every nonzero result blocks merge.
+  Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3` means
+  squad evidence is unavailable and permits only a verified current
+  non-author human GitHub approval as fallback.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

@@ -185,6 +185,7 @@ test('workflow keeps the independent recorder and exact-head controls', async ()
   assert.match(workflow, /pull\.user\.login\.toLowerCase\(\) === actor\.toLowerCase\(\)/);
   assert.match(workflow, /pull\.head\.sha\.toLowerCase\(\) !== reviewedHeadSha/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
+  assert.match(workflow, /actorPermission\.permission !== 'admin'/);
   assert.match(workflow, /context: 'squad\/pre-pr-verdict'/);
   assert.doesNotMatch(workflow, /pull-requests: write/);
 });

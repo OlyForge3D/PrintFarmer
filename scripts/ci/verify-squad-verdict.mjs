@@ -226,6 +226,8 @@ async function main() {
   if (verdict.classification === 'APPROVED') {
     return;
   }
+  // Exit 2 is a current rejection; exit 3 means no usable squad evidence.
+  // Execution failures use exit 1 through the catch handler below.
   process.exitCode = verdict.classification === 'CHANGES_REQUESTED' ? 2 : 3;
 }
 

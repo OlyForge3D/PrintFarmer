@@ -81,8 +81,8 @@ jobs:
                 repo: context.repo.repo,
                 username: actor,
               });
-            if (!['admin', 'maintain', 'write'].includes(actorPermission.permission)) {
-              core.setFailed('The recorder must have write, maintain, or admin permission.');
+            if (actorPermission.permission !== 'admin') {
+              core.setFailed('The recorder must be a repository administrator.');
               return;
             }
             if (pull.head.sha.toLowerCase() !== reviewedHeadSha) {

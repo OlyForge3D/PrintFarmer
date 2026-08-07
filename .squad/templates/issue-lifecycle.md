@@ -363,13 +363,13 @@ If the project requires human approval:
 For repositories with the Bishop, Hicks, and Vasquez pre-PR gate:
 
 1. The trio reviews and approves the exact branch head before PR creation.
-2. After the PR opens, a non-author maintainer dispatches
+2. After the PR opens, a non-author repository administrator dispatches
    `.github/workflows/squad-review-verdict.yml` for that PR and SHA.
 3. Ralph runs `scripts/ci/verify-squad-verdict.mjs` and accepts only the
    trusted default-branch workflow run and its exact current-head status.
 4. Any head movement supersedes both approval and rejection. The new head
    returns to `needsReview` until fresh evidence exists.
-5. Author comments never count. Until the workflow and a non-author recorder
+5. Author comments never count. Until the workflow and a non-author administrator
    are available, require human GitHub approval.
 
 ### Squad Member Review
@@ -377,7 +377,7 @@ For repositories with the Bishop, Hicks, and Vasquez pre-PR gate:
 If the issue was assigned to a squad member and they authored the PR:
 1. The required squad panel reviews before PR creation
 2. If changes are requested, **the original author addresses them** — there is no rejection lockout
-3. A non-author maintainer records the exact-head verdict, or a human reviewer approves on GitHub
+3. A non-author administrator records the exact-head verdict, or a human reviewer approves on GitHub
 
 ## Common Issue Lifecycle Patterns
 

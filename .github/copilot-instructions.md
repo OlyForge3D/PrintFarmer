@@ -159,7 +159,7 @@ Flow:
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
 5. Once APPROVED, open the PR via `gh pr create`.
-6. After the PR exists, have a repository maintainer other than the PR author
+6. After the PR exists, have a repository administrator other than the PR author
    dispatch `.github/workflows/squad-review-verdict.yml` with the PR number,
    exact reviewed 40-character head SHA, and consensus verdict.
 
@@ -169,7 +169,7 @@ This is a hard gate enforced by team policy. The trio's consensus verdict gates 
 
 The workflow publishes the `squad/pre-pr-verdict` commit status on the reviewed
 SHA. The workflow run is the provenance record: its immutable run metadata
-names the workflow path, default-branch ref, non-author recorder, PR number,
+names the workflow path, default-branch ref, non-author administrator, PR number,
 verdict, and exact reviewed SHA. An author-written PR comment, status from a
 different workflow, or status whose workflow run does not match those fields is
 not gate evidence.
@@ -185,10 +185,10 @@ node scripts/ci/verify-squad-verdict.mjs \
 
 Any head movement supersedes the recorded verdict. This rule applies equally
 to `APPROVE`, `CHANGES_REQUESTED`, and `REJECT`, including rebases and force
-pushes. The trio must review the new head and a non-author maintainer must
+pushes. The trio must review the new head and a non-author administrator must
 record a new verdict.
 
-Until the workflow is merged to the default branch and a non-author maintainer
+Until the workflow is merged to the default branch and a non-author administrator
 can dispatch it, author-opened squad PRs require a human GitHub approval before
 merge. Missing, invalid, or superseded squad evidence never becomes approval.
 After verification, merge with
