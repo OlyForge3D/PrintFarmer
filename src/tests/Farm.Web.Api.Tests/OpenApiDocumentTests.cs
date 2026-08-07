@@ -1,6 +1,8 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests;
 
@@ -37,10 +39,25 @@ public class OpenApiDocumentTests
         using HttpResponseMessage documentResponse = await client.GetAsync("/openapi/v1.json");
 
         _ = routeResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        IEnumerable<string> routePatterns = factory.Services
+            .GetRequiredService<EndpointDataSource>()
+            .Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.RoutePattern.RawText ?? string.Empty);
+        _ = routePatterns.Any(IsRawGcodeRoute).Should().BeFalse();
         _ = documentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         await using Stream content = await documentResponse.Content.ReadAsStreamAsync();
         using JsonDocument document = await JsonDocument.ParseAsync(content);
         JsonElement paths = document.RootElement.GetProperty("paths");
-        _ = paths.TryGetProperty("/api/printers/{id}/gcode", out _).Should().BeFalse();
+        _ = paths.EnumerateObject()
+            .Select(path => path.Name)
+            .Any(IsRawGcodeRoute)
+            .Should()
+            .BeFalse();
     }
+
+    private static bool IsRawGcodeRoute(string route) =>
+        (route.StartsWith("api/printers/", StringComparison.OrdinalIgnoreCase) ||
+         route.StartsWith("/api/printers/", StringComparison.OrdinalIgnoreCase)) &&
+        route.EndsWith("/gcode", StringComparison.OrdinalIgnoreCase);
 }
