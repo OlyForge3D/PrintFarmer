@@ -296,6 +296,43 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task UploadAsync_ReparseDestinationDirectory_RejectsPublicationOutsideRoot()
+    {
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_outsideRoot);
+        string currentYearPath =
+            Path.Combine(_root, DateTime.UtcNow.Year.ToString());
+        string nextYearPath =
+            Path.Combine(_root, DateTime.UtcNow.AddYears(1).Year.ToString());
+        _ = Directory.CreateSymbolicLink(currentYearPath, _outsideRoot);
+        _ = Directory.CreateSymbolicLink(nextYearPath, _outsideRoot);
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService artifactsService =
+            CreateArtifactsService(repository.Object, metrics);
+        IFormFile formFile = CreateFormFile("hostile.gcode", "artifact");
+
+        try
+        {
+            Func<Task> upload = () => artifactsService.UploadAsync(
+                formFile,
+                Guid.NewGuid(),
+                workerId: null,
+                "gcode",
+                CancellationToken.None);
+
+            await upload.Should().ThrowAsync<IOException>()
+                .WithMessage("*directories must not contain reparse points*");
+            Directory.EnumerateFileSystemEntries(_outsideRoot).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(currentYearPath);
+            Directory.Delete(nextYearPath);
+        }
+    }
+
     private Mock<IArtifactsRepository> CreateRepository(
         IReadOnlyList<Artifact>? committedArtifacts = null)
     {

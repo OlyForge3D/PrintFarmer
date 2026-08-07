@@ -131,8 +131,12 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string sanitized = SanitizeFileName(file.FileName);
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
-        string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
-        _ = Directory.CreateDirectory(folder);
+        string folder = ArtifactStorageFileSystem.EnsureArtifactDirectory(
+            root,
+            now.Year.ToString(),
+            now.Month.ToString("00"),
+            now.Day.ToString("00"),
+            jobId.ToString());
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
         string fullPath = Path.Combine(folder, targetFileName);
@@ -159,7 +163,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                     "The declared artifact digest does not match the uploaded bytes.");
             }
 
-            writeLease.Publish(fullPath, DateTime.UtcNow);
+            writeLease.Publish(root, fullPath, DateTime.UtcNow);
             string relativePath =
                 ArtifactStorageFileSystem.GetRelativePath(root, fullPath);
             Artifact artifact = new Artifact
@@ -331,8 +335,12 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string sanitized = SanitizeFileName(string.IsNullOrWhiteSpace(fileName) ? "artifact.txt" : fileName);
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
-        string folder = Path.Combine(root, now.Year.ToString(), now.Month.ToString("00"), now.Day.ToString("00"), jobId.ToString());
-        _ = Directory.CreateDirectory(folder);
+        string folder = ArtifactStorageFileSystem.EnsureArtifactDirectory(
+            root,
+            now.Year.ToString(),
+            now.Month.ToString("00"),
+            now.Day.ToString("00"),
+            jobId.ToString());
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized;
         string fullPath = Path.Combine(folder, targetFileName);
@@ -352,7 +360,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                 sha256 = Convert.ToHexString(hasher.Hash!);
             }
 
-            writeLease.Publish(fullPath, DateTime.UtcNow);
+            writeLease.Publish(root, fullPath, DateTime.UtcNow);
             string relativePath =
                 ArtifactStorageFileSystem.GetRelativePath(root, fullPath);
             Artifact artifact = new Artifact

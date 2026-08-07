@@ -1,4 +1,7 @@
-﻿using System.Globalization;
+﻿using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace Farm.Slicer.Module.Api.Services;
 
@@ -58,6 +61,104 @@ internal static class ArtifactStorageFileSystem
         }
 
         return stagingDirectory.FullName;
+    }
+
+    internal static string EnsureArtifactDirectory(
+        string rootPath,
+        params string[] pathSegments)
+    {
+        string normalizedRoot = Path.GetFullPath(rootPath);
+        DirectoryInfo rootDirectory = Directory.CreateDirectory(normalizedRoot);
+        if (IsReparsePoint(rootDirectory))
+        {
+            throw new IOException(
+                "The resolved artifact root must not be a reparse point.");
+        }
+
+        string currentPath = normalizedRoot;
+        foreach (string segment in pathSegments)
+        {
+            if (string.IsNullOrWhiteSpace(segment) ||
+                !string.Equals(
+                    Path.GetFileName(segment),
+                    segment,
+                    StringComparison.Ordinal))
+            {
+                throw new IOException(
+                    "An artifact directory segment is invalid.");
+            }
+
+            currentPath = Path.GetFullPath(Path.Combine(currentPath, segment));
+            if (!IsWithinRoot(normalizedRoot, currentPath))
+            {
+                throw new IOException(
+                    "The artifact directory is outside the artifact root.");
+            }
+
+            DirectoryInfo directory = Directory.CreateDirectory(currentPath);
+            if (IsReparsePoint(directory))
+            {
+                throw new IOException(
+                    "Artifact directories must not contain reparse points.");
+            }
+        }
+
+        return currentPath;
+    }
+
+    internal static string EnsureSafePublicationPath(
+        string rootPath,
+        string fullPath)
+    {
+        string normalizedRoot = Path.GetFullPath(rootPath);
+        string normalizedPath = Path.GetFullPath(fullPath);
+        if (!IsWithinRoot(normalizedRoot, normalizedPath) ||
+            ContainsReparsePoint(normalizedRoot, normalizedPath))
+        {
+            throw new IOException(
+                "The artifact publication path is not safely contained.");
+        }
+
+        return normalizedPath;
+    }
+
+    internal static void CreateAtomicHardLink(
+        string publicationPath,
+        string stagingPath)
+    {
+        int error;
+        if (OperatingSystem.IsWindows())
+        {
+            if (CreateHardLinkWindows(
+                    publicationPath,
+                    stagingPath,
+                    IntPtr.Zero))
+            {
+                return;
+            }
+
+            error = Marshal.GetLastPInvokeError();
+        }
+        else if (OperatingSystem.IsLinux() ||
+                 OperatingSystem.IsMacOS() ||
+                 OperatingSystem.IsFreeBSD())
+        {
+            if (CreateHardLinkUnix(stagingPath, publicationPath) == 0)
+            {
+                return;
+            }
+
+            error = Marshal.GetLastPInvokeError();
+        }
+        else
+        {
+            throw new PlatformNotSupportedException(
+                "Atomic artifact publication is not supported on this platform.");
+        }
+
+        throw new IOException(
+            "Failed to atomically publish the artifact on the same filesystem.",
+            new Win32Exception(error));
     }
 
     internal static bool TryGetProtocolArtifactId(string path, out Guid artifactId)
@@ -253,6 +354,33 @@ internal static class ArtifactStorageFileSystem
         var file = new FileInfo(candidatePath);
         return file.Exists && IsReparsePoint(file);
     }
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "CreateHardLinkW",
+        SetLastError = true,
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkWindows(
+        string fileName,
+        string existingFileName,
+        IntPtr securityAttributes);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "link",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [SuppressMessage(
+        "Security",
+        "CA2101:Specify marshaling for P/Invoke string arguments",
+        Justification = "POSIX link paths are explicitly marshaled as UTF-8.")]
+    private static extern int CreateHardLinkUnix(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
 }
 
 internal sealed class ArtifactWriteLease : IDisposable
@@ -314,13 +442,22 @@ internal sealed class ArtifactWriteLease : IDisposable
         bufferSize: 81920,
         FileOptions.Asynchronous | FileOptions.WriteThrough);
 
-    internal void Publish(string fullPath, DateTime publishedAtUtc)
+    internal void Publish(
+        string rootPath,
+        string fullPath,
+        DateTime publishedAtUtc)
     {
-        // The rename is same-volume and atomic. The locked lease remains until metadata commits,
-        // making the otherwise unavoidable filesystem/database crash window distinguishable.
-        File.Move(StagingPath, fullPath);
-        PublishedPath = fullPath;
-        File.SetLastWriteTimeUtc(fullPath, publishedAtUtc);
+        string publicationPath =
+            ArtifactStorageFileSystem.EnsureSafePublicationPath(rootPath, fullPath);
+
+        // Hard-link creation atomically publishes on the same filesystem and fails rather
+        // than degrading to a cross-volume copy/delete operation.
+        ArtifactStorageFileSystem.CreateAtomicHardLink(
+            publicationPath,
+            StagingPath);
+        PublishedPath = publicationPath;
+        File.Delete(StagingPath);
+        File.SetLastWriteTimeUtc(publicationPath, publishedAtUtc);
         File.SetLastWriteTimeUtc(LeasePath, publishedAtUtc);
     }
 
