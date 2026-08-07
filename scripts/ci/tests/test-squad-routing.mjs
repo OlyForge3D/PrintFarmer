@@ -295,6 +295,7 @@ test('an iOS networking issue routes to the iOS networking specialist', () => {
     'fix: iOS networking URLSession retries',
     'fix: iOS API client timeout',
     'fix: iOS SignalR client reconnect',
+    'fix: iOS API client decodes /api/printers endpoint',
   ]) {
     const result = routeIssue(
       {
@@ -313,6 +314,9 @@ test('a documentation-only issue routes to the documentation specialist', () => 
   for (const title of [
     'docs: document the API endpoint',
     'docs: add a deployment guide',
+    'docs: explain the Docker deployment pipeline workflow',
+    'docs: document the API server endpoint query parameters',
+    'docs: explain the React CSS component layout',
     'update the API reference',
   ]) {
     const result = routeIssue(
@@ -378,6 +382,14 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
       domain: 'test',
       member: '🧪 Kane',
     },
+    {
+      issue: {
+        title: 'ci: deployment tests mutate Docker config',
+        body: 'Isolate the deployment harness from developer configuration.',
+      },
+      domain: 'devops',
+      member: '⚙️ Parker',
+    },
   ];
 
   for (const { issue, domain, member } of cases) {
@@ -392,6 +404,19 @@ test('incidental networking references do not steal SwiftUI work from Hudson', (
     {
       title: 'feat: add SwiftUI printer detail view',
       body: 'Display data from the existing REST client; networking is unaffected.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('explicit SwiftUI intent beats generic frontend vocabulary', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: SwiftUI component layout for printer controls',
+      body: 'Build the native view.',
     },
     members,
     lead,
