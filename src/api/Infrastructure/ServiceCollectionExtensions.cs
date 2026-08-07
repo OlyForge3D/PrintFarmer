@@ -414,6 +414,7 @@ public static class ServiceCollectionExtensions
 
         // CatalogCache resolves scoped AppDbContext per-call, so it can be a Singleton
         _ = services.AddSingleton<Farm.Infrastructure.Services.Catalog.Caching.ICatalogCacheProvider, Farm.Infrastructure.Services.Catalog.Caching.CatalogCache>();
+        _ = services.AddSingleton<Farm.Infrastructure.Services.Spoolman.ISpoolmanStatusCache, Farm.Infrastructure.Services.Spoolman.SpoolmanStatusCache>();
 
         _ = services.AddScoped<Farm.Infrastructure.Services.Printers.IPrinterVersionCache, Farm.Infrastructure.Services.Printers.PrinterVersionCache>();
 
