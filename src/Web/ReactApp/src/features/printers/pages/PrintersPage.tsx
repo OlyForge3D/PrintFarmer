@@ -14,6 +14,7 @@ import {
 } from '@/common/utils/mutationError';
 import { toast } from 'sonner';
 import { CompactPrinterCard } from '@/features/printers/components/CompactPrinterCard';
+import { PrinterCardGrid } from '@/features/printers/components/PrinterCardGrid';
 import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import { PrinterTableView } from '@/features/printers/components/PrinterTableView';
 import { AddPrinterButton } from '@/features/printers/components/AddPrinterButton';
@@ -566,39 +567,43 @@ export function PrintersPage() {
                   <p className="text-pf-text-secondary mb-6">Get started by adding your first 3D printer using the "Add Printer" button above.</p>
                 </div>
               ) : viewMode === 'collapsed' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,18rem)] gap-4 transition-opacity duration-200 min-w-0">
-                  {deferredUserPrinters.map((printer, index) => (
-                    <div key={printer.id} {...(index === 0 ? { 'data-tour': 'printers-card' } : {})}>
-                      <CompactPrinterCard
-                        printer={printer}
-                        backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
-                        onExpand={handleOpenPrinterDetails}
-                        onEdit={handleEditPrinter}
-                      />
-                    </div>
-                  ))}
-                </div>
+                <PrinterCardGrid
+                  printers={deferredUserPrinters}
+                  mode="compact"
+                  activePrinterId={expandedPrinterId}
+                  renderPrinter={(printer) => (
+                    <CompactPrinterCard
+                      printer={printer}
+                      backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
+                      onExpand={handleOpenPrinterDetails}
+                      onEdit={handleEditPrinter}
+                    />
+                  )}
+                />
               ) : viewMode === 'detailed' ? (
                 <Suspense
                   fallback={(
-                    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
-                      {deferredUserPrinters.map((printer) => (
-                        <PrinterCardSkeleton key={printer.id} />
-                      ))}
-                    </div>
+                    <PrinterCardGrid
+                      printers={deferredUserPrinters}
+                      mode="detailed"
+                      activePrinterId={expandedPrinterId}
+                      renderPrinter={() => <PrinterCardSkeleton />}
+                    />
                   )}
                 >
-                  <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,26rem)] gap-4">
-                    {deferredUserPrinters.map((printer) => (
+                  <PrinterCardGrid
+                    printers={deferredUserPrinters}
+                    mode="detailed"
+                    activePrinterId={expandedPrinterId}
+                    renderPrinter={(printer) => (
                       <DetailedPrinterCard
-                        key={printer.id}
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                         onEdit={handleEditPrinter}
                         onOpenDetails={handleOpenPrinterDetails}
                       />
-                    ))}
-                  </div>
+                    )}
+                  />
                 </Suspense>
               ) : (
                 <>
