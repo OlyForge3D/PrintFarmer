@@ -42,9 +42,22 @@ internal static class ArtifactStorageFileSystem
     internal static string GetStagingDirectory(string rootPath) =>
         Path.Combine(rootPath, StagingDirectoryName);
 
+    internal static string EnsureArtifactRoot(string rootPath)
+    {
+        DirectoryInfo rootDirectory =
+            Directory.CreateDirectory(Path.GetFullPath(rootPath));
+        if (IsReparsePoint(rootDirectory))
+        {
+            throw new IOException(
+                "The resolved artifact root must not be a reparse point.");
+        }
+
+        return rootDirectory.FullName;
+    }
+
     internal static string EnsureStagingDirectory(string rootPath)
     {
-        string normalizedRoot = Path.GetFullPath(rootPath);
+        string normalizedRoot = EnsureArtifactRoot(rootPath);
         string stagingPath = Path.GetFullPath(
             GetStagingDirectory(normalizedRoot));
         if (!IsWithinRoot(normalizedRoot, stagingPath))
@@ -61,49 +74,6 @@ internal static class ArtifactStorageFileSystem
         }
 
         return stagingDirectory.FullName;
-    }
-
-    internal static string EnsureArtifactDirectory(
-        string rootPath,
-        params string[] pathSegments)
-    {
-        string normalizedRoot = Path.GetFullPath(rootPath);
-        DirectoryInfo rootDirectory = Directory.CreateDirectory(normalizedRoot);
-        if (IsReparsePoint(rootDirectory))
-        {
-            throw new IOException(
-                "The resolved artifact root must not be a reparse point.");
-        }
-
-        string currentPath = normalizedRoot;
-        foreach (string segment in pathSegments)
-        {
-            if (string.IsNullOrWhiteSpace(segment) ||
-                !string.Equals(
-                    Path.GetFileName(segment),
-                    segment,
-                    StringComparison.Ordinal))
-            {
-                throw new IOException(
-                    "An artifact directory segment is invalid.");
-            }
-
-            currentPath = Path.GetFullPath(Path.Combine(currentPath, segment));
-            if (!IsWithinRoot(normalizedRoot, currentPath))
-            {
-                throw new IOException(
-                    "The artifact directory is outside the artifact root.");
-            }
-
-            DirectoryInfo directory = Directory.CreateDirectory(currentPath);
-            if (IsReparsePoint(directory))
-            {
-                throw new IOException(
-                    "Artifact directories must not contain reparse points.");
-            }
-        }
-
-        return currentPath;
     }
 
     internal static string EnsureSafePublicationPath(
@@ -388,6 +358,7 @@ internal sealed class ArtifactWriteLease : IDisposable
     private readonly FileStream _leaseStream;
     private bool _committed;
     private bool _disposed;
+    private bool _preservePublishedForReconciliation;
 
     private ArtifactWriteLease(
         Guid artifactId,
@@ -467,6 +438,9 @@ internal sealed class ArtifactWriteLease : IDisposable
         Dispose();
     }
 
+    internal void PreservePublishedForReconciliation() =>
+        _preservePublishedForReconciliation = true;
+
     public void Dispose()
     {
         if (_disposed)
@@ -479,7 +453,8 @@ internal sealed class ArtifactWriteLease : IDisposable
         if (!_committed)
         {
             TryDelete(StagingPath);
-            if (PublishedPath is not null)
+            if (PublishedPath is not null &&
+                !_preservePublishedForReconciliation)
             {
                 TryDelete(PublishedPath);
             }

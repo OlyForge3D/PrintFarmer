@@ -297,7 +297,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     }
 
     [Fact]
-    public async Task UploadAsync_ReparseDestinationDirectory_RejectsPublicationOutsideRoot()
+    public async Task UploadAsync_HostileLegacyDirectories_PublishesDirectlyUnderRoot()
     {
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_outsideRoot);
@@ -308,6 +308,11 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         _ = Directory.CreateSymbolicLink(currentYearPath, _outsideRoot);
         _ = Directory.CreateSymbolicLink(nextYearPath, _outsideRoot);
         var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        repository
+            .Setup(candidate => candidate.AddAsync(
+                It.IsAny<Artifact>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Artifact artifact, CancellationToken _) => artifact);
         using ArtifactsMetrics metrics = new();
         ArtifactsService artifactsService =
             CreateArtifactsService(repository.Object, metrics);
@@ -315,15 +320,17 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
         try
         {
-            Func<Task> upload = () => artifactsService.UploadAsync(
+            Artifact artifact = await artifactsService.UploadAsync(
                 formFile,
                 Guid.NewGuid(),
                 workerId: null,
                 "gcode",
                 CancellationToken.None);
 
-            await upload.Should().ThrowAsync<IOException>()
-                .WithMessage("*directories must not contain reparse points*");
+            artifact.RelativePath.Should().Be(
+                $"{artifact.Id}-hostile.gcode");
+            File.Exists(Path.Combine(_root, artifact.RelativePath))
+                .Should().BeTrue();
             Directory.EnumerateFileSystemEntries(_outsideRoot).Should().BeEmpty();
         }
         finally

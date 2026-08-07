@@ -131,12 +131,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string sanitized = SanitizeFileName(file.FileName);
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
-        string folder = ArtifactStorageFileSystem.EnsureArtifactDirectory(
-            root,
-            now.Year.ToString(),
-            now.Month.ToString("00"),
-            now.Day.ToString("00"),
-            jobId.ToString());
+        string folder = ArtifactStorageFileSystem.EnsureArtifactRoot(root);
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
         string fullPath = Path.Combine(folder, targetFileName);
@@ -182,26 +177,13 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                 CreatedAt = now
             };
 
-            if (requireActiveLease)
-            {
-                if (workerId is not Guid activeWorkerId)
-                {
-                    throw new ArgumentException(
-                        "An active-lease upload requires a worker identifier.",
-                        nameof(workerId));
-                }
-
-                persisted = await _artifactsRepo.TryAddForActiveLeaseAsync(
-                    artifact,
-                    activeWorkerId,
-                    claimToken ?? Guid.Empty,
-                    ct);
-            }
-            else
-            {
-                _ = await _artifactsRepo.AddAsync(artifact, ct);
-                persisted = true;
-            }
+            persisted = await PersistArtifactMetadataAsync(
+                artifact,
+                writeLease,
+                workerId,
+                claimToken,
+                requireActiveLease,
+                ct);
 
             if (!persisted)
             {
@@ -335,12 +317,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         string sanitized = SanitizeFileName(string.IsNullOrWhiteSpace(fileName) ? "artifact.txt" : fileName);
         string root = ResolveRootPath();
         DateTime now = DateTime.UtcNow;
-        string folder = ArtifactStorageFileSystem.EnsureArtifactDirectory(
-            root,
-            now.Year.ToString(),
-            now.Month.ToString("00"),
-            now.Day.ToString("00"),
-            jobId.ToString());
+        string folder = ArtifactStorageFileSystem.EnsureArtifactRoot(root);
         Guid artifactId = Guid.NewGuid();
         string targetFileName = artifactId.ToString() + "-" + sanitized;
         string fullPath = Path.Combine(folder, targetFileName);
@@ -377,7 +354,13 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                 CreatedAt = now
             };
 
-            _ = await _artifactsRepo.AddAsync(artifact, ct);
+            _ = await PersistArtifactMetadataAsync(
+                artifact,
+                writeLease,
+                workerId,
+                claimToken: null,
+                requireActiveLease: false,
+                ct);
             writeLease.Commit();
             _metrics.RecordUpload(bytes.Length);
 
@@ -393,6 +376,57 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
             }
 
             return artifact;
+        }
+    }
+
+    private async Task<bool> PersistArtifactMetadataAsync(
+        Artifact artifact,
+        ArtifactWriteLease writeLease,
+        Guid? workerId,
+        Guid? claimToken,
+        bool requireActiveLease,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (requireActiveLease)
+            {
+                if (workerId is not Guid activeWorkerId)
+                {
+                    throw new ArgumentException(
+                        "An active-lease upload requires a worker identifier.",
+                        nameof(workerId));
+                }
+
+                return await _artifactsRepo.TryAddForActiveLeaseAsync(
+                    artifact,
+                    activeWorkerId,
+                    claimToken ?? Guid.Empty,
+                    ct);
+            }
+
+            _ = await _artifactsRepo.AddAsync(artifact, ct);
+            return true;
+        }
+        catch
+        {
+            try
+            {
+                Artifact? committedArtifact = await _artifactsRepo.GetByIdAsync(
+                    artifact.Id,
+                    CancellationToken.None);
+                if (committedArtifact is not null)
+                {
+                    writeLease.PreservePublishedForReconciliation();
+                }
+            }
+            catch
+            {
+                // A failed commit probe is ambiguous, so retain bytes for startup reconciliation.
+                writeLease.PreservePublishedForReconciliation();
+            }
+
+            throw;
         }
     }
 
