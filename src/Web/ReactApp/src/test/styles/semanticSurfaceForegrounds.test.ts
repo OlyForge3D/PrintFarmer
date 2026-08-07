@@ -16,6 +16,7 @@ const SEMANTIC_PAIRS = [
   ['status-online-bg', 'status-online-text'],
   ['error-bg', 'error-text'],
   ['warning-bg', 'warning-text'],
+  ['control-bg', 'control-placeholder'],
 ] as const;
 // The status `*-hover` tokens have no single foreground that clears AA in all
 // themes. These controls retain their accessible surface and use scale/shadow
@@ -117,7 +118,7 @@ const sourceOffenders = (
   });
 });
 
-describe('semantic foregrounds on themed surfaces (#1101, #1103, #1110)', () => {
+describe('semantic foregrounds on themed surfaces (#1101, #1103, #1110, #1128)', () => {
   it.each(SELECTABLE_THEMES)('%s semantic pairs clear WCAG AA for normal text', (theme) => {
     const tokens = parseThemeTokens(theme);
     const failures = SEMANTIC_PAIRS.flatMap(([background, foreground]) => {

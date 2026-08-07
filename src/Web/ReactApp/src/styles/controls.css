@@ -12,8 +12,8 @@
   font-size: 0.875rem;
   border-radius: 0.5rem;
   border: 1px solid var(--pf-border);
-  background-color: var(--pf-bg-0);
-  color: var(--pf-text-primary);
+  background-color: var(--pf-control-bg);
+  color: var(--pf-control-text);
   transition: all 0.2s ease-in-out;
 
   &:focus {
@@ -24,7 +24,7 @@
   }
 
   &::placeholder {
-    color: var(--pf-text-tertiary);
+    color: var(--pf-control-placeholder);
   }
 }
 
@@ -50,8 +50,9 @@
 }
 
 @utility input-disabled {
-  background-color: rgba(156, 163, 175, 0.2);
+  background-color: var(--pf-control-disabled-bg);
   border-color: var(--pf-border-light);
+  color: var(--pf-control-disabled-text);
   cursor: not-allowed;
   opacity: 0.6;
 }
@@ -1291,8 +1292,8 @@
     font-size: 0.875rem;
     border-radius: 0.5rem;
     border: 1px solid var(--pf-border);
-    background-color: var(--pf-bg-0);
-    color: var(--pf-text-primary);
+    background-color: var(--pf-control-bg);
+    color: var(--pf-control-text);
     transition: all 0.2s ease-in-out;
   }
 
@@ -1318,7 +1319,7 @@
   input[type="time"]::placeholder,
   input[type="url"]::placeholder,
   input[type="search"]::placeholder {
-    color: var(--pf-text-tertiary);
+    color: var(--pf-control-placeholder);
   }
 
   input[type="text"]:invalid,
@@ -1351,10 +1352,23 @@
   input[type="time"]:disabled,
   input[type="url"]:disabled,
   input[type="search"]:disabled {
-    background-color: rgba(156, 163, 175, 0.2);
+    background-color: var(--pf-control-disabled-bg);
     border-color: var(--pf-border-light);
+    color: var(--pf-control-disabled-text);
     cursor: not-allowed;
     opacity: 0.6;
+  }
+
+  input[type="text"]:read-only:not(:disabled),
+  input[type="email"]:read-only:not(:disabled),
+  input[type="password"]:read-only:not(:disabled),
+  input[type="number"]:read-only:not(:disabled),
+  input[type="date"]:read-only:not(:disabled),
+  input[type="time"]:read-only:not(:disabled),
+  input[type="url"]:read-only:not(:disabled),
+  input[type="search"]:read-only:not(:disabled) {
+    background-color: var(--pf-bg-1);
+    border-color: var(--pf-border-light);
   }
 
   /**
@@ -1366,8 +1380,8 @@
     font-size: 0.875rem;
     border-radius: 0.5rem;
     border: 1px solid var(--pf-border);
-    background-color: var(--pf-bg-0);
-    color: var(--pf-text-primary);
+    background-color: var(--pf-control-bg);
+    color: var(--pf-control-text);
     resize: vertical;
     min-height: 6rem;
     transition: all 0.2s ease-in-out;
@@ -1381,7 +1395,7 @@
   }
 
   textarea::placeholder {
-    color: var(--pf-text-tertiary);
+    color: var(--pf-control-placeholder);
   }
 
   textarea:invalid {
@@ -1393,10 +1407,16 @@
   }
 
   textarea:disabled {
-    background-color: rgba(156, 163, 175, 0.2);
+    background-color: var(--pf-control-disabled-bg);
     border-color: var(--pf-border-light);
+    color: var(--pf-control-disabled-text);
     cursor: not-allowed;
     opacity: 0.6;
+  }
+
+  textarea:read-only:not(:disabled) {
+    background-color: var(--pf-bg-1);
+    border-color: var(--pf-border-light);
   }
 
   /**
@@ -1409,8 +1429,8 @@
     font-size: 0.875rem;
     border-radius: 0.5rem;
     border: 1px solid var(--pf-border);
-    background-color: var(--pf-bg-0);
-    color: var(--pf-text-primary);
+    background-color: var(--pf-control-bg);
+    color: var(--pf-control-text);
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%239ca3af' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
     background-position: right 0.5rem center;
@@ -1436,8 +1456,9 @@
   }
 
   select:disabled {
-    background-color: rgba(156, 163, 175, 0.2);
+    background-color: var(--pf-control-disabled-bg);
     border-color: var(--pf-border-light);
+    color: var(--pf-control-disabled-text);
     cursor: not-allowed;
     opacity: 0.6;
   }
