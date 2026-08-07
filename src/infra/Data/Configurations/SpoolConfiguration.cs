@@ -13,7 +13,6 @@ public class SpoolConfiguration : IEntityTypeConfiguration<Spool>
     public void Configure(EntityTypeBuilder<Spool> builder)
     {
         _ = builder.HasKey(s => s.Id);
-        _ = builder.Property(s => s.RowVersion).IsRowVersion();
         _ = builder.Property(s => s.Material).IsRequired().HasMaxLength(64);
         _ = builder.Property(s => s.ColorHex).IsRequired().HasMaxLength(16);
         _ = builder.HasOne<Printer>()

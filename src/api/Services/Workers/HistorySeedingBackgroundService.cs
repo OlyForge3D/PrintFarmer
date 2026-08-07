@@ -37,28 +37,28 @@ public class HistorySeedingSettings : IAppSetting
     /// Initial delay before first seeding run in seconds. Default: 60
     /// </summary>
     [JsonPropertyName("initialDelaySeconds")]
-    [SettingDisplay(Name = "Initial Delay", Unit = "seconds", Description = "Delay before the first seeding run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 3)]
+    [SettingDisplay(Name = "Initial delay", Unit = "seconds", Description = "Delay before the first seeding run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 3)]
     public int InitialDelaySeconds { get; set; } = 60;
 
     /// <summary>
     /// Whether active external job sync is enabled. Default: true
     /// </summary>
     [JsonPropertyName("activeSyncEnabled")]
-    [SettingDisplay(Name = "Active Sync Enabled", Description = "Enable faster sync for active external jobs.", InputType = SettingInputType.Boolean, Order = 4)]
+    [SettingDisplay(Name = "Active sync enabled", Description = "Enable faster sync for active external jobs.", InputType = SettingInputType.Boolean, Order = 4)]
     public bool ActiveSyncEnabled { get; set; } = true;
 
     /// <summary>
     /// Interval between active external sync runs in seconds. Default: 60
     /// </summary>
     [JsonPropertyName("activeSyncIntervalSeconds")]
-    [SettingDisplay(Name = "Active Sync Interval", Unit = "seconds", Description = "Time between active external job sync runs.", InputType = SettingInputType.Number, MinValue = 15, MaxValue = 3600, Order = 5)]
+    [SettingDisplay(Name = "Active sync interval", Unit = "seconds", Description = "Time between active external job sync runs.", InputType = SettingInputType.Number, MinValue = 15, MaxValue = 3600, Order = 5)]
     public int ActiveSyncIntervalSeconds { get; set; } = 60;
 
     /// <summary>
     /// Initial delay before first active sync run in seconds. Default: 30
     /// </summary>
     [JsonPropertyName("activeSyncInitialDelaySeconds")]
-    [SettingDisplay(Name = "Active Sync Initial Delay", Unit = "seconds", Description = "Delay before the first active external sync run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 6)]
+    [SettingDisplay(Name = "Active sync initial delay", Unit = "seconds", Description = "Delay before the first active external sync run after startup.", InputType = SettingInputType.Number, MinValue = 0, MaxValue = 3600, Order = 6)]
     public int ActiveSyncInitialDelaySeconds { get; set; } = 30;
 }
 

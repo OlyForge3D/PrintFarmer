@@ -170,7 +170,6 @@ public class LoadBalancingTests : IAsyncLifetime
         db.PrinterDispatchStates.Add(new PrinterDispatchState
         {
             PrinterId = printerId,
-            RowVersion = [],
         });
         await db.SaveChangesAsync();
         IPrinterStatusCacheWriter statusWriter =

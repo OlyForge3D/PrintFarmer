@@ -12,9 +12,9 @@ namespace Farm.Infrastructure.Services.Queue;
 ///
 /// Relational providers increment the counter with one provider-native atomic statement:
 /// SQL Server uses <c>UPDATE ... OUTPUT</c>; PostgreSQL and SQLite use
-/// <c>UPDATE ... RETURNING</c>. No producer tracks or competes on the singleton row's EF
-/// concurrency token, so simultaneous terminal transitions cannot fail merely because
-/// they need adjacent event sequence numbers.
+/// <c>UPDATE ... RETURNING</c>. The same statement advances the row's revision. No producer
+/// tracks or competes on the singleton row's EF concurrency token, so simultaneous terminal
+/// transitions cannot fail merely because they need adjacent event sequence numbers.
 /// </summary>
 public sealed class DbOutboxSequenceAllocator : IDbOutboxSequenceAllocator
 {
@@ -51,15 +51,15 @@ public sealed class DbOutboxSequenceAllocator : IDbOutboxSequenceAllocator
             {
                 "Microsoft.EntityFrameworkCore.SqlServer" =>
                     "UPDATE [OutboxSequenceStates] " +
-                    "SET [NextSequence] = [NextSequence] + 1 " +
+                    "SET [NextSequence] = [NextSequence] + 1, [Revision] = [Revision] + 1 " +
                     "OUTPUT INSERTED.[NextSequence] WHERE [Id] = 1;",
                 "Npgsql.EntityFrameworkCore.PostgreSQL" =>
                     "UPDATE \"OutboxSequenceStates\" " +
-                    "SET \"NextSequence\" = \"NextSequence\" + 1 " +
+                    "SET \"NextSequence\" = \"NextSequence\" + 1, \"Revision\" = \"Revision\" + 1 " +
                     "WHERE \"Id\" = 1 RETURNING \"NextSequence\";",
                 "Microsoft.EntityFrameworkCore.Sqlite" =>
                     "UPDATE \"OutboxSequenceStates\" " +
-                    "SET \"NextSequence\" = \"NextSequence\" + 1 " +
+                    "SET \"NextSequence\" = \"NextSequence\" + 1, \"Revision\" = \"Revision\" + 1 " +
                     "WHERE \"Id\" = 1 RETURNING \"NextSequence\";",
                 _ => throw new NotSupportedException(
                     $"Outbox sequence allocation is not configured for provider '{db.Database.ProviderName}'."),

@@ -2687,8 +2687,8 @@ public class PrintersController(
         }
 
         db.Entry(printer)
-            .Property(candidate => candidate.RowVersion)
-            .OriginalValue = expected;
+            .Property(candidate => candidate.Revision)
+            .OriginalValue = RevisionETag.Decode(expected);
         return null;
     }
 

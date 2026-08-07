@@ -192,8 +192,8 @@ public class SettingsController(
         }
         else
         {
-            // Enforce optimistic concurrency: set the original row version so EF checks it
-            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedRowVersionBytes!;
+            _db.Entry(entity).Property(e => e.Revision).OriginalValue =
+                RevisionETag.Decode(expectedRowVersionBytes);
         }
 
         if (body.Theme is not null)

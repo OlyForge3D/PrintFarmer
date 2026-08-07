@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Data.Configurations;
+﻿using Farm.Infrastructure.Data;
+using Farm.Slicer.Module.Data.Configurations;
 using Farm.Slicer.Module.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -66,8 +67,25 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
 
         // Discover all IEntityTypeConfiguration<T> implementations in this assembly.
         _ = modelBuilder.ApplyConfigurationsFromAssembly(typeof(SlicerDbContext).Assembly);
+        RevisionConcurrency.Configure(modelBuilder);
 
         ApplyProviderSpecificIdempotencyFilters(modelBuilder);
+    }
+
+    /// <inheritdoc/>
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        RevisionConcurrency.Advance(ChangeTracker);
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    /// <inheritdoc/>
+    public override async Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        RevisionConcurrency.Advance(ChangeTracker);
+        return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
     }
 
     /// <summary>

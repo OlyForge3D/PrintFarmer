@@ -345,8 +345,8 @@ public sealed class DispatchClaimService(
         {
             FilamentOverrideAuthorization review = request.FilamentOverride!;
             _db.Entry(printer)
-                .Property(candidate => candidate.RowVersion)
-                .OriginalValue = review.PrinterRowVersion;
+                .Property(candidate => candidate.Revision)
+                .OriginalValue = RevisionETag.Decode(review.PrinterRowVersion);
             _db.Entry(printer)
                 .Property(candidate => candidate.CurrentSpoolId)
                 .IsModified = true;
@@ -548,16 +548,22 @@ public sealed class DispatchClaimService(
                 request.JobId, request.PrinterId);
 
             _db.ChangeTracker.Clear();
-            byte[]? currentJobRevision = await _db.PrintJobs
+            long? currentJobRevisionValue = await _db.PrintJobs
                 .AsNoTracking()
                 .Where(candidate => candidate.Id == request.JobId)
-                .Select(candidate => candidate.RowVersion)
+                .Select(candidate => (long?)candidate.Revision)
                 .SingleOrDefaultAsync(ct);
-            byte[]? currentDispatchRevision = await _db.PrinterDispatchStates
+            long? currentDispatchRevisionValue = await _db.PrinterDispatchStates
                 .AsNoTracking()
                 .Where(candidate => candidate.PrinterId == request.PrinterId)
-                .Select(candidate => candidate.RowVersion)
+                .Select(candidate => (long?)candidate.Revision)
                 .SingleOrDefaultAsync(ct);
+            byte[]? currentJobRevision = currentJobRevisionValue.HasValue
+                ? RevisionETag.EncodeBytes(currentJobRevisionValue.Value)
+                : null;
+            byte[]? currentDispatchRevision = currentDispatchRevisionValue.HasValue
+                ? RevisionETag.EncodeBytes(currentDispatchRevisionValue.Value)
+                : null;
             bool jobRevisionStillMatches =
                 request.ExpectedJobRowVersion is not { Length: > 0 } ||
                 request.ExpectedJobRowVersion.SequenceEqual(

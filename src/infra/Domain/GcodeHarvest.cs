@@ -124,14 +124,13 @@ public enum HarvestErrorType
 /// Represents a G-code harvest operation that scans a printer for files
 /// and imports them into the local library. Tracks progress, errors, and statistics.
 /// </summary>
-public class GcodeHarvestOperation
+public class GcodeHarvestOperation : IRevisionedEntity
 {
     /// <summary>Unique identifier for this harvest operation.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token for optimistic locking during concurrent harvest operations.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>ID of the printer being harvested from.</summary>
     public Guid PrinterId { get; set; }
@@ -213,14 +212,13 @@ public class GcodeHarvestOperation
 /// Queue item for G-code harvest operations. Decouples API requests from background processing,
 /// allowing multiple harvest requests to be queued and processed sequentially with priority.
 /// </summary>
-public class GcodeHarvestQueueItem
+public class GcodeHarvestQueueItem : IRevisionedEntity
 {
     /// <summary>Unique identifier for this queue item.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token for optimistic locking during queue processing.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>ID of the printer to harvest from.</summary>
     public Guid PrinterId { get; set; }

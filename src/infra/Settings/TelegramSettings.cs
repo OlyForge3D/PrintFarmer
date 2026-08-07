@@ -45,7 +45,7 @@ public class TelegramSettings : IAppSetting, IValidatableSetting
     public string ChatId { get; set; } = string.Empty;
 
     [SettingDisplay(
-        Name = "Attach Camera Snapshots",
+        Name = "Attach camera snapshots",
         Description = "Attach a printer camera snapshot to Telegram messages when available.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("includeSnapshots")]

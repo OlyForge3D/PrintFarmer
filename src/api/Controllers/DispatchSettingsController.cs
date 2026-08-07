@@ -69,7 +69,8 @@ public class DispatchSettingsController(
         }
 
         DispatchSettings settings = await db.DispatchSettings.FirstAsync(ct);
-        db.Entry(settings).Property(candidate => candidate.RowVersion).OriginalValue = expected;
+        db.Entry(settings).Property(candidate => candidate.Revision).OriginalValue =
+            RevisionETag.Decode(expected);
 
         settings.AutoDispatchEnabled = request.AutoDispatchEnabled;
         settings.AutoDispatchMode = request.AutoDispatchMode;

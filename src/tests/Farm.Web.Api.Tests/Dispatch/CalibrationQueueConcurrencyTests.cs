@@ -570,7 +570,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         ctx.PrintJobs.Add(job);
         await ctx.SaveChangesAsync();
 
-        job.RowVersion.Should().NotBeNull("StampRowVersions must generate a non-null token for SQLite");
+        job.RowVersion.Should().NotBeNull("portable revisions must produce an ETag token for SQLite");
         job.RowVersion!.Length.Should().BeGreaterThan(0);
     }
 
@@ -747,6 +747,50 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be("acknowledgement_missing",
             "calibration must fail closed when no persisted ack exists in dispatch state");
+    }
+
+    [Fact]
+    public async Task ClaimService_CalibrationWithLegacyAcknowledgedJobToken_RejectsAsStale()
+    {
+        await using AppDbContext seedCtx = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx);
+
+        await using (AppDbContext ackCtx = CreateContext())
+        {
+            await PersistAcknowledgementAsync(
+                ackCtx,
+                printerId,
+                jobId,
+                "legacy-ack-key");
+        }
+
+        await using (AppDbContext legacyCtx = CreateContext())
+        {
+            PrinterDispatchState state = await legacyCtx.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            state.AcknowledgedJobRowVersion = Convert.FromHexString("000000000000002A");
+            await legacyCtx.SaveChangesAsync();
+        }
+
+        await using AppDbContext claimCtx = CreateContext();
+        DispatchClaimService claimService = CreateClaimService(
+            claimCtx,
+            MakeOnlineIdleReader(printerId));
+
+        DispatchClaimResult result = await claimService.AcquireClaimAsync(
+            new DispatchClaimRequest(
+                jobId,
+                printerId,
+                "actor",
+                "Manual",
+                "legacy-ack-key",
+                null,
+                null));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(
+            "acknowledgement_job_revision_stale",
+            "an unversioned SQL Server rowversion snapshot must never authorize dispatch");
     }
 
     // =========================================================================
@@ -1282,16 +1326,18 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         state.Should().NotBeNull("HasData must seed the OutboxSequenceState row");
         state!.Id.Should().Be(1, "the single row always has Id=1");
         state.NextSequence.Should().Be(0, "initial sequence is 0");
-        state.RowVersion.Should().BeNull("row version is null before first write");
+        state.Revision.Should().Be(1, "seeded revisions start at one");
+        state.RowVersion.Should().Equal(RevisionETag.EncodeBytes(1));
 
-        // After a write, RowVersion must be stamped (non-null).
+        // After a write, Revision must advance.
         state.NextSequence = 1;
         await ctx.SaveChangesAsync();
 
         await using AppDbContext verifyCtx = CreateContext();
         OutboxSequenceState? updated = await verifyCtx.OutboxSequenceStates.SingleAsync();
         updated.NextSequence.Should().Be(1);
-        updated.RowVersion.Should().NotBeNull("StampRowVersions must generate a non-null token after first write");
-        updated.RowVersion!.Length.Should().Be(16, "RowVersion is a 16-byte GUID-derived token");
+        updated.Revision.Should().Be(2);
+        updated.RowVersion.Should().Equal(RevisionETag.EncodeBytes(2));
+        updated.RowVersion!.Length.Should().Be(sizeof(byte) + sizeof(long));
     }
 }

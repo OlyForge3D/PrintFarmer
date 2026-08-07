@@ -844,12 +844,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     }
 
     private static string CreateETag(Model3D model)
-    {
-        byte[] token = model.RowVersion is { Length: > 0 }
-            ? model.RowVersion
-            : BitConverter.GetBytes(model.UpdatedAt.ToUniversalTime().Ticks);
-        return $"\"{Convert.ToHexString(token)}\"";
-    }
+        => RevisionETag.EncodeQuoted(model.Revision);
 
     private static bool MatchesIfMatch(string? ifMatch, string currentETag)
     {
