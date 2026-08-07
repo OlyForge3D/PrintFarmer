@@ -4,6 +4,7 @@ import pfNoRawHtmlControls from './pf-no-raw-html-controls.js'
 import noHardcodedColors from './no-hardcoded-colors.js'
 import pfRequireApiClient from './pf-require-apiclient.js'
 import pfNoOversizedRadius from './pf-no-oversized-radius.js'
+import pfNoInertStateBg from './pf-no-inert-state-bg.js'
 
 export default {
   rules: {
@@ -11,6 +12,7 @@ export default {
     'pf-no-raw-html-controls': pfNoRawHtmlControls,
     'no-hardcoded-colors': noHardcodedColors,
     'pf-require-apiclient': pfRequireApiClient,
-    'pf-no-oversized-radius': pfNoOversizedRadius
+    'pf-no-oversized-radius': pfNoOversizedRadius,
+    'pf-no-inert-state-bg': pfNoInertStateBg
   }
 };
