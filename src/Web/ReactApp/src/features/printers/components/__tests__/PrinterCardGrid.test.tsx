@@ -20,7 +20,7 @@ const virtualizerOptions: MockVirtualizerOptions[] = [];
 vi.mock('@tanstack/react-virtual', () => ({
   defaultRangeExtractor: ({ startIndex, endIndex }: { startIndex: number; endIndex: number }) =>
     Array.from({ length: endIndex - startIndex + 1 }, (_, index) => startIndex + index),
-  useWindowVirtualizer: (options: MockVirtualizerOptions) => {
+  useVirtualizer: (options: MockVirtualizerOptions) => {
     virtualizerOptions.push(options);
     return {
       getVirtualItems: () => options
@@ -76,17 +76,20 @@ describe('PrinterCardGrid', () => {
     gridOffset = 0;
 
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => containerWidth);
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const top = this.hasAttribute('data-main-content') ? 0 : gridOffset;
+      return {
       x: 0,
-      y: gridOffset,
-      top: gridOffset,
+      y: top,
+      top,
       right: containerWidth,
-      bottom: gridOffset,
+      bottom: top,
       left: 0,
       width: containerWidth,
       height: 0,
       toJSON: () => ({}),
-    }));
+      };
+    });
     vi.stubGlobal('ResizeObserver', class ResizeObserver {
       constructor(callback: ResizeObserverCallback) {
         observedResizes.push(() => callback([], this));
@@ -153,10 +156,10 @@ describe('PrinterCardGrid', () => {
 
     await waitFor(() => {
       expect(virtualizerOptions.at(-1)?.rangeExtractor({ startIndex: 10, endIndex: 12 }))
-        .toEqual([1, 10, 11, 12]);
+        .toEqual([0, 1, 10, 11, 12]);
     });
 
-    containerWidth = 600;
+    containerWidth = 500;
     act(() => observedResizes.forEach((notify) => notify()));
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
 
@@ -177,7 +180,11 @@ describe('PrinterCardGrid', () => {
 
   it('refreshes scroll margin when surrounding layout content is inserted', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
-    render(<PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />);
+    render(
+      <main data-main-content>
+        <PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />
+      </main>,
+    );
 
     await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(0));
     gridOffset = 240;
@@ -190,24 +197,28 @@ describe('PrinterCardGrid', () => {
   it('rescrolls the active printer when sorting moves it to another row', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
     const { rerender } = render(
-      <PrinterCardGrid
-        printers={printers}
-        mode="compact"
-        activePrinterId="printer-55"
-        renderPrinter={renderCard}
-      />,
+      <main data-main-content>
+        <PrinterCardGrid
+          printers={printers}
+          mode="compact"
+          activePrinterId="printer-55"
+          renderPrinter={renderCard}
+        />
+      </main>,
     );
 
     await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(18, { align: 'center' }));
     scrollToIndex.mockClear();
     const reorderedPrinters = [printers[55], ...printers.filter((printer) => printer.id !== 'printer-55')];
     rerender(
-      <PrinterCardGrid
-        printers={reorderedPrinters}
-        mode="compact"
-        activePrinterId="printer-55"
-        renderPrinter={renderCard}
-      />,
+      <main data-main-content>
+        <PrinterCardGrid
+          printers={reorderedPrinters}
+          mode="compact"
+          activePrinterId="printer-55"
+          renderPrinter={renderCard}
+        />
+      </main>,
     );
 
     await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(0, { align: 'center' }));

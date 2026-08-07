@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { defaultRangeExtractor, useWindowVirtualizer, type Range } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { Printer } from '@/types/api';
 
 export const PRINTER_GRID_VIRTUALIZATION_THRESHOLD = 60;
@@ -15,7 +15,6 @@ export const PRINTER_GRID_VIRTUALIZATION_THRESHOLD = 60;
 const GRID_GAP_PX = 16;
 const COMPACT_CARD_WIDTH_PX = 288;
 const DETAILED_CARD_WIDTH_PX = 416;
-const SINGLE_COLUMN_BREAKPOINT_PX = 640;
 const ROW_OVERSCAN = 2;
 const COMPACT_ESTIMATED_ROW_HEIGHT_PX = 360;
 const DETAILED_ESTIMATED_ROW_HEIGHT_PX = 720;
@@ -40,7 +39,6 @@ function estimatedRowHeight(mode: PrinterGridMode): number {
 }
 
 function getColumnCount(width: number, mode: PrinterGridMode): number {
-  if (width < SINGLE_COLUMN_BREAKPOINT_PX) return 1;
   return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardWidth(mode) + GRID_GAP_PX)));
 }
 
@@ -71,7 +69,8 @@ function VirtualizedPrinterCardGrid({
   renderPrinter,
 }: PrinterCardGridProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastScrollTargetRef = useRef<string>();
+  const lastScrollTargetRef = useRef<string | undefined>(undefined);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [columnCount, setColumnCount] = useState(1);
   const [scrollMargin, setScrollMargin] = useState(0);
   const [focusedPrinterId, setFocusedPrinterId] = useState<string>();
@@ -84,13 +83,21 @@ function VirtualizedPrinterCardGrid({
     if (!container) return;
 
     let animationFrame: number | undefined;
+    const nextScrollElement = container.closest<HTMLElement>('[data-main-content]');
+    setScrollElement(nextScrollElement);
     const measure = () => {
       setColumnCount(getColumnCount(container.clientWidth, mode));
-      setScrollMargin(container.getBoundingClientRect().top + window.scrollY);
+      if (!nextScrollElement) return;
+      const containerRect = container.getBoundingClientRect();
+      const scrollRect = nextScrollElement.getBoundingClientRect();
+      setScrollMargin(containerRect.top - scrollRect.top + nextScrollElement.scrollTop);
     };
     const scheduleMeasure = () => {
       if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
-      animationFrame = requestAnimationFrame(measure);
+      animationFrame = requestAnimationFrame(() => {
+        animationFrame = undefined;
+        measure();
+      });
     };
 
     measure();
@@ -101,7 +108,7 @@ function VirtualizedPrinterCardGrid({
       ancestor = ancestor.parentElement;
     }
 
-    const layoutRoot = container.parentElement;
+    const layoutRoot = nextScrollElement ?? container.parentElement;
     const mutationObserver = new MutationObserver(scheduleMeasure);
     if (layoutRoot) {
       mutationObserver.observe(layoutRoot, {
@@ -149,26 +156,33 @@ function VirtualizedPrinterCardGrid({
   }, []);
 
   const rowCount = Math.ceil(printers.length / columnCount);
-  const rowVirtualizer = useWindowVirtualizer({
+  // TanStack Virtual intentionally exposes mutable measurement methods.
+  // eslint-disable-next-line react-hooks/incompatible-library
+  const rowVirtualizer = useVirtualizer({
+    useFlushSync: false,
+    getScrollElement: () => scrollElement,
     count: rowCount,
     estimateSize: () => estimatedRowHeight(mode),
     overscan: ROW_OVERSCAN,
     scrollMargin,
     rangeExtractor: (range: Range) => {
-      const indexes = defaultRangeExtractor(range);
+      const indexes = new Set(defaultRangeExtractor(range));
+      // Keep the canonical tour target stable instead of moving it to the
+      // first overscan row as the operator scrolls.
+      indexes.add(0);
+
       const focusedPrinterIndex = focusedPrinterId
         ? printers.findIndex((printer) => printer.id === focusedPrinterId)
         : -1;
-      if (focusedPrinterIndex < 0) return indexes;
-
-      const focusedRowIndex = Math.floor(focusedPrinterIndex / columnCount);
-      if (indexes.includes(focusedRowIndex)) return indexes;
-      return [...indexes, focusedRowIndex].sort((left, right) => left - right);
+      if (focusedPrinterIndex >= 0) {
+        indexes.add(Math.floor(focusedPrinterIndex / columnCount));
+      }
+      return [...indexes].sort((left, right) => left - right);
     },
   });
 
   useEffect(() => {
-    if (!activePrinterId) return;
+    if (!activePrinterId || !scrollElement) return;
 
     const printerIndex = printers.findIndex((printer) => printer.id === activePrinterId);
     if (printerIndex < 0) return;
@@ -178,13 +192,13 @@ function VirtualizedPrinterCardGrid({
     if (lastScrollTargetRef.current === targetKey) return;
     lastScrollTargetRef.current = targetKey;
     rowVirtualizer.scrollToIndex(rowIndex, { align: 'center' });
-  }, [activePrinterId, columnCount, printers, rowVirtualizer]);
+  }, [activePrinterId, columnCount, printers, rowVirtualizer, scrollElement]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const renderedItems: ReactNode[] = [];
   const fixedCardWidth = cardWidth(mode);
 
-  virtualRows.forEach((virtualRow, virtualRowIndex) => {
+  virtualRows.forEach((virtualRow) => {
     const startIndex = virtualRow.index * columnCount;
     const rowPrinters = printers.slice(startIndex, startIndex + columnCount);
     const rowHeights = rowPrinters.map((printer) => measuredCardHeights.get(printer.id));
@@ -219,7 +233,7 @@ function VirtualizedPrinterCardGrid({
             width: columnCount === 1 ? '100%' : fixedCardWidth,
             transform: `translate(${columnIndex * (fixedCardWidth + GRID_GAP_PX)}px, ${rowOffset}px)`,
           }}
-          {...(virtualRowIndex === 0 && columnIndex === 0
+          {...(virtualRow.index === 0 && columnIndex === 0
             ? { 'data-tour': 'printers-card' }
             : {})}
         >
