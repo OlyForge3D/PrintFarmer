@@ -82,4 +82,51 @@ describe('LazyModalBoundary', () => {
     expect(screen.getByTestId('route-state')).toHaveTextContent('Unsaved route state');
     expect(factory).toHaveBeenCalledTimes(2);
   });
+
+  it('hands focus directly from the loading surface to the resolved modal', async () => {
+    const user = userEvent.setup();
+    const triggerFocus = vi.fn();
+    let resolveModule: ((module: { default: React.FC }) => void) | undefined;
+    const modulePromise = new Promise<{ default: React.FC }>((resolve) => {
+      resolveModule = resolve;
+    });
+    const LoadedModal = () => (
+      <div role="dialog" aria-label="Loaded modal">
+        <input aria-label="Loaded field" autoFocus />
+      </div>
+    );
+    const PendingModal = lazyWithPreload<Record<string, never>, React.FC>(() => modulePromise);
+
+    function Harness() {
+      const [isOpen, setIsOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setIsOpen(true)} onFocus={triggerFocus}>
+            Open modal
+          </button>
+          {isOpen && (
+            <LazyModalBoundary
+              label="test modal"
+              onCancel={() => setIsOpen(false)}
+              onRetry={PendingModal.retry}
+            >
+              <PendingModal />
+            </LazyModalBoundary>
+          )}
+        </>
+      );
+    }
+
+    render(<Harness />);
+    const trigger = screen.getByRole('button', { name: 'Open modal' });
+    await user.click(trigger);
+    expect(await screen.findByRole('dialog', { name: 'Loading test modal' })).toBeInTheDocument();
+    expect(triggerFocus).toHaveBeenCalledTimes(1);
+
+    resolveModule?.({ default: LoadedModal });
+
+    expect(await screen.findByRole('dialog', { name: 'Loaded modal' })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Loaded field' })).toHaveFocus());
+    expect(triggerFocus).toHaveBeenCalledTimes(1);
+  });
 });

@@ -17,7 +17,6 @@ interface LazyModalSurfaceProps {
 
 function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const previousFocusRef = useRef<HTMLElement | null>(null);
   const onCancelRef = useRef(onCancel);
   const titleId = useId();
 
@@ -26,10 +25,6 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
   }, [onCancel]);
 
   useEffect(() => {
-    previousFocusRef.current = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-
     const getFocusableElements = () => Array.from(
       dialogRef.current?.querySelectorAll<HTMLElement>(
         'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
@@ -71,7 +66,6 @@ function LazyModalSurface({ label, onCancel, children }: LazyModalSurfaceProps) 
     return () => {
       document.removeEventListener('focusin', handleFocus);
       document.removeEventListener('keydown', handleKeyDown);
-      previousFocusRef.current?.focus();
     };
   }, []);
 
@@ -172,6 +166,16 @@ export function LazyModalBoundary({
   onCancel,
   onRetry,
 }: LazyModalBoundaryProps) {
+  const previousFocusRef = useRef<HTMLElement | null>(
+    typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
+
+  useEffect(() => () => {
+    previousFocusRef.current?.focus();
+  }, []);
+
   return (
     <LazyModalErrorBoundary label={label} onCancel={onCancel} onRetry={onRetry}>
       <Suspense fallback={<LazyModalFallback label={label} onCancel={onCancel} />}>
