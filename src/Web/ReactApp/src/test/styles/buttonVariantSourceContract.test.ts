@@ -138,12 +138,18 @@ function paintUtilities(classes: string): string[] {
 function validateButtonShadowSource(source: string): string[] {
   const violations: string[] = [];
   const entries = readVariantClasses(source);
-  const baseMatch = source.match(/applyRingOffset\s*&&\s*'([^']*)'/);
+  const sharedClassStrings = [
+    ['base styles', source.match(/applyBaseStyles\s*&&\s*'([^']*)'/)],
+    ['ring offset', source.match(/applyRingOffset\s*&&\s*'([^']*)'/)],
+  ] as const;
 
-  if (!baseMatch) {
-    violations.push('Button base ring-offset class string was not found');
-  } else {
-    const shadows = paintUtilities(baseMatch[1]).filter((token) =>
+  for (const [label, match] of sharedClassStrings) {
+    if (!match) {
+      violations.push(`Button shared ${label} class string was not found`);
+      continue;
+    }
+
+    const shadows = paintUtilities(match[1]).filter((token) =>
       bareUtility(token).startsWith('shadow'),
     );
     if (shadows.length > 0) {
@@ -155,6 +161,11 @@ function validateButtonShadowSource(source: string): string[] {
   }
 
   for (const variant of ALL_VARIANTS) {
+    if (!entries.has(variant)) {
+      violations.push(`Button variant '${variant}' could not be parsed from variantClasses`);
+      continue;
+    }
+
     const shadows = paintUtilities(entries.get(variant) ?? '').filter((token) =>
       bareUtility(token).startsWith('shadow'),
     );
@@ -179,8 +190,8 @@ describe('Button shadow source contract (#1127)', () => {
 
   it('fails actionably when the shared base shadow utility is reintroduced', () => {
     const mutant = source.replace(
-      "applyRingOffset && 'focus-visible:ring-offset-2'",
-      "applyRingOffset && 'shadow-xs focus-visible:ring-offset-2'",
+      "'font-medium inline-flex",
+      "'shadow-xs font-medium inline-flex",
     );
     expect(mutant, 'falsification mutation must change Button.tsx').not.toBe(source);
 
