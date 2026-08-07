@@ -2743,14 +2743,61 @@ EOF
 # Use an absolute path so the script loads the same config regardless of CWD
 CONFIG_FILE="$REPO_ROOT/.deploy-config"
 
+# Capture and restore explicit caller-supplied values across a config `source`.
+#
+# `.deploy-config` persists worker keys unconditionally (for example
+# `ENABLE_ORCA_WORKER=${ENABLE_ORCA_WORKER:-no}`), so sourcing it overwrites
+# whatever the caller passed on the command line. That silently breaks the
+# documented recovery path for a farm whose worker was disabled:
+#   ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ./scripts/deploy-docker.sh --non-interactive
+# The failure is upstream of normalize_worker_configuration(), which probes with
+# `${VAR+x}` and therefore cannot distinguish a caller's value from a persisted
+# one once the clobber has happened (issue #1258).
+#
+# `${VAR+x}` distinguishes "unset" from "explicitly empty", so an intentional
+# empty override is preserved and still fails validation downstream rather than
+# being silently replaced by a persisted value. Uses eval rather than an
+# associative array to stay Bash 3.2 compatible (macOS /bin/bash).
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT"
+
+capture_config_overrides() {
+    local name
+    for name in $CONFIG_OVERRIDE_VARS; do
+        eval "if [ \"\${${name}+x}\" = \"x\" ]; then
+                  _CONFIG_OVERRIDE_SET_${name}=1
+                  _CONFIG_OVERRIDE_VAL_${name}=\"\${${name}}\"
+              else
+                  _CONFIG_OVERRIDE_SET_${name}=0
+              fi"
+    done
+}
+
+restore_config_overrides() {
+    local name
+    for name in $CONFIG_OVERRIDE_VARS; do
+        eval "if [ \"\${_CONFIG_OVERRIDE_SET_${name}:-0}\" = \"1\" ]; then
+                  ${name}=\"\${_CONFIG_OVERRIDE_VAL_${name}}\"
+              fi
+              unset _CONFIG_OVERRIDE_SET_${name} _CONFIG_OVERRIDE_VAL_${name}"
+    done
+}
+
 load_previous_config() {
     if [ -f "$CONFIG_FILE" ]; then
         print_info "Found previous deployment configuration"
-        
+
+        # Snapshot explicit caller overrides before the config can clobber them.
+        # This also protects the DISABLE_SLICER_BUILDS force-disable policy
+        # applied during startup, which must likewise beat persisted values.
+        capture_config_overrides
+
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
         enforce_supported_orcaslicer_release
+
+        # Explicit overrides win over persisted values.
+        restore_config_overrides
 
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.
