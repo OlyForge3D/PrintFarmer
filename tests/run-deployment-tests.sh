@@ -431,6 +431,9 @@ run_full_tests() {
     log_subsection "Test: Deploy Docker"
     run_test_suite "deploy-docker tests" "$SCRIPT_DIR/test-deploy-docker.sh" || true
 
+    log_subsection "Test: TLS Certificate Cleanup"
+    run_test_suite "TLS certificate cleanup tests" "$SCRIPT_DIR/test-tls-certificate-cleanup.sh" || true
+
     log_subsection "Test: OrcaSlicer Binary Metadata"
     run_test_suite "OrcaSlicer binary metadata tests" "$SCRIPT_DIR/test-orcaslicer-binary-metadata.sh" || true
     

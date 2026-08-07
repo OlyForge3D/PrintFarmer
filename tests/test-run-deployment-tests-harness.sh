@@ -76,6 +76,7 @@ mkdir -p "$marker_dir"
 suites=(
     test-compose-generator.sh
     test-deploy-docker.sh
+    test-tls-certificate-cleanup.sh
     test-orcaslicer-binary-metadata.sh
     test-config-persistence.sh
     test-integration.sh
