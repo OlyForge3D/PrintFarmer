@@ -20,6 +20,17 @@
 # Uses .deploy-config → No prompts, instant deploy
 ```
 
+Normal non-interactive deployment, `--regenerate-config`, and `--redeploy`
+normalize stored worker settings before validation or generated output. Boolean
+settings accept `yes/no`, `true/false`, `1/0`, and `on/off` (case-insensitive).
+Unsupported or explicitly empty values stop with an error.
+
+When a legacy `.deploy-config` enables distributed slicing but omits both
+worker settings, every path migrates the file to `ENABLE_ORCA_WORKER=yes` and
+`ORCA_WORKER_COUNT=1`. Explicit disables remain disabled. Setting
+`DISABLE_SLICER_BUILDS=true` or `1` always forces the effective worker values to
+`no` and `0`, including when the legacy migration would otherwise enable one.
+
 ### Re-Deployment (Update Settings)
 ```bash
 ./scripts/deploy-docker.sh

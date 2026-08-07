@@ -128,9 +128,9 @@ the current `?scope`, `?tab`, and `?sub` search params. See
   is no "Save All" button in the UI; the batch `POST /api/settings` endpoint and its API
   wrapper `saveAllSettings` are dead code from a UX perspective (tests explicitly assert
   the wrapper is not called on save). Do not add a Save-All button.
-- **Legacy paths auto-redirect.** `src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`
-  is the canonical list of moved routes. When you rename a route, add a new entry to keep
-  external bookmarks working — do not delete existing entries.
+- **Navigation is canonical-only.** When a React route changes, update every internal
+  caller and affected test in the same change. Do not add bookmark-compatibility aliases
+  or a redirect registry.
 - **Palette is global.** `GlobalCommandPaletteProvider` is mounted in `Layout.tsx`, so
   `Ctrl+K` (or `Cmd+K`) works on every authenticated route, not just settings.
 - **Palette deep-links are section-qualified.** `?field=Section.Property` (e.g.

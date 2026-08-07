@@ -13,6 +13,3 @@ export {
   getDestinationsByGroup,
   getHubGroupedDestinations,
 } from './adminDestinations';
-
-export type { LegacyRedirect } from './legacyRedirects';
-export { LEGACY_REDIRECTS, getLegacyRedirect } from './legacyRedirects';

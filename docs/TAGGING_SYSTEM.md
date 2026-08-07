@@ -422,8 +422,7 @@ Mounted inside the settings shell at sub-page key `data.tags`.
 
 `/admin/manage?tab=data&sub=tags`
 
-Legacy `/admin/tags` still resolves via `legacyRedirects.ts` so external
-bookmarks continue to work.
+Internal navigation must use this canonical route directly.
 
 #### Access Control
 

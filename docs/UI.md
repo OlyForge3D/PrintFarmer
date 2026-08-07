@@ -124,14 +124,11 @@ Workers, System Status) render their own components inside the shell.
 For the full architecture, tab-to-group map, save model, Essential mode, and
 palette details, see [SETTINGS_ARCHITECTURE.md](./SETTINGS_ARCHITECTURE.md).
 
-#### Legacy Admin Routes
+#### Canonical Admin Routes
 
-Older admin URLs (`/admin/tags`, `/admin/slicer-profiles`, `/admin/webhooks`,
-`/admin/cameras`, `/admin/quotas`, `/admin/workers`, `/admin/system`, …) still
-resolve — they auto-redirect to the appropriate shell location via
-`src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`. Do not delete
-entries from that file when you rename a route; add a new one instead so
-external bookmarks keep working.
+Admin navigation links directly to the current settings or management shell URL.
+When a route changes, update its internal callers and tests in the same change;
+do not add bookmark-compatibility aliases.
 
 ### Command Palette (Ctrl+K)
 

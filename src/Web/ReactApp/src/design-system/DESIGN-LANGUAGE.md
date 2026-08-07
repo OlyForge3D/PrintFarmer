@@ -687,7 +687,7 @@ never renders its own `PageTemplate`, its own `<h1>`, or its own back navigation
 truth for what the ACC links to. Adding an entry there is what puts a page under this contract.
 It holds 27 entries: the 22 that live at `/admin` or below are admin-owned and bound by
 everything above, and 20 of those are drawn by `SettingsShell`. The other five —
-`/maintenance`, `/analytics`, `/auto-dispatch`, `/catalog`, `/locations/dashboard` — are
+`/maintenance`, `/analytics`, `/auto-dispatch`, `/catalog`, `/locations` — are
 operational pages the ACC merely links to. They keep their own top-level navigation because
 they are day-to-day destinations in their own right, not admin sub-pages, so the "back to
 Admin Control Center" rule does not apply to them.

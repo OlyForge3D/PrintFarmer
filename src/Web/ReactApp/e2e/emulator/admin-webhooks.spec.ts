@@ -3,7 +3,7 @@ import { test, expect } from '../fixtures/emulator-setup';
 /**
  * Admin Webhooks CRUD E2E Tests — Emulator-backed
  *
- * Tests the /admin/webhooks route:
+ * Tests the canonical System Settings > Integrations > Webhooks route:
  *   - Webhook list display
  *   - Create webhook modal (name, URL, secret, event types)
  *   - Edit/delete webhooks
@@ -19,7 +19,7 @@ test.describe('Admin Webhooks — Emulator', () => {
   test.beforeEach(async ({ page }) => {
     consoleErrors = [];
     page.on('pageerror', (error) => consoleErrors.push(error.message));
-    await page.goto('/admin/webhooks');
+    await page.goto('/admin/settings?tab=integrations&sub=webhooks');
     await page.waitForLoadState('networkidle');
   });
 

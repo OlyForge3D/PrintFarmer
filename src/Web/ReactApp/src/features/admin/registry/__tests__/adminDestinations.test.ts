@@ -10,7 +10,6 @@ import {
   type AdminDestination,
   type AdminDestinationGroup,
 } from '../adminDestinations';
-import { LEGACY_REDIRECTS } from '../legacyRedirects';
 
 const validGroupIds = new Set<AdminDestinationGroup>(
   ADMIN_DESTINATION_GROUPS.map((group) => group.id),
@@ -76,6 +75,10 @@ describe('adminDestinations registry', () => {
     expect(overviewEntries).toHaveLength(1);
     expect(overviewEntries[0].id).toBe('admin-home');
     expect(overviewEntries[0].path).toBe('/admin');
+  });
+
+  it('uses the canonical Locations index route', () => {
+    expect(getDestinationById('hw-locations')?.path).toBe('/locations');
   });
 
   it('has at least one hub-tile destination per operational group', () => {
@@ -202,59 +205,5 @@ describe('registry lookup helpers', () => {
   it('getHubGroupedDestinations returns nothing for a user without admin access', () => {
     const grouped = getHubGroupedDestinations(accessAs('operator'));
     expect(grouped).toHaveLength(0);
-  });
-});
-
-describe('legacy redirects registry', () => {
-  it('covers the paths flagged in the design review', () => {
-    const criticalPaths = [
-      '/admin/tags',
-      '/admin/data',
-      '/admin/system',
-      '/admin/webhooks',
-      '/admin/workers',
-      '/admin/slicer-profiles',
-      '/admin/printers',
-      '/admin/monitoring',
-      '/admin/cameras',
-      '/users',
-      '/settings/system',
-    ];
-
-    for (const path of criticalPaths) {
-      const entry = LEGACY_REDIRECTS.find((redirect) => redirect.from === path);
-      expect(entry, `missing legacy redirect for ${path}`).toBeDefined();
-    }
-  });
-
-  it('routes every legacy path into a known namespace', () => {
-    const validPrefixes = [
-      '/admin',
-      '/settings',
-      '/analytics',
-      '/locations',
-      '/printers',
-      '/profiles',
-      '/projects',
-    ];
-
-    for (const redirect of LEGACY_REDIRECTS) {
-      expect(redirect.to.startsWith('/')).toBe(true);
-      const [pathname] = redirect.to.split('?');
-      const matches = validPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-      expect(matches, `redirect ${redirect.from} -> ${redirect.to} lands outside every known namespace`).toBe(true);
-    }
-  });
-
-  it('assigns every legacy redirect a unique source path', () => {
-    const froms = LEGACY_REDIRECTS.map((redirect) => redirect.from);
-    const unique = new Set(froms);
-    expect(unique.size).toBe(froms.length);
-  });
-
-  it('gives every legacy redirect a non-empty description', () => {
-    for (const redirect of LEGACY_REDIRECTS) {
-      expect(redirect.description.trim().length).toBeGreaterThan(0);
-    }
   });
 });
