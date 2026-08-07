@@ -315,6 +315,21 @@ function escapingCommentOrder(rawCandidate) {
   return 'unknown'
 }
 
+function escapingCommentMayPrecede(escaper, radiusVariants) {
+  const escaperVariants = escaper.variants
+  if (escaperVariants.length === 0 && radiusVariants.length > 0) return true
+  if (escaperVariants.length > 0 && radiusVariants.length === 0) return false
+  if (
+    escaperVariants.length !== radiusVariants.length ||
+    escaperVariants.some((variant, index) => variant !== radiusVariants[index])
+  ) {
+    return undefined
+  }
+  if (escaper.order === 'before') return true
+  if (escaper.order === 'after') return false
+  return undefined
+}
+
 function changesSelectorScope(variant) {
   if (PSEUDO_ELEMENT_VARIANTS.has(variant) || variant === '*' || variant === '**') {
     return true
@@ -839,23 +854,29 @@ export default {
         const escaping = classText
           .split(/\s+/)
           .filter(hasEscapingComment)
-          .map(rawToken => ({ rawToken, order: escapingCommentOrder(rawToken) }))
-        if (escaping.some(entry => entry.order === 'before' || entry.order === 'unknown')) {
-          return
-        }
-        const radiusEscapers = escaping.filter(entry => entry.order === 'radius')
-        if (radiusEscapers.length > 1) return
-        const soleRadiusEscaper = radiusEscapers[0]?.rawToken
+          .map(rawToken => ({
+            rawToken,
+            variants: splitToken(rawToken).variants,
+            order: escapingCommentOrder(rawToken),
+          }))
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
-            if (soleRadiusEscaper !== undefined && rawToken !== soleRadiusEscaper) continue
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue
+            if (
+              escaping.some(
+                entry =>
+                  entry.rawToken !== rawToken &&
+                  escapingCommentMayPrecede(entry, variants) !== false,
+              )
+            ) {
+              continue
+            }
 
             const reportFullRound = () => {
               if (!checkFullRound || waived || isCircular(parseCondition(variants))) return

@@ -56,6 +56,11 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: `<div className="w-[64px${OPEN_CSS_COMMENT}] rounded-[9999px] h-[32px]" />`,
     },
+    // Base candidates are emitted before variant candidates regardless of
+    // property order, so this opacity comment swallows the hover radius.
+    {
+      code: `<div className="hover:rounded-[16px] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+    },
     // Competing radius escapers have ambiguous generated candidate order, so
     // neither can be judged safely.
     {
@@ -336,6 +341,13 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       output: null,
       errors: [{ messageId: 'oversized', suggestions: 1 }],
     },
+    // Variant layers sort after base utilities, so a hover width comment cannot
+    // swallow an already-emitted base radius.
+    {
+      code: `<div className="rounded-[16px] hover:w-[64px${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
     {
       code: `<div className="rounded-[16px] bg-[red${OPEN_CSS_COMMENT}] opacity-[1${OPEN_CSS_COMMENT}]" />`,
       output: null,
@@ -353,6 +365,13 @@ ruleTester.run('pf-no-oversized-radius', rule, {
           suggestions: 1,
         },
       ],
+    },
+    // A variant-scoped radius escaper is emitted after the base radius and cannot
+    // hide that base violation.
+    {
+      code: `<div className="hover:rounded-[8px${OPEN_CSS_COMMENT}] rounded-3xl" />`,
+      output: '<div className="hover:rounded-[8px/*c] rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
     },
     // A content box with no shape evidence is the "bubble button" case.
     {

@@ -139,6 +139,8 @@ left side, not a size.
 
 Arbitrary values in units the rule cannot resolve statically (e.g. `rounded-[var(--x)]`) are
 left alone rather than guessed at. Unterminated CSS comments are handled by Tailwind's
-generated declaration order: a comment emitted before `border-radius` can swallow the radius,
-while a comment emitted afterward cannot. A radius value before its own unterminated comment
-still applies and is judged.
+generated declaration order: variant layers are ordered before property families are compared,
+so a base utility can swallow a later variant radius while a variant utility cannot swallow an
+already-emitted base radius. Within one variant condition, a comment emitted before
+`border-radius` can swallow the radius, while one emitted afterward cannot. A radius value
+before its own unterminated comment still applies and is judged.
