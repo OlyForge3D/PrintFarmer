@@ -88,10 +88,16 @@ focused regression coverage, then complete the required PR and merge gates.
 - [x] Update canonical Docker and compose sources and synchronize required copies.
 - [x] Add or update focused worker and deployment-generation regression coverage.
 - [x] Run focused validation and fix regressions.
-- [ ] Commit, push, open the PR with `Closes #1231`, and verify linkage.
+- [x] Commit and push the implementation branch.
+- [ ] Open the PR with `Closes #1231` and verify linkage.
 - [ ] Obtain unanimous Bishop/Hicks/Vasquez review and authoritative exact-head verdict.
 - [ ] Wait for CI, merge safely, and verify PR and issue closure.
 
 ### Summary
 
-Pending.
+Implemented and pushed through HEAD `eba82fb1e43b2019bfc423db5f23cd3d5b690b99`.
+Canonical Docker/compose/appsettings paths use the real OrcaSlicer binary, the
+detector and slicing pipeline share one default, and focused worker, compose,
+and binary-metadata regressions pass. PR/review/merge gates are blocked because
+the GitHub token lacks `workflow` scope for the inline publish workflow override;
+device authorization was unavailable.
