@@ -49,6 +49,8 @@ public sealed class OrcaBinaryPathTests
             OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeTrue();
             File.WriteAllText(launcherPath, "#!/bin/sh\nAPPDIR=\"$(dirname \"$0\")\"\nexec \"$APPDIR/bin/other-slicer\" \"$@\"\n");
             OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeFalse();
+            File.WriteAllText(launcherPath, "#!/bin/sh\n# exec \"$APPDIR/bin/orca-slicer\" \"$@\"\nexec \"$APPDIR/bin/other-slicer\" \"$@\"\n");
+            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeFalse();
         }
         finally
         {

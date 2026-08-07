@@ -104,9 +104,10 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
         }
 
         string launcher = File.ReadAllText(path);
-        return launcher.Contains("$APPDIR/bin/orca-slicer", StringComparison.Ordinal)
-            || launcher.Contains("${APPDIR}/bin/orca-slicer", StringComparison.Ordinal)
-            || launcher.Contains("\"$APPDIR\"/bin/orca-slicer", StringComparison.Ordinal);
+        return Regex.IsMatch(
+            launcher,
+            @"(?m)^\s*exec\s+[""']?(?:""\$APPDIR""|\$APPDIR|\$\{APPDIR\})/bin/orca-slicer(?:[""']|\s|$)",
+            RegexOptions.CultureInvariant);
     }
 
     public async Task<string?> GetVersionAsync()
