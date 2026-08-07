@@ -117,40 +117,44 @@ const readColors = async (page: Page): Promise<ColorPair> =>
     };
   });
 
-test('real bulk-delete button text clears AA at rest and hover in every palette', async ({
-  page,
-}) => {
-  await mountGcodeFileBrowser(page);
-  const button = page.getByRole('button', { name: 'Delete (1)' });
-  await expect(button).toBeVisible();
+test.describe('GcodeFileBrowser bulk-delete contrast (#1140)', () => {
+  test.skip(({ isMobile }) => isMobile, 'Hover feedback is not applicable under touch emulation');
 
-  for (const theme of SELECTABLE_THEMES) {
-    await page.evaluate((selectedTheme) => {
-      document.documentElement.dataset.theme = selectedTheme;
-    }, theme);
-    await page.mouse.move(0, 0);
-    const rest = await readColors(page);
-    const errorForeground = await page.locator('#error-text-reference').evaluate(
-      (element) => getComputedStyle(element).color,
-    );
+  test('real bulk-delete button text clears AA at rest and hover in every palette', async ({
+    page,
+  }) => {
+    await mountGcodeFileBrowser(page);
+    const button = page.getByRole('button', { name: 'Delete (1)' });
+    await expect(button).toBeVisible();
 
-    await button.hover();
-    const hover = await readColors(page);
+    for (const theme of SELECTABLE_THEMES) {
+      await page.evaluate((selectedTheme) => {
+        document.documentElement.dataset.theme = selectedTheme;
+      }, theme);
+      await page.mouse.move(0, 0);
+      const rest = await readColors(page);
+      const errorForeground = await page.locator('#error-text-reference').evaluate(
+        (element) => getComputedStyle(element).color,
+      );
 
-    expect(
-      contrastRatio(rest),
-      `${theme} rest: ${rest.foreground} on ${rest.background}`,
-    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
-    expect(
-      contrastRatio(hover),
-      `${theme} hover: ${hover.foreground} on ${hover.background}`,
-    ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
-    expect(rest.foreground, `${theme} rest uses the semantic destructive foreground`).toBe(
-      errorForeground,
-    );
-    expect(hover.foreground, `${theme} hover uses the semantic destructive foreground`).toBe(
-      errorForeground,
-    );
-    expect(hover, `${theme} retains visible hover feedback`).not.toEqual(rest);
-  }
+      await button.hover();
+      const hover = await readColors(page);
+
+      expect(
+        contrastRatio(rest),
+        `${theme} rest: ${rest.foreground} on ${rest.background}`,
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+      expect(
+        contrastRatio(hover),
+        `${theme} hover: ${hover.foreground} on ${hover.background}`,
+      ).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
+      expect(rest.foreground, `${theme} rest uses the semantic destructive foreground`).toBe(
+        errorForeground,
+      );
+      expect(hover.foreground, `${theme} hover uses the semantic destructive foreground`).toBe(
+        errorForeground,
+      );
+      expect(hover, `${theme} retains visible hover feedback`).not.toEqual(rest);
+    }
+  });
 });
