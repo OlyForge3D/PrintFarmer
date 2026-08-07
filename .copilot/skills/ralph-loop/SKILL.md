@@ -1,6 +1,6 @@
 ---
 name: "ralph-loop"
-description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, dispatch, PR lifecycle ownership, merge safety, and report format."
+description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, epic maintenance, the Dallas analysis gate, READY dispatch, full issue accounting, PR lifecycle ownership, merge safety, and report format."
 domain: "work-monitor"
 confidence: "high"
 source: "extracted from the Ralph workflow prompt to stop per-round duplication and the 76KB agent-file read"
@@ -137,13 +137,110 @@ To triage:
 3. Add a justified `type:*` label and a justified `priority:*` label.
 4. Comment naming the owner and one concrete first step.
 
-Do not assign implementation work directly to `type:epic` issues — route epics to Dallas
-for decomposition into child issues, and dispatch the children.
+Every issue MUST leave triage with **exactly one `squad:*` label AND one `priority:*`
+label**. Both are required; neither substitutes for the other.
+
+Label hygiene (both problems exist in the live label set):
+
+- The bare `squad` marker is not an owner. Once a member label is applied, **remove the
+  bare `squad` marker** (e.g. #628 carries `squad` alongside `squad:lambert`).
+- Emoji and plain forms of the same member coexist (`squad:🏗️ dallas` on #705/#1125 vs.
+  `squad:dallas` on #1134). Treat both forms as the **same owner** when querying or
+  counting, and apply the **plain form** for any new label.
+
+Do not assign implementation work directly to `type:epic` issues — epics go to EPIC
+MAINTENANCE each round and, when they need decomposition, to the ANALYSIS GATE.
+
+## EPIC MAINTENANCE
+
+Run this for **every open `type:epic`, every round**. Epics are decomposed and tracked,
+never implemented directly.
+
+1. **Enumerate children two ways and union the results** — the repo uses both mechanisms,
+   so neither alone is complete:
+
+   ```bash
+   gh api repos/OlyForge3D/PrintFarmer/issues/{n}/sub_issues \
+     --jq '.[] | "\(.number) \(.state)"'
+
+   gh issue list --repo OlyForge3D/PrintFarmer --state all --label epic-child \
+     --json number,state,title
+   ```
+
+2. **Post or refresh a single progress comment** — `X of Y children closed`, listing the
+   open children by number and title. Find Ralph's existing progress comment and **edit
+   it in place** (`gh issue comment --edit-last`). Never add a second progress comment;
+   duplicate progress comments each round are an anti-pattern.
+3. **Tick the epic body checklist** for completed children where the body contains one.
+4. **Close the epic** when every child is closed AND the epic's own acceptance checklist
+   is satisfied. Close with a summary comment listing the delivered children.
+5. **Route to the ANALYSIS GATE** an epic that has zero children, or that has no open
+   actionable children while its acceptance criteria are still unsatisfied.
+
+Worked case: #705 has 15 children (#706–#715, #723, #724, #725, #794, #805), 13 closed.
+It must carry a refreshed `13 of 15 children closed` comment naming #723 and #724 as the
+open remainder — not sit silently at ~87% forever.
+
+## ANALYSIS GATE (Dallas)
+
+The escape hatch for work that cannot go straight to an implementer. Without it, gated
+issues stall permanently.
+
+**Triggers** — any one of:
+
+- a `type:epic` that needs decomposition into child issues;
+- an issue whose body declares an **unmet architecture/audit gate** — e.g. #1134 states
+  "**Architecture gate:** Dallas must complete and sign off on a repository-wide audit
+  before this work is handed to implementation";
+- any issue Ralph judges too under-specified to hand to an implementer.
+
+**Action:**
+
+1. Label `status:needs-analysis`.
+2. Comment naming the **specific gate** and **what would satisfy it**.
+3. Dispatch a Dallas session via `create_session` — PrintFarmer project,
+   `base_branch: development`.
+
+**Rules:**
+
+- Dallas's deliverable is **child issues or a written audit sign-off comment — NEVER
+  implementation code**.
+- Analysis sessions **count against the 5-slot budget** like any other session.
+- **Do not re-dispatch Dallas** for an issue already carrying `status:needs-analysis` with
+  a live analysis session. Check `list_sessions_and_chats` first to avoid duplicate spawns.
+- Once Dallas satisfies the gate, **remove `status:needs-analysis`**. The resulting child
+  issues become normal dispatch candidates on the next round.
 
 ## DISPATCH POLICY
 
 - Maintain **at most 5 active implementation sessions**.
-- Fill free slots only from currently open, ready, unowned issues.
+- Fill free slots only from **READY** issues (defined below).
+
+### READY (definition)
+
+An issue is **READY** when ALL of the following hold:
+
+1. it is **open**;
+2. it carries **exactly one** `squad:*` member label (emoji and plain forms count as the
+   same owner);
+3. it is **unassigned and unclaimed**;
+4. it is **NOT** `type:epic`;
+5. it is **NOT** `status:in-progress`;
+6. it is **NOT** `status:needs-analysis`;
+7. it has **no unsatisfied blocking dependency**.
+
+A `dependencies` label is not itself a blocker. For any issue labelled `dependencies` or
+otherwise marked blocked, Ralph MUST **verify whether the named blocking issue is still
+open**. If the blocker has closed, the issue becomes READY and is dispatched. Silently
+skipping such an issue is an error.
+
+Concrete case this fixes: #723 (p0, `squad:🧪 kane`) and #724 (p0, `squad:⚙️ parker`) are
+open, labelled, unassigned and top-priority, but carry `dependencies` and were skipped
+every round with no recorded reason. Resolve their blockers and dispatch or record them as
+`blocked` naming the open blocking issue.
+
+### Queue order
+
 - Sort the queue strictly by:
   1. recognized priority ascending — `priority:p0`, `priority:p1`, `priority:p2`, `priority:p3`
   2. then issues with no recognized priority
@@ -151,7 +248,6 @@ for decomposition into child issues, and dispatch the children.
   4. then lowest issue number as tie-breaker
 
   Priority outranks age and number.
-
 - Call `list_sessions_and_chats` before spawning and skip any issue already owned by a
   live session.
 - Before each claim, **re-fetch the issue** and skip it if it is closed, assigned, already
@@ -167,6 +263,25 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
+
+## ACCOUNT FOR EVERY ISSUE
+
+**No open issue may be silently skipped.** Every open issue must end each round in
+**exactly one** bucket:
+
+| Bucket | Meaning |
+|---|---|
+| `dispatched` | claimed and a session spawned this round |
+| `in-flight` | already owned by a live session |
+| `awaiting-analysis` | `status:needs-analysis`, Dallas session live or just dispatched |
+| `blocked` | **name the specific open blocking issue** |
+| `epic-tracking` | `type:epic` maintained under EPIC MAINTENANCE |
+
+An open issue matching none of these is an **error**: report it as `unaccounted` with its
+number and current labels.
+
+The bucket counts must reconcile against the open-issue total. `dispatched + in-flight +
+awaiting-analysis + blocked + epic-tracking + unaccounted == open issues`.
 
 ## PR LIFECYCLE OWNERSHIP
 
@@ -208,16 +323,21 @@ and the checks rollup.
 Report each round, in this order:
 
 1. Triage counts and assigned owners
-2. Queue order (issue numbers in dispatch order)
-3. Sessions dispatched this round
-4. Sessions retained for open PRs
-5. Sessions archived
-6. Active slot count (`n/5`)
-7. Gate failures
-8. PRs awaiting review or merge
-9. Blockers
-10. Remaining backlog and trend vs. previous round
-11. Next action
+2. **Issue accounting** — every open issue in exactly one bucket, with per-bucket counts
+   and numbers: `dispatched`, `in-flight`, `awaiting-analysis`, `blocked` (each naming its
+   open blocking issue), `epic-tracking`, and `unaccounted` (must be zero)
+3. **Epic status** — per open epic: `X of Y children closed`, open children, action taken
+4. **Analysis gate** — issues newly gated, Dallas sessions dispatched, gates satisfied
+5. Queue order (issue numbers in dispatch order)
+6. Sessions dispatched this round
+7. Sessions retained for open PRs
+8. Sessions archived
+9. Active slot count (`n/5`)
+10. Gate failures
+11. PRs awaiting review or merge
+12. Blockers
+13. Remaining backlog and trend vs. previous round
+14. Next action
 
 When nothing is eligible, report exactly:
 
@@ -233,3 +353,9 @@ When nothing is eligible, report exactly:
 - Merging on green CI without an approval at the current head SHA.
 - Editing files, committing, or resolving conflicts from the workflow checkout.
 - Exceeding 5 active sessions, or dispatching by age when a higher-priority issue is queued.
+- Leaving an epic unmaintained, or posting a fresh progress comment instead of refreshing
+  the existing one.
+- Skipping a `dependencies`-labelled issue without checking whether its blocker is closed.
+- Ending a round with an open issue in no accounting bucket.
+- Dispatching Dallas again for an issue already `status:needs-analysis` with a live session,
+  or letting a Dallas analysis session write implementation code.
