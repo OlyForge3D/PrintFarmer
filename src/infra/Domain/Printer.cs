@@ -8,16 +8,16 @@ using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Domain;
 
-public class Printer
+public class Printer : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    /// <summary>
-    /// Optimistic concurrency token for EF Core.
-    /// Automatically updated on each modification to detect concurrent edits.
-    /// </summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <summary>Opaque compatibility token derived from <see cref="Revision"/>.</summary>
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     public string Name { get; set; } = string.Empty;
 

@@ -1201,16 +1201,17 @@ public class JobQueueAnalyticsController(
             return NotFound(new { error = "job_not_found" });
         }
 
-        byte[]? actual = await db.PrintJobs
+        long? actualRevision = await db.PrintJobs
             .AsNoTracking()
             .Where(job => job.Id == id)
-            .Select(job => job.RowVersion)
+            .Select(job => (long?)job.Revision)
             .SingleOrDefaultAsync(cancellationToken);
-        if (actual is null)
+        if (actualRevision is null)
         {
             return NotFound(new { error = "job_not_found" });
         }
 
+        byte[] actual = RevisionETag.EncodeBytes(actualRevision.Value);
         byte[] expected;
         try
         {

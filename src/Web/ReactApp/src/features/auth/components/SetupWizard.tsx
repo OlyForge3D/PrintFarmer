@@ -1,5 +1,5 @@
 /* eslint-disable local/pf-no-raw-html-controls */
-import React, { useState, useEffect, useActionState } from 'react';
+import React, { useState, useEffect, useActionState, useRef } from 'react';
 import { useFormStatus } from 'react-dom';
 import { AccountIcon, EmailIcon, LockIcon, EyeIcon, EyeOffIcon, CheckCircleIcon, NetworkIcon, ServerIcon, LayersIcon, InfoIcon, WiFiIcon, SearchIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
 import { useSpoolman as useSpoolmanContext } from '@/contexts/SpoolmanHooks';
@@ -8,6 +8,7 @@ import { Button } from '@/common/components/ui';
 import { useHealthStatus } from '@/common/hooks/useApi';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
+import { isApiError } from '@/common/utils/apiErrors';
 import { apiClient } from '@/services/api';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 
@@ -151,6 +152,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Step: Spoolman
   const [spoolmanEnabled, setSpoolmanEnabled] = useState(false);
   const [spoolmanUrl, setSpoolmanUrl] = useState('');
+  const [spoolmanBootstrapError, setSpoolmanBootstrapError] = useState<string | null>(null);
+  const spoolmanUrlChangedRef = useRef(false);
+  const spoolmanEnabledChangedRef = useRef(false);
   const [testingSpoolman, setTestingSpoolman] = useState(false);
   const [spoolmanTestResult, setSpoolmanTestResult] = useState<string | null>(null);
   const [spoolmanTestOk, setSpoolmanTestOk] = useState<boolean | null>(null);
@@ -163,21 +167,37 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => { setSpoolmanEnabledCtx(spoolmanEnabled); }, [spoolmanEnabled, setSpoolmanEnabledCtx]);
   useEffect(() => { setSpoolmanBaseUrlCtx(spoolmanUrl); }, [spoolmanUrl, setSpoolmanBaseUrlCtx]);
 
-  // Fetch Spoolman settings from backend on mount (pre-populate from deployment config)
+  // Fetch only the non-secret first-run bootstrap value; authenticated settings remain protected.
   useEffect(() => {
-    if (!isAuthenticated) return;
+    const controller = new AbortController();
+    let active = true;
 
-    apiClient.getSettings<import("@/types/SpoolmanSettings").SpoolmanSettings>('Spoolman')
-      .then(settings => {
-        if (settings?.baseUrl) {
-          setSpoolmanUrl(settings.baseUrl);
-          setSpoolmanEnabled(true);
+    apiClient.getSetupBootstrap(controller.signal)
+      .then(bootstrap => {
+        if (active && bootstrap.baseUrl && !spoolmanUrlChangedRef.current) {
+          setSpoolmanUrl(bootstrap.baseUrl);
+          if (!spoolmanEnabledChangedRef.current) {
+            setSpoolmanEnabled(true);
+          }
         }
       })
-      .catch(() => {
-        // Silently fail - user can configure manually
+      .catch(error => {
+        if (
+          active &&
+          !spoolmanUrlChangedRef.current &&
+          !(isApiError(error) && error.statusCode === 404)
+        ) {
+          setSpoolmanBootstrapError(
+            'Could not load the deployment Spoolman URL. Enter it manually or scan the network.',
+          );
+        }
       });
-  }, [isAuthenticated]);
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, []);
 
   // Network scanning for Spoolman discovery
   const { isScanning, results: scanResults, error: scanError, scanNetwork, reset: resetScan, availableInstances } = useSpoolmanNetworkScan();
@@ -380,6 +400,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const selectSpoolmanInstance = (url: string) => {
+    spoolmanUrlChangedRef.current = true;
+    setSpoolmanBootstrapError(null);
     setSpoolmanUrl(url);
     setSpoolmanBaseUrlCtx(url);
     // Auto-test the selected instance
@@ -387,6 +409,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const handleNetworkScan = async () => {
+    spoolmanUrlChangedRef.current = true;
+    setSpoolmanBootstrapError(null);
     resetScan();
     await scanNetwork();
   };
@@ -632,8 +656,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <h2 className="text-lg font-semibold flex items-center gap-2"><ServerIcon className="h-5 w-5"/>Spoolman Integration</h2>
         <p className="text-sm text-pf-text-secondary">Optionally connect to a Spoolman instance now or later in Settings.</p>
       </div>
+      {spoolmanBootstrapError && (
+        <div className="text-sm text-pf-warning bg-pf-warning/10 border border-pf-warning/30 rounded-sm p-3" role="alert">
+          {spoolmanBootstrapError}
+        </div>
+      )}
       <div className="flex items-center gap-2">
-        <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
+        <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { spoolmanEnabledChangedRef.current = true; setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
         <label htmlFor="useSpoolman" className="text-sm">Enable Spoolman</label>
       </div>
   {spoolmanEnabled && (
@@ -701,7 +730,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input
               type="url"
               value={spoolmanUrl}
-              onChange={e => setSpoolmanUrl(e.target.value)}
+              onChange={e => { spoolmanUrlChangedRef.current = true; setSpoolmanBootstrapError(null); setSpoolmanUrl(e.target.value); }}
               placeholder="http://spoolman:7912"
               className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-sm"
             />

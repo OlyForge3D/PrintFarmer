@@ -28,10 +28,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SettingsJson")
                         .IsRequired()
@@ -1656,12 +1656,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("REAL");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("TEXT");
@@ -2277,10 +2274,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<double?>("RetractionSpeed")
                         .HasColumnType("REAL");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
@@ -2448,10 +2445,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("TEXT");
@@ -2526,10 +2523,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime>("QueuedAt")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .HasColumnType("INTEGER");
@@ -3064,10 +3061,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("OccurrencePrintJobId")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("ScheduledExecutionTime")
                         .HasColumnType("TEXT");
@@ -4608,10 +4605,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<long>("NextSequence")
                         .HasColumnType("INTEGER");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("Id");
 
@@ -4621,7 +4618,8 @@ namespace Farm.Migrations.Sqlite.Migrations
                         new
                         {
                             Id = 1,
-                            NextSequence = 0L
+                            NextSequence = 0L,
+                            Revision = 1L
                         });
                 });
 
@@ -5390,12 +5388,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<Guid?>("SliceJobId")
                         .HasColumnType("TEXT");
@@ -5711,10 +5706,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
@@ -5783,10 +5778,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()
@@ -5855,10 +5850,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("INTEGER");
@@ -6212,10 +6207,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("PrinterGroupId")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("ServerUrl")
                         .IsRequired()
@@ -6456,12 +6451,9 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("INTEGER");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -6825,10 +6817,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -6983,10 +6975,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("INTEGER");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("StartPathKind")
                         .IsRequired()
@@ -7114,10 +7106,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                     b.Property<DateTime?>("RetryAfterUtc")
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .HasMaxLength(16)
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SchemaVersion")
                         .IsRequired()
@@ -7526,10 +7518,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Sku")
                         .HasMaxLength(256)
@@ -8177,10 +8169,10 @@ namespace Farm.Migrations.Sqlite.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Theme")
                         .IsRequired()

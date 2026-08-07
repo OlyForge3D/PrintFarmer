@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Setup;
+using Farm.Infrastructure.Settings;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -26,6 +27,48 @@ public class SetupController(ISetupService setupService) : ControllerBase
     {
         bool needsSetup = await _setupService.NeedsSetupAsync(ct);
         return Ok(new { needsSetup });
+    }
+
+    /// <summary>
+    /// Gets the non-secret deployment defaults needed by the first-run wizard.
+    /// </summary>
+    /// <remarks>
+    /// This endpoint intentionally exposes only the Spoolman base URL and is unavailable after an
+    /// administrator exists. The authenticated settings endpoint remains the canonical settings
+    /// surface after setup.
+    /// </remarks>
+    /// <param name="settingsService">Settings provider resolved only for this bootstrap action.</param>
+    /// <param name="ct">Cancellation token to cancel the operation.</param>
+    [HttpGet("bootstrap")]
+    [AllowAnonymous] // Public only while no account exists; the response contains one non-secret setup default.
+    [ProducesResponseType<SetupBootstrapResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<SetupBootstrapResponse>> GetBootstrapAsync(
+        [FromServices] ISettingsService settingsService,
+        CancellationToken ct)
+    {
+        if (!await _setupService.NeedsSetupAsync(ct))
+        {
+            return NotFound();
+        }
+
+        SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
+        return Ok(new SetupBootstrapResponse(GetPublicBootstrapBaseUrl(settings.BaseUrl)));
+    }
+
+    private static string GetPublicBootstrapBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) ||
+            !Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return string.Empty;
+        }
+
+        return baseUrl;
     }
 
     /// <summary>

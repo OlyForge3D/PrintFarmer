@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -12,12 +13,12 @@ public static class QueueEventSchemaVersions
 /// Atomically incremented (within the same <c>AppDbContext</c> transaction as each
 /// outbox event insert) to provide a truly cross-process monotonic sequence.
 ///
-/// The <see cref="RowVersion"/> optimistic concurrency token ensures that two concurrent
+/// The <see cref="Revision"/> optimistic concurrency token ensures that two concurrent
 /// API instances racing on the same sequence slot both cannot commit: the loser receives
 /// a <c>DbUpdateConcurrencyException</c> that rolls back its entire unit of work.
 /// There is always exactly one row in this table (Id = 1).
 /// </summary>
-public sealed class OutboxSequenceState
+public sealed class OutboxSequenceState : IRevisionedEntity
 {
     /// <summary>Always 1 — there is exactly one row.</summary>
     public int Id { get; set; }
@@ -29,11 +30,13 @@ public sealed class OutboxSequenceState
     public long NextSequence { get; set; }
 
     /// <summary>
-    /// Optimistic concurrency token (application-managed on SQLite/PostgreSQL;
-    /// native ROWVERSION on SQL Server). Prevents two concurrent writers from
-    /// both succeeding with the same sequence value.
+    /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
-    public byte[]? RowVersion { get; set; }
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 }
 
 /// <summary>
@@ -43,7 +46,7 @@ public sealed class OutboxSequenceState
 /// The in-memory channel is only a wake-up optimization; startup/periodic
 /// reconciliation recovers any events that were written but not yet published.
 /// </summary>
-public sealed class QueueDispatchOutbox
+public sealed class QueueDispatchOutbox : IRevisionedEntity
 {
     /// <summary>Durable event identity — also used as the idempotency key for the publisher.</summary>
     public Guid Id { get; set; }
@@ -56,11 +59,13 @@ public sealed class QueueDispatchOutbox
     public long Sequence { get; set; }
 
     /// <summary>
-    /// Optimistic concurrency token used for atomic lease acquisition by the durable command
-    /// consumer. Prevents two concurrent consumer instances from double-executing the same event.
-    /// Application-managed on SQLite/PostgreSQL; native ROWVERSION on SQL Server.
+    /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
-    public byte[]? RowVersion { get; set; }
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>Aggregate root type this event belongs to (e.g., <c>PrintJob</c>).</summary>
     [MaxLength(128)]
@@ -182,14 +187,17 @@ public sealed class QueueDispatchOutbox
 /// One row is written per start path invocation so that unknown outcomes
 /// can be reconciled and known failures release the lease cleanly.
 /// </summary>
-public sealed class QueueDispatchAttempt
+public sealed class QueueDispatchAttempt : IRevisionedEntity
 {
     /// <summary>Unique attempt identity.</summary>
     public Guid Id { get; set; }
 
-    /// <summary>Optimistic concurrency token fencing concurrent outcome/reconciliation writers.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <summary>Opaque compatibility token derived from <see cref="Revision"/>.</summary>
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>The print job this attempt belongs to. Null for ad-hoc (non-queue) starts.</summary>
     public Guid? PrintJobId { get; set; }

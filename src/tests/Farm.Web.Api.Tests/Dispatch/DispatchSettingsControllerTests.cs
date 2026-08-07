@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Queue.Dispatch;
@@ -32,6 +33,13 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient _client = null!;
+
+    public static TheoryData<string> NonAdvanceableEtags =>
+    [
+        $"\"{Convert.ToBase64String(Convert.FromHexString("000000000000002A"))}\"",
+        $"\"{Convert.ToBase64String(Guid.Parse("29e33b8d-b7e9-4f1e-8632-3f687aa99210").ToByteArray())}\"",
+        RevisionETag.EncodeQuoted(long.MaxValue),
+    ];
 
     // API serializes enums as strings via JsonStringEnumConverter
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -333,6 +341,24 @@ public class DispatchSettingsControllerTests : IAsyncLifetime
             JsonOptions);
         persisted!.AutoDispatchEnabled.Should().BeTrue();
         persisted.IdleThresholdSeconds.Should().Be(10);
+    }
+
+    [Theory]
+    [MemberData(nameof(NonAdvanceableEtags))]
+    public async Task UpdateSettings_NonAdvanceableEtag_Returns412(string etag)
+    {
+        var request = new UpdateDispatchSettingsDto
+        {
+            AutoDispatchEnabled = true,
+            AutoDispatchMode = AutoDispatchMode.Auto,
+            IdleThresholdSeconds = 30,
+            MinimumScoreThreshold = 50,
+            MaxConcurrentDispatches = 1,
+        };
+
+        HttpResponseMessage response = await PutWithEtagAsync(request, etag);
+
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
     }
 
     private async Task<HttpResponseMessage> PutWithCurrentEtagAsync(

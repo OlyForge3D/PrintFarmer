@@ -2078,6 +2078,10 @@ export interface ApiError {
   isAxiosError?: boolean;
 }
 
+export interface SetupBootstrapResponse {
+  baseUrl: string;
+}
+
 // Authentication types
 export interface LoginRequest {
   // Accept either `username` (legacy) or `usernameOrEmail` (backend contract)

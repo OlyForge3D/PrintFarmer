@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Domain;
 /// Isolated from the main Printer row to prevent xmin concurrency conflicts
 /// when background services write timestamps while users edit printer config.
 /// </summary>
-public class PrinterServiceState
+public class PrinterServiceState : IRevisionedEntity
 {
     public Guid PrinterId { get; set; }
 
@@ -27,6 +27,6 @@ public class PrinterServiceState
 
     public ObicoServer? ObicoServer { get; set; }
 
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 }

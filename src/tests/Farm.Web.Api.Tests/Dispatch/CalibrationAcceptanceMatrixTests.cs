@@ -1356,7 +1356,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
 
         // Use a deliberately wrong (stale) dispatch state row version.
-        byte[] staleRowVersion = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
+        byte[] staleRowVersion = RevisionETag.EncodeBytes(long.MaxValue);
 
         await using AppDbContext ackCtx = CreateContext();
         var ackSvc = CreateAckService(ackCtx);

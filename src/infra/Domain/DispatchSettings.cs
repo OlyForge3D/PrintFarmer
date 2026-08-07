@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 
 namespace Farm.Infrastructure.Domain;
@@ -7,7 +8,7 @@ namespace Farm.Infrastructure.Domain;
 /// Singleton entity storing system-wide auto-dispatch configuration.
 /// One row in the database — use Id = 1 by convention.
 /// </summary>
-public class DispatchSettings
+public class DispatchSettings : IRevisionedEntity
 {
     /// <summary>
     /// Primary key. Always 1 (singleton pattern).
@@ -15,9 +16,9 @@ public class DispatchSettings
     [Key]
     public int Id { get; set; } = 1;
 
-    /// <summary>Public optimistic concurrency token returned as an ETag.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <summary>Opaque compatibility token returned as an ETag.</summary>
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <summary>Provider-independent logical revision.</summary>
     public long Revision { get; set; } = 1;

@@ -13,7 +13,6 @@ public class GcodeHarvestOperationConfiguration : IEntityTypeConfiguration<Gcode
     public void Configure(EntityTypeBuilder<GcodeHarvestOperation> builder)
     {
         builder.HasKey(h => h.Id);
-        builder.Property(h => h.RowVersion).IsRowVersion();
 
         // Basic properties
         builder.Property(h => h.Status).HasConversion<int>();

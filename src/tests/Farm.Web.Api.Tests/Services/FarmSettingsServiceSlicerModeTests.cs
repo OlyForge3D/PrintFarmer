@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,13 @@ public class FarmSettingsServiceSlicerModeTests
 {
     private readonly Mock<ISettingsService> _settingsMock = new();
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
+
+    public static TheoryData<string> NonAdvanceableTokens =>
+    [
+        Convert.ToBase64String(Convert.FromHexString("000000000000002A")),
+        Convert.ToBase64String(Guid.Parse("29e33b8d-b7e9-4f1e-8632-3f687aa99210").ToByteArray()),
+        RevisionETag.Encode(long.MaxValue),
+    ];
 
     public FarmSettingsServiceSlicerModeTests()
     {
@@ -73,6 +81,42 @@ public class FarmSettingsServiceSlicerModeTests
         _settingsMock.Verify(
             s => s.Save(It.Is<SlicerSettings>(ss => ss.SlicerMode == SlicerMode.Simple)),
             Times.Once);
+    }
+
+    [Theory]
+    [MemberData(nameof(NonAdvanceableTokens))]
+    public void UpdateFarmSettings_WithNonAdvanceableToken_ThrowsConcurrency(string rowVersion)
+    {
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString())
+            .Options;
+        using (AppDbContext seedContext = new(options))
+        {
+            seedContext.AppSettingsEntities.Add(new AppSettingsEntity
+            {
+                Key = CostTrackingSettings.SectionName,
+                SettingsJson = "{}",
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = seedContext.SaveChanges();
+        }
+
+        var factory = new Mock<IDbContextFactory<AppDbContext>>();
+        factory
+            .Setup(value => value.CreateDbContext())
+            .Returns(() => new AppDbContext(options));
+        var settings = new Mock<ISettingsService>();
+        settings
+            .Setup(value => value.Get<CostTrackingSettings>())
+            .Returns(new CostTrackingSettings());
+        FarmSettingsService service = new(settings.Object, factory.Object);
+        var request = new UpdateFarmSettingsRequest(
+            ElectricityRatePerKwh: 0.2m,
+            DefaultMachineHourlyRate: null,
+            AveragePrinterWattage: null);
+
+        _ = Assert.Throws<DbUpdateConcurrencyException>(
+            () => service.UpdateFarmSettings(request, rowVersion));
     }
 
     [Fact]

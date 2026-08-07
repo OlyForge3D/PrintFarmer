@@ -14,8 +14,6 @@ public class PrintProjectFileConfiguration : IEntityTypeConfiguration<PrintProje
         builder.HasKey(pf => pf.Id);
 
         // Concurrency token for optimistic locking
-        builder.Property(pf => pf.RowVersion).IsRowVersion();
-
         // Basic properties
         builder.Property(pf => pf.MaterialRequirement).HasMaxLength(64);
         builder.Property(pf => pf.Status).HasConversion<int>().HasDefaultValue(PrintProjectFileStatus.Pending);

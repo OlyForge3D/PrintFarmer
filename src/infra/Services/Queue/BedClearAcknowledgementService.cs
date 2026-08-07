@@ -727,16 +727,22 @@ public sealed class BedClearAcknowledgementService(
                 request.JobId);
 
             _db.ChangeTracker.Clear();
-            byte[]? currentJobRevision = await _db.PrintJobs
+            long? currentJobRevisionValue = await _db.PrintJobs
                 .AsNoTracking()
                 .Where(candidate => candidate.Id == request.JobId)
-                .Select(candidate => candidate.RowVersion)
+                .Select(candidate => (long?)candidate.Revision)
                 .SingleOrDefaultAsync(ct);
-            byte[]? currentDispatchRevision = await _db.PrinterDispatchStates
+            long? currentDispatchRevisionValue = await _db.PrinterDispatchStates
                 .AsNoTracking()
                 .Where(candidate => candidate.PrinterId == request.PrinterId)
-                .Select(candidate => candidate.RowVersion)
+                .Select(candidate => (long?)candidate.Revision)
                 .SingleOrDefaultAsync(ct);
+            byte[]? currentJobRevision = currentJobRevisionValue.HasValue
+                ? RevisionETag.EncodeBytes(currentJobRevisionValue.Value)
+                : null;
+            byte[]? currentDispatchRevision = currentDispatchRevisionValue.HasValue
+                ? RevisionETag.EncodeBytes(currentDispatchRevisionValue.Value)
+                : null;
             return new AcknowledgeBedClearResult(
                 BedClearAckOutcome.DispatchRevisionConflict,
                 currentJobRevision,

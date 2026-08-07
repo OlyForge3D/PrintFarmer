@@ -7,12 +7,12 @@ namespace Farm.Infrastructure.Domain;
 /// Templates define preset file patterns, color requirements, and print counts
 /// for common printer kit assemblies (e.g., Voron 2.4, Trident).
 /// </summary>
-public class PrintProjectTemplate
+public class PrintProjectTemplate : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     [Required]
     [MaxLength(255)]
