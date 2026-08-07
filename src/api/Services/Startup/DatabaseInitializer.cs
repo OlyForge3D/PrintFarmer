@@ -147,8 +147,8 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             return;
         }
 
-        const int maxUniqueConstraintRetries = 2;
-        for (int attempt = 1; attempt <= maxUniqueConstraintRetries; attempt++)
+        const int maxUniqueConstraintAttempts = 3;
+        for (int attempt = 1; attempt <= maxUniqueConstraintAttempts; attempt++)
         {
             try
             {
@@ -164,7 +164,7 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 _ = await _context.SaveChangesAsync();
                 return;
             }
-            catch (DbUpdateException ex) when (attempt < maxUniqueConstraintRetries && IsUniqueConstraintViolation(ex))
+            catch (DbUpdateException ex) when (attempt < maxUniqueConstraintAttempts && IsUniqueConstraintViolation(ex))
             {
                 _logger.LogDebug(ex, "[DB] Authentication seed insert raced with another initializer; retrying from committed rows");
                 _context.ChangeTracker.Clear();
@@ -230,9 +230,16 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 sqlServerErrorNumber = inner.GetType().GetProperty("Number")?.GetValue(inner) as int?;
             }
 
+            int? mySqlErrorNumber = null;
+            if (inner.GetType().FullName is "MySqlConnector.MySqlException" or "MySql.Data.MySqlClient.MySqlException")
+            {
+                mySqlErrorNumber = inner.GetType().GetProperty("Number")?.GetValue(inner) as int?;
+            }
+
             if (MatchesUniqueConstraintViolation(
                 sqlState,
                 sqlServerErrorNumber,
+                mySqlErrorNumber,
                 sqliteErrorCode,
                 sqliteExtendedErrorCode))
             {
@@ -246,12 +253,13 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
     internal static bool MatchesUniqueConstraintViolation(
         string? sqlState,
         int? sqlServerErrorNumber,
+        int? mySqlErrorNumber,
         int? sqliteErrorCode,
         int? sqliteExtendedErrorCode)
-        => sqliteErrorCode == 19
-            || sqliteExtendedErrorCode is 1555 or 2067
+        => sqliteExtendedErrorCode is 1555 or 2067
             || string.Equals(sqlState, "23505", StringComparison.Ordinal)
-            || sqlServerErrorNumber is 2601 or 2627;
+            || sqlServerErrorNumber is 2601 or 2627
+            || mySqlErrorNumber == 1062;
 
     private async Task SeedResourcesAsync()
     {

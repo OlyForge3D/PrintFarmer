@@ -1,10 +1,12 @@
 ﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.DataManagement;
 using Farm.Web.Api.Services.Startup;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -85,13 +87,14 @@ public sealed class PermissionSeedTests
     [Fact]
     public void MatchesUniqueConstraintViolation_UsesProviderErrorCodes()
     {
-        DatabaseInitializer.MatchesUniqueConstraintViolation(null, null, 19, null).Should().BeTrue();
-        DatabaseInitializer.MatchesUniqueConstraintViolation(null, null, null, 2067).Should().BeTrue();
-        DatabaseInitializer.MatchesUniqueConstraintViolation("23505", null, null, null).Should().BeTrue();
-        DatabaseInitializer.MatchesUniqueConstraintViolation(null, 2601, null, null).Should().BeTrue();
-        DatabaseInitializer.MatchesUniqueConstraintViolation(null, 2627, null, null).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation(null, null, null, null, 2067).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation(null, null, null, null, 1555).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation("23505", null, null, null, null).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation(null, 2601, null, null, null).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation(null, 2627, null, null, null).Should().BeTrue();
+        DatabaseInitializer.MatchesUniqueConstraintViolation(null, null, 1062, null, null).Should().BeTrue();
 
-        DatabaseInitializer.MatchesUniqueConstraintViolation("23503", 547, null, null).Should().BeFalse();
+        DatabaseInitializer.MatchesUniqueConstraintViolation("23503", 547, null, null, null).Should().BeFalse();
     }
 
     [Fact]
@@ -162,5 +165,65 @@ public sealed class PermissionSeedTests
         await using AppDbContext verificationContext = new(options);
         (await verificationContext.Resources.CountAsync()).Should().Be(14);
         (await verificationContext.Resources.Select(resource => resource.Name).Distinct().CountAsync()).Should().Be(14);
+    }
+
+    [Fact]
+    public async Task SeedAllAsync_WhenResourceInsertWinsRace_ReloadsAndCompletes()
+    {
+        string connectionString = $"Data Source=file:seed_interceptor_{Guid.NewGuid():N}?mode=memory&cache=shared";
+        await using SqliteConnection keeper = new(connectionString);
+        await keeper.OpenAsync();
+        DbContextOptions<AppDbContext> contenderOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .Options;
+        await using (AppDbContext schemaContext = new(contenderOptions))
+        {
+            _ = await schemaContext.Database.EnsureCreatedAsync();
+        }
+
+        DbContextOptions<AppDbContext> initializerOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connectionString)
+            .AddInterceptors(new ResourceInsertInterceptor(contenderOptions))
+            .Options;
+        var dataSeedService = new Mock<IDataSeedService>(MockBehavior.Loose);
+        await using AppDbContext context = new(initializerOptions);
+        DatabaseInitializer initializer = new(
+            context,
+            NullLogger<DatabaseInitializer>.Instance,
+            dataSeedService.Object);
+
+        await initializer.SeedAllAsync();
+
+        (await context.Resources.CountAsync()).Should().Be(14);
+    }
+
+    private sealed class ResourceInsertInterceptor(DbContextOptions<AppDbContext> contenderOptions) : SaveChangesInterceptor
+    {
+        private int _hasInserted;
+
+        public override async ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Interlocked.Exchange(ref _hasInserted, 1) == 0)
+            {
+                await using AppDbContext contender = new(contenderOptions);
+                _ = contender.Resources.Add(new Resource
+                {
+                    Id = Guid.NewGuid(),
+                    Name = "printers",
+                    DisplayName = "Printers",
+                    Description = "3D printer management",
+                    ResourceType = "printer",
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+                _ = await contender.SaveChangesAsync(cancellationToken);
+            }
+
+            return await base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }
