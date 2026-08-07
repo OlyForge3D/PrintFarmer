@@ -27,6 +27,7 @@ export default tseslint.config([
       'local/pf-no-unguarded-console': 'warn',
       'local/pf-no-raw-html-controls': 'warn',
       'local/pf-require-apiclient': 'error',
+      'local/pf-no-inert-state-bg': 'error',
       // DESIGN-LANGUAGE caps rectangular surfaces at --pf-radius-lg (8px) and
       // reserves the fully-round radius for shapes that are actually round.
       // This ran in two tiers while the backlog was cleared (#1015): a

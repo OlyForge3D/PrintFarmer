@@ -11,6 +11,50 @@ about. Registered in [`eslint-plugin-local.js`](./eslint-plugin-local.js) and co
 | `local/pf-no-unguarded-console` | `console.log/debug/info` in UI code is wrapped in a `window.PrintFarmerDebug` guard; no raw object dumps in JSX. |
 | `local/no-hardcoded-colors` | Theme tokens instead of literal hex/rgb/Tailwind palette colors. |
 | `local/pf-no-oversized-radius` | Border radii stay inside the `DESIGN-LANGUAGE.md` scale. See below. |
+| `local/pf-no-inert-state-bg` | Direct `hover:`/`active:` backgrounds must differ from the background already active at that interaction stage. See below. |
+
+## `local/pf-no-inert-state-bg`
+
+This rule prevents token migrations from silently erasing interactive feedback. It reports a
+direct `hover:` background that repeats the base background and an `active:` background that
+repeats the hover background:
+
+```tsx
+<button className="bg-pf-bg-2 hover:bg-pf-bg-2" />
+<div className="bg-pf-border hover:bg-pf-accent active:bg-pf-accent" />
+```
+
+The rule is intentionally background-only. A reproducible, class-order-independent AST
+inventory on 2026-08-07 found 21 current same-token base/state shapes: 8 text, 9 border,
+3 ring, and 1 background. All 21 are deliberate pins. The background case is
+`disabled:hover:bg-pf-bg-1`, which preserves the disabled surface and is excluded. The
+selected direct `hover`/`active` background strategy therefore reports zero current source
+findings while still reproducing all three #1082 regressions.
+
+The rejected all-utility strategy would report error text preserved on hover, error borders
+preserved on focus, and selected borders preserved on hover. Ancestor analysis is unnecessary
+for the narrower rule: `group-hover:` and `peer-hover:` are not direct element states and remain
+green. Responsive and theme prefixes are retained as context, so
+`dark:md:bg-pf-bg-1 dark:md:hover:bg-pf-bg-1` is still detected. Opacity suffixes are part of
+the value, so `/55` to `/75` is a real change. Mutually exclusive ternary branches are analyzed
+separately.
+
+Class strings are read from plain JSX attributes, template literals, arrays, object keys, and
+helper calls such as `clsx()` and `cn()`. Important markers and color-typed arbitrary values are
+parsed without splitting colons inside brackets or functions. Negative background utilities
+are ignored because they are positioning utilities rather than colors.
+
+If a direct hover or active background genuinely must stay pinned, document that exceptional
+intent at the element:
+
+```tsx
+<button
+  data-pf-allow-inert-bg="selected state deliberately stays pinned"
+  className="bg-pf-accent-bg hover:bg-pf-accent-bg"
+/>
+```
+
+The rule has no autofix because choosing a replacement background is a design decision.
 
 ## `local/pf-no-oversized-radius`
 
