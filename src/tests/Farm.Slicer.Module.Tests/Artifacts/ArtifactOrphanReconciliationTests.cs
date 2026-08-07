@@ -193,6 +193,10 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             pendingArtifact.Id.ToString("N") +
                 ArtifactStorageFileSystem.LeaseFileExtension);
         SetStale(permanentPath);
+        if (OperatingSystem.IsLinux())
+        {
+            SetStale(leasePath);
+        }
 
         Mock<IArtifactsRepository> cleanupRepository = CreateRepository();
         int deleted = await CreateCleanupService(cleanupRepository.Object)

@@ -454,6 +454,14 @@ public class ArtifactCleanupService(
                 FileMode.Open,
                 FileAccess.ReadWrite,
                 FileShare.None);
+            if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
+                    leaseStream))
+            {
+                leaseStream.Dispose();
+                leaseStream = null;
+                return false;
+            }
+
             return true;
         }
         catch (FileNotFoundException)

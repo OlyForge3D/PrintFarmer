@@ -296,7 +296,23 @@ internal static class ArtifactStorageFileSystem
     {
         if (OperatingSystem.IsLinux())
         {
-            return CreateNamedLinuxStagingStream(leasePath);
+            FileStream leaseStream =
+                CreateNamedLinuxStagingStream(leasePath);
+            try
+            {
+                if (!TryAcquireExclusiveLeaseLock(leaseStream))
+                {
+                    throw new IOException(
+                        "Failed to acquire the artifact upload lease.");
+                }
+
+                return leaseStream;
+            }
+            catch
+            {
+                leaseStream.Dispose();
+                throw;
+            }
         }
 
         if (!OperatingSystem.IsWindows())
@@ -317,6 +333,40 @@ internal static class ArtifactStorageFileSystem
             FileShare.None,
             bufferSize: 1,
             FileOptions.WriteThrough);
+    }
+
+    internal static bool TryAcquireExclusiveLeaseLock(FileStream leaseStream)
+    {
+        ArgumentNullException.ThrowIfNull(leaseStream);
+        if (!OperatingSystem.IsLinux())
+        {
+            return true;
+        }
+
+        int result;
+        int error;
+        do
+        {
+            result = LockLinuxFile(
+                leaseStream.SafeFileHandle,
+                LinuxExclusiveLock | LinuxNonBlockingLock);
+            error = result < 0 ? Marshal.GetLastPInvokeError() : 0;
+        }
+        while (result < 0 && error == LinuxInterrupted);
+
+        if (result == 0)
+        {
+            return true;
+        }
+
+        if (error == LinuxTryAgain)
+        {
+            return false;
+        }
+
+        throw new IOException(
+            "Failed to acquire the artifact lease lock.",
+            new Win32Exception(error));
     }
 
     internal static FileStream CreateNamedLinuxStagingStream(
@@ -856,6 +906,10 @@ internal static class ArtifactStorageFileSystem
     private const int LinuxNoSuchFileOrDirectory = 2;
     private const int LinuxOperationNotPermitted = 1;
     private const int LinuxAccessDenied = 13;
+    private const int LinuxInterrupted = 4;
+    private const int LinuxTryAgain = 11;
+    private const int LinuxExclusiveLock = 2;
+    private const int LinuxNonBlockingLock = 4;
     private const uint LinuxOwnerReadWrite = 0x180;
     private const uint WindowsDelete = 0x00010000;
     private const uint WindowsReadAttributes = 0x00000080;
@@ -950,6 +1004,16 @@ internal static class ArtifactStorageFileSystem
         int directoryFileDescriptor,
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int flags);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "flock",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern int LockLinuxFile(
+        SafeFileHandle fileDescriptor,
+        int operation);
 
     [DllImport(
         "libc",
