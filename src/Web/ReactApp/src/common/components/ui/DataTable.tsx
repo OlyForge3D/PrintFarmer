@@ -108,6 +108,7 @@ export function DataTable<T>({
 }: DataTableProps<T>) {
   const keyboardNavigationEnabled = keyboardNavigation || Boolean(onRowSelect);
   const rowIdPrefix = useId();
+  const [activeRowKey, setActiveRowKey] = useState<string | number | null>(null);
   const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
 
   // Internal sort state
@@ -185,10 +186,19 @@ export function DataTable<T>({
 
   // Handle row focus
   const handleRowFocus = useCallback((index: number) => {
-    if (onRowFocus && sortedData[index]) {
-      onRowFocus(sortedData[index], index);
+    if (sortedData[index]) {
+      setActiveRowKey(getRowKey(sortedData[index]));
+      onRowFocus?.(sortedData[index], index);
     }
-  }, [onRowFocus, sortedData]);
+  }, [getRowKey, onRowFocus, sortedData]);
+
+  const activeRowIndex = useMemo(() => {
+    if (activeRowKey === null) {
+      return -1;
+    }
+
+    return sortedData.findIndex((item) => getRowKey(item) === activeRowKey);
+  }, [activeRowKey, getRowKey, sortedData]);
 
   const getAccessibleRowId = useCallback((index: number) => {
     if (index < 0 || index >= sortedData.length) {
@@ -214,6 +224,7 @@ export function DataTable<T>({
       onRowFocus={handleRowFocus}
       className={className}
       rowCount={sortedData.length}
+      focusedRowIndex={activeRowIndex}
       selectionEnabled={Boolean(onRowSelect)}
       getRowId={getAccessibleRowId}
       aria-label={ariaLabel}

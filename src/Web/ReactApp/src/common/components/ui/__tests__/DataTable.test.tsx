@@ -141,6 +141,7 @@ describe('DataTable', () => {
     await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
+    expect(screen.getAllByRole('row')[0]).not.toHaveAttribute('aria-selected');
     expect(screen.getByRole('row', { name: /Item A/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('row', { name: /Item B/ })).toHaveAttribute('aria-selected', 'false');
   });
@@ -327,7 +328,31 @@ describe('DataTable', () => {
     expect(screen.getAllByRole('row', { name: /Item A/ })[0]).toHaveAttribute('id', itemAId);
   });
 
-  it('should remove an active descendant reference when its row is absent', async () => {
+  it('should keep the active row associated with its key when sorting', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation
+      />
+    );
+
+    const grid = screen.getByRole('grid');
+    await user.tab();
+    await user.keyboard('{ArrowDown}');
+    const itemA = screen.getByRole('row', { name: /Item A/ });
+    expect(grid).toHaveAttribute('aria-activedescendant', itemA.id);
+
+    fireEvent.click(screen.getByRole('columnheader', { name: /Value/ }));
+
+    expect(grid).toHaveAttribute('aria-activedescendant', itemA.id);
+    expect(itemA).toHaveClass('ring-2');
+  });
+
+  it('should remove an active descendant reference when the active row is absent', async () => {
     const user = userEvent.setup();
     const { rerender } = render(
       <DataTable
@@ -340,13 +365,13 @@ describe('DataTable', () => {
 
     const grid = screen.getByRole('grid');
     await user.tab();
-    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+    await user.keyboard('{ArrowDown}');
     const removedRowId = grid.getAttribute('aria-activedescendant');
     expect(removedRowId).not.toBeNull();
 
     rerender(
       <DataTable
-        data={mockData.slice(0, 1)}
+        data={mockData.slice(1)}
         columns={mockColumns}
         getRowKey={(item) => item.id}
         keyboardNavigation

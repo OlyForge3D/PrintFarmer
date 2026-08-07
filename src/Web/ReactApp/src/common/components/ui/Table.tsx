@@ -34,6 +34,8 @@ export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   onRowSelect?: (index: number) => void;
   /** Explicit navigable row count when rows provide their own rowIndex values */
   rowCount?: number;
+  /** Controlled active row index */
+  focusedRowIndex?: number;
   /** Whether data rows expose selection state */
   selectionEnabled?: boolean;
   /** Resolve the DOM id for a navigable row */
@@ -99,13 +101,15 @@ function useTableKeyboardNavigation(
   enabled: boolean,
   onRowFocus?: (index: number) => void,
   onRowSelect?: (index: number) => void,
-  explicitRowCount?: number
+  explicitRowCount?: number,
+  controlledFocusedRowIndex?: number,
 ) {
   const [requestedFocusedRowIndex, setRequestedFocusedRowIndex] = useState(-1);
   const [registeredRowCount, setRegisteredRowCount] = useState(0);
   const rowCount = explicitRowCount ?? registeredRowCount;
-  const focusedRowIndex = requestedFocusedRowIndex >= 0 && requestedFocusedRowIndex < rowCount
-    ? requestedFocusedRowIndex
+  const candidateFocusedRowIndex = controlledFocusedRowIndex ?? requestedFocusedRowIndex;
+  const focusedRowIndex = candidateFocusedRowIndex >= 0 && candidateFocusedRowIndex < rowCount
+    ? candidateFocusedRowIndex
     : -1;
   const rowIndexCounter = useRef(0);
 
@@ -127,34 +131,24 @@ function useTableKeyboardNavigation(
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!enabled || rowCount === 0 || e.target !== e.currentTarget) return;
 
+    let nextIndex: number | undefined;
+
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setRequestedFocusedRowIndex(prev => {
-          const current = prev >= 0 && prev < rowCount ? prev : -1;
-          const next = current < rowCount - 1 ? current + 1 : current;
-          onRowFocus?.(next);
-          return next;
-        });
+        nextIndex = focusedRowIndex < rowCount - 1 ? focusedRowIndex + 1 : focusedRowIndex;
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setRequestedFocusedRowIndex(prev => {
-          const current = prev >= 0 && prev < rowCount ? prev : 0;
-          const next = current > 0 ? current - 1 : 0;
-          onRowFocus?.(next);
-          return next;
-        });
+        nextIndex = focusedRowIndex > 0 ? focusedRowIndex - 1 : 0;
         break;
       case 'Home':
         e.preventDefault();
-        setRequestedFocusedRowIndex(0);
-        onRowFocus?.(0);
+        nextIndex = 0;
         break;
       case 'End':
         e.preventDefault();
-        setRequestedFocusedRowIndex(rowCount - 1);
-        onRowFocus?.(rowCount - 1);
+        nextIndex = rowCount - 1;
         break;
       case 'Enter':
       case ' ':
@@ -163,6 +157,11 @@ function useTableKeyboardNavigation(
           onRowSelect?.(focusedRowIndex);
         }
         break;
+    }
+
+    if (nextIndex !== undefined) {
+      setRequestedFocusedRowIndex(nextIndex);
+      onRowFocus?.(nextIndex);
     }
   }, [enabled, rowCount, focusedRowIndex, onRowFocus, onRowSelect]);
 
@@ -201,6 +200,7 @@ export function Table({
   onRowFocus,
   onRowSelect,
   rowCount: explicitRowCount,
+  focusedRowIndex: controlledFocusedRowIndex,
   selectionEnabled = Boolean(onRowSelect),
   getRowId,
   ...props 
@@ -219,7 +219,13 @@ export function Table({
     registerRow,
     unregisterRow,
     handleKeyDown,
-  } = useTableKeyboardNavigation(keyboardNavigation, onRowFocus, onRowSelect, explicitRowCount);
+  } = useTableKeyboardNavigation(
+    keyboardNavigation,
+    onRowFocus,
+    onRowSelect,
+    explicitRowCount,
+    controlledFocusedRowIndex,
+  );
   const activeDescendantId = focusedRowIndex >= 0 ? resolveRowId(focusedRowIndex) : undefined;
 
   return (
@@ -322,7 +328,9 @@ export function TableRow({
     }
   }, [context, assignedIndex]);
 
-  const isFocused = context ? context.focusedRowIndex === assignedIndex : false;
+  const isFocused = context
+    ? assignedIndex >= 0 && context.focusedRowIndex === assignedIndex
+    : false;
   const rowId = context?.keyboardNavigation && assignedIndex >= 0
     ? context.getRowId(assignedIndex)
     : id;
@@ -352,7 +360,11 @@ export function TableRow({
       {...props}
       id={rowId}
       role={context?.keyboardNavigation ? 'row' : role}
-      aria-selected={context?.selectionEnabled ? isSelected : props['aria-selected']}
+      aria-selected={
+        context?.selectionEnabled && assignedIndex >= 0
+          ? isSelected
+          : props['aria-selected']
+      }
     >
       {children}
     </tr>
