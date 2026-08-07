@@ -343,6 +343,7 @@ export function ExtrudersCatalog() {
           columns={columns}
           getRowKey={(item) => item.id}
           keyboardNavigation
+          ariaLabel="Extruders catalog"
           defaultSortColumn="name"
           renderActions={(item) => (
             <div className="flex gap-1">

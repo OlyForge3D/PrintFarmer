@@ -12,15 +12,15 @@ public class SlicerSettings : IAppSetting
 
     public static string SectionKey => SectionName;
 
-    [SettingDisplay(Name = "Slicer Enabled", Description = "Automatically enabled when a slicer worker registers. Disable to hide slicer UI.", InputType = SettingInputType.Boolean)]
+    [SettingDisplay(Name = "Slicer enabled", Description = "Automatically enabled when a slicer worker registers. Disable to hide slicer UI.", InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
 
-    [SettingDisplay(Name = "Per-Engine Slicer Settings", Description = "Settings for each slicer engine.", InputType = SettingInputType.Custom)]
+    [SettingDisplay(Name = "Per-engine slicer settings", Description = "Settings for each slicer engine.", InputType = SettingInputType.Custom)]
     [JsonPropertyName("perEngine")]
     public Dictionary<string, PerEngineSlicerSetting> PerEngine { get; set; } = new();
 
-    [SettingDisplay(Name = "Jitter Percent", Description = "Randomization percentage for slicer jobs.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Jitter percent", Description = "Randomization percentage for slicer jobs.", InputType = SettingInputType.Number)]
     [JsonPropertyName("jitterPercent")]
     public double JitterPercent { get; set; } = 15.0;
 
@@ -28,15 +28,15 @@ public class SlicerSettings : IAppSetting
     [JsonPropertyName("workerId")]
     public string WorkerId { get; set; } = Environment.MachineName + "-" + Guid.NewGuid().ToString("N")[..8];
 
-    [SettingDisplay(Name = "Max Retry Count", Description = "Maximum number of retries for failed jobs.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max retry count", Description = "Maximum number of retries for failed jobs.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxRetryCount")]
     public int MaxRetryCount { get; set; } = 3;
 
-    [SettingDisplay(Name = "Max Concurrent Jobs", Description = "Upper bound of simultaneous slice jobs per worker enforced by the orchestrator.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max concurrent jobs", Description = "Upper bound of simultaneous slice jobs per worker enforced by the orchestrator.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxConcurrentJobs")]
     public int MaxConcurrentJobs { get; set; } = 1;
 
-    [SettingDisplay(Name = "Max Memory", Unit = "MB", Description = "Advisory memory ceiling for slice job admission. Future versions will use this for predictive scheduling.", InputType = SettingInputType.Number)]
+    [SettingDisplay(Name = "Max memory", Unit = "MB", Description = "Advisory memory ceiling for slice job admission. Future versions will use this for predictive scheduling.", InputType = SettingInputType.Number)]
     [JsonPropertyName("maxMemoryMb")]
     public int MaxMemoryMb { get; set; } = 1024;
 }

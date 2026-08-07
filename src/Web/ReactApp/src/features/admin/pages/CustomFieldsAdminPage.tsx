@@ -7,7 +7,14 @@ import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProp
 import { Button, Input, Select, FormField, Textarea, Toggle } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useCustomFieldDefinitions, queryKeys } from '@/common/hooks/useApi';
-import { toast } from 'sonner';
+import {
+  AdminEmpty,
+  AdminError,
+  AdminLoading,
+  AdminSaveBar,
+  adminToast,
+  useDirtyState,
+} from '@/common/components/admin';
 import type {
   CustomFieldDefinition,
   CustomFieldEntityType,
@@ -24,6 +31,17 @@ const FIELD_TYPES: { value: CustomFieldType; label: string }[] = [
   { value: 'Select', label: 'Select (dropdown)' },
 ];
 
+const DEFAULT_FORM = {
+  fieldName: '',
+  fieldKey: '',
+  fieldType: 'Text' as CustomFieldType,
+  options: '',
+  isRequired: false,
+  sortOrder: 0,
+  description: '',
+  defaultValue: '',
+};
+
 function toKebabCase(s: string): string {
   return s
     .trim()
@@ -36,29 +54,15 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<CustomFieldEntityType>('Printer');
 
-  const { data: definitions = [], isLoading } = useCustomFieldDefinitions(activeTab);
+  const { data: definitions = [], isLoading, error, refetch } = useCustomFieldDefinitions(activeTab);
 
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<CustomFieldDefinition | null>(null);
-  const [fieldName, setFieldName] = useState('');
-  const [fieldKey, setFieldKey] = useState('');
-  const [fieldType, setFieldType] = useState<CustomFieldType>('Text');
-  const [options, setOptions] = useState('');
-  const [isRequired, setIsRequired] = useState(false);
-  const [sortOrder, setSortOrder] = useState(0);
-  const [description, setDescription] = useState('');
-  const [defaultValue, setDefaultValue] = useState('');
+  const form = useDirtyState(DEFAULT_FORM);
   const [autoKey, setAutoKey] = useState(true);
 
   const resetForm = () => {
-    setFieldName('');
-    setFieldKey('');
-    setFieldType('Text');
-    setOptions('');
-    setIsRequired(false);
-    setSortOrder(0);
-    setDescription('');
-    setDefaultValue('');
+    form.markPristine(DEFAULT_FORM);
     setAutoKey(true);
   };
 
@@ -70,22 +74,24 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
 
   const openEdit = (def: CustomFieldDefinition) => {
     setEditing(def);
-    setFieldName(def.fieldName);
-    setFieldKey(def.fieldKey);
-    setFieldType(def.fieldType);
-    setOptions(def.options ? parseOptionsToLines(def.options) : '');
-    setIsRequired(def.isRequired);
-    setSortOrder(def.sortOrder);
-    setDescription(def.description ?? '');
-    setDefaultValue(def.defaultValue ?? '');
+    form.markPristine({
+      fieldName: def.fieldName,
+      fieldKey: def.fieldKey,
+      fieldType: def.fieldType,
+      options: def.options ? parseOptionsToLines(def.options) : '',
+      isRequired: def.isRequired,
+      sortOrder: def.sortOrder,
+      description: def.description ?? '',
+      defaultValue: def.defaultValue ?? '',
+    });
     setAutoKey(false);
     setShowModal(true);
   };
 
   const handleFieldNameChange = (name: string) => {
-    setFieldName(name);
+    form.setValue('fieldName', name);
     if (autoKey && !editing) {
-      setFieldKey(toKebabCase(name));
+      form.setValue('fieldKey', toKebabCase(name));
     }
   };
 
@@ -93,10 +99,11 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
     mutationFn: (dto: CreateCustomFieldDefinitionRequest) => apiClient.createCustomFieldDefinition(dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.customFieldDefinitions(activeTab) });
-      toast.success('Custom field created');
+      form.markPristine(form.values);
+      adminToast.success('Custom field created');
       setShowModal(false);
     },
-    onError: (err: Error) => toast.error(`Failed to create: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to create: ${err.message}`),
   });
 
   const updateMutation = useMutation({
@@ -104,41 +111,42 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
       apiClient.updateCustomFieldDefinition(id, dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.customFieldDefinitions(activeTab) });
-      toast.success('Custom field updated');
+      form.markPristine(form.values);
+      adminToast.success('Custom field updated');
       setShowModal(false);
     },
-    onError: (err: Error) => toast.error(`Failed to update: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to update: ${err.message}`),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deleteCustomFieldDefinition(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.customFieldDefinitions(activeTab) });
-      toast.success('Custom field deleted');
+      adminToast.success('Custom field deleted');
     },
-    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to delete: ${err.message}`),
   });
 
   const handleSave = () => {
-    const trimmedName = fieldName.trim();
-    const trimmedKey = fieldKey.trim();
-    if (!trimmedName) { toast.error('Field name is required'); return; }
-    if (!trimmedKey) { toast.error('Field key is required'); return; }
+    const trimmedName = form.values.fieldName.trim();
+    const trimmedKey = form.values.fieldKey.trim();
+    if (!trimmedName) { adminToast.error('Field name is required'); return; }
+    if (!trimmedKey) { adminToast.error('Field key is required'); return; }
 
-    const optionsJson = fieldType === 'Select' && options.trim()
-      ? JSON.stringify(options.trim().split('\n').map(o => o.trim()).filter(Boolean))
+    const optionsJson = form.values.fieldType === 'Select' && form.values.options.trim()
+      ? JSON.stringify(form.values.options.trim().split('\n').map(o => o.trim()).filter(Boolean))
       : undefined;
 
     if (editing) {
       const dto: UpdateCustomFieldDefinitionRequest = {
         fieldName: trimmedName,
         fieldKey: trimmedKey,
-        fieldType,
+        fieldType: form.values.fieldType,
         options: optionsJson,
-        isRequired,
-        sortOrder,
-        description: description.trim() || undefined,
-        defaultValue: defaultValue.trim() || undefined,
+        isRequired: form.values.isRequired,
+        sortOrder: form.values.sortOrder,
+        description: form.values.description.trim() || undefined,
+        defaultValue: form.values.defaultValue.trim() || undefined,
       };
       updateMutation.mutate({ id: editing.id, dto });
     } else {
@@ -146,12 +154,12 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
         entityType: activeTab,
         fieldName: trimmedName,
         fieldKey: trimmedKey,
-        fieldType,
+        fieldType: form.values.fieldType,
         options: optionsJson,
-        isRequired,
-        sortOrder,
-        description: description.trim() || undefined,
-        defaultValue: defaultValue.trim() || undefined,
+        isRequired: form.values.isRequired,
+        sortOrder: form.values.sortOrder,
+        description: form.values.description.trim() || undefined,
+        defaultValue: form.values.defaultValue.trim() || undefined,
       };
       createMutation.mutate(dto);
     }
@@ -184,11 +192,20 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
       </div>
 
       {isLoading ? (
-        <div className="text-pf-text-secondary p-8 text-center">Loading…</div>
+        <AdminLoading variant="table" cols={6} label={`Loading ${activeTab.toLowerCase()} custom fields`} />
+      ) : error ? (
+        <AdminError
+          title="Couldn't load custom fields"
+          description={`Try loading the ${activeTab.toLowerCase()} field definitions again.`}
+          error={error}
+          onRetry={() => void refetch()}
+        />
       ) : definitions.length === 0 ? (
-        <div className="text-pf-text-secondary p-8 text-center">
-          No custom fields defined for {activeTab.toLowerCase()}s. Click &quot;Add Field&quot; to create one.
-        </div>
+        <AdminEmpty
+          title={`No ${activeTab.toLowerCase()} custom fields`}
+          description={`Create a field to store additional metadata for ${activeTab.toLowerCase()}s.`}
+          action={<Button variant="primary" onClick={openCreate}>Add Field</Button>}
+        />
       ) : (
         <div className="overflow-x-auto rounded-lg border border-pf-border">
           <table className="w-full text-sm">
@@ -244,23 +261,43 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
 
       <Modal
         isOpen={showModal}
-        onClose={() => setShowModal(false)}
+        onClose={() => {
+          form.reset();
+          setShowModal(false);
+        }}
         title={editing ? 'Edit Custom Field' : 'New Custom Field'}
         size="md"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSave} loading={isSaving}>
-              {editing ? 'Save' : 'Create'}
-            </Button>
-          </>
-        }
+        footer={(
+          <AdminSaveBar
+            isDirty={form.isDirty}
+            changeCount={form.changedCount}
+            changedLabels={form.changedKeys.map(key => ({
+              fieldName: 'Field name',
+              fieldKey: 'Field key',
+              fieldType: 'Type',
+              options: 'Options',
+              isRequired: 'Required',
+              sortOrder: 'Sort order',
+              description: 'Description',
+              defaultValue: 'Default value',
+            })[key])}
+            onDiscard={() => {
+              form.reset();
+              setShowModal(false);
+            }}
+            onSave={handleSave}
+            isSaving={isSaving}
+            saveLabel={editing ? 'Save' : 'Create'}
+            discardLabel="Cancel"
+            className="-mx-6 -my-4"
+          />
+        )}
       >
         <div className="flex flex-col gap-4">
           <FormField label="Field Name" htmlFor="cf-name" required>
             <Input
               id="cf-name"
-              value={fieldName}
+              value={form.values.fieldName}
               onChange={e => handleFieldNameChange(e.target.value)}
               placeholder="e.g. Department"
             />
@@ -268,8 +305,8 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
           <FormField label="Field Key" htmlFor="cf-key" required helper="Unique identifier (kebab-case)">
             <Input
               id="cf-key"
-              value={fieldKey}
-              onChange={e => { setFieldKey(e.target.value); setAutoKey(false); }}
+              value={form.values.fieldKey}
+              onChange={e => { form.setValue('fieldKey', e.target.value); setAutoKey(false); }}
               placeholder="e.g. department"
               className="font-mono text-sm"
             />
@@ -277,20 +314,20 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
           <FormField label="Type" htmlFor="cf-type" required>
             <Select
               id="cf-type"
-              value={fieldType}
-              onChange={e => setFieldType(e.target.value as CustomFieldType)}
+              value={form.values.fieldType}
+              onChange={e => form.setValue('fieldType', e.target.value as CustomFieldType)}
             >
               {FIELD_TYPES.map(ft => (
                 <option key={ft.value} value={ft.value}>{ft.label}</option>
               ))}
             </Select>
           </FormField>
-          {fieldType === 'Select' && (
+          {form.values.fieldType === 'Select' && (
             <FormField label="Options" htmlFor="cf-options" helper="One option per line">
               <Textarea
                 id="cf-options"
-                value={options}
-                onChange={e => setOptions(e.target.value)}
+                value={form.values.options}
+                onChange={e => form.setValue('options', e.target.value)}
                 rows={4}
                 placeholder={"Option A\nOption B\nOption C"}
               />
@@ -299,16 +336,16 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
           <FormField label="Description" htmlFor="cf-desc">
             <Input
               id="cf-desc"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
+              value={form.values.description}
+              onChange={e => form.setValue('description', e.target.value)}
               placeholder="Optional help text"
             />
           </FormField>
           <FormField label="Default Value" htmlFor="cf-default">
             <Input
               id="cf-default"
-              value={defaultValue}
-              onChange={e => setDefaultValue(e.target.value)}
+              value={form.values.defaultValue}
+              onChange={e => form.setValue('defaultValue', e.target.value)}
               placeholder="Optional default"
             />
           </FormField>
@@ -317,13 +354,13 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
               <Input
                 id="cf-sort"
                 type="number"
-                value={String(sortOrder)}
-                onChange={e => setSortOrder(parseInt(e.target.value) || 0)}
+                value={String(form.values.sortOrder)}
+                onChange={e => form.setValue('sortOrder', parseInt(e.target.value) || 0)}
                 className="w-20"
               />
             </FormField>
             <div className="flex items-center gap-2">
-              <Toggle checked={isRequired} onChange={setIsRequired} />
+              <Toggle checked={form.values.isRequired} onChange={value => form.setValue('isRequired', value)} />
               <span className="text-sm text-pf-text-primary">Required</span>
             </div>
           </div>

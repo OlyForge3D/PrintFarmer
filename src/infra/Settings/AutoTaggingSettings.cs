@@ -12,21 +12,21 @@ public class AutoTaggingSettings : IAppSetting
     public static string SectionKey => SectionName;
 
     [SettingDisplay(
-        Name = "Enable Material Tags",
+        Name = "Enable material tags",
         Description = "Automatically tag completed jobs with material type (PLA, PETG, ABS, etc.).",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("materialTagEnabled")]
     public bool MaterialTagEnabled { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Enable Color Tags",
+        Name = "Enable color tags",
         Description = "Automatically tag completed jobs with color family (Red, Blue, Green, etc.).",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("colorTagEnabled")]
     public bool ColorTagEnabled { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Enable Nozzle Tags",
+        Name = "Enable nozzle tags",
         Description = "Automatically tag completed jobs with nozzle diameter (0.4mm, 0.6mm, etc.).",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("nozzleTagEnabled")]

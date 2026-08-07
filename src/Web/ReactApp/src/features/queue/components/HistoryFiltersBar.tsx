@@ -77,11 +77,17 @@ export default function HistoryFiltersBar({
         {/* Quick actions always visible */}
         <div className="flex items-center gap-2 shrink-0">
           {/* View Toggle */}
-          <div className="hidden sm:flex rounded-sm border border-pf-border overflow-hidden shrink-0">
+          <div
+            className="hidden sm:flex rounded-sm border border-pf-border overflow-hidden shrink-0"
+            role="group"
+            aria-label="History view mode"
+          >
             <Button
               onClick={() => onViewModeChange("cards")}
               variant="ghost"
               size="sm"
+              aria-pressed={viewMode === "cards"}
+              aria-label="Card view"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "cards"
                   ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
@@ -89,12 +95,14 @@ export default function HistoryFiltersBar({
               }`}
               title="Card view"
             >
-              ▦
+              <span aria-hidden="true">▦</span>
             </Button>
             <Button
               onClick={() => onViewModeChange("table")}
               variant="ghost"
               size="sm"
+              aria-pressed={viewMode === "table"}
+              aria-label="Table view"
               className={`px-2 py-1 text-xs rounded-none ${
                 viewMode === "table"
                   ? "bg-pf-accent-bg text-[var(--pf-on-accent)] enabled:hover:ring-1 enabled:hover:ring-inset enabled:hover:ring-[var(--pf-on-accent)]"
@@ -102,7 +110,7 @@ export default function HistoryFiltersBar({
               }`}
               title="Table view"
             >
-              ☰
+              <span aria-hidden="true">☰</span>
             </Button>
           </div>
           <Select
@@ -111,6 +119,7 @@ export default function HistoryFiltersBar({
               onSortChange(e.target.value as "newest" | "oldest" | "duration" | "model")
             }
             className="text-xs py-1 px-2 w-auto shrink-0"
+            aria-label="Sort history jobs"
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
@@ -145,6 +154,14 @@ export default function HistoryFiltersBar({
                     onClick={() => handleStatusToggle(status)}
                     variant="ghost"
                     size="sm"
+                    aria-pressed={selectedStatuses.includes(status)}
+                    aria-label={
+                      status === "completed"
+                        ? "Done"
+                        : status === "failed"
+                          ? "Failed"
+                          : "Cancelled"
+                    }
                     className={`px-2 py-1 text-xs font-medium ${
                       selectedStatuses.includes(status)
                         ? status === "completed"
@@ -155,9 +172,21 @@ export default function HistoryFiltersBar({
                         : "bg-pf-bg-0 border border-pf-border text-pf-text-secondary hover:bg-pf-bg-2"
                     } ${selectedStatuses.includes(status) ? "enabled:hover:scale-105 enabled:hover:shadow-sm" : ""}`}
                   >
-                    {status === "completed" && "✓ Done"}
-                    {status === "failed" && "✗ Failed"}
-                    {status === "cancelled" && "◯ Cancelled"}
+                    {status === "completed" && (
+                      <>
+                        <span aria-hidden="true">✓</span> Done
+                      </>
+                    )}
+                    {status === "failed" && (
+                      <>
+                        <span aria-hidden="true">✗</span> Failed
+                      </>
+                    )}
+                    {status === "cancelled" && (
+                      <>
+                        <span aria-hidden="true">◯</span> Cancelled
+                      </>
+                    )}
                   </Button>
                 ))}
               </div>

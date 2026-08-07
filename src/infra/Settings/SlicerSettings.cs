@@ -14,7 +14,7 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
     public static string SectionKey => SectionName;
 
     [JsonPropertyName("slicerMode")]
-    [SettingDisplay(Name = "Default Slicer Mode", Description = "The mode users start in. When both modes are enabled, users can switch; otherwise this mode is forced. Must be one of the enabled modes.", InputType = SettingInputType.Select, AllowedValues = ["Simple", "Advanced"], Order = 1)]
+    [SettingDisplay(Name = "Default slicer mode", Description = "The mode users start in. When both modes are enabled, users can switch; otherwise this mode is forced. Must be one of the enabled modes.", InputType = SettingInputType.Select, AllowedValues = ["Simple", "Advanced"], Order = 1)]
     public SlicerMode SlicerMode { get; set; } = SlicerMode.Simple;
 
     /// <summary>
@@ -28,7 +28,7 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
     /// </para>
     /// </summary>
     [JsonPropertyName("enabledModes")]
-    [SettingDisplay(Name = "Enabled Slicer Modes", Description = "Which slicer modes are available to users. Enable both to let users toggle between Simple and Advanced.", InputType = SettingInputType.MultiSelect, AllowedValues = ["Simple", "Advanced"], Order = 2)]
+    [SettingDisplay(Name = "Enabled slicer modes", Description = "Which slicer modes are available to users. Enable both to let users toggle between Simple and Advanced.", InputType = SettingInputType.MultiSelect, AllowedValues = ["Simple", "Advanced"], Order = 2)]
     public IReadOnlyList<SlicerMode>? EnabledModes { get; set; }
 
     /// <summary>

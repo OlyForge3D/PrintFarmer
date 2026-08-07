@@ -33,20 +33,20 @@ public class PrintStatsSyncSettings : IAppSetting
     /// Include statistics from PrintFarmer-managed jobs (in addition to external prints)
     /// </summary>
     [JsonPropertyName("includePrintFarmerJobs")]
-    [SettingDisplay(Name = "Include PrintFarmer Jobs", Description = "Include statistics from PrintFarmer-managed jobs (in addition to external prints).", InputType = SettingInputType.Boolean, Order = 3)]
+    [SettingDisplay(Name = "Include PrintFarmer jobs", Description = "Include statistics from PrintFarmer-managed jobs (in addition to external prints).", InputType = SettingInputType.Boolean, Order = 3)]
     public bool IncludePrintFarmerJobs { get; set; } = true;
 
     /// <summary>
     /// Maximum number of printers to sync per iteration (to avoid overload)
     /// </summary>
     [JsonPropertyName("maxPrintersPerIteration")]
-    [SettingDisplay(Name = "Max Printers Per Iteration", Description = "Maximum number of printers to sync per iteration.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 100, Order = 4)]
+    [SettingDisplay(Name = "Max printers per iteration", Description = "Maximum number of printers to sync per iteration.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 100, Order = 4)]
     public int MaxPrintersPerIteration { get; set; } = 10;
 
     /// <summary>
     /// Timeout in seconds for each printer API call
     /// </summary>
     [JsonPropertyName("apiTimeoutSeconds")]
-    [SettingDisplay(Name = "API Timeout", Unit = "seconds", Description = "Timeout in seconds for each printer API call.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 120, Order = 5)]
+    [SettingDisplay(Name = "API timeout", Unit = "seconds", Description = "Timeout in seconds for each printer API call.", InputType = SettingInputType.Number, MinValue = 1, MaxValue = 120, Order = 5)]
     public int ApiTimeoutSeconds { get; set; } = 10;
 }

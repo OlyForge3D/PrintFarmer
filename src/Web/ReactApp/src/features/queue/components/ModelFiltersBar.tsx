@@ -43,10 +43,11 @@ export default function ModelFiltersBar({
       <div className="flex flex-col sm:flex-row gap-3">
         {/* Model Select */}
         <div className="flex-1">
-          <label className="block text-pf-text-secondary text-sm mb-1">
+          <label htmlFor="model-filter" className="block text-pf-text-secondary text-sm mb-1">
             Printer Model
           </label>
           <Select
+            id="model-filter"
             value={selectedModel || ""}
             onChange={(e: ChangeEvent<HTMLSelectElement>) => onModelChange(e.target.value || null)}
             disabled={isLoading}
@@ -63,10 +64,11 @@ export default function ModelFiltersBar({
 
         {/* Sort Select */}
         <div className="flex-1">
-          <label className="block text-pf-text-secondary text-sm mb-1">
+          <label htmlFor="model-sort" className="block text-pf-text-secondary text-sm mb-1">
             Sort By
           </label>
           <Select
+            id="model-sort"
             value={sortBy}
             onChange={(e: ChangeEvent<HTMLSelectElement>) =>
               onSortChange(
@@ -110,16 +112,18 @@ export default function ModelFiltersBar({
 
       {/* Status Filter Toggle Buttons */}
       <div>
-        <label className="block text-pf-text-secondary text-sm mb-2">
+        <span id="model-status-label" className="block text-pf-text-secondary text-sm mb-2">
           Job Status
-        </label>
-        <div className="flex flex-wrap gap-2">
+        </span>
+        <div className="flex flex-wrap gap-2" role="group" aria-labelledby="model-status-label">
           {(["queued", "printing", "paused"] as JobStatus[]).map((status) => (
             <Button
               key={status}
               onClick={() => handleStatusToggle(status)}
               disabled={isLoading}
               variant="subtle"
+              aria-pressed={selectedStatuses.includes(status)}
+              aria-label={status.charAt(0).toUpperCase() + status.slice(1)}
               className={`px-3 py-1 rounded-sm text-sm font-medium transition-colors ${
                 selectedStatuses.includes(status)
                   ? `${

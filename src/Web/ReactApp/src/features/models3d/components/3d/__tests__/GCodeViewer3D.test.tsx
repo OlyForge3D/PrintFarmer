@@ -1,6 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { GCodeViewer } from '../GCodeViewer3D';
+import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 import type { IGcodePreviewService, DetailedParsedGCode } from '@/features/slicer/services';
 
 // Mock react-three/fiber and drei — they require WebGL
@@ -37,6 +41,9 @@ G1 Z0.6
 G1 X5 Y5 E5
 `;
 
+const THEME_ROOT = resolve(process.cwd(), 'src/design-system/themes');
+const GRAPHIC_CONTRAST_MINIMUM = 3;
+
 function createMockService(result?: DetailedParsedGCode): IGcodePreviewService {
   const defaultResult: DetailedParsedGCode = {
     layerCount: 3,
@@ -53,6 +60,36 @@ function createMockService(result?: DetailedParsedGCode): IGcodePreviewService {
     parseGCodeDetailed: vi.fn().mockResolvedValue(result ?? defaultResult),
     dispose: vi.fn(),
   };
+}
+
+function readThemeToken(theme: string, token: string): string {
+  const source = readFileSync(resolve(THEME_ROOT, `${theme}.css`), 'utf8');
+  const match = source.match(new RegExp(`--pf-${token}:\\s*(#[0-9a-f]{3,8})`, 'i'));
+  if (!match) throw new Error(`${theme} is missing --pf-${token}`);
+  return match[1];
+}
+
+function relativeLuminance(hex: string): number {
+  const value = hex.slice(1);
+  const expanded = value.length === 3
+    ? value.split('').map(character => `${character}${character}`).join('')
+    : value;
+  const channel = (offset: number): number => {
+    const normalized = Number.parseInt(expanded.slice(offset, offset + 2), 16) / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  };
+
+  return 0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+}
+
+function contrastRatio(first: string, second: string): number {
+  const firstLuminance = relativeLuminance(first);
+  const secondLuminance = relativeLuminance(second);
+  const lighter = Math.max(firstLuminance, secondLuminance);
+  const darker = Math.min(firstLuminance, secondLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 describe('GCodeViewer3D', () => {
@@ -82,6 +119,46 @@ describe('GCodeViewer3D', () => {
       expect(screen.getByText(/Layer 3 \/ 3/)).toBeInTheDocument();
     });
   });
+
+  it('keeps the real settings control visible, named, and keyboard operable on hover', async () => {
+    const user = userEvent.setup();
+    const service = createMockService();
+
+    render(<GCodeViewer gcodeUrl="/test.gcode" service={service} />);
+
+    const settingsButton = await screen.findByRole('button', { name: 'Settings' });
+    expect(settingsButton).toHaveAttribute('type', 'button');
+    expect(settingsButton).toHaveAttribute('title', 'Settings');
+    expect(settingsButton).toHaveAttribute('data-pf-variant', 'subtle');
+    expect(settingsButton).toHaveClass(
+      'enabled:hover:text-pf-text-primary',
+      'border-none',
+      'shadow-none',
+      'focus:ring-0',
+    );
+    expect(settingsButton).not.toHaveClass('hover:text-white', 'text-pf-text-secondary');
+    expect(settingsButton.closest('.bg-linear-to-r')).toHaveClass('from-pf-bg-0', 'to-pf-bg-0');
+
+    settingsButton.focus();
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('heading', { name: 'Rendering' })).toBeInTheDocument();
+  });
+
+  it.each(SELECTABLE_THEMES)(
+    '%s keeps the settings hover foreground visible on the subtle hover surface',
+    theme => {
+      const hoverForeground = readThemeToken(theme, 'text-primary');
+      const restingForeground = readThemeToken(theme, 'text-secondary');
+      const hoverBackground = readThemeToken(theme, 'bg-1');
+      const restingSurface = readThemeToken(theme, 'bg-0');
+
+      expect(hoverForeground).not.toBe(restingForeground);
+      expect(hoverBackground).not.toBe(restingSurface);
+      expect(contrastRatio(hoverForeground, hoverBackground)).toBeGreaterThanOrEqual(
+        GRAPHIC_CONTRAST_MINIMUM,
+      );
+    },
+  );
 
   it('shows error state on fetch failure', async () => {
     global.fetch = vi.fn().mockResolvedValue({

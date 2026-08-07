@@ -33,6 +33,7 @@
 
   /* --- Accent --------------------------------------------------------------- */
   --pf-accent:       #ef4444;
+  --pf-accent-text:  #f87171;
   --pf-accent-bg:    #dc2626;
   --pf-accent-hover: #b91c1c;
   --pf-accent-fg:    var(--pf-on-accent);
@@ -103,7 +104,7 @@
   --pf-control-border-hover:  #52525b;
   --pf-control-border-focus:  #ef4444;
   --pf-control-text:          #f4f4f5;
-  --pf-control-placeholder:   #71717a;
+  --pf-control-placeholder:   #a1a1aa;
   --pf-control-disabled-bg:   #141416;
   --pf-control-disabled-text: #71717a;
 

@@ -7,32 +7,43 @@ import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProp
 import { Button, Input, FormField } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { useBedTypes, queryKeys } from '@/common/hooks/useApi';
-import { toast } from 'sonner';
+import {
+  AdminEmpty,
+  AdminError,
+  AdminLoading,
+  AdminSaveBar,
+  adminToast,
+  useDirtyState,
+} from '@/common/components/admin';
 import type { BedType, CreateBedTypeRequest, UpdateBedTypeRequest } from '@/types/api';
+
+const DEFAULT_FORM = {
+  name: '',
+  description: '',
+  color: '#6366f1',
+};
 
 export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
   const queryClient = useQueryClient();
-  const { data: bedTypes = [], isLoading } = useBedTypes();
+  const { data: bedTypes = [], isLoading, error, refetch } = useBedTypes();
 
   const [showModal, setShowModal] = useState(false);
   const [editingType, setEditingType] = useState<BedType | null>(null);
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [color, setColor] = useState('#6366f1');
+  const form = useDirtyState(DEFAULT_FORM);
 
   const openCreate = () => {
     setEditingType(null);
-    setName('');
-    setDescription('');
-    setColor('#6366f1');
+    form.markPristine(DEFAULT_FORM);
     setShowModal(true);
   };
 
   const openEdit = (bt: BedType) => {
     setEditingType(bt);
-    setName(bt.name);
-    setDescription(bt.description ?? '');
-    setColor(bt.color ?? '#6366f1');
+    form.markPristine({
+      name: bt.name,
+      description: bt.description ?? '',
+      color: bt.color ?? '#6366f1',
+    });
     setShowModal(true);
   };
 
@@ -40,10 +51,11 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
     mutationFn: (dto: CreateBedTypeRequest) => apiClient.createBedType(dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bedTypes });
-      toast.success('Bed type created');
+      form.markPristine(form.values);
+      adminToast.success('Bed type created');
       setShowModal(false);
     },
-    onError: (err: Error) => toast.error(`Failed to create: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to create: ${err.message}`),
   });
 
   const updateMutation = useMutation({
@@ -51,28 +63,33 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
       apiClient.updateBedType(id, dto),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bedTypes });
-      toast.success('Bed type updated');
+      form.markPristine(form.values);
+      adminToast.success('Bed type updated');
       setShowModal(false);
     },
-    onError: (err: Error) => toast.error(`Failed to update: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to update: ${err.message}`),
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiClient.deleteBedType(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bedTypes });
-      toast.success('Bed type deleted');
+      adminToast.success('Bed type deleted');
     },
-    onError: (err: Error) => toast.error(`Failed to delete: ${err.message}`),
+    onError: (err: Error) => adminToast.error(`Failed to delete: ${err.message}`),
   });
 
   const handleSave = () => {
-    const trimmed = name.trim();
+    const trimmed = form.values.name.trim();
     if (!trimmed) {
-      toast.error('Name is required');
+      adminToast.error('Name is required');
       return;
     }
-    const dto = { name: trimmed, description: description.trim() || undefined, color };
+    const dto = {
+      name: trimmed,
+      description: form.values.description.trim() || undefined,
+      color: form.values.color,
+    };
     if (editingType) {
       updateMutation.mutate({ id: editingType.id, dto });
     } else {
@@ -94,11 +111,20 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
       embedded={embedded}
     >
       {isLoading ? (
-        <div className="text-pf-text-secondary p-8 text-center">Loading…</div>
+        <AdminLoading variant="card-grid" label="Loading bed types" rows={3} />
+      ) : error ? (
+        <AdminError
+          title="Couldn't load bed types"
+          description="Try loading the bed type list again."
+          error={error}
+          onRetry={() => void refetch()}
+        />
       ) : bedTypes.length === 0 ? (
-        <div className="text-pf-text-secondary p-8 text-center">
-          No bed types configured. Click &quot;Add Bed Type&quot; to create one.
-        </div>
+        <AdminEmpty
+          title="No bed types configured"
+          description="Create a bed type to make it available for printer configuration."
+          action={<Button variant="primary" onClick={openCreate}>Add Bed Type</Button>}
+        />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {bedTypes.map(bt => (
@@ -149,32 +175,47 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
 
       <Modal
         isOpen={showModal}
-        onClose={() => setShowModal(false)}
+        onClose={() => {
+          form.reset();
+          setShowModal(false);
+        }}
         title={editingType ? 'Edit Bed Type' : 'New Bed Type'}
         size="sm"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setShowModal(false)}>Cancel</Button>
-            <Button variant="primary" onClick={handleSave} loading={isSaving}>
-              {editingType ? 'Save' : 'Create'}
-            </Button>
-          </>
-        }
+        footer={(
+          <AdminSaveBar
+            isDirty={form.isDirty}
+            changeCount={form.changedCount}
+            changedLabels={form.changedKeys.map(key => ({
+              name: 'Name',
+              description: 'Description',
+              color: 'Badge color',
+            })[key])}
+            onDiscard={() => {
+              form.reset();
+              setShowModal(false);
+            }}
+            onSave={handleSave}
+            isSaving={isSaving}
+            saveLabel={editingType ? 'Save' : 'Create'}
+            discardLabel="Cancel"
+            className="-mx-6 -my-4"
+          />
+        )}
       >
         <div className="flex flex-col gap-4">
           <FormField label="Name" htmlFor="bt-name" required>
             <Input
               id="bt-name"
-              value={name}
-              onChange={e => setName(e.target.value)}
+              value={form.values.name}
+              onChange={e => form.setValue('name', e.target.value)}
               placeholder="e.g. PEI Smooth"
             />
           </FormField>
           <FormField label="Description" htmlFor="bt-desc">
             <Input
               id="bt-desc"
-              value={description}
-              onChange={e => setDescription(e.target.value)}
+              value={form.values.description}
+              onChange={e => form.setValue('description', e.target.value)}
               placeholder="Optional description"
             />
           </FormField>
@@ -183,13 +224,13 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
               <input
                 id="bt-color"
                 type="color"
-                value={color}
-                onChange={e => setColor(e.target.value)}
+                value={form.values.color}
+                onChange={e => form.setValue('color', e.target.value)}
                 className="w-10 h-10 rounded cursor-pointer border border-pf-border"
               />
               <Input
-                value={color}
-                onChange={e => setColor(e.target.value)}
+                value={form.values.color}
+                onChange={e => form.setValue('color', e.target.value)}
                 className="w-28 font-mono text-sm"
                 placeholder="#hex"
               />

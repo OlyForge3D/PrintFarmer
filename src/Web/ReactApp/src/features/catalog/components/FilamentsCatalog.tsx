@@ -561,6 +561,7 @@ export function FilamentsCatalog() {
           columns={columns}
           getRowKey={(item) => item.id}
           keyboardNavigation
+          ariaLabel="Filaments catalog"
           defaultSortColumn="name"
           renderActions={(item) => (
             <div className="flex gap-1">

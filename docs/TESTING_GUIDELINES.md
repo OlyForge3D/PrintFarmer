@@ -4,8 +4,10 @@ This document outlines the testing strategy and guidelines for `deploy-docker.sh
 
 ## Quick Links
 
-- **Test Coverage Analysis**: See [`/docs/TEST_COVERAGE_ANALYSIS.md`](./TEST_COVERAGE_ANALYSIS.md) for complete analysis of all 44 tests and 37 identified gaps
-- **Implementation Guide**: See [`/docs/QUICK_TEST_IMPLEMENTATION_GUIDE.md`](./QUICK_TEST_IMPLEMENTATION_GUIDE.md) for step-by-step TDD workflow
+- **Test Coverage Guidance**: See
+  [Testing Patterns: Coverage Goals](./TESTING_PATTERNS.md#coverage-goals)
+- **Implementation Guide**: See
+  [TDD Workflow](#tdd-workflow-required-for-new-features)
 - **Test Files**: 
   - [`/tests/test-compose-generator.sh`](/tests/test-compose-generator.sh) (20 tests)
   - [`/tests/test-deploy-docker.sh`](/tests/test-deploy-docker.sh) (24 tests)
@@ -128,8 +130,7 @@ git commit -m "Feature: description (all tests passing)"
 
 4. **Update Documentation**
    ```bash
-   # Update TEST_COVERAGE_ANALYSIS.md
-   # Move test from "Missing Tests" to "Current Tests"
+   # Update TESTING_PATTERNS.md when coverage goals or patterns change
    # Add to this TESTING_GUIDELINES.md if needed
    ```
 
@@ -301,7 +302,7 @@ Implement as features evolve:
 - Architecture support edge cases
 - Logging and diagnostics
 
-See `/docs/TEST_COVERAGE_ANALYSIS.md` for complete details on all 37 gaps.
+See `/docs/TESTING_PATTERNS.md` for current coverage goals and high-impact areas.
 
 ---
 
@@ -343,7 +344,7 @@ Before approving changes to deployment scripts:
 - [ ] No test-specific file paths hardcoded (use `$TEST_TEMP_DIR`)
 - [ ] All existing tests still pass (no regressions)
 - [ ] Test names clearly describe what they test
-- [ ] Documentation updated (`TEST_COVERAGE_ANALYSIS.md`)
+- [ ] Testing documentation updated when behavior or guidance changes
 - [ ] No password/secrets exposure in tests
 
 ---
@@ -351,8 +352,8 @@ Before approving changes to deployment scripts:
 ## Resources
 
 - **Test Framework Code**: `/tests/test-framework.sh`
-- **Test Analysis**: `/docs/TEST_COVERAGE_ANALYSIS.md`
-- **Implementation Guide**: `/docs/QUICK_TEST_IMPLEMENTATION_GUIDE.md`
+- **Testing Patterns**: `/docs/TESTING_PATTERNS.md`
+- **Implementation Guide**: the TDD workflow in this document
 - **Compose-Generator Script**: `/scripts/docker/compose-generator.sh`
 - **Deploy Script**: `/scripts/deploy-docker.sh`
 
@@ -361,7 +362,7 @@ Before approving changes to deployment scripts:
 ## Questions?
 
 See the detailed guides:
-- [TEST_COVERAGE_ANALYSIS.md](./TEST_COVERAGE_ANALYSIS.md) - Why each test matters
-- [QUICK_TEST_IMPLEMENTATION_GUIDE.md](./QUICK_TEST_IMPLEMENTATION_GUIDE.md) - How to write tests
+- [Testing Patterns](./TESTING_PATTERNS.md) - Coverage goals and reusable test patterns
+- [Test Writing Guidelines](#test-writing-guidelines) - How to write deployment tests
 
 Or check the existing test files for examples of working tests.

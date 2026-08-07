@@ -15,10 +15,11 @@ export const Textarea: React.FC<TextareaProps> = ({
   return (
     <textarea
       className={clsx(
-        'w-full border rounded-sm p-2 text-sm bg-pf-bg-0 text-pf-text-primary border-pf-border',
-        'focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-pf-accent',
-        'disabled:bg-pf-disabled disabled:cursor-not-allowed',
-        'placeholder:text-pf-text-tertiary',
+        'w-full border rounded-sm p-2 text-sm bg-pf-control-bg text-pf-control-text border-pf-control-border',
+        'focus:outline-hidden focus:ring-2 focus:ring-pf-control-border-focus focus:border-pf-control-border-focus',
+        'disabled:bg-pf-control-disabled-bg disabled:text-pf-control-disabled-text disabled:cursor-not-allowed disabled:opacity-60',
+        'read-only:bg-pf-control-disabled-bg read-only:border-pf-control-border',
+        'placeholder:text-pf-control-placeholder',
         'resize-none min-h-[80px]',
         'transition',
         invalid && 'border-pf-error focus:ring-pf-error focus:border-pf-error',

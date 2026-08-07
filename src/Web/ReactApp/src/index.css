@@ -37,8 +37,18 @@
   --color-pf-text-light: var(--pf-text-light);
   --color-pf-text-muted: var(--pf-text-muted);
 
+  /* Form controls */
+  --color-pf-control-bg: var(--pf-control-bg);
+  --color-pf-control-border: var(--pf-control-border);
+  --color-pf-control-border-focus: var(--pf-control-border-focus);
+  --color-pf-control-text: var(--pf-control-text);
+  --color-pf-control-placeholder: var(--pf-control-placeholder);
+  --color-pf-control-disabled-bg: var(--pf-control-disabled-bg);
+  --color-pf-control-disabled-text: var(--pf-control-disabled-text);
+
   /* Accent colors */
   --color-pf-accent: var(--pf-accent);
+  --color-pf-accent-text: var(--pf-accent-text);
   --color-pf-accent-bg: var(--pf-accent-bg);
   --color-pf-accent-hover: var(--pf-accent-hover);
   --color-pf-accent-2: var(--pf-accent-2);
