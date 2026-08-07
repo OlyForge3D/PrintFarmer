@@ -263,6 +263,31 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
     ]);
   });
 
+  it('ignores utility-shaped text inside regex literals in test sources', () => {
+    const references = scanThemeText(
+      String.raw`const match = source.match(/className="(bg-pf-bg-\d[^"]*max-h-48[^"]*)"/);`,
+      'Component.test.tsx',
+    );
+
+    expect(references).toEqual([]);
+  });
+
+  it('detects legitimate utility strings in test sources', () => {
+    const references = scanThemeText(
+      "expect(element).toHaveClass('bg-pf-missing');",
+      'Component.test.tsx',
+    );
+
+    expect(references).toMatchObject([
+      {
+        file: 'Component.test.tsx',
+        token: 'pf-missing',
+        kind: 'utility',
+        utilityPrefix: 'bg',
+      },
+    ]);
+  });
+
   it('detects dead inline custom properties and arbitrary values, including ring offsets', () => {
     const references = scanThemeText(
       [
