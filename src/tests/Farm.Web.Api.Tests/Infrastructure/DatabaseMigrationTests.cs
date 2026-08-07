@@ -153,6 +153,38 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task ProgramHelpersInitialization_SeedingFailure_RemainsNonFatal()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        _ = builder.Services.AddLogging();
+        _ = builder.Services.AddDbContext<AppDbContext>(
+            options => options.UseSqlite(
+                connection,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
+        var initializer = new Mock<IDatabaseInitializer>();
+        _ = initializer
+            .Setup(service => service.InitializeAsync(
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()))
+            .ThrowsAsync(new InvalidOperationException("Synthetic seeding failure"));
+        _ = builder.Services.AddScoped(_ => initializer.Object);
+        _ = builder.Services.AddSingleton<IStartupStatus, StartupStatus>();
+        await using WebApplication app = builder.Build();
+
+        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+
+        _ = await initialize.Should().NotThrowAsync();
+        initializer.Verify(
+            service => service.InitializeAsync(
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task CoreMigration_BaselinePreservesPopulatedLegacyData()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();

@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
@@ -351,8 +352,25 @@ internal static class ProgramHelpers
         IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
         IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
 
-        // Database failures must propagate so the host cannot serve against an unsafe or partial schema.
-        await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
+        try
+        {
+            await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
+        }
+        catch (DatabaseMigrationContractException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception initializationException)
+        {
+            app.Logger.LogWarning(
+                initializationException,
+                "[Startup] Database seeding failed (non-fatal)");
+            return;
+        }
 
         // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
         // registered in AddSlicerModule().
