@@ -333,43 +333,6 @@ function mappingTokens(reference: ThemeReference): string[] {
   return [colourMapping];
 }
 
-export function deadThemeReferences(
-  references: readonly ThemeReference[],
-  facts: CssFacts,
-  allowlist: readonly RawCustomPropertyAllowance[] = RAW_CUSTOM_PROPERTY_ALLOWLIST,
-): ThemeFinding[] {
-  const findings = new Map<string, ThemeFinding>();
-
-  for (const reference of references) {
-    if (allowanceFor(reference, allowlist)) continue;
-    const candidates = mappingTokens(reference);
-    if (candidates.some((candidate) => resolvesCustomProperty(candidate, facts))) continue;
-
-    const key = [
-      reference.file,
-      reference.line,
-      reference.column,
-      reference.token,
-      reference.kind,
-    ].join(':');
-    findings.set(key, {
-      ...reference,
-      reason:
-        reference.kind === 'utility'
-          ? `no resolvable Tailwind mapping for ${reference.source}`
-          : `custom property ${reference.token} does not resolve to a declared value`,
-    });
-  }
-
-  return [...findings.values()].sort(
-    (left, right) =>
-      left.file.localeCompare(right.file) ||
-      left.line - right.line ||
-      left.column - right.column ||
-      left.token.localeCompare(right.token),
-  );
-}
-
 export function deadThemeReferencesByTheme(
   references: readonly ThemeReference[],
   factsByTheme: ReadonlyMap<string, CssFacts>,

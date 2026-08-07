@@ -6,7 +6,6 @@ import {
   collectThemeSources,
   cssFacts,
   cssFactsByTheme,
-  deadThemeReferences,
   deadThemeReferencesByTheme,
   formatThemeFinding,
   scanThemeText,
@@ -23,11 +22,11 @@ import {
  *  1. A component hardcodes a colour, so one theme looks wrong and no build step
  *     complains. `local/no-hardcoded-colors` catches the common source form;
  *     this catches it in the shipped CSS of the admin surface too.
- *  2. A theme omits a token another theme defines, so a surface styled with it
- *     falls back to `unset` in that theme only. DESIGN-LANGUAGE (L814) calls for
- *     exactly this check and it had never been written.
+ *  2. A theme omits a token another theme defines, so that theme silently falls
+ *     back to the dark `:root` value instead of its intended palette.
+ *     DESIGN-LANGUAGE (L814) calls for exactly this check.
  *
- * Note: the epic docs say "four themes". There are seven.
+ * Note: the epic docs say "four themes". There are eight.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -133,7 +132,7 @@ describe('admin surface uses tokens, not literal colours (#1016)', () => {
  * Vasquez #1 — a theme token that no `@theme` entry maps is invisible.
  *
  * Tailwind v4 only emits a `bg-pf-x` / `text-pf-x` / `border-pf-x` rule when
- * `--color-pf-x` is registered in the `@theme` block. All seven themes defined
+ * `--color-pf-x` is registered in the `@theme` block. All eight themes defined
  * `--pf-warning-bg` and `--pf-warning-border`, every status surface in the app
  * used `bg-pf-warning-bg`, and none of it painted: the mapping was simply
  * absent, so the class compiled to nothing. No build step complains, no lint
@@ -224,6 +223,8 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
   const sources = collectThemeSources(SRC);
   const facts = cssFacts(sources);
   const factsByTheme = cssFactsByTheme(sources);
+  const asSingleTheme = (singleFacts: CssFacts): Map<string, CssFacts> =>
+    new Map([['fixture.css', singleFacts]]);
 
   it('finds utilities to check', () => {
     const references = sources.flatMap(({ file, text }) => scanThemeText(text, file));
@@ -251,7 +252,7 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
       "const classes = 'dark:enabled:hover:-mask-pf-missing/50!';",
       'Mutation.ts',
     );
-    const findings = deadThemeReferences(references, facts, []);
+    const findings = deadThemeReferencesByTheme(references, factsByTheme, []);
     expect(findings).toMatchObject([
       {
         file: 'Mutation.ts',
@@ -270,11 +271,9 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
       ].join('\n'),
       'Mutation.tsx',
     );
-    expect(deadThemeReferences(references, facts, []).map((finding) => finding.token)).toEqual([
-      '--pf-dead-inline',
-      '--pf-dead-arbitrary',
-      '--pf-dead-offset',
-    ]);
+    expect(
+      deadThemeReferencesByTheme(references, factsByTheme, []).map((finding) => finding.token),
+    ).toEqual(['--pf-dead-inline', '--pf-dead-arbitrary', '--pf-dead-offset']);
   });
 
   it('does not treat custom-property declarations as utility usages', () => {
@@ -284,14 +283,16 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
     );
     expect(references.map((reference) => reference.token)).toEqual(['--pf-dead-declaration']);
     expect(
-      deadThemeReferences(
+      deadThemeReferencesByTheme(
         references,
-        cssFacts([
-          {
-            file: 'mutation.css',
-            text: ':root { --pf-dead-declaration: #fff; --pf-live-alias: var(--pf-dead-declaration); }',
-          },
-        ]),
+        asSingleTheme(
+          cssFacts([
+            {
+              file: 'mutation.css',
+              text: ':root { --pf-dead-declaration: #fff; --pf-live-alias: var(--pf-dead-declaration); }',
+            },
+          ]),
+        ),
         [],
       ),
     ).toEqual([]);
@@ -309,15 +310,15 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
         reason: 'assigned by the embedding runtime',
       },
     ];
-    expect(deadThemeReferences(references, facts, [])).toHaveLength(1);
-    expect(deadThemeReferences(references, facts, allowance)).toEqual([]);
+    expect(deadThemeReferencesByTheme(references, factsByTheme, [])).toHaveLength(1);
+    expect(deadThemeReferencesByTheme(references, factsByTheme, allowance)).toEqual([]);
     expect(
-      deadThemeReferences(
+      deadThemeReferencesByTheme(
         scanThemeText(
           "const style = { marginRight: 'var(--pf-runtime-inset, 0px)' };",
           'DifferentSite.tsx',
         ),
-        facts,
+        factsByTheme,
         allowance,
       ),
     ).toHaveLength(1);
@@ -342,9 +343,11 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
       "const classes = 'bg-pf-live-alias border-pf-repeated-alias text-pf-cycle';",
       'Aliases.tsx',
     );
-    expect(deadThemeReferences(references, aliasFacts, []).map((finding) => finding.token)).toEqual([
-      'pf-cycle',
-    ]);
+    expect(
+      deadThemeReferencesByTheme(references, asSingleTheme(aliasFacts), []).map(
+        (finding) => finding.token,
+      ),
+    ).toEqual(['pf-cycle']);
   });
 
   it('isolates alias resolution per theme without duplicating the occurrence', () => {
@@ -375,12 +378,31 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
     expect(findings[0].reason).not.toContain('healthy.css');
   });
 
+  it('catches a token removed from one real theme even though collapsed facts remain healthy', () => {
+    const mutatedSources = sources.map((source) => {
+      if (source.file !== 'design-system/themes/light.css') return source;
+      const text = source.text.replace(/^\s*--pf-success-text\s*:[^;]+;\s*$/m, '');
+      expect(text).not.toBe(source.text);
+      return { ...source, text };
+    });
+    const references = mutatedSources.flatMap(({ file, text }) => scanThemeText(text, file));
+
+    expect(cssFacts(mutatedSources).declarations.has('--pf-success-text')).toBe(true);
+    const findings = deadThemeReferencesByTheme(
+      references,
+      cssFactsByTheme(mutatedSources),
+    ).filter((finding) => finding.token === 'pf-success-text');
+
+    expect(findings.length).toBeGreaterThan(0);
+    expect(findings.every((finding) => /unresolved in light\.css$/.test(finding.reason))).toBe(true);
+  });
+
   it('reports each occurrence once with actionable location data', () => {
     const references = scanThemeText(
       "const classes = 'bg-[var(--pf-dead)] bg-[var(--pf-dead)]';",
       'Diagnostics.tsx',
     );
-    const findings = deadThemeReferences(references, facts, []);
+    const findings = deadThemeReferencesByTheme(references, factsByTheme, []);
     expect(findings).toHaveLength(2);
     expect(new Set(findings.map(formatThemeFinding)).size).toBe(2);
     expect(formatThemeFinding(findings[0])).toMatch(

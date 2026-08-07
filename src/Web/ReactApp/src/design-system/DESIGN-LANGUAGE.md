@@ -759,7 +759,7 @@ one thing a user needs when four sections save and one does not.
 ### Colour
 
 The admin surface has no hardcoded colours. No hex, no `rgba()`, no Tailwind palette classes
-(`bg-gray-500` and friends) — only `--pf-*` tokens, so all seven themes stay coherent. The
+(`bg-gray-500` and friends) — only `--pf-*` tokens, so all eight themes stay coherent. The
 theme-safety test asserts the scan for literals, token parity across `dark`, `light`, `matrix`,
 `blueprint`, `ratos`, `voron`, `farm`, and `forge`, and resolution of ordinary utilities, direct
 `var()` references, and arbitrary-value classes through aliases independently in every theme. A
