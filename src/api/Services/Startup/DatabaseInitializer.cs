@@ -147,11 +147,29 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             return;
         }
 
-        await SeedActionsAsync();
-        await SeedResourcesAsync();
-        await SeedRolesAsync();
-        await SeedRolePermissionsAsync();
-        _ = await _context.SaveChangesAsync();
+        const int maxUniqueConstraintAttempts = 3;
+        for (int attempt = 1; attempt <= maxUniqueConstraintAttempts; attempt++)
+        {
+            try
+            {
+                await SeedActionsAsync();
+                await SeedResourcesAsync();
+                await SeedRolesAsync();
+
+                // Persist the principals before creating permissions so a concurrent
+                // initializer can lose the insert race and then reload the committed rows.
+                _ = await _context.SaveChangesAsync();
+
+                await SeedRolePermissionsAsync();
+                _ = await _context.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateException ex) when (attempt < maxUniqueConstraintAttempts && IsUniqueConstraintViolation(ex))
+            {
+                _logger.LogDebug(ex, "[DB] Authentication seed insert raced with another initializer; retrying from committed rows");
+                _context.ChangeTracker.Clear();
+            }
+        }
     }
 
     private async Task SeedActionsAsync()
@@ -195,40 +213,53 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
     private static bool IsUniqueConstraintViolation(Exception ex)
     {
-        if (ex == null)
+        for (Exception? inner = ex; inner is not null; inner = inner.InnerException)
         {
-            return false;
-        }
+            int? sqliteErrorCode = null;
+            int? sqliteExtendedErrorCode = null;
+            if (inner is Microsoft.Data.Sqlite.SqliteException sqlite)
+            {
+                sqliteErrorCode = sqlite.SqliteErrorCode;
+                sqliteExtendedErrorCode = sqlite.SqliteExtendedErrorCode;
+            }
 
-        // Walk inner exceptions to find DB-specific messages
-        Exception? e = ex;
-        while (e != null)
-        {
-            string msg = e.Message ?? string.Empty;
+            string? sqlState = (inner as System.Data.Common.DbException)?.SqlState;
+            int? sqlServerErrorNumber = null;
+            if (inner.GetType().FullName is "Microsoft.Data.SqlClient.SqlException" or "System.Data.SqlClient.SqlException")
+            {
+                sqlServerErrorNumber = inner.GetType().GetProperty("Number")?.GetValue(inner) as int?;
+            }
 
-            // SQLite
-            if (msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase) || msg.Contains("constraint failed", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique index", StringComparison.OrdinalIgnoreCase))
+            int? mySqlErrorNumber = null;
+            if (inner.GetType().FullName is "MySqlConnector.MySqlException" or "MySql.Data.MySqlClient.MySqlException")
+            {
+                mySqlErrorNumber = inner.GetType().GetProperty("Number")?.GetValue(inner) as int?;
+            }
+
+            if (MatchesUniqueConstraintViolation(
+                sqlState,
+                sqlServerErrorNumber,
+                mySqlErrorNumber,
+                sqliteErrorCode,
+                sqliteExtendedErrorCode))
             {
                 return true;
             }
-
-            // Postgres
-            if (msg.Contains("duplicate key value", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique_violation", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            // SQL Server
-            if (msg.Contains("violation of unique", StringComparison.OrdinalIgnoreCase) || msg.Contains("unique constraint", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            e = e.InnerException;
         }
 
         return false;
     }
+
+    internal static bool MatchesUniqueConstraintViolation(
+        string? sqlState,
+        int? sqlServerErrorNumber,
+        int? mySqlErrorNumber,
+        int? sqliteErrorCode,
+        int? sqliteExtendedErrorCode)
+        => sqliteExtendedErrorCode is 1555 or 2067
+            || string.Equals(sqlState, "23505", StringComparison.Ordinal)
+            || sqlServerErrorNumber is 2601 or 2627
+            || mySqlErrorNumber == 1062;
 
     private async Task SeedResourcesAsync()
     {
@@ -296,7 +327,6 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
     private async Task SeedRolePermissionsAsync()
     {
-        _ = await _context.SaveChangesAsync();
         Role? adminRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "farm_admin");
         if (adminRole != null)
         {
