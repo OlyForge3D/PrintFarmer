@@ -703,17 +703,68 @@ function circularAt(classText) {
   }
 }
 
+function rawOffsetAt(raw, cookedOffset) {
+  let rawIndex = 0
+  let cookedIndex = 0
+
+  while (rawIndex < raw.length && cookedIndex < cookedOffset) {
+    if (raw[rawIndex] !== '\\') {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+
+    const escaped = raw[rawIndex + 1]
+    if (escaped === '\r' || escaped === '\n') {
+      rawIndex += escaped === '\r' && raw[rawIndex + 2] === '\n' ? 3 : 2
+      continue
+    }
+    if (escaped === 'x' && /^[0-9a-f]{2}$/i.test(raw.slice(rawIndex + 2, rawIndex + 4))) {
+      rawIndex += 4
+      cookedIndex += 1
+      continue
+    }
+    if (escaped === 'u') {
+      const codePoint = /^\{([0-9a-f]+)\}/i.exec(raw.slice(rawIndex + 2))
+      if (codePoint) {
+        rawIndex += codePoint[0].length + 2
+        cookedIndex += Number.parseInt(codePoint[1], 16) > 0xffff ? 2 : 1
+        continue
+      }
+      if (/^[0-9a-f]{4}$/i.test(raw.slice(rawIndex + 2, rawIndex + 6))) {
+        rawIndex += 6
+        cookedIndex += 1
+        continue
+      }
+    }
+
+    const legacyOctal = /^[0-7]{1,3}/.exec(raw.slice(rawIndex + 1))
+    rawIndex += legacyOctal ? legacyOctal[0].length + 1 : 2
+    cookedIndex += 1
+  }
+
+  return cookedIndex === cookedOffset ? rawIndex : -1
+}
+
 /** Collect every string literal and template quasi beneath a className value. */
 function collectStringNodes(node, found = []) {
   if (!node || typeof node !== 'object') return found
 
   if (node.type === 'Literal' && typeof node.value === 'string') {
-    found.push({ node, text: node.value, quasi: null })
+    const decodeEscapes = node.parent?.type !== 'JSXAttribute'
+    const raw = decodeEscapes ? node.raw.slice(1, -1) : node.value
+    found.push({ node, text: node.value, raw, decodeEscapes, quasi: null })
     return found
   }
   if (node.type === 'TemplateLiteral') {
     for (const quasi of node.quasis) {
-      found.push({ node: quasi, text: quasi.value.cooked ?? '', quasi })
+      found.push({
+        node: quasi,
+        text: quasi.value.cooked ?? '',
+        raw: quasi.value.raw,
+        decodeEscapes: true,
+        quasi,
+      })
     }
     for (const expression of node.expressions) collectStringNodes(expression, found)
     return found
@@ -814,7 +865,17 @@ export default {
       return `${prefix}${leadingImportant}${replacement}${trailingImportant}`
     }
 
-    function reportToken({ stringNode, quasi, rawToken, sourceOffset, messageId, data, autofix }) {
+    function reportToken({
+      stringNode,
+      quasi,
+      rawToken,
+      sourceOffset,
+      sourceLength,
+      sourceMatches,
+      messageId,
+      data,
+      autofix,
+    }) {
       const replacement = toLargeToken(rawToken)
       const descriptor = {
         node: quasi ?? stringNode,
@@ -828,15 +889,15 @@ export default {
       }
 
       const start = stringNode.range[0] + sourceOffset
-      const range = [start, start + rawToken.length]
+      const range = [start, start + sourceLength]
       descriptor.loc = {
         start: context.sourceCode.getLocFromIndex(start),
         end: context.sourceCode.getLocFromIndex(range[1]),
       }
 
-      if (autofix) {
+      if (autofix && sourceMatches) {
         descriptor.fix = fixer => fixer.replaceTextRange(range, replacement)
-      } else if (replacement !== rawToken) {
+      } else if (!autofix && sourceMatches && replacement !== rawToken) {
         descriptor.suggest = [
           {
             messageId: 'replaceWithLg',
@@ -875,13 +936,17 @@ export default {
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
-        for (const { node: stringNode, text, quasi } of strings) {
-          const sourceText = context.sourceCode.getText(stringNode)
-          let sourceCursor = 0
+        for (const { node: stringNode, text, raw, decodeEscapes, quasi } of strings) {
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
-            const sourceOffset = sourceText.indexOf(rawToken, sourceCursor)
-            if (sourceOffset >= 0) sourceCursor = sourceOffset + rawToken.length
+            const rawStart = decodeEscapes ? rawOffsetAt(raw, match.index) : match.index
+            const rawEnd = decodeEscapes
+              ? rawOffsetAt(raw, match.index + rawToken.length)
+              : match.index + rawToken.length
+            const sourceOffset = rawStart < 0 || rawEnd < 0 ? -1 : rawStart + 1
+            const sourceLength = rawEnd - rawStart
+            const sourceMatches =
+              rawStart >= 0 && rawEnd >= 0 && raw.slice(rawStart, rawEnd) === rawToken
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue
@@ -902,6 +967,8 @@ export default {
                 quasi,
                 rawToken,
                 sourceOffset,
+                sourceLength,
+                sourceMatches,
                 messageId: 'fullRound',
                 data: { token: rawToken },
                 autofix: false,
@@ -931,6 +998,8 @@ export default {
                 quasi,
                 rawToken,
                 sourceOffset,
+                sourceLength,
+                sourceMatches,
                 messageId: 'oversized',
                 data: { token: rawToken, px: Math.round(px * 100) / 100 },
                 // Named sizes map onto the scale deterministically, so they are

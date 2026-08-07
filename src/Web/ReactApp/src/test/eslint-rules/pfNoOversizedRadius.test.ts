@@ -529,6 +529,20 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
+    // If the utility itself uses a JavaScript escape, report its precise raw
+    // source span but do not let a later lookalike token attract its autofix.
+    {
+      code: '<div className={"rounded-\\x32xl rounded-2xlfoo"} />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          line: 1,
+          column: 18,
+          endColumn: 32,
+        },
+      ],
+    },
     // Two violations in one attribute are both reported.
     {
       code: '<div className="rounded-2xl md:rounded-3xl" />',
