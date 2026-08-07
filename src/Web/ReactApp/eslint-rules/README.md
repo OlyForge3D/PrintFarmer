@@ -138,6 +138,7 @@ resolver described above. Side-specific utilities are handled explicitly — `ro
 left side, not a size.
 
 Arbitrary values in units the rule cannot resolve statically (e.g. `rounded-[var(--x)]`) are
-left alone rather than guessed at. Unterminated CSS comments are handled by declaration
-order: a comment opened by an earlier utility can swallow a later radius, while a radius
-value before its own unterminated comment still applies and is judged.
+left alone rather than guessed at. Unterminated CSS comments are handled by Tailwind's
+generated declaration order: a comment emitted before `border-radius` can swallow the radius,
+while a comment emitted afterward cannot. A radius value before its own unterminated comment
+still applies and is judged.

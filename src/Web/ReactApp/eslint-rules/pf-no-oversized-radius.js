@@ -301,6 +301,20 @@ function hasEscapingComment(rawCandidate) {
   return false
 }
 
+function escapingCommentOrder(rawCandidate) {
+  const { base } = splitToken(rawCandidate)
+  if (parseRounded(base)) return 'radius'
+  if (/^(?:size|w|h|aspect)-/.test(base)) return 'before'
+  if (/^(?:bg|opacity|shadow|text)-/.test(base)) return 'after'
+
+  const property = /^\[([^:]+):/.exec(base)?.[1]
+  if (/^(?:width|height|aspect-ratio)$/.test(property)) return 'before'
+  if (/^(?:background|background-color|color|opacity|box-shadow|text-shadow)$/.test(property)) {
+    return 'after'
+  }
+  return 'unknown'
+}
+
 function changesSelectorScope(variant) {
   if (PSEUDO_ELEMENT_VARIANTS.has(variant) || variant === '*' || variant === '**') {
     return true
@@ -822,16 +836,23 @@ export default {
         // index it by variant scope, so a scoped radius is judged against the
         // evidence that applies where it applies.
         const classText = strings.map(entry => entry.text).join(' ')
-        const escaping = classText.split(/\s+/).filter(hasEscapingComment)
-        const soleEscaper = escaping.length === 1 ? escaping[0] : undefined
-        if (escaping.length > 1) return
+        const escaping = classText
+          .split(/\s+/)
+          .filter(hasEscapingComment)
+          .map(rawToken => ({ rawToken, order: escapingCommentOrder(rawToken) }))
+        if (escaping.some(entry => entry.order === 'before' || entry.order === 'unknown')) {
+          return
+        }
+        const radiusEscapers = escaping.filter(entry => entry.order === 'radius')
+        if (radiusEscapers.length > 1) return
+        const soleRadiusEscaper = radiusEscapers[0]?.rawToken
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
-            if (soleEscaper !== undefined && rawToken !== soleEscaper) continue
+            if (soleRadiusEscaper !== undefined && rawToken !== soleRadiusEscaper) continue
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue

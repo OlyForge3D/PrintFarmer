@@ -56,6 +56,11 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: `<div className="w-[64px${OPEN_CSS_COMMENT}] rounded-[9999px] h-[32px]" />`,
     },
+    // Competing radius escapers have ambiguous generated candidate order, so
+    // neither can be judged safely.
+    {
+      code: `<div className="rounded-[9999px${OPEN_CSS_COMMENT}] rounded-[8px${OPEN_CSS_COMMENT}] w-[64px] h-[32px]" />`,
+    },
 
     // Provably circular elements keep rounded-full with no annotation.
     { code: '<span className="w-2 h-2 rounded-full bg-pf-error" />' },
@@ -315,6 +320,31 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // live while later declarations are swallowed.
     {
       code: `<div className="rounded-[16px${OPEN_CSS_COMMENT}] w-[64px] h-[32px]" />`,
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[16px/*c]', px: 16 },
+          suggestions: 1,
+        },
+      ],
+    },
+    // Utilities emitted after border-radius cannot swallow a live radius. One or
+    // several later comments therefore do not suppress the radius report.
+    {
+      code: `<div className="rounded-[16px] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
+    {
+      code: `<div className="rounded-[16px] bg-[red${OPEN_CSS_COMMENT}] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
+    // A radius escaper remains live even when another later utility also opens a
+    // comment; only the radius token itself is judged.
+    {
+      code: `<div className="rounded-[16px${OPEN_CSS_COMMENT}] opacity-[1${OPEN_CSS_COMMENT}]" />`,
       output: null,
       errors: [
         {
