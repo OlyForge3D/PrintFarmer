@@ -274,7 +274,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     id: 'hw-locations',
     label: 'Locations',
     description: 'Physical zones, rooms, and printer placement.',
-    path: '/locations/dashboard',
+    path: '/locations',
     icon: LocationIcon,
     group: 'hardware',
     keywords: ['location', 'zone', 'room', 'floor', 'placement', 'physical'],

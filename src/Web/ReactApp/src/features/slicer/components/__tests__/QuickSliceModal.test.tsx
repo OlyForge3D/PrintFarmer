@@ -187,7 +187,7 @@ describe('QuickSliceModal', () => {
       });
     });
 
-    it('navigates to jobs page on success', async () => {
+    it('navigates to the canonical jobs page on success', async () => {
       renderModal();
 
       await waitFor(() => {
@@ -197,7 +197,9 @@ describe('QuickSliceModal', () => {
       fireEvent.click(screen.getByRole('button', { name: /slice/i }));
 
       await waitFor(() => {
-        expect(mockNavigate).toHaveBeenCalledWith('/slice-jobs');
+        expect(mockNavigate).toHaveBeenCalledWith(
+          '/admin/manage?tab=operations&sub=workers&workerTab=jobs',
+        );
       });
     });
   });

@@ -214,8 +214,8 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('tab=general');
   });
 
-  it('maps legacy notifications links into User Settings', () => {
-    renderSettings('/settings?tab=notifications');
+  it('opens Notifications from its canonical User Settings URL', () => {
+    renderSettings('/settings?scope=user&tab=profile&sub=notifications');
 
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Notifications' })).toHaveAttribute('aria-selected', 'true');
@@ -225,8 +225,8 @@ describe('SettingsShell', () => {
     expect(screen.getByTestId('location-search')).toHaveTextContent('sub=notifications');
   });
 
-  it('maps legacy system worker links into Admin Settings workers', () => {
-    renderSettings('/settings?tab=system&sub=workers&workerTab=jobs');
+  it('opens worker jobs from its canonical Admin URL', () => {
+    renderSettings('/admin/manage?scope=admin&tab=operations&sub=workers&workerTab=jobs');
 
     expect(getCategoryButton('Operations')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Workers' })).toHaveAttribute('aria-selected', 'true');
@@ -400,8 +400,8 @@ describe('SettingsShell', () => {
     expect(SETTINGS_SCOPES.some(scope => scope.label === expected)).toBe(true);
   });
 
-  it('keeps API Keys reachable under User Settings through legacy links', () => {
-    renderSettings('/settings?tab=users&sub=api-keys');
+  it('opens API Keys from its canonical User Settings URL', () => {
+    renderSettings('/settings?scope=user&tab=profile&sub=api-keys');
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'API Keys' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('api-keys-page')).toHaveAttribute('data-embedded', 'true');

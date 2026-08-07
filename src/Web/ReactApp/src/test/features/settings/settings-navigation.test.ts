@@ -50,11 +50,11 @@ describe('resolveSettingsNavigationTarget', () => {
     });
   });
 
-  it('maps legacy category aliases to the scoped destination', () => {
-    expect(resolveSettingsNavigationTarget('system', 'workers', undefined)).toEqual({
+  it('falls back within the route scope when the tab is not canonical', () => {
+    expect(resolveSettingsNavigationTarget('system', 'workers', 'admin')).toEqual({
       scopeId: 'admin',
       categoryId: 'operations',
-      subPageId: 'workers',
+      subPageId: 'status',
     });
   });
 });

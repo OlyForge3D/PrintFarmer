@@ -363,48 +363,26 @@ component code:
 You do **not** need to write React form code, add a save handler, wire validation, or
 add the property to a hand-maintained list. The metadata pipeline handles all of that.
 
-## Legacy Path Redirects
+## Canonical Navigation
 
-`src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts` is the canonical list
-of moved URLs. It backs both this documentation and the redirect regression tests. Do
-not delete entries when you rename a route — add a NEW entry pointing the old path to the
-new path so external bookmarks keep working.
+All supported React navigation must link directly to the current route. Do not add
+compatibility aliases or redirects for renamed URLs, and do not depend on historical
+bookmarks in tests. Update every in-app caller and its assertions in the same change as
+a route rename.
 
-The current list:
+The settings and admin shell routes are:
 
-| Legacy path | Now lands at | Notes |
-|---|---|---|
-| `/admin/printers` | `/printers` | Duplicate of the top-level Printers destination. |
-| `/admin/file-health` | `/admin/manage?tab=operations&sub=status` | Folded into System Status. |
-| `/admin/slicer-profiles` | `/admin/settings?tab=slicing&sub=profiles` | Moved into System Settings > Slicing. |
-| `/admin/tags` | `/admin/manage?tab=data&sub=tags` | Moved into Admin Console > Data. |
-| `/admin/bed-types` | `/admin/settings?tab=slicing&sub=bed-types` | Moved into System Settings > Slicing. |
-| `/admin/custom-fields` | `/admin/settings?tab=hardware&sub=custom-fields` | Moved into System Settings > Hardware. |
-| `/admin/webhooks` | `/admin/settings?tab=integrations` | Lands on the Integrations tab. |
-| `/admin/quotas` | `/admin/settings?tab=quotas` | Moved into System Settings > Quotas. |
-| `/admin/data` | `/admin/manage?tab=data&sub=management` | Moved into Admin Console > Data. |
-| `/admin/monitoring` | `/admin/manage?tab=operations&sub=status` | Folded into System Status. |
-| `/admin/cameras` | `/admin/settings?tab=hardware&sub=cameras` | Moved into System Settings > Hardware. |
-| `/admin/security/login-audit` | `/admin/manage?tab=users&sub=audit` | Moved into Admin Console > Users. |
-| `/admin/settings-legacy` | `/admin/settings?tab=general` | Legacy alias for the pre-shell admin settings page. |
-| `/admin/workers` | `/admin/manage?tab=operations&sub=workers` | Any incoming `?tab=` is remapped to `?workerTab=` so deep-links to a specific worker tab keep working. |
-| `/admin/system` | `/admin/manage?tab=operations&sub=status` | Legacy `?tab=services\|logs\|connections\|monitoring` values each map to a specific Operations sub-page. |
-| `/users` | `/admin/manage?tab=users&sub=accounts` | Top-level Users route now under the admin namespace. |
-| `/settings/system` | `/admin/settings?tab=general` | Legacy top-level System Settings shortcut. |
-| `/preferences` | `/settings` | Legacy preferences shortcut — now the user Settings page. |
-| `/locations` | `/locations/dashboard` | Bare `/locations` lands on the dashboard. |
-| `/cameras` | `/admin/settings?tab=hardware&sub=cameras` | Legacy top-level Cameras page. |
-| `/nfc-devices` | `/admin/settings?tab=hardware&sub=nfc` | Legacy top-level NFC Devices page. |
-| `/statistics` | `/analytics?lens=production` | Legacy Statistics route — now the Analytics production lens. |
-| `/statistics/costs` | `/analytics?lens=cost` | Legacy statistics cost view — now the Analytics cost lens. |
-| `/slicer-profiles` | `/admin/settings?tab=slicing&sub=profiles` | Legacy top-level Slicer Profiles page. |
-| `/slicer/import-official` | `/profiles/import` | Legacy import-official shortcut — now the shared profile import wizard. |
-| `/slice-jobs` | `/admin/manage?tab=operations&sub=workers&workerTab=jobs` | Legacy Slice Jobs list — now the Jobs tab under Workers. |
-| `/files/projects` | `/projects` | Legacy nested Projects path. |
+- `/settings` for user settings.
+- `/admin/settings?tab=<category>&sub=<page>` for system settings.
+- `/admin/manage?tab=<category>&sub=<page>` for administration.
 
-Most redirects drop incoming search params (they use a plain `<Navigate>`). The two
-exceptions — `/admin/workers` and `/admin/system` — remap parameters so their historical
-deep-links keep working; see the `notes` field in `legacyRedirects.ts` for each rule.
+Use additional query parameters only when the destination owns them. For example, the
+canonical slice-job list is
+`/admin/manage?tab=operations&sub=workers&workerTab=jobs`.
+
+Default children within a current route hierarchy use React Router index routes. For
+example, the Locations dashboard renders at the `/locations` index route without
+rewriting the URL.
 
 ## File Locations
 
@@ -426,7 +404,6 @@ Frontend:
 - Categories / scopes: `src/Web/ReactApp/src/features/settings/types.ts`.
 - Group → location map: `src/Web/ReactApp/src/features/settings/settings-navigation.ts`.
 - Admin destination registry: `src/Web/ReactApp/src/features/admin/registry/adminDestinations.ts`.
-- Legacy redirects: `src/Web/ReactApp/src/features/admin/registry/legacyRedirects.ts`.
 - Essential manifest: `src/Web/ReactApp/src/features/admin/settings/essential-manifest.ts`.
 - Command palette: `src/Web/ReactApp/src/features/settings/components/GlobalCommandPaletteProvider.tsx`.
 - Palette mount: `src/Web/ReactApp/src/common/components/Layout.tsx`.
