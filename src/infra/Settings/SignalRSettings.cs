@@ -11,7 +11,7 @@ public class SignalRSettings : IAppSetting
     public static string SectionKey => SectionName;
 
     [SettingDisplay(
-        Name = "Log Level",
+        Name = "Log level",
         Description = "Minimum log level for SignalR events.",
         AllowedValues = new[] { "Trace", "Debug", "Information", "Warning", "Error", "Critical", "None" },
         InputType = SettingInputType.Select)]
@@ -19,7 +19,7 @@ public class SignalRSettings : IAppSetting
     public string LogLevel { get; set; } = "Information";
 
     [SettingDisplay(
-        Name = "Console Logging Enabled",
+        Name = "Console logging enabled",
         Description = "Enable logging to console for SignalR.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("consoleLoggingEnabled")]

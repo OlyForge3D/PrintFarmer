@@ -12,14 +12,14 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public static string SectionKey => SectionName;
 
     [SettingDisplay(
-        Name = "Enable Automatic Calculation",
+        Name = "Enable automatic calculation",
         Description = "Automatically calculate costs when jobs complete.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enableAutomaticCostCalculation")]
     public bool EnableAutomaticCostCalculation { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Electricity Rate", Unit = "per kWh",
+        Name = "Electricity rate", Unit = "per kWh",
         Description = "Cost of electricity per kilowatt-hour (e.g., 0.12 for $0.12/kWh).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -28,7 +28,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public decimal ElectricityRatePerKwh { get; set; } = 0.12m;
 
     [SettingDisplay(
-        Name = "Default Machine Hourly Rate",
+        Name = "Default machine hourly rate",
         Description = "Default hourly rate for machine time (e.g., 0.50 for $0.50/hour).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -37,7 +37,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public decimal DefaultMachineHourlyRate { get; set; } = 0.50m;
 
     [SettingDisplay(
-        Name = "Labor Markup Percent",
+        Name = "Labor markup percent",
         Description = "Labor cost as percentage of material+energy+machine (e.g., 0 for no markup, 20 for 20%).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -46,7 +46,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public decimal LaborMarkupPercent { get; set; } = 0m;
 
     [SettingDisplay(
-        Name = "Profit Margin Target Percent",
+        Name = "Profit margin target percent",
         Description = "Target profit margin for pricing calculations (e.g., 30 for 30%).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -55,7 +55,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     public decimal ProfitMarginTargetPercent { get; set; } = 30m;
 
     [SettingDisplay(
-        Name = "Average Printer Wattage",
+        Name = "Average printer wattage",
         Description = "Average power consumption of printers in watts (used if printer-specific data unavailable).",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -67,7 +67,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     /// Global fallback price per kilogram when no Spoolman or material-specific price is available.
     /// </summary>
     [SettingDisplay(
-        Name = "Default Filament Price", Unit = "per kg",
+        Name = "Default filament price", Unit = "per kg",
         Description = "Fallback filament price per kilogram when Spoolman pricing and material defaults are unavailable.",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -80,7 +80,7 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
     /// Used when Spoolman spool/filament has no price set.
     /// </summary>
     [SettingDisplay(
-        Name = "Material Price Defaults",
+        Name = "Material price defaults",
         Description = "Default price per kilogram for each material type. Used when Spoolman pricing is unavailable.",
         InputType = SettingInputType.Custom)]
     [JsonPropertyName("materialPriceDefaults")]

@@ -12,7 +12,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public static string SectionKey => SectionName;
 
     [SettingDisplay(
-        Name = "Enable Failure Detection",
+        Name = "Enable failure detection",
         Description = "Enable automatic AI-powered failure detection for active print jobs.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("enabled")]
@@ -26,7 +26,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public string ObicoApiUrl { get; set; } = "http://obico-ml-api:3333";
 
     [SettingDisplay(
-        Name = "Confidence Threshold",
+        Name = "Confidence threshold",
         Description = "Minimum confidence score (0.0-1.0) to trigger failure detection. Higher = fewer false positives.",
         InputType = SettingInputType.Number,
         MinValue = 0.0,
@@ -35,7 +35,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public decimal ConfidenceThreshold { get; set; } = 0.7m;
 
     [SettingDisplay(
-        Name = "Scan Interval", Unit = "seconds",
+        Name = "Scan interval", Unit = "seconds",
         Description = "How often to check active print jobs for failures (minimum 10 seconds).",
         InputType = SettingInputType.Number,
         MinValue = 10,
@@ -44,14 +44,14 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int ScanIntervalSeconds { get; set; } = 30;
 
     [SettingDisplay(
-        Name = "Auto-Pause on Failure",
+        Name = "Auto-pause on failure",
         Description = "Automatically pause the print job when a failure is detected.",
         InputType = SettingInputType.Boolean)]
     [JsonPropertyName("autoPauseOnFailure")]
     public bool AutoPauseOnFailure { get; set; } = true;
 
     [SettingDisplay(
-        Name = "Startup Delay", Unit = "seconds",
+        Name = "Startup delay", Unit = "seconds",
         Description = "How long the monitor waits after application start before beginning scans. Allows the database and printer connections to initialize. Setting this too low causes a burst of errors on every restart.",
         InputType = SettingInputType.Number,
         MinValue = 5,
@@ -60,7 +60,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int StartupDelaySeconds { get; set; } = 30;
 
     [SettingDisplay(
-        Name = "Print Warmup Grace Period", Unit = "seconds",
+        Name = "Print warmup grace period", Unit = "seconds",
         Description = "How long to wait after a print starts before scanning for failures. Skips the nozzle heating, purge line, and first-layer adhesion phases that frequently trigger false positives. Reducing this significantly increases the risk of false auto-pauses.",
         InputType = SettingInputType.Number,
         MinValue = 0,
@@ -69,7 +69,7 @@ public class ObicoSettings : IAppSetting, IValidatableSetting
     public int WarmupGracePeriodSeconds { get; set; } = 120;
 
     [SettingDisplay(
-        Name = "Analysis Request Timeout", Unit = "seconds",
+        Name = "Analysis request timeout", Unit = "seconds",
         Description = "Maximum time to wait for the Obico ML API to respond to a single snapshot analysis request. If the ML service is overloaded or unreachable, a long timeout will stall the entire monitoring cycle and delay checks for all other printers.",
         InputType = SettingInputType.Number,
         MinValue = 5,

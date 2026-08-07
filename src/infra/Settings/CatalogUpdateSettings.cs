@@ -35,6 +35,6 @@ public class CatalogUpdateSettings : IAppSetting
     /// Defaults to false — users are notified and must apply manually.
     /// </summary>
     [JsonPropertyName("autoApply")]
-    [SettingDisplay(Name = "Auto-apply Updates", Description = "Automatically apply catalog model updates to printers when detected, without user confirmation", InputType = SettingInputType.Boolean)]
+    [SettingDisplay(Name = "Auto-apply updates", Description = "Automatically apply catalog model updates to printers when detected, without user confirmation", InputType = SettingInputType.Boolean)]
     public bool AutoApply { get; set; } = false;
 }
