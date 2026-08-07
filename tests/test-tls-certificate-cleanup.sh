@@ -96,8 +96,13 @@ EOF
         cat <<'EOF'
 
 outer_caller() {
-    ensure_tls_certificates
-    printf 'outer-returned\n'
+    local status
+    if ensure_tls_certificates; then
+        printf 'outer-returned\n'
+    else
+        status=$?
+        return "$status"
+    fi
 }
 
 outer_caller
@@ -153,11 +158,57 @@ EOF
     pass "$case_name cleanup"
 }
 
+find_unsafe_return_traps() {
+    grep -HnE \
+        -e "trap[[:space:]]+'[^']*\\\$[A-Za-z_][A-Za-z0-9_]*[^']*'[[:space:]]+RETURN" \
+        -e 'trap[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+RETURN' \
+        "$@" || true
+    grep -HnE 'trap[[:space:]]+".*"[[:space:]]+RETURN' "$@" \
+        | grep -F '\$' || true
+}
+
+trap_fixture="$TEST_ROOT/return-trap-fixture.sh"
+cat > "$trap_fixture" <<'EOF'
+safe_registration() {
+    local temp_dir="/tmp/safe"
+    trap "rm -rf -- '$temp_dir'" RETURN
+}
+unsafe_single_quotes() {
+    local temp_dir="/tmp/unsafe-single"
+    trap 'rm -rf -- "$temp_dir"' RETURN # unsafe-single
+}
+unsafe_escaped_double_quotes() {
+    local temp_dir="/tmp/unsafe-double"
+    trap "rm -rf -- \"\$temp_dir\"" RETURN # unsafe-double
+}
+unsafe_indirect_handler() {
+    local temp_dir="/tmp/unsafe-indirect"
+    cleanup_temp_dir() { rm -rf -- "$temp_dir"; }
+    trap cleanup_temp_dir RETURN # unsafe-indirect
+}
+EOF
+
+fixture_findings="$(find_unsafe_return_traps "$trap_fixture")"
+for expected_finding in unsafe-single unsafe-double unsafe-indirect; do
+    if ! grep -q "$expected_finding" <<<"$fixture_findings"; then
+        fail "RETURN trap sweep missed $expected_finding fixture"
+    fi
+done
+if grep -q 'safe_registration' <<<"$fixture_findings"; then
+    fail "RETURN trap sweep rejected safely expanded registration"
+fi
+pass "RETURN trap sweep distinguishes deferred and registration-time expansion"
+
 unsafe_return_traps="$(
-    grep -RInE \
-        --include='*.sh' \
-        "trap[[:space:]]+'[^']*\\\$[A-Za-z_][A-Za-z0-9_]*[^']*'[[:space:]]+RETURN" \
-        "$REPO_ROOT/scripts" "$REPO_ROOT/tests" || true
+    while IFS= read -r -d '' shell_file; do
+        find_unsafe_return_traps "$shell_file"
+    done < <(
+        find "$REPO_ROOT" -type f -name '*.sh' \
+            -not -path '*/.git/*' \
+            -not -path '*/node_modules/*' \
+            -not -path "$REPO_ROOT/tests/test-tls-certificate-cleanup.sh" \
+            -print0
+    )
 )"
 if [[ -n "$unsafe_return_traps" ]]; then
     printf '%s\n' "$unsafe_return_traps" >&2

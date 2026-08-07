@@ -5868,9 +5868,9 @@ ensure_tls_certificates() {
         ./scripts/generate-certs.sh "$cert_dir"
     else
         (
-        mkdir -p "$cert_dir"
+        mkdir -p "$cert_dir" || exit $?
         local temp_dir
-        temp_dir="$(mktemp -d)"
+        temp_dir="$(mktemp -d)" || exit $?
         local ca_config="$temp_dir/ca.cnf"
         local server_config="$temp_dir/server.cnf"
         trap 'rm -rf -- "$temp_dir"' EXIT
@@ -5896,7 +5896,7 @@ ensure_tls_certificates() {
             san_entries+=("$tailscale_ip")
         fi
 
-        cat > "$ca_config" <<EOF
+        cat > "$ca_config" <<EOF || exit $?
 [ req ]
 distinguished_name = dn
 x509_extensions = v3_ca
@@ -5944,21 +5944,21 @@ EOF
                     dns_index=$((dns_index + 1))
                 fi
             done
-        } > "$server_config"
+        } > "$server_config" || exit $?
 
-        openssl genrsa -out "$cert_dir/ca.key" 4096 2>/dev/null
+        openssl genrsa -out "$cert_dir/ca.key" 4096 2>/dev/null || exit $?
         openssl req -x509 -new -key "$cert_dir/ca.key" -sha256 -days 825 \
-            -out "$cert_dir/ca.crt" -config "$ca_config" 2>/dev/null
-        openssl genrsa -out "$cert_dir/tls.key" 2048 2>/dev/null
+            -out "$cert_dir/ca.crt" -config "$ca_config" 2>/dev/null || exit $?
+        openssl genrsa -out "$cert_dir/tls.key" 2048 2>/dev/null || exit $?
         openssl req -new -key "$cert_dir/tls.key" -out "$temp_dir/tls.csr" \
-            -config "$server_config" 2>/dev/null
+            -config "$server_config" 2>/dev/null || exit $?
         openssl x509 -req -in "$temp_dir/tls.csr" -CA "$cert_dir/ca.crt" \
             -CAkey "$cert_dir/ca.key" -CAcreateserial -out "$cert_dir/tls.crt" \
-            -days 365 -sha256 -extfile "$server_config" -extensions v3_req 2>/dev/null
-        cat "$cert_dir/tls.crt" "$cert_dir/ca.crt" > "$cert_dir/tls-fullchain.crt"
-        openssl x509 -in "$cert_dir/ca.crt" -outform der -out "$cert_dir/ca.cer"
-        chmod 600 "$cert_dir/ca.key" "$cert_dir/tls.key"
-        chmod 644 "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/tls.crt" "$cert_dir/tls-fullchain.crt"
+            -days 365 -sha256 -extfile "$server_config" -extensions v3_req 2>/dev/null || exit $?
+        cat "$cert_dir/tls.crt" "$cert_dir/ca.crt" > "$cert_dir/tls-fullchain.crt" || exit $?
+        openssl x509 -in "$cert_dir/ca.crt" -outform der -out "$cert_dir/ca.cer" || exit $?
+        chmod 600 "$cert_dir/ca.key" "$cert_dir/tls.key" || exit $?
+        chmod 644 "$cert_dir/ca.crt" "$cert_dir/ca.cer" "$cert_dir/tls.crt" "$cert_dir/tls-fullchain.crt" || exit $?
         print_success "TLS certificates generated at $cert_dir"
         print_info "Install $cert_dir/ca.cer on iPhone/iPad and enable trust in Certificate Trust Settings."
         print_info "Do not install tls.crt on iPhone/iPad; if Settings shows a trusted certificate named 'PrintFarmer', remove it and trust 'PrintFarmer Local CA' instead."
