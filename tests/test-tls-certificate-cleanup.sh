@@ -162,6 +162,8 @@ find_unsafe_return_traps() {
     grep -HnE \
         -e "trap[[:space:]]+'[^']*\\\$[A-Za-z_][A-Za-z0-9_]*[^']*'[[:space:]]+RETURN" \
         -e 'trap[[:space:]]+[A-Za-z_][A-Za-z0-9_]*[[:space:]]+RETURN' \
+        -e "trap[[:space:]]+'[A-Za-z_][A-Za-z0-9_]*'[[:space:]]+RETURN" \
+        -e 'trap[[:space:]]+"[A-Za-z_][A-Za-z0-9_]*"[[:space:]]+RETURN' \
         "$@" || true
     grep -HnE 'trap[[:space:]]+".*"[[:space:]]+RETURN' "$@" \
         | grep -F '\$' || true
@@ -186,10 +188,25 @@ unsafe_indirect_handler() {
     cleanup_temp_dir() { rm -rf -- "$temp_dir"; }
     trap cleanup_temp_dir RETURN # unsafe-indirect
 }
+unsafe_single_quoted_handler() {
+    local temp_dir="/tmp/unsafe-single-handler"
+    cleanup_single_quoted() { rm -rf -- "$temp_dir"; }
+    trap 'cleanup_single_quoted' RETURN # unsafe-single-handler
+}
+unsafe_double_quoted_handler() {
+    local temp_dir="/tmp/unsafe-double-handler"
+    cleanup_double_quoted() { rm -rf -- "$temp_dir"; }
+    trap "cleanup_double_quoted" RETURN # unsafe-double-handler
+}
 EOF
 
 fixture_findings="$(find_unsafe_return_traps "$trap_fixture")"
-for expected_finding in unsafe-single unsafe-double unsafe-indirect; do
+for expected_finding in \
+    unsafe-single \
+    unsafe-double \
+    unsafe-indirect \
+    unsafe-single-handler \
+    unsafe-double-handler; do
     if ! grep -q "$expected_finding" <<<"$fixture_findings"; then
         fail "RETURN trap sweep missed $expected_finding fixture"
     fi
