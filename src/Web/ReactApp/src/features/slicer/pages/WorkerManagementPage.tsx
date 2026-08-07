@@ -367,7 +367,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
           <tbody className="divide-y divide-pf-border">
             {workers.map(worker => (
               <>
-                <tr key={worker.id} className="hover:bg-pf-bg-2 transition-colors">
+                <tr key={worker.id}>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-start gap-2">
                       <Button
