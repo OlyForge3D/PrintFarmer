@@ -308,7 +308,7 @@ function renderPagelet() {
  *
  * Update this only from a fresh measurement, never to make a test pass.
  */
-const LONGEST_LABEL = 'Spool Burn-Rate Minimum Samples';
+const LONGEST_LABEL = 'Spool burn-rate minimum samples';
 const LONGEST_LABEL_PX = 194 + 22;
 
 /**
