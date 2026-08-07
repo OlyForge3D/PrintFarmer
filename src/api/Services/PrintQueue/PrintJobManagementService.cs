@@ -246,15 +246,17 @@ public class PrintJobManagementService(
                     .Select(job => job.AssignedPrinterId!.Value)
                     .Distinct()
                     .ToArray();
-                dispatchVersions = await _appDbContext.PrinterDispatchStates
+                Dictionary<Guid, long> dispatchRevisionValues =
+                    await _appDbContext.PrinterDispatchStates
                     .AsNoTracking()
                     .Where(state => printerIds.Contains(state.PrinterId))
                     .ToDictionaryAsync(
                         state => state.PrinterId,
-                        state => state.RowVersion is { Length: > 0 }
-                            ? Convert.ToBase64String(state.RowVersion)
-                            : null,
+                        state => state.Revision,
                         cancellationToken);
+                dispatchVersions = dispatchRevisionValues.ToDictionary(
+                    pair => pair.Key,
+                    pair => (string?)RevisionETag.Encode(pair.Value));
                 List<QueueDispatchAttempt> attempts = await _appDbContext
                     .QueueDispatchAttempts
                     .AsNoTracking()
@@ -1188,13 +1190,16 @@ public class PrintJobManagementService(
             if (expectedJobRowVersion is not null &&
                 !expectedJobRowVersion.SequenceEqual(job.RowVersion ?? []))
             {
-                byte[]? currentDispatchRevision = job.AssignedPrinterId.HasValue &&
-                                                  _appDbContext is not null
+                long? currentDispatchRevisionValue = job.AssignedPrinterId.HasValue &&
+                                                     _appDbContext is not null
                     ? await _appDbContext.PrinterDispatchStates
                         .AsNoTracking()
                         .Where(state => state.PrinterId == job.AssignedPrinterId.Value)
-                        .Select(state => state.RowVersion)
+                        .Select(state => (long?)state.Revision)
                         .SingleOrDefaultAsync(cancellationToken)
+                    : null;
+                byte[]? currentDispatchRevision = currentDispatchRevisionValue.HasValue
+                    ? RevisionETag.EncodeBytes(currentDispatchRevisionValue.Value)
                     : null;
                 throw new QueueRevisionConflictException(
                     "The resource has changed since the request was prepared (job dispatch). " +
@@ -4518,11 +4523,14 @@ public class PrintJobManagementService(
         byte[]? dispatchRevision = null;
         if (_appDbContext is not null)
         {
-            dispatchRevision = await _appDbContext.PrinterDispatchStates
+            long? dispatchRevisionValue = await _appDbContext.PrinterDispatchStates
                 .AsNoTracking()
                 .Where(state => state.PrinterId == attempt.PrinterId)
-                .Select(state => state.RowVersion)
+                .Select(state => (long?)state.Revision)
                 .FirstOrDefaultAsync(ct);
+            dispatchRevision = dispatchRevisionValue.HasValue
+                ? RevisionETag.EncodeBytes(dispatchRevisionValue.Value)
+                : null;
         }
 
         string? dispatchStateRevision = dispatchRevision is { Length: > 0 }

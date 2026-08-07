@@ -1,9 +1,10 @@
-﻿using System;
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+using Farm.Infrastructure.Domain;
 
 namespace Farm.Infrastructure.Data;
 
-public class AppSettingsEntity
+public class AppSettingsEntity : IRevisionedEntity
 {
     [Key]
     public int Id { get; set; }
@@ -15,7 +16,15 @@ public class AppSettingsEntity
     public DateTime UpdatedAt { get; set; }
 
     /// <summary>
-    /// Optimistic concurrency token. Prevents silent overwrites from concurrent writers.
+    /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
-    public byte[] RowVersion { get; set; } = [];
+    [NotMapped]
+    public byte[] RowVersion
+    {
+        get => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : [];
+        set => Revision = RevisionETag.Decode(value);
+    }
+
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 }

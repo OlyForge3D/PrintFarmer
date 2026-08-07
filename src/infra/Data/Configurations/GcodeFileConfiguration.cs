@@ -13,7 +13,6 @@ public class GcodeFileConfiguration : IEntityTypeConfiguration<GcodeFile>
     public void Configure(EntityTypeBuilder<GcodeFile> builder)
     {
         builder.HasKey(g => g.Id);
-        builder.Property(g => g.RowVersion).IsRowVersion();
 
         // Basic properties
         builder.Property(g => g.FileName).IsRequired().HasMaxLength(255);

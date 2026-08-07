@@ -9,8 +9,6 @@ public class DispatchSettingsConfiguration : IEntityTypeConfiguration<DispatchSe
     public void Configure(EntityTypeBuilder<DispatchSettings> builder)
     {
         _ = builder.HasKey(d => d.Id);
-        _ = builder.Property(d => d.RowVersion).IsRowVersion();
-
         _ = builder.Property(d => d.AutoDispatchMode)
             .HasConversion<string>()
             .HasMaxLength(20);

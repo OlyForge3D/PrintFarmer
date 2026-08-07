@@ -139,7 +139,17 @@ require their current `ETag`. These tokens are bound to EF's update predicate,
 not checked only by a prior read. Event envelopes retain compatibility ETags
 and include provider-independent job/dispatch revisions, attempt number and
 outcome, bed-clear command/expiry/state, and typed failure retry/reconciliation
-flags. SignalR queue events require explicit authorized printer/project/job
+flags.
+
+Mutable queue resources use an application-managed `long Revision` as the EF
+concurrency token on SQLite, PostgreSQL, and SQL Server. Each tracked update
+increments the revision in the same write; direct atomic SQL updates increment
+it explicitly. API and SignalR contracts continue to expose opaque ETags by
+encoding the revision as eight big-endian bytes in base64. Legacy tokens with a
+different byte length are treated as stale so they cannot overwrite a migrated
+row.
+
+SignalR queue events require explicit authorized printer/project/job
 subscriptions. Clients proactively drain the change feed on initial connection
 and reconnect, detect later sequence gaps, and refetch
 `GET /api/job-queue/changes?afterSequence={n}` as REST authority.

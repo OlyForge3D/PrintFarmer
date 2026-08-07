@@ -1282,16 +1282,18 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         state.Should().NotBeNull("HasData must seed the OutboxSequenceState row");
         state!.Id.Should().Be(1, "the single row always has Id=1");
         state.NextSequence.Should().Be(0, "initial sequence is 0");
-        state.RowVersion.Should().BeNull("row version is null before first write");
+        state.Revision.Should().Be(1, "seeded revisions start at one");
+        state.RowVersion.Should().Equal(RevisionETag.EncodeBytes(1));
 
-        // After a write, RowVersion must be stamped (non-null).
+        // After a write, Revision must advance.
         state.NextSequence = 1;
         await ctx.SaveChangesAsync();
 
         await using AppDbContext verifyCtx = CreateContext();
         OutboxSequenceState? updated = await verifyCtx.OutboxSequenceStates.SingleAsync();
         updated.NextSequence.Should().Be(1);
-        updated.RowVersion.Should().NotBeNull("StampRowVersions must generate a non-null token after first write");
-        updated.RowVersion!.Length.Should().Be(16, "RowVersion is a 16-byte GUID-derived token");
+        updated.Revision.Should().Be(2);
+        updated.RowVersion.Should().Equal(RevisionETag.EncodeBytes(2));
+        updated.RowVersion!.Length.Should().Be(sizeof(long));
     }
 }

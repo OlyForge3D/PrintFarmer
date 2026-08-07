@@ -40,7 +40,8 @@ public sealed class DatabaseMigrationTests
         first.LegacySchemaBaselined.Should().BeFalse();
         first.AppliedMigrations.Should().Equal(
             "20260730231403_InitialV2",
-            "20260806232640_CanonicalizePrintJobPriority");
+            "20260806232640_CanonicalizePrintJobPriority",
+            "20260807023655_UsePortableRevisionConcurrency");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -90,7 +91,7 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
-    public async Task CoreMigration_SeedsOutboxSequenceFenceWithApplicationManagedRowVersion()
+    public async Task CoreMigration_SeedsOutboxSequenceFenceWithPortableRevision()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
         await using AppDbContext context = CreateCoreContext(connection);
@@ -103,9 +104,8 @@ public sealed class DatabaseMigrationTests
 
         OutboxSequenceState seeded = await context.OutboxSequenceStates.SingleAsync(s => s.Id == 1);
         seeded.NextSequence.Should().Be(0L);
-        seeded.RowVersion.Should().BeNull(
-            "SQLite/PostgreSQL row versions are application-managed, so a migration-seeded row is "
-            + "not stamped until the application first saves it");
+        seeded.Revision.Should().Be(1L);
+        seeded.RowVersion.Should().Equal(RevisionETag.EncodeBytes(1));
 
         seeded.NextSequence = 1L;
         _ = await context.SaveChangesAsync();
@@ -440,7 +440,9 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         result.LegacySchemaBaselined.Should().BeFalse();
-        result.AppliedMigrations.Should().Equal("20260730231419_SlicerInitialV2");
+        result.AppliedMigrations.Should().Equal(
+            "20260730231419_SlicerInitialV2",
+            "20260807023701_UsePortableRevisionConcurrency");
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
     }
 

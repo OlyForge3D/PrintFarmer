@@ -435,7 +435,7 @@ public class PrintJobManagementServiceQueueMappingTests
             Id = jobId,
             Name = "Recovered job",
             Status = PrintJobStatus.Starting,
-            RowVersion = jobId.ToByteArray(),
+            Revision = 1,
             QueuedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

@@ -448,10 +448,10 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .IsRequired()
                         .HasColumnType("TEXT");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("BLOB");
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SourceCreator")
                         .HasMaxLength(256)
@@ -473,7 +473,6 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTime>("UpdatedAt")
-                        .IsConcurrencyToken()
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("UploadedAt")
@@ -685,7 +684,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                     b.Property<Guid>("IdempotencyScopeId")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("TEXT")
-                        .HasDefaultValue(Guid.Empty);
+                        .HasDefaultValue(new Guid("00000000-0000-0000-0000-000000000000"));
 
                     b.Property<DateTime?>("LeaseExpiresAt")
                         .HasColumnType("TEXT");

@@ -25,7 +25,5 @@ public class PrinterServiceStateConfiguration : IEntityTypeConfiguration<Printer
             .WithMany(o => o.PrinterServiceStates)
             .HasForeignKey(e => e.ObicoServerId)
             .OnDelete(DeleteBehavior.SetNull);
-
-        builder.Property(e => e.RowVersion).IsRowVersion();
     }
 }

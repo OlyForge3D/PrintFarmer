@@ -6,12 +6,12 @@ namespace Farm.Infrastructure.Domain;
 /// Junction table linking print projects to gcode files with tracking information.
 /// Tracks how many times each file needs to be printed and completion status.
 /// </summary>
-public class PrintProjectFile
+public class PrintProjectFile : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     // Foreign key to PrintProject
     public Guid PrintProjectId { get; set; }

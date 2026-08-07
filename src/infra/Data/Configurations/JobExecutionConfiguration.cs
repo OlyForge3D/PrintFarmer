@@ -13,7 +13,6 @@ public class JobExecutionConfiguration : IEntityTypeConfiguration<JobExecution>
     public void Configure(EntityTypeBuilder<JobExecution> builder)
     {
         _ = builder.HasKey(je => je.Id);
-        _ = builder.Property(je => je.RowVersion).IsRowVersion();
         _ = builder.Property(je => je.Status).IsRequired().HasMaxLength(50);
         _ = builder.Property(je => je.Message).HasMaxLength(500);
 
