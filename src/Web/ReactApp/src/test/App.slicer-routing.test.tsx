@@ -1,9 +1,26 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Outlet } from 'react-router';
 
 const mockUseSystemCapabilities = vi.fn();
+const lazyNewSliceJobPageModule = vi.hoisted(() => {
+  let releaseImport: () => void;
+  let markResolved: () => void;
+  const importReleased = new Promise<void>(resolve => {
+    releaseImport = resolve;
+  });
+  const importResolved = new Promise<void>(resolve => {
+    markResolved = resolve;
+  });
+
+  return {
+    releaseImport: () => releaseImport(),
+    waitUntilReleased: () => importReleased,
+    markResolved: () => markResolved(),
+    waitUntilResolved: () => importResolved,
+  };
+});
 
 vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
@@ -97,9 +114,13 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
   useSystemCapabilities: () => mockUseSystemCapabilities(),
 }));
 
-vi.mock('@/features/slicer/pages/NewSliceJobPage', () => ({
-  NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
-}));
+vi.mock('@/features/slicer/pages/NewSliceJobPage', async () => {
+  await lazyNewSliceJobPageModule.waitUntilReleased();
+  lazyNewSliceJobPageModule.markResolved();
+  return {
+    NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
+  };
+});
 
 vi.mock('@/features/tasks', () => ({
   ProfileImportWizardPage: () => <div>ProfileImportWizardMock</div>,
@@ -176,6 +197,15 @@ describe('App slicer route consolidation', () => {
       error: null,
     });
     rerender(<App />);
+
+    expect(await screen.findByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Loading platform capabilities' })).not.toBeInTheDocument();
+
+    // The capability gate is open; synchronize with the separate route-level lazy import.
+    await act(async () => {
+      lazyNewSliceJobPageModule.releaseImport();
+      await lazyNewSliceJobPageModule.waitUntilResolved();
+    });
 
     expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
   });
