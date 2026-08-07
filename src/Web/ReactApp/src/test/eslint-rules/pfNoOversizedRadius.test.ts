@@ -113,6 +113,14 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<div className="md:aspect-video dark:aspect-square md:dark:rounded-full" />',
     },
+    // Combinators inside a functional pseudo-class do not move the target away
+    // from the host element.
+    { code: '<div className="w-8 h-8 [&:has(>img)]:rounded-full" />' },
+    // Logical start/end corners map to their physical LTR corners.
+    { code: '<div className="rounded-se-full rounded-tr-lg" />' },
+    { code: '<div className="rounded-es-full rounded-bl-lg" />' },
+    // Keyword candidate order is deliberately ambiguous rather than guessed.
+    { code: '<div className="h-full w-fit w-full rounded-full" />' },
 
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
@@ -561,6 +569,23 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output: '<div className="rounded-lg rounded-t-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Multi-state source order is compared lexicographically, not collapsed to
+    // the largest individual state rank.
+    {
+      code: '<div className="h-8 hover:active:w-8 focus:hover:w-4 hover:focus:active:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="h-8 hover:active:w-8 focus:hover:w-4 hover:focus:active:rounded-lg" />',
             },
           ],
         },

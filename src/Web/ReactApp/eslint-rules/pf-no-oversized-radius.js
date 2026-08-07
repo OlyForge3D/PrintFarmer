@@ -88,9 +88,9 @@ const CORNERS_BY_SIDE = new Map([
   ['br', ['br']],
   ['bl', ['bl']],
   ['ss', ['tl']],
-  ['se', ['bl']],
+  ['se', ['tr']],
   ['ee', ['br']],
-  ['es', ['tr']],
+  ['es', ['bl']],
 ])
 
 function parseRounded(base) {
@@ -147,19 +147,6 @@ const STATE_SOURCE_ORDER = new Map([
   ['active', 5],
   ['enabled', 6],
   ['disabled', 7],
-])
-
-const DIMENSION_SOURCE_ORDER = new Map([
-  ['auto', 0],
-  ['px', 1],
-  ['full', 20_000],
-  ['screen', 21_000],
-  ['svw', 21_001],
-  ['lvw', 21_002],
-  ['dvw', 21_003],
-  ['min', 22_000],
-  ['max', 23_000],
-  ['fit', 24_000],
 ])
 
 const PSEUDO_ELEMENT_VARIANTS = new Set([
@@ -221,7 +208,25 @@ function changesSelectorScope(variant) {
   const selector = variant.slice(1, -1)
   const subject = selector.indexOf('&')
   if (subject === -1) return false
-  return /::|[>+~_\s]/.test(selector.slice(subject + 1))
+
+  let parentheses = 0
+  let brackets = 0
+  for (let index = subject + 1; index < selector.length; index += 1) {
+    const character = selector[index]
+    if (character === '\\') {
+      index += 1
+      continue
+    }
+    if (character === '(') parentheses += 1
+    else if (character === ')') parentheses = Math.max(0, parentheses - 1)
+    else if (character === '[') brackets += 1
+    else if (character === ']') brackets = Math.max(0, brackets - 1)
+    else if (parentheses === 0 && brackets === 0) {
+      if (character === ':' && selector[index + 1] === ':') return true
+      if (/[>+~_\s]/.test(character)) return true
+    }
+  }
+  return false
 }
 
 /**
@@ -266,10 +271,9 @@ function parseCondition(variants) {
     specificityReliable: stateZones
       .flat()
       .every(variant => STATE_SOURCE_ORDER.has(variant)),
-    variantOrder: Math.max(
-      0,
-      ...stateZones.flat().map(variant => STATE_SOURCE_ORDER.get(variant) ?? 0),
-    ),
+    variantOrder: stateZones
+      .flat()
+      .map(variant => STATE_SOURCE_ORDER.get(variant) ?? 0),
     mediaOrder: Math.max(0, ...media.map(variant => MEDIA_VARIANTS.get(variant) ?? 0)),
   }
 }
@@ -334,13 +338,25 @@ function mergeConditions(base, extension) {
     media,
     breakpoint: Math.max(base.breakpoint, extension.breakpoint),
     specificity: stateZones.reduce((total, zone) => total + zone.length, 0),
-    variantOrder: Math.max(base.variantOrder, extension.variantOrder),
+    variantOrder: stateZones
+      .flat()
+      .map(variant => STATE_SOURCE_ORDER.get(variant) ?? 0),
     mediaOrder: Math.max(base.mediaOrder, extension.mediaOrder),
   }
 }
 
 function sameConditionPart(left, right) {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function compareOrderLists(left, right) {
+  const length = Math.max(left.length, right.length)
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = left[index] ?? -1
+    const rightValue = right[index] ?? -1
+    if (leftValue !== rightValue) return leftValue > rightValue ? 1 : -1
+  }
+  return 0
 }
 
 function comparePrecedence(candidate, winner) {
@@ -360,9 +376,11 @@ function comparePrecedence(candidate, winner) {
     if (!candidate.condition.specificityReliable || !winner.condition.specificityReliable) {
       return undefined
     }
-    if (candidate.condition.variantOrder !== winner.condition.variantOrder) {
-      return candidate.condition.variantOrder > winner.condition.variantOrder ? 1 : -1
-    }
+    const variantComparison = compareOrderLists(
+      candidate.condition.variantOrder,
+      winner.condition.variantOrder,
+    )
+    if (variantComparison !== 0) return variantComparison
   }
   if (candidate.utilityOrder !== winner.utilityOrder) {
     return candidate.utilityOrder > winner.utilityOrder ? 1 : -1
@@ -401,8 +419,6 @@ function isUnresolvedDimension(value) {
 }
 
 function dimensionSourceOrder(value) {
-  const keywordOrder = DIMENSION_SOURCE_ORDER.get(value)
-  if (keywordOrder !== undefined) return { group: 'keyword', order: keywordOrder }
   const numeric = /^\d*\.?\d+$/.exec(value)
   if (numeric) return { group: 'numeric', order: Number(value) }
   return { group: undefined, order: 0 }
