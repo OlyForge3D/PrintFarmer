@@ -79,11 +79,11 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             .GroupBy(job => new
             {
                 Engine =
-                    EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.PrusaSlicer)
+                    EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.PrusaSlicer) + "#"
                         ? SlicerEngineType.PrusaSlicer
-                        : EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.SuperSlicer)
+                        : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.SuperSlicer) + "#"
                             ? SlicerEngineType.SuperSlicer
-                            : EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.Cura)
+                            : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.Cura) + "#"
                                 ? SlicerEngineType.Cura
                                 : SlicerEngineType.OrcaSlicer,
                 job.Status,

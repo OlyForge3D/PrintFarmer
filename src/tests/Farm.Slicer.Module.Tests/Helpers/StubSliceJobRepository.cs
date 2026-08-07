@@ -17,6 +17,11 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(CancellationToken ct = default)
     {
         IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int> counts = Jobs
+            .Where(job => job.Status is
+                SliceJobStatus.Queued or
+                SliceJobStatus.Processing or
+                SliceJobStatus.Completed or
+                SliceJobStatus.Failed)
             .GroupBy(job => (SlicerEngineNames.Resolve(job), job.Status))
             .ToDictionary(group => group.Key, group => group.Count());
         return Task.FromResult(counts);

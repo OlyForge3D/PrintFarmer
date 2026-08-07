@@ -31,7 +31,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         orca.Engine.Should().Be(SlicerEngineType.OrcaSlicer);
         orca.QueuedJobs.Should().Be(2);
         orca.ProcessingJobs.Should().Be(1);
-        orca.CompletedJobs.Should().Be(4);
+        orca.CompletedJobs.Should().Be(6);
         orca.FailedJobs.Should().Be(1);
 
         prusa.Engine.Should().Be(SlicerEngineType.PrusaSlicer);
@@ -121,6 +121,8 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
             CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, string.Empty),
             CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, " "),
             CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, "prusaslicer"),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, "PrusaSlicer "),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, " PrusaSlicer"),
             CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, "Unknown"),
             CreateCanonicalJob(SliceJobStatus.Cancelled, SlicerEngineType.PrusaSlicer),
         ]);
