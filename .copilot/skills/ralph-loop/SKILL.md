@@ -1,6 +1,6 @@
 ---
 name: "ralph-loop"
-description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, epic maintenance, the Dallas analysis gate, READY dispatch, full issue accounting, PR lifecycle ownership, session self-archiving and the reap report, merge safety, and report format."
+description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, epic maintenance, the Dallas analysis gate, READY dispatch, full issue accounting, PR lifecycle ownership, session lifecycle and the reap report, merge safety, and report format."
 domain: "work-monitor"
 confidence: "high"
 source: "extracted from the Ralph workflow prompt to stop per-round duplication and the 76KB agent-file read"
@@ -263,7 +263,7 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
-- the **verbatim hand-off clause** from SESSION LIFECYCLE AND REAPING, as the final
+- the **verbatim report-and-stop clause** from SESSION LIFECYCLE AND REAPING, as the final
   paragraph of the kickoff prompt. A kickoff prompt without it is malformed.
 
 ## ACCOUNT FOR EVERY ISSUE
@@ -299,9 +299,9 @@ A session is done only when all three hold:
 While a PR is open, keep the owning session alive. If checks fail or changes are
 requested, message that session to address them.
 
-Ownership decides **when** a session ends. SESSION LIFECYCLE AND REAPING decides **who**
-archives it and how a finished session is surfaced — Ralph archives only its own children
-from the current round, never a prior round's session.
+Ownership decides **when** a session ends. SESSION LIFECYCLE AND REAPING decides how a
+finished session is surfaced — there is no automated archival path, so Ralph reports
+completed sessions and a human reaps them.
 
 ## SESSION LIFECYCLE AND REAPING
 
@@ -315,41 +315,73 @@ Two platform limits, both verified against the live runtime:
 2. **A session cannot archive itself.** `archive_session` on your own session id returns
    `Cannot archive the current session`. True self-archiving does not exist.
 
-Together these mean a finished implementation session can only be archived by **the session
-that created it, while that creator is still alive**, or by a human. Ralph must never
-attempt either failing call.
+Together these mean **no automated archival path exists**. A finished implementation
+session cannot archive itself, and the round that created it has already exited by the
+time its PR merges. Ralph must never attempt either failing call.
 
-### Hand off, then let the creator reap
+### There is no automated archival path
 
-Because self-archiving is impossible, a finished session **reports and hands off** rather
-than archiving. Every dispatch kickoff prompt Ralph writes MUST end with this clause,
-verbatim:
+Do not design around a mechanism that will not fire. Both theoretically-available
+automated paths are dead in practice:
+
+- **Hand-off to the creating session does not work.** A finished session could message its
+  creator to request archival, but a Ralph round **hard-exits at step 10**, typically
+  within 2–6 minutes of starting. Implementation sessions essentially never finish inside
+  that window — the sessions reaped by hand were spawned by the 18:30 round and finished
+  more than three hours later. By then the creator is long gone, so the message either
+  goes nowhere or wakes a completed round purely for a cleanup call, re-running round
+  logic as a side effect. **Never rely on this.**
+- **Ralph archiving its own children barely applies.** Ralph may archive a session it
+  spawned *this round*, but that requires the child to both start and finish inside the
+  same 2–6 minute round. For real implementation work that effectively never happens; it
+  covers the rare instant-failure case and nothing else. It is not a cleanup strategy.
+
+Therefore a dispatched session's last action is simply to **report and stop**. Every
+dispatch kickoff prompt Ralph writes MUST end with this clause, verbatim:
 
 ```
-When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status and then message your creating session to request archival — you cannot archive yourself, and `archive_session` on your own id will fail. Do not request archival while your PR is still open, has pending checks, or needs fixes.
+When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled by Ralph's `🧹 Ready to reap` report.
 ```
 
-Before finishing a round, Ralph MUST archive **its own children** — sessions it spawned
-this round whose PR merged and closed out before the round ended. That is the only
-archiving Ralph is ever permitted to perform.
+Quote the clause exactly as written above — it is kept verbatim in sync with the Ralph
+workflow prompt so the two cannot drift. Read its merge condition as covering both exits:
+a **merged** PR requires the squash-merge-safe verification below plus a closed linked
+issue; a **definitively closed** PR has no merge to verify, so verify instead that the PR
+state is `CLOSED`, it will not be reopened, and the linked issue is closed or explicitly
+left open with a reason. Either exit ends the session's ownership.
 
-### The reap report is the primary safety net
+### The reap report is the ONLY mechanism
 
-Most sessions outlive the round that spawned them, so their creator is gone by the time
-their PR merges and nobody can archive them automatically. The reap report is what surfaces
-them for a human — treat it as load-bearing, not as a fallback.
+Because nothing automated reaps a finished session, the `🧹 Ready to reap` report is not
+the primary option among several — it is **the only one**, and the actual removal is a
+**human action**. Do not treat it as a fallback that some automation covers.
 
-Each round, call `list_sessions_and_chats` and list **every session in the project whose PR
-is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
+Each round, call `list_sessions_and_chats` and list every session meeting **all** of these
+under a `🧹 Ready to reap` heading:
+
+1. its PR is **merged** (verified per the squash-merge-safe procedure below) **or
+   definitively closed**;
+2. its linked issue is closed, or deliberately left open with a stated reason;
+3. it holds **no uncommitted or unpushed work**;
+4. it has **no other open PR** and no active work in flight.
+
+A session failing any of these is **not** ready to reap and MUST NOT be listed — an open
+PR, unpushed commits, or unverified merge state each disqualify it on their own. Report it
+under `Sessions retained for open PRs` instead. For each listed session give:
 
 - session name
 - branch
 - PR number
 - merged / closed state
 
-**This is REPORT ONLY.** Ralph never archives another round's session, and never lists a
-session whose PR is still open or which holds uncommitted or unpushed work. A human does
-the reaping.
+**This is REPORT ONLY.** Ralph never archives another round's session and never removes any
+session itself.
+
+Note that **`delete_item` does work cross-session**, regardless of creator, unlike
+`archive_session`. Ralph still MUST NOT use it. Reaping stays a human decision because
+merge verification in a squash-merge repo is subtle enough to get wrong (see below), and a
+false positive destroys unpushed work. Do not hand an autopilot agent destructive
+session-deletion authority.
 
 Produce the `🧹 Ready to reap` heading **every round, even when it is empty** — a missing
 section is indistinguishable from an unchecked one.
@@ -412,9 +444,10 @@ Report each round, in this order:
 5. Queue order (issue numbers in dispatch order)
 6. Sessions dispatched this round
 7. Sessions retained for open PRs
-8. **`🧹 Ready to reap`** — every session whose PR is merged or definitively closed, with
-   session name, branch, PR number, and merged/closed state. Report only; emit the heading
-   every round even when the list is empty.
+8. **`🧹 Ready to reap`** — every session meeting all four readiness criteria in SESSION
+   LIFECYCLE AND REAPING, with session name, branch, PR number, and merged/closed state.
+   Report only, for a human to act on; emit the heading every round even when the list is
+   empty.
 9. Active slot count (`n/5`)
 10. Gate failures
 11. PRs awaiting review or merge
@@ -433,12 +466,17 @@ When nothing is eligible, report exactly:
 - Reading `.github/agents/squad.agent.md` wholesale for label or member lookups.
 - Deep-inspecting issues or PRs whose comparison fields did not change.
 - Archiving a session while its PR is still open.
-- Calling `archive_session` on a session created by a previous round — the call fails; only
-  a live creator or a human can archive it.
+- Calling `archive_session` on a session created by a previous round — the call fails.
 - Instructing a session to archive itself — `archive_session` on your own id returns
   `Cannot archive the current session`.
-- Writing a kickoff prompt that omits the verbatim hand-off clause.
-- Ending a round without archiving your own children whose PRs merged during that round.
+- Designing cleanup around a session messaging its creator for archival, or around Ralph
+  archiving its own children. A round hard-exits within minutes; neither fires for real
+  implementation work.
+- Using `delete_item` to reap a session. It works cross-session, which is exactly why it is
+  off-limits to autopilot — a false merge call destroys unpushed work.
+- Listing a session under `🧹 Ready to reap` that fails any readiness criterion — an open
+  PR, unpushed work, or unverified merge state each disqualify it.
+- Writing a kickoff prompt that omits the verbatim report-and-stop clause.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
 - Treating "this branch's commits are not on `development`" as proof the work is unmerged —
   squash merges never put branch commits on `development`.
