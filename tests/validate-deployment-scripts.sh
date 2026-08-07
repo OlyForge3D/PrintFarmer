@@ -99,10 +99,16 @@ pushd "$MONO_DIR" >/dev/null
 cat > ".deploy-config" << 'EOF'
 ARCHITECTURE=monolithic
 ENVIRONMENT=Development
-DB_PROVIDER=sqlite
-CONNECTION_STRING=Data Source=/data/farm.db
+DB_PROVIDER=postgres
+POSTGRES_DB=printfarmer
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DB_PASSWORD=postgres
+INCLUDE_POSTGRES=yes
+CONNECTION_STRING=Host=database;Database=printfarmer;Username=postgres;Password=postgres
 NETWORK_MODE=bridge
 HTTP_PORT=8080
+HTTPS_PORT=0
 ENABLE_DISCOVERY=yes
 ALLOW_LOCAL_NETWORK=true
 NETWORK_RANGES=192.168.0.0/16
@@ -112,22 +118,38 @@ ENABLE_DISTRIBUTED_SLICING=no
 ENABLE_ORCA_WORKER=no
 ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
+INCLUDE_MONITORING=no
+INCLUDE_TELEMETRY=no
+INCLUDE_SECURITY=no
+INCLUDE_REGISTRY=no
+INCLUDE_DISCOVERY=no
 EOF
 
-if mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+set +e
+mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
     --config-file "$MONO_DIR/.deploy-config" \
     --env-file "$MONO_DIR/.env" \
     --output-dir "$MONO_DIR/generated" \
     --dry-run \
-    --batch 2>&1); then
+    --batch 2>&1)
+mono_status=$?
+set -e
+
+if grep -q 'unbound variable' <<<"$mono_output"; then
+    echo "$mono_output"
+    echo -e "${RED}❌ FAIL${NC}: Monolithic dry-run emitted an unbound-variable error"
+    exit 1
+fi
+
+if [ "$mono_status" -eq 0 ]; then
     mono_checks_pass=true
 
     if [ ! -f ".env" ]; then
         mono_checks_pass=false
         echo -e "${YELLOW}⚠️  .env not generated${NC}"
-    elif ! grep -q 'ConnectionStrings__Default=Data Source=/data/farm.db' ".env" 2>/dev/null; then
+    elif ! grep -q 'DB_PROVIDER=postgres' ".env" 2>/dev/null; then
         mono_checks_pass=false
-        echo -e "${YELLOW}⚠️  Monolithic connection string missing expected SQLite value${NC}"
+        echo -e "${YELLOW}⚠️  Monolithic database provider missing expected PostgreSQL value${NC}"
     fi
 
     if [ "$mono_checks_pass" = true ]; then
@@ -164,6 +186,7 @@ NETWORK_RANGES=192.168.0.0/16
 ALLOWED_NETWORK_RANGES=192.168.0.0/16
 ENABLE_DISCOVERY=yes
 HTTP_PORT=8080
+HTTPS_PORT=0
 API_PORT=5245
 ENABLE_SWAGGER=true
 ENABLE_DETAILED_LOGGING=true
@@ -171,14 +194,30 @@ ENABLE_DISTRIBUTED_SLICING=no
 ENABLE_ORCA_WORKER=no
 ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
+INCLUDE_MONITORING=no
+INCLUDE_TELEMETRY=no
+INCLUDE_SECURITY=no
+INCLUDE_REGISTRY=no
+INCLUDE_DISCOVERY=no
 EOF
 
-if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+set +e
+host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
     --config-file "$MS_DIR/.deploy-config" \
     --env-file "$MS_DIR/.env" \
     --output-dir "$MS_DIR/generated" \
     --dry-run \
-    --batch 2>&1); then
+    --batch 2>&1)
+host_status=$?
+set -e
+
+if grep -q 'unbound variable' <<<"$host_output"; then
+    echo "$host_output"
+    echo -e "${RED}❌ FAIL${NC}: Microservices dry-run emitted an unbound-variable error"
+    exit 1
+fi
+
+if [ "$host_status" -eq 0 ]; then
     host_checks_pass=true
 
     if [ ! -f ".env" ]; then

@@ -5867,12 +5867,13 @@ ensure_tls_certificates() {
     if [ -x "./scripts/generate-certs.sh" ]; then
         ./scripts/generate-certs.sh "$cert_dir"
     else
+        (
         mkdir -p "$cert_dir"
         local temp_dir
         temp_dir="$(mktemp -d)"
         local ca_config="$temp_dir/ca.cnf"
         local server_config="$temp_dir/server.cnf"
-        trap 'rm -rf "$temp_dir"' RETURN
+        trap 'rm -rf -- "$temp_dir"' EXIT
 
         local san_entries=("localhost" "printfarmer.local" "127.0.0.1")
         local lan_ip=""
@@ -5962,6 +5963,7 @@ EOF
         print_info "Install $cert_dir/ca.cer on iPhone/iPad and enable trust in Certificate Trust Settings."
         print_info "Do not install tls.crt on iPhone/iPad; if Settings shows a trusted certificate named 'PrintFarmer', remove it and trust 'PrintFarmer Local CA' instead."
         print_info "Users can open http://<host>/install-ca to download the CA."
+        )
     fi
 }
 
