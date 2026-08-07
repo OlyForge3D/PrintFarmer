@@ -66,11 +66,19 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             })
             .SingleOrDefaultAsync(ct);
 
-        var ticksList = await query
+        // TimeSpan.Ticks is not translated consistently across supported providers, so stream
+        // only the scalar values instead of materializing the full result set in a list.
+        long totalPrintTimeTicks = 0;
+        await foreach (long ticks in query
             .Where(j => j.ActualPrintTime.HasValue)
             .Select(j => j.ActualPrintTime!.Value.Ticks)
-            .ToListAsync(ct);
-        double totalPrintHours = ticksList.Sum(t => TimeSpan.FromTicks(t).TotalHours);
+            .AsAsyncEnumerable()
+            .WithCancellation(ct))
+        {
+            totalPrintTimeTicks += ticks;
+        }
+
+        double totalPrintHours = TimeSpan.FromTicks(totalPrintTimeTicks).TotalHours;
 
         int totalJobs = aggregate?.TotalJobs ?? 0;
         int completed = aggregate?.Completed ?? 0;

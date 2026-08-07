@@ -14,7 +14,7 @@ namespace Farm.Web.Api.Tests.Services.Statistics;
 public class StatisticsServicePerformanceTests
 {
     [Fact]
-    public async Task GetSummaryAsync_UsesTwoDatabaseCommandsForAggregateMetrics()
+    public async Task GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics()
     {
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -27,27 +27,134 @@ public class StatisticsServicePerformanceTests
 
         await using var db = new AppDbContext(options);
         await db.Database.EnsureCreatedAsync();
-        db.PrintJobs.Add(new PrintJob
-        {
-            Id = Guid.NewGuid(),
-            Name = "performance-proxy.gcode",
-            Status = PrintJobStatus.Completed,
-            QueuedAt = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            ActualCost = 2.5m,
-            ActualFilamentUsage = 12.5d,
-            ActualPrintTime = TimeSpan.FromMinutes(30),
-        });
+        DateTime now = DateTime.UtcNow;
+        db.PrintJobs.AddRange(
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "completed-1.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "completed-2.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "completed-3.gcode",
+                Status = PrintJobStatus.Completed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "failed-1.gcode",
+                Status = PrintJobStatus.Failed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "failed-2.gcode",
+                Status = PrintJobStatus.Failed,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "cancelled.gcode",
+                Status = PrintJobStatus.Cancelled,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = TimeSpan.FromMinutes(30),
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "queued.gcode",
+                Status = PrintJobStatus.Queued,
+                QueuedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now,
+                ActualCost = 0.1m,
+                ActualFilamentUsage = 2.5d,
+                ActualPrintTime = null,
+            });
         await db.SaveChangesAsync();
         interceptor.Reset();
 
         StatisticsSummaryDto result = await new StatisticsService(db).GetSummaryAsync(null);
 
-        Assert.Equal(1, result.TotalJobs);
-        Assert.Equal(2.5m, result.TotalCost);
-        Assert.Equal(12.5d, result.TotalFilamentGrams);
-        Assert.Equal(0.5d, result.TotalPrintHours);
+        Assert.Equal(7, result.TotalJobs);
+        Assert.Equal(3, result.CompletedJobs);
+        Assert.Equal(2, result.FailedJobs);
+        Assert.Equal(1, result.CancelledJobs);
+        Assert.Equal(50d, result.SuccessRate);
+        Assert.Equal(0.7m, result.TotalCost);
+        Assert.Equal(17.5d, result.TotalFilamentGrams);
+        Assert.Equal(3d, result.TotalPrintHours);
+        Assert.Equal(2, interceptor.NonSchemaCommandCount);
+    }
+
+    [Fact]
+    public async Task GetSummaryAsync_WithNoJobs_ReturnsEmptyMetricsUsingTwoDatabaseCommands()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+
+        var interceptor = new CommandCountingInterceptor();
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        interceptor.Reset();
+
+        StatisticsSummaryDto result = await new StatisticsService(db).GetSummaryAsync(null);
+
+        Assert.Equal(0, result.TotalJobs);
+        Assert.Equal(0, result.CompletedJobs);
+        Assert.Equal(0, result.FailedJobs);
+        Assert.Equal(0, result.CancelledJobs);
+        Assert.Equal(0d, result.SuccessRate);
+        Assert.Equal(0m, result.TotalCost);
+        Assert.Equal(0d, result.TotalFilamentGrams);
+        Assert.Equal(0d, result.TotalPrintHours);
         Assert.Equal(2, interceptor.NonSchemaCommandCount);
     }
 
@@ -65,10 +172,7 @@ public class StatisticsServicePerformanceTests
             CommandEventData eventData,
             InterceptionResult<DbDataReader> result)
         {
-            if (!IsSchemaCommand(command))
-            {
-                NonSchemaCommandCount++;
-            }
+            NonSchemaCommandCount++;
 
             return result;
         }
@@ -79,18 +183,47 @@ public class StatisticsServicePerformanceTests
             InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
-            if (!IsSchemaCommand(command))
-            {
-                NonSchemaCommandCount++;
-            }
+            NonSchemaCommandCount++;
 
             return ValueTask.FromResult(result);
         }
 
-        private static bool IsSchemaCommand(DbCommand command)
+        public override InterceptionResult<object> ScalarExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<object> result)
         {
-            return command.CommandText.Contains("sqlite_master", StringComparison.OrdinalIgnoreCase) ||
-                command.CommandText.Contains("CREATE TABLE", StringComparison.OrdinalIgnoreCase);
+            NonSchemaCommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<object>> ScalarExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<object> result,
+            CancellationToken cancellationToken = default)
+        {
+            NonSchemaCommandCount++;
+            return ValueTask.FromResult(result);
+        }
+
+        public override InterceptionResult<int> NonQueryExecuting(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result)
+        {
+            NonSchemaCommandCount++;
+            return result;
+        }
+
+        public override ValueTask<InterceptionResult<int>> NonQueryExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            NonSchemaCommandCount++;
+            return ValueTask.FromResult(result);
         }
     }
 }

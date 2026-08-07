@@ -33,8 +33,8 @@ Perform an evidence-based cross-stack performance audit, rank ten concrete oppor
 - [x] Implement the focused optimization without broad refactoring.
 - [x] Add focused regression coverage and a reproducible performance validation proxy.
 - [x] Run targeted validation and fix regressions.
-- [ ] Commit and push with exact SHA tracking.
-- [ ] Obtain Bishop/Hicks/Vasquez exact-head consensus.
+- [x] Commit and push with exact SHA tracking (initial head `467787169bb49183e5e3ae20c81de9cd58a4a80a`; follow-up pending validation).
+- [ ] Obtain Bishop/Hicks/Vasquez exact-head consensus (initial review: Bishop APPROVE, Hicks CHANGES_REQUESTED, Vasquez REQUEST_CHANGES).
 - [ ] Open a non-draft PR targeting development with `Closes #871` and verify linkage.
 - [ ] Track CI, trusted verdict, safe merge, issue closure, archival, and report lifecycle state to Ralph.
 
@@ -59,4 +59,5 @@ Selected #1 because it removes five round trips from a frequently used analytics
 
 - `dotnet test .\tests\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj -c Debug --no-restore --filter 'FullyQualifiedName~StatisticsDateRangeTests|FullyQualifiedName~StatisticsServicePerformanceTests'`
 - Result: 18 tests passed.
-- Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsForAggregateMetrics` asserts the endpoint preserves totals while using exactly two non-schema EF reader commands.
+- Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics` asserts all status/total fields, the empty-result path, and exactly two database commands across reader/scalar/non-query interception. Print-time values are streamed to avoid an unbounded list while retaining provider-safe `TimeSpan` handling.
+- Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, and replaced print-time list materialization with scalar streaming in response to Hicks/Vasquez findings.
