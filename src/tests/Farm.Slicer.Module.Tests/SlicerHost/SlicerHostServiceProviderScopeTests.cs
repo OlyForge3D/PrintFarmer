@@ -4,6 +4,7 @@ using SlicerHost::Farm.Slicer.Host;
 using SlicerHost::Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
+using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -44,5 +45,7 @@ public sealed class SlicerHostServiceProviderScopeTests
         using IServiceScope scope = app.Services.CreateScope();
         Assert.NotNull(
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>());
+        Assert.NotNull(
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<SlicerDbContext>>());
     }
 }
