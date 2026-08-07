@@ -19,6 +19,7 @@ Closes #351
 ## Pre-merge checklist
 
 - [ ] PR body contains `Closes #N` / `Fixes #N` / `Resolves #N` for every linked issue
+- [ ] Current-head human approval or verified `squad/pre-pr-verdict` evidence exists before merge
 - [ ] Changes follow project conventions (see CONTRIBUTING.md)
 - [ ] New warnings were not introduced (or are acceptable for this scope)
 - [ ] Relevant documentation updated
