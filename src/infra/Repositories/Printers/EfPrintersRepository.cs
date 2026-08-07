@@ -183,6 +183,8 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
                 .Where(s => s.PrinterId == trackedPrinter.Id)
                 .ExecuteDeleteAsync(ct);
 
+            await DeleteCalibrationProjectsAsync(trackedPrinter.Id, ct);
+
             // SpoolmanSpool references will be set to NULL by the database (SetNull behavior), so no need to handle them
 
             // Now remove the tracked printer
@@ -235,6 +237,57 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         }
 
         return await _db.Database.BeginTransactionAsync(ct);
+    }
+
+    private async Task DeleteCalibrationProjectsAsync(Guid printerId, CancellationToken ct)
+    {
+        List<Guid> projectIds = await _db.CalibrationProjects
+            .Where(project => project.PrinterId == printerId)
+            .Select(project => project.Id)
+            .ToListAsync(ct);
+        if (projectIds.Count == 0)
+        {
+            return;
+        }
+
+        await _db.CalibrationOrchestrations
+            .Where(orchestration => projectIds.Contains(orchestration.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationPhotos
+            .Where(photo => projectIds.Contains(photo.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationObservations
+            .Where(observation => projectIds.Contains(observation.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationAttemptEvents
+            .Where(@event => projectIds.Contains(@event.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.GeneratedProfileRevisionOperations
+            .Where(operation => _db.GeneratedProfileRevisions.Any(revision =>
+                revision.Id == operation.GeneratedProfileRevisionId
+                && projectIds.Contains(revision.ProjectId)))
+            .ExecuteDeleteAsync(ct);
+        await _db.GeneratedProfileRevisions
+            .Where(revision => projectIds.Contains(revision.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationAttempts
+            .Where(attempt => projectIds.Contains(attempt.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.PrinterConfigurationSnapshots
+            .Where(snapshot => projectIds.Contains(snapshot.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationDrafts
+            .Where(draft => projectIds.Contains(draft.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationIdempotencyRecords
+            .Where(record => record.ProjectId != null && projectIds.Contains(record.ProjectId.Value))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationChanges
+            .Where(change => projectIds.Contains(change.ProjectId))
+            .ExecuteDeleteAsync(ct);
+        await _db.CalibrationProjects
+            .Where(project => projectIds.Contains(project.Id))
+            .ExecuteDeleteAsync(ct);
     }
 
     public async Task SaveChangesAsync(CancellationToken ct) => await _db.SaveChangesAsync(ct);
