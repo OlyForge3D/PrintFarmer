@@ -92,8 +92,10 @@ to pass because their `w-*`, `h-*`, and `rounded-full` utilities share the same
 
 Arbitrary descendant selectors, child variants, and Tailwind's named pseudo-element variants
 (`before`, `after`, `file`, `marker`, and related forms) establish distinct target scopes. State
-conditions on either side of that scope remain distinct. Mutually exclusive built-in states and
-media preferences are not combined into impossible cascades.
+conditions on either side of that scope remain distinct. Legacy single-colon pseudo-element
+selectors such as `[&:before]` establish the same boundary, while host pseudo-classes such as
+`[&:hover]` and `[&:has(...)]` do not. Mutually exclusive built-in states and media preferences
+are not combined into impossible cascades.
 
 Within one target scope, evidence applies when its ordered state condition is active where the
 radius applies. State variants contribute selector specificity; media variants do not.

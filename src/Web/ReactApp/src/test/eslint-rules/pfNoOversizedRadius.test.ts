@@ -116,6 +116,11 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // Combinators inside a functional pseudo-class do not move the target away
     // from the host element.
     { code: '<div className="w-8 h-8 [&:has(>img)]:rounded-full" />' },
+    // Legacy single-colon pseudo-element spelling remains same-scope when all
+    // evidence targets that pseudo-element.
+    {
+      code: '<div className="[&:before]:w-4 [&:before]:h-4 [&:before]:rounded-full" />',
+    },
     // Logical start/end corners map to their physical LTR corners.
     { code: '<div className="rounded-se-full rounded-tr-lg" />' },
     { code: '<div className="rounded-es-full rounded-bl-lg" />' },
@@ -559,6 +564,21 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output: '<input className="w-4 h-4 file:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Legacy single-colon pseudo-elements are distinct from the host element.
+    {
+      code: '<div className="w-8 h-8 [&:before]:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-8 h-8 [&:before]:rounded-lg" />',
             },
           ],
         },

@@ -161,6 +161,8 @@ const PSEUDO_ELEMENT_VARIANTS = new Set([
   'selection',
 ])
 
+const LEGACY_PSEUDO_ELEMENTS = new Set(['after', 'before', 'first-letter', 'first-line'])
+
 /**
  * Split a utility into its ordered variants and base token. Colons inside
  * arbitrary variants are selector syntax, not separators.
@@ -223,6 +225,10 @@ function changesSelectorScope(variant) {
     else if (character === ']') brackets = Math.max(0, brackets - 1)
     else if (parentheses === 0 && brackets === 0) {
       if (character === ':' && selector[index + 1] === ':') return true
+      if (character === ':') {
+        const pseudo = /^:([\w-]+)/.exec(selector.slice(index))?.[1]
+        if (pseudo && LEGACY_PSEUDO_ELEMENTS.has(pseudo)) return true
+      }
       if (/[>+~_\s]/.test(character)) return true
     }
   }
