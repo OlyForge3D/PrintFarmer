@@ -226,6 +226,7 @@
   }
 
   [data-main-content] :is(.truncate, [class*='line-clamp-']) {
+    display: block;
     overflow: visible;
     white-space: normal;
     text-overflow: clip;

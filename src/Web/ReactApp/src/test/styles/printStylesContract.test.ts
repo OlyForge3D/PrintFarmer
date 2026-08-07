@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { cssFacts, isPrintOnlyStylesheet } from '../features/admin/themeSafetyScanner';
 
 const SOURCE_ROOT = resolve(__dirname, '../..');
 const indexSource = readFileSync(resolve(SOURCE_ROOT, 'index.css'), 'utf8');
@@ -33,9 +34,9 @@ describe('print stylesheet contract (#1126)', () => {
 
   it('defines a light semantic print palette with only the required tour overrides', () => {
     const uncommentedSource = printSource.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-    expect(uncommentedSource).toMatch(/^@media\s+print\s*\{/);
-    expect(printSource).toMatch(/:root\s*\{[\s\S]*color-scheme:\s*light/);
-    const importantProperties = [...printSource.matchAll(/([\w-]+):[^;]+!important/g)]
+    expect(isPrintOnlyStylesheet(printSource, 'styles/print.css')).toBe(true);
+    expect(uncommentedSource).toMatch(/:root\s*\{[\s\S]*color-scheme:\s*light/);
+    const importantProperties = [...uncommentedSource.matchAll(/([\w-]+):[^;]+!important/g)]
       .map((match) => match[1]);
     expect(importantProperties).toEqual(['outline', 'outline-offset', 'filter']);
 
@@ -53,16 +54,15 @@ describe('print stylesheet contract (#1126)', () => {
       'info',
       'info-bg',
     ]) {
-      expect(printSource).toMatch(new RegExp(`--pf-${token}:\\s*#[0-9a-f]{6}`, 'i'));
+      expect(uncommentedSource).toMatch(new RegExp(`--pf-${token}:\\s*#[0-9a-f]{6}`, 'i'));
     }
   });
 
   it('overrides the complete selectable-theme color token contract', () => {
-    const themeTokens = [...lightThemeSource.matchAll(/(--pf-[\w-]+):\s*[^;]+;/g)]
-      .map((match) => match[1])
+    const themeTokens = [...cssFacts([{ file: 'light.css', text: lightThemeSource }]).declarations.keys()]
       .filter((token) => token !== '--pf-theme-name');
     const printTokens = new Set(
-      [...printSource.matchAll(/(--pf-[\w-]+):\s*[^;]+;/g)].map((match) => match[1]),
+      cssFacts([{ file: 'styles/print.css', text: printSource }]).declarations.keys(),
     );
 
     expect(themeTokens.filter((token) => !printTokens.has(token))).toEqual([]);

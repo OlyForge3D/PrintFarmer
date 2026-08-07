@@ -17,6 +17,12 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
+import {
+  cssFacts,
+  hasThemeSelector,
+  isPrintOnlyStylesheet,
+  NON_SCREEN_STYLESHEETS,
+} from '../features/admin/themeSafetyScanner';
 
 const appRoot = path.resolve(__dirname, '../..', '..');
 const read = (p: string) => fs.readFileSync(path.join(appRoot, p), 'utf8');
@@ -122,11 +128,12 @@ describe('theme registry', () => {
     const palettes = new Map<string, string>();
     for (const theme of SELECTABLE_THEMES) {
       const css = read(`src/design-system/themes/${theme}.css`);
+      const declarations = cssFacts([{ file: `${theme}.css`, text: css }]).declarations;
       const keys = ['--pf-bg-0', '--pf-bg-1', '--pf-accent', '--pf-text-primary'];
       const values = keys.map((k) => {
-        const m = css.match(new RegExp(`${k}\\s*:\\s*([^;]+);`));
-        expect(m, `${theme}.css does not declare ${k}`).toBeTruthy();
-        return m![1].trim();
+        const value = declarations.get(k);
+        expect(value, `${theme}.css does not declare ${k}`).toBeTruthy();
+        return value!;
       });
       palettes.set(theme, values.join('|'));
     }
@@ -146,9 +153,12 @@ describe('theme registry', () => {
     // custom properties cascade.
     const tokensOf = (theme: string) =>
       new Set(
-        [...read(`src/design-system/themes/${theme}.css`).matchAll(/^\s*(--pf-[a-z0-9-]+)\s*:/gm)].map(
-          (m) => m[1]
-        )
+        cssFacts([
+          {
+            file: `${theme}.css`,
+            text: read(`src/design-system/themes/${theme}.css`),
+          },
+        ]).declarations.keys(),
       );
 
     const [reference, ...rest] = SELECTABLE_THEMES;
@@ -171,7 +181,9 @@ describe('theme registry', () => {
     // trap that hid three themes. Plain rules there are not dead, which makes
     // this even harder to spot by eye, so ban the selector outright.
     const offenders: string[] = [];
-    const mediaOnlyStylesheets = new Set(['src/styles/print.css']);
+    const mediaOnlyStylesheets = new Set(
+      [...NON_SCREEN_STYLESHEETS].map((stylesheet) => `src/${stylesheet}`),
+    );
     const walk = (dir: string) => {
       if (!fs.existsSync(dir)) return;
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -182,9 +194,7 @@ describe('theme registry', () => {
         }
         if (!entry.name.endsWith('.css')) continue;
         const text = fs.readFileSync(full, 'utf8');
-        // Ignore prose; only flag real selectors.
-        const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '');
-        if (/\[data-theme\s*[=~|]/.test(stripped)) {
+        if (hasThemeSelector(text, full)) {
           const relativePath = path.relative(appRoot, full).replace(/\\/g, '/');
           if (!mediaOnlyStylesheets.has(relativePath)) {
             offenders.push(relativePath);
@@ -197,8 +207,29 @@ describe('theme registry', () => {
     expect(offenders).toEqual([]);
     for (const stylesheet of mediaOnlyStylesheets) {
       const text = fs.readFileSync(path.join(appRoot, stylesheet), 'utf8');
-      const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-      expect(stripped, `${stylesheet} must remain print-only`).toMatch(/^@media\s+print\s*\{/);
+      expect(isPrintOnlyStylesheet(text, stylesheet), `${stylesheet} must remain print-only`).toBe(true);
     }
+  });
+
+  it('rejects theme selectors outside a fully print-scoped stylesheet', () => {
+    for (const selector of [
+      '[data-theme]',
+      '[data-theme="forge"]',
+      '[data-theme~="forge"]',
+      '[data-theme|="forge"]',
+      '[data-theme^="forge"]',
+      '[data-theme$="forge"]',
+      '[data-theme*="forge"]',
+      '[DATA-THEME="forge"]',
+    ]) {
+      expect(hasThemeSelector(`${selector} { color: red; }`), selector).toBe(true);
+    }
+
+    expect(isPrintOnlyStylesheet('@media print { [data-theme] { color: black; } }')).toBe(true);
+    expect(
+      isPrintOnlyStylesheet(
+        '@media print { [data-theme] { color: black; } }\n[data-theme] { color: red; }',
+      ),
+    ).toBe(false);
   });
 });
