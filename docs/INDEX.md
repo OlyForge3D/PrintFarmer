@@ -28,9 +28,9 @@ These are the main documentation files you should read first:
 
 ### Development & Testing
 
-- **[TEST_COVERAGE_ANALYSIS.md](./TEST_COVERAGE_ANALYSIS.md)** - Test coverage status and goals
+- **[TESTING_PATTERNS.md](./TESTING_PATTERNS.md#coverage-goals)** - Test coverage goals and reusable patterns
 - **[TESTING_GUIDELINES.md](./TESTING_GUIDELINES.md)** - Testing patterns and best practices
-- **[TESTING_SETUP_WIZARD_INTEGRATION.md](./TESTING_SETUP_WIZARD_INTEGRATION.md)** - Testing the setup wizard
+- **[DEVELOPMENT.md](./DEVELOPMENT.md#frontend-tests)** - Frontend test commands
 
 ### API Reference
 
@@ -39,16 +39,15 @@ These are the main documentation files you should read first:
 
 ### Performance & Optimization
 
-- **[OPTIMIZATION_NOTES.md](./OPTIMIZATION_NOTES.md)** - Printer list performance fix and caching strategy
 - **[SLICER_SERVICE_METRICS.md](./SLICER_SERVICE_METRICS.md)** - Slicer service performance metrics
-- **[HARVEST_METADATA_OPTIMIZATION.md](./HARVEST_METADATA_OPTIMIZATION.md)** - Gcode harvest optimization
+- **[GCODE_HARVESTING_API.md](./GCODE_HARVESTING_API.md)** - G-code harvesting API
 
 ### Features Deep-Dives
 
 - **[TAGGING_SYSTEM.md](./TAGGING_SYSTEM.md)** - Model tagging architecture
-- **[ORCASLICER_PROFILES_HIERARCHY.md](./ORCASLICER_PROFILES_HIERARCHY.md)** - OrcaSlicer profile organization
-- **[SLICER_LIBRARY_ARCHITECTURE.md](./SLICER_LIBRARY_ARCHITECTURE.md)** - Slicer integration architecture
-- **[PRINTER_DISCOVERY_ARCHITECTURE.md](./PRINTER_DISCOVERY_ARCHITECTURE.md)** - Network discovery system
+- **[OrcaSlicer Profile Hierarchy](./ORCASLICER_INTEGRATION.md#profile-hierarchy--loading)** - OrcaSlicer profile organization
+- **[OrcaSlicer Architecture](./ORCASLICER_INTEGRATION.md#architecture-overview)** - Slicer integration architecture
+- **[DISCOVERY_SERVICE_TROUBLESHOOTING.md](./DISCOVERY_SERVICE_TROUBLESHOOTING.md)** - Network discovery diagnostics
 - **docs/NGINX_HEALTH_ENDPOINT_FIX.md** - Nginx health check configuration
 - **docs/MICROSERVICES_NGINX_FIX_STEPS.md** - Nginx fixes for microservices
 
@@ -57,8 +56,8 @@ These are the main documentation files you should read first:
 - **docs/TESTING_GUIDELINES.md** - Testing best practices
 - **docs/TESTING_PATTERNS.md** - Common testing patterns
 - **docs/TESTING_SETUP_WIZARD_INTEGRATION.md** - Testing setup wizard feature
-- **docs/QUICK_TEST_IMPLEMENTATION_GUIDE.md** - Quick test implementation
-- **docs/TEST_COVERAGE_ANALYSIS.md** - Code coverage analysis
+- **docs/TESTING_GUIDELINES.md** - Deployment script testing and TDD workflow
+- **docs/TESTING_PATTERNS.md** - Reusable test patterns and coverage goals
 - **docs/PHASE_7_AUTHENTICATION_TEST_PLAN.md** - Authentication testing
 - **docs/PHASE_7_AUTHENTICATION_SUMMARY.md** - Authentication testing results
 
@@ -219,14 +218,14 @@ These files document completed work and may be relevant for understanding past d
 
 3. **Deploying to production?**
    - [DEPLOYMENT.md](./DEPLOYMENT.md)
-   - [DEPLOYMENT_READINESS_CHECK.md](./docs/DEPLOYMENT_READINESS_CHECK.md)
+   - [Production Readiness Checklist](./DEPLOYMENT.md#production-readiness-checklist)
 
 4. **Having issues?**
    - [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
    - Check specific feature documentation
 
 5. **Need quick answers?**
-   - [QUICK_REFERENCE.md](./QUICK_REFERENCE.md)
+   - [DEPLOYMENT_QUICK_REFERENCE.md](./DEPLOYMENT_QUICK_REFERENCE.md)
 
 ---
 

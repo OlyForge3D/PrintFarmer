@@ -105,6 +105,6 @@ docker compose build
 
 ## Related Documentation
 
-- [Deployment Overview](../DEPLOYMENT_OVERVIEW.md) - General deployment architecture
-- [Docker Deployment](../DOCKER_DEPLOYMENT.md) - Docker-specific deployment guide
-- [Local Development](../LOCAL_DEVELOPMENT.md) - Running locally without Docker
+- [Deployment Overview](DEPLOYMENT.md) - General deployment architecture
+- [Docker Deployment](DOCKER_DEPLOYMENT.md) - Docker-specific deployment guide
+- [Local Development](DEVELOPMENT.md#running-locally) - Running locally without Docker

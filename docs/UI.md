@@ -4,7 +4,7 @@
 
 For complete information about styling, themes, colors, and UI components, see:
 
-**[FRONTEND_DESIGN_SYSTEM.md](./FRONTEND_DESIGN_SYSTEM.md)** - Master guide to:
+**[DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)** - Master guide to:
 - Theme system and CSS variables
 - Color tokens and accessibility
 - React component library

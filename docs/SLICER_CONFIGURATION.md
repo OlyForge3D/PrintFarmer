@@ -213,7 +213,7 @@ To manage multiple PrintFarmer instances:
 ## See Also
 
 - [API Documentation](API.md) - Complete PrintFarmer API reference
-- [Print Approval Workflow](ARCHITECTURE.md#print-approval-workflow) - Architecture details
+- [Print Approval Workflow](#print-approval-workflow) - Upload and approval behavior
 - [OctoPrint API Specification](https://docs.octoprint.org/en/master/api/) - Original OctoPrint API
 
 ## Desktop API-Key Exchange

@@ -6,7 +6,7 @@ Navigation guide for PrintFarmer UI component styling, color system, and theme a
 
 Comprehensive guide to the complete design system with unified documentation:
 
-**[FRONTEND_DESIGN_SYSTEM.md](./FRONTEND_DESIGN_SYSTEM.md)** - Master index for all UI/styling documentation
+**[DESIGN_SYSTEM.md](./DESIGN_SYSTEM.md)** - Canonical UI and styling guide
 - Quick navigation by role and task
 - Architecture overview of three-layer system
 - Common workflows and best practices
@@ -16,9 +16,9 @@ Comprehensive guide to the complete design system with unified documentation:
 
 | Document | Purpose | Read Time |
 |----------|---------|-----------|
-| **[`FRONTEND_DESIGN_SYSTEM.md`](./FRONTEND_DESIGN_SYSTEM.md)** | Master index for design system | 10 min |
-| **[`FRONTEND_THEME_ARCHITECTURE.md`](./FRONTEND_THEME_ARCHITECTURE.md)** | Theme system, CSS variables, customization | 20 min |
-| **[`FRONTEND_COLOR_SYSTEM.md`](./FRONTEND_COLOR_SYSTEM.md)** | Color tokens, accessibility compliance | 15 min |
+| **[`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)** | Design system, themes, tokens, and components | 30 min |
+| **[Available Themes](./DESIGN_SYSTEM.md#available-themes)** | Theme registry and customization | 10 min |
+| **[Color Palette](./DESIGN_SYSTEM.md#color-palette)** | Color tokens and accessibility | 10 min |
 | **[`FRONTEND_UI_COMPONENTS.md`](./FRONTEND_UI_COMPONENTS.md)** | React component library reference | 25 min |
 | **[`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)** | Legacy control styling (being migrated) | 20 min |
 
@@ -43,12 +43,12 @@ The PrintFarmer app has a **three-layer design system** ensuring consistency and
 
 **New to the design system?**
 
-Start with: [`FRONTEND_DESIGN_SYSTEM.md`](./FRONTEND_DESIGN_SYSTEM.md)
+Start with: [`DESIGN_SYSTEM.md`](./DESIGN_SYSTEM.md)
 
 Then choose a detailed guide:
 - **Using components**: [`FRONTEND_UI_COMPONENTS.md`](./FRONTEND_UI_COMPONENTS.md)
-- **Choosing colors**: [`FRONTEND_COLOR_SYSTEM.md`](./FRONTEND_COLOR_SYSTEM.md)
-- **Adding themes**: [`FRONTEND_THEME_ARCHITECTURE.md`](./FRONTEND_THEME_ARCHITECTURE.md)
+- **Choosing colors**: [Color Palette](./DESIGN_SYSTEM.md#color-palette)
+- **Adding themes**: [Available Themes](./DESIGN_SYSTEM.md#available-themes)
 
 **Using existing control styles?**
 
@@ -99,9 +99,7 @@ Read: [`CONTROLS_GUIDE.md`](./CONTROLS_GUIDE.md)
 ## 🔗 Key Files & Directories
 
 **Documentation (in `/docs/`):**
-- `FRONTEND_DESIGN_SYSTEM.md` - Master index (start here)
-- `FRONTEND_THEME_ARCHITECTURE.md` - Theme system and CSS variables
-- `FRONTEND_COLOR_SYSTEM.md` - Color tokens and accessibility
+- `DESIGN_SYSTEM.md` - Canonical design system, themes, tokens, and components
 - `FRONTEND_UI_COMPONENTS.md` - React component reference
 - `CONTROLS_GUIDE.md` - Legacy control styling
 
