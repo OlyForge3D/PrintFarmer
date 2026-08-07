@@ -213,7 +213,8 @@ internal static class ArtifactStorageFileSystem
         SafeFileHandle leaseHandle,
         string artifactPublicationPath,
         string stagingPath,
-        SafeFileHandle stagingHandle)
+        SafeFileHandle stagingHandle,
+        Action? afterLeasePublished = null)
     {
         string leasePublicationDirectory =
             Path.GetDirectoryName(leasePublicationPath) ??
@@ -240,6 +241,7 @@ internal static class ArtifactStorageFileSystem
             using SafeFileHandle publicationDirectoryHandle =
                 OpenPinnedWindowsDirectory(artifactPublicationDirectory);
             CreateWindowsHardLink(leasePublicationPath, leasePath);
+            afterLeasePublished?.Invoke();
             CreateWindowsHardLink(artifactPublicationPath, stagingPath);
             return;
         }
@@ -270,6 +272,7 @@ internal static class ArtifactStorageFileSystem
                 leaseHandle.DangerousGetHandle().ToInt32(),
                 publicationDirectoryFileDescriptor,
                 leasePublicationPath);
+            afterLeasePublished?.Invoke();
             CreateLinuxHardLinkFromHandle(
                 stagingHandle.DangerousGetHandle().ToInt32(),
                 publicationDirectoryFileDescriptor,

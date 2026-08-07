@@ -256,7 +256,16 @@ public class ArtifactCleanupService(
                 parentPath,
                 ArtifactStorageFileSystem.GetStagingDirectory(rootPath),
                 pathComparison);
-            Guid artifactId;
+            Guid artifactId = Guid.Empty;
+            bool isDirectPublishedLease =
+                string.Equals(parentPath, rootPath, pathComparison) &&
+                string.Equals(
+                    Path.GetExtension(fullPath),
+                    ArtifactStorageFileSystem.LeaseFileExtension,
+                    StringComparison.Ordinal) &&
+                ArtifactStorageFileSystem.TryGetStagingArtifactId(
+                    fullPath,
+                    out artifactId);
             if (isDirectStagingFile)
             {
                 if (!ArtifactStorageFileSystem.TryGetStagingArtifactId(
@@ -268,6 +277,10 @@ public class ArtifactCleanupService(
                         fullPath);
                     continue;
                 }
+            }
+            else if (isDirectPublishedLease)
+            {
+                // The artifact ID was parsed while classifying the root lease.
             }
             else if (!ArtifactStorageFileSystem.TryGetProtocolArtifactId(
                          fullPath,

@@ -152,6 +152,90 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         File.Exists(leasePath).Should().BeFalse();
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScanAndCleanupAsync_HardTerminationDuringPublication_RemovesAllProtocolFiles(
+        bool publishArtifactBytes)
+    {
+        string stagingDirectory =
+            ArtifactStorageFileSystem.GetStagingDirectory(_root);
+        Directory.CreateDirectory(stagingDirectory);
+        Guid artifactId = Guid.NewGuid();
+        string stagingPath = Path.Combine(
+            stagingDirectory,
+            artifactId.ToString("N") +
+                ArtifactStorageFileSystem.StagingFileExtension);
+        string stagingLeasePath =
+            ArtifactStorageFileSystem.GetStagingLeasePath(
+                _root,
+                artifactId);
+        string publishedLeasePath =
+            ArtifactStorageFileSystem.GetPublishedLeasePath(
+                _root,
+                artifactId);
+        string permanentPath = Path.Combine(
+            _root,
+            $"{artifactId}-hard-crash.gcode");
+
+        using (FileStream leaseStream =
+               ArtifactStorageFileSystem.CreateLeaseStream(
+                   stagingLeasePath))
+        using (FileStream stagingStream =
+               ArtifactStorageFileSystem.CreateStagingStream(
+                   stagingPath))
+        {
+            stagingStream.Write("crash bytes"u8);
+            stagingStream.Flush();
+            Action? terminateAfterLease = publishArtifactBytes
+                ? null
+                : () => throw new SimulatedHardTerminationException();
+            Action publish = () =>
+                ArtifactStorageFileSystem.CreateAtomicPublication(
+                    publishedLeasePath,
+                    stagingLeasePath,
+                    leaseStream.SafeFileHandle,
+                    permanentPath,
+                    stagingPath,
+                    stagingStream.SafeFileHandle,
+                    terminateAfterLease);
+
+            if (publishArtifactBytes)
+            {
+                publish();
+            }
+            else
+            {
+                publish.Should()
+                    .Throw<SimulatedHardTerminationException>();
+            }
+        }
+
+        int expectedDeleted = publishArtifactBytes ? 3 : 2;
+        if (File.Exists(stagingPath))
+        {
+            SetStale(stagingPath);
+            expectedDeleted++;
+        }
+
+        SetStale(stagingLeasePath);
+        SetStale(publishedLeasePath);
+        if (publishArtifactBytes)
+        {
+            SetStale(permanentPath);
+        }
+
+        int deleted = await CreateCleanupService(
+                CreateRepository().Object)
+            .ScanAndCleanupAsync(CancellationToken.None);
+
+        deleted.Should().Be(expectedDeleted);
+        File.Exists(stagingPath).Should().BeFalse();
+        File.Exists(stagingLeasePath).Should().BeFalse();
+        File.Exists(publishedLeasePath).Should().BeFalse();
+        File.Exists(permanentPath).Should().BeFalse();
+    }
+
     [Fact]
     public async Task ScanAndCleanupAsync_WriterPublishingBeforeRepositoryCommit_PreservesFile()
     {
@@ -692,6 +776,8 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
     private static void SetStale(string path) =>
         File.SetLastWriteTimeUtc(path, DateTime.UtcNow.AddMinutes(-5));
+
+    private sealed class SimulatedHardTerminationException : Exception;
 
     public void Dispose()
     {
