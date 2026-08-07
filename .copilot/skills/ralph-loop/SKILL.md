@@ -1,6 +1,6 @@
 ---
 name: "ralph-loop"
-description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, epic maintenance, the Dallas analysis gate, READY dispatch, full issue accounting, PR lifecycle ownership, merge safety, and report format."
+description: "Ralph's standing operating rules for the hourly backlog-monitor workflow: safety boundary, context budget, delta scanning, triage, epic maintenance, the Dallas analysis gate, READY dispatch, full issue accounting, PR lifecycle ownership, session self-archiving and the reap report, merge safety, and report format."
 domain: "work-monitor"
 confidence: "high"
 source: "extracted from the Ralph workflow prompt to stop per-round duplication and the 76KB agent-file read"
@@ -263,6 +263,8 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
+- the **verbatim self-archive clause** from SESSION LIFECYCLE AND REAPING, as the final
+  paragraph of the kickoff prompt. A kickoff prompt without it is malformed.
 
 ## ACCOUNT FOR EVERY ISSUE
 
@@ -288,7 +290,7 @@ awaiting-analysis + blocked + epic-tracking + unaccounted == open issues`.
 The session that implements an issue owns that issue's lifecycle until its PR is **merged
 or definitively closed**. Opening a PR is not completion.
 
-A session may be archived only when all three hold:
+A session is done only when all three hold:
 
 1. its PR is merged or definitively closed, **and**
 2. that final status is recorded in the round report, **and**
@@ -296,6 +298,74 @@ A session may be archived only when all three hold:
 
 While a PR is open, keep the owning session alive. If checks fail or changes are
 requested, message that session to address them.
+
+Ownership decides **when** a session ends. SESSION LIFECYCLE AND REAPING decides **who**
+archives it and how a finished session is surfaced — Ralph does not archive it.
+
+## SESSION LIFECYCLE AND REAPING
+
+### The constraint
+
+**`archive_session` only works on sessions the caller created.** Every Ralph round is a
+brand-new session. Therefore **a round CANNOT archive a session spawned by any previous
+round** — the round can see it via `list_sessions_and_chats`, but the `archive_session`
+call will fail. Ralph must never attempt it.
+
+This is a hard platform constraint, not a wording problem. Ralph can only ever archive a
+session it spawned during the current round.
+
+### Self-archive is the primary mechanism
+
+Because Ralph cannot reap across rounds, **each session archives itself**. Every dispatch
+kickoff prompt Ralph writes MUST end with this clause, verbatim:
+
+```
+When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status and then archive yourself with `archive_session` using your own session id. Do not archive while your PR is still open, has pending checks, or needs fixes.
+```
+
+### The reap report is the safety net
+
+A session that finishes but crashes, stalls, or is interrupted before self-archiving will
+linger forever holding a stale worktree. The reap report is exactly what catches that case.
+
+Each round, call `list_sessions_and_chats` and list **every session in the project whose PR
+is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
+
+- session name
+- branch
+- PR number
+- merged / closed state
+
+**This is REPORT ONLY.** Ralph never archives another round's session, and never deletes a
+session whose PR is still open or which holds uncommitted or unpushed work. A human (or the
+session itself) does the reaping.
+
+Produce the `🧹 Ready to reap` heading **every round, even when it is empty** — a missing
+section is indistinguishable from an unchecked one.
+
+### Merge verification is squash-merge-safe
+
+This repo **squash-merges** pull requests. A squash merge creates a **new** commit on
+`development`; the branch's own commits never land there. So on a fully merged branch
+`git log origin/development..HEAD` still shows commits, and any naive "are this branch's
+commits on `development`?" check will **wrongly** conclude the work is unmerged and unsafe
+to reap.
+
+Never use commit-containment of the branch head as merge evidence. Read the PR's own state
+and merge commit instead:
+
+```bash
+git fetch origin development
+
+gh pr view <n> --repo OlyForge3D/PrintFarmer --json state,mergeCommit
+# -> {"state":"MERGED","mergeCommit":{"oid":"<sha>"}}
+
+git branch -r --contains <sha>
+# -> must list origin/development
+```
+
+A PR counts as merged for reaping only when `state` is `MERGED` **and** its
+`mergeCommit.oid` is contained in `origin/development` after a fresh fetch.
 
 ## MERGE SAFETY
 
@@ -331,7 +401,9 @@ Report each round, in this order:
 5. Queue order (issue numbers in dispatch order)
 6. Sessions dispatched this round
 7. Sessions retained for open PRs
-8. Sessions archived
+8. **`🧹 Ready to reap`** — every session whose PR is merged or definitively closed, with
+   session name, branch, PR number, and merged/closed state. Report only; emit the heading
+   every round even when the list is empty.
 9. Active slot count (`n/5`)
 10. Gate failures
 11. PRs awaiting review or merge
@@ -350,6 +422,14 @@ When nothing is eligible, report exactly:
 - Reading `.github/agents/squad.agent.md` wholesale for label or member lookups.
 - Deep-inspecting issues or PRs whose comparison fields did not change.
 - Archiving a session while its PR is still open.
+- Calling `archive_session` on a session created by a previous round — the call fails; only
+  the session itself can archive it.
+- Writing a kickoff prompt that omits the verbatim self-archive clause.
+- Omitting the `🧹 Ready to reap` heading because the list is empty.
+- Treating "this branch's commits are not on `development`" as proof the work is unmerged —
+  squash merges never put branch commits on `development`.
+- Phrasing a cleanup rule as a permission ("may archive once…") instead of an instruction
+  ("each round, list every session ready to reap"). A permission never gets executed.
 - Merging on green CI without an approval at the current head SHA.
 - Editing files, committing, or resolving conflicts from the workflow checkout.
 - Exceeding 5 active sessions, or dispatching by age when a higher-priority issue is queued.
