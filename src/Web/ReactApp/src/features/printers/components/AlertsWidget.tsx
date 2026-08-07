@@ -9,8 +9,7 @@ import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { AlertCircleIcon, CheckCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
-import { usePrinters } from '@/common/hooks/useApi';
-import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
+import { usePrinterSummary } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 
 interface MaintenanceAlertSettings {
@@ -27,8 +26,7 @@ export interface AlertsWidgetProps {
  * Dashboard widget showing printer alerts
  */
 export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
-  const { data: printers } = usePrinters();
-  const displayPrinters = usePrinterDisplays(printers || []);
+  const { data: printers } = usePrinterSummary();
   
   // Fetch maintenance alert settings
   const { data: alertSettings } = useQuery({
@@ -41,13 +39,13 @@ export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
 
   // Calculate stats
   const stats = React.useMemo(() => {
-    const userPrinters = displayPrinters ?? [];
+    const userPrinters = printers ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => p.isOnline).length;
     const maintenance = userPrinters.filter(p => p.inMaintenance).length;
     const offline = total - online;
     return { offline, maintenance };
-  }, [displayPrinters]);
+  }, [printers]);
 
   const hasAlerts = (showOfflineAlerts && stats.offline > 0) || stats.maintenance > 0;
   const alertCount = (showOfflineAlerts ? stats.offline : 0) + stats.maintenance;

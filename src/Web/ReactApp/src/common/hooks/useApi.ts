@@ -31,6 +31,7 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  PrinterSummary,
   PrintJobPriority,
   PrintJobObjectListDto,
   QueuedPrintJobWithFileMetaDto,
@@ -173,6 +174,15 @@ export function usePrintersFast(includeDisabled = false, options?: QueryOptions<
     queryKey,
     queryFn: () => apiClient.getPrintersFast(includeDisabled),
     staleTime: 30000, // 30 seconds
+    ...options,
+  });
+}
+
+export function usePrinterSummary(options?: QueryOptions<PrinterSummary[]>) {
+  return useQuery({
+    queryKey: [...queryKeys.printers, 'summary'],
+    queryFn: () => apiClient.getPrinterSummary(),
+    staleTime: 30000,
     ...options,
   });
 }

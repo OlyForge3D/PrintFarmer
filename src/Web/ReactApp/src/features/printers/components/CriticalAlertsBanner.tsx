@@ -19,7 +19,7 @@ import { useMaintenanceComponents } from '@/features/maintenance/hooks/useMainte
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { apiClient } from '@/services/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { usePrinters } from '@/common/hooks/useApi';
+import { usePrinterSummary } from '@/common/hooks/useApi';
 import { toast } from 'sonner';
 
 interface AlertItem {
@@ -41,7 +41,7 @@ export function CriticalAlertsBanner() {
   const { hasRole } = useAuth();
   const isAdmin = hasRole('farm_admin');
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  const { data: printers } = usePrinters();
+  const { data: printers } = usePrinterSummary();
   const queryClient = useQueryClient();
 
   const applyAllTemplatesMutation = useMutation({

@@ -7,8 +7,7 @@
 
 import React from 'react';
 import { Link } from 'react-router';
-import { usePrinters } from '@/common/hooks/useApi';
-import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
+import { usePrinterSummary, usePrinters } from '@/common/hooks/useApi';
 import { 
   SettingsIcon, 
   PlayIcon, 
@@ -88,11 +87,11 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
 
 export const PrinterDashboard: React.FC = () => {
   const { data: printers, isLoading, error } = usePrinters();
-  const displayPrinters = usePrinterDisplays(printers || []);
+  const { data: printerSummary } = usePrinterSummary();
   const { startTour } = usePageTour({ tourId: 'dashboard', steps: dashboardTour });
 
   const stats = React.useMemo(() => {
-    const userPrinters = displayPrinters ?? [];
+    const userPrinters = printerSummary ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => p.isOnline).length;
     const printing = userPrinters.filter(p => (p.state ?? '').toLowerCase().includes('printing')).length;
@@ -100,7 +99,7 @@ export const PrinterDashboard: React.FC = () => {
     const maintenance = userPrinters.filter(p => p.inMaintenance).length;
     const offline = total - online;
     return { total, online, printing, paused, offline, maintenance };
-  }, [displayPrinters]);
+  }, [printerSummary]);
 
   return (
     <PageTemplate

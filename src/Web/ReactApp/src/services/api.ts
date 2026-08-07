@@ -43,6 +43,7 @@ import {
   PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrinterSummary,
   PrintJobPriority,
   PrintJobObjectListDto,
   PrinterFileDto,
@@ -719,6 +720,12 @@ export class ApiClient {
   async getPrintersFast(includeDisabled?: boolean): Promise<PrinterFast[]> {
     const params = includeDisabled ? { includeDisabled: true } : undefined;
     const response = await this.client.get<PrinterFast[]>("/printers", { params });
+    return response.data;
+  }
+
+  async getPrinterSummary(includeDisabled?: boolean): Promise<PrinterSummary[]> {
+    const params = includeDisabled ? { includeDisabled: true } : undefined;
+    const response = await this.client.get<PrinterSummary[]>("/printers/summary", { params });
     return response.data;
   }
 

@@ -50,6 +50,35 @@ public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SummaryAsync_Unauthenticated_Returns401()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync("/api/printers/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task SummaryAsync_NonAdminCannotIncludeDisabled_Returns403()
+    {
+        HttpResponseMessage response = await _nonAdminClient.GetAsync(
+            "/api/printers/summary?includeDisabled=true");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task SummaryAsync_Admin_ReturnsMinimalContract()
+    {
+        HttpResponseMessage response = await _adminClient.GetAsync("/api/printers/summary");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Be("[]");
+    }
+
+    [Fact]
     public async Task AssignPrinterToLocationAsync_NonAdmin_Returns403()
     {
         HttpResponseMessage response = await _nonAdminClient.PostAsJsonAsync(

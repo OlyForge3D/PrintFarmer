@@ -181,6 +181,13 @@ public interface IPrintersService
     Task<PrinterFastDto[]> GetAllFastDtosAsync(CancellationToken ct);
 
     /// <summary>
+    /// Retrieves a projected printer summary with cached status for dashboard consumers.
+    /// </summary>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>Array of minimal printer summaries.</returns>
+    Task<PrinterSummaryDto[]> GetAllSummaryDtosAsync(CancellationToken ct);
+
+    /// <summary>
     /// Retrieves all printers with complete status and configuration data.
     /// Replaces GetAllFastDtosAsync for comprehensive printer data in new API endpoints.
     /// </summary>
