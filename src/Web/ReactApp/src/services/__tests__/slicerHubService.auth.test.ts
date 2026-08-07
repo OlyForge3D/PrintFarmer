@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const hubTestState = vi.hoisted(() => {
   const connection = {
@@ -35,6 +35,12 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getHubUrl: vi.fn(() => 'http://localhost:5245/hubs/slicers'),
 }));
 
+let slicerHubService: typeof import('@/services/slicerHubService')['slicerHubService'];
+
+beforeAll(async () => {
+  ({ slicerHubService } = await import('@/services/slicerHubService'));
+}, 60_000);
+
 describe('slicerHubService auth token', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -46,7 +52,6 @@ describe('slicerHubService auth token', () => {
     // never written, so the slicer hub negotiate always sent an empty bearer -> 401.
     localStorage.setItem('auth-token', 'jwt-abc');
 
-    const { slicerHubService } = await import('@/services/slicerHubService');
     await slicerHubService.start();
 
     const options = hubTestState.builder.withUrl.mock.calls[0][1] as {
@@ -60,7 +65,6 @@ describe('slicerHubService auth token', () => {
   it('returns an empty string (not the wrong key) when no token is stored', async () => {
     localStorage.setItem('authToken', 'wrong-key-should-be-ignored');
 
-    const { slicerHubService } = await import('@/services/slicerHubService');
     await slicerHubService.start();
 
     const options = hubTestState.builder.withUrl.mock.calls[0][1] as {

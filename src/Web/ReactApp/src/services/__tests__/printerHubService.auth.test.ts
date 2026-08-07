@@ -46,6 +46,7 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
 
 describe('printerHubService authentication', () => {
   beforeEach(() => {
+    // Re-evaluate the singleton after each mock setup; per-test isolation is intentional.
     vi.resetModules();
     vi.clearAllMocks();
     localStorage.clear();
