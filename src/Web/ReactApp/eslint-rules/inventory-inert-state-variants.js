@@ -52,13 +52,19 @@ function collectPaths(node) {
 
   if (
     ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+  ) {
+    return [[], ...collectPaths(node.right)]
+  }
+
+  if (
+    ts.isBinaryExpression(node) &&
     (
-      node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken ||
       node.operatorToken.kind === ts.SyntaxKind.BarBarToken ||
       node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
     )
   ) {
-    return [[], ...collectPaths(node.right)]
+    return [...collectPaths(node.left), ...collectPaths(node.right)]
   }
 
   let paths = [[]]
@@ -134,6 +140,7 @@ function analyzePath(entries, sourceFile, filePath) {
       matches.push({
         file: path.relative(sourceRoot, filePath).replaceAll('\\', '/'),
         line: location.line + 1,
+        column: location.character + 1,
         family: variant.family,
         base: base.raw,
         variant: variant.raw,
@@ -173,7 +180,7 @@ for (const filePath of await findSources(sourceRoot)) {
 }
 
 const matches = [...new Map(rawMatches.map(match => [
-  [match.file, match.line, match.base, match.variant].join('\u0000'),
+  [match.file, match.line, match.column, match.base, match.variant].join('\u0000'),
   match,
 ])).values()]
 const production = matches.filter(match =>
@@ -184,16 +191,45 @@ const byFamily = Object.fromEntries(
     .map(([family, familyMatches]) => [family, familyMatches.length]),
 )
 
-const dirty = execFileSync(
-  'git',
-  ['status', '--porcelain'],
-  { cwd: reactRoot, encoding: 'utf8' },
-).trim().length > 0
+function readWorktreeStatus() {
+  const fields = execFileSync(
+    'git',
+    ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+    { cwd: reactRoot, encoding: 'utf8' },
+  ).split('\0')
+  const entries = []
+
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]
+    if (!field) continue
+    const status = field.slice(0, 2)
+    const entry = {
+      status,
+      path: field.slice(3).replaceAll('\\', '/'),
+    }
+    if (status.includes('R') || status.includes('C')) {
+      entry.originalPath = fields[index + 1]?.replaceAll('\\', '/')
+      index += 1
+    }
+    entries.push(entry)
+  }
+
+  return entries.sort((left, right) =>
+    left.path.localeCompare(right.path) || left.status.localeCompare(right.status),
+  )
+}
+
+const worktreeStatus = readWorktreeStatus()
 
 console.log(JSON.stringify({
   scope: 'src/**/*.{ts,tsx} JSX class/className attributes',
-  head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: reactRoot, encoding: 'utf8' }).trim(),
-  dirty,
+  head: execFileSync(
+  'git',
+    ['rev-parse', 'HEAD'],
+  { cwd: reactRoot, encoding: 'utf8' },
+  ).trim(),
+  dirty: worktreeStatus.length > 0,
+  worktreeStatus,
   totals: {
     production: production.length,
     tests: matches.length - production.length,
