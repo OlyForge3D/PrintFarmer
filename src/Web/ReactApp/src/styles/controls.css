@@ -1645,6 +1645,34 @@
   }
 
   /*
+   * Shared Button shadow default.
+   *
+   * This is deliberately zero-specificity and in @layer components. Every
+   * Tailwind shadow class supplied through Button's className lands in the later
+   * utilities layer and therefore wins without source-order dependence,
+   * !important, or runtime class deduplication. The three exempt variants keep
+   * their existing no-default-shadow contract.
+   *
+   * The declarations mirror Tailwind's shadow-xs utility so Buttons without a
+   * caller override retain their exact pre-#1127 computed appearance.
+   */
+  :where(
+    [data-pf-button]:not(
+      [data-pf-variant='ghost'],
+      [data-pf-variant='link'],
+      [data-pf-variant='unstyled']
+    )
+  ) {
+    --tw-shadow: 0 1px 2px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.05));
+    box-shadow:
+      var(--tw-inset-shadow),
+      var(--tw-inset-ring-shadow),
+      var(--tw-ring-offset-shadow),
+      var(--tw-ring-shadow),
+      var(--tw-shadow);
+  }
+
+  /*
    * Ghost Button defaults.
    *
    * These live here, in the components layer, rather than in the `ghost` entry of

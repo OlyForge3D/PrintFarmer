@@ -13,6 +13,8 @@ const INDEX_STYLESHEET = /^assets\/index-[^/]+\.css$/;
 const TEXT_INHERIT_CLASS = ['text', 'inherit'].join('-');
 const GHOST_SELECTOR =
   /\[data-pf-button\]\[data-pf-variant=(?:"ghost"|'ghost'|ghost)\]\s*\{([^{}]*)\}/g;
+const BUTTON_SHADOW_SELECTOR =
+  /:where\(\[data-pf-button\]:not\(\[data-pf-variant=(?:"ghost"|'ghost'|ghost)\],\[data-pf-variant=(?:"link"|'link'|link)\],\[data-pf-variant=(?:"unstyled"|'unstyled'|unstyled)\]\)\)\s*\{([^{}]*)\}/g;
 const TRANSPARENT_VALUES = new Set([
   'transparent',
   '#0000',
@@ -222,6 +224,53 @@ function validateGhostCascade(css: string): string[] {
   return violations;
 }
 
+function validateButtonShadowCascade(css: string): string[] {
+  const violations: string[] = [];
+  const layerOrder = findLayerOrder(css);
+  const componentsIndex = layerOrder.indexOf('components');
+  const utilitiesIndex = layerOrder.indexOf('utilities');
+  const componentBlocks = findLayerBlocks(css, 'components');
+  const rules = [...css.matchAll(BUTTON_SHADOW_SELECTOR)].map((match) => ({
+    index: match.index,
+    declarations: parseDeclarations(match[1]),
+  }));
+
+  if (componentsIndex < 0 || utilitiesIndex < 0 || componentsIndex >= utilitiesIndex) {
+    violations.push(
+      `expected components before utilities in built layer order; found ${layerOrder.join(', ')}`,
+    );
+  }
+
+  if (rules.length !== 1) {
+    violations.push(`expected one built shared Button shadow rule; found ${rules.length}`);
+  }
+
+  for (const rule of rules) {
+    const isInComponents = componentBlocks.some(
+      (block) => rule.index > block.openBrace && rule.index < block.closeBrace,
+    );
+    if (!isInComponents) {
+      violations.push(
+        `shared Button shadow rule at built stylesheet offset ${rule.index} is outside @layer components`,
+      );
+    }
+    if (!rule.declarations.has('--tw-shadow')) {
+      violations.push('shared Button shadow rule must define --tw-shadow');
+    }
+    if (!rule.declarations.get('box-shadow')?.includes('var(--tw-shadow)')) {
+      violations.push('shared Button shadow rule must compose box-shadow with var(--tw-shadow)');
+    }
+  }
+
+  const exactShadowUtility = /\.shadow-xs(?=\s*\{)/g;
+  const shadowXsOffsets = [...css.matchAll(exactShadowUtility)].map((match) => match.index);
+  if (shadowXsOffsets.length === 0) {
+    violations.push('expected the caller .shadow-xs utility in the built stylesheet');
+  }
+
+  return violations;
+}
+
 async function buildIndexStylesheet(outDir: string): Promise<string> {
   const execFileAsync = promisify(execFile);
   await execFileAsync(process.execPath, [
@@ -313,6 +362,25 @@ describe('built stylesheet ghost cascade (#1122)', () => {
           violation.startsWith('subtle base rule') &&
           violation.includes('outside @layer components'),
       ),
+      violations.join('\n'),
+    ).toBe(true);
+  });
+
+  it('keeps the shared Button shadow default below every caller utility', () => {
+    const violations = validateButtonShadowCascade(builtCss);
+    expect(violations, violations.join('\n')).toEqual([]);
+  });
+
+  it('detects a shared Button shadow rule outside the components layer', () => {
+    const leakedRule =
+      ":where([data-pf-button]:not([data-pf-variant='ghost'],[data-pf-variant='link']," +
+      "[data-pf-variant='unstyled'])){--tw-shadow:0 1px 2px #0000000d;" +
+      'box-shadow:var(--tw-shadow)}';
+    const mutant = `${builtCss}${leakedRule}`;
+    const violations = validateButtonShadowCascade(mutant);
+
+    expect(
+      violations.some((violation) => violation.includes('outside @layer components')),
       violations.join('\n'),
     ).toBe(true);
   });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import { Button, type ButtonVariant } from '@/common/components/ui/Button';
+import { Button } from '@/common/components/ui/Button';
 
 const FORBIDDEN_PAINT_PATTERNS: Array<[string, RegExp]> = [
   ['background shorthand', /\[background:/],
@@ -357,40 +357,14 @@ describe('Button', () => {
   describe('subtle, tab, toggle and link emit no paint utilities (#1102)', () => {
     const VARIANTS = ['subtle', 'tab', 'toggle', 'link'] as const;
 
-    // The shared base string contributes one box-shadow utility of its own —
-    // but only to variants that opt in. `applyShadow` in Button.tsx excludes
-    // ghost, link and unstyled, so filtering the token unconditionally would
-    // blind this guard to a real shadow utility declared by `link`. The set
-    // below must track `applyShadow`.
-    //
-    // That base shadow is a base-level concern affecting all opted-in variants,
-    // not the four this issue is about, so it is filtered rather than silently
-    // widening #1102. Tracked separately as #1127.
-    const BASE_SHADOW_VARIANTS = new Set<ButtonVariant>(['subtle', 'tab', 'toggle']);
-
-    // Exactly one box-shadow utility comes from the base, so exactly one is
-    // dropped. `clsx` does not deduplicate — that is the very property that
-    // makes #1102 possible — so a variant that declares the same utility shows
-    // up as a second occurrence. Filtering every occurrence would swallow it
-    // and blind this guard to the variants most likely to regress.
-    const variantContributed = (variant: ButtonVariant, className: string) => {
-      const tokens = className.split(/\s+/).filter(Boolean);
-      if (!BASE_SHADOW_VARIANTS.has(variant)) return tokens;
-
-      const baseShadow = tokens.indexOf('shadow-xs');
-      return baseShadow === -1
-        ? tokens
-        : [...tokens.slice(0, baseShadow), ...tokens.slice(baseShadow + 1)];
-    };
-
     it.each(VARIANTS)(
       '%s contributes no background, colour, border-colour or shadow class',
       (variant) => {
         render(<Button variant={variant}>Label</Button>);
-        const tokens = variantContributed(
-          variant,
-          screen.getByRole('button', { name: 'Label' }).className
-        );
+        const tokens = screen
+          .getByRole('button', { name: 'Label' })
+          .className.split(/\s+/)
+          .filter(Boolean);
 
         for (const [label, pattern] of FORBIDDEN_PAINT_PATTERNS) {
           const offender = tokens.find((token) => pattern.test(token));
@@ -402,33 +376,6 @@ describe('Button', () => {
         }
       }
     );
-
-    // Keeps BASE_SHADOW_VARIANTS honest in both directions: if the base stops
-    // giving these variants a shadow the filter becomes a silent no-op, and if
-    // it starts giving `link` one the filter would need to grow. Either drift
-    // reopens the hole this filter could otherwise hide. The count is asserted
-    // exactly, because the filter drops precisely one occurrence: were the base
-    // to contribute two, one would leak through and read as variant-declared.
-    it.each([...BASE_SHADOW_VARIANTS])(
-      '%s really does receive the base shadow the filter assumes, exactly once',
-      (variant) => {
-        render(<Button variant={variant}>Label</Button>);
-        const shadows = screen
-          .getByRole('button', { name: 'Label' })
-          .className.split(/\s+/)
-          .filter((token) => token === 'shadow-xs');
-
-        expect(shadows).toHaveLength(1);
-      }
-    );
-
-    it('link receives no base shadow, so nothing is filtered for it', () => {
-      render(<Button variant="link">Label</Button>);
-      expect(
-        screen.getByRole('button', { name: 'Label' }).className.split(/\s+/)
-      ).not.toContain('shadow-xs');
-      expect(BASE_SHADOW_VARIANTS.has('link')).toBe(false);
-    });
 
     it.each(VARIANTS)('%s exposes its variant to the components layer', (variant) => {
       render(<Button variant={variant}>Label</Button>);
@@ -471,7 +418,7 @@ describe('Button', () => {
       const button = screen.getByRole('button', { name: 'Active tab' });
       expect(button).toHaveAttribute('data-pf-active');
 
-      const tokens = variantContributed('tab', button.className);
+      const tokens = button.className.split(/\s+/).filter(Boolean);
       for (const [label, pattern] of FORBIDDEN_PAINT_PATTERNS) {
         const offender = tokens.find((token) => pattern.test(token));
         expect(
