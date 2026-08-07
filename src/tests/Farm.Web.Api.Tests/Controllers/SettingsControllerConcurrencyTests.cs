@@ -149,6 +149,45 @@ public class SettingsControllerConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task UpdateUserSettings_LegacySqlServerRowVersion_Returns409()
+    {
+        Guid userId = Guid.NewGuid();
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = "legacy",
+                Email = "legacy@test.com",
+                PasswordHash = "x",
+            });
+            db.UserSettings.Add(new UserSettings
+            {
+                UserId = userId,
+                Theme = "dark",
+                Locale = "en",
+                ItemsPerPage = 25,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var updateDb = new AppDbContext(_dbOptions);
+        SettingsController controller = CreateController(updateDb, userId);
+        var body = new UpdateUserSettingsBody(
+            Theme: "light",
+            Locale: null,
+            ItemsPerPage: null,
+            DefaultSlicerPreset: null,
+            RowVersion: Convert.ToBase64String(Convert.FromHexString("000000000000002A")));
+
+        IActionResult result = await controller.UpdateUserSettingsAsync(
+            body,
+            CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Fact]
     public async Task UpdateUserSettings_MalformedIfMatchHeader_Returns400()
     {
         Guid userId = Guid.NewGuid();

@@ -55,7 +55,7 @@ public sealed class RevisionConcurrencyProviderTests
         state.NextSequence++;
         context.Entry(state).Property(entity => entity.Revision).OriginalValue = 0;
 
-        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(
+        DbUpdateConcurrencyException exception = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
             () => context.SaveChangesAsync());
         Assert.Contains("invalid revision 0", exception.Message, StringComparison.Ordinal);
     }
