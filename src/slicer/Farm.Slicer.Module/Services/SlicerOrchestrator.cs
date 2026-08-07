@@ -227,7 +227,7 @@ public class SlicerOrchestrator(
         {
             allQueueStats = await _jobQueue.GetAllQueueStatsAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex, "Failed to retrieve queue stats for slicer engines");
             throw new InvalidOperationException("Failed to retrieve queue stats for all slicer engines", ex);
@@ -372,7 +372,7 @@ public class SlicerOrchestrator(
         {
             allQueueStats = await _jobQueue.GetAllQueueStatsAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogWarning(ex, "Job queue health check failed");
             health.JobQueueHealthy = false;

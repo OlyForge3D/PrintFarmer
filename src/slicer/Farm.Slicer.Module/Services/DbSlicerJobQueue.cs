@@ -109,6 +109,11 @@ public class DbSlicerJobQueue(
     public async Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default)
     {
         SlicerEngineType selectedEngine = engine ?? SlicerEngineType.OrcaSlicer;
+        if (!SlicerEngineNames.IsDefined(selectedEngine))
+        {
+            throw new ArgumentOutOfRangeException(nameof(engine), engine, "Unknown slicer engine.");
+        }
+
         IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats> stats =
             await GetAllQueueStatsAsync(cancellationToken);
         return stats[selectedEngine];

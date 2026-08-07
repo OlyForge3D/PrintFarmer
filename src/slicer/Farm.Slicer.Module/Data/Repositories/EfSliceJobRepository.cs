@@ -1,5 +1,4 @@
-﻿using System.Diagnostics.CodeAnalysis;
-using Farm.Slicer.Module.Domain;
+﻿using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -11,9 +10,6 @@ namespace Farm.Slicer.Module.Data.Repositories;
 public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 {
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
-    private const string PrusaSlicerNormalized = "PRUSASLICER";
-    private const string SuperSlicerNormalized = "SUPERSLICER";
-    private const string CuraNormalized = "CURA";
 
     /// <inheritdoc/>
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
@@ -64,26 +60,30 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
-    [SuppressMessage(
-        "Performance",
-        "CA1862:Use the 'StringComparison' method overloads to perform case-insensitive string comparisons",
-        Justification = "StringComparison overloads are not translated by EF Core; SQL normalization keeps the aggregate provider-side.")]
+    /// <remarks>
+    /// This aggregate scans all historical rows in the four reported statuses. It avoids loading
+    /// entities or large payload columns, but a future covering engine/status index could reduce
+    /// database I/O further.
+    /// </remarks>
     public async Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
         CancellationToken ct = default)
     {
+        string ordinalCollation = GetOrdinalEngineNameCollation();
         var counts = await _db.SliceJobs
             .AsNoTracking()
+            .Where(job =>
+                job.Status == SliceJobStatus.Queued ||
+                job.Status == SliceJobStatus.Processing ||
+                job.Status == SliceJobStatus.Completed ||
+                job.Status == SliceJobStatus.Failed)
             .GroupBy(job => new
             {
                 Engine =
-                    job.SlicerEngineName != null &&
-                    job.SlicerEngineName.Trim().ToUpper() == PrusaSlicerNormalized
+                    EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.PrusaSlicer)
                         ? SlicerEngineType.PrusaSlicer
-                        : job.SlicerEngineName != null &&
-                          job.SlicerEngineName.Trim().ToUpper() == SuperSlicerNormalized
+                        : EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.SuperSlicer)
                             ? SlicerEngineType.SuperSlicer
-                            : job.SlicerEngineName != null &&
-                              job.SlicerEngineName.Trim().ToUpper() == CuraNormalized
+                            : EF.Functions.Collate(job.SlicerEngineName!, ordinalCollation) == nameof(SlicerEngineType.Cura)
                                 ? SlicerEngineType.Cura
                                 : SlicerEngineType.OrcaSlicer,
                 job.Status,
@@ -99,6 +99,21 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         return counts.ToDictionary(
             count => (count.Engine, count.Status),
             count => count.Count);
+    }
+
+    private string GetOrdinalEngineNameCollation()
+    {
+        return _db.Database.ProviderName switch
+        {
+            "Microsoft.EntityFrameworkCore.Sqlite" => "BINARY",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "Latin1_General_100_BIN2",
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "C",
+            "Pomelo.EntityFrameworkCore.MySql" => "utf8mb4_bin",
+            string provider => throw new NotSupportedException(
+                $"Queue statistics require a binary engine-name collation for provider '{provider}'."),
+            null => throw new NotSupportedException(
+                "Queue statistics require a relational provider with a binary engine-name collation."),
+        };
     }
 
     /// <inheritdoc/>

@@ -31,14 +31,20 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         orca.Engine.Should().Be(SlicerEngineType.OrcaSlicer);
         orca.QueuedJobs.Should().Be(2);
         orca.ProcessingJobs.Should().Be(1);
-        orca.CompletedJobs.Should().Be(0);
+        orca.CompletedJobs.Should().Be(4);
         orca.FailedJobs.Should().Be(1);
 
         prusa.Engine.Should().Be(SlicerEngineType.PrusaSlicer);
         prusa.QueuedJobs.Should().Be(1);
         prusa.ProcessingJobs.Should().Be(0);
-        prusa.CompletedJobs.Should().Be(1);
+        prusa.CompletedJobs.Should().Be(0);
         prusa.FailedJobs.Should().Be(2);
+
+        foreach (SlicerEngineType engine in Enum.GetValues<SlicerEngineType>())
+        {
+            allStats[engine].QueuedJobs.Should().Be(engine == SlicerEngineType.OrcaSlicer ? 2 : 1);
+        }
+
         _interceptor.SliceJobCommands.Should().ContainSingle();
     }
 
@@ -55,10 +61,37 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         string command = _interceptor.SliceJobCommands.Should().ContainSingle().Subject;
         command.Contains("COUNT(", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
         command.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+        command.Contains("COLLATE BINARY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
         command.Should().NotContain("MachineProfileJson");
         command.Should().NotContain("ProcessProfileJson");
         command.Should().NotContain("FilamentProfileJson");
         command.Should().NotContain("SlicerProfileJson");
+    }
+
+    [Fact]
+    public async Task GetQueueStatsAsync_UndefinedEngine_ThrowsBeforeQuerying()
+    {
+        await using SlicerDbContext context = await CreatePopulatedContextAsync();
+        var queue = new DbSlicerJobQueue(new EfSliceJobRepository(context));
+        _interceptor.Reset();
+
+        Func<Task> action = () => queue.GetQueueStatsAsync((SlicerEngineType)999);
+
+        _ = await action.Should().ThrowAsync<ArgumentOutOfRangeException>();
+        _interceptor.SliceJobCommands.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetAllQueueStatsAsync_CancelledToken_PropagatesCancellation()
+    {
+        await using SlicerDbContext context = await CreatePopulatedContextAsync();
+        var queue = new DbSlicerJobQueue(new EfSliceJobRepository(context));
+        using var cancellation = new CancellationTokenSource();
+        await cancellation.CancelAsync();
+
+        Func<Task> action = () => queue.GetAllQueueStatsAsync(cancellation.Token);
+
+        _ = await action.Should().ThrowAsync<OperationCanceledException>();
     }
 
     private async Task<SlicerDbContext> CreatePopulatedContextAsync()
@@ -75,29 +108,36 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         var context = new SlicerDbContext(options);
         _ = await context.Database.EnsureCreatedAsync();
 
-        context.SliceJobs.AddRange(
-            CreateJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
-            CreateJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
-            CreateJob(SliceJobStatus.Processing, SlicerEngineType.OrcaSlicer),
-            CreateJob(SliceJobStatus.Queued, SlicerEngineType.PrusaSlicer),
-            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, " prusaslicer "),
-            CreateJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer),
-            CreateJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer),
-            CreateJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer, engineName: null));
+        List<SliceJob> jobs = Enum.GetValues<SlicerEngineType>()
+            .Select(engine => CreateCanonicalJob(SliceJobStatus.Queued, engine))
+            .ToList();
+        jobs.AddRange(
+        [
+            CreateCanonicalJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
+            CreateCanonicalJob(SliceJobStatus.Processing, SlicerEngineType.OrcaSlicer),
+            CreateCanonicalJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer),
+            CreateCanonicalJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer),
+            CreateJob(SliceJobStatus.Failed, SlicerEngineType.PrusaSlicer, engineName: null),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, string.Empty),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, " "),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, "prusaslicer"),
+            CreateJob(SliceJobStatus.Completed, SlicerEngineType.PrusaSlicer, "Unknown"),
+            CreateCanonicalJob(SliceJobStatus.Cancelled, SlicerEngineType.PrusaSlicer),
+        ]);
+        context.SliceJobs.AddRange(jobs);
         _ = await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         return context;
     }
 
+    private static SliceJob CreateCanonicalJob(string status, SlicerEngineType engine) =>
+        CreateJob(status, engine, engine.ToString());
+
     private static SliceJob CreateJob(
         string status,
         SlicerEngineType numericEngine,
-        string? engineName = "canonical")
+        string? engineName)
     {
-        string? persistedEngineName = engineName == "canonical"
-            ? numericEngine.ToString()
-            : engineName;
-
         return new SliceJob
         {
             Id = Guid.NewGuid(),
@@ -105,7 +145,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
             ModelFileUrl = "file:///model.stl",
             ModelFileName = "model.stl",
             SlicerEngine = (int)numericEngine,
-            SlicerEngineName = persistedEngineName,
+            SlicerEngineName = engineName,
             Status = status,
             MachineProfileJson = new string('m', 1024),
             ProcessProfileJson = new string('p', 1024),
