@@ -55,13 +55,6 @@ public class SettingsMetadataAttributeTests
         "ID",
     ];
 
-    private static readonly Assembly[] SettingsAssemblies =
-    [
-        typeof(SlicerSettings).Assembly,
-        typeof(Farm.Slicer.Module.Settings.SlicerSettings).Assembly,
-        typeof(Farm.Web.Api.Services.Workers.HistorySeedingSettings).Assembly,
-    ];
-
     public static IEnumerable<object[]> SettingTypes()
     {
         foreach (Type type in typeof(SlicerSettings).Assembly.GetTypes()
@@ -106,7 +99,7 @@ public class SettingsMetadataAttributeTests
     [Fact]
     public void EveryUserVisibleSettingDisplayLabel_UsesSentenceCase()
     {
-        (Type Type, PropertyInfo Property, string Label)[] labels = SettingsAssemblies
+        (Type Type, PropertyInfo Property, string Label)[] labels = SettingsAssemblies()
             .SelectMany(assembly => assembly.GetTypes())
             .Where(type => type.GetCustomAttribute<AppSettingAttribute>() is not null)
             .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -159,4 +152,11 @@ public class SettingsMetadataAttributeTests
             .Skip(1)
             .All(word => !char.IsUpper(word.Value[0]));
     }
+
+    private static IEnumerable<Assembly> SettingsAssemblies() =>
+        Directory.EnumerateFiles(AppContext.BaseDirectory, "Farm.*.dll")
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(Assembly.LoadFrom)
+            .Where(assembly => assembly.GetTypes()
+                .Any(type => type.GetCustomAttribute<AppSettingAttribute>() is not null));
 }
