@@ -59,14 +59,28 @@ public static class SlicerEngineNames
     /// written from two different enumerations with incompatible ordering, so it cannot be decoded
     /// reliably. Those rows resolve to <see cref="SlicerEngineType.OrcaSlicer"/>, which is the only
     /// engine the worker fleet runs, so pre-existing jobs stay claimable. This compatibility
-    /// mapping never applies to a request value: an unknown engine on the wire is rejected.
+    /// mapping also applies to malformed non-canonical persisted names. Request parsing remains
+    /// case-insensitive through <see cref="TryParse"/> and rejects unknown values.
     /// </remarks>
     public static SlicerEngineType Resolve(SliceJob job)
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        return TryParse(job.SlicerEngineName, out SlicerEngineType named)
-            ? named
+        return ResolvePersistedName(job.SlicerEngineName);
+    }
+
+    /// <summary>
+    /// Resolves an exact canonical persisted engine name, falling back to OrcaSlicer for legacy or
+    /// malformed values.
+    /// </summary>
+    /// <param name="value">The engine name stored on a slice job.</param>
+    /// <returns>The canonical persisted engine, or OrcaSlicer when the name is not exact.</returns>
+    public static SlicerEngineType ResolvePersistedName(string? value)
+    {
+        return Enum.TryParse(value, ignoreCase: false, out SlicerEngineType engine) &&
+               IsDefined(engine) &&
+               string.Equals(value, engine.ToString(), StringComparison.Ordinal)
+            ? engine
             : SlicerEngineType.OrcaSlicer;
     }
 

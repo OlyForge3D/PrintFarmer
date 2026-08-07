@@ -60,6 +60,63 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     }
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// This aggregate scans all historical rows in the four reported statuses. It avoids loading
+    /// entities or large payload columns, but a future covering engine/status index could reduce
+    /// database I/O further.
+    /// </remarks>
+    public async Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
+        CancellationToken ct = default)
+    {
+        string ordinalCollation = GetOrdinalEngineNameCollation();
+        var counts = await _db.SliceJobs
+            .AsNoTracking()
+            .Where(job =>
+                job.Status == SliceJobStatus.Queued ||
+                job.Status == SliceJobStatus.Processing ||
+                job.Status == SliceJobStatus.Completed ||
+                job.Status == SliceJobStatus.Failed)
+            .GroupBy(job => new
+            {
+                Engine =
+                    EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.PrusaSlicer) + "#"
+                        ? SlicerEngineType.PrusaSlicer
+                        : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.SuperSlicer) + "#"
+                            ? SlicerEngineType.SuperSlicer
+                            : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.Cura) + "#"
+                                ? SlicerEngineType.Cura
+                                : SlicerEngineType.OrcaSlicer,
+                job.Status,
+            })
+            .Select(group => new
+            {
+                group.Key.Engine,
+                group.Key.Status,
+                Count = group.Count(),
+            })
+            .ToListAsync(ct);
+
+        return counts.ToDictionary(
+            count => (count.Engine, count.Status),
+            count => count.Count);
+    }
+
+    private string GetOrdinalEngineNameCollation()
+    {
+        return _db.Database.ProviderName switch
+        {
+            "Microsoft.EntityFrameworkCore.Sqlite" => "BINARY",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "Latin1_General_100_BIN2",
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "C",
+            "Pomelo.EntityFrameworkCore.MySql" => "utf8mb4_bin",
+            string provider => throw new NotSupportedException(
+                $"Queue statistics require a binary engine-name collation for provider '{provider}'."),
+            null => throw new NotSupportedException(
+                "Queue statistics require a relational provider with a binary engine-name collation."),
+        };
+    }
+
+    /// <inheritdoc/>
     public async Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default)
     {
         return await _db.SliceJobs

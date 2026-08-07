@@ -1,4 +1,5 @@
 ﻿using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 
 namespace Farm.Slicer.Module.Data.Repositories;
 
@@ -18,6 +19,16 @@ public interface ISliceJobRepository
 
     /// <summary>Gets jobs filtered by status.</summary>
     Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets job counts grouped by normalized engine and status.
+    /// </summary>
+    /// <remarks>
+    /// Jobs without a valid canonical engine name are grouped under OrcaSlicer, matching
+    /// <see cref="SlicerEngineNames.Resolve(SliceJob)"/> legacy-row semantics.
+    /// </remarks>
+    Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
+        CancellationToken ct = default);
 
     /// <summary>Gets active jobs assigned to a specific worker.</summary>
     Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default);

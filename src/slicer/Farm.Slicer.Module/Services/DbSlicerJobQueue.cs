@@ -108,22 +108,44 @@ public class DbSlicerJobQueue(
 
     public async Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<SliceJob> queued = await _repo.GetByStatusAsync(SliceJobStatus.Queued, limit: null, ct: cancellationToken);
-        IReadOnlyList<SliceJob> processing = await _repo.GetByStatusAsync(SliceJobStatus.Processing, limit: null, ct: cancellationToken);
-        IReadOnlyList<SliceJob> completed = await _repo.GetByStatusAsync(SliceJobStatus.Completed, limit: null, ct: cancellationToken);
-        IReadOnlyList<SliceJob> failed = await _repo.GetByStatusAsync(SliceJobStatus.Failed, limit: null, ct: cancellationToken);
-
-        return new SlicerQueueStats
+        SlicerEngineType selectedEngine = engine ?? SlicerEngineType.OrcaSlicer;
+        if (!SlicerEngineNames.IsDefined(selectedEngine))
         {
-            Engine = engine ?? SlicerEngineType.OrcaSlicer,
-            QueuedJobs = queued.Count,
-            ProcessingJobs = processing.Count,
-            CompletedJobs = completed.Count,
-            FailedJobs = failed.Count,
-            ActiveWorkers = 0,
-            AverageProcessingTimeSeconds = 0,
-            LastUpdated = DateTime.UtcNow
-        };
+            throw new ArgumentOutOfRangeException(nameof(engine), engine, "Unknown slicer engine.");
+        }
+
+        IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats> stats =
+            await GetAllQueueStatsAsync(cancellationToken);
+        return stats[selectedEngine];
+    }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int> counts =
+            await _repo.GetQueueCountsAsync(cancellationToken);
+
+        DateTime lastUpdated = DateTime.UtcNow;
+        return Enum.GetValues<SlicerEngineType>().ToDictionary(
+            engine => engine,
+            engine =>
+            {
+                long GetCount(string status) =>
+                    counts.TryGetValue((engine, status), out int count) ? count : 0;
+
+                return new SlicerQueueStats
+                {
+                    Engine = engine,
+                    QueuedJobs = GetCount(SliceJobStatus.Queued),
+                    ProcessingJobs = GetCount(SliceJobStatus.Processing),
+                    CompletedJobs = GetCount(SliceJobStatus.Completed),
+                    FailedJobs = GetCount(SliceJobStatus.Failed),
+                    ActiveWorkers = 0,
+                    AverageProcessingTimeSeconds = 0,
+                    LastUpdated = lastUpdated
+                };
+            });
     }
 
     public Task<List<DistributedSlicingJob>> GetUserJobsAsync(Guid userId, int? limit = null, CancellationToken cancellationToken = default)

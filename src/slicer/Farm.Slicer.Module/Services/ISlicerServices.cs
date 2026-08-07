@@ -51,6 +51,12 @@ public interface ISlicerJobQueue
     Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Get queue statistics for every slicer engine in one aggregate query.
+    /// </summary>
+    Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats>> GetAllQueueStatsAsync(
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Get jobs by user.
     /// </summary>
     Task<List<DistributedSlicingJob>> GetUserJobsAsync(Guid userId, int? limit = null, CancellationToken cancellationToken = default);
