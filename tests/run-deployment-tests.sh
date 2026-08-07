@@ -190,7 +190,7 @@ assert_test_sources_use_isolated_artifacts() {
     for test_file in "$SCRIPT_DIR"/test-*.sh "$SCRIPT_DIR"/validate-deployment-scripts.sh; do
         [[ "$(basename "$test_file")" == "test-run-deployment-tests-harness.sh" ]] && continue
         violations+=$(grep -nE \
-            '\$\{?REPO_ROOT\}?/\.(deploy-config|env)(["'"'"'[:space:]]|$)|\$\{?REPO_ROOT\}?/docker-compose[^[:space:]"]*|backup_repository_deployment_artifacts|restore_repository_deployment_artifacts|(^|[;&|[:space:]])(cd|pushd)[[:space:]]+(--[[:space:]]+)?["'"'"']?\$\{?REPO_ROOT\}?([/"'"'"'[:space:];&|]|$)' \
+            '\$\{?REPO_ROOT\}?/\.(deploy-config|env)(["'"'"'[:space:]]|$)|\$\{?REPO_ROOT\}?/docker-compose[^[:space:]"]*|backup_repository_deployment_artifacts|restore_repository_deployment_artifacts|(^|[;&|("'"'"'[:space:]])(cd|pushd)[[:space:]]+(--[[:space:]]+)?["'"'"']?\$\{?REPO_ROOT\}?([/"'"'"'[:space:];&|]|$)' \
             "$test_file" || true)
     done
 

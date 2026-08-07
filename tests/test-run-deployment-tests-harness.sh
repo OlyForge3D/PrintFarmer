@@ -122,6 +122,32 @@ fi
 rm -f "$root_relative_test"
 pass "Static-isolation: repo-root-relative source and transient mutation are rejected"
 
+# The same access embedded in a quoted command string is the historical suite
+# pattern and must be rejected independently of the bare-shell form above.
+quoted_root_relative_test="$mock_tests_dir/test-quoted-root-relative-access.sh"
+cat > "$quoted_root_relative_test" <<'EOF'
+#!/bin/bash
+capture_output "cd '$REPO_ROOT' && source .deploy-config; : > .env; rm -f .env"
+EOF
+chmod +x "$quoted_root_relative_test"
+
+quoted_root_relative_out="$TMP_ROOT/quoted-root-relative.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --quick >"$quoted_root_relative_out" 2>&1
+quoted_root_relative_rc=$?
+set -e
+
+if [[ $quoted_root_relative_rc -eq 0 ]]; then
+    cat "$quoted_root_relative_out"
+    fail "Static isolation guard accepted quoted repo-root-relative artifact access."
+fi
+if ! grep -q "forbidden repo-root artifact access" "$quoted_root_relative_out"; then
+    cat "$quoted_root_relative_out"
+    fail "Static isolation failure did not identify quoted repo-root-relative access."
+fi
+rm -f "$quoted_root_relative_test"
+pass "Static-isolation: quoted repo-root-relative command strings are rejected"
+
 harness_out="$TMP_ROOT/harness.out"
 sentinel_config="$TMP_ROOT/.deploy-config"
 printf '%s\n' \
