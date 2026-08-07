@@ -122,6 +122,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<div className="h-8 enabled:w-8 disabled:w-4 enabled:rounded-full" />',
     },
+    { code: '<div className="aspect-square rounded-full odd:w-8 even:h-4" />' },
     // A later all-corner radius removes rounded-full completely.
     { code: '<div className="rounded-full rounded-lg" />' },
     // Same-condition radius and aspect candidate order comes from Tailwind's
@@ -540,6 +541,23 @@ ruleTester.run('pf-no-oversized-radius', rule, {
           line: 1,
           column: 18,
           endColumn: 32,
+        },
+      ],
+    },
+    {
+      code: '<div className="x&#32;rounded-2xl" />',
+      output: '<div className="x&#32;rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className={`a\r\nrounded-2xl`} />',
+      output: '<div className={`a\r\nrounded-lg`} />',
+      errors: [
+        {
+          messageId: 'oversized',
+          line: 2,
+          column: 1,
+          endColumn: 12,
         },
       ],
     },

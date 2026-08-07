@@ -443,6 +443,7 @@ function conditionsConflict(left, right) {
       ['valid', 'invalid'],
       ['in-range', 'out-of-range'],
       ['read-only', 'read-write'],
+      ['odd', 'even'],
       ['motion-safe', 'motion-reduce'],
       ['portrait', 'landscape'],
       ['contrast-more', 'contrast-less'],
@@ -708,6 +709,11 @@ function rawOffsetAt(raw, cookedOffset) {
   let cookedIndex = 0
 
   while (rawIndex < raw.length && cookedIndex < cookedOffset) {
+    if (raw[rawIndex] === '\r') {
+      rawIndex += raw[rawIndex + 1] === '\n' ? 2 : 1
+      cookedIndex += 1
+      continue
+    }
     if (raw[rawIndex] !== '\\') {
       rawIndex += 1
       cookedIndex += 1
@@ -746,14 +752,44 @@ function rawOffsetAt(raw, cookedOffset) {
   return cookedIndex === cookedOffset ? rawIndex : -1
 }
 
+function jsxRawOffsetAt(raw, cookedOffset) {
+  let rawIndex = 0
+  let cookedIndex = 0
+
+  while (rawIndex < raw.length && cookedIndex < cookedOffset) {
+    if (raw[rawIndex] !== '&') {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+
+    const entity = /^&(?:#(\d+)|#x([0-9a-f]+)|(amp|apos|gt|lt|nbsp|quot));/i.exec(
+      raw.slice(rawIndex),
+    )
+    if (!entity) {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+    const point = entity[1]
+      ? Number.parseInt(entity[1], 10)
+      : entity[2]
+        ? Number.parseInt(entity[2], 16)
+        : 0
+    rawIndex += entity[0].length
+    cookedIndex += point > 0xffff ? 2 : 1
+  }
+
+  return cookedIndex === cookedOffset ? rawIndex : -1
+}
+
 /** Collect every string literal and template quasi beneath a className value. */
 function collectStringNodes(node, found = []) {
   if (!node || typeof node !== 'object') return found
 
   if (node.type === 'Literal' && typeof node.value === 'string') {
-    const decodeEscapes = node.parent?.type !== 'JSXAttribute'
-    const raw = decodeEscapes ? node.raw.slice(1, -1) : node.value
-    found.push({ node, text: node.value, raw, decodeEscapes, quasi: null })
+    const mapping = node.parent?.type === 'JSXAttribute' ? 'jsx' : 'js'
+    found.push({ node, text: node.value, mapping, quasi: null })
     return found
   }
   if (node.type === 'TemplateLiteral') {
@@ -761,8 +797,7 @@ function collectStringNodes(node, found = []) {
       found.push({
         node: quasi,
         text: quasi.value.cooked ?? '',
-        raw: quasi.value.raw,
-        decodeEscapes: true,
+        mapping: 'js',
         quasi,
       })
     }
@@ -936,13 +971,16 @@ export default {
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
-        for (const { node: stringNode, text, raw, decodeEscapes, quasi } of strings) {
+        for (const { node: stringNode, text, mapping, quasi } of strings) {
+          const sourceText = context.sourceCode.getText(stringNode)
+          const raw = quasi
+            ? sourceText.slice(1, quasi.tail ? -1 : -2)
+            : sourceText.slice(1, -1)
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
-            const rawStart = decodeEscapes ? rawOffsetAt(raw, match.index) : match.index
-            const rawEnd = decodeEscapes
-              ? rawOffsetAt(raw, match.index + rawToken.length)
-              : match.index + rawToken.length
+            const offsetAt = mapping === 'jsx' ? jsxRawOffsetAt : rawOffsetAt
+            const rawStart = offsetAt(raw, match.index)
+            const rawEnd = offsetAt(raw, match.index + rawToken.length)
             const sourceOffset = rawStart < 0 || rawEnd < 0 ? -1 : rawStart + 1
             const sourceLength = rawEnd - rawStart
             const sourceMatches =
