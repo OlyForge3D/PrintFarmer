@@ -152,6 +152,10 @@ public static class DatabaseInitializationExtensions
                         }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     logger.LogDebug(ex, "[Startup] Short verification of core tables failed (non-fatal)");
@@ -212,6 +216,10 @@ public static class DatabaseInitializationExtensions
                             await conn.CloseAsync();
                         }
                     }
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
                 }
                 catch (Exception diagEx)
                 {

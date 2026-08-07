@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -312,18 +313,20 @@ public sealed class DatabaseMigrationTests
         await using TemporarySqliteDatabase database = await TemporarySqliteDatabase.CreateAsync();
         SqliteConnection connection = database.Connection;
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        _ = builder.Services.AddLogging();
+        var loggerProvider = new RecordingLoggerProvider();
+        _ = builder.Logging.AddProvider(loggerProvider);
         _ = builder.Services.AddDbContext<AppDbContext>(
             options => options.UseSqlite(
                 connection,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
         var initializer = new Mock<IDatabaseInitializer>();
+        var seedingException = new InvalidOperationException("Synthetic seeding failure");
         _ = initializer
             .Setup(service => service.InitializeAsync(
                 It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<int>()))
-            .ThrowsAsync(new InvalidOperationException("Synthetic seeding failure"));
+            .ThrowsAsync(seedingException);
         _ = builder.Services.AddScoped(_ => initializer.Object);
         var startupStatus = new StartupStatus();
         _ = builder.Services.AddSingleton<IStartupStatus>(startupStatus);
@@ -343,6 +346,10 @@ public sealed class DatabaseMigrationTests
             "reference-data seeding failure keeps startup degraded rather than reporting ready");
         (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeTrue(
             "migration and schema validation must complete before reference-data seeding");
+        loggerProvider.Entries.Should().ContainSingle(entry =>
+            entry.Level == LogLevel.Warning
+            && ReferenceEquals(entry.Exception, seedingException)
+            && entry.Message == "[Startup] Database seeding failed (non-fatal)");
     }
 
     [Fact]
@@ -881,6 +888,49 @@ internal sealed class TemporarySqliteDatabase : IAsyncDisposable
     {
         await Connection.DisposeAsync();
         File.Delete(Path);
+    }
+}
+
+internal sealed record RecordedLogEntry(
+    LogLevel Level,
+    Exception? Exception,
+    string Message);
+
+internal sealed class RecordingLoggerProvider : ILoggerProvider
+{
+    internal List<RecordedLogEntry> Entries { get; } = [];
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        return new RecordingLogger(Entries);
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class RecordingLogger(List<RecordedLogEntry> entries) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            entries.Add(new RecordedLogEntry(logLevel, exception, formatter(state, exception)));
+        }
     }
 }
 
