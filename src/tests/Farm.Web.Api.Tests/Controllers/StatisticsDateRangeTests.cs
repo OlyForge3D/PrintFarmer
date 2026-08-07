@@ -140,6 +140,7 @@ public class StatisticsDateRangeTests : IAsyncLifetime
     [InlineData("/api/statistics/costs")]
     [InlineData("/api/statistics/costs/by-printer")]
     [InlineData("/api/statistics/costs/by-material")]
+    [InlineData("/api/statistics/costs/by-job")]
     public async Task Endpoint_StartDateAfterEndDate_Returns400(string endpoint)
     {
         var startDate = DateTime.UtcNow.ToString("yyyy-MM-dd");
@@ -150,6 +151,18 @@ public class StatisticsDateRangeTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         string body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("startDate must be before endDate");
+    }
+
+    [Fact]
+    public async Task Summary_StartDateBeyondMaximumRange_Returns400()
+    {
+        string startDate = DateTime.UtcNow.AddDays(-731).ToString("yyyy-MM-dd");
+
+        HttpResponseMessage response = await _client!.GetAsync($"/api/statistics/summary?startDate={startDate}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("730 days");
     }
 
     [Fact]
@@ -193,6 +206,7 @@ public class StatisticsDateRangeTests : IAsyncLifetime
         var summary = await response.Content.ReadFromJsonAsync<StatisticsSummaryDto>(JsonOptions);
         summary.Should().NotBeNull();
         summary!.TotalJobs.Should().Be(2, "only 2 jobs fall within the 15-day range");
+        summary.TotalPrintHours.Should().Be(2, "print hours must use the same date range as job counts");
     }
 
     [Fact]
