@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 const mockStatus = {
@@ -48,12 +48,17 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
-describe('FailureDetectionStatusCard', () => {
-  it('renders runtime summary and printers needing attention', async () => {
-    const { FailureDetectionStatusCard } = await import(
-      '@/features/admin/components/FailureDetectionStatusCard'
-    );
+let FailureDetectionStatusCard:
+  typeof import('@/features/admin/components/FailureDetectionStatusCard')['FailureDetectionStatusCard'];
 
+beforeAll(async () => {
+  ({ FailureDetectionStatusCard } = await import(
+    '@/features/admin/components/FailureDetectionStatusCard'
+  ));
+}, 60_000);
+
+describe('FailureDetectionStatusCard', () => {
+  it('renders runtime summary and printers needing attention', () => {
     render(<FailureDetectionStatusCard />);
 
     expect(screen.getByText('Failure Detection Runtime')).toBeTruthy();

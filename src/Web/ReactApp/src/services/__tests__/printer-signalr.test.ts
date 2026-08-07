@@ -94,6 +94,7 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
 
 describe('PrinterSignalRService auto-dispatch updates', () => {
   beforeEach(() => {
+    // Re-evaluate the singleton after each mock setup; per-test isolation is intentional.
     vi.resetModules();
     vi.clearAllMocks();
     localStorage.clear();

@@ -9,7 +9,7 @@
  * created via the UI. Without this the AC1 ("configure maintenance per
  * physical toolhead") cannot be met even though the backend supports it.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -45,6 +45,12 @@ vi.mock('@/services/maintenancePlanService', () => ({
 import { apiClient } from '@/services/api';
 import { maintenancePlanService } from '@/services/maintenancePlanService';
 import { queryKeys } from '@/common/hooks/useApi';
+
+let onlineManager: typeof import('@tanstack/react-query')['onlineManager'];
+
+beforeAll(async () => {
+  ({ onlineManager } = await import('@tanstack/react-query'));
+}, 60_000);
 
 // Calendar/manual-only plan — no task resolves an hour-based interval.
 // `planUsesHourIntervals` (DeployPlanModal, Hicks #719/2) is therefore
@@ -536,11 +542,6 @@ describe('DeployPlanModal — per-toolhead scope (Hicks #1)', () => {
   // ---------------------------------------------------------------------------
 
   it('blocks Deploy while the printer-details fetch is paused (offline), even when stale cache says per-tool is off; unpauses on reconnect and requires the fresh verdict (Hicks #1 paused)', async () => {
-    // Late-imported so we can toggle before mount without affecting other
-    // tests. `onlineManager` is a module-level singleton; we restore its
-    // state in `finally` so subsequent tests see it online.
-    const { onlineManager } = await import('@tanstack/react-query');
-
     const stale: PrinterDetails = {
       id: 'printer-1',
       name: 'Voron 2.4',
