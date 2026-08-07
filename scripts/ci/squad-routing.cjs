@@ -156,6 +156,56 @@ const DOMAINS = [
       { id: 'release', weight: 1, forms: ['release'] },
     ],
   },
+  {
+    id: 'ios',
+    reason: 'Issue relates to iOS/mobile app work',
+    role: /\bios\b|swift|mobile/i,
+    keywords: [
+      // `ios` and `mobile` are deliberately weak: test, release, backend, and
+      // frontend issues often mention the client they support. Native-specific
+      // technologies and app phrases are strong enough to establish ownership.
+      { id: 'platform', weight: 1, forms: ['ios', 'mobile'] },
+      {
+        id: 'native-app',
+        weight: 2,
+        forms: ['ios app', 'mobile app', 'iphone app', 'ipad app'],
+      },
+      { id: 'swiftui', weight: 2, forms: ['swiftui'] },
+      { id: 'swift', weight: 2, forms: ['swift'] },
+      { id: 'xcode', weight: 2, forms: ['xcode', 'xcodebuild', 'xctest', 'xcuitest'] },
+      { id: 'apple-device', weight: 1, forms: ['iphone', 'ipad'] },
+      { id: 'apple-push', weight: 1, forms: ['apns'] },
+      { id: 'testflight', weight: 1, forms: ['testflight'] },
+      { id: 'urlsession', weight: 2, forms: ['urlsession'] },
+    ],
+    ownerRules: [
+      {
+        role: /\bios networking\b/i,
+        forms: [
+          'ios networking',
+          'urlsession',
+          'rest client',
+          'api client',
+          'http client',
+          'signalr client',
+          'websocket',
+          'json decoding',
+          'codable',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'docs',
+    reason: 'Issue relates to documentation work',
+    role: /documentation|technical writer|\bdocs\b/i,
+    keywords: [
+      { id: 'docs', weight: 2, forms: ['documentation', 'docs'] },
+      { id: 'readme', weight: 2, forms: ['readme'] },
+      { id: 'changelog', weight: 2, forms: ['changelog'] },
+      { id: 'tutorial', weight: 2, forms: ['tutorial', 'tutorials'] },
+    ],
+  },
 ];
 
 // A term in the title is a deliberate statement of what the issue is about; the
@@ -187,6 +237,18 @@ function scoreDomain(domain, title, body) {
     matched.push(concept.id);
   }
   return { id: domain.id, score, matched, reason: domain.reason };
+}
+
+function findDomainMember(domain, members, title, body) {
+  for (const rule of domain.ownerRules || []) {
+    if (rule.forms.some((form) => hasWord(title, form) || hasWord(body, form))) {
+      const specialist = members.find((member) => rule.role.test(member.role || ''));
+      if (specialist) {
+        return specialist;
+      }
+    }
+  }
+  return members.find((member) => domain.role.test(member.role || ''));
 }
 
 /**
@@ -229,7 +291,7 @@ function routeIssue(issue, members, lead) {
   }
 
   const domain = DOMAINS.find((d) => d.id === best.id);
-  const member = members.find((m) => domain.role.test(m.role || ''));
+  const member = findDomainMember(domain, members, title, body);
   return { member, reason: best.reason, domain: best.id, scores };
 }
 

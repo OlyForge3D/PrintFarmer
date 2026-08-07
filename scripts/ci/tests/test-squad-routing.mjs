@@ -171,6 +171,9 @@ test('Ralph routes identically to the triage workflow', () => {
     { title: 'ci: docker build fails in the deployment pipeline', body: '' },
     { title: 'test: raise coverage for SliceJobQueue', body: 'flaky xunit' },
     { title: 'feat: add /api/spools endpoint', body: '' },
+    { title: 'feat: build SwiftUI printer controls', body: 'iPhone app screen' },
+    { title: 'fix: iOS networking URLSession retries', body: 'REST client' },
+    { title: 'docs: update the deployment README', body: 'Documentation only.' },
   ];
   for (const issue of cases) {
     const expected = routeIssue(issue, members, lead);
@@ -272,6 +275,88 @@ test('a testing issue routes to the Tester', () => {
   );
   assert.equal(result.domain, 'test');
   assert.equal(result.member.name, '🧪 Kane');
+});
+
+test('a SwiftUI issue routes to the iOS developer', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: build SwiftUI printer controls for the iPhone app',
+      body: 'Add the native mobile app screen and VoiceOver labels.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('an iOS networking issue routes to the iOS networking specialist', () => {
+  const result = routeIssue(
+    {
+      title: 'fix: iOS networking URLSession retries',
+      body: 'The REST client should decode the API response with Codable.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '🌐 Gorman');
+});
+
+test('a documentation-only issue routes to the documentation specialist', () => {
+  const result = routeIssue(
+    {
+      title: 'docs: update the deployment README and tutorial',
+      body: 'Documentation-only change; no application behavior changes.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'docs');
+  assert.equal(result.member.name, '📝 Ash');
+});
+
+test('incidental iOS and docs references do not steal unrelated issues', () => {
+  const cases = [
+    {
+      issue: {
+        title: 'fix: /api/printers endpoint returns 500',
+        body: 'The iOS client documentation will be updated after the backend fix.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
+    },
+    {
+      issue: {
+        title: 'fix: React mobile layout overflows',
+        body: 'Update the CSS component; the native iOS app is unaffected.',
+      },
+      domain: 'frontend',
+      member: '⚛️ Ripley',
+    },
+    {
+      issue: {
+        title: 'QA: qualify operator-first redesign for iOS beta',
+        body: 'Run the APNs acceptance pass on iPhone and iPad.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+    {
+      issue: {
+        title: 'ci: deploy the API and publish release documentation',
+        body: 'The Docker pipeline supports the mobile app deployment.',
+      },
+      domain: 'devops',
+      member: '⚙️ Parker',
+    },
+  ];
+
+  for (const { issue, domain, member } of cases) {
+    const result = routeIssue(issue, members, lead);
+    assert.equal(result.domain, domain, issue.title);
+    assert.equal(result.member.name, member, issue.title);
+  }
 });
 
 test('an ambiguous issue falls through to the Lead', () => {
