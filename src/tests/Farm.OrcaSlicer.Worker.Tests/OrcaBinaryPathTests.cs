@@ -39,11 +39,16 @@ public sealed class OrcaBinaryPathTests
         string launcherPath = Path.Combine(directory, "orcaslicer");
         string binaryPath = Path.Combine(directory, "orca-slicer");
         File.WriteAllText(binaryPath, new string('x', 2048));
-        File.WriteAllText(launcherPath, $"#!/bin/sh\nexec \"{binaryPath}\" \"$@\"\n");
+        File.WriteAllText(launcherPath, "#!/bin/sh\nAPPDIR=\"$(dirname \"$0\")\"\nexec \"$APPDIR/bin/orca-slicer\" \"$@\"\n");
+        string relativeBinaryPath = Path.Combine(directory, "bin", "orca-slicer");
+        Directory.CreateDirectory(Path.GetDirectoryName(relativeBinaryPath)!);
+        File.Move(binaryPath, relativeBinaryPath);
 
         try
         {
-            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, binaryPath).Should().BeTrue();
+            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeTrue();
+            File.WriteAllText(launcherPath, "#!/bin/sh\nexit 0\n");
+            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeFalse();
         }
         finally
         {
