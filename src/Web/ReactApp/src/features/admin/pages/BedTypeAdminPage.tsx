@@ -181,6 +181,26 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
         }}
         title={editingType ? 'Edit Bed Type' : 'New Bed Type'}
         size="sm"
+        footer={(
+          <AdminSaveBar
+            isDirty={form.isDirty}
+            changeCount={form.changedCount}
+            changedLabels={form.changedKeys.map(key => ({
+              name: 'Name',
+              description: 'Description',
+              color: 'Badge color',
+            })[key])}
+            onDiscard={() => {
+              form.reset();
+              setShowModal(false);
+            }}
+            onSave={handleSave}
+            isSaving={isSaving}
+            saveLabel={editingType ? 'Save' : 'Create'}
+            discardLabel="Cancel"
+            className="-mx-6 -my-4"
+          />
+        )}
       >
         <div className="flex flex-col gap-4">
           <FormField label="Name" htmlFor="bt-name" required>
@@ -216,24 +236,6 @@ export function BedTypeAdminPage({ embedded = false }: EmbeddablePageProps) {
               />
             </div>
           </FormField>
-          <AdminSaveBar
-            isDirty={form.isDirty}
-            changeCount={form.changedCount}
-            changedLabels={form.changedKeys.map(key => ({
-              name: 'Name',
-              description: 'Description',
-              color: 'Badge color',
-            })[key])}
-            onDiscard={() => {
-              form.reset();
-              setShowModal(false);
-            }}
-            onSave={handleSave}
-            isSaving={isSaving}
-            saveLabel={editingType ? 'Save' : 'Create'}
-            discardLabel="Cancel"
-            className="-mx-6 -mb-6 mt-2"
-          />
         </div>
       </Modal>
     </PageTemplate>

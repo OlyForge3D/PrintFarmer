@@ -101,6 +101,24 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     );
   });
 
+  it('does not overwrite optional fields that were absent when renaming a tag', async () => {
+    vi.mocked(apiClient.getTags).mockResolvedValue([{ id: 'tag-1', name: 'Resin', revision: 1 }]);
+    vi.mocked(apiClient.updateTag).mockResolvedValue({ id: 'tag-1', name: 'Renamed', revision: 2 });
+    const user = userEvent.setup();
+    renderPage();
+
+    await startEditingResin(user);
+    const nameInput = screen.getByDisplayValue('Resin');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Renamed');
+    await saveCurrentEdit(user);
+
+    await waitFor(() => expect(apiClient.updateTag).toHaveBeenCalledWith(
+      'tag-1',
+      { name: 'Renamed', expectedRevision: 1 },
+    ));
+  });
+
   it('shows an inline accessible error and preserves the edit form on a generic failure', async () => {
     vi.mocked(apiClient.updateTag).mockRejectedValue(new Error('network unreachable'));
     const user = userEvent.setup();

@@ -78,6 +78,7 @@ describe('BedTypeAdminPage shared admin patterns', () => {
 
     await user.type(screen.getByLabelText(/^Name/), 'Textured PEI');
     const saveBar = screen.getByTestId('admin-save-bar');
+    expect(saveBar.parentElement).toHaveClass('sticky', 'bottom-0');
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => expect(apiClient.createBedType).toHaveBeenCalled());

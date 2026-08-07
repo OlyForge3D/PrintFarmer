@@ -160,6 +160,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   const createUser = async () => {
     if (isCreating) return;
+    if (usernameStatus === 'taken' || emailStatus === 'taken') return;
     const fieldErrs = validateForm();
     if (Object.keys(fieldErrs).length > 0) {
       setCreateErrors(fieldErrs);
@@ -215,13 +216,13 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   };
 
   const openEditUser = (user: User) => {
-    editForm.markPristine({ user });
+    editForm.markPristine({ user: { ...user, permissions: user.permissions ?? [] } });
     setShowEditModal(true);
   };
 
   const openPermissions = (user: User) => {
-    editForm.markPristine({ user });
-    permissionForm.markPristine({ permissions: user.permissions });
+    editForm.markPristine({ user: { ...user, permissions: user.permissions ?? [] } });
+    permissionForm.markPristine({ permissions: user.permissions ?? [] });
     setShowPermissionsModal(true);
   };
 
@@ -289,7 +290,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       const data = await apiClient.getUsers();
       setUsers((data as unknown) as User[]);
     } catch (error) {
-      setLoadError(error);
+      console.error('Error loading users:', error);
     } finally {
       setLoading(false);
     }
@@ -305,6 +306,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       setUsers((usersData as unknown) as User[]);
       setRoles((rolesData as unknown) as Role[]);
     } catch (error) {
+      console.error('Error loading user management data:', error);
       setLoadError(error);
     } finally {
       setLoading(false);
@@ -582,6 +584,29 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
             }}
             title="Create New User"
             size="lg"
+            footer={(
+              <AdminSaveBar
+                isDirty={createForm.isDirty}
+                changeCount={createForm.changedCount}
+                changedLabels={createForm.changedKeys.map(key => ({
+                  user: 'User details',
+                  roleId: 'Role',
+                  permissions: 'Application access',
+                })[key])}
+                onDiscard={() => {
+                  createForm.reset();
+                  setShowCreateModal(false);
+                }}
+                onSave={createUser}
+                isSaving={isCreating}
+                error={usernameStatus === 'taken' || emailStatus === 'taken'
+                  ? 'Choose an available username and email before creating the user.'
+                  : null}
+                saveLabel="Create user"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               {createErrors.general && (
@@ -778,27 +803,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </div>
 
-            <AdminSaveBar
-              isDirty={createForm.isDirty}
-              changeCount={createForm.changedCount}
-              changedLabels={createForm.changedKeys.map(key => ({
-                user: 'User details',
-                roleId: 'Role',
-                permissions: 'Application access',
-              })[key])}
-              onDiscard={() => {
-                createForm.reset();
-                setShowCreateModal(false);
-              }}
-              onSave={createUser}
-              isSaving={isCreating}
-              error={usernameStatus === 'taken' || emailStatus === 'taken'
-                ? 'Choose an available username and email before creating the user.'
-                : null}
-              saveLabel="Create user"
-              discardLabel="Cancel"
-              className="-mx-6 -mb-6 mt-6"
-            />
           </Modal>
         )}
         {showEditModal && selectedUser && (
@@ -811,6 +815,22 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
             }}
             title={`Edit User: ${selectedUser.username}`}
             size="lg"
+            footer={(
+              <AdminSaveBar
+                isDirty={editForm.isDirty}
+                changeCount={editForm.changedCount}
+                changedLabels={['User details']}
+                onDiscard={() => {
+                  editForm.reset();
+                  setShowEditModal(false);
+                }}
+                onSave={saveSelectedUser}
+                isSaving={isSavingUser}
+                saveLabel="Save changes"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
               <FormField label="First Name">
@@ -896,7 +916,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                     size="sm"
                     disabled={isSavingUser}
                     onClick={() => {
-                      permissionForm.markPristine({ permissions: selectedUser.permissions });
+                      permissionForm.markPristine({ permissions: selectedUser.permissions ?? [] });
                       setShowPermissionsModal(true);
                     }}
                   >
@@ -920,20 +940,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </form>
 
-            <AdminSaveBar
-              isDirty={editForm.isDirty}
-              changeCount={editForm.changedCount}
-              changedLabels={['User details']}
-              onDiscard={() => {
-                editForm.reset();
-                setShowEditModal(false);
-              }}
-              onSave={saveSelectedUser}
-              isSaving={isSavingUser}
-              saveLabel="Save changes"
-              discardLabel="Cancel"
-              className="-mx-6 -mb-6 mt-6"
-            />
           </Modal>
         )}
 
@@ -948,6 +954,22 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
             }}
             title={`Manage Application Access for ${selectedUser.username}`}
             size="lg"
+            footer={(
+              <AdminSaveBar
+                isDirty={permissionForm.isDirty}
+                changeCount={permissionForm.changedCount}
+                changedLabels={['Application access']}
+                onDiscard={() => {
+                  permissionForm.reset();
+                  setShowPermissionsModal(false);
+                }}
+                onSave={savePermissions}
+                isSaving={isSavingPermissions}
+                saveLabel="Save permissions"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               <p className="text-sm text-pf-text-secondary">
@@ -985,20 +1007,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </div>
             </div>
 
-            <AdminSaveBar
-              isDirty={permissionForm.isDirty}
-              changeCount={permissionForm.changedCount}
-              changedLabels={['Application access']}
-              onDiscard={() => {
-                permissionForm.reset();
-                setShowPermissionsModal(false);
-              }}
-              onSave={savePermissions}
-              isSaving={isSavingPermissions}
-              saveLabel="Save permissions"
-              discardLabel="Cancel"
-              className="-mx-6 -mb-6 mt-6"
-            />
           </Modal>
         )}
 
@@ -1015,6 +1023,38 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
             }}
             title={`Change Password: ${userToChangePassword.username}`}
             size="md"
+            footer={(
+              <AdminSaveBar
+                isDirty={passwordForm.isDirty}
+                changeCount={passwordForm.changedCount}
+                changedLabels={passwordForm.changedKeys.map(key => ({
+                  newPassword: 'New password',
+                  confirmNewPassword: 'Password confirmation',
+                })[key])}
+                onDiscard={() => {
+                  passwordForm.reset();
+                  setShowChangePasswordModal(false);
+                  setUserToChangePassword(null);
+                  setChangePasswordError(null);
+                }}
+                onSave={() => {
+                  if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
+                    setChangePasswordError('Password confirmation does not match.');
+                    return;
+                  }
+                  if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
+                    setChangePasswordError('Password does not meet policy requirements.');
+                    return;
+                  }
+                  setShowChangePasswordConfirm(true);
+                }}
+                isSaving={isChangingPassword}
+                error={changePasswordError}
+                saveLabel="Continue"
+                discardLabel="Cancel"
+                className="-mx-6 -my-4"
+              />
+            )}
           >
             <div className="space-y-4">
               {changePasswordError && <Alert type="error">{changePasswordError}</Alert>}
@@ -1078,36 +1118,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               )}
             </div>
 
-            <AdminSaveBar
-              isDirty={passwordForm.isDirty}
-              changeCount={passwordForm.changedCount}
-              changedLabels={passwordForm.changedKeys.map(key => ({
-                newPassword: 'New password',
-                confirmNewPassword: 'Password confirmation',
-              })[key])}
-              onDiscard={() => {
-                passwordForm.reset();
-                setShowChangePasswordModal(false);
-                setUserToChangePassword(null);
-                setChangePasswordError(null);
-              }}
-              onSave={() => {
-                if (passwordChangeForm.newPassword !== passwordChangeForm.confirmNewPassword) {
-                  setChangePasswordError('Password confirmation does not match.');
-                  return;
-                }
-                if (!passwordMeetsPolicyValue(passwordChangeForm.newPassword)) {
-                  setChangePasswordError('Password does not meet policy requirements.');
-                  return;
-                }
-                setShowChangePasswordConfirm(true);
-              }}
-              isSaving={isChangingPassword}
-              error={changePasswordError}
-              saveLabel="Continue"
-              discardLabel="Cancel"
-              className="-mx-6 -mb-6 mt-6"
-            />
           </Modal>
         )}
 

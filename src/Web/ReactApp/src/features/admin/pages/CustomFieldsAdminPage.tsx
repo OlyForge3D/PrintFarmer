@@ -267,6 +267,31 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
         }}
         title={editing ? 'Edit Custom Field' : 'New Custom Field'}
         size="md"
+        footer={(
+          <AdminSaveBar
+            isDirty={form.isDirty}
+            changeCount={form.changedCount}
+            changedLabels={form.changedKeys.map(key => ({
+              fieldName: 'Field name',
+              fieldKey: 'Field key',
+              fieldType: 'Type',
+              options: 'Options',
+              isRequired: 'Required',
+              sortOrder: 'Sort order',
+              description: 'Description',
+              defaultValue: 'Default value',
+            })[key])}
+            onDiscard={() => {
+              form.reset();
+              setShowModal(false);
+            }}
+            onSave={handleSave}
+            isSaving={isSaving}
+            saveLabel={editing ? 'Save' : 'Create'}
+            discardLabel="Cancel"
+            className="-mx-6 -my-4"
+          />
+        )}
       >
         <div className="flex flex-col gap-4">
           <FormField label="Field Name" htmlFor="cf-name" required>
@@ -339,29 +364,6 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
               <span className="text-sm text-pf-text-primary">Required</span>
             </div>
           </div>
-          <AdminSaveBar
-            isDirty={form.isDirty}
-            changeCount={form.changedCount}
-            changedLabels={form.changedKeys.map(key => ({
-              fieldName: 'Field name',
-              fieldKey: 'Field key',
-              fieldType: 'Type',
-              options: 'Options',
-              isRequired: 'Required',
-              sortOrder: 'Sort order',
-              description: 'Description',
-              defaultValue: 'Default value',
-            })[key])}
-            onDiscard={() => {
-              form.reset();
-              setShowModal(false);
-            }}
-            onSave={handleSave}
-            isSaving={isSaving}
-            saveLabel={editing ? 'Save' : 'Create'}
-            discardLabel="Cancel"
-            className="-mx-6 -mb-6 mt-2"
-          />
         </div>
       </Modal>
     </PageTemplate>

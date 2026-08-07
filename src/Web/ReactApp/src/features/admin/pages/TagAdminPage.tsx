@@ -295,8 +295,12 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 id: editingTagId,
                 dto: {
                     name: editForm.values.name.trim(),
-                    color: editForm.values.color,
-                    description: editForm.values.description,
+                    ...(editForm.values.color || editForm.original.color
+                        ? { color: editForm.values.color }
+                        : {}),
+                    ...(editForm.values.description || editForm.original.description
+                        ? { description: editForm.values.description }
+                        : {}),
                     expectedRevision: editingRevision
                 }
             });
@@ -711,6 +715,26 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                 }}
                 title="Create New Tag"
                 width="max-w-md"
+                footer={(
+                    <AdminSaveBar
+                        isDirty={createForm.isDirty}
+                        changeCount={createForm.changedCount}
+                        changedLabels={createForm.changedKeys.map(key => ({
+                            name: 'Name',
+                            color: 'Color',
+                            description: 'Description',
+                        })[key])}
+                        onDiscard={() => {
+                            createForm.reset();
+                            setShowNewTagForm(false);
+                        }}
+                        onSave={() => createTagMutation.mutate()}
+                        isSaving={createTagMutation.isPending}
+                        saveLabel="Create tag"
+                        discardLabel="Cancel"
+                        className="-mx-6 -my-4"
+                    />
+                )}
             >
                 <div className="space-y-6">
                     {/* Tag Preview */}
@@ -810,24 +834,6 @@ export const TagAdminPage: React.FC<EmbeddablePageProps> = ({ embedded = false }
                         />
                     )}
 
-                    <AdminSaveBar
-                        isDirty={createForm.isDirty}
-                        changeCount={createForm.changedCount}
-                        changedLabels={createForm.changedKeys.map(key => ({
-                            name: 'Name',
-                            color: 'Color',
-                            description: 'Description',
-                        })[key])}
-                        onDiscard={() => {
-                            createForm.reset();
-                            setShowNewTagForm(false);
-                        }}
-                        onSave={() => createTagMutation.mutate()}
-                        isSaving={createTagMutation.isPending}
-                        saveLabel="Create tag"
-                        discardLabel="Cancel"
-                        className="-mx-6 -mb-6"
-                    />
                 </div>
             </Modal>
 

@@ -96,6 +96,24 @@ describe('UserManagementPage shared admin patterns', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('does not submit a username known to be unavailable', async () => {
+    vi.mocked(apiClient.checkUserAvailability).mockResolvedValue({
+      usernameExists: true,
+      emailExists: false,
+    });
+    const user = userEvent.setup();
+    render(<UserManagementPage />);
+
+    await user.click(await screen.findByRole('button', { name: 'Add User' }));
+    await user.type(screen.getByPlaceholderText('Enter username'), 'operator');
+    await user.type(screen.getByPlaceholderText('Enter email address'), 'operator@example.com');
+    await user.type(screen.getByPlaceholderText('Enter password'), 'NewPassword1!');
+    expect(await screen.findByText('✗ Already taken')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Create user' }));
+    expect(apiClient.createUser).not.toHaveBeenCalled();
+  });
+
   it('saves a dirty profile and clears its pristine baseline', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
     const update = createDeferred();
