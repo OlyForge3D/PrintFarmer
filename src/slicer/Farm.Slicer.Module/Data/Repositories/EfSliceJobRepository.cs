@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Domain;
+﻿using System.Diagnostics.CodeAnalysis;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Models;
 using Microsoft.EntityFrameworkCore;
 
@@ -10,6 +11,9 @@ namespace Farm.Slicer.Module.Data.Repositories;
 public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 {
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
+    private const string PrusaSlicerNormalized = "PRUSASLICER";
+    private const string SuperSlicerNormalized = "SUPERSLICER";
+    private const string CuraNormalized = "CURA";
 
     /// <inheritdoc/>
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
@@ -57,6 +61,44 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         }
 
         return await query.ToListAsync(ct);
+    }
+
+    /// <inheritdoc/>
+    [SuppressMessage(
+        "Performance",
+        "CA1862:Use the 'StringComparison' method overloads to perform case-insensitive string comparisons",
+        Justification = "StringComparison overloads are not translated by EF Core; SQL normalization keeps the aggregate provider-side.")]
+    public async Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
+        CancellationToken ct = default)
+    {
+        var counts = await _db.SliceJobs
+            .AsNoTracking()
+            .GroupBy(job => new
+            {
+                Engine =
+                    job.SlicerEngineName != null &&
+                    job.SlicerEngineName.Trim().ToUpper() == PrusaSlicerNormalized
+                        ? SlicerEngineType.PrusaSlicer
+                        : job.SlicerEngineName != null &&
+                          job.SlicerEngineName.Trim().ToUpper() == SuperSlicerNormalized
+                            ? SlicerEngineType.SuperSlicer
+                            : job.SlicerEngineName != null &&
+                              job.SlicerEngineName.Trim().ToUpper() == CuraNormalized
+                                ? SlicerEngineType.Cura
+                                : SlicerEngineType.OrcaSlicer,
+                job.Status,
+            })
+            .Select(group => new
+            {
+                group.Key.Engine,
+                group.Key.Status,
+                Count = group.Count(),
+            })
+            .ToListAsync(ct);
+
+        return counts.ToDictionary(
+            count => (count.Engine, count.Status),
+            count => count.Count);
     }
 
     /// <inheritdoc/>

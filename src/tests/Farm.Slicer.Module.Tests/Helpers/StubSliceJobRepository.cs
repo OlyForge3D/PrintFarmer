@@ -1,5 +1,6 @@
 ﻿using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 
 namespace Farm.Slicer.Module.Tests.Helpers;
 
@@ -13,6 +14,13 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task<SliceJob?> GetByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult(Jobs.Find(j => j.Id == id));
     public Task<IReadOnlyList<SliceJob>> GetByUserIdAsync(Guid userId, int? limit = null, int? offset = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs);
     public Task<IReadOnlyList<SliceJob>> GetByStatusAsync(string status, int? limit = null, CancellationToken ct = default) => Task.FromResult((IReadOnlyList<SliceJob>)Jobs.FindAll(j => j.Status == status));
+    public Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(CancellationToken ct = default)
+    {
+        IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int> counts = Jobs
+            .GroupBy(job => (SlicerEngineNames.Resolve(job), job.Status))
+            .ToDictionary(group => group.Key, group => group.Count());
+        return Task.FromResult(counts);
+    }
     public Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
     {
         List<SliceJob> queued = Jobs.FindAll(j => j.Status == SliceJobStatus.Queued);

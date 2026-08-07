@@ -222,13 +222,23 @@ public class SlicerOrchestrator(
     {
         List<SlicerEngineInfo> engineInfos = new();
         int failures = 0;
+        IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats> allQueueStats;
+        try
+        {
+            allQueueStats = await _jobQueue.GetAllQueueStatsAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to retrieve queue stats for slicer engines");
+            throw new InvalidOperationException("Failed to retrieve queue stats for all slicer engines", ex);
+        }
 
         foreach (KeyValuePair<SlicerEngineType, EngineMetadata> kvp in _engineCatalog)
         {
             EngineMetadata meta = kvp.Value;
             try
             {
-                SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)meta.EngineType, cancellationToken);
+                SlicerQueueStats queueStats = allQueueStats[meta.EngineType];
                 engineInfos.Add(new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
@@ -276,11 +286,13 @@ public class SlicerOrchestrator(
     {
         try
         {
+            IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats> allQueueStats =
+                await _jobQueue.GetAllQueueStatsAsync(cancellationToken);
             Dictionary<SlicerEngineType, SlicerQueueStats> stats = new();
 
             foreach (SlicerEngineType engineType in _engineCatalog.Keys)
             {
-                SlicerQueueStats infraStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)engineType, cancellationToken);
+                SlicerQueueStats infraStats = allQueueStats[engineType];
                 stats[engineType] = new SlicerQueueStats
                 {
                     Engine = engineType,
@@ -355,13 +367,29 @@ public class SlicerOrchestrator(
         };
 
         int engineFailures = 0;
+        IReadOnlyDictionary<SlicerEngineType, SlicerQueueStats>? allQueueStats = null;
+        try
+        {
+            allQueueStats = await _jobQueue.GetAllQueueStatsAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Job queue health check failed");
+            health.JobQueueHealthy = false;
+            health.IsHealthy = false;
+        }
 
         foreach (KeyValuePair<SlicerEngineType, EngineMetadata> kvp in _engineCatalog)
         {
             EngineMetadata meta = kvp.Value;
             try
             {
-                SlicerQueueStats queueStats = await _jobQueue.GetQueueStatsAsync((SlicerEngineType)(int)meta.EngineType, cancellationToken);
+                if (allQueueStats is null ||
+                    !allQueueStats.TryGetValue(meta.EngineType, out SlicerQueueStats? queueStats))
+                {
+                    throw new InvalidOperationException($"Queue statistics are unavailable for {meta.EngineType}.");
+                }
+
                 health.Engines[meta.EngineType] = new SlicerEngineInfo
                 {
                     Engine = meta.EngineType,
@@ -393,18 +421,6 @@ public class SlicerOrchestrator(
                 };
                 health.IsHealthy = false; // degraded
             }
-        }
-
-        // Job queue broad connectivity test
-        try
-        {
-            _ = await _jobQueue.GetQueueStatsAsync(null, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Job queue health check failed");
-            health.JobQueueHealthy = false;
-            health.IsHealthy = false;
         }
 
         // File storage test
