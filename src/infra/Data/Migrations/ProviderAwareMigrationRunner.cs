@@ -87,7 +87,11 @@ public static class ProviderAwareMigrationRunner
         ArgumentNullException.ThrowIfNull(logger);
 
         SupportedProvider provider = GetSupportedProvider(context, target);
-        string[] contextMigrations = [.. context.Database.GetMigrations()];
+        string[] contextMigrations =
+        [
+            .. context.Database.GetMigrations()
+                .OrderBy(migration => migration, StringComparer.Ordinal)
+        ];
         if (contextMigrations.Length == 0)
         {
             throw new DatabaseMigrationContractException(
@@ -223,7 +227,7 @@ public static class ProviderAwareMigrationRunner
         }
         catch
         {
-            await transaction.RollbackAsync(cancellationToken);
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
         }
 

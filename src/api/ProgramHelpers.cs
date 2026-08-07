@@ -7,6 +7,7 @@ using System.Net.Sockets;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Startup;
@@ -342,47 +343,52 @@ internal static class ProgramHelpers
     internal static async Task InitializeDatabaseAsync(WebApplication app)
     {
         // Initialize settings and ensure DB schema exists. This runs post-build using app.Services to avoid building a separate provider.
+        await using AsyncServiceScope initScope = app.Services.CreateAsyncScope();
+        IServiceProvider sp = initScope.ServiceProvider;
+
+        // Resolve required services for DB initialization and call into the existing initializer
+        ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
+        AppDbContext db = sp.GetRequiredService<AppDbContext>();
+        IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
+        IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
+
         try
         {
-            await using AsyncServiceScope initScope = app.Services.CreateAsyncScope();
-            IServiceProvider sp = initScope.ServiceProvider;
-
-            // Resolve required services for DB initialization and call into the existing initializer
-            ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
-            AppDbContext db = sp.GetRequiredService<AppDbContext>();
-            IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
-            IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
-
-            // This call ensures the database schema exists and runs seeding. Do this before any
-            // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
             await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
-
-            // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
-            // registered in AddSlicerModule().
-
-            // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
-            try
-            {
-                ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
-                settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
-                settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
-                settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
-                app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
-            }
-            catch (Exception innerEx)
-            {
-                app.Logger.LogWarning(innerEx, "[Startup] Settings initialization from environment variables failed (non-fatal)");
-            }
         }
-        catch (Exception ex)
+        catch (DatabaseMigrationContractException)
         {
-            try
-            {
-                app.Logger.LogWarning(ex, "[Startup] Settings/database initialization failed (non-fatal)");
-            }
-            catch
-            {
-            }
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception initializationException)
+        {
+            app.Logger.LogWarning(
+                initializationException,
+                "[Startup] Database seeding failed (non-fatal)");
+            return;
+        }
+
+        // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
+        // registered in AddSlicerModule().
+
+        // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
+        try
+        {
+            ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
+            settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
+            settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+            settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
+            app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
+        }
+        catch (Exception settingsException)
+        {
+            app.Logger.LogWarning(
+                settingsException,
+                "[Startup] Settings initialization from environment variables failed (non-fatal)");
         }
     }
 }
