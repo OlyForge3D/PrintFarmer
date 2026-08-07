@@ -22,6 +22,7 @@ setup() {
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
     test_info "Using temp directory: $TEST_TEMP_DIR"
+    trap teardown EXIT
 }
 
 teardown() {
@@ -307,8 +308,7 @@ SPOOLMAN_BASE_URL=http://spoolman:7912
 ORCASLICER_VERSION=2.4.0
 EOF
     
-    # Run deployment to generate environment file from repo root
-    capture_output "cd '$REPO_ROOT' && timeout 60 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     
     # Check that environment file was mentioned/created
     local output=$(get_output)
@@ -362,7 +362,7 @@ NETWORK_MODE=bridge
 DB_PROVIDER=postgres
 EOF
     
-    capture_output "timeout 60 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     assert_file_exists "docker-compose.yml"
     
     local content=$(cat "docker-compose.yml")
@@ -379,21 +379,19 @@ test_worker_scaling_validation() {
     start_test "worker scaling configuration validation"
     
     cd "$TEST_TEMP_DIR"
+    rm -f "$TEST_TEMP_DIR/.env"
+    rm -rf "$TEST_TEMP_DIR/generated"
     
-    # Create configuration file in repo root for deploy script
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=3
+ENABLE_DISTRIBUTED_SLICING=true
 DB_PROVIDER=postgres
 EOF
     
-    # Run deploy script from repo root with batch mode
-    capture_output "cd '$REPO_ROOT' && timeout 60 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
-    
-    # Clean up config file
-    rm -f "$REPO_ROOT/.deploy-config"
     
     # Should reflect the worker count configuration
     assert_contains "$output" "Orca Workers: 3" "Should show configured worker count"
@@ -439,10 +437,10 @@ run_all_tests() {
     test_security_monitoring_content_validation
     test_environment_file_content_validation
     test_configuration_consistency_validation
-    # NOTE: Skipping test_port_network_accuracy_validation and test_worker_scaling_validation
-    # These tests require running from repo root with full deployment flow, not from temp dir
+    # NOTE: test_port_network_accuracy_validation remains disabled pending its
+    # partial-config behavior fix.
     # test_port_network_accuracy_validation
-    # test_worker_scaling_validation
+    test_worker_scaling_validation
     test_complete_configuration_validation
     
     teardown

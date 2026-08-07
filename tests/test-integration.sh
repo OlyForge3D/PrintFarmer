@@ -16,16 +16,13 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
-REPO_BACKUP_DIR=""
 TEARDOWN_COMPLETE=false
 
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
-    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
     test_info "Using temp directory: $TEST_TEMP_DIR"
-    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
     trap teardown EXIT
 }
 
@@ -33,9 +30,7 @@ teardown() {
     if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
         return
     fi
-
     cd "$ORIGINAL_PWD" 2>/dev/null || true
-    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
     TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment

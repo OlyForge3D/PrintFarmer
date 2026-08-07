@@ -15,16 +15,13 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
-REPO_BACKUP_DIR=""
 TEARDOWN_COMPLETE=false
 
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
     ORIGINAL_PWD=$(pwd)
-    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
     test_info "Using temp directory: $TEST_TEMP_DIR"
-    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
     trap teardown EXIT
 }
 
@@ -32,9 +29,7 @@ teardown() {
     if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
         return
     fi
-
     cd "$ORIGINAL_PWD" 2>/dev/null || true
-    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
     TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
@@ -320,7 +315,7 @@ test_regenerate_config_migrates_legacy_worker_defaults() {
     cd "$TEST_TEMP_DIR"
     write_legacy_worker_config ".deploy-config"
 
-    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --regenerate-config 2>&1"
     local exit_code
     exit_code=$(get_output_exit_code)
     local output
@@ -349,7 +344,7 @@ test_redeploy_migrates_legacy_worker_defaults() {
     write_legacy_worker_config ".deploy-config"
     rm -f docker-compose.yml docker-compose.override.yml
 
-    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --redeploy --dry-run 2>&1"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --redeploy --dry-run 2>&1"
     local exit_code
     exit_code=$(get_output_exit_code)
     local output
@@ -409,14 +404,14 @@ test_malformed_and_empty_worker_booleans_fail_clearly() {
         -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=maybe/' \
         ".deploy-config"
 
-    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
     local malformed_exit_code
     malformed_exit_code=$(get_output_exit_code)
     local malformed_output
     malformed_output=$(get_output)
 
     sed -i 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=/' ".deploy-config"
-    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
     local empty_exit_code
     empty_exit_code=$(get_output_exit_code)
     local empty_output
@@ -426,7 +421,7 @@ test_malformed_and_empty_worker_booleans_fail_clearly() {
         -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=/' \
         -e 's/^ENABLE_ORCA_WORKER=.*/ENABLE_ORCA_WORKER=no/' \
         ".deploy-config"
-    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --dry-run --non-interactive 2>&1"
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
     local empty_distributed_exit_code
     empty_distributed_exit_code=$(get_output_exit_code)
     local empty_distributed_output
@@ -510,7 +505,7 @@ INCLUDE_SECURITY=false
 INCLUDE_REGISTRY=false
 EOF
 
-    capture_output "ORCASLICER_VERSION=2.4.0 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    capture_output "ORCASLICER_VERSION=2.4.0 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --regenerate-config 2>&1"
     local persisted_config
     persisted_config=$(cat ".deploy-config")
     local generated_env

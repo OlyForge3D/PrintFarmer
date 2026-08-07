@@ -4778,6 +4778,12 @@ detect_db_credential_divergence() {
 # Generate React .env.production file for Docker builds
 generate_react_env_production() {
     local react_dir=""
+
+    if [[ -n "${CLI_OUTPUT_DIR:-}" ]]; then
+        react_dir="$CLI_OUTPUT_DIR/src/Web/ReactApp"
+        mkdir -p "$react_dir"
+    fi
+
     local candidates=(
         "$REPO_ROOT/src/Web/ReactApp"
         "$REPO_ROOT/Web/ReactApp"
@@ -4785,12 +4791,14 @@ generate_react_env_production() {
         "./Web/ReactApp"
     )
 
-    for path in "${candidates[@]}"; do
-        if [ -d "$path" ]; then
-            react_dir="$path"
-            break
-        fi
-    done
+    if [[ -z "$react_dir" ]]; then
+        for path in "${candidates[@]}"; do
+            if [ -d "$path" ]; then
+                react_dir="$path"
+                break
+            fi
+        done
+    fi
     if [ -z "$react_dir" ]; then
         print_warning "React app directory not found, skipping React environment setup"
         return 0

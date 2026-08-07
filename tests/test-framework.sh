@@ -254,58 +254,21 @@ cleanup_test_temp_dir() {
     fi
 }
 
-repository_deployment_artifact_paths() {
-    printf '%s\n' \
-        ".deploy-config" \
-        ".env" \
-        "src/Web/ReactApp/.env.production" \
-        "docker-compose.yml" \
-        "Dockerfile.multistage" \
-        "dockerfiles" \
-        "docker-entrypoint-config.sh" \
-        "otel-collector-config.yaml" \
-        "monitoring" \
-        "security-config.json"
-}
-
-backup_repository_deployment_artifacts() {
-    local repository_root="$1"
-    local backup_root="$2"
-    local relative_path
-    while IFS= read -r relative_path; do
-        local source_path="$repository_root/$relative_path"
-        if [[ -e "$source_path" || -L "$source_path" ]]; then
-            mkdir -p "$backup_root/files/$(dirname "$relative_path")"
-            cp -a "$source_path" "$backup_root/files/$relative_path"
-            mkdir -p "$backup_root/present/$(dirname "$relative_path")"
-            : > "$backup_root/present/$relative_path"
-        fi
-    done < <(repository_deployment_artifact_paths)
-}
-
-restore_repository_deployment_artifacts() {
-    local repository_root="$1"
-    local backup_root="$2"
-    local relative_path
-    while IFS= read -r relative_path; do
-        local destination_path="$repository_root/$relative_path"
-        rm -rf "$destination_path"
-        if [[ -e "$backup_root/present/$relative_path" ]]; then
-            mkdir -p "$(dirname "$destination_path")"
-            cp -a "$backup_root/files/$relative_path" "$destination_path"
-        fi
-    done < <(repository_deployment_artifact_paths)
-}
-
 # Helper function to get deploy script command with correct paths
 get_deploy_script_command() {
     local args=("$@")
     local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     local repo_root="$(cd "$script_dir/.." && pwd)"
     local deploy_script="$repo_root/scripts/deploy-docker.sh"
-    
-    # Return command string that runs from repo root with proper timeout
-    echo "cd '$repo_root' && timeout 120 '$deploy_script' ${args[*]} 2>&1 || true"
+    local working_dir="${TEST_TEMP_DIR:-$(pwd)}"
+    local config_file="$working_dir/.deploy-config"
+    local env_file="$working_dir/.env"
+    local output_dir="$working_dir/generated"
+
+    mkdir -p "$output_dir"
+
+    # Keep every generated artifact under the suite's temporary directory.
+    echo "cd '$working_dir' && timeout 120 '$deploy_script' --config-file '$config_file' --env-file '$env_file' --output-dir '$output_dir' ${args[*]} 2>&1 || true"
 }
 
 # Helper function to get compose generator command with correct paths
