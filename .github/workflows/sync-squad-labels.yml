@@ -21,6 +21,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const path = require('path');
+            const { memberLabel, isCanonicalMemberLabel } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
               core.info('No .squad/team.md found — skipping label sync');
@@ -98,8 +102,6 @@ jobs:
               { name: 'priority:p2', color: 'FBCA04', description: 'Next sprint' }
             ];
 
-            function slugify(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
-
             // Ensure the base "squad" triage label exists
             const labels = [
               { name: 'squad', color: SQUAD_COLOR, description: 'Squad triage inbox — Lead will assign to a member' }
@@ -107,7 +109,7 @@ jobs:
 
             for (const member of members) {
               labels.push({
-                name: `squad:${slugify(member.name)}`,
+                name: memberLabel(member.name),
                 color: MEMBER_COLOR,
                 description: `Assigned to ${member.name} (${member.role})`
               });
@@ -164,3 +166,47 @@ jobs:
             }
 
             core.info(`Label sync complete: ${labels.length} labels synced`);
+
+            // Audit for non-canonical squad:* duplicates.
+            //
+            // `memberLabel` is the single source of truth for squad label
+            // spelling, and it strips the emoji prefix from roster names, so
+            // `squad:dallas` is canonical and `squad:🏗️ dallas` is a duplicate.
+            // This sync never creates the emoji form; it reports any that
+            // already exist so the migration can be done deliberately rather
+            // than silently relabelling issues here.
+            const canonical = new Set(labels.map(l => l.name));
+            const existing = await github.paginate(
+              github.rest.issues.listLabelsForRepo,
+              { owner: context.repo.owner, repo: context.repo.repo, per_page: 100 }
+            );
+
+            const duplicates = existing
+              .map(l => l.name)
+              .filter(name => name.startsWith('squad:'))
+              .filter(name => !canonical.has(name))
+              .sort();
+
+            if (duplicates.length > 0) {
+              const rows = duplicates.map(name => {
+                const suggested = isCanonicalMemberLabel(name)
+                  ? '(not on current roster)'
+                  : memberLabel(name.slice('squad:'.length));
+                return `| \`${name}\` | ${suggested} |`;
+              });
+              core.warning(
+                `${duplicates.length} non-canonical squad:* label(s) found: ${duplicates.join(', ')}`
+              );
+              await core.summary
+                .addHeading('Non-canonical `squad:*` labels', 3)
+                .addRaw(
+                  'These labels are not produced by this workflow. Exactly one '
+                  + '`squad:*` label per issue identifies the owner, so '
+                  + 'duplicates break that invariant. Migrate issues onto the '
+                  + 'canonical label, then delete the duplicate.\n\n'
+                )
+                .addRaw(['| Label | Canonical form |', '|---|---|', ...rows].join('\n'))
+                .write();
+            } else {
+              core.info('No non-canonical squad:* labels found');
+            }

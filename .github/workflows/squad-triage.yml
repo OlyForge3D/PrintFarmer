@@ -20,6 +20,10 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const path = require('path');
+            const { routeIssue, memberLabel } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
             const issue = context.payload.issue;
 
             const teamFile = '.squad/team.md';
@@ -102,11 +106,9 @@ jobs:
               return;
             }
 
-            function slugify(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
-
             // Build triage context
             const memberList = members.map(m =>
-              `- **${m.name}** (${m.role}) → label: \`squad:${slugify(m.name)}\``
+              `- **${m.name}** (${m.role}) → label: \`${memberLabel(m.name)}\``
             ).join('\n');
 
             // Determine best assignee based on issue content and routing
@@ -136,44 +138,19 @@ jobs:
               }
             }
 
-            // If not routed to @copilot, use keyword-based routing
+            // If not routed to @copilot, use keyword-based routing.
+            // Scoring is domain-outer / member-inner: every domain is scored
+            // independently and the highest scorer wins, so roster ordering no
+            // longer decides the assignment. Ties fall through to the Lead.
             if (!assignedMember) {
-              for (const member of members) {
-                const role = member.role.toLowerCase();
-                if ((role.includes('frontend') || role.includes('ui')) &&
-                    (issueText.includes('ui') || issueText.includes('frontend') ||
-                     issueText.includes('css') || issueText.includes('component') ||
-                     issueText.includes('button') || issueText.includes('page') ||
-                     issueText.includes('layout') || issueText.includes('design'))) {
-                  assignedMember = member;
-                  triageReason = 'Issue relates to frontend/UI work';
-                  break;
-                }
-                if ((role.includes('backend') || role.includes('api') || role.includes('server')) &&
-                    (issueText.includes('api') || issueText.includes('backend') ||
-                     issueText.includes('database') || issueText.includes('endpoint') ||
-                     issueText.includes('server') || issueText.includes('auth'))) {
-                  assignedMember = member;
-                  triageReason = 'Issue relates to backend/API work';
-                  break;
-                }
-                if ((role.includes('test') || role.includes('qa') || role.includes('quality')) &&
-                    (issueText.includes('test') || issueText.includes('bug') ||
-                     issueText.includes('fix') || issueText.includes('regression') ||
-                     issueText.includes('coverage'))) {
-                  assignedMember = member;
-                  triageReason = 'Issue relates to testing/quality work';
-                  break;
-                }
-                if ((role.includes('devops') || role.includes('infra') || role.includes('ops')) &&
-                    (issueText.includes('deploy') || issueText.includes('ci') ||
-                     issueText.includes('pipeline') || issueText.includes('docker') ||
-                     issueText.includes('infrastructure'))) {
-                  assignedMember = member;
-                  triageReason = 'Issue relates to DevOps/infrastructure work';
-                  break;
-                }
-              }
+              const routed = routeIssue(
+                { title: issue.title, body: issue.body },
+                members,
+                lead
+              );
+              core.info(`Routing scores: ${JSON.stringify(routed.scores)}`);
+              assignedMember = routed.member;
+              triageReason = routed.reason;
             }
 
             // Default to Lead if no routing match
@@ -183,7 +160,7 @@ jobs:
             }
 
             const isCopilot = assignedMember.name === '@copilot';
-            const assignLabel = isCopilot ? 'squad:copilot' : `squad:${slugify(assignedMember.name)}`;
+            const assignLabel = isCopilot ? 'squad:copilot' : memberLabel(assignedMember.name);
 
             // Add the member-specific label
             await github.rest.issues.addLabels({
