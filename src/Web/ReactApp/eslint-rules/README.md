@@ -115,10 +115,12 @@ Radius declarations are resolved per corner, so `rounded-t-lg` does not hide a s
 `rounded-full` on the bottom corners.
 
 The resolver remains deliberately conservative around dynamic dimensions. A winning width or
-height containing `var()`, `calc()`, `min()`, `max()`, or `clamp()` cannot be evaluated without
-the browser's computed custom properties and layout context. The rule withholds a
-`rounded-full` report in that case rather than risk a false positive. Identical static dimensions,
-known aspect ratios, and state/media overrides are still resolved normally.
+height containing `var()`, `if()`, `calc()`, `min()`, `max()`, or `clamp()` cannot be evaluated
+without the browser's computed custom properties and layout context. The rule withholds a
+`rounded-full` report in that case rather than risk a false positive. Semicolons invalidate a
+dimension only when their nearest enclosing function is CSS math; `if()` branch separators remain
+valid. Identical static dimensions, known aspect ratios, and state/media overrides are still
+resolved normally.
 
 ### Reading class names
 
