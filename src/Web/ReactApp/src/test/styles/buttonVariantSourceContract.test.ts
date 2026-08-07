@@ -838,7 +838,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         kind === 'bg'
           ? /^bg-/.test(utility)
           : kind === 'deco'
-            ? utility === 'underline'
+            ? utility === 'underline' ||
+              /^\[text-decoration(?:-line)?:.*underline/.test(utility)
             : /^text-pf-/.test(utility) || /^text-\[/.test(utility),
       );
 
@@ -897,38 +898,43 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
     ).toEqual([]);
   }, SOURCE_SCAN_TIMEOUT_MS);
 
-  it('reports a `link` caller only when it is underlined at rest', () => {
+  it('reports a `link` caller only when its resting decoration includes underline', () => {
     // V1, round 12. An earlier revision modelled `link` as having no default
     // hover, so the predicate returned true unconditionally and idiomatic,
     // correct code was reported as dead. `link` in fact ships
     // `enabled:hover:underline` from the variant map.
     //
     // Measured on the real Button across 8 palettes -- see DEFAULT_HOVER.
-    const [tag] = buttonTags('<Button variant="link" className="text-pf-accent">Docs</Button>');
-    expect(isUnmaskedIn(tag, tag.branches[0]), '`link` is a bare variant').toBe(true);
-    expect(silencedVariants(tag, tag.branches[0]), 'correct link code must not be reported').toEqual(
-      [],
-    );
+    const fixtures = [
+      ['text-pf-accent', []],
+      ['text-pf-accent no-underline', []],
+      ['text-pf-accent line-through', []],
+      ['text-pf-accent decoration-pf-accent decoration-2', []],
+      ['text-pf-accent underline-offset-2', []],
+      ['text-pf-accent [text-decoration-line:line-through]', []],
+      ['text-pf-accent [text-decoration:overline]', []],
+      ['text-pf-accent [text-decoration-color:underline]', []],
+      ['text-pf-accent [text-decoration-thickness:underline]', []],
+      ['text-pf-accent underline', ['link']],
+      ['text-pf-accent [text-decoration-line:underline]', ['link']],
+      ['text-pf-accent [text-decoration:underline]', ['link']],
+    ] as const;
 
-    // A resting `no-underline` does NOT silence it: the hover sorts after the
-    // plain utility in the same layer, so the underline still wins. 8/8.
-    const [tag2] = buttonTags(
-      '<Button variant="link" className="text-pf-accent no-underline">Docs</Button>',
-    );
-    expect(silencedVariants(tag2, tag2.branches[0])).toEqual([]);
-
-    // A resting `underline` DOES silence it, by value equality rather than by
-    // cascade -- the hover sets the value the element already has. Measured 0/8.
-    const [tag3] = buttonTags(
-      '<Button variant="link" className="text-pf-accent underline">Docs</Button>',
-    );
-    expect(silencedVariants(tag3, tag3.branches[0])).toEqual(['link']);
+    for (const [className, expected] of fixtures) {
+      const [tag] = buttonTags(
+        `<Button variant="link" className="${className}">Docs</Button>`,
+      );
+      expect(isUnmaskedIn(tag, tag.branches[0]), '`link` is a bare variant').toBe(true);
+      expect(silencedVariants(tag, tag.branches[0]), className).toEqual(expected);
+    }
 
     // The contrast: `subtle`'s default lives in the components layer, so it is
     // silenced by layer order instead. Without this the test would pass on a
     // guard that reports nothing at all.
-    const [tag4] = buttonTags('<Button variant="subtle" className="bg-pf-accent-bg">Docs</Button>');
-    expect(silencedVariants(tag4, tag4.branches[0])).toEqual(['subtle']);
+    const [subtleTag] = buttonTags(
+      '<Button variant="subtle" className="bg-pf-accent-bg">Docs</Button>',
+    );
+    expect(silencedVariants(subtleTag, subtleTag.branches[0])).toEqual(['subtle']);
   });
 
   it('splits a className by operator, not by assuming every binary is `&&`', () => {
