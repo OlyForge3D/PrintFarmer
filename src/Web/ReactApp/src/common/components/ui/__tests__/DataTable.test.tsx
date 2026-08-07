@@ -132,15 +132,18 @@ describe('DataTable', () => {
       />
     );
 
-    const table = screen.getByRole('table');
-    expect(table).toHaveAttribute('tabIndex', '0');
+    const grid = screen.getByRole('grid');
+    expect(grid).toHaveAttribute('tabIndex', '0');
 
     await user.tab();
-    expect(table).toHaveFocus();
+    expect(grid).toHaveFocus();
 
     await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onRowSelect).toHaveBeenCalledWith(mockData[0], 0);
+    expect(screen.getAllByRole('row')[0]).not.toHaveAttribute('aria-selected');
+    expect(screen.getByRole('row', { name: /Item A/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('row', { name: /Item B/ })).toHaveAttribute('aria-selected', 'false');
   });
 
   it('should make selectable rows hoverable and clickable', () => {
@@ -219,18 +222,20 @@ describe('DataTable', () => {
       />
     );
 
-    const table = screen.getByRole('table');
+    const grid = screen.getByRole('grid');
     const editButton = screen.getByRole('button', { name: 'Edit Item A' });
 
     await user.tab();
-    expect(table).toHaveFocus();
+    expect(grid).toHaveFocus();
     await user.keyboard('{ArrowDown}');
+    const activeRowId = grid.getAttribute('aria-activedescendant');
     await user.tab();
     expect(editButton).toHaveFocus();
-    await user.keyboard('{Enter}');
+    await user.keyboard('{ArrowDown}{Enter}');
 
     expect(onEdit).toHaveBeenCalledWith(mockData[0]);
     expect(onRowSelect).not.toHaveBeenCalled();
+    expect(grid).toHaveAttribute('aria-activedescendant', activeRowId);
   });
 
   it('should enable keyboard navigation when specified', () => {
@@ -243,12 +248,156 @@ describe('DataTable', () => {
       />
     );
 
-    const table = screen.getByRole('table');
+    const grid = screen.getByRole('grid');
     const rows = screen.getAllByRole('row');
 
-    expect(table).toHaveAttribute('tabIndex', '0');
+    expect(grid).toHaveAttribute('tabIndex', '0');
+    expect(grid).not.toHaveAttribute('aria-activedescendant');
     expect(rows.length).toBeGreaterThan(1);
     expect(container.querySelectorAll('tbody tr[data-rowindex]')).toHaveLength(mockData.length);
+    expect(screen.getAllByRole('rowgroup')).toHaveLength(2);
+    expect(screen.getAllByRole('columnheader')).toHaveLength(mockColumns.length);
+    expect(screen.getAllByRole('gridcell')).toHaveLength(mockData.length * mockColumns.length);
+    rows.slice(1).forEach((row) => {
+      expect(row.id).not.toBe('');
+      expect(row).not.toHaveAttribute('aria-selected');
+    });
+  });
+
+  it('should announce the active row while DOM focus remains on the grid', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation
+        ariaLabel="Inventory"
+      />
+    );
+
+    const grid = screen.getByRole('grid', { name: 'Inventory' });
+    const rows = screen.getAllByRole('row').slice(1);
+
+    await user.tab();
+    await user.keyboard('{ArrowDown}');
+
+    expect(grid).toHaveFocus();
+    expect(grid).toHaveAttribute('aria-activedescendant', rows[0].id);
+    expect(document.getElementById(rows[0].id)).toBe(rows[0]);
+
+    await user.keyboard('{End}');
+    expect(grid).toHaveAttribute('aria-activedescendant', rows[2].id);
+
+    await user.keyboard('{ArrowDown}');
+    expect(grid).toHaveAttribute('aria-activedescendant', rows[2].id);
+
+    await user.keyboard('{Home}{ArrowUp}');
+    expect(grid).toHaveAttribute('aria-activedescendant', rows[0].id);
+  });
+
+  it('should use stable, unique row-key IDs across sorting and table instances', () => {
+    render(
+      <>
+        <DataTable
+          data={mockData}
+          columns={mockColumns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          ariaLabel="First inventory"
+        />
+        <DataTable
+          data={mockData}
+          columns={mockColumns}
+          getRowKey={(item) => item.id}
+          keyboardNavigation
+          ariaLabel="Second inventory"
+        />
+      </>
+    );
+
+    const initialIds = screen.getAllByRole('row')
+      .filter((row) => row.id)
+      .map((row) => row.id);
+    expect(new Set(initialIds).size).toBe(initialIds.length);
+
+    const itemAId = screen.getAllByRole('row', { name: /Item A/ })[0].id;
+    fireEvent.click(screen.getAllByRole('columnheader', { name: /Value/ })[0]);
+
+    expect(screen.getAllByRole('row', { name: /Item A/ })[0]).toHaveAttribute('id', itemAId);
+  });
+
+  it('should keep the active row associated with its key when sorting', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation
+      />
+    );
+
+    const grid = screen.getByRole('grid');
+    await user.tab();
+    await user.keyboard('{ArrowDown}');
+    const itemA = screen.getByRole('row', { name: /Item A/ });
+    expect(grid).toHaveAttribute('aria-activedescendant', itemA.id);
+
+    fireEvent.click(screen.getByRole('columnheader', { name: /Value/ }));
+
+    expect(grid).toHaveAttribute('aria-activedescendant', itemA.id);
+    expect(itemA).toHaveClass('ring-2');
+  });
+
+  it('should remove an active descendant reference when the active row is absent', async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation
+      />
+    );
+
+    const grid = screen.getByRole('grid');
+    await user.tab();
+    await user.keyboard('{ArrowDown}');
+    const removedRowId = grid.getAttribute('aria-activedescendant');
+    expect(removedRowId).not.toBeNull();
+
+    rerender(
+      <DataTable
+        data={mockData.slice(1)}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+        keyboardNavigation
+      />
+    );
+
+    expect(grid).not.toHaveAttribute('aria-activedescendant');
+    expect(document.getElementById(removedRowId!)).not.toBeInTheDocument();
+  });
+
+  it('should preserve native table semantics when keyboard navigation is disabled', () => {
+    render(
+      <DataTable
+        data={mockData}
+        columns={mockColumns}
+        getRowKey={(item) => item.id}
+      />
+    );
+
+    const table = screen.getByRole('table');
+    expect(table).not.toHaveAttribute('tabIndex');
+    expect(table).not.toHaveAttribute('aria-activedescendant');
+    screen.getAllByRole('row').slice(1).forEach((row) => {
+      expect(row).not.toHaveAttribute('id');
+      expect(row).not.toHaveAttribute('aria-selected');
+    });
   });
 
   it('should apply custom className', () => {
