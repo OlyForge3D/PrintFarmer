@@ -291,29 +291,41 @@ test('a SwiftUI issue routes to the iOS developer', () => {
 });
 
 test('an iOS networking issue routes to the iOS networking specialist', () => {
-  const result = routeIssue(
-    {
-      title: 'fix: iOS networking URLSession retries',
-      body: 'The REST client should decode the API response with Codable.',
-    },
-    members,
-    lead,
-  );
-  assert.equal(result.domain, 'ios');
-  assert.equal(result.member.name, '🌐 Gorman');
+  for (const title of [
+    'fix: iOS networking URLSession retries',
+    'fix: iOS API client timeout',
+    'fix: iOS SignalR client reconnect',
+  ]) {
+    const result = routeIssue(
+      {
+        title,
+        body: 'The REST client should decode the API response with Codable.',
+      },
+      members,
+      lead,
+    );
+    assert.equal(result.domain, 'ios', title);
+    assert.equal(result.member.name, '🌐 Gorman', title);
+  }
 });
 
 test('a documentation-only issue routes to the documentation specialist', () => {
-  const result = routeIssue(
-    {
-      title: 'docs: update the deployment README and tutorial',
-      body: 'Documentation-only change; no application behavior changes.',
-    },
-    members,
-    lead,
-  );
-  assert.equal(result.domain, 'docs');
-  assert.equal(result.member.name, '📝 Ash');
+  for (const title of [
+    'docs: document the API endpoint',
+    'docs: add a deployment guide',
+    'update the API reference',
+  ]) {
+    const result = routeIssue(
+      {
+        title,
+        body: 'Documentation-only change; no application behavior changes.',
+      },
+      members,
+      lead,
+    );
+    assert.equal(result.domain, 'docs', title);
+    assert.equal(result.member.name, '📝 Ash', title);
+  }
 });
 
 test('incidental iOS and docs references do not steal unrelated issues', () => {
@@ -337,7 +349,7 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
     {
       issue: {
         title: 'QA: qualify operator-first redesign for iOS beta',
-        body: 'Run the APNs acceptance pass on iPhone and iPad.',
+        body: 'Run the TestFlight acceptance pass on iPhone and iPad with APNs.',
       },
       domain: 'test',
       member: '🧪 Kane',
@@ -350,6 +362,22 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
       domain: 'devops',
       member: '⚙️ Parker',
     },
+    {
+      issue: {
+        title: 'perf: optimize query',
+        body: 'Update the README documentation after the query fix.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
+    },
+    {
+      issue: {
+        title: 'test: add XCTest coverage for the printer list view',
+        body: 'Exercise the iPhone and iPad variants.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
   ];
 
   for (const { issue, domain, member } of cases) {
@@ -357,6 +385,32 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
     assert.equal(result.domain, domain, issue.title);
     assert.equal(result.member.name, member, issue.title);
   }
+});
+
+test('incidental networking references do not steal SwiftUI work from Hudson', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: add SwiftUI printer detail view',
+      body: 'Display data from the existing REST client; networking is unaffected.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('generic iOS ownership does not depend on roster order', () => {
+  const issue = {
+    title: 'feat: add SwiftUI printer detail view',
+    body: 'Build the native screen.',
+  };
+  const forward = routeIssue(issue, members, lead);
+  const reversed = routeIssue(issue, [...members].reverse(), lead);
+  assert.equal(forward.domain, 'ios');
+  assert.equal(reversed.domain, 'ios');
+  assert.equal(forward.member.name, '📱 Hudson');
+  assert.equal(reversed.member.name, '📱 Hudson');
 });
 
 test('an ambiguous issue falls through to the Lead', () => {

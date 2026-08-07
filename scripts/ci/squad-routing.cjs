@@ -160,37 +160,44 @@ const DOMAINS = [
     id: 'ios',
     reason: 'Issue relates to iOS/mobile app work',
     role: /\bios\b|swift|mobile/i,
+    defaultRole: /\bios developer\b/i,
     keywords: [
-      // `ios` and `mobile` are deliberately weak: test, release, backend, and
-      // frontend issues often mention the client they support. Native-specific
-      // technologies and app phrases are strong enough to establish ownership.
-      { id: 'platform', weight: 1, forms: ['ios', 'mobile'] },
-      {
-        id: 'native-app',
-        weight: 2,
-        forms: ['ios app', 'mobile app', 'iphone app', 'ipad app'],
-      },
+      { id: 'native-app', weight: 2, forms: ['ios app', 'mobile app'] },
       { id: 'swiftui', weight: 2, forms: ['swiftui'] },
       { id: 'swift', weight: 2, forms: ['swift'] },
-      { id: 'xcode', weight: 2, forms: ['xcode', 'xcodebuild', 'xctest', 'xcuitest'] },
-      { id: 'apple-device', weight: 1, forms: ['iphone', 'ipad'] },
-      { id: 'apple-push', weight: 1, forms: ['apns'] },
-      { id: 'testflight', weight: 1, forms: ['testflight'] },
-      { id: 'urlsession', weight: 2, forms: ['urlsession'] },
+      { id: 'xcode', weight: 2, forms: ['xcode', 'xcodebuild'] },
+      {
+        id: 'ios-networking',
+        weight: 3,
+        forms: [
+          'ios networking',
+          'ios api client',
+          'ios rest client',
+          'ios http client',
+          'ios signalr client',
+          'ios json decoding',
+          'ios codable',
+          'urlsession',
+        ],
+      },
+      {
+        id: 'apple-ecosystem',
+        weight: 1,
+        forms: ['iphone', 'ipad', 'apns', 'testflight'],
+      },
     ],
     ownerRules: [
       {
         role: /\bios networking\b/i,
-        forms: [
+        titleForms: [
           'ios networking',
           'urlsession',
-          'rest client',
-          'api client',
-          'http client',
-          'signalr client',
-          'websocket',
-          'json decoding',
-          'codable',
+          'ios api client',
+          'ios rest client',
+          'ios http client',
+          'ios signalr client',
+          'ios json decoding',
+          'ios codable',
         ],
       },
     ],
@@ -200,10 +207,35 @@ const DOMAINS = [
     reason: 'Issue relates to documentation work',
     role: /documentation|technical writer|\bdocs\b/i,
     keywords: [
-      { id: 'docs', weight: 2, forms: ['documentation', 'docs'] },
-      { id: 'readme', weight: 2, forms: ['readme'] },
-      { id: 'changelog', weight: 2, forms: ['changelog'] },
-      { id: 'tutorial', weight: 2, forms: ['tutorial', 'tutorials'] },
+      {
+        id: 'docs-intent',
+        weight: 5,
+        titleOnly: true,
+        titlePrefixes: ['docs:', 'doc:', 'documentation:'],
+        forms: [],
+      },
+      { id: 'readme', weight: 5, titleOnly: true, forms: ['readme'] },
+      { id: 'changelog', weight: 3, titleOnly: true, forms: ['changelog'] },
+      {
+        id: 'api-docs',
+        weight: 3,
+        titleOnly: true,
+        forms: ['api docs', 'api documentation', 'api reference'],
+      },
+      {
+        id: 'guide',
+        weight: 3,
+        titleOnly: true,
+        forms: [
+          'user guide',
+          'developer guide',
+          'deployment guide',
+          'configuration guide',
+          'installation guide',
+          'tutorial',
+          'tutorials',
+        ],
+      },
     ],
   },
 ];
@@ -225,8 +257,11 @@ const BODY_WEIGHT = 1;
 function scoreDomain(domain, title, body) {
   let score = 0;
   const matched = [];
+  const normalizedTitle = (title || '').trimStart().toLowerCase();
   for (const concept of domain.keywords) {
-    const inTitle = concept.forms.some((form) => hasWord(title, form));
+    const inTitle = (concept.titlePrefixes || [])
+      .some((prefix) => normalizedTitle.startsWith(prefix))
+      || concept.forms.some((form) => hasWord(title, form));
     const inBody = !inTitle
       && !concept.titleOnly
       && concept.forms.some((form) => hasWord(body, form));
@@ -239,16 +274,17 @@ function scoreDomain(domain, title, body) {
   return { id: domain.id, score, matched, reason: domain.reason };
 }
 
-function findDomainMember(domain, members, title, body) {
+function findDomainMember(domain, members, title) {
   for (const rule of domain.ownerRules || []) {
-    if (rule.forms.some((form) => hasWord(title, form) || hasWord(body, form))) {
+    if (rule.titleForms.some((form) => hasWord(title, form))) {
       const specialist = members.find((member) => rule.role.test(member.role || ''));
       if (specialist) {
         return specialist;
       }
     }
   }
-  return members.find((member) => domain.role.test(member.role || ''));
+  return members.find((member) => domain.defaultRole?.test(member.role || ''))
+    || members.find((member) => domain.role.test(member.role || ''));
 }
 
 /**
@@ -291,7 +327,7 @@ function routeIssue(issue, members, lead) {
   }
 
   const domain = DOMAINS.find((d) => d.id === best.id);
-  const member = findDomainMember(domain, members, title, body);
+  const member = findDomainMember(domain, members, title);
   return { member, reason: best.reason, domain: best.id, scores };
 }
 
