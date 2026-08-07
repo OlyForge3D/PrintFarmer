@@ -439,7 +439,7 @@ function hasInvalidMathSemicolon(value) {
     const character = value[index]
     if (character === '(') {
       const functionName = /([a-z][\w-]*)$/i.exec(value.slice(0, index))?.[1]
-      functionStack.push(functionName?.toLowerCase())
+      functionStack.push(functionName?.toLowerCase() ?? functionStack.at(-1))
     } else if (character === ')') {
       functionStack.pop()
     } else if (character === ';' && CSS_MATH_FUNCTIONS.has(functionStack.at(-1))) {

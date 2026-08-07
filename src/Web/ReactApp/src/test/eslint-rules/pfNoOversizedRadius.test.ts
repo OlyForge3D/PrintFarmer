@@ -44,6 +44,9 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<div className="size-[calc(if(style(--x:yes):16px;else:16px))] rounded-full" />',
     },
+    {
+      code: '<div className="size-[calc((if(style(--x:yes):16px;else:16px)))] rounded-full" />',
+    },
 
     // Provably circular elements keep rounded-full with no annotation.
     { code: '<span className="w-2 h-2 rounded-full bg-pf-error" />' },
@@ -289,6 +292,21 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output: '<div className="size-[calc(1px+2px;3px)] rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="size-[calc((1px+2px);3px)] rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="size-[calc((1px+2px);3px)] rounded-lg" />',
             },
           ],
         },
