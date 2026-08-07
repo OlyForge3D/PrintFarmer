@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 
 namespace Farm.Web.Api.Tests;
@@ -22,5 +23,24 @@ public class OpenApiDocumentTests
         _ = document.RootElement.TryGetProperty("paths", out JsonElement paths).Should().BeTrue();
         _ = paths.ValueKind.Should().Be(JsonValueKind.Object);
         _ = paths.EnumerateObject().Should().NotBeEmpty();
+    }
+
+    [Fact]
+    public async Task RawGcodeEndpoint_RetiredRoute_IsNotRoutedOrDocumented()
+    {
+        await using CustomWebApplicationFactory factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
+        using HttpClient client = await factory.CreateAuthenticatedClientAsync();
+
+        using HttpResponseMessage routeResponse = await client.PostAsJsonAsync(
+            $"/api/printers/{Guid.NewGuid()}/gcode",
+            new { command = "G28" });
+        using HttpResponseMessage documentResponse = await client.GetAsync("/openapi/v1.json");
+
+        _ = routeResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _ = documentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using Stream content = await documentResponse.Content.ReadAsStreamAsync();
+        using JsonDocument document = await JsonDocument.ParseAsync(content);
+        JsonElement paths = document.RootElement.GetProperty("paths");
+        _ = paths.TryGetProperty("/api/printers/{id}/gcode", out _).Should().BeFalse();
     }
 }
