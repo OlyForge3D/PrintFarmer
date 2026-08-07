@@ -12,9 +12,10 @@ import type { Printer } from '@/types/api';
 
 export const PRINTER_GRID_VIRTUALIZATION_THRESHOLD = 60;
 
-const GRID_GAP_PX = 16;
-const COMPACT_CARD_WIDTH_PX = 288;
-const DETAILED_CARD_WIDTH_PX = 416;
+const GRID_GAP_REM = 1;
+const COMPACT_CARD_WIDTH_REM = 18;
+const DETAILED_CARD_WIDTH_REM = 26;
+const DEFAULT_ROOT_FONT_SIZE_PX = 16;
 const ROW_OVERSCAN = 2;
 const COMPACT_ESTIMATED_ROW_HEIGHT_PX = 360;
 const DETAILED_ESTIMATED_ROW_HEIGHT_PX = 720;
@@ -28,8 +29,9 @@ interface PrinterCardGridProps {
   renderPrinter: (printer: Printer) => ReactNode;
 }
 
-function cardWidth(mode: PrinterGridMode): number {
-  return mode === 'compact' ? COMPACT_CARD_WIDTH_PX : DETAILED_CARD_WIDTH_PX;
+function cardWidth(mode: PrinterGridMode, rootFontSize: number): number {
+  const widthRem = mode === 'compact' ? COMPACT_CARD_WIDTH_REM : DETAILED_CARD_WIDTH_REM;
+  return widthRem * rootFontSize;
 }
 
 function estimatedRowHeight(mode: PrinterGridMode): number {
@@ -38,8 +40,8 @@ function estimatedRowHeight(mode: PrinterGridMode): number {
     : DETAILED_ESTIMATED_ROW_HEIGHT_PX;
 }
 
-function getColumnCount(width: number, mode: PrinterGridMode): number {
-  return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardWidth(mode) + GRID_GAP_PX)));
+function getColumnCount(width: number, cardWidthPx: number, gapPx: number): number {
+  return Math.max(1, Math.floor((width + gapPx) / (cardWidthPx + gapPx)));
 }
 
 function gridClassName(mode: PrinterGridMode): string {
@@ -72,6 +74,8 @@ function VirtualizedPrinterCardGrid({
   const lastScrollTargetRef = useRef<string | undefined>(undefined);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [columnCount, setColumnCount] = useState(1);
+  const [cardWidthPx, setCardWidthPx] = useState(() => cardWidth(mode, DEFAULT_ROOT_FONT_SIZE_PX));
+  const [gridGapPx, setGridGapPx] = useState(DEFAULT_ROOT_FONT_SIZE_PX * GRID_GAP_REM);
   const [scrollMargin, setScrollMargin] = useState(0);
   const [focusedPrinterId, setFocusedPrinterId] = useState<string>();
   const [measuredCardHeights, setMeasuredCardHeights] = useState<ReadonlyMap<string, number>>(
@@ -83,10 +87,21 @@ function VirtualizedPrinterCardGrid({
     if (!container) return;
 
     let animationFrame: number | undefined;
+    let transitionFrame: number | undefined;
+    let activeTransitions = 0;
+    let disposed = false;
     const nextScrollElement = container.closest<HTMLElement>('[data-main-content]');
     setScrollElement(nextScrollElement);
     const measure = () => {
-      setColumnCount(getColumnCount(container.clientWidth, mode));
+      const parsedRootFontSize = Number.parseFloat(getComputedStyle(document.documentElement).fontSize);
+      const rootFontSize = Number.isFinite(parsedRootFontSize)
+        ? parsedRootFontSize
+        : DEFAULT_ROOT_FONT_SIZE_PX;
+      const nextCardWidth = cardWidth(mode, rootFontSize);
+      const nextGridGap = GRID_GAP_REM * rootFontSize;
+      setCardWidthPx(nextCardWidth);
+      setGridGapPx(nextGridGap);
+      setColumnCount(getColumnCount(container.clientWidth, nextCardWidth, nextGridGap));
       if (!nextScrollElement) return;
       const containerRect = container.getBoundingClientRect();
       const scrollRect = nextScrollElement.getBoundingClientRect();
@@ -102,14 +117,29 @@ function VirtualizedPrinterCardGrid({
 
     measure();
     const resizeObserver = new ResizeObserver(scheduleMeasure);
-    let ancestor: HTMLElement | null = container;
-    while (ancestor) {
-      resizeObserver.observe(ancestor);
-      ancestor = ancestor.parentElement;
-    }
+    const observeLayoutContributors = () => {
+      let branch: HTMLElement = container;
+      let ancestor = container.parentElement;
+      resizeObserver.observe(container);
+      while (ancestor) {
+        // A preceding sibling can move the grid without resizing the grid or
+        // any ancestor, so observe each layout contributor above the branch.
+        for (const sibling of ancestor.children) {
+          if (sibling === branch) break;
+          resizeObserver.observe(sibling);
+        }
+        resizeObserver.observe(ancestor);
+        branch = ancestor;
+        ancestor = ancestor.parentElement;
+      }
+    };
+    observeLayoutContributors();
 
     const layoutRoot = nextScrollElement ?? container.parentElement;
-    const mutationObserver = new MutationObserver(scheduleMeasure);
+    const mutationObserver = new MutationObserver(() => {
+      observeLayoutContributors();
+      scheduleMeasure();
+    });
     if (layoutRoot) {
       mutationObserver.observe(layoutRoot, {
         attributes: true,
@@ -117,17 +147,52 @@ function VirtualizedPrinterCardGrid({
         childList: true,
         subtree: true,
       });
-      layoutRoot.addEventListener('transitionrun', scheduleMeasure, true);
-      layoutRoot.addEventListener('transitionend', scheduleMeasure, true);
     }
+
+    const rootMutationObserver = new MutationObserver(scheduleMeasure);
+    rootMutationObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+    });
+
+    const trackTransition = () => {
+      measure();
+      if (activeTransitions > 0) transitionFrame = requestAnimationFrame(trackTransition);
+    };
+    const handleTransitionRun = () => {
+      activeTransitions += 1;
+      if (activeTransitions === 1) transitionFrame = requestAnimationFrame(trackTransition);
+    };
+    const handleTransitionFinished = () => {
+      activeTransitions = Math.max(0, activeTransitions - 1);
+      scheduleMeasure();
+    };
+    layoutRoot?.addEventListener('transitionrun', handleTransitionRun, true);
+    layoutRoot?.addEventListener('transitionend', handleTransitionFinished, true);
+    layoutRoot?.addEventListener('transitioncancel', handleTransitionFinished, true);
     window.addEventListener('resize', scheduleMeasure);
 
+    let layoutShiftObserver: PerformanceObserver | undefined;
+    if (typeof PerformanceObserver !== 'undefined'
+      && PerformanceObserver.supportedEntryTypes?.includes('layout-shift')) {
+      layoutShiftObserver = new PerformanceObserver(scheduleMeasure);
+      layoutShiftObserver.observe({ type: 'layout-shift', buffered: true });
+    }
+    void document.fonts?.ready.then(() => {
+      if (!disposed) scheduleMeasure();
+    });
+
     return () => {
+      disposed = true;
       if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      if (transitionFrame !== undefined) cancelAnimationFrame(transitionFrame);
       resizeObserver.disconnect();
       mutationObserver.disconnect();
-      layoutRoot?.removeEventListener('transitionrun', scheduleMeasure, true);
-      layoutRoot?.removeEventListener('transitionend', scheduleMeasure, true);
+      rootMutationObserver.disconnect();
+      layoutShiftObserver?.disconnect();
+      layoutRoot?.removeEventListener('transitionrun', handleTransitionRun, true);
+      layoutRoot?.removeEventListener('transitionend', handleTransitionFinished, true);
+      layoutRoot?.removeEventListener('transitioncancel', handleTransitionFinished, true);
       window.removeEventListener('resize', scheduleMeasure);
     };
   }, [mode]);
@@ -182,7 +247,11 @@ function VirtualizedPrinterCardGrid({
   });
 
   useEffect(() => {
-    if (!activePrinterId || !scrollElement) return;
+    if (!activePrinterId) {
+      lastScrollTargetRef.current = undefined;
+      return;
+    }
+    if (!scrollElement) return;
 
     const printerIndex = printers.findIndex((printer) => printer.id === activePrinterId);
     if (printerIndex < 0) return;
@@ -196,7 +265,7 @@ function VirtualizedPrinterCardGrid({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const renderedItems: ReactNode[] = [];
-  const fixedCardWidth = cardWidth(mode);
+  const fixedCardWidth = cardWidthPx;
 
   virtualRows.forEach((virtualRow) => {
     const startIndex = virtualRow.index * columnCount;
@@ -204,7 +273,7 @@ function VirtualizedPrinterCardGrid({
     const rowHeights = rowPrinters.map((printer) => measuredCardHeights.get(printer.id));
     const allCardsMeasured = rowHeights.every((height) => height !== undefined);
     const measuredRowHeight = allCardsMeasured
-      ? Math.max(...rowHeights as number[]) + GRID_GAP_PX
+      ? Math.max(...rowHeights as number[]) + gridGapPx
       : estimatedRowHeight(mode);
     const rowOffset = virtualRow.start - scrollMargin;
 
@@ -231,7 +300,7 @@ function VirtualizedPrinterCardGrid({
           className="absolute left-0 top-0 min-w-0"
           style={{
             width: columnCount === 1 ? '100%' : fixedCardWidth,
-            transform: `translate(${columnIndex * (fixedCardWidth + GRID_GAP_PX)}px, ${rowOffset}px)`,
+            transform: `translate(${columnIndex * (fixedCardWidth + gridGapPx)}px, ${rowOffset}px)`,
           }}
           {...(virtualRow.index === 0 && columnIndex === 0
             ? { 'data-tour': 'printers-card' }

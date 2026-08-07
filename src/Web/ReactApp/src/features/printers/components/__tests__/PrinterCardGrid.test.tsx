@@ -74,6 +74,7 @@ describe('PrinterCardGrid', () => {
     observedResizes.length = 0;
     containerWidth = 1000;
     gridOffset = 0;
+    document.documentElement.style.fontSize = '16px';
 
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => containerWidth);
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -143,6 +144,19 @@ describe('PrinterCardGrid', () => {
     expect(screen.getAllByRole('button')).toHaveLength(4);
   });
 
+  it('derives rem card widths and gaps from the custom root font size', async () => {
+    const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
+    render(<PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />);
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(20));
+    act(() => {
+      document.documentElement.style.fontSize = '20px';
+    });
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(30));
+    expect(screen.getAllByRole('listitem')[0]).toHaveStyle({ width: '360px' });
+  });
+
   it('preserves a focused stateful card when sorting and responsive columns move it between rows', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
     const renderStatefulCard = (printer: Printer) => <StatefulCard printer={printer} />;
@@ -178,7 +192,7 @@ describe('PrinterCardGrid', () => {
     expect(movedCard).toHaveFocus();
   });
 
-  it('refreshes scroll margin when surrounding layout content is inserted', async () => {
+  it('refreshes scroll margin when a preceding layout sibling shifts the grid', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
     render(
       <main data-main-content>
@@ -187,10 +201,13 @@ describe('PrinterCardGrid', () => {
     );
 
     await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(0));
-    gridOffset = 240;
+    gridOffset = 100;
     const grid = screen.getByTestId('virtualized-printer-grid');
     grid.parentElement?.prepend(document.createElement('aside'));
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(100));
 
+    gridOffset = 240;
+    act(() => observedResizes.forEach((notify) => notify()));
     await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(240));
   });
 
@@ -210,6 +227,28 @@ describe('PrinterCardGrid', () => {
     await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(18, { align: 'center' }));
     scrollToIndex.mockClear();
     const reorderedPrinters = [printers[55], ...printers.filter((printer) => printer.id !== 'printer-55')];
+    rerender(
+      <main data-main-content>
+        <PrinterCardGrid
+          printers={reorderedPrinters}
+          mode="compact"
+          activePrinterId="printer-55"
+          renderPrinter={renderCard}
+        />
+      </main>,
+    );
+
+    await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(0, { align: 'center' }));
+    scrollToIndex.mockClear();
+    rerender(
+      <main data-main-content>
+        <PrinterCardGrid
+          printers={reorderedPrinters}
+          mode="compact"
+          renderPrinter={renderCard}
+        />
+      </main>,
+    );
     rerender(
       <main data-main-content>
         <PrinterCardGrid
