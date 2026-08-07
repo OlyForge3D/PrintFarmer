@@ -17,20 +17,10 @@ source "$SCRIPT_DIR/test-framework.sh"
 # Test configuration
 TEST_TEMP_DIR=""
 ORIGINAL_PWD=""
-REPO_BACKUP_DIR=""
 TEARDOWN_COMPLETE=false
 
-setup() {
-    setup_test_environment
-    TEST_TEMP_DIR=$(create_test_temp_dir)
-    ORIGINAL_PWD=$(pwd)
-    REPO_BACKUP_DIR="$TEST_TEMP_DIR/repository-artifacts"
-    test_info "Using temp directory: $TEST_TEMP_DIR"
-    backup_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
-    trap teardown EXIT
-
-    # Create a mock .deploy-config in the repo root to avoid interactive prompts
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+write_default_deploy_config() {
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 COMPOSE_FILE=docker-compose.yml
 DB_PROVIDER=postgres
@@ -65,13 +55,20 @@ USE_EXTERNAL_STORAGE=no
 EOF
 }
 
+setup() {
+    setup_test_environment
+    TEST_TEMP_DIR=$(create_test_temp_dir)
+    ORIGINAL_PWD=$(pwd)
+    test_info "Using temp directory: $TEST_TEMP_DIR"
+    trap teardown EXIT
+    write_default_deploy_config
+}
+
 teardown() {
     if [[ "$TEARDOWN_COMPLETE" == "true" ]]; then
         return
     fi
-
     cd "$ORIGINAL_PWD" 2>/dev/null || true
-    restore_repository_deployment_artifacts "$REPO_ROOT" "$REPO_BACKUP_DIR"
     TEARDOWN_COMPLETE=true
     cleanup_test_temp_dir "$TEST_TEMP_DIR"
     teardown_test_environment
@@ -97,15 +94,10 @@ test_help_output() {
 test_basic_execution() {
     start_test "basic deploy script execution"
     
-    local original_dir
-    original_dir=$(pwd)
-    cd "$REPO_ROOT"
-
     # Deploy script should run successfully in dry-run mode
-    capture_output "$DEPLOY_SCRIPT --dry-run --batch --output-dir $TEST_TEMP_DIR 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
-    cd "$original_dir"
     if [[ "$output" != *"Setup completed successfully"* ]]; then
         test_info "Dry-run output: $output"
     fi
@@ -119,15 +111,8 @@ test_basic_execution() {
 test_dry_run_mode() {
     start_test "dry-run mode execution"
     
-    # Deploy script must be run from PrintFarmer root directory
-    local original_dir=$(pwd)
-    cd "$REPO_ROOT"
-    
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
-    
-    # Return to original directory
-    cd "$original_dir"
     
     assert_contains "$output" "Setup completed successfully" "Dry-run should complete successfully"
     assert_contains "$output" "To deploy:" "Dry-run should show deployment command"
@@ -139,15 +124,8 @@ test_dry_run_mode() {
 test_batch_mode() {
     start_test "batch mode execution"
     
-    # Deploy script must be run from PrintFarmer root directory
-    local original_dir=$(pwd)
-    cd "$REPO_ROOT"
-    
-    capture_output "timeout 120 $DEPLOY_SCRIPT --batch --dry-run 2>&1 || true"
+    capture_output "$(get_deploy_script_command --batch --dry-run)"
     local output=$(get_output)
-    
-    # Return to original directory
-    cd "$original_dir"
     
     # Should not prompt for input in batch mode and should complete successfully
     assert_contains "$output" "Setup completed successfully" "Batch mode should complete successfully"
@@ -160,18 +138,13 @@ test_batch_mode() {
 test_config_file_generation() {
     start_test "configuration file generation"
     
-    # Deploy script must be run from PrintFarmer root directory
-    local original_dir=$(pwd)
-    cd "$REPO_ROOT"
-    
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
-    
-    # Return to original directory
-    cd "$original_dir"
     
     # Check that .env file is mentioned or created
     assert_contains "$output" ".env" "Should mention environment file creation"
+    assert_file_exists "$TEST_TEMP_DIR/generated/src/Web/ReactApp/.env.production" \
+        "React production environment should be generated under the explicit output directory"
     
     pass_test
 }
@@ -195,7 +168,7 @@ test_no_redis_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     # Should not contain Redis-related prompts or configuration
@@ -211,7 +184,7 @@ test_no_prusaslicer_configuration() {
     
     cd "$TEST_TEMP_DIR"
     
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
     # Should not contain PrusaSlicer-related prompts or configuration
@@ -265,7 +238,7 @@ test_worker_configuration() {
     cd "$TEST_TEMP_DIR"
     
     # Create configuration file for deploy script
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 ENABLE_ORCA_WORKER=yes
 ORCA_WORKER_COUNT=2
@@ -276,10 +249,8 @@ EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
-    # Clean up config file
-    rm -f "$REPO_ROOT/.deploy-config"
-    
     assert_contains "$output" "Orca Workers: 2" "Should show configured Orca worker count"
+    write_default_deploy_config
     
     pass_test
 }
@@ -291,7 +262,7 @@ test_network_configuration() {
     cd "$TEST_TEMP_DIR"
     
     # Create configuration file for deploy script
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 NETWORK_MODE=bridge
 DISCOVERY_RANGES=192.168.1.0/24,10.0.0.0/8
@@ -302,7 +273,7 @@ EOF
     local output=$(get_output)
     
     assert_contains "$output" "Network Discovery Configuration" "Should mention discovery configuration section"
-    rm -f "$REPO_ROOT/.deploy-config"
+    write_default_deploy_config
     
     pass_test
 }
@@ -314,26 +285,23 @@ test_database_configuration() {
     cd "$TEST_TEMP_DIR"
     
     # Test PostgreSQL
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
     local postgres_output=$(get_output)
-    rm -f "$REPO_ROOT/.deploy-config"
-    
     assert_contains "$postgres_output" "postgres" "Should configure PostgreSQL"
     
     # Test SQL Server
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 DB_PROVIDER=sqlserver
 EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
     local sqlserver_output=$(get_output)
-    rm -f "$REPO_ROOT/.deploy-config"
-    
     assert_contains "$sqlserver_output" "sqlserver" "Should configure SQL Server"
+    write_default_deploy_config
     
     pass_test
 }
@@ -350,11 +318,6 @@ test_generated_db_password_propagation() {
 
     # Determine expected env file
     local env_file="$TEST_TEMP_DIR/.env"
-
-    # The deploy script copies .env to repo root; it also writes the output in working dir
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Expected generated env file $env_file"
 
@@ -385,10 +348,6 @@ test_generated_sqlserver_password_propagation() {
     local output=$(get_output)
 
     local env_file="$TEST_TEMP_DIR/.env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
-
     assert_file_exists "$env_file" "Expected generated env file $env_file"
 
     local sql_pw
@@ -421,7 +380,7 @@ test_all_database_combinations() {
     
     for db in "${databases[@]}"; do
         # Create config file for this combination
-        cat > "$REPO_ROOT/.deploy-config" << EOF
+        cat > "$TEST_TEMP_DIR/.deploy-config" << EOF
 ARCHITECTURE=microservices
 DB_PROVIDER=$db
 EOF
@@ -429,12 +388,10 @@ EOF
         capture_output "$(get_deploy_script_command --dry-run --batch)"
         local output=$(get_output)
         
-        # Clean up config file
-        rm -f "$REPO_ROOT/.deploy-config"
-        
         assert_contains "$output" "$db" "Should configure $db database"
         assert_contains "$output" "microservices" "Should show microservices architecture with $db database"
     done
+    write_default_deploy_config
     
     pass_test
 }
@@ -461,7 +418,7 @@ test_comprehensive_deployment_combinations() {
     cd "$TEST_TEMP_DIR"
     
     # Test maximum configuration using config file
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=yes
@@ -472,14 +429,12 @@ EOF
     capture_output "$(get_deploy_script_command --include-monitoring --dry-run --batch)"
     local output=$(get_output)
     
-    rm -f "$REPO_ROOT/.deploy-config"
-    
     assert_contains "$output" "microservices" "Should configure microservices architecture"
     assert_contains "$output" "postgres" "Should configure PostgreSQL database"
     assert_contains "$output" "Setup completed successfully" "Should complete full configuration"
     
     # Test minimal configuration using config file
-    cat > "$REPO_ROOT/.deploy-config" << 'EOF'
+    cat > "$TEST_TEMP_DIR/.deploy-config" << 'EOF'
 ARCHITECTURE=microservices
     DB_PROVIDER=postgres
 ENABLE_ORCA_WORKER=no
@@ -489,10 +444,9 @@ EOF
     capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
     
-    rm -f "$REPO_ROOT/.deploy-config"
-    
     assert_contains "$output" "microservices" "Should configure microservices architecture"
     assert_contains "$output" "Setup completed successfully" "Should complete minimal configuration"
+    write_default_deploy_config
     
     unset ARCHITECTURE DB_PROVIDER ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ENABLE_SPOOLMAN
     
@@ -557,7 +511,7 @@ EOF
 
     # Run deploy in dry-run, batch mode so it generates files but doesn't start containers
     # Use --config-file to explicitly point to the temp directory's config
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     # The script should mention environment file creation
@@ -603,7 +557,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=postgres
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     assert_file_exists ".env" "Should have created .env for postgres"
@@ -636,7 +590,7 @@ DB_PROVIDER=mysql
 EOF
 
     rm -f .env
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     assert_contains "$output" "Unsupported database provider 'mysql'" "Should reject MySQL before generation"
@@ -664,7 +618,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+        capture_output "$(get_deploy_script_command --dry-run --batch)"
         local output=$(get_output)
 
         # Expect .env
@@ -704,7 +658,7 @@ ARCHITECTURE=microservices
 DB_PROVIDER=$provider
 EOF
 
-        capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file ./.deploy-config 2>&1 || true"
+        capture_output "$(get_deploy_script_command --dry-run --batch)"
         local output=$(get_output)
 
         # Microservices uses .env
@@ -743,7 +697,8 @@ EOF
     
     # Run deployment script and capture stdout
     local output
-    output=$(timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file ./.deploy-config 2>&1 || true)
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    output=$(get_output)
     
     # Check that env file was created
     assert_file_exists ".env" "Should create .env"
@@ -830,7 +785,7 @@ SPOOLMAN_BASE_URL=http://spoolman.local:7912
 EOF
 
     # Run deploy script in dry-run, batch mode
-    capture_output "timeout 90 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     # Check output for errors or completion
@@ -839,17 +794,9 @@ EOF
     fi
 
     # Determine expected env file - .env is used
-    local env_file=""
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    elif [ -f ".env" ]; then
-        env_file=".env"
-    fi
+    local env_file=".env"
 
     if [ -z "$env_file" ] || [ ! -f "$env_file" ]; then
-        test_info "Available files in repo root: $(ls -la "$REPO_ROOT"/.env* 2>/dev/null || echo 'none')"
         test_info "Available files in TEST_TEMP_DIR: $(ls -la "$TEST_TEMP_DIR"/.env* 2>/dev/null || echo 'none')"
         fail_test "Could not find generated .env file"
         return
@@ -887,7 +834,7 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1046,13 +993,10 @@ ENABLE_DISCOVERY=yes
 NETWORK_RANGES=192.168.1.0/24,10.0.0.0/8,172.16.0.0/12
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Should create env file with discovery subnets"
     
@@ -1109,13 +1053,10 @@ INCLUDE_DISCOVERY=true
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
-    if [ -f "$REPO_ROOT/.env" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
 
     assert_file_exists "$env_file" "Should create env file with full PFARM configuration"
     
@@ -1178,7 +1119,7 @@ INCLUDE_DISCOVERY=true
 NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1464,7 +1405,7 @@ ORCA_WORKER_COUNT=2
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1495,7 +1436,7 @@ EOF
     assert_not_equals "$discovery_key_value" "" "Discovery service key should not be empty"
 
     # A second run must recover the original bootstrap key before rewriting either file.
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local second_output
     second_output=$(get_output)
     local preserved_key_value
@@ -1547,7 +1488,7 @@ ORCA_WORKER_COUNT=1
 ENABLE_DISTRIBUTED_SLICING=true
 EOF
 
-    capture_output "timeout 120 $DEPLOY_SCRIPT --dry-run --batch --config-file .deploy-config 2>&1 || true"
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
     local output=$(get_output)
 
     local env_file=".env"
@@ -1606,9 +1547,6 @@ test_postgres_password_authentication_integration() {
     assert_file_exists "$compose_file" "Generated compose file should exist"
 
     local env_file="$TEST_TEMP_DIR/.env"
-    if [ ! -f "$env_file" ]; then
-        env_file="$REPO_ROOT/.env"
-    fi
     
     assert_file_exists "$env_file" "Generated env file should exist"
     

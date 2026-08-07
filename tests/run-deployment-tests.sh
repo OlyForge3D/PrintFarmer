@@ -49,6 +49,10 @@ TESTS_PASSED=0
 TESTS_FAILED=0
 TESTS_SKIPPED=0
 FAILED_TESTS=()
+GUARD_TEMP_DIR=""
+GUARD_BASELINE=""
+GUARD_VERIFIED=false
+QUICK_TEMP_DIR=""
 
 ################################################################################
 # Logging Functions
@@ -86,6 +90,137 @@ log_section() {
 log_subsection() {
     echo ""
     echo -e "${CYAN}── $* ──${NC}"
+}
+
+################################################################################
+# Repository Artifact Isolation Guard
+################################################################################
+
+repository_deployment_artifact_paths() {
+    {
+        printf '%s\n' \
+            ".deploy-config" \
+            ".env" \
+            "Dockerfile.multistage" \
+            "dockerfiles" \
+            "docker-entrypoint-config.sh" \
+            "monitoring" \
+            "otel-collector-config.yaml" \
+            "security-config.json" \
+            "src/Web/ReactApp/.env.production"
+
+        local path
+        for path in \
+            "$REPO_ROOT"/.env* \
+            "$REPO_ROOT"/docker-compose*.yml \
+            "$REPO_ROOT"/docker-compose*.yaml; do
+            if [[ -e "$path" || -L "$path" ]]; then
+                printf '%s\n' "${path#"$REPO_ROOT/"}"
+            fi
+        done
+    } | LC_ALL=C sort -u
+}
+
+file_hash() {
+    local path="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$path" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$path" | awk '{print $1}'
+    else
+        cksum "$path" | awk '{print $1 ":" $2}'
+    fi
+}
+
+path_metadata() {
+    local path="$1"
+    stat -c '%s:%y:%a' "$path" 2>/dev/null \
+        || stat -f '%z:%m:%Lp' "$path"
+}
+
+snapshot_repository_deployment_artifacts() {
+    local snapshot_file="$1"
+    local relative_path
+    : > "$snapshot_file"
+
+    while IFS= read -r relative_path; do
+        local artifact_path="$REPO_ROOT/$relative_path"
+        if [[ -L "$artifact_path" ]]; then
+            printf '%s\tsymlink\t%s\t%s\n' \
+                "$relative_path" \
+                "$(path_metadata "$artifact_path")" \
+                "$(readlink "$artifact_path")" >> "$snapshot_file"
+        elif [[ -f "$artifact_path" ]]; then
+            printf '%s\tfile\t%s\t%s\n' \
+                "$relative_path" \
+                "$(path_metadata "$artifact_path")" \
+                "$(file_hash "$artifact_path")" >> "$snapshot_file"
+        elif [[ -d "$artifact_path" ]]; then
+            printf '%s\tdirectory\t%s\n' \
+                "$relative_path" \
+                "$(path_metadata "$artifact_path")" >> "$snapshot_file"
+        else
+            printf '%s\tabsent\n' "$relative_path" >> "$snapshot_file"
+        fi
+    done < <(repository_deployment_artifact_paths)
+}
+
+assert_test_sources_use_isolated_artifacts() {
+    local violations=""
+    local test_file
+
+    for test_file in "$SCRIPT_DIR"/test-*.sh "$SCRIPT_DIR"/validate-deployment-scripts.sh; do
+        [[ "$(basename "$test_file")" == "test-run-deployment-tests-harness.sh" ]] && continue
+        violations+=$(grep -nE \
+            '\$REPO_ROOT/\.(deploy-config|env)(["'"'"'[:space:]]|$)|\$REPO_ROOT/docker-compose[^[:space:]"]*|backup_repository_deployment_artifacts|restore_repository_deployment_artifacts' \
+            "$test_file" || true)
+    done
+
+    if [[ -n "$violations" ]]; then
+        log_error "Deployment tests contain forbidden repo-root artifact access:"
+        printf '%s\n' "$violations" >&2
+        return 1
+    fi
+}
+
+initialize_repository_artifact_guard() {
+    GUARD_TEMP_DIR=$(mktemp -d -t "printfarmer-deployment-guard-XXXXXX")
+    GUARD_BASELINE="$GUARD_TEMP_DIR/baseline"
+    snapshot_repository_deployment_artifacts "$GUARD_BASELINE"
+}
+
+assert_no_repo_root_config_mutation() {
+    local current_snapshot="$GUARD_TEMP_DIR/current"
+    snapshot_repository_deployment_artifacts "$current_snapshot"
+
+    if cmp -s "$GUARD_BASELINE" "$current_snapshot"; then
+        return 0
+    fi
+
+    log_error "Deployment tests mutated repo-root deployment artifacts:"
+    diff -u "$GUARD_BASELINE" "$current_snapshot" >&2 || true
+    return 1
+}
+
+cleanup_repository_artifact_guard() {
+    local exit_code=$?
+    trap - EXIT
+
+    if [[ "$GUARD_VERIFIED" != "true" && -n "$GUARD_BASELINE" ]]; then
+        if ! assert_no_repo_root_config_mutation; then
+            exit_code=1
+        fi
+    fi
+
+    if [[ -n "$GUARD_TEMP_DIR" && -d "$GUARD_TEMP_DIR" ]]; then
+        rm -rf "$GUARD_TEMP_DIR"
+    fi
+
+    if [[ -n "$QUICK_TEMP_DIR" && -d "$QUICK_TEMP_DIR" ]]; then
+        rm -rf "$QUICK_TEMP_DIR"
+    fi
+
+    exit "$exit_code"
 }
 
 ################################################################################
@@ -181,9 +316,10 @@ check_dependencies() {
 run_quick_tests() {
     log_section "Quick Mode: Sanity Checks"
     
-    local test_temp_dir="/tmp/deployment-tests-quick-$$"
+    local test_temp_dir
+    test_temp_dir=$(mktemp -d -t "printfarmer-deployment-quick-XXXXXX")
+    QUICK_TEMP_DIR="$test_temp_dir"
     mkdir -p "$test_temp_dir"
-    trap "rm -rf '$test_temp_dir'" EXIT
     
     log_subsection "Basic Compose Generation"
     
@@ -408,6 +544,13 @@ main() {
     if ! check_dependencies; then
         exit 2
     fi
+
+    if ! assert_test_sources_use_isolated_artifacts; then
+        exit 1
+    fi
+
+    initialize_repository_artifact_guard
+    trap cleanup_repository_artifact_guard EXIT
     
     # Run tests
     if [[ "$QUICK_MODE" == "true" ]]; then
@@ -415,6 +558,13 @@ main() {
     else
         run_full_tests
     fi
+
+    if ! assert_no_repo_root_config_mutation; then
+        FAILED_TESTS+=("repository artifact isolation guard")
+        TESTS_FAILED=$((TESTS_FAILED + 1))
+        TESTS_RUN=$((TESTS_RUN + 1))
+    fi
+    GUARD_VERIFIED=true
     
     # Print summary
     if print_summary; then

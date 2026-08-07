@@ -19,6 +19,7 @@ echo "=============================================="
 
 # Create temp directory for testing
 TEMP_DIR=$(mktemp -d -t "printfarmer-validation-XXXXXX")
+trap 'rm -rf "$TEMP_DIR"' EXIT
 echo "Using temp directory: $TEMP_DIR"
 
 # Function to check for success/failure
@@ -113,13 +114,18 @@ ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
 EOF
 
-if mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch 2>&1); then
+if mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+    --config-file "$MONO_DIR/.deploy-config" \
+    --env-file "$MONO_DIR/.env" \
+    --output-dir "$MONO_DIR/generated" \
+    --dry-run \
+    --batch 2>&1); then
     mono_checks_pass=true
 
-    if [ ! -f ".env.monolithic" ]; then
+    if [ ! -f ".env" ]; then
         mono_checks_pass=false
-        echo -e "${YELLOW}⚠️  .env.monolithic not generated${NC}"
-    elif ! grep -q 'ConnectionStrings__Default=Data Source=/data/farm.db' ".env.monolithic" 2>/dev/null; then
+        echo -e "${YELLOW}⚠️  .env not generated${NC}"
+    elif ! grep -q 'ConnectionStrings__Default=Data Source=/data/farm.db' ".env" 2>/dev/null; then
         mono_checks_pass=false
         echo -e "${YELLOW}⚠️  Monolithic connection string missing expected SQLite value${NC}"
     fi
@@ -167,7 +173,12 @@ ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
 EOF
 
-if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" --dry-run --batch 2>&1); then
+if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+    --config-file "$MS_DIR/.deploy-config" \
+    --env-file "$MS_DIR/.env" \
+    --output-dir "$MS_DIR/generated" \
+    --dry-run \
+    --batch 2>&1); then
     host_checks_pass=true
 
     if [ ! -f ".env" ]; then
@@ -178,7 +189,7 @@ if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.s
         echo -e "${YELLOW}⚠️  Database provider not set in .env${NC}"
     fi
 
-    react_env_path="$MS_DIR/src/Web/ReactApp/.env.production"
+    react_env_path="$MS_DIR/generated/src/Web/ReactApp/.env.production"
     if [ ! -f "$react_env_path" ]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
@@ -262,6 +273,7 @@ fi
 echo
 echo "🧹 Cleaning up test directory: $TEMP_DIR"
 rm -rf "$TEMP_DIR"
+trap - EXIT
 
 echo
 echo "=============================================="
