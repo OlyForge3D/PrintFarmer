@@ -111,11 +111,9 @@ export default defineConfig({
         // Chunk-splitting policy:
         //   1. Keep the routing chunk small and independent so the router
         //      shell can render before the rest of the app is parsed.
-        //   2. Group three.js and its react-three-fiber/drei bindings into
-        //      a single chunk so they share tree-shaking across the graph.
-        //      This form matches the baseline that was tested to yield the
-        //      smallest chunk (~1,208 kB) because rollup can prune exports
-        //      transitively when the entry points are named packages.
+        //   2. Keep three.js core shared while allowing Drei to follow its
+        //      lazy 3D consumers. Manually owning Drei can absorb ReactDOM and
+        //      make the otherwise route-specific 3D dependency eager.
         //   3. Split heavy vendor libraries out of the main `index-*.js`
         //      bundle so it stays under the 1200 kB warning threshold.
         //   4. NEVER raise `chunkSizeWarningLimit`. If a new heavy library
@@ -123,15 +121,10 @@ export default defineConfig({
         //      of silencing the warning.
         manualChunks: {
           routing: ['react-router'],
-          // three.js ecosystem — split so the largest chunk (three core +
-          // stdlib + fiber bindings) stays under the 1,200 kB warning
-          // threshold. @react-three/drei is peeled out because it re-
-          // exports many components that pull heavy transitive deps
-          // (zustand, camera-controls, three-mesh-bvh, troika-three-text
-          // at runtime). Keeping it in a sibling chunk lets rollup drop
-          // the drei code path from routes that only need three-core.
-          three: ['three', '@react-three/fiber', 'three-stdlib'],
-          'three-drei': ['@react-three/drei'],
+          // Keep only framework-agnostic Three modules here. Fiber and Drei
+          // follow the lazy 3D consumers so their React dependencies cannot
+          // turn this shared core into an eager app-shell chunk.
+          three: ['three', 'three-stdlib'],
           // Charting library — used across analytics/statistics/maintenance
           // dashboards; ~400 kB minified. Splitting keeps it out of the
           // main entry chunk (loaded only when a chart-using route mounts).
@@ -139,9 +132,10 @@ export default defineConfig({
           // Real-time transport. Isolated so the initial bundle does not
           // pay for the SignalR client until a hub is actually contacted.
           'vendor-signalr': ['@microsoft/signalr'],
-          // File / export utilities: PDF, CSV, zip generation. Heavy and
-          // only needed on export flows.
-          'vendor-files': ['jspdf', 'jspdf-autotable', 'jszip', 'fflate', 'html2canvas'],
+          // File/archive utilities intentionally follow their lazy consumers.
+          // Combining PDF, HTML capture, ZIP, and 3MF parsing in one manual
+          // chunk makes every interaction pay for all of them and can pull
+          // Vite's preload helper into that otherwise optional chunk.
           // OpenTelemetry web SDK — instrumentation stack used by the
           // telemetry provider. Grouping keeps the main bundle from
           // pulling in the whole SDK on first paint.
@@ -168,7 +162,7 @@ export default defineConfig({
           'vendor-icons': ['@mdi/js', 'lucide-react', '@heroicons/react/24/outline', '@heroicons/react/24/solid'],
           // Date utilities — pulled in from many pages.
           'vendor-datetime': ['date-fns'],
-        }
+        },
       }
     }
   },

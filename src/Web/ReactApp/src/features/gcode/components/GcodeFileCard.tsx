@@ -16,10 +16,19 @@ import { Button, Badge, TagChip } from '@/common/components/ui';
 import { GcodeFile } from '@/types/api';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 import { useState } from 'react';
-import { QueueGcodeModal } from './QueueGcodeModal';
 import { TaggingModal } from '@/components/TaggingModal';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { ClipboardListIcon, LayersTripleOutlineIcon, CubeIcon } from '@/common/components/icons/MdiIcons';
+import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
+import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+
+type QueueGcodeModalComponent = typeof import('./QueueGcodeModal')['QueueGcodeModal'];
+const QueueGcodeModal = lazyWithPreload<
+  React.ComponentProps<QueueGcodeModalComponent>,
+  QueueGcodeModalComponent
+>(
+  () => import('./QueueGcodeModal').then((module) => ({ default: module.QueueGcodeModal })),
+);
 
 interface GcodeFileCardProps {
   file: GcodeFile;
@@ -280,6 +289,8 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
               </Button>
               <Button
                 onClick={() => setIsQueueOpen(true)}
+                onFocus={() => void QueueGcodeModal.preload()}
+                onPointerEnter={() => void QueueGcodeModal.preload()}
                 disabled={isDeleting}
                 variant="primary"
                 size="sm"
@@ -304,7 +315,13 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
       </div>
     </div>
     {isQueueOpen && (
-      <QueueGcodeModal file={file} isOpen={isQueueOpen} onClose={(added) => { setIsQueueOpen(false); if (added) { /* maybe show toast later */ } }} />
+      <LazyModalBoundary
+        label="print queue"
+        onCancel={() => setIsQueueOpen(false)}
+        onRetry={QueueGcodeModal.retry}
+      >
+        <QueueGcodeModal file={file} isOpen={isQueueOpen} onClose={(added) => { setIsQueueOpen(false); if (added) { /* maybe show toast later */ } }} />
+      </LazyModalBoundary>
     )}
     {isTaggingOpen && !file.isDirectory && (
       <TaggingModal

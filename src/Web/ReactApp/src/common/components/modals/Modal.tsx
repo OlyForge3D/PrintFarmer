@@ -325,7 +325,7 @@ export function Modal({
       unregisterModalRoot(modalRoot);
 
       const previouslyFocusedElement = previouslyFocusedElementRef.current;
-      if (previouslyFocusedElement?.isConnected) {
+      if (previouslyFocusedElement?.isConnected && previouslyFocusedElement !== document.body) {
         window.requestAnimationFrame(() => previouslyFocusedElement.focus());
       }
     };

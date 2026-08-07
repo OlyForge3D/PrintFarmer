@@ -4,15 +4,39 @@ import React from 'react';
 // Usage:
 //   const MyComp = lazyWithPreload(() => import('./MyComp'));
 //   MyComp.preload(); // (e.g. on hover) to start loading before render
-export interface PreloadableComponent<P, T extends React.ComponentType<P>> {
-  (props: P): React.ReactElement | null;
-  preload: () => Promise<{ default: T }>;
+export interface PreloadableComponent {
+  preload: () => Promise<void>;
+  retry: () => void;
 }
 
-export function lazyWithPreload<P, T extends React.ComponentType<P>>(
+export function lazyWithPreload<P extends object, T extends React.ComponentType<P>>(
   factory: () => Promise<{ default: T }>
-): T & PreloadableComponent<P, T> {
-  const LazyComp = React.lazy(factory) as unknown as T & PreloadableComponent<P, T>;
-  LazyComp.preload = factory;
-  return LazyComp;
+): React.ComponentType<P> & PreloadableComponent {
+  let modulePromise: Promise<{ default: T }> | undefined;
+  const load = (): Promise<{ default: T }> => {
+    modulePromise ??= factory().catch((error: unknown) => {
+      modulePromise = undefined;
+      throw error;
+    });
+    return modulePromise;
+  };
+  const loadComponent = (): Promise<{ default: React.ComponentType<P> }> => load();
+  let LazyComponent = React.lazy(loadComponent);
+  const RetryableComponent: React.FC<P> = (props) => React.createElement(LazyComponent, props);
+  const preload = async () => {
+    try {
+      await load();
+    } catch {
+      // Preload is speculative. A later render retries and surfaces persistent
+      // failures through the nearest lazy-content boundary.
+    }
+  };
+
+  return Object.assign(RetryableComponent, {
+    preload,
+    retry: () => {
+      modulePromise = undefined;
+      LazyComponent = React.lazy(loadComponent);
+    },
+  });
 }

@@ -4,6 +4,7 @@ import { useNavigate, useLocation, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
+import { LazyModalBoundary } from '@/common/components/LazyModalFallback';
 import { FileBrowser, type FileBrowserHandle } from '@/features/fileBrowser/components/FileBrowser';
 import {
   type ColumnDef,
@@ -17,11 +18,6 @@ import { useAuth } from '@/features/auth/hooks/useAuth';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
 import { ViewerSkeleton } from '@/features/models3d/components/3d/ViewerSkeleton';
 import { GcodeFileCard } from '@/features/gcode/components/GcodeFileCard';
-import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
-import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
-import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
-import { HarvestWizardModal } from '@/features/gcode/components/harvest/HarvestWizardModal';
-import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
 import { AddToProjectModal } from '@/features/projects/components/AddToProjectModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
@@ -54,6 +50,27 @@ const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>
 );
 type FileTypeFilter = 'all' | 'models' | 'gcode' | 'other';
 type FileSource = 'model' | 'gcode';
+type PrintablesImportModalComponent = typeof import('@/features/models3d/components/PrintablesImportModal')['PrintablesImportModal'];
+type PrintablesBrowserModalComponent = typeof import('@/features/models3d/components/PrintablesBrowserModal')['PrintablesBrowserModal'];
+type QuickSliceModalComponent = typeof import('@/features/slicer/components/QuickSliceModal')['QuickSliceModal'];
+type HarvestWizardModalComponent = typeof import('@/features/gcode/components/harvest/HarvestWizardModal')['HarvestWizardModal'];
+type QueueGcodeModalComponent = typeof import('@/features/gcode/components/QueueGcodeModal')['QueueGcodeModal'];
+
+const PrintablesImportModal = lazyWithPreload<React.ComponentProps<PrintablesImportModalComponent>, PrintablesImportModalComponent>(
+  () => import('@/features/models3d/components/PrintablesImportModal').then((module) => ({ default: module.PrintablesImportModal })),
+);
+const PrintablesBrowserModal = lazyWithPreload<React.ComponentProps<PrintablesBrowserModalComponent>, PrintablesBrowserModalComponent>(
+  () => import('@/features/models3d/components/PrintablesBrowserModal').then((module) => ({ default: module.PrintablesBrowserModal })),
+);
+const QuickSliceModal = lazyWithPreload<React.ComponentProps<QuickSliceModalComponent>, QuickSliceModalComponent>(
+  () => import('@/features/slicer/components/QuickSliceModal').then((module) => ({ default: module.QuickSliceModal })),
+);
+const HarvestWizardModal = lazyWithPreload<React.ComponentProps<HarvestWizardModalComponent>, HarvestWizardModalComponent>(
+  () => import('@/features/gcode/components/harvest/HarvestWizardModal').then((module) => ({ default: module.HarvestWizardModal })),
+);
+const QueueGcodeModal = lazyWithPreload<React.ComponentProps<QueueGcodeModalComponent>, QueueGcodeModalComponent>(
+  () => import('@/features/gcode/components/QueueGcodeModal').then((module) => ({ default: module.QueueGcodeModal })),
+);
 type SortOption = 'name' | 'size' | 'date';
 
 type TagSummary = { id: string; name: string; color?: string };
@@ -358,6 +375,8 @@ function buildModelCard(
             size="sm"
             variant="primary"
             onClick={() => onSliceModel(model)}
+            onFocus={() => void QuickSliceModal.preload()}
+            onPointerEnter={() => void QuickSliceModal.preload()}
             title="Open quick slice"
           >
             <LayersTripleOutlineIcon className="h-4 w-4" />
@@ -468,6 +487,7 @@ export function FilesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
   const [showGcodeUploadModal, setShowGcodeUploadModal] = useState(false);
+  const printablesButtonRef = useRef<HTMLButtonElement>(null);
   const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
   const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
   const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
@@ -685,6 +705,8 @@ export function FilesPage() {
             size="sm"
             variant="secondary"
             onClick={() => setQueueFile(gcode)}
+            onFocus={() => void QueueGcodeModal.preload()}
+            onPointerEnter={() => void QueueGcodeModal.preload()}
             title="Queue for printing"
           >
             <PlayIcon className="h-4 w-4" />
@@ -774,6 +796,8 @@ export function FilesPage() {
           size="sm"
           variant="primary"
           onClick={() => setQuickSliceModel(model)}
+          onFocus={() => void QuickSliceModal.preload()}
+          onPointerEnter={() => void QuickSliceModal.preload()}
           title="Quick slice"
         >
           <LayersTripleOutlineIcon className="h-4 w-4" />
@@ -925,11 +949,14 @@ export function FilesPage() {
     <div className="flex flex-wrap items-center gap-2">
       {hasPermission('3d_models', 'create') && (
         <Button
+          ref={printablesButtonRef}
           type="button"
           variant="secondary"
           size="sm"
           iconLeft={<PrintablesIcon />}
           onClick={() => setShowPrintablesBrowserModal(true)}
+          onFocus={() => void PrintablesBrowserModal.preload()}
+          onPointerEnter={() => void PrintablesBrowserModal.preload()}
         >
           Printables
         </Button>
@@ -963,6 +990,8 @@ export function FilesPage() {
           size="sm"
           iconLeft={<ActivityIcon className="h-4 w-4" />}
           onClick={() => setShowHarvestModal(true)}
+          onFocus={() => void HarvestWizardModal.preload()}
+          onPointerEnter={() => void HarvestWizardModal.preload()}
         >
           Start Harvest
         </Button>
@@ -1083,35 +1112,63 @@ export function FilesPage() {
         }}
       />
       {showPrintablesBrowserModal && (
-        <PrintablesBrowserModal
-          isOpen={showPrintablesBrowserModal}
-          onClose={() => setShowPrintablesBrowserModal(false)}
-          onImportUrl={(url) => {
-            setSelectedPrintablesUrl(url);
-            setShowPrintablesBrowserModal(false);
-            setShowPrintablesImportModal(true);
-          }}
-        />
+        <LazyModalBoundary
+          label="printables browser"
+          onCancel={() => setShowPrintablesBrowserModal(false)}
+          onRetry={PrintablesBrowserModal.retry}
+          restoreFocus={() => printablesButtonRef.current?.focus()}
+        >
+          <PrintablesBrowserModal
+            isOpen={showPrintablesBrowserModal}
+            onClose={() => setShowPrintablesBrowserModal(false)}
+            onImportUrl={(url) => {
+              void PrintablesImportModal.preload();
+              setSelectedPrintablesUrl(url);
+              setShowPrintablesBrowserModal(false);
+              setShowPrintablesImportModal(true);
+            }}
+          />
+        </LazyModalBoundary>
       )}
-      <PrintablesImportModal
-        isOpen={showPrintablesImportModal}
-        initialUrl={selectedPrintablesUrl}
-        onClose={() => {
-          setShowPrintablesImportModal(false);
-          setSelectedPrintablesUrl(null);
-          void handleRefresh();
-        }}
-      />
-      <HarvestWizardModal
-        isOpen={showHarvestModal}
-        onClose={() => setShowHarvestModal(false)}
-        printers={printers}
-        activeHarvests={harvestOperations}
-        onComplete={() => {
-          toast.success('Harvest completed');
-          handleRefresh();
-        }}
-      />
+      {showPrintablesImportModal && (
+        <LazyModalBoundary
+          label="printables import"
+          onCancel={() => {
+            setShowPrintablesImportModal(false);
+            setSelectedPrintablesUrl(null);
+          }}
+          onRetry={PrintablesImportModal.retry}
+          restoreFocus={() => printablesButtonRef.current?.focus()}
+        >
+          <PrintablesImportModal
+            isOpen={showPrintablesImportModal}
+            initialUrl={selectedPrintablesUrl}
+            onClose={() => {
+              setShowPrintablesImportModal(false);
+              setSelectedPrintablesUrl(null);
+              void handleRefresh();
+            }}
+          />
+        </LazyModalBoundary>
+      )}
+      {showHarvestModal && (
+        <LazyModalBoundary
+          label="harvest wizard"
+          onCancel={() => setShowHarvestModal(false)}
+          onRetry={HarvestWizardModal.retry}
+        >
+          <HarvestWizardModal
+            isOpen={showHarvestModal}
+            onClose={() => setShowHarvestModal(false)}
+            printers={printers}
+            activeHarvests={harvestOperations}
+            onComplete={() => {
+              toast.success('Harvest completed');
+              handleRefresh();
+            }}
+          />
+        </LazyModalBoundary>
+      )}
       <BulkTagAssignmentModal
         isOpen={showBulkTagModal}
         onClose={() => {
@@ -1137,16 +1194,32 @@ export function FilesPage() {
           initialTags={taggingTarget.tags}
         />
       )}
-      <QueueGcodeModal
-        file={queueFile}
-        isOpen={queueFile !== null}
-        onClose={() => setQueueFile(null)}
-      />
-      <QuickSliceModal
-        isOpen={quickSliceModel !== null}
-        onClose={() => setQuickSliceModel(null)}
-        model={quickSliceModel}
-      />
+      {queueFile && (
+        <LazyModalBoundary
+          label="print queue"
+          onCancel={() => setQueueFile(null)}
+          onRetry={QueueGcodeModal.retry}
+        >
+          <QueueGcodeModal
+            file={queueFile}
+            isOpen
+            onClose={() => setQueueFile(null)}
+          />
+        </LazyModalBoundary>
+      )}
+      {quickSliceModel && (
+        <LazyModalBoundary
+          label="quick slice"
+          onCancel={() => setQuickSliceModel(null)}
+          onRetry={QuickSliceModal.retry}
+        >
+          <QuickSliceModal
+            isOpen
+            onClose={() => setQuickSliceModel(null)}
+            model={quickSliceModel}
+          />
+        </LazyModalBoundary>
+      )}
       <ConfirmationModal
         isOpen={deleteMode === 'single' && deleteTarget !== null}
         title="Delete File"

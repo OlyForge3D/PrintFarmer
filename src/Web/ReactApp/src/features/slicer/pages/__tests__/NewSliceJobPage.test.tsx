@@ -268,7 +268,7 @@ vi.mock('../../components/job', () => ({
 
 const slicerWorkspaceSpy = vi.fn();
 
-vi.mock('@/features/slicer/components/viewer', () => ({
+vi.mock('@/features/slicer/components/viewer/SlicerWorkspace', () => ({
   SlicerWorkspace: (props: {
     models?: Array<{ id: string; url: string; viewerUrl?: string; fileType: string }>;
   }) => {

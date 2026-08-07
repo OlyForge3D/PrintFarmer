@@ -35,7 +35,6 @@ import {
   legacyMachineProfileMatchesPrinter,
   legacyProcessProfileMatchesMachine,
 } from '../utils/customProfileScoping';
-import { isZipFile, extractOrcaBundle } from '@/features/slicer/orca/utils/orcaBundleExtractor';
 import type { Model3DBasic } from '../components/job/types';
 import type { ModelListItem } from '@/types/models';
 import { SearchablePickerModal } from '@/common/components/SearchablePickerModal';
@@ -43,16 +42,18 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import { Button, Alert, Input, Select, ColorPicker, ProgressBar } from '@/common/components/ui';
 import { LayersIcon, EditIcon, DownloadIcon, RefreshIcon, SaveIcon, MoreVerticalIcon, CopyIcon, FileImportIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { STLPreviewModal } from '@/features/models3d/components/3d/STLPreviewModal';
 import { useSTLFile } from '@/common/hooks/useSTLFile';
 import { useSliceJobProgress } from '@/features/slicer/hooks/useSliceJobProgress';
 import { useSlicerMode } from '@/features/slicer/hooks/useSlicerMode';
 import { SliceProgressOverlay } from '@/features/slicer/components/SliceProgressOverlay';
-import { SlicerWorkspace, type LoadedModel, type BedConfig } from '@/features/slicer/components/viewer';
-import * as THREE from 'three';
+import type { LoadedModel, BedConfig } from '@/features/slicer/components/viewer';
+import type { BufferGeometry } from 'three';
 import { sliceJobService as sliceJobSvc } from '@/services/sliceJobService';
 import { buildSlicerViewerModelUrl, getSlicerViewerFileType } from '@/features/slicer/utils/model-file-utils';
 import { buildSlicePayloadModels, modelTransformJson, diffProcessOverrides } from '@/features/slicer/utils/slicePayload';
+import { readOrcaBundle } from '@/features/slicer/utils/orcaBundleLoader';
+import { SlicerWorkspaceBoundary } from '@/features/slicer/components/viewer/SlicerWorkspaceBoundary';
+import { STLPreviewModalBoundary } from '@/features/slicer/components/viewer/STLPreviewModalBoundary';
 
 // Removed MATERIAL_PRESETS constant - now using API-driven filament profiles
 
@@ -461,12 +462,12 @@ export const NewSliceJobPage: React.FC = () => {
       try {
         if (isBundle) {
           const buffer = await file.arrayBuffer();
-          if (!isZipFile(buffer)) {
+          const bundleJson = await readOrcaBundle(buffer);
+          if (bundleJson === null) {
             toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
             failedCount++;
             continue;
           }
-          const bundleJson = await extractOrcaBundle(buffer);
           const bundle = JSON.parse(bundleJson) as { process?: Array<{ name?: string }> };
           const processProfiles = bundle.process ?? [];
 
@@ -528,12 +529,12 @@ export const NewSliceJobPage: React.FC = () => {
       try {
         if (isBundle) {
           const buffer = await file.arrayBuffer();
-          if (!isZipFile(buffer)) {
+          const bundleJson = await readOrcaBundle(buffer);
+          if (bundleJson === null) {
             toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
             failedCount++;
             continue;
           }
-          const bundleJson = await extractOrcaBundle(buffer);
           const bundle = JSON.parse(bundleJson) as { printer?: Array<{ name?: string }> };
           const machineProfiles = bundle.printer ?? [];
 
@@ -596,12 +597,12 @@ export const NewSliceJobPage: React.FC = () => {
       try {
         if (isBundle) {
           const buffer = await file.arrayBuffer();
-          if (!isZipFile(buffer)) {
+          const bundleJson = await readOrcaBundle(buffer);
+          if (bundleJson === null) {
             toast.error(`${file.name}: not a valid OrcaSlicer bundle`);
             failedCount++;
             continue;
           }
-          const bundleJson = await extractOrcaBundle(buffer);
           const bundle = JSON.parse(bundleJson) as { filament?: Array<{ name?: string }> };
           const filamentProfiles = bundle.filament ?? [];
 
@@ -1933,7 +1934,7 @@ export const NewSliceJobPage: React.FC = () => {
   }, []);
 
   // C1: Handle model replacement (e.g., after cut operation)
-  const handleWorkspaceModelsReplace = useCallback((removedId: string, newModels: Array<{ url: string; fileName: string; geometry: THREE.BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => {
+  const handleWorkspaceModelsReplace = useCallback((removedId: string, newModels: Array<{ url: string; fileName: string; geometry: BufferGeometry; position?: [number, number, number]; rotation?: [number, number, number]; scale?: [number, number, number] }>) => {
     setBedModels(prev => {
       const filtered = prev.filter(m => m.id !== removedId);
       const additions: LoadedModel[] = newModels.map((nm, i) => ({
@@ -2832,7 +2833,7 @@ export const NewSliceJobPage: React.FC = () => {
         <div className="flex-1 flex flex-col min-h-0">
           <div className="relative bg-pf-panel border border-pf-border rounded-lg flex-1 overflow-hidden flex flex-col min-h-0">
             {selectedPrinterId ? (
-              <SlicerWorkspace
+              <SlicerWorkspaceBoundary
                 bedConfig={workspaceBedConfig}
                 models={workspaceModels}
                 selectedModelId={selectedBedModelId ?? undefined}
@@ -2891,7 +2892,7 @@ export const NewSliceJobPage: React.FC = () => {
 
       {/* STL Preview Modal */}
       {isSTLPreviewOpen && (
-        <STLPreviewModal
+        <STLPreviewModalBoundary
           isOpen={isSTLPreviewOpen}
           fileUrl={modelFileUrl}
           fileName={modelFileName}
