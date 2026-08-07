@@ -6,6 +6,11 @@ import rule from '../../../eslint-rules/pf-no-oversized-radius.js'
 RuleTester.describe = describe
 RuleTester.it = it
 
+const OUT_OF_RANGE_CSS_ESCAPE = '\\110000'
+const ESCAPED_BANG = '\\!'
+const CSS_COMMENT = '/*c*/'
+const OPEN_CSS_COMMENT = '/*c'
+
 const ruleTester = new RuleTester({
   languageOptions: {
     ecmaVersion: 2022,
@@ -29,9 +34,28 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // Arbitrary values within the ceiling.
     { code: '<div className="rounded-[4px]" />' },
     { code: '<div className="rounded-[0.5rem]" />' },
+    { code: '<div className="rounded-[length:4px]" />' },
+    { code: '<div className="[border-radius:8px]" />' },
+    { code: '<div className="[border-radius:0.5rem]" />' },
     // Unresolvable arbitrary values are never guessed at.
     { code: '<div className="rounded-[var(--pf-radius-md)]" />' },
     { code: '<div className="rounded-[calc(2px+2px)]" />' },
+    { code: '<div className="[border-radius:var(--pf-radius-md)]" />' },
+    // A comment before the hint prevents Tailwind from treating it as a hint.
+    { code: `<div className="rounded-[${CSS_COMMENT}length:16px]" />` },
+    // Negative radii are invalid CSS and therefore do not render oversized.
+    { code: '<div className="rounded-[-16px]" />' },
+    // Inline importance is read after comments and preserves the winning square.
+    {
+      code: `<div className="size-[16px${CSS_COMMENT}!important] h-[32px] rounded-full" />`,
+    },
+    {
+      code: `<div className="size-[var(--x${ESCAPED_BANG}y,16px)] rounded-full" />`,
+    },
+    // A dimension-side escaping comment swallows the later radius declaration.
+    {
+      code: `<div className="w-[64px${OPEN_CSS_COMMENT}] rounded-[9999px] h-[32px]" />`,
+    },
 
     // Provably circular elements keep rounded-full with no annotation.
     { code: '<span className="w-2 h-2 rounded-full bg-pf-error" />' },
@@ -230,6 +254,73 @@ ruleTester.run('pf-no-oversized-radius', rule, {
           suggestions: [
             { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
           ],
+        },
+      ],
+    },
+    // Arbitrary-property syntax emits the same border-radius declaration without
+    // using a rounded-* utility, so it is judged through the same value reader.
+    {
+      code: '<div className="[border-radius:12px]" />',
+      output: null,
+      errors: [{ messageId: 'oversized', data: { token: '[border-radius:12px]', px: 12 } }],
+    },
+    {
+      code: '<div className="md:[border-radius:1.5rem]" />',
+      output: null,
+      errors: [{ messageId: 'oversized', data: { token: 'md:[border-radius:1.5rem]', px: 24 } }],
+    },
+    {
+      code: '<div className="[border-radius:9999px]" />',
+      output: null,
+      errors: [{ messageId: 'fullRound' }],
+    },
+    // Radius values follow CSS number spelling and comment rules.
+    ...[
+      '16PX',
+      '+16px',
+      '_16px_',
+      `16px${CSS_COMMENT}`,
+      `${CSS_COMMENT}16px`,
+      `length:${CSS_COMMENT}16px`,
+    ].map(value => ({
+      code: `<div className="rounded-[${value}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    })),
+    {
+      code: '<div className="rounded-[1e1px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[1e1px]', px: 10 },
+          suggestions: 1,
+        },
+      ],
+    },
+    // An out-of-range CSS escape is replacement text, not an exception, and the
+    // invalid size declaration cannot prove the box is circular.
+    {
+      code: `<div className="size-[16px!${OUT_OF_RANGE_CSS_ESCAPE}] h-[32px] rounded-full" />`,
+      output: null,
+      errors: [{ messageId: 'fullRound', suggestions: 1 }],
+    },
+    // Comment stripping and importance must agree on which axis wins.
+    {
+      code: `<div className="size-[16px] h-[32px${CSS_COMMENT}!important] rounded-full" />`,
+      output: null,
+      errors: [{ messageId: 'fullRound', suggestions: 1 }],
+    },
+    // A lone unterminated comment in the radius token leaves the radius itself
+    // live while later declarations are swallowed.
+    {
+      code: `<div className="rounded-[16px${OPEN_CSS_COMMENT}] w-[64px] h-[32px]" />`,
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[16px/*c]', px: 16 },
+          suggestions: 1,
         },
       ],
     },

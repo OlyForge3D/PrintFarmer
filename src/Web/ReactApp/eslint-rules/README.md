@@ -25,8 +25,16 @@ It reports two independent families.
 
 ### 1. Over the ceiling
 
-Any radius larger than `maxPx`, whether a named size (`rounded-xl` … `rounded-4xl`) or an
-arbitrary value (`rounded-[1.35rem]`).
+Any radius larger than `maxPx`, whether a named size (`rounded-xl` … `rounded-4xl`), an
+arbitrary value (`rounded-[1.35rem]`), or a single-value arbitrary property
+(`border-radius:12px` written as `[border-radius:12px]`).
+
+The arbitrary-value reader follows the Tailwind-to-CSS forms that can be resolved safely:
+optional `length:` hints, CSS comments, Tailwind underscore spaces, case-insensitive units,
+leading `+`, scientific notation, and escaped `!important` identifiers. Invalid negative
+radii are ignored because the browser drops them. Values that require runtime layout or
+custom properties, and multi-value or elliptical `border-radius` shorthands, remain
+unresolved rather than guessed.
 
 Named sizes are **auto-fixable** — `--fix` rewrites them to `rounded-lg`. Arbitrary values
 only get a *suggestion*, because the correct replacement is a judgement call: a 1.1rem inner
@@ -130,4 +138,6 @@ resolver described above. Side-specific utilities are handled explicitly — `ro
 left side, not a size.
 
 Arbitrary values in units the rule cannot resolve statically (e.g. `rounded-[var(--x)]`) are
-left alone rather than guessed at.
+left alone rather than guessed at. Unterminated CSS comments are handled by declaration
+order: a comment opened by an earlier utility can swallow a later radius, while a radius
+value before its own unterminated comment still applies and is judged.

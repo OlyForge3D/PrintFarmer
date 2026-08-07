@@ -94,6 +94,9 @@ const CORNERS_BY_SIDE = new Map([
 ])
 
 function parseRounded(base) {
+  const property = /^\[border-radius:([^\]]+)\]$/.exec(base)
+  if (property) return { size: `[${property[1]}]`, corners: ALL_CORNERS }
+
   if (base !== 'rounded' && !base.startsWith('rounded-')) return null
   if (base === 'rounded') return { size: '', corners: ALL_CORNERS }
 
@@ -162,6 +165,46 @@ const PSEUDO_ELEMENT_VARIANTS = new Set([
 ])
 
 const LEGACY_PSEUDO_ELEMENTS = new Set(['after', 'before', 'first-letter', 'first-line'])
+const IMPORTANT_TAIL = /^[\s_]*(?:\\(?:[0-9a-fA-F]{1,6}[\s_]?|[^])|[^\\\s_])+[\s_]*$/
+const CSS_ESCAPE = /\\(?:([0-9a-fA-F]{1,6})[\s_]?|([^]))/g
+const stripCssComments = text => text.replace(/\/\*[^]*?(?:\*\/|$)/g, ' ')
+
+function decodeCssEscapes(text) {
+  return text.replace(CSS_ESCAPE, (_whole, hex, literal) => {
+    if (hex === undefined) return literal
+    const point = Number.parseInt(hex, 16)
+    if (point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+      return '\uFFFD'
+    }
+    return String.fromCodePoint(point)
+  })
+}
+
+function arbitraryImportance(utility) {
+  if (!utility.endsWith(']')) return { utility, important: false }
+  const clean = stripCssComments(utility)
+  if (!clean.endsWith(']')) return { utility, important: false }
+
+  let bang = -1
+  for (let index = 0; index < clean.length; index += 1) {
+    if (clean[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (clean[index] === '!') bang = index
+  }
+  if (bang < 0) return { utility, important: false }
+
+  const tail = clean.slice(bang + 1, -1)
+  if (!IMPORTANT_TAIL.test(tail)) return { utility, important: false }
+  if (decodeCssEscapes(tail).trim().replace(/^_+|_+$/g, '').toLowerCase() !== 'important') {
+    return { utility, important: false }
+  }
+
+  const open = clean.indexOf('[')
+  const head = clean.slice(open + 1, bang).trim()
+  return { utility: `${clean.slice(0, open + 1)}${head}]`, important: true }
+}
 
 /**
  * Split a utility into its ordered variants and base token. Colons inside
@@ -183,7 +226,14 @@ function splitToken(token) {
   }
 
   parts.push(token.slice(start))
-  return { variants: parts.slice(0, -1), base: parts.at(-1) ?? '' }
+  const marked = parts.at(-1) ?? ''
+  const stripped = marked.replace(/^!+/, '').replace(/!+$/, '')
+  const inner = arbitraryImportance(stripped)
+  return {
+    variants: parts.slice(0, -1),
+    base: inner.utility,
+    important: marked !== stripped || inner.important,
+  }
 }
 
 /**
@@ -193,12 +243,62 @@ function splitToken(token) {
  * reported -- an unprovable violation is not a violation.
  */
 function arbitraryToPx(value) {
-  const inner = value.slice(1, -1).trim()
-  if (/^(?:9999(?:px|rem)|100%|50%|100vmax)$/.test(inner)) return Infinity
-  const match = /^(\d*\.?\d+)(px|rem|em)$/.exec(inner)
+  const hinted = value.slice(1, -1).replace(/^[a-z-]+:(?!:)/i, '')
+  const inner = stripCssComments(hinted).replace(/_/g, ' ').trim()
+  if (/^(?:9999(?:px|rem)|100%|50%|100vmax)$/i.test(inner)) return Infinity
+  const match = /^\+?(\d*\.?\d+(?:e[+-]?\d+)?)(px|rem|em)$/i.exec(inner)
   if (!match) return null
   const scalar = Number.parseFloat(match[1])
-  return match[2] === 'px' ? scalar : scalar * 16
+  return match[2].toLowerCase() === 'px' ? scalar : scalar * 16
+}
+
+function hasUnescapedBang(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (value[index] === '!') return true
+  }
+  return false
+}
+
+function normalizeDimension(value) {
+  if (!value.startsWith('[') || !value.endsWith(']')) return value
+  const hinted = value.slice(1, -1).replace(/^[a-z-]+:(?!:)/i, '')
+  const inner = stripCssComments(hinted).replace(/_/g, ' ').trim()
+  if (hasUnescapedBang(inner)) return undefined
+
+  const match = /^\+?(\d*\.?\d+(?:e[+-]?\d+)?)(px|rem|em)$/i.exec(inner)
+  if (!match) return value
+  const scalar = Number.parseFloat(match[1])
+  const px = match[2].toLowerCase() === 'px' ? scalar : scalar * 16
+  return `[${px}px]`
+}
+
+function hasEscapingComment(rawCandidate) {
+  let quote = null
+  for (let index = 0; index < rawCandidate.length; index += 1) {
+    const character = rawCandidate[index]
+    if (character === '\\') {
+      index += 1
+      continue
+    }
+    if (quote) {
+      if (character === quote) quote = null
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === '/' && rawCandidate[index + 1] === '*') {
+      const close = rawCandidate.indexOf('*/', index + 2)
+      if (close === -1) return true
+      index = close + 1
+    }
+  }
+  return false
 }
 
 function changesSelectorScope(variant) {
@@ -366,6 +466,7 @@ function compareOrderLists(left, right) {
 }
 
 function comparePrecedence(candidate, winner) {
+  if (candidate.important !== winner.important) return candidate.important ? 1 : -1
   if (candidate.condition.specificity !== winner.condition.specificity) {
     if (!candidate.condition.specificityReliable || !winner.condition.specificityReliable) {
       return undefined
@@ -461,10 +562,12 @@ function circularAt(classText) {
     value,
     utilityOrder = 0,
     valueSource = { group: undefined, order: 0 },
+    important = false,
   ) => {
     declarations.push({
       condition,
       value,
+      important,
       utilityOrder,
       valueGroup: valueSource.group,
       valueOrder: valueSource.order,
@@ -474,29 +577,44 @@ function circularAt(classText) {
 
   for (const raw of classText.split(/\s+/)) {
     if (!raw) continue
-    const { variants, base } = splitToken(raw)
+    const { variants, base, important } = splitToken(raw)
     const condition = parseCondition(variants)
 
     const size = /^size-(\S+)$/.exec(base)
     if (size) {
-      add(widths, condition, size[1], 0, dimensionSourceOrder(size[1]))
-      add(heights, condition, size[1], 0, dimensionSourceOrder(size[1]))
+      const value = normalizeDimension(size[1])
+      if (value !== undefined) {
+        add(widths, condition, value, 0, dimensionSourceOrder(value), important)
+        add(heights, condition, value, 0, dimensionSourceOrder(value), important)
+      }
     }
     const width = /^w-(\S+)$/.exec(base)
-    if (width) add(widths, condition, width[1], 1, dimensionSourceOrder(width[1]))
+    if (width) {
+      const value = normalizeDimension(width[1])
+      if (value !== undefined) {
+        add(widths, condition, value, 1, dimensionSourceOrder(value), important)
+      }
+    }
     const height = /^h-(\S+)$/.exec(base)
-    if (height) add(heights, condition, height[1], 1, dimensionSourceOrder(height[1]))
+    if (height) {
+      const value = normalizeDimension(height[1])
+      if (value !== undefined) {
+        add(heights, condition, value, 1, dimensionSourceOrder(value), important)
+      }
+    }
     const aspect = /^aspect-(\S+)$/.exec(base)
-    if (aspect) add(aspects, condition, aspectKind(aspect[1]))
+    if (aspect) add(aspects, condition, aspectKind(aspect[1]), 0, undefined, important)
     if (base === 'animate-spin' || base === 'animate-ping' || base === 'pf-animate-spin') {
-      add(animations, condition, true)
+      add(animations, condition, true, 0, undefined, important)
     }
     const radius = parseRounded(base)
     if (radius) {
       const isArbitrary = radius.size.startsWith('[') && radius.size.endsWith(']')
       const px = isArbitrary ? arbitraryToPx(radius.size) : NAMED_RADII[radius.size]
       const value = radius.size === 'full' || px === Infinity ? 'full' : 'other'
-      for (const corner of radius.corners) add(radii.get(corner), condition, value)
+      for (const corner of radius.corners) {
+        add(radii.get(corner), condition, value, 0, undefined, important)
+      }
     }
     order += 1
   }
@@ -676,7 +794,7 @@ export default {
 
       if (autofix) {
         descriptor.fix = fixer => fixer.replaceTextRange(range, replacement)
-      } else {
+      } else if (replacement !== rawToken) {
         descriptor.suggest = [
           {
             messageId: 'replaceWithLg',
@@ -704,12 +822,16 @@ export default {
         // index it by variant scope, so a scoped radius is judged against the
         // evidence that applies where it applies.
         const classText = strings.map(entry => entry.text).join(' ')
+        const escaping = classText.split(/\s+/).filter(hasEscapingComment)
+        const soleEscaper = escaping.length === 1 ? escaping[0] : undefined
+        if (escaping.length > 1) return
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
         for (const { node: stringNode, text, quasi } of strings) {
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
+            if (soleEscaper !== undefined && rawToken !== soleEscaper) continue
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue
