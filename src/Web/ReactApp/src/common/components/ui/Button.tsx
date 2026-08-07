@@ -1,6 +1,7 @@
 /* eslint-disable local/pf-no-raw-html-controls */
 import React from 'react';
 import clsx from 'clsx';
+import { hasRadiusOverride } from '@/common/components/ui/radius-classes';
 
 export type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'subtle' | 'ghost' | 'success' | 'tab' | 'toggle' | 'link' | 'unstyled';
 export type ButtonSize = 'sm' | 'md' | 'lg';
@@ -34,7 +35,7 @@ const variantClasses: Record<ButtonVariant, string> = {
   success: 'bg-[var(--pf-button-success-bg)] enabled:hover:bg-[var(--pf-button-success-hover)] text-[var(--pf-button-success-text)] border border-[var(--pf-button-success-border)] shadow-md font-semibold',
   // tab/toggle/link keep only their structural utilities; their paint lives in the
   // components layer alongside subtle's and ghost's. See #1102.
-  tab: 'border-b-2 focus:ring-0 rounded-none',
+  tab: 'border-b-2 focus:ring-0',
   toggle: '',
   link: 'enabled:hover:underline px-0 py-0',
   unstyled: '' // No default styles - fully controlled by className prop
@@ -75,6 +76,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   const applySizeClasses = variant !== 'link' && variant !== 'unstyled';
   const applyBaseStyles = variant !== 'unstyled';
   const applyShadow = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
+  const defaultRadiusClass = variant === 'tab' ? 'rounded-none' : 'rounded-xs';
 
   return (
     <button
@@ -84,7 +86,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       data-pf-active={isActiveTab ? '' : undefined}
       className={clsx(
         applyBaseStyles &&
-          'rounded-xs font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+          'font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+        applyBaseStyles && !hasRadiusOverride(className) && defaultRadiusClass,
         applyShadow && 'shadow-xs focus-visible:ring-offset-2',
         variantClasses[variant],
         applySizeClasses && sizeClasses[size],
