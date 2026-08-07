@@ -143,10 +143,15 @@ export function verifySquadVerdict({ pull, status, run }) {
   });
 }
 
-export function selectSquadVerdict({ pull, statuses, loadRun }) {
+export function selectSquadVerdict({
+  pull,
+  statuses,
+  statusHeadSha = pull.head.sha,
+  loadRun,
+}) {
   const candidates = statuses
     .filter((status) => status.context === verdictContext)
-    .map((status) => bindStatusToHead(status, pull.head.sha))
+    .map((status) => bindStatusToHead(status, statusHeadSha))
     .sort((left, right) => {
       const timestampOrder =
         Date.parse(right.created_at) - Date.parse(left.created_at);
@@ -156,7 +161,7 @@ export function selectSquadVerdict({ pull, statuses, loadRun }) {
   for (const status of candidates) {
     const runId = parseRunTarget(status.target_url, pull.base.repo.full_name);
     if (!runId) {
-      continue;
+      return result('INVALID', 'The newest verdict status has no trusted run target.');
     }
     const run = loadRun(runId);
     return verifySquadVerdict({ pull, status, run });
@@ -168,7 +173,11 @@ function parseArgs(argv) {
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--repo' || argument === '--pr') {
+    if (
+      argument === '--repo' ||
+      argument === '--pr' ||
+      argument === '--expected-head'
+    ) {
       args[argument.slice(2)] = argv[index + 1];
       index += 1;
       continue;
@@ -179,11 +188,17 @@ function parseArgs(argv) {
     }
     throw new Error(`Unknown argument: ${argument}`);
   }
-  if (!/^[^/]+\/[^/]+$/.test(args.repo ?? '')) {
+  if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(args.repo ?? '')) {
     throw new Error('--repo must be OWNER/REPOSITORY.');
   }
   if (!/^[1-9]\d*$/.test(args.pr ?? '')) {
     throw new Error('--pr must be a positive integer.');
+  }
+  if (
+    args['expected-head'] !== undefined &&
+    !/^[0-9a-f]{40}$/.test(args['expected-head'])
+  ) {
+    throw new Error('--expected-head must be a lowercase 40-character SHA.');
   }
   return { ...args, pr: Number.parseInt(args.pr, 10) };
 }
@@ -199,12 +214,14 @@ function ghApi(path) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pull = ghApi(`/repos/${args.repo}/pulls/${args.pr}`);
+  const statusHeadSha = args['expected-head'] ?? pull.head.sha;
   const statuses = ghApi(
-    `/repos/${args.repo}/commits/${pull.head.sha}/statuses?per_page=100`,
+    `/repos/${args.repo}/commits/${statusHeadSha}/statuses?per_page=100`,
   );
   const verdict = selectSquadVerdict({
     pull,
     statuses,
+    statusHeadSha,
     loadRun: (runId) => {
       const run = ghApi(`/repos/${args.repo}/actions/runs/${runId}`);
       const comparison = ghApi(

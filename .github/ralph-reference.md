@@ -67,6 +67,10 @@ node scripts/ci/verify-squad-verdict.mjs \
   --json
 ```
 
+When Ralph already has a recorded reviewed SHA and the PR head may have moved,
+add `--expected-head <recorded-sha>`. This distinguishes a superseded approval
+or rejection from a PR that never had squad evidence.
+
 - `APPROVED` is valid merge evidence only for the PR's exact current head.
 - `CHANGES_REQUESTED` routes the findings back to the original author.
 - `SUPERSEDED`, `MISSING`, or `INVALID` is not approval and does not preserve

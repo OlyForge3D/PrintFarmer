@@ -112,6 +112,21 @@ test('supersedes a rejection when rebase or force-push moves the head', () => {
   assert.equal(verdict.verdict, 'REJECT');
 });
 
+for (const verdictName of ['APPROVE', 'REJECT']) {
+  test(`selector supersedes stale ${verdictName} evidence from an expected head`, () => {
+    const evidence = fixture(verdictName);
+    evidence.pull.head.sha = movedHeadSha;
+    const verdict = selectSquadVerdict({
+      pull: evidence.pull,
+      statuses: [evidence.status],
+      statusHeadSha: reviewedHeadSha,
+      loadRun: () => evidence.run,
+    });
+    assert.equal(verdict.classification, 'SUPERSEDED');
+    assert.equal(verdict.verdict, verdictName);
+  });
+}
+
 test('rejects a status not created by GitHub Actions', () => {
   const evidence = fixture();
   evidence.status.creator.login = 'pr-author';

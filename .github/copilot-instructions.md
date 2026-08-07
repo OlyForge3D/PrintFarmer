@@ -183,6 +183,10 @@ node scripts/ci/verify-squad-verdict.mjs \
   --json
 ```
 
+Pass `--expected-head <recorded-sha>` when auditing a previously recorded
+verdict after the PR head may have moved. The verifier then reports
+`SUPERSEDED` for either an old approval or an old rejection.
+
 Any head movement supersedes the recorded verdict. This rule applies equally
 to `APPROVE`, `CHANGES_REQUESTED`, and `REJECT`, including rebases and force
 pushes. The trio must review the new head and a non-author administrator must
