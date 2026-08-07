@@ -12,7 +12,7 @@ import {
   RectangleStackIcon
 } from '@heroicons/react/24/solid';
 import { NozzleIcon, BedIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Badge } from '@/common/components/ui';
+import { Button, Badge, TagChip } from '@/common/components/ui';
 import { GcodeFile } from '@/types/api';
 import { formatPrintTimeMinutes } from '@/common/utils/datetime';
 import { useState } from 'react';
@@ -208,14 +208,15 @@ export const GcodeFileCard: React.FC<GcodeFileCardProps> = ({
           {!file.isDirectory && file.tags && file.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1 border-t border-pf-border/50">
               {file.tags.map(tag => (
-                <span
+                <TagChip
                   key={tag.id}
-                  className="inline-block px-2 py-0.5 rounded-sm text-[10px] font-medium text-white"
-                  style={{ backgroundColor: tag.color || 'var(--pf-accent)' }}
+                  label={tag.name}
+                  color={tag.color}
+                  appearance="solid"
+                  className="max-w-full text-[10px]"
                   title={tag.description}
-                >
-                  {tag.name}
-                </span>
+                  truncate
+                />
               ))}
             </div>
           )}

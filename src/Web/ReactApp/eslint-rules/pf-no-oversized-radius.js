@@ -420,8 +420,38 @@ function resolveDeclaration(declarations, target) {
   }
 }
 
+const CSS_MATH_FUNCTIONS = new Set([
+  'abs',
+  'calc',
+  'clamp',
+  'hypot',
+  'max',
+  'min',
+  'mod',
+  'rem',
+  'round',
+])
+
+function hasInvalidMathSemicolon(value) {
+  const functionStack = []
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === '(') {
+      const functionName = /([a-z][\w-]*)$/i.exec(value.slice(0, index))?.[1]
+      functionStack.push(functionName?.toLowerCase() ?? functionStack.at(-1))
+    } else if (character === ')') {
+      functionStack.pop()
+    } else if (character === ';' && CSS_MATH_FUNCTIONS.has(functionStack.at(-1))) {
+      return true
+    }
+  }
+
+  return false
+}
+
 function isUnresolvedDimension(value) {
-  return /(?:var|calc|min|max|clamp)\(/.test(value) || value.startsWith('(--')
+  return /(?:var|if|calc|min|max|clamp)\(/i.test(value) || value.startsWith('(--')
 }
 
 function dimensionSourceOrder(value) {
@@ -478,14 +508,18 @@ function circularAt(classText) {
     const condition = parseCondition(variants)
 
     const size = /^size-(\S+)$/.exec(base)
-    if (size) {
+    if (size && !hasInvalidMathSemicolon(size[1])) {
       add(widths, condition, size[1], 0, dimensionSourceOrder(size[1]))
       add(heights, condition, size[1], 0, dimensionSourceOrder(size[1]))
     }
     const width = /^w-(\S+)$/.exec(base)
-    if (width) add(widths, condition, width[1], 1, dimensionSourceOrder(width[1]))
+    if (width && !hasInvalidMathSemicolon(width[1])) {
+      add(widths, condition, width[1], 1, dimensionSourceOrder(width[1]))
+    }
     const height = /^h-(\S+)$/.exec(base)
-    if (height) add(heights, condition, height[1], 1, dimensionSourceOrder(height[1]))
+    if (height && !hasInvalidMathSemicolon(height[1])) {
+      add(heights, condition, height[1], 1, dimensionSourceOrder(height[1]))
+    }
     const aspect = /^aspect-(\S+)$/.exec(base)
     if (aspect) add(aspects, condition, aspectKind(aspect[1]))
     if (base === 'animate-spin' || base === 'animate-ping' || base === 'pf-animate-spin') {

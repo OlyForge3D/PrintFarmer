@@ -23,6 +23,18 @@ const REACT_APP_ROOT = resolve(TEST_DIR, '../../..');
 // or shadow utility in any state.
 // ---------------------------------------------------------------------------
 const BUTTON_SOURCE = resolve(REACT_APP_ROOT, 'src/common/components/ui/Button.tsx');
+const ALL_VARIANTS = [
+  'primary',
+  'secondary',
+  'danger',
+  'subtle',
+  'ghost',
+  'success',
+  'tab',
+  'toggle',
+  'link',
+  'unstyled',
+] as const;
 const BARE_VARIANTS = ['ghost', 'subtle', 'tab', 'toggle', 'link'] as const;
 
 function readVariantClasses(source: string): Map<string, string> {
@@ -122,6 +134,78 @@ function paintUtilities(classes: string): string[] {
     );
   });
 }
+
+function validateButtonShadowSource(source: string): string[] {
+  const violations: string[] = [];
+  const entries = readVariantClasses(source);
+  const sharedClassStrings = [
+    ['base styles', source.match(/applyBaseStyles\s*&&\s*'([^']*)'/)],
+    ['ring offset', source.match(/applyRingOffset\s*&&\s*'([^']*)'/)],
+  ] as const;
+
+  for (const [label, match] of sharedClassStrings) {
+    if (!match) {
+      violations.push(`Button shared ${label} class string was not found`);
+      continue;
+    }
+
+    const shadows = paintUtilities(match[1]).filter((token) =>
+      bareUtility(token).startsWith('shadow'),
+    );
+    if (shadows.length > 0) {
+      violations.push(
+        `Button shared base declares ${shadows.join(', ')} in @layer utilities; ` +
+          'move the default shadow to @layer components in styles/controls.css',
+      );
+    }
+  }
+
+  for (const variant of ALL_VARIANTS) {
+    if (!entries.has(variant)) {
+      violations.push(`Button variant '${variant}' could not be parsed from variantClasses`);
+      continue;
+    }
+
+    const shadows = paintUtilities(entries.get(variant) ?? '').filter((token) =>
+      bareUtility(token).startsWith('shadow'),
+    );
+    if (shadows.length > 0) {
+      violations.push(
+        `Button variant '${variant}' declares ${shadows.join(', ')} in @layer utilities; ` +
+          'caller shadow classes would depend on utility source order',
+      );
+    }
+  }
+
+  return violations;
+}
+
+describe('Button shadow source contract (#1127)', () => {
+  const source = readFileSync(BUTTON_SOURCE, 'utf8');
+
+  it('keeps the shared base and every variant free of shadow utilities', () => {
+    const violations = validateButtonShadowSource(source);
+    expect(violations, violations.join('\n')).toEqual([]);
+  });
+
+  it('fails actionably when the shared base shadow utility is reintroduced', () => {
+    const mutant = source.replace(
+      "'font-medium inline-flex",
+      "'shadow-xs font-medium inline-flex",
+    );
+    expect(mutant, 'falsification mutation must change Button.tsx').not.toBe(source);
+
+    const violations = validateButtonShadowSource(mutant);
+    expect(
+      violations.some(
+        (violation) =>
+          violation.includes('Button shared base declares shadow-xs') &&
+          violation.includes('@layer components'),
+      ),
+      violations.join('\n'),
+    ).toBe(true);
+  });
+});
 
 describe('Button variant map — bare variants own no paint (#1102)', () => {
   const entries = readVariantClasses(readFileSync(BUTTON_SOURCE, 'utf8'));

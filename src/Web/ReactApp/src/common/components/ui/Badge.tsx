@@ -85,9 +85,7 @@ export const Badge: React.FC<BadgeProps> = ({
   // DESIGN-LANGUAGE "Badges / Status Pills": status pills are --pf-radius-xs,
   // tag chips are fully round. Tag chips declare the waiver here rather than at
   // the call site, because the call site cannot: this component does not spread
-  // arbitrary DOM props. That is also why ten existing tag chips still sign the
-  // waiver by hand — they need `style`, ARIA, `title` or `onClick`, none of
-  // which this closed prop set accepts. Raised by Vasquez; tracked in #1076.
+  // arbitrary DOM props.
   const isTag = shape === 'tag';
 
   return (

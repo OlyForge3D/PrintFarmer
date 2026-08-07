@@ -374,7 +374,12 @@ describe('CompactPrinterCard memoization', () => {
 
   it('reads its tag list from the shared tags fleet query by printer id (#1146 item 1)', () => {
     printerTagsFromFleetMock.mockReturnValue({
-      data: [{ id: 'tag-1', name: 'Production' }],
+      data: [{
+        id: 'tag-1',
+        name: 'Production',
+        color: '#ffff00',
+        description: 'Production-ready printer',
+      }],
       isPending: false,
       isError: false,
       error: null,
@@ -389,7 +394,10 @@ describe('CompactPrinterCard memoization', () => {
     );
 
     expect(printerTagsFromFleetMock).toHaveBeenCalledWith('printer-1');
-    expect(screen.getByText('Production')).toBeInTheDocument();
+    const tag = screen.getByText('Production').closest('[data-pf-radius="full"]');
+    expect(tag).toHaveClass('bg-black/70', 'text-white');
+    expect(tag).toHaveStyle({ borderColor: '#ffff00' });
+    expect(tag).toHaveAttribute('title', 'Production-ready printer');
   });
 
   it('renders no tag pills when the fleet query has no tags for this printer (empty-tag behavior)', () => {

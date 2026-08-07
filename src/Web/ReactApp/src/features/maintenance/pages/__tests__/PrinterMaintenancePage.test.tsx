@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -60,6 +60,12 @@ vi.mock('@/common/components/PageTemplate', () => ({
 import { apiClient } from '@/services/api';
 import { maintenanceService } from '@/services/maintenanceService';
 import { maintenancePlanService } from '@/services/maintenancePlanService';
+
+let useNavigate: typeof import('react-router')['useNavigate'];
+
+beforeAll(async () => {
+  ({ useNavigate } = await import('react-router'));
+}, 60_000);
 
 const printerId = 'printer-multi';
 const printer = { id: printerId, name: 'Voron 2.4' };
@@ -758,8 +764,6 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
     });
-    const { MemoryRouter, Routes, Route, useNavigate } = await import('react-router');
-
     function Harness() {
       const nav = useNavigate();
       return (
@@ -869,8 +873,6 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     const queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false, staleTime: 0 } },
     });
-    const { MemoryRouter, Routes, Route, useNavigate } = await import('react-router');
-
     function Harness() {
       const nav = useNavigate();
       return (

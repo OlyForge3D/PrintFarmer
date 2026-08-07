@@ -83,7 +83,7 @@ export const Slider: React.FC<SliderProps> = ({
         className
       )}
       style={{
-        background: `linear-gradient(to right, var(--color-pf-primary) 0%, var(--color-pf-primary) ${percentage}%, var(--color-pf-surface) ${percentage}%, var(--color-pf-surface) 100%)`,
+        background: `linear-gradient(to right, var(--pf-accent) 0%, var(--pf-accent) ${percentage}%, var(--pf-bg-2) ${percentage}%, var(--pf-bg-2) 100%)`,
       }}
     />
   );

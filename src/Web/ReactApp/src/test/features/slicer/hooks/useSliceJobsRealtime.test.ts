@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
@@ -43,6 +43,13 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({ user: { id: 'user-123' } }),
 }));
 
+let useSliceJobsRealtime:
+  typeof import('@/features/slicer/hooks/useSliceJobsRealtime')['useSliceJobsRealtime'];
+
+beforeAll(async () => {
+  ({ useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime'));
+}, 60_000);
+
 function makeJobResponse(overrides: Partial<SliceJobStatusResponse> = {}): SliceJobStatusResponse {
   return {
     id: 'job-1',
@@ -83,7 +90,6 @@ describe('useSliceJobsRealtime', () => {
   });
 
   it('joins user group on mount', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
     const { wrapper } = createWrapper();
 
     renderHook(() => useSliceJobsRealtime(), { wrapper });
@@ -96,7 +102,6 @@ describe('useSliceJobsRealtime', () => {
   });
 
   it('updates cache when a progress event arrives', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
     const { queryClient, wrapper } = createWrapper();
     const existingJobs = [makeJobResponse({ id: 'job-1', progressPercent: 10 })];
     queryClient.setQueryData(['slice-jobs'], existingJobs);
@@ -122,7 +127,6 @@ describe('useSliceJobsRealtime', () => {
   });
 
   it('updates cache on job completion', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
     const { queryClient, wrapper } = createWrapper();
     queryClient.setQueryData(['slice-jobs'], [
       makeJobResponse({ id: 'job-1', status: 'Processing', progressPercent: 80 }),
@@ -150,7 +154,6 @@ describe('useSliceJobsRealtime', () => {
   });
 
   it('invalidates query for unknown job IDs', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
     const { queryClient, wrapper } = createWrapper();
     queryClient.setQueryData(['slice-jobs'], [makeJobResponse({ id: 'job-1' })]);
     const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -169,7 +172,6 @@ describe('useSliceJobsRealtime', () => {
   });
 
   it('leaves user group on unmount', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
     const { wrapper } = createWrapper();
 
     const { unmount } = renderHook(() => useSliceJobsRealtime(), { wrapper });
@@ -183,8 +185,7 @@ describe('useSliceJobsRealtime', () => {
     expect(mockState.leaveUserGroup).toHaveBeenCalledWith('user-123');
   });
 
-  it('does not connect when disabled', async () => {
-    const { useSliceJobsRealtime } = await import('@/features/slicer/hooks/useSliceJobsRealtime');
+  it('does not connect when disabled', () => {
     const { wrapper } = createWrapper();
 
     renderHook(() => useSliceJobsRealtime({ enabled: false }), { wrapper });

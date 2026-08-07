@@ -32,6 +32,27 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // Unresolvable arbitrary values are never guessed at.
     { code: '<div className="rounded-[var(--pf-radius-md)]" />' },
     { code: '<div className="rounded-[calc(2px+2px)]" />' },
+    // CSS if() conditions are not statically knowable. Both spellings render a
+    // square through Tailwind's size utility, so opacity must not condemn them.
+    {
+      code: '<div className="size-[if(style(--x:yes):16px;else:16px)] rounded-full" />',
+    },
+    { code: '<div className="size-[if(style(--x:yes):16px)] rounded-full" />' },
+    { code: '<div className="size-[var(--x,16px)] rounded-full" />' },
+    // The nearest enclosing function owns semicolon grammar. Branch separators
+    // inside if() remain valid even when the conditional is nested in calc().
+    {
+      code: '<div className="size-[calc(if(style(--x:yes):16px;else:16px))] rounded-full" />',
+    },
+    {
+      code: '<div className="size-[calc((if(style(--x:yes):16px;else:16px)))] rounded-full" />',
+    },
+    {
+      code: '<div className="w-[if(style(--x:yes):16px;else:8px)] h-8 rounded-full" />',
+    },
+    {
+      code: '<div className="h-[if(style(--x:yes):16px;else:8px)] w-8 rounded-full" />',
+    },
 
     // Provably circular elements keep rounded-full with no annotation.
     { code: '<span className="w-2 h-2 rounded-full bg-pf-error" />' },
@@ -260,6 +281,69 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output: '<div className="px-2 py-0.5 text-xs rounded-lg bg-pf-bg-2" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Semicolons are invalid inside CSS math calls, so this size declaration is
+    // dropped and cannot prove that rounded-full applies to a circle.
+    {
+      code: '<div className="size-[calc(1px+2px;3px)] rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="size-[calc(1px+2px;3px)] rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="size-[calc((1px+2px);3px)] rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="size-[calc((1px+2px);3px)] rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="size-[if(style(--x:yes):calc(1px;2px);else:16px)] rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output:
+                '<div className="size-[if(style(--x:yes):calc(1px;2px);else:16px)] rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="w-[min(1px;2px)] h-8 rounded-full" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="w-[min(1px;2px)] h-8 rounded-lg" />',
             },
           ],
         },

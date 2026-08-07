@@ -11,6 +11,8 @@
 @import './design-system/themes/voron.css';
 @import './design-system/themes/farm.css';
 @import './design-system/themes/forge.css';
+/* Must remain unlayered and last: print values override every selectable theme. */
+@import './styles/print.css';
 
 @theme {
   /* PrintFarmer Colors — primary backgrounds */
@@ -68,13 +70,9 @@
   --color-pf-link: var(--pf-link);
   --color-pf-progress-track: var(--pf-progress-track);
   --color-pf-progress-fill: var(--pf-progress-fill);
-  /* Mapped so the translucent row-hover overlay can be written as a normal
-     utility (`hover:bg-pf-hover-overlay`) instead of the arbitrary value
-     `hover:bg-[var(--pf-hover-overlay)]`. Arbitrary values are invisible to the
-     dead-utility scan in AdminThemeSafety.test.ts, so every site written that
-     way sits outside the ratchet -- documenting that blind spot does not close
-     it. Declared by all seven themes; deliberately absent from base.css, which
-     declares no surface colours. */
+  /* Keep the ordinary utility for readability. AdminThemeSafety also resolves
+     arbitrary-value and direct var() references, so either spelling remains
+     inside the dead-token ratchet. */
   --color-pf-hover-overlay: var(--pf-hover-overlay);
 
   /* Status colors */

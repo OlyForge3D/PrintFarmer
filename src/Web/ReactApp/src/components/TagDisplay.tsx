@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button } from '@/common/components/ui/Button';
+import { TagChip } from '@/common/components/ui/TagChip';
 import { TagDto } from '../services/tagService';
 
 export interface TagDisplayProps {
@@ -39,74 +39,52 @@ export const TagDisplay: React.FC<TagDisplayProps> = ({
   className = '',
   disabled = false,
 }) => {
-  const handleRemoveClick = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onRemove?.(tag.id);
-  };
+  const statusLabel = `Tag: ${tag.name}${tag.description ? ` - ${tag.description}` : ''}`;
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !disabled) {
-      if (e.ctrlKey || e.metaKey) {
-        // Ctrl/Cmd+Enter to remove
-        onRemove?.(tag.id);
-      } else {
-        // Enter to click
-        onClick?.(tag);
-      }
-    } else if (e.key === 'Delete' && showRemoveButton && !disabled) {
-      onRemove?.(tag.id);
-    }
-  };
+  if (showRemoveButton) {
+    return (
+      <TagChip
+        mode="removable"
+        label={tag.name}
+        color={tag.color || '#6366f1'}
+        size="md"
+        className={className}
+        title={tag.description}
+        disabled={disabled}
+        ariaLabel={statusLabel}
+        onClick={onClick ? () => onClick(tag) : undefined}
+        onRemove={() => onRemove?.(tag.id)}
+        removeLabel={`Remove tag ${tag.name}`}
+      />
+    );
+  }
 
-  const handleRemoveKeyDown = (e: React.KeyboardEvent) => {
-    e.stopPropagation();
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      onRemove?.(tag.id);
-    }
-  };
-
-  const tagStyles: React.CSSProperties = {
-    backgroundColor: tag.color || '#6366f1',
-    color: 'white',
-  };
+  if (onClick) {
+    return (
+      <TagChip
+        mode="action"
+        label={tag.name}
+        color={tag.color || '#6366f1'}
+        size="md"
+        className={className}
+        title={tag.description}
+        disabled={disabled}
+        ariaLabel={statusLabel}
+        onClick={() => onClick(tag)}
+      />
+    );
+  }
 
   return (
-    <div
-      data-pf-radius="full"
-      className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium transition-all duration-200 ${
-        disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-md cursor-default'
-      } ${className}`}
-      style={tagStyles}
-      role="status"
-      aria-label={`Tag: ${tag.name}${tag.description ? ` - ${tag.description}` : ''}`}
+    <TagChip
+      label={tag.name}
+      color={tag.color || '#6366f1'}
+      size="md"
+      className={className}
       title={tag.description}
-    >
-      <span
-        onClick={() => !disabled && onClick?.(tag)}
-        onKeyDown={handleKeyDown}
-        role="button"
-        tabIndex={disabled ? -1 : 0}
-        className={`${!disabled && onClick ? 'cursor-pointer hover:underline' : ''}`}
-      >
-        {tag.name}
-      </span>
-
-      {showRemoveButton && (
-        <Button
-          onClick={handleRemoveClick}
-          onKeyDown={handleRemoveKeyDown}
-          className="ml-1 inline-flex items-center justify-center w-4 h-4 rounded-full enabled:hover:bg-pf-bg-1 transition-colors duration-150"
-          aria-label={`Remove tag ${tag.name}`}
-          title={`Remove ${tag.name}`}
-          disabled={disabled}
-          variant="subtle"
-          size="sm"
-        >
-          <span className="text-xs font-bold leading-none">×</span>
-        </Button>
-      )}
-    </div>
+      disabled={disabled}
+      ariaLabel={statusLabel}
+    />
   );
 };
 

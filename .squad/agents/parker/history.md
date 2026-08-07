@@ -186,3 +186,10 @@ When asked for `git branch -d` only, never silently escalate to `-D`. If `-d` re
 **Orchestration Log:** .squad/orchestration-log/2026-05-31T225752-parker.md
 
 Status: Backlog item cleared. Beta trigger gated on PR stack merge.
+
+## 2026-08-07T03:23:06.930-07:00 — Issue #1135 root Squad quarantine inventory
+
+- Inventoried 20 current PrintFarmer worktrees using Git worktree metadata plus app session mapping; only `D:\s\pfarm1\decisions\inbox\` existed among the five named quarantined root paths.
+- The branch-matching main-checkout session had no active session ID and was classified inactive. Its 20 Markdown records had no same-name canonical collisions, no exact duplicates, and no local secret-pattern flags; recovery remains coordinator-owned because all are unique.
+- Retained `/decisions/`; removed absent `/decisions.md`, `/agents/`, `/orchestration-log/`, and `/log/`; left out-of-scope `/memory/` unchanged. Canonical `.squad/decisions.md` and Parker history remain tracked, while canonical generated logs keep their separate explicit ignores.
+- Focused state-root tests passed 2/2. Bishop, Hicks, and Vasquez reached joint consensus APPROVE on exact SHA `429283d3870cd1553224a2f6e101547d657055b3`. PR #1204 targets `development` and closes #1135.

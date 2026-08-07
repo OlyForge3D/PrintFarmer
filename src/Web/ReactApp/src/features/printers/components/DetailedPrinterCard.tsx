@@ -470,6 +470,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
   return (
     <article
+      data-pf-card
       className="pf-detailed-printer-card relative rounded-lg border border-white/10 bg-pf-card p-3 shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
       style={{ transform: 'translateZ(0)' }}
     >

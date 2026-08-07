@@ -9,7 +9,7 @@ import {
   MoreVerticalIcon,
   TagIcon,
 } from '@/common/components/icons/MdiIcons';
-import { Button } from '@/common/components/ui';
+import { Button, TagChip } from '@/common/components/ui';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
@@ -211,6 +211,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 
   return (
     <article
+      data-pf-card
       className="group relative rounded-lg border border-white/10 bg-pf-card shadow-lg w-full transition-all duration-200 hover:-translate-y-0.5 hover:border-pf-accent/40 hover:shadow-2xl motion-reduce:transition-none motion-reduce:hover:-translate-y-0"
       style={{ transform: 'translateZ(0)' }}
     >
@@ -267,13 +268,14 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
               <BedTypeBadge name={printer.bedTypeName} color={printer.bedTypeColor} />
             )}
             {printerTags.map(tag => (
-              <span
+              <TagChip
                 key={tag.id}
-                data-pf-radius="full"
-                className="text-xs px-1.5 py-0.5 rounded-full bg-black/30 border border-white/10 text-pf-text-secondary"
-              >
-                {tag.name}
-              </span>
+                label={tag.name}
+                color={tag.color}
+                appearance="overlay"
+                title={tag.description}
+                truncate
+              />
             ))}
           </div>
         )}

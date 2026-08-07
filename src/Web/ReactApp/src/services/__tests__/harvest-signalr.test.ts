@@ -99,6 +99,7 @@ describe('SignalRService (harvest) settings reload on authentication', () => {
   };
 
   beforeEach(() => {
+    // Re-evaluate the singleton after each mock setup; per-test isolation is intentional.
     vi.resetModules();
     vi.clearAllMocks();
     signalRTestState.getSettings.mockReset();

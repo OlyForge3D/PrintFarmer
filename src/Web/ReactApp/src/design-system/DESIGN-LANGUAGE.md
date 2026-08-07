@@ -128,9 +128,11 @@ exceptions listed below.
 
 **The sanctioned pill exceptions**, and nothing else:
 
-- **Tag chips** — user-authored labels from the tag system. Use `<Badge shape="tag">`, which
-  carries the radius and signs the waiver for you. A *status* pill is not a tag chip: status is
-  a fixed vocabulary the app owns, and it takes `--pf-radius-xs`.
+- **Tag chips** — user-authored labels from the tag system. Use `TagChip`, whose discriminated
+  display, action, and removable modes carry the radius waiver, normalized sizing, custom-color
+  contrast, and keyboard semantics. Use `<Badge shape="tag">` only for simple legacy labels that
+  do not need tag-system color or interaction. A *status* pill is not a tag chip: status is a fixed
+  vocabulary the app owns, and it takes `--pf-radius-xs`.
 - **Progress bars** — track and fill both, marked `data-pf-progress-track` / `-fill`.
 - **Switch and toggle tracks**, including their travelling thumb.
 - **Fixed-dimension count badges** — a notification counter drawn at `h-4 min-w-4` or
@@ -606,6 +608,8 @@ Structural specifications for the canonical components. Visual values come from 
 - Typography: `text-2xs`, weight 600, `uppercase`, `letter-spacing: 0.04em`.
 - Always uses the `{bg, text, border}` triple for its semantic role.
 - Icon prefix for status: `●` (online), `○` (offline), `▶` (printing), `❚❚` (paused), `!` (error). **Never color-only.**
+- Tag-system labels use `TagChip`: `mode="display"` (default), `mode="action"`, or
+  `mode="removable"`. Its `label` is plain text so interactive children cannot be nested.
 
 ### Modals
 
@@ -759,9 +763,14 @@ one thing a user needs when four sections save and one does not.
 ### Colour
 
 The admin surface has no hardcoded colours. No hex, no `rgba()`, no Tailwind palette classes
-(`bg-gray-500` and friends) — only `--pf-*` tokens, so all seven themes stay coherent. The
-theme-safety test asserts both halves of this: the scan for literals, and token parity across
-`dark`, `light`, `matrix`, `blueprint`, `ratos`, `voron` and `farm`.
+(`bg-gray-500` and friends) — only `--pf-*` tokens, so all eight themes stay coherent. The
+theme-safety test asserts the scan for literals, token parity across `dark`, `light`, `matrix`,
+`blueprint`, `ratos`, `voron`, `farm`, and `forge`, and resolution of ordinary utilities, direct
+`var()` references, and arbitrary-value classes through aliases independently in every theme. A
+valid declaration in one theme cannot mask a missing token or alias cycle in another. The scan
+excludes declarations and permits runtime-assigned raw properties only through exact, documented
+site allowances. Dynamic property names split across template expressions cannot be resolved
+statically and must use one of those documented bridges.
 
 ---
 
@@ -1141,6 +1150,11 @@ The Phase 2 implementer should be aware of these deltas between the existing the
 4. **New tokens**. `--pf-space-*`, `--pf-radius-*`, `--pf-shadow-*`, `--pf-duration-*`, `--pf-ease-*`, `--pf-z-*`, `--pf-glow-*`, `--pf-modal-bg`, status triples for `printing`/`paused`/`error`/`idle`, `--pf-text-inverse`, `--pf-text-on-accent`, `--pf-accent-fg`, `--pf-selection-*`, `--pf-validation-warning-*`, and the full `info` semantic group are all new.
 5. **`forge` and `github-dark` themes**. ✅ Resolved. `github-dark` and `printfarmer-dark` were removed and now migrate to `dark`; both had been rendering the `dark` palette anyway, since their stylesheets sat in a cascade layer they could never win from. `forge` was migrated into `src/design-system/themes/forge.css` as a first-class supported theme with the full token contract — unlike the other two it carried real visual identity (heading and progress glows) that did render.
 6. **Default theme**. ✅ Resolved. The default is `dark`. There is no bare-`:root` default any more — `index.html` always sets an explicit `data-theme`, which is what made the old default so hard to reason about.
+7. **Print is an output theme**. `src/styles/print.css` is intentionally imported
+   unlayered after every selectable theme. Its light, ink-friendly token palette
+   must remain last so print media overrides theme colors. Use
+   `data-print-hidden` only for unequivocal application chrome and
+   `data-pf-card` for conservative card pagination.
 
 ---
 
