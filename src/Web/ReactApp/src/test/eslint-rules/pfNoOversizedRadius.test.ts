@@ -550,6 +550,16 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       errors: [{ messageId: 'oversized' }],
     },
     {
+      code: '<div className="&copy; rounded-2xl" />',
+      output: '<div className="&copy; rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="&#128512; rounded-2xl" />',
+      output: '<div className="&#128512; rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
       code: '<div className={`a\r\nrounded-2xl`} />',
       output: '<div className={`a\r\nrounded-lg`} />',
       errors: [

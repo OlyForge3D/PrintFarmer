@@ -763,7 +763,7 @@ function jsxRawOffsetAt(raw, cookedOffset) {
       continue
     }
 
-    const entity = /^&(?:#(\d+)|#x([0-9a-f]+)|(amp|apos|gt|lt|nbsp|quot));/i.exec(
+    const entity = /^&(?:#(\d+)|#x([0-9a-f]+)|([a-z][a-z0-9]+));/i.exec(
       raw.slice(rawIndex),
     )
     if (!entity) {
@@ -771,13 +771,8 @@ function jsxRawOffsetAt(raw, cookedOffset) {
       cookedIndex += 1
       continue
     }
-    const point = entity[1]
-      ? Number.parseInt(entity[1], 10)
-      : entity[2]
-        ? Number.parseInt(entity[2], 16)
-        : 0
     rawIndex += entity[0].length
-    cookedIndex += point > 0xffff ? 2 : 1
+    cookedIndex += 1
   }
 
   return cookedIndex === cookedOffset ? rawIndex : -1
