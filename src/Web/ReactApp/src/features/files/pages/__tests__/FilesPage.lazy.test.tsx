@@ -36,7 +36,11 @@ vi.mock('@/features/models3d/components/PrintablesBrowserModal', () => {
 vi.mock('@/features/models3d/components/PrintablesImportModal', () => {
   moduleLoads.printablesImport();
   return {
-    PrintablesImportModal: () => <div role="dialog" aria-label="Printables import mock" />,
+    PrintablesImportModal: ({ onClose }: { onClose: () => void }) => (
+      <div role="dialog" aria-label="Printables import mock">
+        <button type="button" onClick={onClose}>Close import</button>
+      </div>
+    ),
   };
 });
 
@@ -159,6 +163,8 @@ describe('FilesPage lazy interactions', () => {
     await user.click(await screen.findByRole('button', { name: 'Choose Printables model' }));
     expect(await screen.findByRole('dialog', { name: 'Printables import mock' })).toBeInTheDocument();
     expect(moduleLoads.printablesImport).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Close import' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Printables' })).toHaveFocus());
 
     await user.click(screen.getByRole('button', { name: 'Start Harvest' }));
     expect(await screen.findByRole('dialog', { name: 'Harvest wizard mock' })).toBeInTheDocument();

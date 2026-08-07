@@ -487,6 +487,7 @@ export function FilesPage() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showModelUploadModal, setShowModelUploadModal] = useState(false);
   const [showGcodeUploadModal, setShowGcodeUploadModal] = useState(false);
+  const printablesButtonRef = useRef<HTMLButtonElement>(null);
   const [showPrintablesBrowserModal, setShowPrintablesBrowserModal] = useState(false);
   const [showPrintablesImportModal, setShowPrintablesImportModal] = useState(false);
   const [selectedPrintablesUrl, setSelectedPrintablesUrl] = useState<string | null>(null);
@@ -948,6 +949,7 @@ export function FilesPage() {
     <div className="flex flex-wrap items-center gap-2">
       {hasPermission('3d_models', 'create') && (
         <Button
+          ref={printablesButtonRef}
           type="button"
           variant="secondary"
           size="sm"
@@ -1114,6 +1116,7 @@ export function FilesPage() {
           label="printables browser"
           onCancel={() => setShowPrintablesBrowserModal(false)}
           onRetry={PrintablesBrowserModal.retry}
+          restoreFocus={() => printablesButtonRef.current?.focus()}
         >
           <PrintablesBrowserModal
             isOpen={showPrintablesBrowserModal}
@@ -1135,14 +1138,16 @@ export function FilesPage() {
             setSelectedPrintablesUrl(null);
           }}
           onRetry={PrintablesImportModal.retry}
+          restoreFocus={() => printablesButtonRef.current?.focus()}
         >
           <PrintablesImportModal
             isOpen={showPrintablesImportModal}
             initialUrl={selectedPrintablesUrl}
-            onClose={() => {
+            onClose={async () => {
               setShowPrintablesImportModal(false);
               setSelectedPrintablesUrl(null);
-              void handleRefresh();
+              await handleRefresh();
+              printablesButtonRef.current?.focus();
             }}
           />
         </LazyModalBoundary>

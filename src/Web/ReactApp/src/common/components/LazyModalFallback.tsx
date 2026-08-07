@@ -158,6 +158,7 @@ interface LazyModalBoundaryProps {
   label: string;
   onCancel: () => void;
   onRetry: () => void;
+  restoreFocus?: () => void;
 }
 
 export function LazyModalBoundary({
@@ -165,7 +166,9 @@ export function LazyModalBoundary({
   label,
   onCancel,
   onRetry,
+  restoreFocus,
 }: LazyModalBoundaryProps) {
+  const restoreFocusRef = useRef(restoreFocus);
   const previousFocusRef = useRef<HTMLElement | null>(
     typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -173,7 +176,13 @@ export function LazyModalBoundary({
   );
 
   useEffect(() => () => {
-    previousFocusRef.current?.focus();
+    if (restoreFocusRef.current) {
+      restoreFocusRef.current();
+      return;
+    }
+    if (previousFocusRef.current?.isConnected) {
+      previousFocusRef.current.focus();
+    }
   }, []);
 
   return (
