@@ -528,25 +528,73 @@ public sealed class CalibrationGenerationSaga(
             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
         }
 
-        CalibrationPinnedSlicerIdentity? pinned =
-            await _capabilityProbe.FindPinnedWorkerAsync(cancellationToken);
-        if (pinned is null)
+        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
+            .AsNoTracking()
+            .FirstOrDefaultAsync(
+                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
+                cancellationToken);
+        if (snapshot is null)
         {
-            await ScheduleRetryAsync(
+            await FailTerminallyAsync(
+                project,
                 orchestration,
-                CalibrationGenerationProblemCodes.PinnedWorkerUnavailable,
+                CalibrationGenerationProblemCodes.ContextIdentityMissing,
                 [
                     new(
-                        CalibrationGenerationProblemCodes.PinnedWorkerUnavailable,
+                        CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                        "attempt.printerConfigurationSnapshotId",
+                        "The immutable printer configuration snapshot is missing."),
+                ],
+                cancellationToken);
+            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+        }
+
+        if (string.IsNullOrWhiteSpace(snapshot.SlicerVersion))
+        {
+            await FailTerminallyAsync(
+                project,
+                orchestration,
+                CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                [
+                    new(
+                        CalibrationGenerationProblemCodes.ContextIdentityMissing,
+                        "attempt.printerConfigurationSnapshot.slicerVersion",
+                        "The immutable printer configuration snapshot has no slicer version."),
+                ],
+                cancellationToken);
+            return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
+        }
+
+        CalibrationPinnedSlicerIdentity? pinned =
+            await _capabilityProbe.FindPinnedWorkerAsync(snapshot.SlicerVersion, cancellationToken);
+        if (pinned is null)
+        {
+            CalibrationGenerationCapabilityDto capability =
+                await _capabilityProbe.GetCapabilityAsync(cancellationToken);
+            bool unsupportedVersion =
+                capability.UnavailableCode ==
+                CalibrationGenerationProblemCodes.SlicerVersionUnsupported;
+            string unavailableCode = unsupportedVersion
+                ? CalibrationGenerationProblemCodes.SlicerVersionUnsupported
+                : CalibrationGenerationProblemCodes.PinnedWorkerUnavailable;
+            string unavailableMessage = unsupportedVersion
+                ? $"Observed upstream OrcaSlicer version(s) {string.Join(", ", capability.ObservedWorkerVersions)}; configured supported version(s): {string.Join(", ", capability.SupportedSlicerVersions)}."
+                : "No registered worker attests an allow-listed upstream slicer build identity.";
+            await ScheduleRetryAsync(
+                orchestration,
+                unavailableCode,
+                [
+                    new(
+                        unavailableCode,
                         "worker",
-                        "No registered worker attests the pinned upstream slicer build identity."),
+                        unavailableMessage),
                 ],
                 cancellationToken);
             return CalibrationApiResult<CalibrationOrchestrationStatusDto>.Success(Project(orchestration));
         }
 
         CalibrationGenerationResult<CalibrationRunContext> prepared =
-            await PrepareAsync(project, attempt, orchestration, pinned, cancellationToken);
+            await PrepareAsync(project, attempt, orchestration, snapshot, pinned, cancellationToken);
         if (!prepared.IsValid)
         {
             await FailTerminallyAsync(
@@ -715,22 +763,10 @@ public sealed class CalibrationGenerationSaga(
         CalibrationProject project,
         CalibrationAttempt attempt,
         CalibrationOrchestration orchestration,
+        PrinterConfigurationSnapshot snapshot,
         CalibrationPinnedSlicerIdentity pinned,
         CancellationToken cancellationToken)
     {
-        PrinterConfigurationSnapshot? snapshot = await _dbContext.PrinterConfigurationSnapshots
-            .AsNoTracking()
-            .FirstOrDefaultAsync(
-                candidate => candidate.Id == attempt.PrinterConfigurationSnapshotId,
-                cancellationToken);
-        if (snapshot is null)
-        {
-            return CalibrationGenerationResults.Failure<CalibrationRunContext>(
-                CalibrationGenerationProblemCodes.ContextIdentityMissing,
-                "attempt.printerConfigurationSnapshotId",
-                "The immutable printer configuration snapshot is missing.");
-        }
-
         long currentRevision = await _dbContext.Printers
             .AsNoTracking()
             .Where(printer => printer.Id == snapshot.PrinterId)

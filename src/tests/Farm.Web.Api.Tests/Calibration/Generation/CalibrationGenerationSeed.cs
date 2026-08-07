@@ -191,7 +191,7 @@ internal static class CalibrationGenerationSeed
                 FirmwareVersion = "v0.12.0-321",
                 SlicerEngine = CalibrationContractConstants.SlicerEngine,
                 SlicerDistribution = CalibrationContractConstants.SlicerDistribution,
-                SlicerVersion = CalibrationContractConstants.SlicerVersion,
+                SlicerVersion = pinned.Version,
                 SlicerContainerDigest = pinned.ContainerDigest,
                 MachineProfileId = machineProfileId,
                 ExactMachineProfileJson = profileSet.MachineJson,
@@ -273,16 +273,18 @@ internal static class CalibrationGenerationSeed
     /// <summary>Builds the capabilities document an attested pinned worker registers with.</summary>
     /// <param name="containerDigest">Container digest, or <see langword="null"/> to omit it.</param>
     /// <param name="binaryDigest">Binary digest, or <see langword="null"/> to omit it.</param>
+    /// <param name="version">Exact upstream slicer version attested by the worker.</param>
     /// <returns>The capabilities JSON.</returns>
     public static string BuildAttestationJson(
         string? containerDigest = ContainerDigest,
-        string? binaryDigest = BinaryDigest) =>
+        string? binaryDigest = BinaryDigest,
+        string version = CalibrationContractConstants.SlicerVersion) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["capabilities"] = new[] { "orcaslicer", CalibrationContractConstants.UpstreamSlicerCapability },
-            ["engineVersion"] = CalibrationContractConstants.SlicerVersion,
+            ["engineVersion"] = version,
             ["slicerDistribution"] = CalibrationContractConstants.SlicerDistribution,
-            ["slicerVersion"] = CalibrationContractConstants.SlicerVersion,
+            ["slicerVersion"] = version,
             [CalibrationSlicerAttestation.ContainerDigestProperty] = containerDigest,
             [CalibrationSlicerAttestation.BinaryDigestProperty] = binaryDigest,
             ["realBinary"] = true,
@@ -328,7 +330,9 @@ internal static class CalibrationGenerationSeed
                 pinned,
                 importedAsset);
         CalibrationGenerationResult<CalibrationSpecification> compiled =
-            new CalibrationSpecificationCompiler(TimeProvider.System)
+            new CalibrationSpecificationCompiler(
+                TimeProvider.System,
+                new CalibrationSlicerCompatibilityPolicy([pinned.Version]))
                 .Compile(context.Value!, bound.Value!);
         return compiled.Value ?? throw new InvalidOperationException(
             "The seed could not compile a valid calibration specification: " +

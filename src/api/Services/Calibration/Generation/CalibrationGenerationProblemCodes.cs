@@ -32,7 +32,7 @@ public static class CalibrationGenerationProblemCodes
     /// <summary>The slicer distribution is not upstream.</summary>
     public const string SlicerDistributionUnsupported = "slicer_distribution_unsupported";
 
-    /// <summary>The slicer version is not the pinned upstream version.</summary>
+    /// <summary>The slicer version is outside the configured bounded allow-list.</summary>
     public const string SlicerVersionUnsupported = "slicer_version_unsupported";
 
     /// <summary>The authoritative container digest is absent.</summary>
@@ -349,7 +349,7 @@ public static class CalibrationGenerationProblemCodes
     /// <summary>The stored calibration model could not be resolved through authorized storage.</summary>
     public const string ModelStorageUnavailable = "model_storage_unavailable";
 
-    /// <summary>No registered worker attests the pinned upstream slicer identity.</summary>
+    /// <summary>No registered worker attests an allow-listed upstream slicer identity.</summary>
     public const string PinnedWorkerUnavailable = "pinned_worker_unavailable";
 
     /// <summary>The canonical slice submission path is not routable from this process.</summary>

@@ -5,6 +5,7 @@ using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Farm.Web.Api.Services.Calibration.Generation;
 using Farm.Web.Api.Services.Capabilities;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -122,6 +123,12 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = normalizedBody.Should().NotContain("password");
         _ = root.GetProperty("healthyCompatibleWorker").GetProperty("distribution")
             .GetString().Should().Be("upstream");
+        _ = root.GetProperty("healthyCompatibleWorker").GetProperty("versionPolicy")
+            .GetString().Should().Be("allow-list");
+        _ = root.GetProperty("healthyCompatibleWorker").GetProperty("supportedVersions")
+            .EnumerateArray()
+            .Select(value => value.GetString())
+            .Should().Equal(CalibrationContractConstants.SlicerVersion);
     }
 
     [Theory]
@@ -244,9 +251,27 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
             _ = document.RootElement.GetProperty("slicingOperational").GetBoolean().Should().BeFalse();
             _ = document.RootElement.GetProperty("healthyCompatibleWorker")
                 .GetProperty("available").GetBoolean().Should().BeFalse();
-            _ = document.RootElement.GetProperty("unavailableReasons").EnumerateArray()
-                .Select(reason => reason.GetProperty("code").GetString())
-                .Should().Contain("compatible_worker_unavailable");
+            JsonElement worker = document.RootElement.GetProperty("healthyCompatibleWorker");
+            _ = worker.GetProperty("observedVersions").EnumerateArray()
+                .Select(value => value.GetString()).Should().Equal("2.2.0");
+            _ = worker.GetProperty("supportedVersions").EnumerateArray()
+                .Select(value => value.GetString())
+                .Should().Equal(CalibrationContractConstants.SlicerVersion);
+
+            JsonElement[] versionReasons = document.RootElement
+                .GetProperty("unavailableReasons")
+                .EnumerateArray()
+                .Where(reason =>
+                    reason.GetProperty("code").GetString() ==
+                    CalibrationGenerationProblemCodes.SlicerVersionUnsupported)
+                .ToArray();
+            _ = versionReasons.Should().Contain(reason =>
+                reason.GetProperty("feature").GetString() == "slicing");
+            _ = versionReasons.Should().Contain(reason =>
+                reason.GetProperty("feature").GetString() == "calibrationGeneration");
+            _ = versionReasons.Should().OnlyContain(reason =>
+                reason.GetProperty("message").GetString() ==
+                $"Observed upstream OrcaSlicer version(s) 2.2.0; configured supported version(s): {CalibrationContractConstants.SlicerVersion}.");
         }
     }
 

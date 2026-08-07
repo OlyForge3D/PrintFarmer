@@ -1290,6 +1290,32 @@
       }
     },
     {
+      "id": "calibration-slicer-compatibility-policy",
+      "destinationPath": "src/infra/Calibration/CalibrationSlicerCompatibilityPolicy.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1061"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1061 bounded slicer compatibility allow-list; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-06",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-compatibility-policy-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/Generation/CalibrationSlicerCompatibilityPolicyTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1061"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering the issue #1061 bounded slicer compatibility policy; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-06",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-slicer-lease-provenance-postgresql",
       "destinationPath": "src/migrations/Farm.Slicer.Migrations.PostgreSQL/Migrations/20260730231413_SlicerInitialV2.cs",
       "referenceUrls": [

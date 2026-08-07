@@ -1,4 +1,6 @@
-﻿namespace Farm.Web.Api.Services.Calibration.Generation;
+﻿using Farm.Infrastructure.PrinterCalibration;
+
+namespace Farm.Web.Api.Services.Calibration.Generation;
 
 /// <summary>
 /// Compiles typed method input plus an authoritative context into a canonical, hashed specification.
@@ -45,7 +47,10 @@ public interface ICalibrationSpecificationCompiler
 
 /// <summary>Default <see cref="ICalibrationSpecificationCompiler"/>.</summary>
 /// <param name="timeProvider">Clock used to evaluate snapshot freshness.</param>
-public sealed class CalibrationSpecificationCompiler(TimeProvider timeProvider)
+/// <param name="compatibilityPolicy">Configured upstream OrcaSlicer allow-list.</param>
+public sealed class CalibrationSpecificationCompiler(
+    TimeProvider timeProvider,
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
     : ICalibrationSpecificationCompiler
 {
     /// <summary>The specification schema version emitted by this build.</summary>
@@ -76,6 +81,9 @@ public sealed class CalibrationSpecificationCompiler(TimeProvider timeProvider)
     private readonly TimeProvider _timeProvider = timeProvider ??
         throw new ArgumentNullException(nameof(timeProvider));
 
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <inheritdoc/>
     public CalibrationGenerationResult<CalibrationSpecification> Compile(
         CalibrationGenerationContext context,
@@ -87,7 +95,10 @@ public sealed class CalibrationSpecificationCompiler(TimeProvider timeProvider)
         List<CalibrationGenerationProblem> problems = [];
         ValidateDefinitionVersion(options, problems);
         ValidateIdentity(context, problems);
-        CalibrationSupportedTupleValidator.Validate(context.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            context.Compatibility,
+            problems,
+            _compatibilityPolicy);
         ValidateFirmware(context, problems);
         ValidateFreshness(context, problems);
         ValidateProfiles(context, problems);
@@ -221,7 +232,10 @@ public sealed class CalibrationSpecificationCompiler(TimeProvider timeProvider)
             "filament",
             problems);
 
-        CalibrationSupportedTupleValidator.Validate(context.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            context.Compatibility,
+            problems,
+            _compatibilityPolicy);
         ValidateFreshness(context, problems);
         return problems;
     }

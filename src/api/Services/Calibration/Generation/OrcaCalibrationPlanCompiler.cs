@@ -1,6 +1,7 @@
 ﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure.PrinterCalibration;
 
 namespace Farm.Web.Api.Services.Calibration.Generation;
 
@@ -584,8 +585,13 @@ public static class OrcaCalibrationPlanManifestSchema
 }
 
 /// <summary>Default <see cref="IOrcaCalibrationPlanCompiler"/>.</summary>
-public sealed class OrcaCalibrationPlanCompiler : IOrcaCalibrationPlanCompiler
+public sealed class OrcaCalibrationPlanCompiler(
+    CalibrationSlicerCompatibilityPolicy? compatibilityPolicy = null)
+    : IOrcaCalibrationPlanCompiler
 {
+    private readonly CalibrationSlicerCompatibilityPolicy _compatibilityPolicy =
+        compatibilityPolicy ?? CalibrationSlicerCompatibilityPolicy.Default;
+
     /// <summary>The plan manifest schema version emitted by this build.</summary>
     public const string ManifestSchemaVersion = OrcaCalibrationPlanManifestSchema.Current;
 
@@ -640,7 +646,10 @@ public sealed class OrcaCalibrationPlanCompiler : IOrcaCalibrationPlanCompiler
         CalibrationSpecificationDocument document = specification.Document;
         List<CalibrationGenerationProblem> problems = [];
 
-        CalibrationSupportedTupleValidator.Validate(document.Compatibility, problems);
+        CalibrationSupportedTupleValidator.Validate(
+            document.Compatibility,
+            problems,
+            _compatibilityPolicy);
 
         string recomputedSpecification =
             CalibrationCanonicalJson.ComputeTextSha256(specification.CanonicalJson);
