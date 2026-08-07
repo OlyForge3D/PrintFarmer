@@ -76,7 +76,8 @@ function hasWord(text, word) {
 // `titlePriority` is reserved for explicit ownership intent and applies whenever
 // its concept matches in a title. `prefixPriority` applies only when the title
 // starts with one of the concept's `priorityPrefixes`. Priority is compared
-// before score so generic subject vocabulary cannot outvote explicit intent.
+// before score. Conventional ownership prefixes are the strongest signal,
+// followed by explicit documentation artifacts, then iOS implementation terms.
 //
 // Deliberately absent: `bug` and `fix`. They describe the *type* of an issue,
 // not its domain — every domain gets bug reports — and treating them as
@@ -141,7 +142,7 @@ const DOMAINS = [
         id: 'test',
         weight: 2,
         titleOnly: true,
-        prefixPriority: 2,
+        prefixPriority: 4,
         priorityPrefixes: ['test:', 'tests:', 'testing:'],
         forms: ['test', 'tests', 'testing'],
       },
@@ -160,7 +161,7 @@ const DOMAINS = [
       {
         id: 'qa',
         weight: 2,
-        prefixPriority: 2,
+        prefixPriority: 4,
         priorityPrefixes: ['qa:'],
         forms: ['qa'],
       },
@@ -247,7 +248,7 @@ const DOMAINS = [
         id: 'docs-intent',
         weight: 5,
         titleOnly: true,
-        titlePriority: 3,
+        titlePriority: 4,
         titlePrefixes: ['docs:', 'doc:', 'documentation:'],
         forms: [],
       },

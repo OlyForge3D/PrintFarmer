@@ -400,6 +400,22 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
       domain: 'backend',
       member: '🔧 Lambert',
     },
+    {
+      issue: {
+        title: 'test: add xunit coverage for the changelog generator',
+        body: 'Validate the generated artifact.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+    {
+      issue: {
+        title: 'QA: verify the installation guide on a clean host',
+        body: 'Run the acceptance pass.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
   ];
 
   for (const { issue, domain, member } of cases) {
