@@ -5864,7 +5864,7 @@ ensure_tls_certificates() {
         temp_dir="$(mktemp -d)"
         local ca_config="$temp_dir/ca.cnf"
         local server_config="$temp_dir/server.cnf"
-        trap "rm -rf -- '$temp_dir'; trap - RETURN" RETURN
+        trap 'rm -rf -- "$temp_dir"; trap - RETURN' RETURN
 
         local san_entries=("localhost" "printfarmer.local" "127.0.0.1")
         local lan_ip=""

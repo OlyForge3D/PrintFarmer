@@ -109,7 +109,7 @@ run_validator() {
 }
 
 strip_ansi() {
-    sed -r $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1"
+    sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' "$1"
 }
 
 clean_output="$TMP_ROOT/clean.out"
@@ -149,7 +149,10 @@ pass "Single broken assertion exits non-zero and suppresses success output"
 
 # Restore the first control, then break two independent assertions to prove
 # failures accumulate instead of stopping after or forgetting the first.
-sed -i '/PrusaSlicer negative control/d' "$mock_repo/scripts/deploy-docker.sh"
+restored_deploy_script="$TMP_ROOT/deploy-docker-restored.sh"
+sed '/PrusaSlicer negative control/d' "$mock_repo/scripts/deploy-docker.sh" > "$restored_deploy_script"
+mv "$restored_deploy_script" "$mock_repo/scripts/deploy-docker.sh"
+chmod +x "$mock_repo/scripts/deploy-docker.sh"
 printf 'redis:\n' > "$mock_repo/scripts/docker/compose-templates/base.yml"
 printf '\n# PrusaSlicer accumulation control\n' >> "$mock_repo/scripts/deploy-docker.sh"
 
