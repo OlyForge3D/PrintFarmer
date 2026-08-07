@@ -32,7 +32,8 @@ describe('print stylesheet contract (#1126)', () => {
   });
 
   it('defines a light semantic print palette with only the required tour overrides', () => {
-    expect(printSource).toContain('@media print');
+    const uncommentedSource = printSource.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    expect(uncommentedSource).toMatch(/^@media\s+print\s*\{/);
     expect(printSource).toMatch(/:root\s*\{[\s\S]*color-scheme:\s*light/);
     const importantProperties = [...printSource.matchAll(/([\w-]+):[^;]+!important/g)]
       .map((match) => match[1]);

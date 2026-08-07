@@ -171,6 +171,7 @@ describe('theme registry', () => {
     // trap that hid three themes. Plain rules there are not dead, which makes
     // this even harder to spot by eye, so ban the selector outright.
     const offenders: string[] = [];
+    const mediaOnlyStylesheets = new Set(['src/styles/print.css']);
     const walk = (dir: string) => {
       if (!fs.existsSync(dir)) return;
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -184,12 +185,20 @@ describe('theme registry', () => {
         // Ignore prose; only flag real selectors.
         const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '');
         if (/\[data-theme\s*[=~|]/.test(stripped)) {
-          offenders.push(path.relative(appRoot, full).replace(/\\/g, '/'));
+          const relativePath = path.relative(appRoot, full).replace(/\\/g, '/');
+          if (!mediaOnlyStylesheets.has(relativePath)) {
+            offenders.push(relativePath);
+          }
         }
       }
     };
     walk(path.join(appRoot, 'src/styles'));
 
     expect(offenders).toEqual([]);
+    for (const stylesheet of mediaOnlyStylesheets) {
+      const text = fs.readFileSync(path.join(appRoot, stylesheet), 'utf8');
+      const stripped = text.replace(/\/\*[\s\S]*?\*\//g, '').trim();
+      expect(stripped, `${stylesheet} must remain print-only`).toMatch(/^@media\s+print\s*\{/);
+    }
   });
 });

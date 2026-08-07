@@ -266,6 +266,7 @@ export function cssFacts(sources: readonly SourceText[]): CssFacts {
 }
 
 const THEME_SOURCE = /^design-system\/themes\/([^/]+\.css)$/;
+const NON_SCREEN_STYLESHEETS = new Set(['styles/print.css']);
 
 /**
  * Builds one resolution graph per selectable theme. Shared CSS (including
@@ -278,7 +279,13 @@ export function cssFactsByTheme(sources: readonly SourceText[]): Map<string, Css
     (source) => THEME_SOURCE.test(source.file) && !source.file.endsWith('/base.css'),
   );
   const themedFiles = new Set(themedSources.map((source) => source.file));
-  const shared = cssFacts(sources.filter((source) => !themedFiles.has(source.file)));
+  const shared = cssFacts(
+    sources.filter(
+      (source) =>
+        !themedFiles.has(source.file) &&
+        !NON_SCREEN_STYLESHEETS.has(source.file),
+    ),
+  );
 
   return new Map(
     themedSources.map((source) => {
