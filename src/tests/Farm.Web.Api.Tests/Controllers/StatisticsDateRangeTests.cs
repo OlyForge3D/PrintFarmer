@@ -193,6 +193,7 @@ public class StatisticsDateRangeTests : IAsyncLifetime
         var summary = await response.Content.ReadFromJsonAsync<StatisticsSummaryDto>(JsonOptions);
         summary.Should().NotBeNull();
         summary!.TotalJobs.Should().Be(2, "only 2 jobs fall within the 15-day range");
+        summary.TotalPrintHours.Should().Be(2, "print hours must use the same date range as job counts");
     }
 
     [Fact]

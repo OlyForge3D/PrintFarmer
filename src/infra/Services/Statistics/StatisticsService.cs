@@ -56,19 +56,17 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
         List<StatisticsSummaryAggregate> aggregateParts = await BuildSummaryAggregateQuery(query)
             .ToListAsync(ct);
 
-        // TimeSpan.Ticks is not translated consistently across supported providers, so stream
-        // only the scalar values instead of materializing the full result set in a list.
-        long totalPrintTimeTicks = 0;
+        // Value-converted TimeSpan ticks are not provider-translatable as a SUM, so stream
+        // scalar durations without materializing the full result set or overflowing a long total.
+        double totalPrintHours = 0;
         await foreach (long ticks in query
             .Where(j => j.ActualPrintTime.HasValue)
             .Select(j => j.ActualPrintTime!.Value.Ticks)
             .AsAsyncEnumerable()
             .WithCancellation(ct))
         {
-            totalPrintTimeTicks += ticks;
+            totalPrintHours += TimeSpan.FromTicks(ticks).TotalHours;
         }
-
-        double totalPrintHours = TimeSpan.FromTicks(totalPrintTimeTicks).TotalHours;
 
         int totalJobs = aggregateParts.Sum(part => part.TotalJobs);
         int completed = aggregateParts.Sum(part => part.Completed);
