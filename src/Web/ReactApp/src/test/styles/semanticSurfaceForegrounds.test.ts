@@ -1,11 +1,13 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { colorDistance, INVALID_COLOR_DISTANCE } from '@/common/utils/colorDistance';
 import { SELECTABLE_THEMES } from '@/design-system/themes/registry';
 
 const SOURCE_ROOT = resolve(__dirname, '../..');
 const THEME_ROOT = resolve(SOURCE_ROOT, 'design-system/themes');
 const AA_NORMAL_TEXT = 4.5;
+const MIN_ACCENT_HOVER_DISTANCE = 5;
 const SEMANTIC_PAIRS = [
   ['accent-bg', 'on-accent'],
   ['success', 'text-inverse'],
@@ -168,6 +170,17 @@ describe('semantic foregrounds on themed surfaces (#1101, #1103, #1110)', () => 
     });
 
     expect(failures).toEqual([]);
+  });
+
+  it.each(SELECTABLE_THEMES)('%s accent text remains perceptibly distinct on hover', (theme) => {
+    const tokens = parseThemeTokens(theme);
+    const distance = colorDistance(
+      requireToken(tokens, theme, 'accent'),
+      requireToken(tokens, theme, 'accent-text'),
+    );
+
+    expect(distance).not.toBe(INVALID_COLOR_DISTANCE);
+    expect(distance).toBeGreaterThanOrEqual(MIN_ACCENT_HOVER_DISTANCE);
   });
 
   it('exposes accent text through Tailwind and uses it only at the two affected Button hovers', () => {
