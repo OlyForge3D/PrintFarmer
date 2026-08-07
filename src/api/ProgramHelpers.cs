@@ -352,23 +352,10 @@ internal static class ProgramHelpers
         IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
         IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
 
-        try
-        {
+        DatabaseInitializationOutcome initializationOutcome =
             await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
-        }
-        catch (DatabaseMigrationContractException)
+        if (initializationOutcome == DatabaseInitializationOutcome.ReferenceDataSeedingFailed)
         {
-            throw;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception initializationException)
-        {
-            app.Logger.LogWarning(
-                initializationException,
-                "[Startup] Database seeding failed (non-fatal)");
             return;
         }
 
