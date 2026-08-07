@@ -3,6 +3,7 @@ import { SlicerState, SlicerContextValue, SlicerContext } from './SlicerTypes';
 import { slicerRegistry } from '@/services/slicerRegistry';
 import { apiClient } from '@/services/api';
 import { AUTH_SESSION_ESTABLISHED_EVENT } from '@/services/authEvents';
+import { useAuth } from '@/features/auth/hooks/useAuth';
 
 interface SlicerSettings {
   enabled: boolean;
@@ -13,11 +14,24 @@ interface SlicerSnapshot {
   workers: Awaited<ReturnType<typeof slicerRegistry.getSlicers>>;
 }
 
+interface TokenScopedSlicerState {
+  authToken: string | null;
+  value: SlicerState;
+}
+
 const defaultState: SlicerState = {
   settingEnabled: true, // Default to true until we fetch actual setting
   hasWorkers: false,
   isSlicerAvailable: false,
   isLoading: true,
+  workerCount: 0,
+};
+
+const loggedOutState: SlicerState = {
+  settingEnabled: true,
+  hasWorkers: false,
+  isSlicerAvailable: false,
+  isLoading: false,
   workerCount: 0,
 };
 
@@ -51,16 +65,6 @@ function loadWorkers(authToken: string): Promise<SlicerSnapshot['workers']> {
   return promise;
 }
 
-function clearLoggedOutState() {
-  return {
-    settingEnabled: true,
-    hasWorkers: false,
-    isSlicerAvailable: false,
-    isLoading: false,
-    workerCount: 0,
-  } satisfies SlicerState;
-}
-
 function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
   if (snapshotRequest?.authToken === authToken) {
     return snapshotRequest.promise;
@@ -85,8 +89,11 @@ function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
 }
 
 export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<SlicerState>(() =>
-    localStorage.getItem('auth-token') ? defaultState : clearLoggedOutState());
+  const [scopedState, setScopedState] = useState<TokenScopedSlicerState>({
+    authToken: null,
+    value: defaultState,
+  });
+  const { isAuthenticated } = useAuth();
   const mountedRef = useRef(false);
   const settingsLoadGenerationRef = useRef(0);
   const workersLoadGenerationRef = useRef(0);
@@ -113,7 +120,10 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         }
 
         const settingEnabled = settings.enabled ?? true;
-        setState(previousState => {
+        setScopedState(previousScopedState => {
+          const previousState = previousScopedState.authToken === authToken
+            ? previousScopedState.value
+            : defaultState;
           const workersAreCurrent =
             workersGeneration === workersLoadGenerationRef.current;
           const workerCount = workersAreCurrent
@@ -122,11 +132,14 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           const hasWorkers = workerCount > 0;
 
           return {
-            settingEnabled,
-            hasWorkers,
-            isSlicerAvailable: settingEnabled && hasWorkers,
-            isLoading: false,
-            workerCount,
+            authToken,
+            value: {
+              settingEnabled,
+              hasWorkers,
+              isSlicerAvailable: settingEnabled && hasWorkers,
+              isLoading: false,
+              workerCount,
+            },
           };
         });
       });
@@ -138,7 +151,12 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
 
     if (localStorage.getItem('auth-token')) {
-      refreshAuthenticatedState();
+      if (isAuthenticated) {
+        refreshAuthenticatedState();
+      }
+    } else {
+      settingsLoadGenerationRef.current++;
+      workersLoadGenerationRef.current++;
     }
 
     return () => {
@@ -148,14 +166,11 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         refreshAuthenticatedState,
       );
     };
-  }, []);
+  }, [isAuthenticated]);
 
   const refreshWorkers = useCallback(async () => {
     const authToken = localStorage.getItem('auth-token');
     if (!authToken) {
-      if (mountedRef.current) {
-        setState(clearLoggedOutState());
-      }
       return;
     }
 
@@ -170,21 +185,36 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return;
     }
 
-    setState(previousState => {
+    setScopedState(previousScopedState => {
+      const previousState = previousScopedState.authToken === authToken
+        ? previousScopedState.value
+        : defaultState;
       const hasWorkers = workers.length > 0;
       return {
-        ...previousState,
-        hasWorkers,
-        workerCount: workers.length,
-        isSlicerAvailable: previousState.settingEnabled && hasWorkers,
+        authToken,
+        value: {
+          ...previousState,
+          hasWorkers,
+          workerCount: workers.length,
+          isSlicerAvailable: previousState.settingEnabled && hasWorkers,
+        },
       };
     });
   }, []);
 
+  const currentAuthToken = isAuthenticated
+    ? localStorage.getItem('auth-token')
+    : null;
+  const visibleState = !currentAuthToken
+    ? loggedOutState
+    : scopedState.authToken === currentAuthToken
+      ? scopedState.value
+      : defaultState;
+
   const value: SlicerContextValue = useMemo(() => ({
-    ...state,
+    ...visibleState,
     refreshWorkers,
-  }), [state, refreshWorkers]);
+  }), [visibleState, refreshWorkers]);
 
   return <SlicerContext.Provider value={value}>{children}</SlicerContext.Provider>;
 };

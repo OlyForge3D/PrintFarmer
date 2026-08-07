@@ -23,6 +23,12 @@ vi.mock('@/services/slicerRegistry', () => ({
   },
 }));
 
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({
+    isAuthenticated: Boolean(localStorage.getItem('auth-token')),
+  }),
+}));
+
 const WORKERS: SlicerDto[] = [{ id: 'worker-1', name: 'Orca worker' }];
 
 interface Deferred<T> {
@@ -52,12 +58,16 @@ function SlicerStateProbe() {
 }
 
 function renderProvider({ strictMode = false }: { strictMode?: boolean } = {}) {
-  const tree = (
+  const tree = providerTree();
+  return render(strictMode ? <StrictMode>{tree}</StrictMode> : tree);
+}
+
+function providerTree() {
+  return (
     <SlicerProvider>
       <SlicerStateProbe />
     </SlicerProvider>
   );
-  return render(strictMode ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 function readState() {
@@ -93,12 +103,13 @@ describe('SlicerProvider authenticated settings loading', () => {
   });
 
   it('loads authoritative settings after SPA authentication, including enabled false', async () => {
-    renderProvider();
+    const { rerender } = renderProvider();
     await waitFor(() => expect(readState().isLoading).toBe(false));
     apiTestState.getSettings.mockResolvedValueOnce({ enabled: false });
 
     await act(async () => {
       localStorage.setItem('auth-token', 'authenticated-token');
+      rerender(providerTree());
       window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
     });
 
@@ -182,18 +193,21 @@ describe('SlicerProvider authenticated settings loading', () => {
   });
 
   it('reloads settings for successive login sessions', async () => {
-    renderProvider();
+    const { rerender } = renderProvider();
     await waitFor(() => expect(readState().isLoading).toBe(false));
     apiTestState.getSettings
       .mockResolvedValueOnce({ enabled: false })
       .mockResolvedValueOnce({ enabled: true });
 
     localStorage.setItem('auth-token', 'first-session');
+    rerender(providerTree());
     window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
     await waitFor(() => expect(readState().settingEnabled).toBe(false));
 
     localStorage.removeItem('auth-token');
+    rerender(providerTree());
     localStorage.setItem('auth-token', 'second-session');
+    rerender(providerTree());
     window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
     await waitFor(() => expect(readState().settingEnabled).toBe(true));
 
@@ -234,6 +248,44 @@ describe('SlicerProvider authenticated settings loading', () => {
     });
     expect(readState().settingEnabled).toBe(false);
     expect(readState().workerCount).toBe(1);
+  });
+
+  it('hides prior-session state on logout and while the next session loads', async () => {
+    localStorage.setItem('auth-token', 'first-session');
+    apiTestState.getSettings.mockResolvedValueOnce({ enabled: false });
+    const { rerender } = renderProvider();
+    await waitFor(() => expect(readState().settingEnabled).toBe(false));
+    expect(readState().workerCount).toBe(1);
+
+    localStorage.removeItem('auth-token');
+    rerender(providerTree());
+    expect(readState()).toEqual({
+      settingEnabled: true,
+      workerCount: 0,
+      isSlicerAvailable: false,
+      isLoading: false,
+    });
+
+    const nextSettingsRequest = deferred<{ enabled: boolean }>();
+    const nextWorkersRequest = deferred<SlicerDto[]>();
+    apiTestState.getSettings.mockReturnValueOnce(nextSettingsRequest.promise);
+    apiTestState.getSlicers.mockReturnValueOnce(nextWorkersRequest.promise);
+    localStorage.setItem('auth-token', 'second-session');
+    rerender(providerTree());
+    window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
+
+    expect(readState()).toEqual({
+      settingEnabled: true,
+      workerCount: 0,
+      isSlicerAvailable: false,
+      isLoading: true,
+    });
+
+    await act(async () => {
+      nextSettingsRequest.resolve({ enabled: true });
+      nextWorkersRequest.resolve(WORKERS);
+    });
+    await waitFor(() => expect(readState().isSlicerAvailable).toBe(true));
   });
 
   it('shares the initial request across a StrictMode remount', async () => {
