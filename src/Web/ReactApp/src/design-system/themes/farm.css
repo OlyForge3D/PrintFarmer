@@ -101,6 +101,7 @@
   /* --- Controls ------------------------------------------------------------- */
   --pf-control-bg:            #332113;
   --pf-control-border:        #5b3b24;
+  --pf-control-boundary:      #8e775a;
   --pf-control-border-hover:  #7c542f;
   --pf-control-border-focus:  #f97316;
   --pf-control-text:          #fff2dc;

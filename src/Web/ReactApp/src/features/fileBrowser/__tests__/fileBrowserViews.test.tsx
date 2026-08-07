@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { GridView } from '../components/GridView';
 import { ExplorerView } from '../components/ExplorerView';
@@ -68,5 +68,41 @@ describe('ExplorerView', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /Sort by Name/i }));
     expect(onSort).toHaveBeenCalledWith('fileName');
+  });
+
+  it('keeps the folder delete action named, destructive, and operable', async () => {
+    render(
+      <ExplorerView
+        folders={folders}
+        files={files}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        onNavigate={vi.fn()}
+        currentPath="/"
+        renderItemActions={() => null}
+        sortBy="fileName"
+        sortOrder="asc"
+        onSort={vi.fn()}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
+        pageSize={25}
+        onPageSizeChange={vi.fn()}
+        columns={columns}
+      />
+    );
+
+    fireEvent.contextMenu(screen.getByRole('button', { name: 'dir' }));
+
+    const deleteAction = screen.getByRole('button', { name: 'Delete Folder' });
+    expect(deleteAction).toHaveClass(
+      'text-[var(--pf-error-fg)]',
+      'enabled:hover:bg-pf-bg-1'
+    );
+    expect(deleteAction).not.toHaveClass('text-pf-error');
+
+    await userEvent.click(deleteAction);
+    expect(screen.getByText('Delete folder "dir"? This action cannot be undone.')).toBeVisible();
   });
 });
