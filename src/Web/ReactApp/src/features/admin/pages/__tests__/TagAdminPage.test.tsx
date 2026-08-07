@@ -46,6 +46,10 @@ async function startEditingResin(user: ReturnType<typeof userEvent.setup>) {
   await user.click(within(row).getByRole('button', { name: /^edit$/i }));
 }
 
+async function saveCurrentEdit(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole('button', { name: /save changes/i }));
+}
+
 describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -59,6 +63,24 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     expect((await screen.findAllByText('Resin')).length).toBeGreaterThan(0);
   });
 
+  it('uses the shared loading state', () => {
+    vi.mocked(apiClient.getTags).mockImplementation(() => new Promise(() => {}));
+    renderPage();
+    expect(screen.getByRole('status', { name: 'Loading tags' })).toBeInTheDocument();
+  });
+
+  it('uses the shared error state', async () => {
+    vi.mocked(apiClient.getTags).mockRejectedValue(new Error('tag outage'));
+    renderPage();
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't load tags");
+  });
+
+  it('uses the shared empty state', async () => {
+    vi.mocked(apiClient.getTags).mockResolvedValue([]);
+    renderPage();
+    expect(await screen.findByText('No tags created yet')).toBeInTheDocument();
+  });
+
   it('captures the tag revision when starting an edit and sends it as expectedRevision on save', async () => {
     vi.mocked(apiClient.updateTag).mockResolvedValue({ ...resin, name: 'Resin (Updated)', revision: 2 });
     const user = userEvent.setup();
@@ -69,8 +91,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await user.clear(nameInput);
     await user.type(nameInput, 'Resin (Updated)');
 
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     await waitFor(() =>
       expect(apiClient.updateTag).toHaveBeenCalledWith(
@@ -87,12 +108,12 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
 
     await startEditingResin(user);
     const nameInput = screen.getByDisplayValue('Resin');
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await user.type(nameInput, ' updated');
+    await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/network unreachable/i);
     // The edit form must remain open/preserved rather than silently discarding the attempt.
-    expect(screen.getByDisplayValue('Resin')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Resin updated')).toBeInTheDocument();
   });
 
   it('opens a non-destructive revision conflict dialog on HTTP 409, preserving the user\'s attempted values', async () => {
@@ -107,8 +128,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     const nameInput = screen.getByDisplayValue('Resin');
     await user.clear(nameInput);
     await user.type(nameInput, 'My Local Edit');
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     const dialog = await screen.findByRole('dialog', { name: /conflict updating "my local edit"/i });
     expect(within(dialog).getByRole('table')).toHaveTextContent('My Local Edit');
@@ -131,8 +151,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     const nameInput = screen.getByDisplayValue('Resin');
     await user.clear(nameInput);
     await user.type(nameInput, 'My Local Edit');
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     const dialog = await screen.findByRole('dialog', { name: /conflict updating "my local edit"/i });
     // The "current version" column must not mirror the user's own attempted value.
@@ -161,8 +180,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     const nameInput = screen.getByDisplayValue('Resin');
     await user.clear(nameInput);
     await user.type(nameInput, 'Wood');
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     // Backend message reaches the user — not a generic "Failed to update tag" fallback.
     expect(await screen.findByRole('alert')).toHaveTextContent(/A tag named 'Wood' already exists/);
@@ -187,8 +205,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     const nameInput = screen.getByDisplayValue('Resin');
     await user.clear(nameInput);
     await user.type(nameInput, 'My Local Edit');
-    const row = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     await screen.findByRole('dialog', { name: /conflict updating "my local edit"/i });
     await user.click(screen.getByRole('button', { name: /reload latest version/i }));
@@ -197,7 +214,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     // Attempted value must survive the reload.
     expect(screen.getByDisplayValue('My Local Edit')).toBeInTheDocument();
 
-    await user.click(within(row).getByRole('button', { name: /^check$/i }));
+    await saveCurrentEdit(user);
 
     await waitFor(() =>
       expect(apiClient.updateTag).toHaveBeenLastCalledWith(
@@ -234,12 +251,12 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await user.click(within(row).getByRole('button', { name: /^edit$/i }));
 
     const nameInput = screen.getByDisplayValue('Unversioned');
-    const editRow = nameInput.closest('tr') as HTMLElement;
-    await user.click(within(editRow).getByRole('button', { name: /^check$/i }));
+    await user.type(nameInput, ' updated');
+    await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/refresh the page/i);
     expect(apiClient.updateTag).not.toHaveBeenCalled();
     // The edit form must remain open/preserved rather than silently discarding the attempt.
-    expect(screen.getByDisplayValue('Unversioned')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Unversioned updated')).toBeInTheDocument();
   });
 });
