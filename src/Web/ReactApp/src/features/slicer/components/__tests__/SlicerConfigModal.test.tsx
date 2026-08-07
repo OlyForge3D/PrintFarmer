@@ -1,7 +1,15 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { SlicerConfigModal } from '@/features/slicer/components/SlicerConfigModal';
+import { slicerService, type SlicingProgress } from '@/services/slicerService';
+import { toast } from 'sonner';
+
+vi.mock('sonner', () => ({
+  toast: {
+    error: vi.fn(),
+  },
+}));
 
 // Mock the slicerService
 vi.mock('@/services/slicerService', () => ({
@@ -27,6 +35,20 @@ const defaultProps = {
 };
 
 type SlicerConfigModalProps = ComponentProps<typeof SlicerConfigModal>;
+type ProgressCallback = (progress: SlicingProgress) => void;
+
+const sliceResult = {
+  jobId: 'slice-job-123',
+  gcodeUrl: '/api/slicer/jobs/slice-job-123/gcode',
+  printTime: 3600,
+  filamentUsed: 12,
+  layerCount: 100,
+  metadata: {
+    slicerVersion: '1.0.0',
+    profileUsed: 'standard',
+    estimatedCost: 1.25,
+  },
+};
 
 const renderSlicerConfigModal = async (props: Partial<SlicerConfigModalProps> = {}) => {
   const mergedProps = { ...defaultProps, ...props };
@@ -42,6 +64,10 @@ const renderSlicerConfigModal = async (props: Partial<SlicerConfigModalProps> = 
 describe('SlicerConfigModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('Modal open/close', () => {
@@ -197,6 +223,71 @@ describe('SlicerConfigModal', () => {
         />
       );
       expect(screen.getByText('My Custom Model')).toBeInTheDocument();
+    });
+  });
+
+  describe('Slicing failure feedback', () => {
+    const selectPrinterAndSlice = async () => {
+      await renderSlicerConfigModal();
+      fireEvent.click(screen.getByText('Printer One'));
+      const sliceButton = screen.getByRole('button', { name: /slice.*queue/i });
+      sliceButton.focus();
+      await act(async () => {
+        fireEvent.click(sliceButton);
+      });
+      return sliceButton;
+    };
+
+    it('surfaces progress-reported failures without blocking or closing the modal', async () => {
+      let reportProgress: ProgressCallback | undefined;
+      const closeProgressSource = vi.fn();
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+
+      vi.mocked(slicerService.sliceModel).mockResolvedValueOnce(sliceResult);
+      vi.mocked(slicerService.subscribeToSlicingProgress).mockImplementationOnce((_jobId, onProgress) => {
+        reportProgress = onProgress;
+        return { close: closeProgressSource } as EventSource;
+      });
+
+      const sliceButton = await selectPrinterAndSlice();
+      await waitFor(() => expect(reportProgress).toBeDefined());
+
+      act(() => {
+        reportProgress?.({
+          jobId: sliceResult.jobId,
+          progress: 42,
+          status: 'error',
+          message: 'Worker exited with code 7',
+        });
+      });
+
+      expect(toast.error).toHaveBeenCalledWith('Slicing failed: Worker exited with code 7');
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(closeProgressSource).toHaveBeenCalledOnce();
+      expect(screen.getByText('Configure Slicing')).toBeInTheDocument();
+      expect(sliceButton).toBeEnabled();
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeEnabled();
+      expect(document.activeElement).toBe(sliceButton);
+    });
+
+    it.each([
+      { rejection: new Error('Slicer service unavailable'), detail: 'Slicer service unavailable' },
+      { rejection: { status: 503 }, detail: 'Unknown error' },
+    ])('surfaces thrown failure detail "$detail" without blocking retry', async ({ rejection, detail }) => {
+      const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      vi.mocked(slicerService.sliceModel).mockRejectedValueOnce(rejection);
+
+      const sliceButton = await selectPrinterAndSlice();
+
+      await waitFor(() => {
+        expect(toast.error).toHaveBeenCalledWith(`Slicing failed: ${detail}`);
+      });
+      expect(alertSpy).not.toHaveBeenCalled();
+      expect(screen.getByText('Configure Slicing')).toBeInTheDocument();
+      expect(sliceButton).toBeEnabled();
+      expect(screen.getByRole('button', { name: /cancel/i })).toBeEnabled();
+      expect(document.activeElement).toBe(sliceButton);
     });
   });
 });
