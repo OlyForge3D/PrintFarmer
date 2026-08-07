@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState, useEffect, createContext, useContext } from 'react';
+import React, { useCallback, useRef, useState, useEffect, createContext, useContext, useId } from 'react';
 import type { SortDirection } from '../../hooks/useTableSort';
 
 // ============================================================================
@@ -15,6 +15,8 @@ interface TableContextValue {
   registerRow: () => number;
   unregisterRow: (index: number) => void;
   keyboardNavigation: boolean;
+  selectionEnabled: boolean;
+  getRowId: (index: number) => string | undefined;
 }
 
 const TableContext = createContext<TableContextValue | null>(null);
@@ -32,6 +34,10 @@ export interface TableProps extends React.HTMLAttributes<HTMLTableElement> {
   onRowSelect?: (index: number) => void;
   /** Explicit navigable row count when rows provide their own rowIndex values */
   rowCount?: number;
+  /** Whether data rows expose selection state */
+  selectionEnabled?: boolean;
+  /** Resolve the DOM id for a navigable row */
+  getRowId?: (index: number) => string | undefined;
 }
 
 /**
@@ -95,9 +101,12 @@ function useTableKeyboardNavigation(
   onRowSelect?: (index: number) => void,
   explicitRowCount?: number
 ) {
-  const [focusedRowIndex, setFocusedRowIndex] = useState(-1);
+  const [requestedFocusedRowIndex, setRequestedFocusedRowIndex] = useState(-1);
   const [registeredRowCount, setRegisteredRowCount] = useState(0);
   const rowCount = explicitRowCount ?? registeredRowCount;
+  const focusedRowIndex = requestedFocusedRowIndex >= 0 && requestedFocusedRowIndex < rowCount
+    ? requestedFocusedRowIndex
+    : -1;
   const rowIndexCounter = useRef(0);
 
   const registerRow = useCallback(() => {
@@ -121,28 +130,30 @@ function useTableKeyboardNavigation(
     switch (e.key) {
       case 'ArrowDown':
         e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const next = prev < rowCount - 1 ? prev + 1 : prev;
+        setRequestedFocusedRowIndex(prev => {
+          const current = prev >= 0 && prev < rowCount ? prev : -1;
+          const next = current < rowCount - 1 ? current + 1 : current;
           onRowFocus?.(next);
           return next;
         });
         break;
       case 'ArrowUp':
         e.preventDefault();
-        setFocusedRowIndex(prev => {
-          const next = prev > 0 ? prev - 1 : 0;
+        setRequestedFocusedRowIndex(prev => {
+          const current = prev >= 0 && prev < rowCount ? prev : 0;
+          const next = current > 0 ? current - 1 : 0;
           onRowFocus?.(next);
           return next;
         });
         break;
       case 'Home':
         e.preventDefault();
-        setFocusedRowIndex(0);
+        setRequestedFocusedRowIndex(0);
         onRowFocus?.(0);
         break;
       case 'End':
         e.preventDefault();
-        setFocusedRowIndex(rowCount - 1);
+        setRequestedFocusedRowIndex(rowCount - 1);
         onRowFocus?.(rowCount - 1);
         break;
       case 'Enter':
@@ -156,7 +167,7 @@ function useTableKeyboardNavigation(
   }, [enabled, rowCount, focusedRowIndex, onRowFocus, onRowSelect]);
 
   const setFocusedRow = useCallback((index: number) => {
-    setFocusedRowIndex(index);
+    setRequestedFocusedRowIndex(index);
     onRowFocus?.(index);
   }, [onRowFocus]);
 
@@ -190,9 +201,17 @@ export function Table({
   onRowFocus,
   onRowSelect,
   rowCount: explicitRowCount,
+  selectionEnabled = Boolean(onRowSelect),
+  getRowId,
   ...props 
 }: TableProps) {
   const tableRef = useRef<HTMLTableElement>(null);
+  const generatedTableId = useId();
+  const getDefaultRowId = useCallback(
+    (index: number) => `pf-table-${generatedTableId}-row-${index}`,
+    [generatedTableId],
+  );
+  const resolveRowId = getRowId ?? getDefaultRowId;
   const {
     focusedRowIndex,
     setFocusedRowIndex,
@@ -201,6 +220,7 @@ export function Table({
     unregisterRow,
     handleKeyDown,
   } = useTableKeyboardNavigation(keyboardNavigation, onRowFocus, onRowSelect, explicitRowCount);
+  const activeDescendantId = focusedRowIndex >= 0 ? resolveRowId(focusedRowIndex) : undefined;
 
   return (
     <TableContext.Provider value={{ 
@@ -209,7 +229,9 @@ export function Table({
       rowCount, 
       registerRow, 
       unregisterRow,
-      keyboardNavigation
+      keyboardNavigation,
+      selectionEnabled,
+      getRowId: resolveRowId,
     }}>
       <div className="overflow-x-auto rounded-lg border border-pf-border">
         <table
@@ -218,6 +240,8 @@ export function Table({
           tabIndex={keyboardNavigation ? 0 : undefined}
           onKeyDown={keyboardNavigation ? handleKeyDown : undefined}
           {...props}
+          role={keyboardNavigation ? 'grid' : props.role}
+          aria-activedescendant={keyboardNavigation ? activeDescendantId : undefined}
         >
           {children}
         </table>
@@ -230,10 +254,13 @@ export function Table({
  * Table header section
  */
 export function TableHead({ children, className = '', ...props }: TableHeadProps) {
+  const context = useContext(TableContext);
+
   return (
     <thead
       className={`bg-pf-bg-1 ${className}`}
       {...props}
+      role={context?.keyboardNavigation ? 'rowgroup' : props.role}
     >
       {children}
     </thead>
@@ -244,10 +271,13 @@ export function TableHead({ children, className = '', ...props }: TableHeadProps
  * Table body section
  */
 export function TableBody({ children, className = '', ...props }: TableBodyProps) {
+  const context = useContext(TableContext);
+
   return (
     <tbody
       className={`divide-y divide-pf-border bg-pf-bg-0 ${className}`}
       {...props}
+      role={context?.keyboardNavigation ? 'rowgroup' : props.role}
     >
       {children}
     </tbody>
@@ -264,6 +294,8 @@ export function TableRow({
   isHoverable = false,
   rowIndex,
   onClick,
+  id,
+  role,
   ...props 
 }: TableRowProps) {
   const context = useContext(TableContext);
@@ -291,6 +323,9 @@ export function TableRow({
   }, [context, assignedIndex]);
 
   const isFocused = context ? context.focusedRowIndex === assignedIndex : false;
+  const rowId = context?.keyboardNavigation && assignedIndex >= 0
+    ? context.getRowId(assignedIndex)
+    : id;
   const selectedClass = isSelected ? 'bg-pf-accent-bg/15' : '';
   // The hover utility is withheld while the row is selected. `bg-*` compiles to
   // `background-color`, which replaces rather than layers, and `:hover` scores
@@ -315,6 +350,9 @@ export function TableRow({
       data-rowindex={assignedIndex >= 0 ? assignedIndex + 1 : undefined}
       onClick={handleClick}
       {...props}
+      id={rowId}
+      role={context?.keyboardNavigation ? 'row' : role}
+      aria-selected={context?.selectionEnabled ? isSelected : props['aria-selected']}
     >
       {children}
     </tr>
@@ -355,6 +393,7 @@ export function TableHeaderCell({
   onSort,
   ...props 
 }: TableHeaderCellProps) {
+  const context = useContext(TableContext);
   const handleClick = () => {
     if (sortable && sortKey && onSort) {
       onSort(sortKey);
@@ -375,6 +414,8 @@ export function TableHeaderCell({
       onClick={sortable ? handleClick : undefined}
       aria-sort={ariaSortValue}
       {...props}
+      role={context?.keyboardNavigation ? 'columnheader' : props.role}
+      scope={props.scope ?? 'col'}
     >
       <div className="flex items-center">
         {children}
@@ -388,10 +429,13 @@ export function TableHeaderCell({
  * Table data cell
  */
 export function TableCell({ children, className = '', ...props }: TableCellProps) {
+  const context = useContext(TableContext);
+
   return (
     <td
       className={`px-4 py-3 text-sm text-pf-text-primary ${className}`}
       {...props}
+      role={context?.keyboardNavigation ? 'gridcell' : props.role}
     >
       {children}
     </td>

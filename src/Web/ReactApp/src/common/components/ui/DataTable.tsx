@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useId, useMemo } from 'react';
 import { Table, TableHead, TableBody, TableRow, TableHeaderCell, TableCell } from './Table';
 import type { SortDirection } from '../../hooks/useTableSort';
 
@@ -54,6 +54,8 @@ export interface DataTableProps<T> {
   emptyMessage?: React.ReactNode;
   /** Additional className for the table */
   className?: string;
+  /** Accessible name for the table or keyboard-navigable grid */
+  ariaLabel?: string;
 }
 
 /**
@@ -102,8 +104,11 @@ export function DataTable<T>({
   actionsWidth = 'w-24',
   emptyMessage = 'No data available.',
   className,
+  ariaLabel,
 }: DataTableProps<T>) {
   const keyboardNavigationEnabled = keyboardNavigation || Boolean(onRowSelect);
+  const rowIdPrefix = useId();
+  const [selectedRowKey, setSelectedRowKey] = useState<string | number | null>(null);
 
   // Internal sort state
   const [sortColumn, setSortColumn] = useState<string | null>(defaultSortColumn ?? null);
@@ -159,9 +164,10 @@ export function DataTable<T>({
   // Handle row selection
   const handleRowSelect = useCallback((index: number) => {
     if (onRowSelect && sortedData[index]) {
+      setSelectedRowKey(getRowKey(sortedData[index]));
       onRowSelect(sortedData[index], index);
     }
-  }, [onRowSelect, sortedData]);
+  }, [getRowKey, onRowSelect, sortedData]);
 
   const handleRowClick = useCallback((
     event: React.MouseEvent<HTMLTableRowElement>,
@@ -184,6 +190,14 @@ export function DataTable<T>({
     }
   }, [onRowFocus, sortedData]);
 
+  const getAccessibleRowId = useCallback((index: number) => {
+    if (index < 0 || index >= sortedData.length) {
+      return undefined;
+    }
+
+    return `pf-data-table-${rowIdPrefix}-row-${encodeURIComponent(String(getRowKey(sortedData[index])))}`;
+  }, [getRowKey, rowIdPrefix, sortedData]);
+
   // Empty state
   if (sortedData.length === 0) {
     return (
@@ -200,6 +214,9 @@ export function DataTable<T>({
       onRowFocus={handleRowFocus}
       className={className}
       rowCount={sortedData.length}
+      selectionEnabled={Boolean(onRowSelect)}
+      getRowId={getAccessibleRowId}
+      aria-label={ariaLabel}
     >
       <TableHead>
         <TableRow isHoverable={false} rowIndex={-1}>
@@ -227,6 +244,7 @@ export function DataTable<T>({
           <TableRow
             key={getRowKey(item)}
             rowIndex={index}
+            isSelected={Boolean(onRowSelect) && selectedRowKey === getRowKey(item)}
             isHoverable={Boolean(onRowSelect)}
             onClick={onRowSelect ? (event) => handleRowClick(event, index) : undefined}
           >

@@ -374,6 +374,7 @@ export function NozzlesCatalog() {
           columns={columns}
           getRowKey={(item) => item.id}
           keyboardNavigation
+          ariaLabel="Nozzles catalog"
           defaultSortColumn="name"
           renderActions={(item) => (
             <div className="flex gap-1">

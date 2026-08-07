@@ -380,6 +380,7 @@ export function ToolheadsCatalog() {
           columns={columns}
           getRowKey={(item) => item.id}
           keyboardNavigation
+          ariaLabel="Toolheads catalog"
           defaultSortColumn="name"
           renderActions={(item) => (
             <div className="flex gap-1">
