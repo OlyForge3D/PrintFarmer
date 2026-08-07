@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const toastErrorMock = vi.fn();
 const toastSuccessMock = vi.fn();
@@ -42,6 +42,18 @@ describe('SystemLogsContent', () => {
     localStorage.clear();
     toastErrorMock.mockClear();
     toastSuccessMock.mockClear();
+    Object.defineProperty(window.URL, 'createObjectURL', {
+      configurable: true,
+      value: vi.fn(() => 'blob:system-logs'),
+    });
+    Object.defineProperty(window.URL, 'revokeObjectURL', {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   describe('rendering', () => {
@@ -137,6 +149,60 @@ describe('SystemLogsContent', () => {
       
       const saved = JSON.parse(localStorage.getItem('logs-page-columns') || '{}');
       expect(saved.timestamp).toBe(true);
+    });
+  });
+
+  describe('export', () => {
+    it('downloads the exported JSON blob and releases its object URL', async () => {
+      const exportedBlob = new Blob(['[{"message":"Test"}]'], { type: 'application/json' });
+      vi.mocked(apiClient.exportSystemLogs).mockResolvedValueOnce(exportedBlob);
+      render(<SystemLogsContent />);
+
+      const appendChildSpy = vi.spyOn(document.body, 'appendChild');
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      const removeSpy = vi.spyOn(HTMLAnchorElement.prototype, 'remove');
+
+      fireEvent.click(screen.getByRole('button', { name: /export/i }));
+
+      await waitFor(() => {
+        expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:system-logs');
+      });
+
+      expect(exportedBlob.type).toBe('application/json');
+      expect(window.URL.createObjectURL).toHaveBeenCalledWith(exportedBlob);
+      expect(clickSpy).toHaveBeenCalledOnce();
+
+      const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement;
+      expect(anchor.href).toBe('blob:system-logs');
+      expect(anchor.download).toBe('systemlogs_export.json');
+      expect(appendChildSpy).toHaveBeenCalledWith(anchor);
+      expect(removeSpy).toHaveBeenCalledOnce();
+      expect(removeSpy.mock.instances[0]).toBe(anchor);
+      expect(anchor.isConnected).toBe(false);
+      expect(toastErrorMock).not.toHaveBeenCalled();
+    });
+
+    it('removes the anchor and revokes the object URL when clicking throws', async () => {
+      render(<SystemLogsContent />);
+
+      const clickSpy = vi
+        .spyOn(HTMLAnchorElement.prototype, 'click')
+        .mockImplementation(() => {
+          throw new Error('download click failed');
+        });
+      const removeSpy = vi.spyOn(HTMLAnchorElement.prototype, 'remove');
+
+      fireEvent.click(screen.getByRole('button', { name: /export/i }));
+
+      await waitFor(() => {
+        expect(toastErrorMock).toHaveBeenCalledWith('download click failed');
+      });
+
+      const anchor = clickSpy.mock.instances[0] as HTMLAnchorElement;
+      expect(removeSpy).toHaveBeenCalledOnce();
+      expect(removeSpy.mock.instances[0]).toBe(anchor);
+      expect(anchor.isConnected).toBe(false);
+      expect(window.URL.revokeObjectURL).toHaveBeenCalledWith('blob:system-logs');
     });
   });
 

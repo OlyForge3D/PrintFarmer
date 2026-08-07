@@ -110,12 +110,20 @@ export function SystemLogsContent() {
       if (filters.metadata) params.metadata = filters.metadata;
       const blob = await apiClient.exportSystemLogs(params);
       const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `systemlogs_export.json`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+      let link: HTMLAnchorElement | undefined;
+      try {
+        link = document.createElement("a");
+        link.href = url;
+        link.setAttribute("download", `systemlogs_export.json`);
+        document.body.appendChild(link);
+        link.click();
+      } finally {
+        try {
+          link?.remove();
+        } finally {
+          window.URL.revokeObjectURL(url);
+        }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to export logs';
       adminToast.error(message);
