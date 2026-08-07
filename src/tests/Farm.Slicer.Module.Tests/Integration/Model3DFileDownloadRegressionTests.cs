@@ -290,6 +290,82 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task DownloadForViewer_WithSymlinkCycle_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string firstLinkPath = Path.Combine(modelsPath, $"cycle-a-{Guid.NewGuid():N}.stl");
+        string secondLinkPath = Path.Combine(modelsPath, $"cycle-b-{Guid.NewGuid():N}.stl");
+        bool firstLinkCreated = false;
+        bool secondLinkCreated = false;
+
+        try
+        {
+            _ = File.CreateSymbolicLink(firstLinkPath, Path.GetFileName(secondLinkPath));
+            firstLinkCreated = true;
+            _ = File.CreateSymbolicLink(secondLinkPath, Path.GetFileName(firstLinkPath));
+            secondLinkCreated = true;
+
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(Path.GetFileName(firstLinkPath)));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            if (secondLinkCreated)
+            {
+                File.Delete(secondLinkPath);
+            }
+            if (firstLinkCreated)
+            {
+                File.Delete(firstLinkPath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithExcessiveSymlinkDepth_Returns403()
+    {
+        const int linkCount = 65;
+        string modelsPath = GetModelStoragePath();
+        string targetPath = Path.Combine(modelsPath, $"depth-target-{Guid.NewGuid():N}.stl");
+        string[] linkPaths = new string[linkCount];
+        for (int index = 0; index < linkPaths.Length; index++)
+        {
+            linkPaths[index] = Path.Combine(
+                modelsPath,
+                $"depth-{index:D2}-{Guid.NewGuid():N}.stl");
+        }
+
+        List<string> createdLinks = [];
+        await File.WriteAllTextAsync(targetPath, "inside");
+
+        try
+        {
+            string nextTarget = Path.GetFileName(targetPath);
+            for (int index = linkPaths.Length - 1; index >= 0; index--)
+            {
+                _ = File.CreateSymbolicLink(linkPaths[index], nextTarget);
+                createdLinks.Add(linkPaths[index]);
+                nextTarget = Path.GetFileName(linkPaths[index]);
+            }
+
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(Path.GetFileName(linkPaths[0])));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            foreach (string linkPath in createdLinks)
+            {
+                File.Delete(linkPath);
+            }
+            File.Delete(targetPath);
+        }
+    }
+
+    [Fact]
     public async Task GetModelFile_WithInvalidModel_Returns200AndFileContent()
     {
         // Arrange - Create INVALID model with physical file
