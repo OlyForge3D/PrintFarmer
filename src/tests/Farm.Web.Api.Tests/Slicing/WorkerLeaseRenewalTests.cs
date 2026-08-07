@@ -304,16 +304,26 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
     /// the pipeline open until the renewal loop has actually sent (and the stub has captured) a
     /// renew-lease request, so the test never races the background renewal loop.
     /// </summary>
-    private sealed class RenewalRecordingPoller(
-        IHttpClientFactory httpClientFactory,
-        IServiceProvider serviceProvider,
-        ILogger<HttpJobPollerService> logger,
-        IWorkerStateService workerState,
-        IConfiguration configuration,
-        StubHandler handler)
-        : HttpJobPollerService(httpClientFactory, serviceProvider, logger, workerState, configuration)
+    private sealed class RenewalRecordingPoller : HttpJobPollerService
     {
+        private readonly IConfiguration _configuration;
+        private readonly StubHandler _handler;
+        private readonly IWorkerStateService _workerState;
         private string _jobDirectory = string.Empty;
+
+        public RenewalRecordingPoller(
+            IHttpClientFactory httpClientFactory,
+            IServiceProvider serviceProvider,
+            ILogger<HttpJobPollerService> logger,
+            IWorkerStateService workerState,
+            IConfiguration configuration,
+            StubHandler handler)
+            : base(httpClientFactory, serviceProvider, logger, workerState, configuration)
+        {
+            _configuration = configuration;
+            _handler = handler;
+            _workerState = workerState;
+        }
 
         /// <summary>
         /// When set, the fake pipeline blocks until the job's own token is cancelled, standing in for
@@ -332,7 +342,9 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             Action<System.Net.Http.Headers.HttpRequestHeaders>? configureDefaults = null)
         {
             _jobDirectory = jobDirectory;
-            using HttpClient client = new(handler, disposeHandler: false)
+            _configuration["Worker:WorkingDirectory"] ??= Path.GetDirectoryName(jobDirectory);
+            _workerState.SetJobWorkDirectory(jobId, jobDirectory);
+            using HttpClient client = new(_handler, disposeHandler: false)
             {
                 BaseAddress = new Uri("http://localhost"),
             };
@@ -366,7 +378,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             // Wait for the background renewal loop to actually fire before letting the pipeline
             // "finish", so the test deterministically observes the renewal request rather than
             // racing it.
-            _ = await handler.RenewCapturedTask.WaitAsync(PipelineWaitTimeout, ct);
+            _ = await _handler.RenewCapturedTask.WaitAsync(PipelineWaitTimeout, ct);
 
             return new SlicingResult
             {
