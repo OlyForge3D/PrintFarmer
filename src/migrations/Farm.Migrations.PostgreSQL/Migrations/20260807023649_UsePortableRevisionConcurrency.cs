@@ -10,6 +10,13 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.Sql(
+                "UPDATE \"PrintJobs\" SET \"Revision\" = 1 WHERE \"Revision\" < 1;");
+            migrationBuilder.Sql(
+                "UPDATE \"PrinterDispatchStates\" SET \"Revision\" = 1 WHERE \"Revision\" < 1;");
+            migrationBuilder.Sql(
+                "UPDATE \"DispatchSettings\" SET \"Revision\" = 1 WHERE \"Revision\" < 1;");
+
             migrationBuilder.DropColumn(
                 name: "RowVersion",
                 table: "UserSettings");

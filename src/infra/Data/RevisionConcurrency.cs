@@ -63,7 +63,7 @@ public static class RevisionConcurrency
             }
 
             long originalRevision = (long)revision.OriginalValue!;
-            if (originalRevision < InitialRevision || originalRevision == long.MaxValue)
+            if (originalRevision == long.MaxValue)
             {
                 throw new DbUpdateConcurrencyException(
                     $"Tracked {entry.Metadata.ClrType.Name} has invalid revision {originalRevision}.");

@@ -117,6 +117,29 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task CoreMigration_BackfillsExistingZeroRevisionAndAllowsUpdate()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260806232640_CanonicalizePrintJobPriority");
+        _ = await context.Database.ExecuteSqlRawAsync(
+            "UPDATE \"DispatchSettings\" SET \"Revision\" = 0;");
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+        context.ChangeTracker.Clear();
+
+        DispatchSettings settings = await context.DispatchSettings.SingleAsync();
+        settings.Revision.Should().Be(1);
+        settings.IdleThresholdSeconds++;
+        _ = await context.SaveChangesAsync();
+        settings.Revision.Should().Be(2);
+    }
+
+    [Fact]
     public async Task CoreMigration_BaselinesVerifiedEnsureCreatedDatabase()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();

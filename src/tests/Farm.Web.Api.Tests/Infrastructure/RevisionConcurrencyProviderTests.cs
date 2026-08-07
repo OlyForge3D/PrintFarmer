@@ -57,7 +57,7 @@ public sealed class RevisionConcurrencyProviderTests
 
         DbUpdateConcurrencyException exception = await Assert.ThrowsAsync<DbUpdateConcurrencyException>(
             () => context.SaveChangesAsync());
-        Assert.Contains("invalid revision 0", exception.Message, StringComparison.Ordinal);
+        _ = Assert.Single(exception.Entries);
     }
 
     [Fact]
