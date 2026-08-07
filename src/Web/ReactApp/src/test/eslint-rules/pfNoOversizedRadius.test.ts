@@ -121,6 +121,11 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     { code: '<div className="rounded-es-full rounded-bl-lg" />' },
     // Keyword candidate order is deliberately ambiguous rather than guessed.
     { code: '<div className="h-full w-fit w-full rounded-full" />' },
+    // Tailwind compares stacked variants inside-out. focus:hover is emitted
+    // before hover:active, so the latter w-8 wins and preserves the circle.
+    {
+      code: '<div className="h-8 focus:hover:w-4 hover:active:w-8 hover:focus:active:rounded-full" />',
+    },
 
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
@@ -574,10 +579,9 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
-    // Multi-state source order is compared lexicographically, not collapsed to
-    // the largest individual state rank.
+    // Reversing the widths makes the later hover:active declaration a lozenge.
     {
-      code: '<div className="h-8 hover:active:w-8 focus:hover:w-4 hover:focus:active:rounded-full" />',
+      code: '<div className="h-8 focus:hover:w-8 hover:active:w-4 hover:focus:active:rounded-full" />',
       errors: [
         {
           messageId: 'fullRound',
@@ -585,7 +589,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output:
-                '<div className="h-8 hover:active:w-8 focus:hover:w-4 hover:focus:active:rounded-lg" />',
+                '<div className="h-8 focus:hover:w-8 hover:active:w-4 hover:focus:active:rounded-lg" />',
             },
           ],
         },

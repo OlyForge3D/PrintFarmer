@@ -351,9 +351,9 @@ function sameConditionPart(left, right) {
 
 function compareOrderLists(left, right) {
   const length = Math.max(left.length, right.length)
-  for (let index = 0; index < length; index += 1) {
-    const leftValue = left[index] ?? -1
-    const rightValue = right[index] ?? -1
+  for (let offset = 1; offset <= length; offset += 1) {
+    const leftValue = left.at(-offset) ?? -1
+    const rightValue = right.at(-offset) ?? -1
     if (leftValue !== rightValue) return leftValue > rightValue ? 1 : -1
   }
   return 0

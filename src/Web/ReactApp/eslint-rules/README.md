@@ -99,8 +99,8 @@ Within one target scope, evidence applies when its ordered state condition is ac
 radius applies. State variants contribute selector specificity; media variants do not.
 Breakpoints are cumulative and ordered, so an `md:` declaration still participates at `lg:`.
 The resolver ranks the project’s known state order (`hover`, `focus`, and related built-ins),
-the complete ordered state sequence, axis-over-`size-*` utility order, and numeric dimension
-candidates.
+the complete inside-out ordering of stacked state variants, axis-over-`size-*` utility order, and
+numeric dimension candidates.
 It does not use class-string order as a proxy for Tailwind's generated stylesheet. If two
 applicable declarations require unsupported ordering knowledge — competing radius/aspect
 candidates, different media families, arbitrary selector payloads, or cross-family dimension
