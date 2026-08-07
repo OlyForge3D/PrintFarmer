@@ -4,59 +4,65 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Attention.Sources;
 using Farm.Infrastructure.Services.Printers;
-using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Moq;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.Attention;
 
 /// <summary>
-/// Integration tests for <see cref="FilamentRunoutSwitchEvaluator"/> (issue #711, F6, Finding 2).
+/// Focused tests for <see cref="FilamentRunoutSwitchEvaluator"/> (issue #711, F6, Finding 2).
 /// Proves the concrete telemetry grading: no loaded backup → <see cref="RunoutSwitchAssessment.NoBackup"/>;
 /// a configured loaded backup without a live switch → <see cref="RunoutSwitchAssessment.BackupAvailable"/>;
 /// fresh MMU active-tool/gate telemetry selecting the backup →
 /// <see cref="RunoutSwitchAssessment.SwitchConfirmed"/>.
 /// </summary>
-[Collection(IntegrationTestCollection.Name)]
-public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
+/// <remarks>
+/// This fixture intentionally avoids <c>CustomWebApplicationFactory</c>. Resolving
+/// <c>factory.Services</c> lazily starts the complete API host, including core and slicer schema
+/// initialization, reference-data seeding, and registered hosted services. The old fixture used
+/// that host only to obtain an <c>AsyncServiceScope</c>, <see cref="AppDbContext"/>, and
+/// <see cref="IFilamentFallbackGroupService"/>. The direct graph below is the complete graph needed
+/// by the evaluator: one private EF in-memory context containing <see cref="Toolhead"/> plus the
+/// scalar <see cref="Printer"/> row required by the context's save hook, and strict fallback-service
+/// and status-cache mocks. A unique database name per test instance keeps this class isolated and
+/// deterministic when xUnit runs it in parallel with other test classes. The concrete fallback
+/// persistence behavior remains covered by <c>FilamentFallbackGroupServiceTests</c>.
+/// </remarks>
+public sealed class FilamentRunoutSwitchEvaluatorTests
+    : IClassFixture<FilamentRunoutSwitchEvaluatorTests.EvaluatorModelFixture>, IDisposable
 {
     private const int RunoutSpoolId = 99;
     private const int BackupSpoolId = 42;
 
-    private readonly CustomWebApplicationFactory _factory;
-    private AsyncServiceScope _scope;
-    private AppDbContext _db = null!;
-    private IFilamentFallbackGroupService _fallbackService = null!;
-    private Mock<IPrinterStatusCacheReader> _statusCache = null!;
-    private FilamentRunoutSwitchEvaluator _evaluator = null!;
+    private readonly AppDbContext _db;
+    private readonly Mock<IFilamentFallbackGroupService> _fallbackService;
+    private readonly Mock<IPrinterStatusCacheReader> _statusCache;
+    private readonly FilamentRunoutSwitchEvaluator _evaluator;
 
-    public FilamentRunoutSwitchEvaluatorTests()
+    public FilamentRunoutSwitchEvaluatorTests(EvaluatorModelFixture modelFixture)
     {
-        _factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
-    }
-
-    public async Task InitializeAsync()
-    {
-        _scope = _factory.Services.CreateAsyncScope();
-        _db = _scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        _fallbackService = _scope.ServiceProvider.GetRequiredService<IFilamentFallbackGroupService>();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseInMemoryDatabase($"filament-runout-switch-evaluator-{Guid.NewGuid():N}")
+            .UseModel(modelFixture.Model)
+            .Options;
+        _db = new EvaluatorDbContext(options);
+        _fallbackService = new Mock<IFilamentFallbackGroupService>(MockBehavior.Strict);
         _statusCache = new Mock<IPrinterStatusCacheReader>(MockBehavior.Strict);
         _statusCache
             .Setup(cache => cache.GetSnapshot(It.IsAny<Guid>()))
             .Returns((PrinterStatusCacheSnapshot?)null);
         _evaluator = new FilamentRunoutSwitchEvaluator(
             _db,
-            _fallbackService,
+            _fallbackService.Object,
             _statusCache.Object);
-        await Task.CompletedTask;
     }
 
-    public async Task DisposeAsync()
+    public void Dispose()
     {
-        await _scope.DisposeAsync();
-        _factory?.Dispose();
+        _db.Dispose();
     }
 
     [Fact]
@@ -476,10 +482,30 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
 
     private async Task CreateGroupAsync(Printer printer, Toolhead t0, Toolhead t1)
     {
-        await _fallbackService.CreateAsync(
+        FilamentFallbackLookupKey key = FilamentFallbackLookupKey.Create(
             printer.Id,
-            new CreateFilamentFallbackGroupRequest("PLA Chain", "PLA", null, [t0.Id, t1.Id]),
-            CancellationToken.None);
+            t0.Id,
+            "PLA");
+        FilamentFallbackResolution resolution = new(
+            Guid.NewGuid(),
+            [
+                new FilamentFallbackChainMember(
+                    Guid.NewGuid(),
+                    Guid.NewGuid(),
+                    t1.Id,
+                    1,
+                    t1.CurrentMaterial,
+                    t1.CurrentSpoolId)
+            ]);
+        _fallbackService
+            .Setup(service => service.GetAvailableFallbacksAsync(
+                It.Is<IEnumerable<Guid>>(ids => ids.SequenceEqual(new[] { printer.Id })),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<FilamentFallbackLookupKey, FilamentFallbackResolution>
+            {
+                [key] = resolution
+            });
+        await Task.CompletedTask;
     }
 
     private void SetStatus(
@@ -541,8 +567,6 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
             ToolheadType = mmuTopology ? ToolheadType.MmuGate : ToolheadType.Physical
         };
 
-        _db.Manufacturers.Add(mfg);
-        _db.PrinterModels.Add(model);
         _db.Printers.Add(printer);
         if (mmuTopology)
         {
@@ -555,5 +579,67 @@ public class FilamentRunoutSwitchEvaluatorTests : IAsyncLifetime
         await _db.SaveChangesAsync();
 
         return (printer, t0, t1);
+    }
+
+    private sealed class EvaluatorDbContext(DbContextOptions<AppDbContext> options)
+        : AppDbContext(options)
+    {
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            ArgumentNullException.ThrowIfNull(modelBuilder);
+
+            Type[] unrelatedEntityTypes = modelBuilder.Model
+                .GetEntityTypes()
+                .Select(entityType => entityType.ClrType)
+                .Where(entityType => entityType != typeof(Toolhead))
+                .Distinct()
+                .ToArray();
+            foreach (Type entityType in unrelatedEntityTypes)
+            {
+                _ = modelBuilder.Ignore(entityType);
+            }
+
+            _ = modelBuilder.Entity<Toolhead>(entity =>
+            {
+                _ = entity.HasKey(toolhead => toolhead.Id);
+                _ = entity.Ignore(toolhead => toolhead.SupportedMaterials);
+                _ = entity.Ignore(toolhead => toolhead.Printer);
+                _ = entity.Ignore(toolhead => toolhead.HotendModel);
+                _ = entity.Ignore(toolhead => toolhead.ExtruderModel);
+                _ = entity.Ignore(toolhead => toolhead.ToolheadModelDef);
+                _ = entity.Ignore(toolhead => toolhead.NozzleModel);
+            });
+            _ = modelBuilder.Entity<Printer>(entity =>
+            {
+                _ = entity.HasKey(printer => printer.Id);
+                _ = entity.Ignore(printer => printer.Credential);
+                _ = entity.Ignore(printer => printer.Cameras);
+                _ = entity.Ignore(printer => printer.Manufacturer);
+                _ = entity.Ignore(printer => printer.Model);
+                _ = entity.Ignore(printer => printer.Location);
+                _ = entity.Ignore(printer => printer.PrinterGroup);
+                _ = entity.Ignore(printer => printer.BedType);
+                _ = entity.Ignore(printer => printer.Toolheads);
+                _ = entity.Ignore(printer => printer.MaintenanceLogs);
+                _ = entity.Ignore(printer => printer.Statistics);
+                _ = entity.Ignore(printer => printer.Tags);
+                _ = entity.Ignore(printer => printer.DispatchState);
+                _ = entity.Ignore(printer => printer.ServiceState);
+            });
+        }
+    }
+
+    public sealed class EvaluatorModelFixture
+    {
+        public EvaluatorModelFixture()
+        {
+            DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase($"filament-runout-switch-model-{Guid.NewGuid():N}")
+                .Options;
+            using EvaluatorDbContext context = new(options);
+            Model = context.Model;
+        }
+
+        public IModel Model { get; }
     }
 }
