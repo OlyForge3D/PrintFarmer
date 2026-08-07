@@ -9,7 +9,6 @@ import {
   ADMIN_DESTINATIONS,
   ADMIN_HUB_PARENT,
 } from '@/features/admin/registry/adminDestinations';
-import { LEGACY_REDIRECTS } from '@/features/admin/registry/legacyRedirects';
 import { PowerMonitorSettingsPage } from '@/features/power-monitors/components/PowerMonitorSettingsPage';
 import { SettingsShell } from '@/features/settings/pages/SettingsShell';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
@@ -53,6 +52,17 @@ function declaredRoutePaths(): Set<string> {
     paths.add('/admin'); // <Route index>
     for (const m of adminBlock.matchAll(/<Route\s+path="([^"]+)"/g)) {
       if (m[1] !== 'admin') paths.add(`/admin/${m[1]}`);
+    }
+  }
+
+  const locationsBlock = source.slice(
+    source.indexOf('<Route path="locations"'),
+    source.indexOf('<Route path="catalog"'),
+  );
+  if (locationsBlock) {
+    paths.add('/locations');
+    for (const m of locationsBlock.matchAll(/<Route\s+path="([^"]+)"/g)) {
+      if (m[1] !== 'locations') paths.add(`/locations/${m[1]}`);
     }
   }
 
@@ -262,12 +272,12 @@ describe('admin destination contract (#1016)', () => {
       const resolved = resolveSettingsNavigationTarget(tab, sub, routeScope);
 
       // Deliberately an identity check, not "resolves to *something*".
-      // `resolveSettingsNavigationTarget` remaps legacy aliases (`system` →
+      // `resolveSettingsNavigationTarget` remaps transitional aliases (`system` →
       // `operations`, `notifications` → `profile`) and the with-subpage table,
       // so a registry entry written against an alias would land somewhere other
       // than the tab it names — reachable, but not where the tile says. That
       // fails here, which is the intent: registry paths must use canonical
-      // category ids and let the alias table serve only external bookmarks.
+      // category ids and reserve the alias table for transitional inputs.
       expect(resolved.categoryId).toBe(tab);
       if (sub) {
         expect(resolved.subPageId).toBe(sub);
@@ -389,20 +399,13 @@ describe('admin destinations the shell does not draw (Hicks #5)', () => {
     // so compare on the pathname or every settings destination looks unrelated
     // to the `/admin/settings` route that serves it.
     const registered = new Set(ADMIN_DESTINATIONS.map((d) => d.path.split('?')[0]));
-    // Legacy paths are routes on purpose — they exist to keep old bookmarks
-    // working and redirect into the shell, so they have no tile by design.
-    // Derived from `LEGACY_REDIRECTS` rather than hand-listed, so retiring a
-    // redirect immediately makes its route an unregistered orphan here.
-    const legacy = new Set(LEGACY_REDIRECTS.map((r) => r.from));
-
     const routerAdminPaths = [...declaredRoutePaths()].filter(
       (p) => p.startsWith('/admin') && !p.includes(':'),
     );
 
     const unregistered = routerAdminPaths.filter(
-      (p) => !registered.has(p) && !legacy.has(p) && !(p in ROUTER_ONLY),
+      (p) => !registered.has(p) && !(p in ROUTER_ONLY),
     );
     expect(unregistered).toEqual([]);
   });
 });
-

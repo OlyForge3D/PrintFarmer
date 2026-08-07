@@ -210,7 +210,7 @@ const navigation: NavigationElement[] = [
     icon: TrendingUpIcon,
     requiredRole: 'farm_admin',
     anchored: true,
-    matches: (pathname) => pathname.startsWith('/analytics') || pathname.startsWith('/statistics')
+    matches: (pathname) => pathname.startsWith('/analytics')
   },
   {
     id: 'auto-dispatch',

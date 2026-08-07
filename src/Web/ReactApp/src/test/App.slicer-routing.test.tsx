@@ -113,6 +113,10 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
 
 vi.mock('@/features/slicer/pages/NewSliceJobPage', () => lazyNewSliceJobPageModule.waitForImport());
 
+vi.mock('@/features/settings/pages/SettingsShell', () => ({
+  SettingsShell: () => <div>SettingsShellMock</div>,
+}));
+
 vi.mock('@/features/tasks', () => ({
   ProfileImportWizardPage: () => <div>ProfileImportWizardMock</div>,
   TasksBadge: () => null,
@@ -142,19 +146,20 @@ describe('App slicer route consolidation', () => {
     });
   });
 
-  it('redirects the old admin slicer profiles route to the settings slicing tab', async () => {
-    window.history.pushState({}, '', '/admin/slicer-profiles');
+  it('renders the canonical slicer profiles settings route without rewriting it', async () => {
+    window.history.pushState({}, '', '/admin/settings?tab=slicing&sub=profiles');
 
     render(<App />);
 
+    expect(await screen.findByText('SettingsShellMock')).toBeInTheDocument();
     await waitFor(() => {
       expect(window.location.pathname).toBe('/admin/settings');
-      expect(window.location.search).toContain('tab=slicing');
+      expect(window.location.search).toBe('?tab=slicing&sub=profiles');
     });
   });
 
-  it('redirects the old import-official route to the shared import wizard', async () => {
-    window.history.pushState({}, '', '/slicer/import-official');
+  it('renders the canonical profile import wizard route', async () => {
+    window.history.pushState({}, '', '/profiles/import');
 
     render(<App />);
 

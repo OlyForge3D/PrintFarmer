@@ -2207,7 +2207,7 @@ export const NewSliceJobPage: React.FC = () => {
                               variant="ghost"
                               size="sm"
                               className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                              onClick={() => { setMachineMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                              onClick={() => { setMachineMenuOpen(false); navigate('/admin/settings?tab=slicing&sub=profiles'); }}
                               iconLeft={<EditIcon className="w-3.5 h-3.5" />}
                             >
                               Manage profiles
@@ -2296,7 +2296,7 @@ export const NewSliceJobPage: React.FC = () => {
                         variant="ghost"
                         size="sm"
                         className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                        onClick={() => { setFilamentMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                        onClick={() => { setFilamentMenuOpen(false); navigate('/admin/settings?tab=slicing&sub=profiles'); }}
                         iconLeft={<EditIcon className="w-3.5 h-3.5" />}
                       >
                         Manage profiles
@@ -2444,7 +2444,7 @@ export const NewSliceJobPage: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => { setFilamentMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                      onClick={() => { setFilamentMenuOpen(false); navigate('/admin/settings?tab=slicing&sub=profiles'); }}
                       iconLeft={<EditIcon className="w-3.5 h-3.5" />}
                     >
                       Manage profiles
@@ -2575,7 +2575,7 @@ export const NewSliceJobPage: React.FC = () => {
                       variant="ghost"
                       size="sm"
                       className="w-full justify-start px-3 py-1.5 text-sm rounded-none"
-                      onClick={() => { setProfileMenuOpen(false); navigate('/admin/slicer-profiles'); }}
+                      onClick={() => { setProfileMenuOpen(false); navigate('/admin/settings?tab=slicing&sub=profiles'); }}
                       iconLeft={<EditIcon className="w-3.5 h-3.5" />}
                     >
                       Manage profiles

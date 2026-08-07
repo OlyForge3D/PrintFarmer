@@ -31,7 +31,7 @@ vi.mock('../../../common/components/PageTemplate', () => ({
 // Import after mocks are set up
 import { SystemDashboardPage } from '../../../features/admin/pages/SystemDashboardPage';
 
-const renderWithRouter = (initialRoute = '/admin/system') => {
+const renderWithRouter = (initialRoute = '/system-dashboard') => {
   return render(
     <MemoryRouter initialEntries={[initialRoute]}>
       <SystemDashboardPage />
@@ -63,27 +63,27 @@ describe('SystemDashboardPage', () => {
 
   describe('tab navigation', () => {
     it('defaults to logs tab when no query parameter', () => {
-      renderWithRouter('/admin/system');
+      renderWithRouter('/system-dashboard');
       expect(screen.getByTestId('system-logs-content')).toBeInTheDocument();
     });
 
     it('shows logs content when tab=logs', () => {
-      renderWithRouter('/admin/system?tab=logs');
+      renderWithRouter('/system-dashboard?tab=logs');
       expect(screen.getByTestId('system-logs-content')).toBeInTheDocument();
     });
 
     it('shows monitoring content when tab=monitoring', () => {
-      renderWithRouter('/admin/system?tab=monitoring');
+      renderWithRouter('/system-dashboard?tab=monitoring');
       expect(screen.getByTestId('monitoring-content')).toBeInTheDocument();
     });
 
     it('shows file health content when tab=file-health', () => {
-      renderWithRouter('/admin/system?tab=file-health');
+      renderWithRouter('/system-dashboard?tab=file-health');
       expect(screen.getByTestId('file-health-content')).toBeInTheDocument();
     });
 
     it('defaults to logs tab for invalid tab parameter', () => {
-      renderWithRouter('/admin/system?tab=invalid');
+      renderWithRouter('/system-dashboard?tab=invalid');
       expect(screen.getByTestId('system-logs-content')).toBeInTheDocument();
     });
   });

@@ -112,32 +112,20 @@ vi.mock('sonner', () => ({
 
 import App from '../App';
 
-describe('App analytics route consolidation', () => {
+describe('App canonical analytics route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it('redirects /statistics to the unified analytics production lens', async () => {
-    window.history.pushState({}, '', '/statistics');
+  it('renders the unified analytics production lens without rewriting it', async () => {
+    window.history.pushState({}, '', '/analytics?lens=production');
 
     render(<App />);
 
     expect(await screen.findByText('AnalyticsHubMock')).toBeInTheDocument();
     await waitFor(() => {
       expect(window.location.pathname).toBe('/analytics');
-      expect(window.location.search).toContain('lens=production');
-    });
-  });
-
-  it('redirects /statistics/costs to the unified analytics cost lens', async () => {
-    window.history.pushState({}, '', '/statistics/costs');
-
-    render(<App />);
-
-    expect(await screen.findByText('AnalyticsHubMock')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(window.location.pathname).toBe('/analytics');
-      expect(window.location.search).toContain('lens=cost');
+      expect(window.location.search).toBe('?lens=production');
     });
   });
 });

@@ -63,7 +63,7 @@ function renderApiKeysRoute(path = '/profile/api-keys') {
         <Routes>
           <Route path="/settings" element={<div data-testid="settings-page">Settings</div>} />
           <Route
-            path="/settings/system"
+            path="/admin/settings"
             element={
               <ProtectedRoute requiredRole="farm_admin">
                 <div data-testid="system-settings-page">System Settings</div>
@@ -111,8 +111,8 @@ describe('ApiKeysPage access control', () => {
     expect(screen.queryByText('Access Denied')).not.toBeInTheDocument();
   });
 
-  it('farm_admin ProtectedRoute still blocks non-admin from /settings/system', () => {
-    renderApiKeysRoute('/settings/system');
+  it('farm_admin ProtectedRoute still blocks non-admin from /admin/settings', () => {
+    renderApiKeysRoute('/admin/settings');
     expect(screen.queryByTestId('system-settings-page')).not.toBeInTheDocument();
     expect(screen.getByText('Access Denied')).toBeInTheDocument();
   });

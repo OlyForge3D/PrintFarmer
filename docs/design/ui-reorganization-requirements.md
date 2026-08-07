@@ -76,10 +76,10 @@ views; only the *primary nav entry* moves into Settings.
 Note: API Keys is already mounted in Settings at `users.api-keys`
 (`ApiKeysPage`). Newt's PoC places it under Integrations. We keep the existing
 `users.api-keys` mount as the canonical location to avoid a regression, and the
-nav "API Keys" link redirects to it. We do **not** duplicate it under
+nav "API Keys" link points directly to it. We do **not** duplicate it under
 Integrations; the Integrations category gains Webhooks only (already wired via
 `SINGLE_PAGE_CONTENT.integrations`). This is the one place we diverge from Newt's
-sketch, for backward compatibility.
+sketch, to preserve the existing information architecture.
 
 ## Design Decision: Analytics Consolidation
 
@@ -192,7 +192,7 @@ Frontend polls every 30s with a manual Refresh button (`staleTime: 10_000`).
   their content is renderable without their own `PageTemplate` wrapper (extract
   body components if needed).
 - **Complexity:** L
-- **Dependencies:** none for build; coordinates with F5 for nav/redirects
+- **Dependencies:** none for build; coordinates with F5 for canonical navigation
 - **Owner:** Ripley
 
 ### F4 — Frontend: Move admin items into Settings
@@ -208,18 +208,19 @@ Frontend polls every 30s with a manual Refresh button (`staleTime: 10_000`).
 - **Dependencies:** none
 - **Owner:** Ripley
 
-### F5 — Frontend: Navigation cleanup + redirects
+### F5 — Frontend: Canonical navigation cleanup
 
 - **Description:** Remove Statistics / Cost Analytics / Analytics → single
-  "Analytics" entry. Remove standalone API Keys, NFC Bindings, Printer Groups nav
-  entries (now in Settings). Add redirect routes so old URLs survive.
+  "Analytics" entry. Remove standalone API Keys, NFC Bindings, and Printer Groups
+  nav entries (now in Settings), and remove superseded compatibility routes.
 - **Affected:** `src/common/components/Layout.tsx` (nav array);
-  `src/App.tsx` (add `Navigate` redirects, see Migration Plan);
+  `src/App.tsx` (remove superseded paths and use index routes for current
+  parent-to-default-child behavior);
   `src/test/features/navigation/navigation-sections.test.tsx` (update
   expectations).
 - **Complexity:** S
 - **Dependencies:** F3 (analytics route must exist), F4 (settings sub-pages must
-  exist) before redirects point at them
+  exist) before callers point at them
 - **Owner:** Ripley
 
 ### F6 — Frontend: Ambient System Pulse pill (second wave)
@@ -239,37 +240,31 @@ Parallel track A (backend) and track B (frontend) start together:
 1. **F1 (Lambert)** and **F3 + F4 (Ripley)** in parallel — F3/F4 don't need the
    API; F1 unblocks the System work.
 2. **F2 (Ripley)** once F1 merges (needs `getSystemInfo`).
-3. **F5 (Ripley)** last among the core set — redirects must point at the new
-   `/analytics` page (F3) and Settings sub-pages (F4) that already exist.
+3. **F5 (Ripley)** last among the core set — internal callers must point at the
+   canonical `/analytics` page (F3) and Settings sub-pages (F4) that already exist.
 4. **F6 (Ripley)** second wave, after F1/F2 — additive polish, not gating.
 
 Critical path: F1 → F2 → F6. F3/F4 are independent and can land first. F5 is the
 integration gate that flips the user-visible nav.
 
-## Migration Plan
+## Navigation Migration Policy
 
-Preserve every existing bookmark with `Navigate` redirects in `src/App.tsx`
-(this repo already uses this pattern for `nfc-devices`, `cameras`, `locations`,
-`users`). Keep the underlying feature routes mounted where a contextual deep link
-still makes sense.
-
-| Old URL | New target | Mechanism |
-|---|---|---|
-| `/statistics` | `/analytics?lens=production` | `Navigate ... replace` |
-| `/statistics/costs` | `/analytics?lens=cost` | `Navigate ... replace` |
-| `/analytics` | unified hub (default `production`) | route now renders hub |
-| `/profile/api-keys` | keep (per-user route stays open) + nav points to `/settings?tab=users&sub=api-keys` | keep route; renav |
-| `/nfc-bindings` | keep route; nav → `/settings?tab=hardware&sub=nfc-bindings` | keep route; renav |
-| `/printer-groups` | keep route (contextual); nav → `/settings?tab=hardware&sub=printer-groups` | keep route; renav |
-| `/admin/workers` | keep route; nav → `/settings?tab=system&sub=workers` | keep route; renav |
+React navigation supports canonical routes only. When a destination moves, update all
+internal links, buttons, command entries, and tests to the new URL in the same change.
+Do not retain old paths as bookmark aliases in `App.tsx`, and do not introduce a
+compatibility redirect registry.
 
 Rules:
 
-- `/profile/api-keys` must remain reachable by all authenticated users (existing
-  access decision in `App.tsx` — do not gate behind `farm_admin`).
-- Redirects use `replace` so back-button doesn't trap users on the old URL.
-- Settings deep links require `farm_admin` (the `/settings` route gate); the
-  standalone routes that stay (api-keys, nfc-bindings) keep their current gates.
+- `/analytics` is the canonical analytics hub.
+- Settings links use `/settings`, `/admin/settings?tab=<category>&sub=<page>`, or
+  `/admin/manage?tab=<category>&sub=<page>` according to scope.
+- `/profile/api-keys` remains reachable by all authenticated users; do not gate it
+  behind `farm_admin`.
+- Standalone contextual routes such as `/nfc-bindings` and `/printer-groups` retain
+  their existing access gates.
+- Current parent-to-default-child behavior uses React Router index routes rather than
+  compatibility aliases.
 
 ## Acceptance Criteria
 
@@ -307,11 +302,11 @@ Rules:
 - API Keys remains reachable at Settings → Users → API Keys.
 - Settings search returns these by keyword.
 
-**F5 — Navigation + redirects**
+**F5 — Canonical navigation**
 
 - Main nav shows a single "Analytics" entry; Statistics, Cost Analytics, standalone
   API Keys, NFC Bindings, and Printer Groups entries are gone.
-- All seven legacy URLs in the Migration Plan resolve to the correct destination.
+- All supported internal links use canonical destinations directly.
 - `navigation-sections.test.tsx` updated and green.
 
 **F6 — System Pulse pill**

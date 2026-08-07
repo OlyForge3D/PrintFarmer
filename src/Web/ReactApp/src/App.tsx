@@ -139,57 +139,6 @@ function lazyRoute(children: React.ReactNode) {
   return <RouteSuspense>{children}</RouteSuspense>;
 }
 
-function LegacySettingsRedirect({
-  to,
-  searchParamMap,
-}: {
-  to: string;
-  searchParamMap?: Record<string, string>;
-}) {
-  const location = useLocation();
-  const [pathname, search = ''] = to.split('?');
-  const currentSearchParams = new URLSearchParams(location.search);
-  const nextSearchParams = new URLSearchParams(search);
-
-  Object.entries(searchParamMap ?? {}).forEach(([fromKey, toKey]) => {
-    const value = currentSearchParams.get(fromKey);
-    if (value) {
-      nextSearchParams.set(toKey, value);
-    }
-  });
-
-  const nextLocation = nextSearchParams.toString()
-    ? `${pathname}?${nextSearchParams.toString()}`
-    : pathname;
-
-  return <Navigate to={nextLocation} replace />;
-}
-
-const LEGACY_SYSTEM_TAB_MAP: Record<string, string> = {
-  services: '/admin/manage?tab=operations&sub=workers',
-  status: '/admin/manage?tab=operations&sub=status',
-  logs: '/admin/manage?tab=operations&sub=status',
-  connections: '/admin/manage?tab=operations&sub=status',
-  monitoring: '/admin/manage?tab=operations&sub=status',
-};
-
-function LegacySystemTabRedirect() {
-  const location = useLocation();
-  const tabParam = new URLSearchParams(location.search).get('tab');
-  const target = (tabParam && LEGACY_SYSTEM_TAB_MAP[tabParam]) || '/admin/manage?tab=operations&sub=status';
-  return <Navigate to={target} replace />;
-}
-
-function SystemSettingsRoute() {
-  const location = useLocation();
-  const params = new URLSearchParams(location.search);
-  if (params.get('tab') === 'hardware' && params.get('sub') === 'locations') {
-    return <Navigate to="/locations/dashboard" replace />;
-  }
-
-  return lazyRoute(<LazySettingsShell routeScope="system" />);
-}
-
 /**
  * Route-level gate that blocks access to a feature when platform
  * capabilities report it as disabled (e.g. on ARM / Raspberry Pi).
@@ -320,30 +269,23 @@ function AuthenticatedAppRoutes() {
         <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
         <Route path="printQueue" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
         <Route path="printQueue/:tabId" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
-        <Route path="files/projects" element={<Navigate to="/projects" replace />} />
         <Route path="files/*" element={lazyRoute(<LazyFilesPage />)} />
         <Route path="projects" element={lazyRoute(<LazyProjectsPage />)} />
         <Route path="spools" element={lazyRoute(<LazyFilamentManagementPage />)} />
         <Route path="spools/:tabId" element={lazyRoute(<LazyFilamentManagementPage />)} />
-        <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
-        <Route path="cameras/:tabId" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
-        <Route path="nfc-devices" element={<Navigate to="/admin/settings?tab=hardware&sub=nfc" replace />} />
         <Route path="nfc-bindings" element={lazyRoute(<LazyNfcBindingsPage />)} />
         <Route path="maintenance" element={lazyRoute(<LazyMaintenanceDashboardPage />)} />
         <Route path="parts-inventory" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
         <Route path="parts-inventory/:tabId" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
         <Route path="auto-dispatch" element={lazyRoute(<LazyAutoDispatchDashboardPage />)} />
-        <Route path="statistics" element={<Navigate to="/analytics?lens=production" replace />} />
-        <Route path="statistics/costs" element={<Navigate to="/analytics?lens=cost" replace />} />
         <Route path="analytics" element={lazyRoute(<LazyAnalyticsHubPage />)} />
         <Route path="scheduling" element={lazyRoute(<LazySchedulingPage />)} />
-        <Route path="locations" element={<Navigate to="/locations/dashboard" replace />} />
-        <Route path="locations/dashboard" element={lazyRoute(<LazyLocationDashboardPage />)} />
+        <Route path="locations" element={<Outlet />}>
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={lazyRoute(<LazyLocationDashboardPage />)} />
+        </Route>
         <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
-        <Route path="users" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/manage?tab=users&sub=accounts" replace /></ProtectedRoute>} />
         <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
-        <Route path="settings/system" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
-        <Route path="admin/settings-legacy" element={<ProtectedRoute requiredRole="farm_admin"><Navigate to="/admin/settings?tab=general" replace /></ProtectedRoute>} />
         {/*
          * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
          * API key management is a per-user feature — every authenticated user needs
@@ -351,34 +293,16 @@ function AuthenticatedAppRoutes() {
          * via the User Settings profile section, but the direct /profile/api-keys route
          * must remain open to all authenticated users to avoid a regression.
          */}
-        <Route path="preferences" element={<Navigate to="/settings" replace />} />
         <Route path="profile/api-keys" element={lazyRoute(<LazyApiKeysPage />)} />
         <Route path="profile/notifications" element={lazyRoute(<LazyNotificationPreferencesPage />)} />
         <Route path="profile/passkeys" element={lazyRoute(<LazyPasskeysPage />)} />
         <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
-          <Route path="settings" element={<SystemSettingsRoute />} />
+          <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
           <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
-          <Route path="printers" element={<Navigate to="/printers" replace />} />
-          <Route path="workers" element={<LegacySettingsRedirect to="/admin/manage?tab=operations&sub=workers" searchParamMap={{ tab: 'workerTab' }} />} />
-          <Route path="file-health" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
-          <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />
-          <Route path="tags" element={<Navigate to="/admin/manage?tab=data&sub=tags" replace />} />
-          <Route path="bed-types" element={<Navigate to="/admin/settings?tab=slicing&sub=bed-types" replace />} />
-          <Route path="custom-fields" element={<Navigate to="/admin/settings?tab=hardware&sub=custom-fields" replace />} />
-          <Route path="webhooks" element={<Navigate to="/admin/settings?tab=integrations" replace />} />
-          <Route path="quotas" element={<Navigate to="/admin/settings?tab=quotas" replace />} />
           <Route path="power-monitors" element={lazyRoute(<LazyPowerMonitorSettingsPage />)} />
-          <Route path="data" element={<Navigate to="/admin/manage?tab=data&sub=management" replace />} />
-          <Route path="system" element={<LegacySystemTabRedirect />} />
-          <Route path="monitoring" element={<Navigate to="/admin/manage?tab=operations&sub=status" replace />} />
-          <Route path="cameras" element={<Navigate to="/admin/settings?tab=hardware&sub=cameras" replace />} />
-          <Route path="security/login-audit" element={<Navigate to="/admin/manage?tab=users&sub=audit" replace />} />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
-        <Route path="slice-jobs" element={<Navigate to="/admin/manage?tab=operations&sub=workers&workerTab=jobs" replace />} />
-        <Route path="slicer-profiles" element={<Navigate to="/admin/settings?tab=slicing&sub=profiles" replace />} />
-        <Route path="slicer/import-official" element={<Navigate to="/profiles/import" replace />} />
         <Route path="profiles/import" element={lazyRoute(<LazyProfileImportWizardPage />)} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
