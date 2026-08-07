@@ -31,31 +31,14 @@ public sealed class OrcaBinaryPathTests
         pipeline.OrcaSlicerBinaryPath.Should().Be(OrcaBinaryDetector.DefaultBinaryPath);
     }
 
-    [Fact]
-    public void TrustedLauncherPath_ReferencesRealBinary_IsRecognized()
+    [Theory]
+    [InlineData("/usr/local/bin/orcaslicer", "/opt/orcaslicer/bin/orca-slicer")]
+    [InlineData("/opt/custom/orca-slicer", "/opt/custom/orca-slicer")]
+    public void ResolveExecutablePath_ConfiguredPath_ReturnsExecutablePath(
+        string configuredPath,
+        string expectedPath)
     {
-        string directory = Path.Combine(Path.GetTempPath(), $"printfarmer-orca-launcher-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        string launcherPath = Path.Combine(directory, "orcaslicer");
-        string binaryPath = Path.Combine(directory, "orca-slicer");
-        File.WriteAllText(binaryPath, new string('x', 2048));
-        File.WriteAllText(launcherPath, "#!/bin/sh\nAPPDIR=\"$(dirname \"$0\")\"\nexec \"$APPDIR/bin/orca-slicer\" \"$@\"\n");
-        string relativeBinaryPath = Path.Combine(directory, "bin", "orca-slicer");
-        Directory.CreateDirectory(Path.GetDirectoryName(relativeBinaryPath)!);
-        File.Move(binaryPath, relativeBinaryPath);
-
-        try
-        {
-            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeTrue();
-            File.WriteAllText(launcherPath, "#!/bin/sh\nAPPDIR=\"$(dirname \"$0\")\"\nexec \"$APPDIR/bin/other-slicer\" \"$@\"\n");
-            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeFalse();
-            File.WriteAllText(launcherPath, "#!/bin/sh\n# exec \"$APPDIR/bin/orca-slicer\" \"$@\"\nexec \"$APPDIR/bin/other-slicer\" \"$@\"\n");
-            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, relativeBinaryPath).Should().BeFalse();
-        }
-        finally
-        {
-            Directory.Delete(directory, recursive: true);
-        }
+        OrcaBinaryDetector.ResolveExecutablePath(configuredPath).Should().Be(expectedPath);
     }
 
     private sealed class NullProgressReporter : IProgressReporter

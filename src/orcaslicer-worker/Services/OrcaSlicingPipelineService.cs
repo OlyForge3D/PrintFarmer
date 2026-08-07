@@ -53,7 +53,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 #pragma warning disable S5443 // Worker default is a container-local scratch directory; deployments can override Worker:WorkingDirectory.
         _workingDirectory = configuration["Worker:WorkingDirectory"] ?? "/tmp/orca-work";
 #pragma warning restore S5443
-        _orcaSlicerBinaryPath = configuration["Worker:OrcaSlicerPath"] ?? OrcaBinaryDetector.DefaultBinaryPath;
+        _orcaSlicerBinaryPath = OrcaBinaryDetector.ResolveExecutablePath(
+            configuration["Worker:OrcaSlicerPath"] ?? OrcaBinaryDetector.DefaultBinaryPath);
         _engineVersion = (configuration["Worker:EngineVersion"]
             ?? configuration["SlicerRegistry:Version"]
             ?? WorkerConstants.SlicerVersion).Trim();
