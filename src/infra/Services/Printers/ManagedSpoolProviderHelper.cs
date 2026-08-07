@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -9,9 +10,13 @@ namespace Farm.Infrastructure.Services.Printers;
 /// from PrintFarmer's database + central Spoolman instance.
 /// Injected into non-Moonraker status clients to avoid duplicating spool resolution logic.
 /// </summary>
-public class ManagedSpoolProviderHelper(ISpoolmanService spoolmanService, ILogger<ManagedSpoolProviderHelper> logger)
+public class ManagedSpoolProviderHelper(
+    ISpoolmanService spoolmanService,
+    ISpoolmanStatusCache statusCache,
+    ILogger<ManagedSpoolProviderHelper> logger)
 {
     private readonly ISpoolmanService _spoolmanService = spoolmanService;
+    private readonly ISpoolmanStatusCache _statusCache = statusCache;
     private readonly ILogger<ManagedSpoolProviderHelper> _logger = logger;
 
     /// <summary>
@@ -26,7 +31,9 @@ public class ManagedSpoolProviderHelper(ISpoolmanService spoolmanService, ILogge
 
         try
         {
-            SpoolmanSpoolDto? spool = await _spoolmanService.GetSpoolByIdAsync(spoolId, ct).ConfigureAwait(false);
+            SpoolmanSpoolDto? spool = await _statusCache
+                .GetSpoolAsync(spoolId, _spoolmanService.GetSpoolByIdAsync, ct)
+                .ConfigureAwait(false);
             if (spool is null)
             {
                 _logger.LogDebug("Spool {SpoolId} not found in Spoolman for printer {PrinterId}", spoolId, printer.Id);

@@ -13,6 +13,7 @@ using Farm.Infrastructure.Contracts.Printers.Sdcp;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Services.Spoolman;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -30,7 +31,10 @@ public class PrinterStatusClientTests
     #region Helper Methods
 
     private static ManagedSpoolProviderHelper CreateSpoolProvider() =>
-        new(Mock.Of<ISpoolmanService>(), NullLogger<ManagedSpoolProviderHelper>.Instance);
+        new(
+            Mock.Of<ISpoolmanService>(),
+            Mock.Of<ISpoolmanStatusCache>(),
+            NullLogger<ManagedSpoolProviderHelper>.Instance);
 
     private static PrinterStatusClientFactory CreateFactoryWithClients(
         IMoonrakerClient moonrakerClient,
