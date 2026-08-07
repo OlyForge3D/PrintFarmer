@@ -93,6 +93,35 @@ EOF
     chmod +x "$mock_tests_dir/$suite"
 done
 
+# The static layer must reject the historical root-relative access pattern,
+# including a transient create/delete that would leave no final-state delta.
+root_relative_test="$mock_tests_dir/test-root-relative-access.sh"
+cat > "$root_relative_test" <<'EOF'
+#!/bin/bash
+cd "$REPO_ROOT"
+source .deploy-config
+: > .env
+rm -f .env
+EOF
+chmod +x "$root_relative_test"
+
+root_relative_out="$TMP_ROOT/root-relative.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --quick >"$root_relative_out" 2>&1
+root_relative_rc=$?
+set -e
+
+if [[ $root_relative_rc -eq 0 ]]; then
+    cat "$root_relative_out"
+    fail "Static isolation guard accepted repo-root-relative artifact access."
+fi
+if ! grep -q "forbidden repo-root artifact access" "$root_relative_out"; then
+    cat "$root_relative_out"
+    fail "Static isolation failure did not identify repo-root-relative access."
+fi
+rm -f "$root_relative_test"
+pass "Static-isolation: repo-root-relative source and transient mutation are rejected"
+
 harness_out="$TMP_ROOT/harness.out"
 sentinel_config="$TMP_ROOT/.deploy-config"
 printf '%s\n' \
@@ -283,6 +312,47 @@ if ! grep -q "mutated repo-root deployment artifacts" "$harness_out3"; then
     fail "Repository artifact isolation failure did not identify the mutation."
 fi
 pass "Dynamic-isolation: repo-root deployment artifact mutation fails the orchestrator"
+
+# ----------------------------------------------------------------------------
+# Dynamic regression #4: protected generated directories must be recursively
+# fingerprinted so in-place descendant edits cannot hide behind directory stat.
+# ----------------------------------------------------------------------------
+
+for suite in "${suites[@]}"; do
+    cat > "$mock_tests_dir/$suite" <<'EOF'
+#!/bin/bash
+exit 0
+EOF
+    chmod +x "$mock_tests_dir/$suite"
+done
+
+nested_artifact="$TMP_ROOT/monitoring/prometheus/prometheus.yml"
+mkdir -p "$(dirname "$nested_artifact")"
+printf '%s\n' 'global: baseline' > "$nested_artifact"
+
+cat > "$mock_tests_dir/test-deploy-docker.sh" <<EOF
+#!/bin/bash
+printf '%s\n' 'global: mutated' > "$nested_artifact"
+exit 0
+EOF
+chmod +x "$mock_tests_dir/test-deploy-docker.sh"
+
+harness_out4="$TMP_ROOT/harness4.out"
+set +e
+bash "$mock_tests_dir/run-deployment-tests.sh" --verbose >"$harness_out4" 2>&1
+harness_rc4=$?
+set -e
+
+if [[ $harness_rc4 -eq 0 ]]; then
+    cat "$harness_out4"
+    fail "Repository artifact isolation guard accepted a nested artifact mutation."
+fi
+if ! grep -q "monitoring/prometheus/prometheus.yml" "$harness_out4"; then
+    cat "$harness_out4"
+    fail "Repository artifact isolation failure did not identify the nested mutation."
+fi
+rm -rf "$TMP_ROOT/monitoring"
+pass "Dynamic-isolation: nested protected artifact mutation fails the orchestrator"
 
 # ----------------------------------------------------------------------------
 # Static regression: test-compose-generator.sh must guard `wait $pid` in

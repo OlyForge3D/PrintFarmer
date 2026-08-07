@@ -138,6 +138,30 @@ path_metadata() {
         || stat -f '%z:%m:%Lp' "$path"
 }
 
+append_repository_artifact_snapshot() {
+    local snapshot_file="$1"
+    local artifact_path="$2"
+    local relative_path="$3"
+
+    if [[ -L "$artifact_path" ]]; then
+        printf '%s\tsymlink\t%s\t%s\n' \
+            "$relative_path" \
+            "$(path_metadata "$artifact_path")" \
+            "$(readlink "$artifact_path")" >> "$snapshot_file"
+    elif [[ -f "$artifact_path" ]]; then
+        printf '%s\tfile\t%s\t%s\n' \
+            "$relative_path" \
+            "$(path_metadata "$artifact_path")" \
+            "$(file_hash "$artifact_path")" >> "$snapshot_file"
+    elif [[ -d "$artifact_path" ]]; then
+        printf '%s\tdirectory\t%s\n' \
+            "$relative_path" \
+            "$(path_metadata "$artifact_path")" >> "$snapshot_file"
+    else
+        printf '%s\tabsent\n' "$relative_path" >> "$snapshot_file"
+    fi
+}
+
 snapshot_repository_deployment_artifacts() {
     local snapshot_file="$1"
     local relative_path
@@ -145,22 +169,16 @@ snapshot_repository_deployment_artifacts() {
 
     while IFS= read -r relative_path; do
         local artifact_path="$REPO_ROOT/$relative_path"
-        if [[ -L "$artifact_path" ]]; then
-            printf '%s\tsymlink\t%s\t%s\n' \
-                "$relative_path" \
-                "$(path_metadata "$artifact_path")" \
-                "$(readlink "$artifact_path")" >> "$snapshot_file"
-        elif [[ -f "$artifact_path" ]]; then
-            printf '%s\tfile\t%s\t%s\n' \
-                "$relative_path" \
-                "$(path_metadata "$artifact_path")" \
-                "$(file_hash "$artifact_path")" >> "$snapshot_file"
-        elif [[ -d "$artifact_path" ]]; then
-            printf '%s\tdirectory\t%s\n' \
-                "$relative_path" \
-                "$(path_metadata "$artifact_path")" >> "$snapshot_file"
-        else
-            printf '%s\tabsent\n' "$relative_path" >> "$snapshot_file"
+        append_repository_artifact_snapshot "$snapshot_file" "$artifact_path" "$relative_path"
+
+        if [[ -d "$artifact_path" && ! -L "$artifact_path" ]]; then
+            local descendant_path
+            while IFS= read -r descendant_path; do
+                append_repository_artifact_snapshot \
+                    "$snapshot_file" \
+                    "$descendant_path" \
+                    "${descendant_path#"$REPO_ROOT/"}"
+            done < <(find "$artifact_path" -mindepth 1 -print | LC_ALL=C sort)
         fi
     done < <(repository_deployment_artifact_paths)
 }
@@ -172,7 +190,7 @@ assert_test_sources_use_isolated_artifacts() {
     for test_file in "$SCRIPT_DIR"/test-*.sh "$SCRIPT_DIR"/validate-deployment-scripts.sh; do
         [[ "$(basename "$test_file")" == "test-run-deployment-tests-harness.sh" ]] && continue
         violations+=$(grep -nE \
-            '\$REPO_ROOT/\.(deploy-config|env)(["'"'"'[:space:]]|$)|\$REPO_ROOT/docker-compose[^[:space:]"]*|backup_repository_deployment_artifacts|restore_repository_deployment_artifacts' \
+            '\$\{?REPO_ROOT\}?/\.(deploy-config|env)(["'"'"'[:space:]]|$)|\$\{?REPO_ROOT\}?/docker-compose[^[:space:]"]*|backup_repository_deployment_artifacts|restore_repository_deployment_artifacts|(^|[;&|[:space:]])(cd|pushd)[[:space:]]+(--[[:space:]]+)?["'"'"']?\$\{?REPO_ROOT\}?([/"'"'"'[:space:];&|]|$)' \
             "$test_file" || true)
     done
 
@@ -277,7 +295,7 @@ check_dependencies() {
     local missing_deps=0
     
     # Check required commands
-    for cmd in bash grep awk sed; do
+    for cmd in bash grep awk sed find; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             log_error "Required command not found: $cmd"
             missing_deps=$((missing_deps + 1))
