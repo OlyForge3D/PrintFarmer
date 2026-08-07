@@ -3,15 +3,20 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Services.Startup;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Infrastructure;
 
@@ -84,27 +89,24 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
-    public async Task CoreMigration_DifferentlyNamedFirstMigration_WritesHistoryRow()
+    public async Task Migration_ArbitrarilyNamedFirstMigration_WritesHistoryRow()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
-        await using AppDbContext context = CreateCoreContext(connection);
+        await using ArbitraryBaselineDbContext context = CreateArbitraryBaselineContext(connection);
         _ = await context.Database.EnsureCreatedAsync();
-        string firstMigration = context.Database.GetMigrations()
-            .OrderBy(migration => migration, StringComparer.Ordinal)
-            .First();
 
         _ = await ProviderAwareMigrationRunner.MigrateAsync(
             context,
-            DatabaseMigrationTarget.Core,
+            new DatabaseMigrationTarget("test", "BaselineEntities"),
             NullLogger.Instance);
 
-        firstMigration.Should().EndWith("_InitialV2");
-        firstMigration.Should().NotContain("InitialCreate");
-        (await ReadAppliedMigrationIdsAsync(connection)).Should().Contain(firstMigration);
+        context.Database.GetMigrations().Should().Equal(ArbitraryNamedBaselineMigration.MigrationId);
+        (await ReadAppliedMigrationIdsAsync(connection))
+            .Should().Equal(ArbitraryNamedBaselineMigration.MigrationId);
     }
 
     [Fact]
-    public async Task CoreMigration_PopulatedSchemaWithoutMigrationAssembly_FailsBeforeMigration()
+    public async Task CoreMigration_WithoutMigrationAssembly_FailsBeforeTouchingSchema()
     {
         await using SqliteConnection connection = await OpenConnectionAsync();
         await using AppDbContext context = CreateCoreContextWithoutMigrations(connection);
@@ -117,6 +119,33 @@ public sealed class DatabaseMigrationTests
 
         DatabaseMigrationContractException exception =
             (await migrate.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
+        exception.Code.Should().Be("migration_assembly_missing");
+        exception.Message.Should().Contain("No SQLite migrations were found");
+        (await TableExistsAsync(connection, "Printers")).Should().BeTrue();
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProgramHelpersInitialization_PopulatedSchemaWithoutMigrationAssembly_PropagatesFailure()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        _ = builder.Services.AddLogging();
+        _ = builder.Services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+        _ = builder.Services.AddScoped(_ => Mock.Of<IDatabaseInitializer>());
+        _ = builder.Services.AddSingleton<IStartupStatus, StartupStatus>();
+        await using WebApplication app = builder.Build();
+
+        await using (AsyncServiceScope scope = app.Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            _ = await context.Database.EnsureCreatedAsync();
+        }
+
+        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+
+        DatabaseMigrationContractException exception =
+            (await initialize.Should().ThrowAsync<DatabaseMigrationContractException>()).Which;
         exception.Code.Should().Be("migration_assembly_missing");
         exception.Message.Should().Contain("No SQLite migrations were found");
         (await TableExistsAsync(connection, "Printers")).Should().BeTrue();
@@ -439,6 +468,19 @@ public sealed class DatabaseMigrationTests
         return new AppDbContext(options);
     }
 
+    private static ArbitraryBaselineDbContext CreateArbitraryBaselineContext(
+        SqliteConnection connection)
+    {
+        string migrationAssembly = typeof(DatabaseMigrationTests).Assembly.GetName().Name!;
+        DbContextOptions<ArbitraryBaselineDbContext> options =
+            new DbContextOptionsBuilder<ArbitraryBaselineDbContext>()
+                .UseSqlite(
+                    connection,
+                    sqlite => sqlite.MigrationsAssembly(migrationAssembly))
+                .Options;
+        return new ArbitraryBaselineDbContext(options);
+    }
+
     private static SlicerDbContext CreateSlicerContext(SqliteConnection connection)
     {
         DbContextOptions<SlicerDbContext> options = new DbContextOptionsBuilder<SlicerDbContext>()
@@ -547,5 +589,43 @@ public sealed class DatabaseMigrationTests
             CREATE UNIQUE INDEX "IX_UserRoles_UserId_RoleId" ON "UserRoles" ("UserId", "RoleId");
             PRAGMA foreign_keys = ON;
             """;
+    }
+}
+
+internal sealed class ArbitraryBaselineDbContext(
+    DbContextOptions<ArbitraryBaselineDbContext> options) : DbContext(options)
+{
+    public DbSet<ArbitraryBaselineEntity> BaselineEntities => Set<ArbitraryBaselineEntity>();
+}
+
+internal sealed class ArbitraryBaselineEntity
+{
+    public int Id { get; set; }
+}
+
+[DbContext(typeof(ArbitraryBaselineDbContext))]
+[Migration(MigrationId)]
+internal sealed class ArbitraryNamedBaselineMigration : Migration
+{
+    public const string MigrationId = "20200101000000_ZzzArbitraryBaseline";
+
+    protected override void Up(MigrationBuilder migrationBuilder)
+    {
+        _ = migrationBuilder.CreateTable(
+            name: "BaselineEntities",
+            columns: table => new
+            {
+                Id = table.Column<int>(type: "INTEGER", nullable: false)
+                    .Annotation("Sqlite:Autoincrement", true),
+            },
+            constraints: table =>
+            {
+                _ = table.PrimaryKey("PK_BaselineEntities", entity => entity.Id);
+            });
+    }
+
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        _ = migrationBuilder.DropTable(name: "BaselineEntities");
     }
 }

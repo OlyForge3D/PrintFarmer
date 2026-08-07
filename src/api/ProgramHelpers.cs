@@ -342,47 +342,35 @@ internal static class ProgramHelpers
     internal static async Task InitializeDatabaseAsync(WebApplication app)
     {
         // Initialize settings and ensure DB schema exists. This runs post-build using app.Services to avoid building a separate provider.
+        await using AsyncServiceScope initScope = app.Services.CreateAsyncScope();
+        IServiceProvider sp = initScope.ServiceProvider;
+
+        // Resolve required services for DB initialization and call into the existing initializer
+        ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
+        AppDbContext db = sp.GetRequiredService<AppDbContext>();
+        IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
+        IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
+
+        // Database failures must propagate so the host cannot serve against an unsafe or partial schema.
+        await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
+
+        // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
+        // registered in AddSlicerModule().
+
+        // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
         try
         {
-            await using AsyncServiceScope initScope = app.Services.CreateAsyncScope();
-            IServiceProvider sp = initScope.ServiceProvider;
-
-            // Resolve required services for DB initialization and call into the existing initializer
-            ILogger logger = sp.GetRequiredService<ILoggerFactory>().CreateLogger("DatabaseInit");
-            AppDbContext db = sp.GetRequiredService<AppDbContext>();
-            IDatabaseInitializer dbInitializer = sp.GetRequiredService<IDatabaseInitializer>();
-            IStartupStatus startupStatusResolved = sp.GetRequiredService<IStartupStatus>();
-
-            // This call ensures the database schema exists and runs seeding. Do this before any
-            // SettingsService or SettingsInitializationService read/write operations that depend on DB tables.
-            await app.InitializeDatabaseAsync(logger, db, dbInitializer, startupStatusResolved);
-
-            // SlicerDbContext initialization is handled by SlicerDbInitializationHostedService
-            // registered in AddSlicerModule().
-
-            // After the DB schema exists and seeding has completed, apply environment-based settings initialization.
-            try
-            {
-                ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
-                settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
-                settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
-                settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
-                app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
-            }
-            catch (Exception innerEx)
-            {
-                app.Logger.LogWarning(innerEx, "[Startup] Settings initialization from environment variables failed (non-fatal)");
-            }
+            ISettingsInitializationService settingsInit = sp.GetRequiredService<ISettingsInitializationService>();
+            settingsInit.InitializeFromEnvironment<SpoolmanSettings>();
+            settingsInit.InitializeFromEnvironment<NetworkDiscoverySettings>();
+            settingsInit.InitializeFromEnvironment<Go2RtcSettings>();
+            app.Logger.LogInformation("[Startup] Settings initialization from environment variables completed");
         }
-        catch (Exception ex)
+        catch (Exception settingsException)
         {
-            try
-            {
-                app.Logger.LogWarning(ex, "[Startup] Settings/database initialization failed (non-fatal)");
-            }
-            catch
-            {
-            }
+            app.Logger.LogWarning(
+                settingsException,
+                "[Startup] Settings initialization from environment variables failed (non-fatal)");
         }
     }
 }
