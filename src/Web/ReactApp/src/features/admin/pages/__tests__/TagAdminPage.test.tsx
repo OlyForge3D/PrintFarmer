@@ -81,6 +81,17 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     expect(await screen.findByText('No tags created yet')).toBeInTheDocument();
   });
 
+  it('uses the shared tag chip for the live create preview', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findAllByText('Resin');
+
+    await user.click(screen.getByRole('button', { name: /add tag/i }));
+
+    const preview = screen.getByRole('status', { name: 'Tag preview: Tag Preview' });
+    expect(preview).toHaveAttribute('data-pf-radius', 'full');
+  });
+
   it('captures the tag revision when starting an edit and sends it as expectedRevision on save', async () => {
     vi.mocked(apiClient.updateTag).mockResolvedValue({ ...resin, name: 'Resin (Updated)', revision: 2 });
     const user = userEvent.setup();

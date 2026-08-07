@@ -81,8 +81,9 @@ describe('JobTagsEditor', () => {
       />
     );
 
-    const removeButtons = screen.getAllByRole('button');
-    fireEvent.click(removeButtons[0]); // Remove first tag
+    const removeButton = screen.getByRole('button', { name: 'Remove tag PLA' });
+    expect(removeButton.closest('[data-pf-radius="full"]')).not.toBeNull();
+    fireEvent.click(removeButton);
 
     expect(mockOnTagsChange).toHaveBeenCalledWith(['Test']);
   });

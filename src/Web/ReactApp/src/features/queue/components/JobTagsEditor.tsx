@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Button } from '@/common/components/ui/Button';
+import { TagChip } from '@/common/components/ui/TagChip';
 
 export interface JobTagsEditorProps {
   tags: string[];
@@ -129,25 +129,14 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
         <div className="space-y-2">
           <div className="flex flex-wrap gap-1.5">
             {localTags.map((tag) => (
-              <div 
-                key={tag} 
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full" 
-                data-pf-radius="full"
-                role="status" 
-                aria-label={`Tag: ${tag}`}
-              >
-                <span>{tag}</span>
-                <Button
-                  className="p-0 h-4 w-4 min-w-0 hover:text-pf-error-text"
-                  onClick={() => removeTag(tag)}
-                  aria-label={`Remove tag ${tag}`}
-                  title={`Remove tag ${tag}`}
-                  variant="ghost"
-                  size="sm"
-                >
-                  ✕
-                </Button>
-              </div>
+              <TagChip
+                key={tag}
+                mode="removable"
+                label={tag}
+                statusLabel={`Tag: ${tag}`}
+                onRemove={() => removeTag(tag)}
+                removeLabel={`Remove tag ${tag}`}
+              />
             ))}
           </div>
 
@@ -224,13 +213,7 @@ const JobTagsEditor: React.FC<JobTagsEditorProps> = ({
       {localTags.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
           {localTags.map((tag) => (
-            <span 
-              key={tag} 
-              className="inline-flex px-2 py-0.5 bg-pf-accent/20 text-pf-accent text-xs rounded-full"
-              data-pf-radius="full"
-            >
-              {tag}
-            </span>
+            <TagChip key={tag} label={tag} />
           ))}
         </div>
       ) : (

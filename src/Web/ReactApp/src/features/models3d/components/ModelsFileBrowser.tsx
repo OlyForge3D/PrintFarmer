@@ -10,7 +10,7 @@ import { ModelUploadModal } from '@/common/components/modals/ModelUploadModal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { PrintablesBrowserModal } from '@/features/models3d/components/PrintablesBrowserModal';
 import { PrintablesImportModal } from '@/features/models3d/components/PrintablesImportModal';
-import { Button } from '@/common/components/ui';
+import { Button, TagChip } from '@/common/components/ui';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
 import { TagIcon, UploadIcon, EyeIcon, LayersTripleOutlineIcon, FilterIcon, DownloadIcon, DeleteIcon, FolderPlusIcon } from '@/common/components/icons/MdiIcons';
 import { useAuth } from '@/features/auth/hooks/useAuth';
@@ -84,14 +84,12 @@ const modelColumns: ColumnDef[] = [
       file.tags?.length ? (
         <div className="flex flex-wrap gap-1" aria-label="Tags">
           {file.tags.map((tag) => (
-            <span
+            <TagChip
               key={tag.id}
-              data-pf-radius="full"
-              className="rounded-full bg-pf-bg-2 px-2 py-0.5 text-xs"
-              style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}
-            >
-              {tag.name}
-            </span>
+              label={tag.name}
+              color={tag.color}
+              truncate
+            />
           ))}
         </div>
       ) : (

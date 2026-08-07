@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { FileBrowser } from '@/features/fileBrowser/components/FileBrowser';
 import { type ColumnDef, type FileItem, type FileQueryState, type GcodeFileItem, type UseFileBrowserConfig } from '@/features/fileBrowser/types';
 import { apiClient } from '@/services/api';
-import { Button, Checkbox } from '@/common/components/ui';
+import { Button, Checkbox, TagChip } from '@/common/components/ui';
 import { UploadIcon, DownloadIcon, DeleteIcon, TagIcon, FilterIcon, PlayIcon, NozzleIcon, BedIcon, ClipboardListIcon } from '@/common/components/icons/MdiIcons';
 import { GcodeUploadModal } from '@/common/components/modals/GcodeUploadModal';
 import { QueueGcodeModal } from '@/features/gcode/components/QueueGcodeModal';
@@ -155,14 +155,12 @@ const gcodeColumns: ColumnDef[] = [
       file.tags?.length ? (
         <div className="flex flex-wrap gap-1" aria-label="Tags">
           {file.tags.map((tag) => (
-            <span
+            <TagChip
               key={tag.id}
-              data-pf-radius="full"
-              className="rounded-full bg-pf-bg-2 px-2 py-0.5 text-xs"
-              style={tag.color ? { borderColor: tag.color, color: tag.color } : undefined}
-            >
-              {tag.name}
-            </span>
+              label={tag.name}
+              color={tag.color}
+              truncate
+            />
           ))}
         </div>
       ) : (

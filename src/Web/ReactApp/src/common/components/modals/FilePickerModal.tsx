@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import clsx from 'clsx';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Input, Select, Checkbox, Spinner, Badge } from '@/common/components/ui';
+import { Button, Input, Select, Checkbox, Spinner, Badge, TagChip } from '@/common/components/ui';
 import { SearchIcon, FileIcon, FilterIcon } from '@/common/components/icons/MdiIcons';
 import { apiClient } from '@/services/api';
 import type { GcodeFile } from '@/types/api';
@@ -294,29 +294,14 @@ function FilePickerContent({
                   {availableTags.map(tag => {
                     const isActive = selectedTagIds.includes(tag.id);
                     return (
-                      <Button
+                      <TagChip
                         key={tag.id}
-                        type="button"
-                        variant="unstyled"
+                        mode="action"
+                        label={tag.name}
+                        color={tag.color}
                         onClick={() => handleTagToggle(tag.id)}
-                        data-pf-radius="full"
-                        className={clsx(
-                          'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-colors cursor-pointer',
-                          isActive
-                            ? 'bg-pf-accent-bg text-[var(--pf-on-accent)] border-pf-accent'
-                            : 'bg-pf-bg-0 text-pf-text-primary border-pf-border hover:border-pf-accent'
-                        )}
-                        aria-pressed={isActive}
-                      >
-                        {tag.color && (
-                          <span
-                            className="w-2.5 h-2.5 rounded-full inline-block shrink-0"
-                            style={{ backgroundColor: tag.color }}
-                            aria-hidden="true"
-                          />
-                        )}
-                        {tag.name}
-                      </Button>
+                        pressed={isActive}
+                      />
                     );
                   })}
                 </div>
@@ -437,13 +422,13 @@ function FilePickerContent({
                   {file.tags && file.tags.length > 0 && (
                     <div className="flex gap-0.5 flex-wrap mt-0.5">
                       {file.tags.slice(0, 2).map(tag => (
-                        <span
+                        <TagChip
                           key={tag.id}
-                          data-pf-radius="full"
-                          className="text-[9px] px-1 rounded-full border border-pf-border text-pf-text-tertiary"
-                        >
-                          {tag.name}
-                        </span>
+                          label={tag.name}
+                          color={tag.color}
+                          className="max-w-20"
+                          truncate
+                        />
                       ))}
                       {file.tags.length > 2 && (
                         <span className="text-[9px] text-pf-text-tertiary">+{file.tags.length - 2}</span>

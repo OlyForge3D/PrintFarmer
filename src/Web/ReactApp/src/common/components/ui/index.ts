@@ -41,6 +41,12 @@ export {
   type TableCellProps
 } from './Table';
 export { Tabs, type TabsProps, type TabListProps, type TabProps, type TabPanelsProps, type TabPanelProps } from './Tabs';
+export {
+  TagChip,
+  type TagChipProps,
+  type TagChipSize,
+  type TagChipAppearance,
+} from './TagChip';
 export { TemperatureInput, type TemperatureInputProps } from './TemperatureInput';
 export { TemperatureControlRow, type TemperatureControlRowProps } from './TemperatureControlRow';
 export { Textarea, type TextareaProps } from './Textarea';

@@ -128,9 +128,11 @@ exceptions listed below.
 
 **The sanctioned pill exceptions**, and nothing else:
 
-- **Tag chips** — user-authored labels from the tag system. Use `<Badge shape="tag">`, which
-  carries the radius and signs the waiver for you. A *status* pill is not a tag chip: status is
-  a fixed vocabulary the app owns, and it takes `--pf-radius-xs`.
+- **Tag chips** — user-authored labels from the tag system. Use `TagChip`, whose discriminated
+  display, action, and removable modes carry the radius waiver, normalized sizing, custom-color
+  contrast, and keyboard semantics. Use `<Badge shape="tag">` only for simple legacy labels that
+  do not need tag-system color or interaction. A *status* pill is not a tag chip: status is a fixed
+  vocabulary the app owns, and it takes `--pf-radius-xs`.
 - **Progress bars** — track and fill both, marked `data-pf-progress-track` / `-fill`.
 - **Switch and toggle tracks**, including their travelling thumb.
 - **Fixed-dimension count badges** — a notification counter drawn at `h-4 min-w-4` or
@@ -606,6 +608,8 @@ Structural specifications for the canonical components. Visual values come from 
 - Typography: `text-2xs`, weight 600, `uppercase`, `letter-spacing: 0.04em`.
 - Always uses the `{bg, text, border}` triple for its semantic role.
 - Icon prefix for status: `●` (online), `○` (offline), `▶` (printing), `❚❚` (paused), `!` (error). **Never color-only.**
+- Tag-system labels use `TagChip`: `mode="display"` (default), `mode="action"`, or
+  `mode="removable"`. Its `label` is plain text so interactive children cannot be nested.
 
 ### Modals
 

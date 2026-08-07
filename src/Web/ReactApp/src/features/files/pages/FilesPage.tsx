@@ -44,7 +44,7 @@ import {
   UploadIcon,
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
-import { Badge, Button, Checkbox } from '@/common/components/ui';
+import { Badge, Button, Checkbox, TagChip } from '@/common/components/ui';
 import type { Model, Model3DSearchResponse } from '@/types/models';
 import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
@@ -314,14 +314,12 @@ function buildModelCard(
           {model.tags && model.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 pt-1">
               {model.tags.slice(0, 3).map((tag) => (
-                <span
+                <TagChip
                   key={tag.id}
-                  data-pf-radius="full"
-                  className="rounded-full bg-pf-bg-2 px-2 py-0.5 text-[10px] font-medium"
-                  style={tag.color ? { color: tag.color } : undefined}
-                >
-                  {tag.name}
-                </span>
+                  label={tag.name}
+                  color={tag.color}
+                  truncate
+                />
               ))}
             </div>
           )}
