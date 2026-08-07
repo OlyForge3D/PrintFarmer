@@ -1,7 +1,7 @@
 import type { ThreeMfMetadata } from '@/types/models';
 import { Card } from '@/common/components/ui/Card';
 import { Badge } from '@/common/components/ui/Badge';
-import { Button } from '@/common/components/ui/Button';
+import { TagChip } from '@/common/components/ui/TagChip';
 
 interface ThreeMfMetadataPanelProps {
   metadata: ThreeMfMetadata | null | undefined;
@@ -67,16 +67,13 @@ export function ThreeMfMetadataPanel({ metadata, autoTags, existingTagNames = []
               </span>
               <div className="flex flex-wrap gap-1.5 mt-1.5">
                 {pendingTags.map((tag) => (
-                  <Button
+                  <TagChip
                     key={tag}
-                    variant="unstyled"
+                    mode="action"
+                    label={`+ ${tag}`}
                     onClick={() => onAcceptTag?.(tag)}
-                    data-pf-radius="full"
-                    className="inline-flex items-center gap-1 rounded-full bg-pf-accent-bg/10 px-2.5 py-0.5 text-xs font-medium text-pf-accent hover:bg-pf-accent-bg/20 transition-colors cursor-pointer border border-pf-accent/30"
                     title={`Apply tag "${tag}"`}
-                  >
-                    + {tag}
-                  </Button>
+                  />
                 ))}
               </div>
             </div>
