@@ -31,6 +31,26 @@ public sealed class OrcaBinaryPathTests
         pipeline.OrcaSlicerBinaryPath.Should().Be(OrcaBinaryDetector.DefaultBinaryPath);
     }
 
+    [Fact]
+    public void TrustedLauncherPath_ReferencesRealBinary_IsRecognized()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"printfarmer-orca-launcher-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string launcherPath = Path.Combine(directory, "orcaslicer");
+        string binaryPath = Path.Combine(directory, "orca-slicer");
+        File.WriteAllText(binaryPath, new string('x', 2048));
+        File.WriteAllText(launcherPath, $"#!/bin/sh\nexec \"{binaryPath}\" \"$@\"\n");
+
+        try
+        {
+            OrcaBinaryDetector.IsTrustedLauncher(launcherPath, launcherPath, binaryPath).Should().BeTrue();
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private sealed class NullProgressReporter : IProgressReporter
     {
         public Task ReportProgressAsync(

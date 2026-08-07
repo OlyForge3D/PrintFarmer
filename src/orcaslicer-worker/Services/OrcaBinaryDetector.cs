@@ -45,7 +45,7 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
             }
 
             FileInfo fi = new FileInfo(_binaryPath);
-            if (fi.Length < 2048)
+            if (fi.Length < 2048 && !IsTrustedLauncher(_binaryPath))
             {
                 return false;
             }
@@ -83,6 +83,28 @@ public sealed class OrcaBinaryDetector : IOrcaBinaryDetector
         {
             return false;
         }
+    }
+
+    private static bool IsTrustedLauncher(string path)
+    {
+        return IsTrustedLauncher(path, "/usr/local/bin/orcaslicer", "/opt/orcaslicer/bin/orca-slicer");
+    }
+
+    internal static bool IsTrustedLauncher(string path, string launcherPath, string realBinaryPath)
+    {
+        if (!string.Equals(path, launcherPath, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        FileInfo realBinary = new(realBinaryPath);
+        if (!realBinary.Exists || realBinary.Length < 2048)
+        {
+            return false;
+        }
+
+        string launcher = File.ReadAllText(path);
+        return launcher.Contains(realBinaryPath, StringComparison.Ordinal);
     }
 
     public async Task<string?> GetVersionAsync()
