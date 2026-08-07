@@ -5,20 +5,17 @@ import { Outlet } from 'react-router';
 
 const mockUseSystemCapabilities = vi.fn();
 const lazyNewSliceJobPageModule = vi.hoisted(() => {
-  let releaseImport: () => void;
-  let markResolved: () => void;
-  const importReleased = new Promise<void>(resolve => {
-    releaseImport = resolve;
-  });
-  const importResolved = new Promise<void>(resolve => {
-    markResolved = resolve;
+  type Module = {
+    NewSliceJobPage: () => React.ReactNode;
+  };
+  let resolveImport: (module: Module) => void;
+  const importPromise = new Promise<Module>(resolve => {
+    resolveImport = resolve;
   });
 
   return {
-    releaseImport: () => releaseImport(),
-    waitUntilReleased: () => importReleased,
-    markResolved: () => markResolved(),
-    waitUntilResolved: () => importResolved,
+    resolveImport: (module: Module) => resolveImport(module),
+    waitForImport: () => importPromise,
   };
 });
 
@@ -114,13 +111,7 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
   useSystemCapabilities: () => mockUseSystemCapabilities(),
 }));
 
-vi.mock('@/features/slicer/pages/NewSliceJobPage', async () => {
-  await lazyNewSliceJobPageModule.waitUntilReleased();
-  lazyNewSliceJobPageModule.markResolved();
-  return {
-    NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
-  };
-});
+vi.mock('@/features/slicer/pages/NewSliceJobPage', () => lazyNewSliceJobPageModule.waitForImport());
 
 vi.mock('@/features/tasks', () => ({
   ProfileImportWizardPage: () => <div>ProfileImportWizardMock</div>,
@@ -202,12 +193,15 @@ describe('App slicer route consolidation', () => {
     expect(screen.queryByRole('status', { name: 'Loading platform capabilities' })).not.toBeInTheDocument();
 
     // The capability gate is open; synchronize with the separate route-level lazy import.
+    const routeModuleImport = import('@/features/slicer/pages/NewSliceJobPage');
     await act(async () => {
-      lazyNewSliceJobPageModule.releaseImport();
-      await lazyNewSliceJobPageModule.waitUntilResolved();
+      lazyNewSliceJobPageModule.resolveImport({
+        NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
+      });
+      await routeModuleImport;
     });
 
-    expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
+    expect(screen.getByText('NewSliceJobPageMock')).toBeInTheDocument();
   });
 
   it('keeps a resolved disabled capability distinct from unresolved data', async () => {
