@@ -3334,6 +3334,10 @@ validate_configuration() {
         ORCA_WORKER_COUNT=0
     fi
 
+    if [ "$NON_INTERACTIVE" = "true" ]; then
+        print_info "Effective OrcaSlicer worker configuration: enabled=$ENABLE_ORCA_WORKER, count=$ORCA_WORKER_COUNT"
+    fi
+
     print_success "Validation complete."
 }
 
@@ -3538,6 +3542,28 @@ configure_slicing() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENABLE_DISTRIBUTED_SLICING:-}" ]; then
         print_info "Using configured distributed slicing: $ENABLE_DISTRIBUTED_SLICING"
+
+        if [ "$ENABLE_DISTRIBUTED_SLICING" = "true" ]; then
+            if [ -z "${ENABLE_ORCA_WORKER:-}" ] && [ -z "${ORCA_WORKER_COUNT:-}" ]; then
+                print_warning "Legacy distributed slicing configuration has no OrcaSlicer worker settings; enabling one worker to preserve the intended slicing service."
+                ENABLE_ORCA_WORKER=yes
+                ORCA_WORKER_COUNT=1
+            elif [ -z "${ENABLE_ORCA_WORKER:-}" ]; then
+                if [ "${ORCA_WORKER_COUNT}" = "0" ]; then
+                    ENABLE_ORCA_WORKER=no
+                else
+                    ENABLE_ORCA_WORKER=yes
+                fi
+            elif [ "$ENABLE_ORCA_WORKER" = "yes" ]; then
+                ORCA_WORKER_COUNT="${ORCA_WORKER_COUNT:-1}"
+            elif [ "$ENABLE_ORCA_WORKER" = "no" ]; then
+                ORCA_WORKER_COUNT=0
+            fi
+        else
+            ENABLE_ORCA_WORKER=no
+            ORCA_WORKER_COUNT=0
+        fi
+
         return 0
     fi
 

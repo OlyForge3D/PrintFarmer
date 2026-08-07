@@ -20,6 +20,13 @@
 # Uses .deploy-config → No prompts, instant deploy
 ```
 
+Non-interactive output reports the effective OrcaSlicer worker enablement and
+count. When a legacy `.deploy-config` enables distributed slicing but omits
+both worker settings, the script preserves the intended slicing service by
+migrating the file to `ENABLE_ORCA_WORKER=yes` and `ORCA_WORKER_COUNT=1`.
+Explicit disables such as `ENABLE_ORCA_WORKER=no` and
+`ORCA_WORKER_COUNT=0` remain disabled.
+
 ### Re-Deployment (Update Settings)
 ```bash
 ./scripts/deploy-docker.sh

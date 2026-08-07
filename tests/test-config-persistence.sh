@@ -62,6 +62,10 @@ ENABLE_SWAGGER=true
 ENABLE_DETAILED_LOGGING=true
 ENABLE_PGADMIN=false
 DEVMODE_BYPASS_AUTH=false
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
 INCLUDE_DISCOVERY=false
 ENABLE_DISTRIBUTED_SLICING=false
 ENABLE_ORCA_WORKER=no
@@ -167,6 +171,68 @@ EOF
     pass_test
 }
 
+test_legacy_distributed_slicing_config_migrates_worker_defaults() {
+    start_test "legacy distributed slicing config enables a safe worker default"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    sed -i \
+        -e 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' \
+        -e '/^ENABLE_ORCA_WORKER=/d' \
+        -e '/^ORCA_WORKER_COUNT=/d' \
+        ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+    local generated_env
+    generated_env=$(cat ".env" 2>/dev/null || true)
+
+    assert_equals "0" "$exit_code" "Legacy migration deployment should complete successfully"
+    assert_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should explain the legacy worker migration"
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=yes, count=1" "Should display the effective migrated worker configuration"
+    assert_contains "$output" "Includes slicer-host service (distributed slicing orchestrator)" "Should select the OrcaSlicer service configuration"
+    assert_contains "$output" "--profile orca up -d" "Should activate the OrcaSlicer compose profile"
+    assert_contains "$persisted_config" "ENABLE_ORCA_WORKER=yes" "Should persist the inferred worker enablement"
+    assert_contains "$persisted_config" "ORCA_WORKER_COUNT=1" "Should persist one inferred worker"
+    assert_contains "$generated_env" "ENABLE_ORCA_WORKER=yes" "Generated environment should enable the inferred worker"
+    assert_contains "$generated_env" "ORCA_WORKER_COUNT=1" "Generated environment should contain the inferred worker count"
+
+    pass_test
+}
+
+test_explicit_worker_disable_remains_disabled() {
+    start_test "explicit OrcaSlicer worker disable remains disabled"
+
+    cd "$TEST_TEMP_DIR"
+
+    write_base_config ".deploy-config"
+    sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
+
+    capture_output "timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local persisted_config
+    persisted_config=$(cat ".deploy-config")
+
+    assert_equals "0" "$exit_code" "Explicit worker-disable deployment should complete successfully"
+    assert_contains "$output" "Effective OrcaSlicer worker configuration: enabled=no, count=0" "Should display the explicit disabled worker configuration"
+    assert_not_contains "$output" "Legacy distributed slicing configuration has no OrcaSlicer worker settings" "Should not migrate an explicit worker disable"
+    assert_contains "$output" "Slicer workers disabled" "Should omit the OrcaSlicer worker service configuration"
+    assert_not_contains "$output" "--profile orca" "Should not activate the OrcaSlicer compose profile"
+    assert_contains "$persisted_config" "ENABLE_ORCA_WORKER=no" "Should preserve explicit worker disable"
+    assert_contains "$persisted_config" "ORCA_WORKER_COUNT=0" "Should preserve explicit zero worker count"
+
+    pass_test
+}
+
 test_orcaslicer_release_is_repository_controlled() {
     start_test "OrcaSlicer release is repository controlled"
 
@@ -229,6 +295,8 @@ run_all_tests() {
     test_monitoring_config_persistence
     test_cli_flag_override
     test_config_loading_display
+    test_legacy_distributed_slicing_config_migrates_worker_defaults
+    test_explicit_worker_disable_remains_disabled
     test_orcaslicer_release_is_repository_controlled
     test_regenerate_config_migrates_orcaslicer_release
     

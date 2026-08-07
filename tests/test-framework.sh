@@ -21,6 +21,7 @@ CURRENT_TEST=""
 
 # Test output
 TEST_OUTPUT=""
+TEST_OUTPUT_EXIT_CODE=0
 
 # Test logging functions
 test_log() { echo -e "${BLUE}[TEST]${NC} $1" >&2; }
@@ -182,12 +183,18 @@ assert_exit_code() {
 # Capture command output for testing
 capture_output() {
     local command="$1"
-    TEST_OUTPUT=$(eval "$command" 2>&1 || true)
+    TEST_OUTPUT_EXIT_CODE=0
+    TEST_OUTPUT=$(eval "$command" 2>&1) || TEST_OUTPUT_EXIT_CODE=$?
 }
 
 # Get the captured output
 get_output() {
     echo "$TEST_OUTPUT"
+}
+
+# Get the captured command's exit code
+get_output_exit_code() {
+    echo "$TEST_OUTPUT_EXIT_CODE"
 }
 
 # Test suite management
