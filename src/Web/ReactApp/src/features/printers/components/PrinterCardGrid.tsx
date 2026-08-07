@@ -1,4 +1,12 @@
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { defaultRangeExtractor, useWindowVirtualizer, type Range } from '@tanstack/react-virtual';
 import type { Printer } from '@/types/api';
 
@@ -21,11 +29,19 @@ interface PrinterCardGridProps {
   renderPrinter: (printer: Printer) => ReactNode;
 }
 
+function cardWidth(mode: PrinterGridMode): number {
+  return mode === 'compact' ? COMPACT_CARD_WIDTH_PX : DETAILED_CARD_WIDTH_PX;
+}
+
+function estimatedRowHeight(mode: PrinterGridMode): number {
+  return mode === 'compact'
+    ? COMPACT_ESTIMATED_ROW_HEIGHT_PX
+    : DETAILED_ESTIMATED_ROW_HEIGHT_PX;
+}
+
 function getColumnCount(width: number, mode: PrinterGridMode): number {
   if (width < SINGLE_COLUMN_BREAKPOINT_PX) return 1;
-
-  const cardWidth = mode === 'compact' ? COMPACT_CARD_WIDTH_PX : DETAILED_CARD_WIDTH_PX;
-  return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardWidth + GRID_GAP_PX)));
+  return Math.max(1, Math.floor((width + GRID_GAP_PX) / (cardWidth(mode) + GRID_GAP_PX)));
 }
 
 function gridClassName(mode: PrinterGridMode): string {
@@ -59,28 +75,83 @@ function VirtualizedPrinterCardGrid({
   const [columnCount, setColumnCount] = useState(1);
   const [scrollMargin, setScrollMargin] = useState(0);
   const [focusedPrinterId, setFocusedPrinterId] = useState<string>();
+  const [measuredCardHeights, setMeasuredCardHeights] = useState<ReadonlyMap<string, number>>(
+    () => new Map(),
+  );
 
   useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
+    let animationFrame: number | undefined;
     const measure = () => {
       setColumnCount(getColumnCount(container.clientWidth, mode));
       setScrollMargin(container.getBoundingClientRect().top + window.scrollY);
     };
+    const scheduleMeasure = () => {
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      animationFrame = requestAnimationFrame(measure);
+    };
 
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(container);
-    return () => observer.disconnect();
+    const resizeObserver = new ResizeObserver(scheduleMeasure);
+    let ancestor: HTMLElement | null = container;
+    while (ancestor) {
+      resizeObserver.observe(ancestor);
+      ancestor = ancestor.parentElement;
+    }
+
+    const layoutRoot = container.parentElement;
+    const mutationObserver = new MutationObserver(scheduleMeasure);
+    if (layoutRoot) {
+      mutationObserver.observe(layoutRoot, {
+        attributes: true,
+        attributeFilter: ['class', 'hidden', 'style'],
+        childList: true,
+        subtree: true,
+      });
+      layoutRoot.addEventListener('transitionrun', scheduleMeasure, true);
+      layoutRoot.addEventListener('transitionend', scheduleMeasure, true);
+    }
+    window.addEventListener('resize', scheduleMeasure);
+
+    return () => {
+      if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+      resizeObserver.disconnect();
+      mutationObserver.disconnect();
+      layoutRoot?.removeEventListener('transitionrun', scheduleMeasure, true);
+      layoutRoot?.removeEventListener('transitionend', scheduleMeasure, true);
+      window.removeEventListener('resize', scheduleMeasure);
+    };
   }, [mode]);
+
+  const measureCard = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+
+    const printerId = element.dataset.printerId;
+    if (!printerId) return;
+
+    const publishHeight = () => {
+      const height = element.getBoundingClientRect().height;
+      if (height <= 0) return;
+      setMeasuredCardHeights((current) => {
+        if (current.get(printerId) === height) return current;
+        const next = new Map(current);
+        next.set(printerId, height);
+        return next;
+      });
+    };
+
+    publishHeight();
+    const observer = new ResizeObserver(publishHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   const rowCount = Math.ceil(printers.length / columnCount);
   const rowVirtualizer = useWindowVirtualizer({
     count: rowCount,
-    estimateSize: () => mode === 'compact'
-      ? COMPACT_ESTIMATED_ROW_HEIGHT_PX
-      : DETAILED_ESTIMATED_ROW_HEIGHT_PX,
+    estimateSize: () => estimatedRowHeight(mode),
     overscan: ROW_OVERSCAN,
     scrollMargin,
     rangeExtractor: (range: Range) => {
@@ -102,13 +173,61 @@ function VirtualizedPrinterCardGrid({
     const printerIndex = printers.findIndex((printer) => printer.id === activePrinterId);
     if (printerIndex < 0) return;
 
-    const targetKey = `${activePrinterId}:${columnCount}`;
+    const rowIndex = Math.floor(printerIndex / columnCount);
+    const targetKey = `${activePrinterId}:${printerIndex}:${columnCount}:${rowIndex}`;
     if (lastScrollTargetRef.current === targetKey) return;
     lastScrollTargetRef.current = targetKey;
-    rowVirtualizer.scrollToIndex(Math.floor(printerIndex / columnCount), { align: 'center' });
+    rowVirtualizer.scrollToIndex(rowIndex, { align: 'center' });
   }, [activePrinterId, columnCount, printers, rowVirtualizer]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
+  const renderedItems: ReactNode[] = [];
+  const fixedCardWidth = cardWidth(mode);
+
+  virtualRows.forEach((virtualRow, virtualRowIndex) => {
+    const startIndex = virtualRow.index * columnCount;
+    const rowPrinters = printers.slice(startIndex, startIndex + columnCount);
+    const rowHeights = rowPrinters.map((printer) => measuredCardHeights.get(printer.id));
+    const allCardsMeasured = rowHeights.every((height) => height !== undefined);
+    const measuredRowHeight = allCardsMeasured
+      ? Math.max(...rowHeights as number[]) + GRID_GAP_PX
+      : estimatedRowHeight(mode);
+    const rowOffset = virtualRow.start - scrollMargin;
+
+    renderedItems.push(
+      <div
+        key={`measure-row-${virtualRow.index}`}
+        ref={rowVirtualizer.measureElement}
+        data-index={virtualRow.index}
+        aria-hidden="true"
+        className="pointer-events-none absolute left-0 top-0 w-px invisible"
+        style={{ height: measuredRowHeight, transform: `translateY(${rowOffset}px)` }}
+      />,
+    );
+
+    rowPrinters.forEach((printer, columnIndex) => {
+      renderedItems.push(
+        <div
+          key={`printer-${printer.id}`}
+          ref={measureCard}
+          role="listitem"
+          aria-setsize={printers.length}
+          aria-posinset={startIndex + columnIndex + 1}
+          data-printer-id={printer.id}
+          className="absolute left-0 top-0 min-w-0"
+          style={{
+            width: columnCount === 1 ? '100%' : fixedCardWidth,
+            transform: `translate(${columnIndex * (fixedCardWidth + GRID_GAP_PX)}px, ${rowOffset}px)`,
+          }}
+          {...(virtualRowIndex === 0 && columnIndex === 0
+            ? { 'data-tour': 'printers-card' }
+            : {})}
+        >
+          {renderPrinter(printer)}
+        </div>,
+      );
+    });
+  });
 
   return (
     <div
@@ -120,8 +239,7 @@ function VirtualizedPrinterCardGrid({
       data-testid="virtualized-printer-grid"
       onFocusCapture={(event) => {
         const card = (event.target as HTMLElement).closest<HTMLElement>('[data-printer-id]');
-        if (!card?.dataset.printerId) return;
-        setFocusedPrinterId(card.dataset.printerId);
+        if (card?.dataset.printerId) setFocusedPrinterId(card.dataset.printerId);
       }}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -129,36 +247,7 @@ function VirtualizedPrinterCardGrid({
         }
       }}
     >
-      {virtualRows.map((virtualRow, virtualRowIndex) => {
-        const startIndex = virtualRow.index * columnCount;
-        const rowPrinters = printers.slice(startIndex, startIndex + columnCount);
-
-        return (
-          <div
-            key={virtualRow.key}
-            ref={rowVirtualizer.measureElement}
-            data-index={virtualRow.index}
-            role="presentation"
-            className={`${gridClassName(mode)} absolute left-0 top-0 w-full pb-4`}
-            style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
-          >
-            {rowPrinters.map((printer, columnIndex) => (
-              <div
-                key={printer.id}
-                role="listitem"
-                aria-setsize={printers.length}
-                aria-posinset={startIndex + columnIndex + 1}
-                data-printer-id={printer.id}
-                {...(virtualRowIndex === 0 && columnIndex === 0
-                  ? { 'data-tour': 'printers-card' }
-                  : {})}
-              >
-                {renderPrinter(printer)}
-              </div>
-            ))}
-          </div>
-        );
-      })}
+      {renderedItems}
     </div>
   );
 }

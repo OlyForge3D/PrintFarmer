@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { useState } from 'react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Printer } from '@/types/api';
 import {
@@ -21,13 +22,14 @@ vi.mock('@tanstack/react-virtual', () => ({
     Array.from({ length: endIndex - startIndex + 1 }, (_, index) => startIndex + index),
   useWindowVirtualizer: (options: MockVirtualizerOptions) => {
     virtualizerOptions.push(options);
-    const mountedRowCount = Math.min(options.count, 4);
     return {
-      getVirtualItems: () => Array.from({ length: mountedRowCount }, (_, index) => ({
-        index,
-        key: `row-${index}`,
-        start: index * 360,
-      })),
+      getVirtualItems: () => options
+        .rangeExtractor({ startIndex: 0, endIndex: Math.min(options.count - 1, 3) })
+        .map((index) => ({
+          index,
+          key: `row-${index}`,
+          start: index * 360,
+        })),
       getTotalSize: () => options.count * 360,
       measureElement: vi.fn(),
       scrollToIndex,
@@ -35,8 +37,9 @@ vi.mock('@tanstack/react-virtual', () => ({
   },
 }));
 
-let observedResize: (() => void) | undefined;
+const observedResizes: Array<() => void> = [];
 let containerWidth = 1000;
+let gridOffset = 0;
 
 function createPrinters(count: number): Printer[] {
   return Array.from({ length: count }, (_, index) => ({
@@ -53,17 +56,40 @@ function renderCard(printer: Printer) {
   return <button type="button">Open {printer.name}</button>;
 }
 
+function StatefulCard({ printer }: { printer: Printer }) {
+  const [note, setNote] = useState('');
+  return (
+    <input
+      aria-label={`Note for ${printer.name}`}
+      value={note}
+      onChange={(event) => setNote(event.target.value)}
+    />
+  );
+}
+
 describe('PrinterCardGrid', () => {
   beforeEach(() => {
     scrollToIndex.mockClear();
     virtualizerOptions.length = 0;
-    observedResize = undefined;
+    observedResizes.length = 0;
     containerWidth = 1000;
+    gridOffset = 0;
 
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => containerWidth);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0,
+      y: gridOffset,
+      top: gridOffset,
+      right: containerWidth,
+      bottom: gridOffset,
+      left: 0,
+      width: containerWidth,
+      height: 0,
+      toJSON: () => ({}),
+    }));
     vi.stubGlobal('ResizeObserver', class ResizeObserver {
       constructor(callback: ResizeObserverCallback) {
-        observedResize = () => callback([], this);
+        observedResizes.push(() => callback([], this));
       }
       observe() {}
       unobserve() {}
@@ -108,20 +134,21 @@ describe('PrinterCardGrid', () => {
     expect(screen.getAllByRole('button')).toHaveLength(8);
 
     containerWidth = 600;
-    act(() => observedResize?.());
+    act(() => observedResizes.forEach((notify) => notify()));
 
     await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
     expect(screen.getAllByRole('button')).toHaveLength(4);
   });
 
-  it('preserves focus when realtime data updates a mounted printer', async () => {
+  it('preserves a focused stateful card when sorting and responsive columns move it between rows', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
+    const renderStatefulCard = (printer: Printer) => <StatefulCard printer={printer} />;
     const { rerender } = render(
-      <PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />,
+      <PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderStatefulCard} />,
     );
 
-    await waitFor(() => expect(screen.getAllByRole('button')).toHaveLength(12));
-    const focusedCard = screen.getByRole('button', { name: 'Open Printer 4' });
+    const focusedCard = await screen.findByRole('textbox', { name: 'Note for Printer 4' });
+    fireEvent.change(focusedCard, { target: { value: 'kept state' } });
     act(() => focusedCard.focus());
 
     await waitFor(() => {
@@ -129,19 +156,40 @@ describe('PrinterCardGrid', () => {
         .toEqual([1, 10, 11, 12]);
     });
 
-    const updatedPrinters = printers.map((printer) => printer.id === 'printer-4'
-      ? { ...printer, state: 'Printing' }
-      : printer);
+    containerWidth = 600;
+    act(() => observedResizes.forEach((notify) => notify()));
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.count).toBe(60));
+
+    const reorderedPrinters = [printers[4], ...printers.filter((printer) => printer.id !== 'printer-4')];
     rerender(
-      <PrinterCardGrid printers={updatedPrinters} mode="compact" renderPrinter={renderCard} />,
+      <PrinterCardGrid
+        printers={reorderedPrinters}
+        mode="compact"
+        renderPrinter={renderStatefulCard}
+      />,
     );
 
-    expect(focusedCard).toHaveFocus();
+    const movedCard = screen.getByRole('textbox', { name: 'Note for Printer 4' });
+    expect(movedCard).toBe(focusedCard);
+    expect(movedCard).toHaveValue('kept state');
+    expect(movedCard).toHaveFocus();
   });
 
-  it('scrolls the active deep-linked printer row into view', async () => {
+  it('refreshes scroll margin when surrounding layout content is inserted', async () => {
     const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
-    render(
+    render(<PrinterCardGrid printers={printers} mode="compact" renderPrinter={renderCard} />);
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(0));
+    gridOffset = 240;
+    const grid = screen.getByTestId('virtualized-printer-grid');
+    grid.parentElement?.prepend(document.createElement('aside'));
+
+    await waitFor(() => expect(virtualizerOptions.at(-1)?.scrollMargin).toBe(240));
+  });
+
+  it('rescrolls the active printer when sorting moves it to another row', async () => {
+    const printers = createPrinters(PRINTER_GRID_VIRTUALIZATION_THRESHOLD);
+    const { rerender } = render(
       <PrinterCardGrid
         printers={printers}
         mode="compact"
@@ -150,8 +198,18 @@ describe('PrinterCardGrid', () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(scrollToIndex).toHaveBeenCalledWith(18, { align: 'center' });
-    });
+    await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(18, { align: 'center' }));
+    scrollToIndex.mockClear();
+    const reorderedPrinters = [printers[55], ...printers.filter((printer) => printer.id !== 'printer-55')];
+    rerender(
+      <PrinterCardGrid
+        printers={reorderedPrinters}
+        mode="compact"
+        activePrinterId="printer-55"
+        renderPrinter={renderCard}
+      />,
+    );
+
+    await waitFor(() => expect(scrollToIndex).toHaveBeenCalledWith(0, { align: 'center' }));
   });
 });
