@@ -7,7 +7,7 @@
 
 import React from 'react';
 import { Link } from 'react-router';
-import { usePrinterSummary, usePrinters } from '@/common/hooks/useApi';
+import { usePrinterSummary } from '@/common/hooks/useApi';
 import { 
   SettingsIcon, 
   PlayIcon, 
@@ -86,8 +86,7 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
 }
 
 export const PrinterDashboard: React.FC = () => {
-  const { data: printers, isLoading, error } = usePrinters();
-  const { data: printerSummary } = usePrinterSummary();
+  const { data: printerSummary, isLoading, error } = usePrinterSummary();
   const { startTour } = usePageTour({ tourId: 'dashboard', steps: dashboardTour });
 
   const stats = React.useMemo(() => {
@@ -147,7 +146,7 @@ export const PrinterDashboard: React.FC = () => {
             return <p className="text-sm text-pf-error-text">Unknown error</p>;
           })()}
         </div>
-      ) : printers && printers.length === 0 ? (
+      ) : printerSummary && printerSummary.length === 0 ? (
         /* Empty State */
         <div className="p-8 text-center">
           <h2 className="text-xl font-semibold">No Printers Found</h2>

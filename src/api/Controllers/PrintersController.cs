@@ -178,7 +178,7 @@ public class PrintersController(
         catch (Exception ex)
         {
             _logger.LogError(ex, "[FATAL] Unhandled exception in /api/printers/summary. TraceId={HttpContextTraceIdentifier}, User={Name}, Exception={Message}", HttpContext.TraceIdentifier, User?.Identity?.Name ?? "anonymous");
-            return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, "Internal Server Error");
         }
     }
 

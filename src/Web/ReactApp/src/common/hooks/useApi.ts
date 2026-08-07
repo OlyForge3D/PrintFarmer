@@ -82,6 +82,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo } from 'react';
 import { toast } from 'sonner';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
+import { usePrinterStatusUpdates } from '@/common/hooks/useSignalR';
 
 // Type alias for query options that omit queryKey and queryFn (already provided by hooks)
 type QueryOptions<TData, TError = ApiError> = Omit<UseQueryOptions<TData, TError>, 'queryKey' | 'queryFn'>;
@@ -179,12 +180,21 @@ export function usePrintersFast(includeDisabled = false, options?: QueryOptions<
 }
 
 export function usePrinterSummary(options?: QueryOptions<PrinterSummary[]>) {
-  return useQuery({
+  const query = useQuery({
     queryKey: [...queryKeys.printers, 'summary'],
     queryFn: () => apiClient.getPrinterSummary(),
     staleTime: 30000,
     ...options,
   });
+  const { printerStatuses } = usePrinterStatusUpdates();
+  const data = useMemo(
+    () => query.data?.map(summary => {
+      const status = printerStatuses.get(summary.id);
+      return status ? { ...summary, isOnline: status.isOnline, state: status.state } : summary;
+    }),
+    [query.data, printerStatuses]
+  );
+  return { ...query, data };
 }
 
 export function usePrinterCameraUrls(options?: QueryOptions<PrinterCameraUrls[]>) {
