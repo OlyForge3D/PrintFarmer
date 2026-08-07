@@ -8,6 +8,7 @@
 import React from 'react';
 import { Link } from 'react-router';
 import { usePrinterSummary } from '@/common/hooks/useApi';
+import { usePrinterStatusUpdates } from '@/common/hooks/useSignalR';
 import { 
   SettingsIcon, 
   PlayIcon, 
@@ -87,10 +88,18 @@ function StatsCard({ title, value, icon: Icon, color, linkTo }: StatsCardProps) 
 
 export const PrinterDashboard: React.FC = () => {
   const { data: printerSummary, isLoading, error } = usePrinterSummary();
+  const { printerStatuses } = usePrinterStatusUpdates();
+  const livePrinterSummary = React.useMemo(
+    () => printerSummary?.map(summary => {
+      const status = printerStatuses.get(summary.id);
+      return status ? { ...summary, isOnline: status.isOnline, state: status.state } : summary;
+    }),
+    [printerSummary, printerStatuses]
+  );
   const { startTour } = usePageTour({ tourId: 'dashboard', steps: dashboardTour });
 
   const stats = React.useMemo(() => {
-    const userPrinters = printerSummary ?? [];
+    const userPrinters = livePrinterSummary ?? [];
     const total = userPrinters.length;
     const online = userPrinters.filter(p => p.isOnline).length;
     const printing = userPrinters.filter(p => (p.state ?? '').toLowerCase().includes('printing')).length;
@@ -98,7 +107,7 @@ export const PrinterDashboard: React.FC = () => {
     const maintenance = userPrinters.filter(p => p.inMaintenance).length;
     const offline = total - online;
     return { total, online, printing, paused, offline, maintenance };
-  }, [printerSummary]);
+  }, [livePrinterSummary]);
 
   return (
     <PageTemplate
@@ -146,7 +155,7 @@ export const PrinterDashboard: React.FC = () => {
             return <p className="text-sm text-pf-error-text">Unknown error</p>;
           })()}
         </div>
-      ) : printerSummary && printerSummary.length === 0 ? (
+      ) : livePrinterSummary && livePrinterSummary.length === 0 ? (
         /* Empty State */
         <div className="p-8 text-center">
           <h2 className="text-xl font-semibold">No Printers Found</h2>

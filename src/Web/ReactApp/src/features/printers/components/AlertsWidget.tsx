@@ -10,6 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { DashboardWidget } from '@/common/components/DashboardWidget';
 import { AlertCircleIcon, CheckCircleIcon, WrenchIcon } from '@/common/components/icons/MdiIcons';
 import { usePrinterSummary } from '@/common/hooks/useApi';
+import { usePrinterStatusUpdates } from '@/common/hooks/useSignalR';
 import { apiClient } from '@/services/api';
 
 interface MaintenanceAlertSettings {
@@ -26,7 +27,15 @@ export interface AlertsWidgetProps {
  * Dashboard widget showing printer alerts
  */
 export function AlertsWidget({ className = '' }: AlertsWidgetProps) {
-  const { data: printers } = usePrinterSummary();
+  const { data: summaries } = usePrinterSummary();
+  const { printerStatuses } = usePrinterStatusUpdates();
+  const printers = React.useMemo(
+    () => summaries?.map(summary => {
+      const status = printerStatuses.get(summary.id);
+      return status ? { ...summary, isOnline: status.isOnline, state: status.state } : summary;
+    }),
+    [summaries, printerStatuses]
+  );
   
   // Fetch maintenance alert settings
   const { data: alertSettings } = useQuery({

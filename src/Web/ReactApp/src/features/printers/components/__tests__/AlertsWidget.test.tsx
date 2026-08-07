@@ -12,6 +12,10 @@ vi.mock('@/common/hooks/usePrinterDisplay', () => ({
   usePrinterDisplays: vi.fn((printers) => printers),
 }));
 
+vi.mock('@/common/hooks/useSignalR', () => ({
+  usePrinterStatusUpdates: vi.fn(() => ({ printerStatuses: new Map() })),
+}));
+
 vi.mock('@/services/api', () => ({
   apiClient: {
     getSettings: vi.fn(),
