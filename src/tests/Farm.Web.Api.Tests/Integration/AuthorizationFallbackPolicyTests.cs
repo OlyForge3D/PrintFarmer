@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Json;
+using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -50,6 +51,7 @@ public class AuthorizationFallbackPolicyTests : IAsyncLifetime
     [InlineData("/api/job-scheduling/timezones")]
     [InlineData("/api/gcode-files/file/00000000-0000-0000-0000-000000000000")]
     [InlineData("/api/3d-models/file/00000000-0000-0000-0000-000000000000")]
+    [InlineData("/api/3d-models/download-for-viewer?path=missing.stl")]
     public async Task ProtectedEndpoint_Unauthenticated_Returns401(string path)
     {
         using HttpClient anon = _factory.CreateClient();
@@ -57,6 +59,16 @@ public class AuthorizationFallbackPolicyTests : IAsyncLifetime
         HttpResponseMessage response = await anon.GetAsync(path);
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public void ArtifactStaticServing_DefaultConfiguration_IsDisabled()
+    {
+        ArtifactStorageSettings settings = _factory.Services
+            .GetRequiredService<IOptions<ArtifactStorageSettings>>()
+            .Value;
+
+        settings.EnableStaticServing.Should().BeFalse();
     }
 
     [Fact]

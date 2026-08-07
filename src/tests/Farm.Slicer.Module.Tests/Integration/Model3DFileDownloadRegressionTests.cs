@@ -49,6 +49,28 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetModelFile_WithoutAuthentication_Returns401()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync(
+            $"/api/3d-models/file/{Guid.NewGuid()}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithoutAuthentication_Returns401()
+    {
+        using HttpClient anonymousClient = _factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync(
+            "/api/3d-models/download-for-viewer?path=missing.stl");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task GetModelFile_WithValidModel_Returns200AndFileContent()
     {
         // Arrange - Create valid model with physical file
@@ -102,6 +124,168 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
             {
                 File.Delete(filePath);
             }
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithAuthenticatedRequest_Returns200AndFileContent()
+    {
+        string modelsPath = GetModelStoragePath();
+        string fileName = $"viewer-{Guid.NewGuid():N}.stl";
+        string filePath = Path.Combine(modelsPath, fileName);
+        const string fileContent = "authenticated viewer STL content";
+        await File.WriteAllTextAsync(filePath, fileContent);
+
+        try
+        {
+            HttpResponseMessage response = await _client!.GetAsync(BuildViewerDownloadUrl(fileName));
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+            response.Content.Headers.ContentType?.MediaType.Should().Be("model/stl");
+            (await response.Content.ReadAsStringAsync()).Should().Be(fileContent);
+        }
+        finally
+        {
+            File.Delete(filePath);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithTraversalPath_Returns400()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
+        string outsidePath = Path.Combine(Path.GetDirectoryName(modelsPath)!, outsideFileName);
+        await File.WriteAllTextAsync(outsidePath, "outside");
+
+        try
+        {
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl($"..{Path.DirectorySeparatorChar}{outsideFileName}"));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+        finally
+        {
+            File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithAbsolutePath_Returns400()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsidePath = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"absolute-{Guid.NewGuid():N}.stl");
+        await File.WriteAllTextAsync(outsidePath, "outside");
+
+        try
+        {
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(outsidePath));
+
+            response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        }
+        finally
+        {
+            File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithSymlinkOutsideStorageRoot_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsidePath = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"symlink-target-{Guid.NewGuid():N}.stl");
+        string linkPath = Path.Combine(modelsPath, $"symlink-{Guid.NewGuid():N}.stl");
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        _ = File.CreateSymbolicLink(linkPath, outsidePath);
+
+        try
+        {
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(Path.GetFileName(linkPath)));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            File.Delete(linkPath);
+            File.Delete(outsidePath);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithMultiHopRelativeDirectorySymlinks_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsideDirectory = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"symlink-directory-{Guid.NewGuid():N}");
+        string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
+        string outsidePath = Path.Combine(outsideDirectory, outsideFileName);
+        string secondLinkPath = Path.Combine(modelsPath, $"second-link-{Guid.NewGuid():N}");
+        string firstLinkPath = Path.Combine(modelsPath, $"first-link-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideDirectory);
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        _ = Directory.CreateSymbolicLink(
+            secondLinkPath,
+            Path.GetRelativePath(modelsPath, outsideDirectory));
+        _ = Directory.CreateSymbolicLink(firstLinkPath, Path.GetFileName(secondLinkPath));
+
+        try
+        {
+            string requestedPath = Path.Combine(Path.GetFileName(firstLinkPath), outsideFileName);
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(requestedPath));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            Directory.Delete(firstLinkPath);
+            Directory.Delete(secondLinkPath);
+            Directory.Delete(outsideDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadForViewer_WithLinkTargetContainingIntermediateSymlink_Returns403()
+    {
+        string modelsPath = GetModelStoragePath();
+        string outsideDirectory = Path.Combine(
+            Path.GetDirectoryName(modelsPath)!,
+            $"intermediate-target-{Guid.NewGuid():N}");
+        string outsideInnerDirectory = Path.Combine(outsideDirectory, "inner");
+        string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
+        string outsidePath = Path.Combine(outsideInnerDirectory, outsideFileName);
+        string nestedLinkPath = Path.Combine(modelsPath, $"nested-{Guid.NewGuid():N}");
+        string bridgeLinkPath = Path.Combine(modelsPath, $"bridge-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(outsideInnerDirectory);
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        _ = Directory.CreateSymbolicLink(
+            nestedLinkPath,
+            Path.GetRelativePath(modelsPath, outsideDirectory));
+        _ = Directory.CreateSymbolicLink(
+            bridgeLinkPath,
+            Path.Combine(Path.GetFileName(nestedLinkPath), "inner"));
+
+        try
+        {
+            string requestedPath = Path.Combine(Path.GetFileName(bridgeLinkPath), outsideFileName);
+            HttpResponseMessage response = await _client!.GetAsync(
+                BuildViewerDownloadUrl(requestedPath));
+
+            response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        }
+        finally
+        {
+            Directory.Delete(bridgeLinkPath);
+            Directory.Delete(nestedLinkPath);
+            Directory.Delete(outsideDirectory, recursive: true);
         }
     }
 
@@ -287,5 +471,18 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
                 File.Delete(thumbnailPath);
             }
         }
+    }
+
+    private string GetModelStoragePath()
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        IConfiguration config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        return config["STORAGE_PATHS:UPLOADS"]
+            ?? throw new InvalidOperationException("Model storage path is not configured for the test host.");
+    }
+
+    private static string BuildViewerDownloadUrl(string path)
+    {
+        return $"/api/3d-models/download-for-viewer?path={Uri.EscapeDataString(path)}";
     }
 }
