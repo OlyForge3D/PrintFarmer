@@ -90,6 +90,29 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     },
     // A later all-corner radius removes rounded-full completely.
     { code: '<div className="rounded-full rounded-lg" />' },
+    // Same-condition radius and aspect candidate order comes from Tailwind's
+    // generated stylesheet, not class text. Unknown ties are not guessed.
+    { code: '<div className="rounded-lg rounded-full" />' },
+    { code: '<div className="aspect-video aspect-square rounded-full" />' },
+    { code: '<div className="aspect-square aspect-video rounded-full" />' },
+    // Cross-family dimension candidate order is likewise conservative.
+    { code: '<div className="h-8 w-1/2 w-8 rounded-full" />' },
+    // Selector variants whose payload changes specificity are not assigned a
+    // guessed Tailwind source position.
+    {
+      code: '<div className="h-8 hover:w-8 data-[active]:w-4 hover:data-[active]:rounded-full" />',
+    },
+    {
+      code: '<div className="h-8 hover:w-8 aria-[expanded=true]:w-4 hover:aria-[expanded=true]:rounded-full" />',
+    },
+    {
+      code: '<div className="h-8 hover:w-8 has-[.active]:w-4 hover:has-[.active]:rounded-full" />',
+    },
+    // Different media families have no selector specificity and their relative
+    // generated order is not inferred.
+    {
+      code: '<div className="md:aspect-video dark:aspect-square md:dark:rounded-full" />',
+    },
 
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },

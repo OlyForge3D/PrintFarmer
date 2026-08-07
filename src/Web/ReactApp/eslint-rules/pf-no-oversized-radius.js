@@ -263,6 +263,9 @@ function parseCondition(variants) {
     media,
     breakpoint,
     specificity: stateZones.reduce((total, zone) => total + zone.length, 0),
+    specificityReliable: stateZones
+      .flat()
+      .every(variant => STATE_SOURCE_ORDER.has(variant)),
     variantOrder: Math.max(
       0,
       ...stateZones.flat().map(variant => STATE_SOURCE_ORDER.get(variant) ?? 0),
@@ -336,37 +339,61 @@ function mergeConditions(base, extension) {
   }
 }
 
-function outranks(candidate, winner) {
-  if (!winner) return true
+function sameConditionPart(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function comparePrecedence(candidate, winner) {
   if (candidate.condition.specificity !== winner.condition.specificity) {
-    return candidate.condition.specificity > winner.condition.specificity
+    if (!candidate.condition.specificityReliable || !winner.condition.specificityReliable) {
+      return undefined
+    }
+    return candidate.condition.specificity > winner.condition.specificity ? 1 : -1
+  }
+  if (!sameConditionPart(candidate.condition.media, winner.condition.media)) {
+    return undefined
   }
   if (candidate.condition.breakpoint !== winner.condition.breakpoint) {
-    return candidate.condition.breakpoint > winner.condition.breakpoint
+    return candidate.condition.breakpoint > winner.condition.breakpoint ? 1 : -1
   }
-  if (candidate.condition.mediaOrder !== winner.condition.mediaOrder) {
-    return candidate.condition.mediaOrder > winner.condition.mediaOrder
-  }
-  if (candidate.condition.variantOrder !== winner.condition.variantOrder) {
-    return candidate.condition.variantOrder > winner.condition.variantOrder
+  if (!sameConditionPart(candidate.condition.stateZones, winner.condition.stateZones)) {
+    if (!candidate.condition.specificityReliable || !winner.condition.specificityReliable) {
+      return undefined
+    }
+    if (candidate.condition.variantOrder !== winner.condition.variantOrder) {
+      return candidate.condition.variantOrder > winner.condition.variantOrder ? 1 : -1
+    }
   }
   if (candidate.utilityOrder !== winner.utilityOrder) {
-    return candidate.utilityOrder > winner.utilityOrder
+    return candidate.utilityOrder > winner.utilityOrder ? 1 : -1
   }
-  if (candidate.valueOrder !== winner.valueOrder) {
-    return candidate.valueOrder > winner.valueOrder
+  if (
+    candidate.valueGroup !== undefined &&
+    candidate.valueGroup === winner.valueGroup &&
+    candidate.valueOrder !== winner.valueOrder
+  ) {
+    return candidate.valueOrder > winner.valueOrder ? 1 : -1
   }
-  return candidate.order > winner.order
+  return candidate.value === winner.value ? 0 : undefined
 }
 
 function resolveDeclaration(declarations, target) {
-  let winner
+  let frontier = []
   for (const declaration of declarations) {
-    if (conditionApplies(declaration.condition, target) && outranks(declaration, winner)) {
-      winner = declaration
-    }
+    if (!conditionApplies(declaration.condition, target)) continue
+
+    const comparisons = frontier.map(winner => comparePrecedence(declaration, winner))
+    if (comparisons.some(comparison => comparison === -1)) continue
+    frontier = frontier.filter((_, index) => comparisons[index] !== 1)
+    frontier.push(declaration)
   }
-  return winner
+  if (frontier.length === 0) return undefined
+
+  const values = new Set(frontier.map(declaration => declaration.value))
+  return {
+    value: values.size === 1 ? frontier[0].value : undefined,
+    ambiguous: values.size > 1,
+  }
 }
 
 function isUnresolvedDimension(value) {
@@ -375,13 +402,10 @@ function isUnresolvedDimension(value) {
 
 function dimensionSourceOrder(value) {
   const keywordOrder = DIMENSION_SOURCE_ORDER.get(value)
-  if (keywordOrder !== undefined) return keywordOrder
+  if (keywordOrder !== undefined) return { group: 'keyword', order: keywordOrder }
   const numeric = /^\d*\.?\d+$/.exec(value)
-  if (numeric) return 1_000 + Number(value)
-  const fraction = /^(\d+)\/(\d+)$/.exec(value)
-  if (fraction) return 10_000 + Number(fraction[1]) / Number(fraction[2])
-  if (value.startsWith('[') || value.startsWith('(')) return 30_000
-  return 0
+  if (numeric) return { group: 'numeric', order: Number(value) }
+  return { group: undefined, order: 0 }
 }
 
 function aspectKind(value) {
@@ -396,10 +420,10 @@ function aspectKind(value) {
 
 /**
  * Build a per-property cascade for shape evidence and return a predicate for a
- * rounded-full condition. Media order wins over broader media declarations;
- * selector specificity wins before Tailwind's variant, utility and candidate
- * source order; only otherwise identical ties use class declaration order.
- * Evidence never crosses a selector-target boundary.
+ * rounded-full condition. Selector specificity wins before the supported
+ * Tailwind breakpoint, variant, utility and candidate source ordering.
+ * Unsupported ties remain ambiguous and cannot produce a report. Evidence
+ * never crosses a selector-target boundary.
  */
 function circularAt(classText) {
   const widths = []
@@ -409,8 +433,21 @@ function circularAt(classText) {
   const radii = new Map(ALL_CORNERS.map(corner => [corner, []]))
   let order = 0
 
-  const add = (declarations, condition, value, utilityOrder = 0, valueOrder = 0) => {
-    declarations.push({ condition, value, utilityOrder, valueOrder, order })
+  const add = (
+    declarations,
+    condition,
+    value,
+    utilityOrder = 0,
+    valueSource = { group: undefined, order: 0 },
+  ) => {
+    declarations.push({
+      condition,
+      value,
+      utilityOrder,
+      valueGroup: valueSource.group,
+      valueOrder: valueSource.order,
+      order,
+    })
   }
 
   for (const raw of classText.split(/\s+/)) {
@@ -445,13 +482,19 @@ function circularAt(classText) {
   const shapeDeclarations = [...widths, ...heights, ...aspects, ...animations]
 
   const isCircularAt = target => {
-    if (resolveDeclaration(animations, target)) return true
+    if (resolveDeclaration(animations, target)?.value) return true
 
-    const width = resolveDeclaration(widths, target)?.value
-    const height = resolveDeclaration(heights, target)?.value
-    const aspect = resolveDeclaration(aspects, target)?.value
+    const resolvedWidth = resolveDeclaration(widths, target)
+    const resolvedHeight = resolveDeclaration(heights, target)
+    const resolvedAspect = resolveDeclaration(aspects, target)
+    const width = resolvedWidth?.value
+    const height = resolvedHeight?.value
+    const aspect = resolvedAspect?.value
 
     if (
+      resolvedWidth?.ambiguous ||
+      resolvedHeight?.ambiguous ||
+      resolvedAspect?.ambiguous ||
       (width !== undefined && isUnresolvedDimension(width)) ||
       (height !== undefined && isUnresolvedDimension(height)) ||
       aspect === 'unknown'
@@ -480,7 +523,10 @@ function circularAt(classText) {
 
     return contexts.every(target => {
       const hasFullCorner = [...radii.values()].some(
-        declarations => resolveDeclaration(declarations, target)?.value === 'full',
+        declarations => {
+          const resolved = resolveDeclaration(declarations, target)
+          return !resolved?.ambiguous && resolved?.value === 'full'
+        },
       )
       if (!hasFullCorner) return true
       return isCircularAt(target)

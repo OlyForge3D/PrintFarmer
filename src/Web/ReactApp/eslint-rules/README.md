@@ -98,11 +98,15 @@ media preferences are not combined into impossible cascades.
 Within one target scope, evidence applies when its ordered state condition is active where the
 radius applies. State variants contribute selector specificity; media variants do not.
 Breakpoints are cumulative and ordered, so an `md:` declaration still participates at `lg:`.
-After specificity and breakpoint precedence, declarations resolve by Tailwind's emitted variant,
-utility, and static-candidate source order; only otherwise identical ties use class declaration
-order. Width, height, and aspect ratio are resolved independently before the rule decides whether
-the resulting box is circular. A radius is checked in later breakpoint, media, and state conditions
-where it remains active, not only at the condition where its class was declared.
+The resolver ranks the project’s known state order (`hover`, `focus`, and related built-ins),
+axis-over-`size-*` utility order, numeric dimension candidates, and built-in dimension keywords.
+It does not use class-string order as a proxy for Tailwind's generated stylesheet. If two
+applicable declarations require unsupported ordering knowledge — competing radius/aspect
+candidates, different media families, arbitrary selector payloads, or cross-family dimension
+candidates — the result is ambiguous and the rule withholds a report rather than risk a false
+positive. Width, height, and aspect ratio are resolved independently before the rule decides
+whether the resulting box is circular. A radius is checked in later breakpoint, media, and state
+conditions where it remains active, not only at the condition where its class was declared.
 Radius declarations are resolved per corner, so `rounded-t-lg` does not hide a surviving
 `rounded-full` on the bottom corners.
 
