@@ -81,6 +81,9 @@ node scripts/ci/verify-squad-verdict.mjs \
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
+- Exit codes are `0` for `APPROVED`, `2` for `CHANGES_REQUESTED`, `3` for
+  missing, invalid, or superseded evidence, and `1` for verifier/tool failure.
+  Prefer parsing `--json`; every nonzero result blocks merge.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

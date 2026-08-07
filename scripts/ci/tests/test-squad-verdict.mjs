@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   bindStatusToHead,
+  selectSquadVerdict,
   verdictContext,
   verdictWorkflowPath,
   verifySquadVerdict,
@@ -48,6 +49,8 @@ function fixture(verdict = 'APPROVE') {
     path: verdictWorkflowPath,
     event: 'workflow_dispatch',
     head_branch: 'development',
+    head_sha: 'c'.repeat(40),
+    default_branch_contains_run: true,
     repository: { full_name: 'OlyForge3D/PrintFarmer' },
     actor: { login: actor },
     display_title:
@@ -74,6 +77,14 @@ test('binds the list-statuses API shape to the requested head', () => {
   const status = bindStatusToHead(apiStatus, reviewedHeadSha);
   const verdict = verifySquadVerdict({ ...evidence, status });
   assert.equal(verdict.classification, 'APPROVED');
+});
+
+test('rejects a status whose explicit SHA disagrees with the requested head', () => {
+  const evidence = fixture();
+  assert.throws(
+    () => bindStatusToHead(evidence.status, movedHeadSha),
+    /does not match the requested head/,
+  );
 });
 
 test('blocks a trusted changes-requested verdict for the exact current head', () => {
@@ -133,6 +144,29 @@ test('author-authored lookalike comments cannot satisfy the verifier', () => {
   assert.equal(verdict.classification, 'MISSING');
 });
 
+test('newest trusted-run evidence fails closed instead of reviving an older approval', () => {
+  const older = fixture();
+  older.status.id = 41;
+  older.status.created_at = '2026-08-07T02:59:10Z';
+
+  const newer = fixture('REJECT');
+  newer.status.id = 43;
+  newer.status.target_url =
+    'https://github.com/OlyForge3D/PrintFarmer/actions/runs/123457';
+  newer.run.id = 123457;
+  newer.run.html_url = newer.status.target_url;
+  newer.run.display_title =
+    `Squad verdict REJECT for PR #1116 @ ${reviewedHeadSha.toUpperCase()} ` +
+    'by trusted-maintainer';
+
+  const verdict = selectSquadVerdict({
+    pull: newer.pull,
+    statuses: [older.status, newer.status],
+    loadRun: (runId) => runId === newer.run.id ? newer.run : older.run,
+  });
+  assert.equal(verdict.classification, 'INVALID');
+});
+
 test('workflow keeps the independent recorder and exact-head controls', async () => {
   const workflow = (await readFile(
     path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'),
@@ -147,6 +181,7 @@ test('workflow keeps the independent recorder and exact-head controls', async ()
   );
   assert.match(workflow, /^\s+statuses: write$/m);
   assert.match(workflow, /\/\^\[1-9\]\\d\*\$\/\.test\(prNumberInput\)/);
+  assert.match(workflow, /\/\^\[0-9a-f\]\{40\}\$\/\.test\(reviewedHeadSha\)/);
   assert.match(workflow, /pull\.user\.login\.toLowerCase\(\) === actor\.toLowerCase\(\)/);
   assert.match(workflow, /pull\.head\.sha\.toLowerCase\(\) !== reviewedHeadSha/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);

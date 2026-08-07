@@ -42,7 +42,7 @@ jobs:
           script: |
             const prNumberInput = process.env.PR_NUMBER;
             const prNumber = Number.parseInt(prNumberInput, 10);
-            const reviewedHeadSha = process.env.REVIEWED_HEAD_SHA.toLowerCase();
+            const reviewedHeadSha = process.env.REVIEWED_HEAD_SHA;
             const verdict = process.env.VERDICT;
             const actor = context.actor;
 
@@ -51,7 +51,9 @@ jobs:
               return;
             }
             if (!/^[0-9a-f]{40}$/.test(reviewedHeadSha)) {
-              core.setFailed('reviewed_head_sha must be an exact 40-character commit SHA.');
+              core.setFailed(
+                'reviewed_head_sha must be an exact lowercase 40-character commit SHA.',
+              );
               return;
             }
 

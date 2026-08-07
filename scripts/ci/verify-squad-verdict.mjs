@@ -15,6 +15,9 @@ function result(classification, reason, evidence = {}) {
 }
 
 export function bindStatusToHead(status, headSha) {
+  if (status.sha && status.sha.toLowerCase() !== headSha.toLowerCase()) {
+    throw new Error('Commit status SHA does not match the requested head.');
+  }
   return { ...status, sha: headSha };
 }
 
@@ -87,6 +90,7 @@ export function verifySquadVerdict({ pull, status, run }) {
     run.path !== verdictWorkflowPath ||
     run.event !== 'workflow_dispatch' ||
     run.head_branch !== defaultBranch ||
+    run.default_branch_contains_run !== true ||
     run.repository?.full_name !== repository ||
     run.status !== 'completed' ||
     run.conclusion !== 'success'
@@ -137,6 +141,27 @@ export function verifySquadVerdict({ pull, status, run }) {
   });
 }
 
+export function selectSquadVerdict({ pull, statuses, loadRun }) {
+  const candidates = statuses
+    .filter((status) => status.context === verdictContext)
+    .map((status) => bindStatusToHead(status, pull.head.sha))
+    .sort((left, right) => {
+      const timestampOrder =
+        Date.parse(right.created_at) - Date.parse(left.created_at);
+      return timestampOrder || right.id - left.id;
+    });
+
+  for (const status of candidates) {
+    const runId = parseRunTarget(status.target_url, pull.base.repo.full_name);
+    if (!runId) {
+      continue;
+    }
+    const run = loadRun(runId);
+    return verifySquadVerdict({ pull, status, run });
+  }
+  return result('MISSING', 'No squad verdict status exists on the current head.');
+}
+
 function parseArgs(argv) {
   const args = {};
   for (let index = 0; index < argv.length; index += 1) {
@@ -175,29 +200,22 @@ async function main() {
   const statuses = ghApi(
     `/repos/${args.repo}/commits/${pull.head.sha}/statuses?per_page=100`,
   );
-  const candidates = statuses
-    .filter((status) => status.context === verdictContext)
-    .map((status) => bindStatusToHead(status, pull.head.sha))
-    .sort((left, right) => {
-      const timestampOrder =
-        Date.parse(right.created_at) - Date.parse(left.created_at);
-      return timestampOrder || right.id - left.id;
-    });
-
-  let verdict = result('MISSING', 'No squad verdict status exists on the current head.');
-  for (const status of candidates) {
-    const runId = parseRunTarget(status.target_url, args.repo);
-    if (!runId) {
-      continue;
-    }
-    const run = ghApi(`/repos/${args.repo}/actions/runs/${runId}`);
-    const candidateVerdict = verifySquadVerdict({ pull, status, run });
-    if (candidateVerdict.classification !== 'INVALID') {
-      verdict = candidateVerdict;
-      break;
-    }
-    verdict = candidateVerdict;
-  }
+  const verdict = selectSquadVerdict({
+    pull,
+    statuses,
+    loadRun: (runId) => {
+      const run = ghApi(`/repos/${args.repo}/actions/runs/${runId}`);
+      const comparison = ghApi(
+        `/repos/${args.repo}/compare/${run.head_sha}...` +
+        encodeURIComponent(pull.base.repo.default_branch),
+      );
+      return {
+        ...run,
+        default_branch_contains_run:
+          comparison.status === 'ahead' || comparison.status === 'identical',
+      };
+    },
+  });
 
   if (args.json) {
     process.stdout.write(`${JSON.stringify(verdict)}\n`);
