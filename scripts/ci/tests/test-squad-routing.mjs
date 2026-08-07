@@ -318,6 +318,8 @@ test('a documentation-only issue routes to the documentation specialist', () => 
     'docs: document the API server endpoint query parameters',
     'docs: explain the React CSS component layout',
     'update the API reference',
+    'update the API reference endpoint query parameters',
+    'add deployment guide for Docker pipeline workflow',
   ]) {
     const result = routeIssue(
       {
@@ -389,6 +391,14 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
       },
       domain: 'devops',
       member: '⚙️ Parker',
+    },
+    {
+      issue: {
+        title: 'Backend API endpoint for Swift client',
+        body: 'Implement the server controller.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
     },
   ];
 

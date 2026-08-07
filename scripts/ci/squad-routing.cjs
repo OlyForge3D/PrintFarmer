@@ -73,9 +73,10 @@ function hasWord(text, word) {
 // Weight 1 = suggestive but common across domains, so it can break a tie but
 // cannot carry a domain on its own.
 //
-// `titlePriority` is reserved for explicit ownership intent. It is compared
-// before score so generic subject vocabulary cannot outvote `docs:`, SwiftUI,
-// iOS-networking, or QA/test intent merely by accumulating more concepts.
+// `titlePriority` is reserved for explicit ownership intent and applies whenever
+// its concept matches in a title. `prefixPriority` applies only when the title
+// starts with one of the concept's `priorityPrefixes`. Priority is compared
+// before score so generic subject vocabulary cannot outvote explicit intent.
 //
 // Deliberately absent: `bug` and `fix`. They describe the *type* of an issue,
 // not its domain — every domain gets bug reports — and treating them as
@@ -133,6 +134,9 @@ const DOMAINS = [
       // test" section, so these words in a *body* are boilerplate, not a
       // statement of ownership. They only signal the testing domain when the
       // author put them in the title.
+      //
+      // Priority is deliberately prefix-only. A plain title mention such as
+      // "Deployment tests mutate Docker config" belongs to DevOps (#1250).
       {
         id: 'test',
         weight: 2,
@@ -191,11 +195,11 @@ const DOMAINS = [
     id: 'ios',
     reason: 'Issue relates to iOS/mobile app work',
     role: /\bios\b|swift|mobile/i,
-    defaultRole: /\bios developer\b/i,
+    defaultRole: /\bios\b.*\bdeveloper\b/i,
     keywords: [
       { id: 'native-app', weight: 2, forms: ['ios app', 'mobile app'] },
       { id: 'swiftui', weight: 2, titlePriority: 1, forms: ['swiftui'] },
-      { id: 'swift', weight: 2, titlePriority: 1, forms: ['swift'] },
+      { id: 'swift', weight: 2, forms: ['swift'] },
       { id: 'xcode', weight: 2, forms: ['xcode', 'xcodebuild'] },
       {
         id: 'ios-networking',
@@ -247,18 +251,32 @@ const DOMAINS = [
         titlePrefixes: ['docs:', 'doc:', 'documentation:'],
         forms: [],
       },
-      { id: 'readme', weight: 5, titleOnly: true, forms: ['readme'] },
-      { id: 'changelog', weight: 3, titleOnly: true, forms: ['changelog'] },
+      {
+        id: 'readme',
+        weight: 5,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: ['readme'],
+      },
+      {
+        id: 'changelog',
+        weight: 3,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: ['changelog'],
+      },
       {
         id: 'api-docs',
         weight: 3,
         titleOnly: true,
+        titlePriority: 3,
         forms: ['api docs', 'api documentation', 'api reference'],
       },
       {
         id: 'guide',
         weight: 3,
         titleOnly: true,
+        titlePriority: 3,
         forms: [
           'user guide',
           'developer guide',
