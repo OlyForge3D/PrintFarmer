@@ -48,11 +48,13 @@ function fixture(verdict = 'APPROVE') {
     html_url: status.target_url,
     path: verdictWorkflowPath,
     event: 'workflow_dispatch',
+    run_attempt: 1,
     head_branch: 'development',
     head_sha: 'c'.repeat(40),
     default_branch_contains_run: true,
     repository: { full_name: 'OlyForge3D/PrintFarmer' },
     actor: { login: actor },
+    triggering_actor: { login: actor },
     display_title:
       `Squad verdict ${verdict} for PR #1116 @ ${reviewedHeadSha} by ${actor}`,
     status: 'completed',
@@ -167,6 +169,30 @@ test('newest trusted-run evidence fails closed instead of reviving an older appr
   assert.equal(verdict.classification, 'INVALID');
 });
 
+test('rerunning an older approval cannot supersede a newer rejection', () => {
+  const rejection = fixture('REJECT');
+  rejection.status.id = 44;
+  rejection.status.created_at = '2026-08-07T03:01:10Z';
+  rejection.status.target_url =
+    'https://github.com/OlyForge3D/PrintFarmer/actions/runs/123458';
+  rejection.run.id = 123458;
+  rejection.run.html_url = rejection.status.target_url;
+
+  const replayedApproval = fixture();
+  replayedApproval.status.id = 45;
+  replayedApproval.status.created_at = '2026-08-07T03:02:10Z';
+  replayedApproval.run.run_attempt = 2;
+  replayedApproval.run.triggering_actor.login = 'write-collaborator';
+
+  const verdict = selectSquadVerdict({
+    pull: replayedApproval.pull,
+    statuses: [rejection.status, replayedApproval.status],
+    loadRun: (runId) =>
+      runId === replayedApproval.run.id ? replayedApproval.run : rejection.run,
+  });
+  assert.equal(verdict.classification, 'INVALID');
+});
+
 test('workflow keeps the independent recorder and exact-head controls', async () => {
   const workflow = (await readFile(
     path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'),
@@ -186,6 +212,8 @@ test('workflow keeps the independent recorder and exact-head controls', async ()
   assert.match(workflow, /pull\.head\.sha\.toLowerCase\(\) !== reviewedHeadSha/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
   assert.match(workflow, /actorPermission\.permission !== 'admin'/);
+  assert.match(workflow, /runAttempt !== '1'/);
+  assert.match(workflow, /triggeringActor\.toLowerCase\(\) !== actor\.toLowerCase\(\)/);
   assert.match(workflow, /context: 'squad\/pre-pr-verdict'/);
   assert.doesNotMatch(workflow, /pull-requests: write/);
 });

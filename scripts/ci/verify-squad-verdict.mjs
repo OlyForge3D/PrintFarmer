@@ -89,6 +89,8 @@ export function verifySquadVerdict({ pull, status, run }) {
   if (
     run.path !== verdictWorkflowPath ||
     run.event !== 'workflow_dispatch' ||
+    run.run_attempt !== 1 ||
+    run.triggering_actor?.login?.toLowerCase() !== run.actor?.login?.toLowerCase() ||
     run.head_branch !== defaultBranch ||
     run.default_branch_contains_run !== true ||
     run.repository?.full_name !== repository ||

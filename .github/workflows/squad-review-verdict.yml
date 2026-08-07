@@ -37,15 +37,23 @@ jobs:
         env:
           PR_NUMBER: ${{ inputs.pr_number }}
           REVIEWED_HEAD_SHA: ${{ inputs.reviewed_head_sha }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
           VERDICT: ${{ inputs.verdict }}
         with:
           script: |
             const prNumberInput = process.env.PR_NUMBER;
             const prNumber = Number.parseInt(prNumberInput, 10);
             const reviewedHeadSha = process.env.REVIEWED_HEAD_SHA;
+            const runAttempt = process.env.RUN_ATTEMPT;
+            const triggeringActor = process.env.TRIGGERING_ACTOR;
             const verdict = process.env.VERDICT;
             const actor = context.actor;
 
+            if (runAttempt !== '1' || triggeringActor.toLowerCase() !== actor.toLowerCase()) {
+              core.setFailed('Verdict workflow reruns are not trusted. Dispatch a new run.');
+              return;
+            }
             if (!/^[1-9]\d*$/.test(prNumberInput) || !Number.isSafeInteger(prNumber)) {
               core.setFailed('pr_number must be a positive integer.');
               return;
