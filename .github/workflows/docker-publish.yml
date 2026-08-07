@@ -513,7 +513,7 @@ jobs:
           COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
           
           ENV ASPNETCORE_URLS=http://+:8080
-          ENV Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
+          ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
           ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
           ENV Worker__EngineVersion=${{ env.ORCA_VERSION }}
           ENV SlicerRegistry__Version=${{ env.ORCA_VERSION }}
