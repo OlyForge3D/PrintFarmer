@@ -39,17 +39,21 @@ test.describe('print stylesheet contract (#1126)', () => {
   test('hides only marked chrome and removes fixed content clipping', async ({ page }) => {
     await page.setContent(`
       <link rel="stylesheet" href="http://localhost:3000/src/index.css">
-      <body>
+      <body data-theme="forge">
+        <div id="root">
         <div data-print-layout>
           <nav data-print-hidden>Navigation</nav>
           <div class="tsqd-open-btn-container">Query devtools</div>
           <div class="driver-popover" style="display: block">Tour</div>
           <svg class="driver-overlay"></svg>
           <main data-main-content>
+            <h1 id="themed-heading">Printer status</h1>
+            <div id="themed-progress" role="progressbar">42%</div>
             <button id="meaningful-action">Retry failed job</button>
             <article data-pf-card id="card">Printer status</article>
             <div class="fixed overflow-x-auto" id="fixed-content">History details</div>
           </main>
+        </div>
         </div>
       </body>`);
     await page.waitForFunction(() =>
@@ -64,5 +68,7 @@ test.describe('print stylesheet contract (#1126)', () => {
     await expect(page.locator('#fixed-content')).toHaveCSS('position', 'static');
     await expect(page.locator('#fixed-content')).toHaveCSS('overflow-x', 'visible');
     await expect(page.locator('#card')).toHaveCSS('break-inside', 'avoid');
+    await expect(page.locator('#themed-heading')).toHaveCSS('text-shadow', 'none');
+    await expect(page.locator('#themed-progress')).toHaveCSS('box-shadow', 'none');
   });
 });

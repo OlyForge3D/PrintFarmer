@@ -73,6 +73,7 @@ describe('print stylesheet contract (#1126)', () => {
     expect(printSource).toContain('html .driver-overlay');
     expect(printSource).toContain('[data-main-content]');
     expect(printSource).toContain('[data-pf-card]');
+    expect(printSource).toMatch(/#root \*[\s\S]*text-shadow:\s*none/);
     expect(printSource).toMatch(/tr,[\s\S]*break-inside:\s*avoid/);
     expect(printSource).not.toMatch(/button[^{]*\{[^}]*display:\s*none/);
   });

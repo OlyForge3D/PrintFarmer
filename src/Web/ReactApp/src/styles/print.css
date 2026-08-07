@@ -228,6 +228,18 @@
     transition: none;
   }
 
+  /* Theme-specific glow selectors carry more specificity than a universal
+     reset. The stable application root lets print neutralize them without
+     escalating individual declarations. */
+  #root *,
+  #root *::before,
+  #root *::after {
+    box-shadow: none;
+    text-shadow: none;
+    filter: none;
+    backdrop-filter: none;
+  }
+
   [data-pf-card],
   tr,
   pre,
