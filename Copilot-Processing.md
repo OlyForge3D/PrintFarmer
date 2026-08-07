@@ -71,3 +71,28 @@ fully valid `bg-pf-missing` utility, so the regression now distinguishes
 syntax-aware AST scanning from lexical scanning. Preserved the positive
 legitimate string utility regression. The focused Vitest suite passed all 27
 tests, and focused ESLint completed successfully.
+
+## Issue #1232 Tracking
+
+### Request
+
+Own issue #1232 end-to-end: reproduce and fix the slicer-host startup DI scope-validation failure involving `AppDbContext`, `DbContextOptions`, and `IDbContextFactory` lifetimes without weakening validation or regressing the main API. Add focused provider-validation coverage, validate, deliver through PR and required review/verdict gates, merge safely, and verify issue closure.
+
+### Action Plan
+
+- [x] Read issue #1232 and repository instructions/skills relevant to .NET architecture, C#, testing, collaboration, and PR linkage.
+- [x] Inspect slicer-host and main API composition roots plus existing EF registrations/tests; reproduce the scope-validation failure.
+- [x] Implement the intended factory/lifetime registration correction without weakening scope validation.
+- [x] Add focused `ValidateOnBuild=true` and `ValidateScopes=true` provider coverage.
+- [x] Run smallest relevant build/tests and verify main API registrations remain valid.
+- [ ] Commit, push, open non-draft PR to development with `Closes #1232`, and verify closing issue linkage.
+- [ ] Obtain unanimous Bishop/Hicks/Vasquez exact-head approval and authoritative non-author verdict; re-review after any head change.
+- [ ] Re-read unchanged approved head, merge safely after all gates are green, and verify PR merged and issue #1232 closed.
+- [ ] Add final summary.
+
+### Validation Evidence
+
+- Reproduced the original failure with the slicer-host factory registered as Singleton: `Cannot consume scoped service 'DbContextOptions<AppDbContext>' from singleton 'IDbContextFactory<AppDbContext>'`.
+- Corrected the slicer-host `AddDbContextFactory<AppDbContext>` registration to `ServiceLifetime.Scoped`, matching the existing factory pattern in the main API and slicer module.
+- Focused `SlicerHostServiceProviderScopeTests`: 1 passed with `ValidateOnBuild=true` and `ValidateScopes=true`.
+- Full `farm-web.sln` Debug build: 0 warnings, 0 errors.
