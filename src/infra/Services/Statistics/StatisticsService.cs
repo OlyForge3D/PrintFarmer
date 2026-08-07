@@ -93,7 +93,7 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     internal static IQueryable<StatisticsSummaryAggregate> BuildSummaryAggregateQuery(IQueryable<PrintJob> query)
     {
         return query
-            .GroupBy(_ => true)
+            .GroupBy(j => j.Id != Guid.Empty)
             .Select(g => new StatisticsSummaryAggregate(
                 g.Count(),
                 g.Count(j => j.Status == PrintJobStatus.Completed),
@@ -102,14 +102,6 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
                 g.Sum(j => j.ActualCost ?? 0m),
                 g.Sum(j => j.ActualFilamentUsage ?? 0d)));
     }
-
-    internal sealed record StatisticsSummaryAggregate(
-        int TotalJobs,
-        int Completed,
-        int Failed,
-        int Cancelled,
-        decimal TotalCost,
-        double TotalFilamentGrams);
 
     public async Task<List<DailyJobCountDto>> GetJobsOverTimeAsync(int? days = null, DateTime? startDate = null, DateTime? endDate = null, CancellationToken ct = default)
     {
@@ -513,4 +505,12 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             CompletedAt = j.ActualEndTime,
         }).ToList();
     }
+
+    internal sealed record StatisticsSummaryAggregate(
+        int TotalJobs,
+        int Completed,
+        int Failed,
+        int Cancelled,
+        decimal TotalCost,
+        double TotalFilamentGrams);
 }

@@ -33,7 +33,7 @@ Perform an evidence-based cross-stack performance audit, rank ten concrete oppor
 - [x] Implement the focused optimization without broad refactoring.
 - [x] Add focused regression coverage and a reproducible performance validation proxy.
 - [x] Run targeted validation and fix regressions.
-- [x] Commit and push with exact SHA tracking (initial head `467787169bb49183e5e3ae20c81de9cd58a4a80a`; follow-up pending validation).
+- [x] Commit and push with exact SHA tracking (initial head `467787169bb49183e5e3ae20c81de9cd58a4a80a`; follow-ups `25e4a3ef0c9dec7c9ccc9c36966a845f3150fe01` and `ecf0ed27d67c77f52d108d3957a0aafbafd029e1`; final follow-up pending commit).
 - [ ] Obtain Bishop/Hicks/Vasquez exact-head consensus (initial review: Bishop APPROVE, Hicks CHANGES_REQUESTED, Vasquez REQUEST_CHANGES).
 - [ ] Open a non-draft PR targeting development with `Closes #871` and verify linkage.
 - [ ] Track CI, trusted verdict, safe merge, issue closure, archival, and report lifecycle state to Ralph.
@@ -62,3 +62,4 @@ Selected #1 because it removes five round trips from a frequently used analytics
 - Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsAndPreservesAggregateMetrics` asserts all status/total fields, the empty-result path, and exactly two database commands across reader/scalar/non-query interception. Print-time values are streamed to avoid an unbounded list while retaining provider-safe `TimeSpan` handling.
 - Provider proxy: `SummaryAggregate_TranslatesAcrossSupportedProviders` compiles the aggregate query for SQLite, PostgreSQL, and SQL Server without opening a database connection.
 - Review follow-up: expanded conditional aggregate and empty-result coverage, strengthened command interception, replaced print-time list materialization with scalar streaming, and changed the constant grouping key to a provider-neutral boolean in response to Hicks/Vasquez findings.
+- Final review follow-up: changed the grouping expression to use the non-empty primary-key invariant (`Id != Guid.Empty`) so SQL Server receives a column-bearing `GROUP BY` expression; focused tests: 22 passed; full solution build: 0 warnings, 0 errors.
