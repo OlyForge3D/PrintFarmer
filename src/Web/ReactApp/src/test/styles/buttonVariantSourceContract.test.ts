@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 const REACT_APP_ROOT = resolve(TEST_DIR, '../../..');
@@ -308,7 +308,6 @@ describe('Button variant map — bare variants own no paint (#1102)', () => {
  */
 describe('Button caller contract — unmasked callers gate hover on :enabled (#1102)', () => {
   const SRC_ROOT = resolve(REACT_APP_ROOT, 'src');
-  const SOURCE_SCAN_TIMEOUT_MS = 20_000;
 
   /**
    * Variants whose paint this cluster moved into the components layer, and
@@ -828,14 +827,50 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   const isUnmaskedIn = (tag: ButtonTag, branch: Branch): boolean =>
     variantsFor(tag, branch).length > 0;
 
+  interface ParsedProductionFile {
+    rel: string;
+    tags: ButtonTag[];
+  }
+
+  let parsedProductionFiles: readonly ParsedProductionFile[] | undefined;
+
+  const cloneBranch = (branch: Branch): Branch => ({
+    text: branch.text,
+    conds: new Map(branch.conds),
+  });
+
+  const cloneButtonTag = (tag: ButtonTag): ButtonTag => ({
+    ...tag,
+    branches: tag.branches.map(cloneBranch),
+    variants: [...tag.variants],
+    variantBranches: tag.variantBranches.map(cloneBranch),
+  });
+
+  const productionButtonCallSites = (): ParsedProductionFile[] => {
+    if (!parsedProductionFiles) {
+      throw new Error('Production Button call sites were not parsed before the assertion ran');
+    }
+
+    return parsedProductionFiles.map(({ rel, tags }) => ({
+      rel,
+      tags: tags.map(cloneButtonTag),
+    }));
+  };
+
+  beforeAll(() => {
+    parsedProductionFiles = sourceFiles(SRC_ROOT).map((file) => ({
+      rel: relative(SRC_ROOT, file).replace(/\\/g, '/'),
+      tags: buttonTags(readFileSync(file, 'utf8'), file, {
+        allowImplicitButton: false,
+      }),
+    }));
+  });
+
   it('no unmasked-variant Button pairs `disabled` with an unguarded hover:', () => {
     const offenders: string[] = [];
 
-    for (const file of sourceFiles(SRC_ROOT)) {
-      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
-        allowImplicitButton: false,
-      })) {
+    for (const { rel, tags } of productionButtonCallSites()) {
+      for (const tag of tags) {
         if (!tag.disableable || !unguardedHover(tag.className)) continue;
         if (!isUnmasked(tag)) continue;
         offenders.push(`${rel}:${tag.line}`);
@@ -848,7 +883,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'longer overridden by the variant, these repaint under the pointer on a control ' +
         'the user cannot activate. Prefix the hover with `enabled:`.',
     ).toEqual([]);
-  }, SOURCE_SCAN_TIMEOUT_MS);
+  });
 
   /**
    * #1102 caller contract, third direction: the FOREGROUND channel.
@@ -894,11 +929,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
 
     const offenders = new Set<string>();
 
-    for (const file of sourceFiles(SRC_ROOT)) {
-      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
-        allowImplicitButton: false,
-      })) {
+    for (const { rel, tags } of productionButtonCallSites()) {
+      for (const tag of tags) {
         if (!isUnmasked(tag)) continue;
         // Every offending token, not just the first: a site typically carries
         // both a resting and a hover spelling, and reporting one hides the other.
@@ -916,7 +948,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'variant, so it now paints and is read directly against the page surface. ' +
         'Use the semantic text token instead — it is defined in all 8 palettes.',
     ).toEqual([]);
-  }, SOURCE_SCAN_TIMEOUT_MS);
+  });
 
   /**
    * SELF-REFERENTIAL HOVER (#1137, round 11).
@@ -1049,11 +1081,8 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
   it('no unmasked-variant Button is left with a hover that changes nothing', () => {
     const offenders = new Set<string>();
 
-    for (const file of sourceFiles(SRC_ROOT)) {
-      const rel = relative(SRC_ROOT, file).replace(/\\/g, '/');
-      for (const tag of buttonTags(readFileSync(file, 'utf8'), file, {
-        allowImplicitButton: false,
-      })) {
+    for (const { rel, tags } of productionButtonCallSites()) {
+      for (const tag of tags) {
         for (const branch of tag.branches) {
           if (!isUnmaskedIn(tag, branch)) continue;
           const { rest, hover } = hoverTokens(branch.text);
@@ -1091,7 +1120,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
         'text and a candidate tint share a hue: `text-pf-accent` with ' +
         '`hover:bg-pf-accent/10` measured 4.36 on light, below AA.',
     ).toEqual([]);
-  }, SOURCE_SCAN_TIMEOUT_MS);
+  });
 
   it('reports a `link` caller only when its resting decoration includes underline', () => {
     // V1, round 12. An earlier revision modelled `link` as having no default
