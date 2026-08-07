@@ -94,6 +94,9 @@ const CORNERS_BY_SIDE = new Map([
 ])
 
 function parseRounded(base) {
+  const property = /^\[border-radius:([^\]]+)\]$/.exec(base)
+  if (property) return { size: `[${property[1]}]`, corners: ALL_CORNERS }
+
   if (base !== 'rounded' && !base.startsWith('rounded-')) return null
   if (base === 'rounded') return { size: '', corners: ALL_CORNERS }
 
@@ -162,6 +165,46 @@ const PSEUDO_ELEMENT_VARIANTS = new Set([
 ])
 
 const LEGACY_PSEUDO_ELEMENTS = new Set(['after', 'before', 'first-letter', 'first-line'])
+const IMPORTANT_TAIL = /^[\s_]*(?:\\(?:[0-9a-fA-F]{1,6}[\s_]?|[^])|[^\\\s_])+[\s_]*$/
+const CSS_ESCAPE = /\\(?:([0-9a-fA-F]{1,6})[\s_]?|([^]))/g
+const stripCssComments = text => text.replace(/\/\*[^]*?(?:\*\/|$)/g, ' ')
+
+function decodeCssEscapes(text) {
+  return text.replace(CSS_ESCAPE, (_whole, hex, literal) => {
+    if (hex === undefined) return literal
+    const point = Number.parseInt(hex, 16)
+    if (point === 0 || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) {
+      return '\uFFFD'
+    }
+    return String.fromCodePoint(point)
+  })
+}
+
+function arbitraryImportance(utility) {
+  if (!utility.endsWith(']')) return { utility, important: false }
+  const clean = stripCssComments(utility)
+  if (!clean.endsWith(']')) return { utility, important: false }
+
+  let bang = -1
+  for (let index = 0; index < clean.length; index += 1) {
+    if (clean[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (clean[index] === '!') bang = index
+  }
+  if (bang < 0) return { utility, important: false }
+
+  const tail = clean.slice(bang + 1, -1)
+  if (!IMPORTANT_TAIL.test(tail)) return { utility, important: false }
+  if (decodeCssEscapes(tail).trim().replace(/^_+|_+$/g, '').toLowerCase() !== 'important') {
+    return { utility, important: false }
+  }
+
+  const open = clean.indexOf('[')
+  const head = clean.slice(open + 1, bang).trim()
+  return { utility: `${clean.slice(0, open + 1)}${head}]`, important: true }
+}
 
 /**
  * Split a utility into its ordered variants and base token. Colons inside
@@ -183,7 +226,14 @@ function splitToken(token) {
   }
 
   parts.push(token.slice(start))
-  return { variants: parts.slice(0, -1), base: parts.at(-1) ?? '' }
+  const marked = parts.at(-1) ?? ''
+  const stripped = marked.replace(/^!+/, '').replace(/!+$/, '')
+  const inner = arbitraryImportance(stripped)
+  return {
+    variants: parts.slice(0, -1),
+    base: inner.utility,
+    important: marked !== stripped || inner.important,
+  }
 }
 
 /**
@@ -193,12 +243,91 @@ function splitToken(token) {
  * reported -- an unprovable violation is not a violation.
  */
 function arbitraryToPx(value) {
-  const inner = value.slice(1, -1).trim()
-  if (/^(?:9999(?:px|rem)|100%|50%|100vmax)$/.test(inner)) return Infinity
-  const match = /^(\d*\.?\d+)(px|rem|em)$/.exec(inner)
+  const hinted = value.slice(1, -1).replace(/^[a-z-]+:(?!:)/i, '')
+  const inner = stripCssComments(hinted).replace(/_/g, ' ').trim()
+  if (/^(?:9999(?:px|rem)|100%|50%|100vmax)$/i.test(inner)) return Infinity
+  const match = /^\+?(\d*\.?\d+(?:e[+-]?\d+)?)(px|rem|em)$/i.exec(inner)
   if (!match) return null
   const scalar = Number.parseFloat(match[1])
-  return match[2] === 'px' ? scalar : scalar * 16
+  return match[2].toLowerCase() === 'px' ? scalar : scalar * 16
+}
+
+function hasUnescapedBang(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '\\') {
+      index += 1
+      continue
+    }
+    if (value[index] === '!') return true
+  }
+  return false
+}
+
+function normalizeDimension(value) {
+  if (!value.startsWith('[') || !value.endsWith(']')) return value
+  const hinted = value.slice(1, -1).replace(/^[a-z-]+:(?!:)/i, '')
+  const inner = stripCssComments(hinted).replace(/_/g, ' ').trim()
+  if (hasUnescapedBang(inner)) return undefined
+
+  const match = /^\+?(\d*\.?\d+(?:e[+-]?\d+)?)(px|rem|em)$/i.exec(inner)
+  if (!match) return value
+  const scalar = Number.parseFloat(match[1])
+  const px = match[2].toLowerCase() === 'px' ? scalar : scalar * 16
+  return `[${px}px]`
+}
+
+function hasEscapingComment(rawCandidate) {
+  let quote = null
+  for (let index = 0; index < rawCandidate.length; index += 1) {
+    const character = rawCandidate[index]
+    if (character === '\\') {
+      index += 1
+      continue
+    }
+    if (quote) {
+      if (character === quote) quote = null
+      continue
+    }
+    if (character === '"' || character === "'") {
+      quote = character
+      continue
+    }
+    if (character === '/' && rawCandidate[index + 1] === '*') {
+      const close = rawCandidate.indexOf('*/', index + 2)
+      if (close === -1) return true
+      index = close + 1
+    }
+  }
+  return false
+}
+
+function escapingCommentOrder(rawCandidate) {
+  const { base } = splitToken(rawCandidate)
+  if (parseRounded(base)) return 'radius'
+  if (/^(?:size|w|h|aspect)-/.test(base)) return 'before'
+  if (/^(?:bg|opacity|shadow|text)-/.test(base)) return 'after'
+
+  const property = /^\[([^:]+):/.exec(base)?.[1]
+  if (/^(?:width|height|aspect-ratio)$/.test(property)) return 'before'
+  if (/^(?:background|background-color|color|opacity|box-shadow|text-shadow)$/.test(property)) {
+    return 'after'
+  }
+  return 'unknown'
+}
+
+function escapingCommentMayPrecede(escaper, radiusVariants) {
+  const escaperVariants = escaper.variants
+  if (escaperVariants.length === 0 && radiusVariants.length > 0) return true
+  if (escaperVariants.length > 0 && radiusVariants.length === 0) return false
+  if (
+    escaperVariants.length !== radiusVariants.length ||
+    escaperVariants.some((variant, index) => variant !== radiusVariants[index])
+  ) {
+    return undefined
+  }
+  if (escaper.order === 'before') return true
+  if (escaper.order === 'after') return false
+  return undefined
 }
 
 function changesSelectorScope(variant) {
@@ -314,6 +443,7 @@ function conditionsConflict(left, right) {
       ['valid', 'invalid'],
       ['in-range', 'out-of-range'],
       ['read-only', 'read-write'],
+      ['odd', 'even'],
       ['motion-safe', 'motion-reduce'],
       ['portrait', 'landscape'],
       ['contrast-more', 'contrast-less'],
@@ -366,6 +496,7 @@ function compareOrderLists(left, right) {
 }
 
 function comparePrecedence(candidate, winner) {
+  if (candidate.important !== winner.important) return candidate.important ? 1 : -1
   if (candidate.condition.specificity !== winner.condition.specificity) {
     if (!candidate.condition.specificityReliable || !winner.condition.specificityReliable) {
       return undefined
@@ -491,10 +622,12 @@ function circularAt(classText) {
     value,
     utilityOrder = 0,
     valueSource = { group: undefined, order: 0 },
+    important = false,
   ) => {
     declarations.push({
       condition,
       value,
+      important,
       utilityOrder,
       valueGroup: valueSource.group,
       valueOrder: valueSource.order,
@@ -504,33 +637,44 @@ function circularAt(classText) {
 
   for (const raw of classText.split(/\s+/)) {
     if (!raw) continue
-    const { variants, base } = splitToken(raw)
+    const { variants, base, important } = splitToken(raw)
     const condition = parseCondition(variants)
 
     const size = /^size-(\S+)$/.exec(base)
     if (size && !hasInvalidMathSemicolon(size[1])) {
-      add(widths, condition, size[1], 0, dimensionSourceOrder(size[1]))
-      add(heights, condition, size[1], 0, dimensionSourceOrder(size[1]))
+      const value = normalizeDimension(size[1])
+      if (value !== undefined) {
+        add(widths, condition, value, 0, dimensionSourceOrder(value), important)
+        add(heights, condition, value, 0, dimensionSourceOrder(value), important)
+      }
     }
     const width = /^w-(\S+)$/.exec(base)
     if (width && !hasInvalidMathSemicolon(width[1])) {
-      add(widths, condition, width[1], 1, dimensionSourceOrder(width[1]))
+      const value = normalizeDimension(width[1])
+      if (value !== undefined) {
+        add(widths, condition, value, 1, dimensionSourceOrder(value), important)
+      }
     }
     const height = /^h-(\S+)$/.exec(base)
     if (height && !hasInvalidMathSemicolon(height[1])) {
-      add(heights, condition, height[1], 1, dimensionSourceOrder(height[1]))
+      const value = normalizeDimension(height[1])
+      if (value !== undefined) {
+        add(heights, condition, value, 1, dimensionSourceOrder(value), important)
+      }
     }
     const aspect = /^aspect-(\S+)$/.exec(base)
-    if (aspect) add(aspects, condition, aspectKind(aspect[1]))
+    if (aspect) add(aspects, condition, aspectKind(aspect[1]), 0, undefined, important)
     if (base === 'animate-spin' || base === 'animate-ping' || base === 'pf-animate-spin') {
-      add(animations, condition, true)
+      add(animations, condition, true, 0, undefined, important)
     }
     const radius = parseRounded(base)
     if (radius) {
       const isArbitrary = radius.size.startsWith('[') && radius.size.endsWith(']')
       const px = isArbitrary ? arbitraryToPx(radius.size) : NAMED_RADII[radius.size]
       const value = radius.size === 'full' || px === Infinity ? 'full' : 'other'
-      for (const corner of radius.corners) add(radii.get(corner), condition, value)
+      for (const corner of radius.corners) {
+        add(radii.get(corner), condition, value, 0, undefined, important)
+      }
     }
     order += 1
   }
@@ -590,17 +734,97 @@ function circularAt(classText) {
   }
 }
 
+function rawOffsetAt(raw, cookedOffset) {
+  let rawIndex = 0
+  let cookedIndex = 0
+
+  while (rawIndex < raw.length && cookedIndex < cookedOffset) {
+    if (raw[rawIndex] === '\r') {
+      rawIndex += raw[rawIndex + 1] === '\n' ? 2 : 1
+      cookedIndex += 1
+      continue
+    }
+    if (raw[rawIndex] !== '\\') {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+
+    const escaped = raw[rawIndex + 1]
+    if (escaped === '\r' || escaped === '\n') {
+      rawIndex += escaped === '\r' && raw[rawIndex + 2] === '\n' ? 3 : 2
+      continue
+    }
+    if (escaped === 'x' && /^[0-9a-f]{2}$/i.test(raw.slice(rawIndex + 2, rawIndex + 4))) {
+      rawIndex += 4
+      cookedIndex += 1
+      continue
+    }
+    if (escaped === 'u') {
+      const codePoint = /^\{([0-9a-f]+)\}/i.exec(raw.slice(rawIndex + 2))
+      if (codePoint) {
+        rawIndex += codePoint[0].length + 2
+        cookedIndex += Number.parseInt(codePoint[1], 16) > 0xffff ? 2 : 1
+        continue
+      }
+      if (/^[0-9a-f]{4}$/i.test(raw.slice(rawIndex + 2, rawIndex + 6))) {
+        rawIndex += 6
+        cookedIndex += 1
+        continue
+      }
+    }
+
+    const legacyOctal = /^[0-7]{1,3}/.exec(raw.slice(rawIndex + 1))
+    rawIndex += legacyOctal ? legacyOctal[0].length + 1 : 2
+    cookedIndex += 1
+  }
+
+  return cookedIndex === cookedOffset ? rawIndex : -1
+}
+
+function jsxRawOffsetAt(raw, cookedOffset) {
+  let rawIndex = 0
+  let cookedIndex = 0
+
+  while (rawIndex < raw.length && cookedIndex < cookedOffset) {
+    if (raw[rawIndex] !== '&') {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+
+    const entity = /^&(?:#(\d+)|#x([0-9a-f]+)|([a-z][a-z0-9]+));/i.exec(
+      raw.slice(rawIndex),
+    )
+    if (!entity) {
+      rawIndex += 1
+      cookedIndex += 1
+      continue
+    }
+    rawIndex += entity[0].length
+    cookedIndex += 1
+  }
+
+  return cookedIndex === cookedOffset ? rawIndex : -1
+}
+
 /** Collect every string literal and template quasi beneath a className value. */
 function collectStringNodes(node, found = []) {
   if (!node || typeof node !== 'object') return found
 
   if (node.type === 'Literal' && typeof node.value === 'string') {
-    found.push({ node, text: node.value, quasi: null })
+    const mapping = node.parent?.type === 'JSXAttribute' ? 'jsx' : 'js'
+    found.push({ node, text: node.value, mapping, quasi: null })
     return found
   }
   if (node.type === 'TemplateLiteral') {
     for (const quasi of node.quasis) {
-      found.push({ node: quasi, text: quasi.value.cooked ?? '', quasi })
+      found.push({
+        node: quasi,
+        text: quasi.value.cooked ?? '',
+        mapping: 'js',
+        quasi,
+      })
     }
     for (const expression of node.expressions) collectStringNodes(expression, found)
     return found
@@ -687,30 +911,53 @@ export default {
 
     /** Build the replacement token, preserving variants and side. */
     function toLargeToken(rawToken) {
-      return rawToken.replace(/-(?:4xl|3xl|2xl|xl|full|\[[^\]]+\])$/, '-lg')
+      const { variants, base, important } = splitToken(rawToken)
+      const prefix = variants.length > 0 ? `${variants.join(':')}:` : ''
+      const marked = rawToken.slice(prefix.length)
+      const leadingImportant = marked.startsWith('!') ? '!' : ''
+      const trailingImportant =
+        marked.endsWith('!') || (important && leadingImportant === '') ? '!' : ''
+      const replacement = /^\[border-radius:/i.test(base)
+        ? 'rounded-lg'
+        : base.replace(/-(?:4xl|3xl|2xl|xl|full|\[[^\]]+\])$/, '-lg')
+
+      if (replacement === base) return rawToken
+      return `${prefix}${leadingImportant}${replacement}${trailingImportant}`
     }
 
-    function reportToken({ stringNode, quasi, rawToken, offset, messageId, data, autofix }) {
-      // A template quasi's own range includes the backtick or `${`, so the raw
-      // text starts one character in. Literals carry their quote at index 0 too.
-      const base = stringNode.range[0] + 1
-      const start = base + offset
-      const range = [start, start + rawToken.length]
+    function reportToken({
+      stringNode,
+      quasi,
+      rawToken,
+      sourceOffset,
+      sourceLength,
+      sourceMatches,
+      messageId,
+      data,
+      autofix,
+    }) {
       const replacement = toLargeToken(rawToken)
-
       const descriptor = {
         node: quasi ?? stringNode,
-        loc: {
-          start: context.sourceCode.getLocFromIndex(start),
-          end: context.sourceCode.getLocFromIndex(range[1]),
-        },
         messageId,
         data,
       }
 
-      if (autofix) {
+      if (sourceOffset < 0) {
+        context.report(descriptor)
+        return
+      }
+
+      const start = stringNode.range[0] + sourceOffset
+      const range = [start, start + sourceLength]
+      descriptor.loc = {
+        start: context.sourceCode.getLocFromIndex(start),
+        end: context.sourceCode.getLocFromIndex(range[1]),
+      }
+
+      if (autofix && sourceMatches) {
         descriptor.fix = fixer => fixer.replaceTextRange(range, replacement)
-      } else {
+      } else if (!autofix && sourceMatches && replacement !== rawToken) {
         descriptor.suggest = [
           {
             messageId: 'replaceWithLg',
@@ -738,15 +985,43 @@ export default {
         // index it by variant scope, so a scoped radius is judged against the
         // evidence that applies where it applies.
         const classText = strings.map(entry => entry.text).join(' ')
+        const escaping = classText
+          .split(/\s+/)
+          .filter(hasEscapingComment)
+          .map(rawToken => ({
+            rawToken,
+            variants: splitToken(rawToken).variants,
+            order: escapingCommentOrder(rawToken),
+          }))
         const isCircular = circularAt(classText)
         const waived = hasWaiverAttribute(node.parent)
 
-        for (const { node: stringNode, text, quasi } of strings) {
+        for (const { node: stringNode, text, mapping, quasi } of strings) {
+          const sourceText = context.sourceCode.getText(stringNode)
+          const raw = quasi
+            ? sourceText.slice(1, quasi.tail ? -1 : -2)
+            : sourceText.slice(1, -1)
           for (const match of text.matchAll(/\S+/g)) {
             const rawToken = match[0]
+            const offsetAt = mapping === 'jsx' ? jsxRawOffsetAt : rawOffsetAt
+            const rawStart = offsetAt(raw, match.index)
+            const rawEnd = offsetAt(raw, match.index + rawToken.length)
+            const sourceOffset = rawStart < 0 || rawEnd < 0 ? -1 : rawStart + 1
+            const sourceLength = rawEnd - rawStart
+            const sourceMatches =
+              rawStart >= 0 && rawEnd >= 0 && raw.slice(rawStart, rawEnd) === rawToken
             const { variants, base } = splitToken(rawToken)
             const size = parseRoundedSize(base)
             if (size === null) continue
+            if (
+              escaping.some(
+                entry =>
+                  entry.rawToken !== rawToken &&
+                  escapingCommentMayPrecede(entry, variants) !== false,
+              )
+            ) {
+              continue
+            }
 
             const reportFullRound = () => {
               if (!checkFullRound || waived || isCircular(parseCondition(variants))) return
@@ -754,7 +1029,9 @@ export default {
                 stringNode,
                 quasi,
                 rawToken,
-                offset: match.index,
+                sourceOffset,
+                sourceLength,
+                sourceMatches,
                 messageId: 'fullRound',
                 data: { token: rawToken },
                 autofix: false,
@@ -783,7 +1060,9 @@ export default {
                 stringNode,
                 quasi,
                 rawToken,
-                offset: match.index,
+                sourceOffset,
+                sourceLength,
+                sourceMatches,
                 messageId: 'oversized',
                 data: { token: rawToken, px: Math.round(px * 100) / 100 },
                 // Named sizes map onto the scale deterministically, so they are

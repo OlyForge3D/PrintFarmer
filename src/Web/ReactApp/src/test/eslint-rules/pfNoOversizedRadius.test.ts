@@ -6,6 +6,11 @@ import rule from '../../../eslint-rules/pf-no-oversized-radius.js'
 RuleTester.describe = describe
 RuleTester.it = it
 
+const OUT_OF_RANGE_CSS_ESCAPE = '\\110000'
+const ESCAPED_BANG = '\\!'
+const CSS_COMMENT = '/*c*/'
+const OPEN_CSS_COMMENT = '/*c'
+
 const ruleTester = new RuleTester({
   languageOptions: {
     ecmaVersion: 2022,
@@ -29,9 +34,38 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     // Arbitrary values within the ceiling.
     { code: '<div className="rounded-[4px]" />' },
     { code: '<div className="rounded-[0.5rem]" />' },
+    { code: '<div className="rounded-[length:4px]" />' },
+    { code: '<div className="[border-radius:8px]" />' },
+    { code: '<div className="[border-radius:0.5rem]" />' },
     // Unresolvable arbitrary values are never guessed at.
     { code: '<div className="rounded-[var(--pf-radius-md)]" />' },
     { code: '<div className="rounded-[calc(2px+2px)]" />' },
+    { code: '<div className="[border-radius:var(--pf-radius-md)]" />' },
+    // A comment before the hint prevents Tailwind from treating it as a hint.
+    { code: `<div className="rounded-[${CSS_COMMENT}length:16px]" />` },
+    // Negative radii are invalid CSS and therefore do not render oversized.
+    { code: '<div className="rounded-[-16px]" />' },
+    // Inline importance is read after comments and preserves the winning square.
+    {
+      code: `<div className="size-[16px${CSS_COMMENT}!important] h-[32px] rounded-full" />`,
+    },
+    {
+      code: `<div className="size-[var(--x${ESCAPED_BANG}y,16px)] rounded-full" />`,
+    },
+    // A dimension-side escaping comment swallows the later radius declaration.
+    {
+      code: `<div className="w-[64px${OPEN_CSS_COMMENT}] rounded-[9999px] h-[32px]" />`,
+    },
+    // Base candidates are emitted before variant candidates regardless of
+    // property order, so this opacity comment swallows the hover radius.
+    {
+      code: `<div className="hover:rounded-[16px] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+    },
+    // Competing radius escapers have ambiguous generated candidate order, so
+    // neither can be judged safely.
+    {
+      code: `<div className="rounded-[9999px${OPEN_CSS_COMMENT}] rounded-[8px${OPEN_CSS_COMMENT}] w-[64px] h-[32px]" />`,
+    },
     // CSS if() conditions are not statically knowable. Both spellings render a
     // square through Tailwind's size utility, so opacity must not condemn them.
     {
@@ -109,6 +143,7 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     {
       code: '<div className="h-8 enabled:w-8 disabled:w-4 enabled:rounded-full" />',
     },
+    { code: '<div className="aspect-square rounded-full odd:w-8 even:h-4" />' },
     // A later all-corner radius removes rounded-full completely.
     { code: '<div className="rounded-full rounded-lg" />' },
     // Same-condition radius and aspect candidate order comes from Tailwind's
@@ -254,6 +289,176 @@ ruleTester.run('pf-no-oversized-radius', rule, {
         },
       ],
     },
+    {
+      code: '<div className="rounded-2xl!" />',
+      output: '<div className="rounded-lg!" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="rounded-[12px]!" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="rounded-full!" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="rounded-[20px!important]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg!" />' },
+          ],
+        },
+      ],
+    },
+    // Arbitrary-property syntax emits the same border-radius declaration without
+    // using a rounded-* utility, so it is judged through the same value reader.
+    {
+      code: '<div className="[border-radius:12px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: '[border-radius:12px]', px: 12 },
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="md:[border-radius:1.5rem]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'md:[border-radius:1.5rem]', px: 24 },
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="md:rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    {
+      code: '<div className="[border-radius:9999px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            { messageId: 'replaceWithLg', output: '<div className="rounded-lg" />' },
+          ],
+        },
+      ],
+    },
+    // Radius values follow CSS number spelling and comment rules.
+    ...[
+      '16PX',
+      '+16px',
+      '_16px_',
+      `16px${CSS_COMMENT}`,
+      `${CSS_COMMENT}16px`,
+      `length:${CSS_COMMENT}16px`,
+    ].map(value => ({
+      code: `<div className="rounded-[${value}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    })),
+    {
+      code: '<div className="rounded-[1e1px]" />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: 'rounded-[1e1px]', px: 10 },
+          suggestions: 1,
+        },
+      ],
+    },
+    // An out-of-range CSS escape is replacement text, not an exception, and the
+    // invalid size declaration cannot prove the box is circular.
+    {
+      code: `<div className="size-[16px!${OUT_OF_RANGE_CSS_ESCAPE}] h-[32px] rounded-full" />`,
+      output: null,
+      errors: [{ messageId: 'fullRound', suggestions: 1 }],
+    },
+    // Comment stripping and importance must agree on which axis wins.
+    {
+      code: `<div className="size-[16px] h-[32px${CSS_COMMENT}!important] rounded-full" />`,
+      output: null,
+      errors: [{ messageId: 'fullRound', suggestions: 1 }],
+    },
+    // A lone unterminated comment in the radius token leaves the radius itself
+    // live while later declarations are swallowed.
+    {
+      code: `<div className="rounded-[16px${OPEN_CSS_COMMENT}] w-[64px] h-[32px]" />`,
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: `rounded-[16px${OPEN_CSS_COMMENT}]`, px: 16 },
+          suggestions: 1,
+        },
+      ],
+    },
+    // Utilities emitted after border-radius cannot swallow a live radius. One or
+    // several later comments therefore do not suppress the radius report.
+    {
+      code: `<div className="rounded-[16px] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
+    // Variant layers sort after base utilities, so a hover width comment cannot
+    // swallow an already-emitted base radius.
+    {
+      code: `<div className="rounded-[16px] hover:w-[64px${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
+    {
+      code: `<div className="rounded-[16px] bg-[red${OPEN_CSS_COMMENT}] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [{ messageId: 'oversized', suggestions: 1 }],
+    },
+    // A radius escaper remains live even when another later utility also opens a
+    // comment; only the radius token itself is judged.
+    {
+      code: `<div className="rounded-[16px${OPEN_CSS_COMMENT}] opacity-[1${OPEN_CSS_COMMENT}]" />`,
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          data: { token: `rounded-[16px${OPEN_CSS_COMMENT}]`, px: 16 },
+          suggestions: 1,
+        },
+      ],
+    },
+    // A variant-scoped radius escaper is emitted after the base radius and cannot
+    // hide that base violation.
+    {
+      code: `<div className="hover:rounded-[8px${OPEN_CSS_COMMENT}] rounded-3xl" />`,
+      output: `<div className="hover:rounded-[8px${OPEN_CSS_COMMENT}] rounded-lg" />`,
+      errors: [{ messageId: 'oversized' }],
+    },
     // A content box with no shape evidence is the "bubble button" case.
     {
       code: '<button className="px-4 py-2 rounded-full text-white" />',
@@ -386,6 +591,69 @@ ruleTester.run('pf-no-oversized-radius', rule, {
       code: '<div className={`rounded-2xl ${extra}`} />',
       output: '<div className={`rounded-lg ${extra}`} />',
       errors: [{ messageId: 'oversized' }],
+    },
+    // Cooked string offsets differ from source offsets when an earlier JavaScript
+    // escape contracts. Replacements must still target only the radius token.
+    {
+      code: '<div className={"foo\\\\! rounded-2xl"} />',
+      output: '<div className={"foo\\\\! rounded-lg"} />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className={`foo\\\\! rounded-[12px]`} />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className={`foo\\\\! rounded-lg`} />',
+            },
+          ],
+        },
+      ],
+    },
+    // If the utility itself uses a JavaScript escape, report its precise raw
+    // source span but do not let a later lookalike token attract its autofix.
+    {
+      code: '<div className={"rounded-\\x32xl rounded-2xlfoo"} />',
+      output: null,
+      errors: [
+        {
+          messageId: 'oversized',
+          line: 1,
+          column: 18,
+          endColumn: 32,
+        },
+      ],
+    },
+    {
+      code: '<div className="x&#32;rounded-2xl" />',
+      output: '<div className="x&#32;rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="&copy; rounded-2xl" />',
+      output: '<div className="&copy; rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className="&#128512; rounded-2xl" />',
+      output: '<div className="&#128512; rounded-lg" />',
+      errors: [{ messageId: 'oversized' }],
+    },
+    {
+      code: '<div className={`a\r\nrounded-2xl`} />',
+      output: '<div className={`a\r\nrounded-lg`} />',
+      errors: [
+        {
+          messageId: 'oversized',
+          line: 2,
+          column: 1,
+          endColumn: 12,
+        },
+      ],
     },
     // Two violations in one attribute are both reported.
     {
