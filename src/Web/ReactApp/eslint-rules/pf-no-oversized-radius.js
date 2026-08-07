@@ -75,18 +75,42 @@ const SIDES = new Set(['t', 'r', 'b', 'l', 's', 'e', 'tl', 'tr', 'br', 'bl', 'ss
  * backtracking, so `rounded-l` (left side, default radius) and `rounded-lg`
  * (large radius, all sides) cannot be confused.
  */
-function parseRoundedSize(base) {
+const ALL_CORNERS = ['tl', 'tr', 'br', 'bl']
+const CORNERS_BY_SIDE = new Map([
+  ['t', ['tl', 'tr']],
+  ['r', ['tr', 'br']],
+  ['e', ['tr', 'br']],
+  ['b', ['br', 'bl']],
+  ['l', ['tl', 'bl']],
+  ['s', ['tl', 'bl']],
+  ['tl', ['tl']],
+  ['tr', ['tr']],
+  ['br', ['br']],
+  ['bl', ['bl']],
+  ['ss', ['tl']],
+  ['se', ['bl']],
+  ['ee', ['br']],
+  ['es', ['tr']],
+])
+
+function parseRounded(base) {
   if (base !== 'rounded' && !base.startsWith('rounded-')) return null
-  if (base === 'rounded') return ''
+  if (base === 'rounded') return { size: '', corners: ALL_CORNERS }
 
   let size = base.slice('rounded-'.length)
   const dash = size.indexOf('-')
   if (dash !== -1 && SIDES.has(size.slice(0, dash))) {
+    const side = size.slice(0, dash)
     size = size.slice(dash + 1)
+    return { size, corners: CORNERS_BY_SIDE.get(side) }
   } else if (SIDES.has(size)) {
-    return '' // e.g. `rounded-l`: a side with the default radius
+    return { size: '', corners: CORNERS_BY_SIDE.get(size) }
   }
-  return size
+  return { size, corners: ALL_CORNERS }
+}
+
+function parseRoundedSize(base) {
+  return parseRounded(base)?.size ?? null
 }
 
 const WAIVER_ATTRIBUTES = new Set([
@@ -138,6 +162,18 @@ const DIMENSION_SOURCE_ORDER = new Map([
   ['fit', 24_000],
 ])
 
+const PSEUDO_ELEMENT_VARIANTS = new Set([
+  'after',
+  'backdrop',
+  'before',
+  'file',
+  'first-letter',
+  'first-line',
+  'marker',
+  'placeholder',
+  'selection',
+])
+
 /**
  * Split a utility into its ordered variants and base token. Colons inside
  * arbitrary variants are selector syntax, not separators.
@@ -177,7 +213,7 @@ function arbitraryToPx(value) {
 }
 
 function changesSelectorScope(variant) {
-  if (variant === 'before' || variant === 'after' || variant === '*' || variant === '**') {
+  if (PSEUDO_ELEMENT_VARIANTS.has(variant) || variant === '*' || variant === '**') {
     return true
   }
   if (!variant.startsWith('[') || !variant.endsWith(']')) return false
@@ -258,6 +294,20 @@ function conditionApplies(condition, target) {
 
 function conditionsConflict(left, right) {
   const variants = new Set([...left, ...right])
+  if (
+    [
+      ['enabled', 'disabled'],
+      ['optional', 'required'],
+      ['valid', 'invalid'],
+      ['in-range', 'out-of-range'],
+      ['read-only', 'read-write'],
+      ['motion-safe', 'motion-reduce'],
+      ['portrait', 'landscape'],
+      ['contrast-more', 'contrast-less'],
+    ].some(group => group.every(variant => variants.has(variant)))
+  ) {
+    return true
+  }
   return [...variants].some(variant => {
     if (variant.startsWith('not-')) return variants.has(variant.slice(4))
     return variants.has(`not-${variant}`)
@@ -356,7 +406,7 @@ function circularAt(classText) {
   const heights = []
   const aspects = []
   const animations = []
-  const radii = []
+  const radii = new Map(ALL_CORNERS.map(corner => [corner, []]))
   let order = 0
 
   const add = (declarations, condition, value, utilityOrder = 0, valueOrder = 0) => {
@@ -382,11 +432,12 @@ function circularAt(classText) {
     if (base === 'animate-spin' || base === 'animate-ping' || base === 'pf-animate-spin') {
       add(animations, condition, true)
     }
-    const radiusSize = parseRoundedSize(base)
-    if (radiusSize !== null) {
-      const isArbitrary = radiusSize.startsWith('[') && radiusSize.endsWith(']')
-      const px = isArbitrary ? arbitraryToPx(radiusSize) : NAMED_RADII[radiusSize]
-      add(radii, condition, radiusSize === 'full' || px === Infinity ? 'full' : 'other')
+    const radius = parseRounded(base)
+    if (radius) {
+      const isArbitrary = radius.size.startsWith('[') && radius.size.endsWith(']')
+      const px = isArbitrary ? arbitraryToPx(radius.size) : NAMED_RADII[radius.size]
+      const value = radius.size === 'full' || px === Infinity ? 'full' : 'other'
+      for (const corner of radius.corners) add(radii.get(corner), condition, value)
     }
     order += 1
   }
@@ -413,18 +464,25 @@ function circularAt(classText) {
 
   return radiusCondition => {
     const contexts = [radiusCondition]
+    const contextKeys = new Set([JSON.stringify(radiusCondition)])
     for (const declaration of shapeDeclarations) {
-      if (
-        declaration.condition.scopeKey !== radiusCondition.scopeKey
-      ) {
-        continue
+      const existingContexts = [...contexts]
+      for (const context of existingContexts) {
+        const merged = mergeConditions(context, declaration.condition)
+        if (!merged) continue
+        const key = JSON.stringify(merged)
+        if (!contextKeys.has(key)) {
+          contextKeys.add(key)
+          contexts.push(merged)
+        }
       }
-      const merged = mergeConditions(radiusCondition, declaration.condition)
-      if (merged) contexts.push(merged)
     }
 
     return contexts.every(target => {
-      if (resolveDeclaration(radii, target)?.value !== 'full') return true
+      const hasFullCorner = [...radii.values()].some(
+        declarations => resolveDeclaration(declarations, target)?.value === 'full',
+      )
+      if (!hasFullCorner) return true
       return isCircularAt(target)
     })
   }

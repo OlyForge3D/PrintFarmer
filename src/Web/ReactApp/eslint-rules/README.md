@@ -90,6 +90,11 @@ excuse a descendant radius, while the slider thumbs in `Slider.tsx` and `Setting
 to pass because their `w-*`, `h-*`, and `rounded-full` utilities share the same
 `[&::-webkit-slider-thumb]` or `[&::-moz-range-thumb]` scope.
 
+Arbitrary descendant selectors, child variants, and Tailwind's named pseudo-element variants
+(`before`, `after`, `file`, `marker`, and related forms) establish distinct target scopes. State
+conditions on either side of that scope remain distinct. Mutually exclusive built-in states and
+media preferences are not combined into impossible cascades.
+
 Within one target scope, evidence applies when its ordered state condition is active where the
 radius applies. State variants contribute selector specificity; media variants do not.
 Breakpoints are cumulative and ordered, so an `md:` declaration still participates at `lg:`.
@@ -98,6 +103,8 @@ utility, and static-candidate source order; only otherwise identical ties use cl
 order. Width, height, and aspect ratio are resolved independently before the rule decides whether
 the resulting box is circular. A radius is checked in later breakpoint, media, and state conditions
 where it remains active, not only at the condition where its class was declared.
+Radius declarations are resolved per corner, so `rounded-t-lg` does not hide a surviving
+`rounded-full` on the bottom corners.
 
 The resolver remains deliberately conservative around dynamic dimensions. A winning width or
 height containing `var()`, `calc()`, `min()`, `max()`, or `clamp()` cannot be evaluated without

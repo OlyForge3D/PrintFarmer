@@ -84,6 +84,12 @@ ruleTester.run('pf-no-oversized-radius', rule, {
     { code: '<div className="h-8 w-4 w-8 rounded-full" />' },
     { code: '<div className="h-min w-min w-auto rounded-full" />' },
     { code: '<div className="h-min w-auto w-min rounded-full" />' },
+    // Mutually exclusive states must never be merged into an impossible cascade.
+    {
+      code: '<div className="h-8 enabled:w-8 disabled:w-4 enabled:rounded-full" />',
+    },
+    // A later all-corner radius removes rounded-full completely.
+    { code: '<div className="rounded-full rounded-lg" />' },
 
     // Shape evidence in a sibling fragment of the same clsx() call still counts.
     { code: '<div className={clsx("rounded-full border", "h-6 w-6 shrink-0")} />' },
@@ -486,6 +492,52 @@ ruleTester.run('pf-no-oversized-radius', rule, {
             {
               messageId: 'replaceWithLg',
               output: '<div className="w-4 h-4 lg:rounded-lg md:hover:w-8" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Two individually compatible state declarations can create a lozenge only
+    // where both states are active, so their intersection must be evaluated.
+    {
+      code: '<div className="aspect-square rounded-full hover:w-8 focus:h-4" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="aspect-square rounded-lg hover:w-8 focus:h-4" />',
+            },
+          ],
+        },
+      ],
+    },
+    // Named pseudo-element variants establish their own selector target.
+    {
+      code: '<input className="w-4 h-4 file:rounded-full" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<input className="w-4 h-4 file:rounded-lg" />',
+            },
+          ],
+        },
+      ],
+    },
+    // A side-specific override leaves the other rounded-full corners active.
+    {
+      code: '<div className="rounded-full rounded-t-lg" />',
+      errors: [
+        {
+          messageId: 'fullRound',
+          suggestions: [
+            {
+              messageId: 'replaceWithLg',
+              output: '<div className="rounded-lg rounded-t-lg" />',
             },
           ],
         },
