@@ -100,7 +100,7 @@ public class SettingsMetadataAttributeTests
     public void EveryUserVisibleSettingDisplayLabel_UsesSentenceCase()
     {
         (Type Type, PropertyInfo Property, string Label)[] labels = SettingsAssemblies()
-            .SelectMany(assembly => assembly.GetTypes())
+            .SelectMany(GetLoadableTypes)
             .Where(type => type.GetCustomAttribute<AppSettingAttribute>() is not null)
             .SelectMany(type => type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
                 .Select(property => (Type: type, Property: property, Display: property.GetCustomAttribute<SettingDisplayAttribute>())))
@@ -154,9 +154,23 @@ public class SettingsMetadataAttributeTests
     }
 
     private static IEnumerable<Assembly> SettingsAssemblies() =>
-        Directory.EnumerateFiles(AppContext.BaseDirectory, "Farm.*.dll")
+        Directory.EnumerateFiles(AppContext.BaseDirectory, "Farm.*.dll", SearchOption.AllDirectories)
             .OrderBy(path => path, StringComparer.Ordinal)
-            .Select(Assembly.LoadFrom)
-            .Where(assembly => assembly.GetTypes()
+            .Select(path => (Path: path, Name: AssemblyName.GetAssemblyName(path)))
+            .GroupBy(candidate => candidate.Name.FullName ?? candidate.Path, StringComparer.Ordinal)
+            .Select(group => Assembly.LoadFrom(group.First().Path))
+            .Where(assembly => GetLoadableTypes(assembly)
                 .Any(type => type.GetCustomAttribute<AppSettingAttribute>() is not null));
+
+    private static IEnumerable<Type> GetLoadableTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException exception)
+        {
+            return exception.Types.OfType<Type>();
+        }
+    }
 }
