@@ -265,7 +265,7 @@ describe('theme references resolve to live tokens (#1023, #1086)', () => {
 
   it('ignores utility-shaped text inside regex literals in test sources', () => {
     const references = scanThemeText(
-      String.raw`const match = source.match(/className="(bg-pf-bg-\d[^"]*max-h-48[^"]*)"/);`,
+      'const match = source.match(/className="bg-pf-missing"/);',
       'Component.test.tsx',
     );
 

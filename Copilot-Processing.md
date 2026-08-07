@@ -2,19 +2,25 @@
 
 ## Request
 
-Implement issue #1111: fix AdminThemeSafety dead-utility scan false positives caused by regex literals in React test sources, add focused positive and negative regression coverage, validate, commit, push, pass Bishop/Hicks/Vasquez consensus, open a non-draft PR with `Closes #1111`, and complete the merge/closure lifecycle.
+Revise issue #1111 after adversarial review by replacing the malformed negative
+regex fixture with a valid utility token, while retaining the positive legitimate
+string regression. Validate, commit, and push without opening a PR or repeating
+reviewer gating.
 
 ## Action plan
 
-- [x] Inspect the scanner, affected tests, project guidance, and issue details; reproduce the false positive.
-- [x] Implement the smallest syntax-aware scanner correction (the existing TypeScript AST scan already provides the correction).
-- [x] Add focused positive and negative regression coverage.
-- [x] Run targeted frontend validation and resolve any failures.
-- [ ] Review the diff, commit, and push the branch.
-- [ ] Obtain mandatory Bishop/Hicks/Vasquez exact-head adversarial consensus.
-- [ ] Open a non-draft PR targeting development with `Closes #1111`, verify issue linkage, and report lifecycle evidence.
-- [ ] Follow CI, trusted verdict, merge, and issue-closure status through completion.
+- [x] Read the focused test, current diff, tracking file, and applicable guidance.
+- [x] Replace the malformed negative fixture with a regex literal containing
+  `className="bg-pf-missing"`.
+- [x] Preserve the positive legitimate string utility regression.
+- [x] Run the focused AdminThemeSafety Vitest test.
+- [x] Run focused frontend lint.
+- [x] Review the focused diff, commit with the required trailer, and push.
 
 ## Summary
 
-Pending.
+Replaced the malformed negative test input with a regex literal containing the
+fully valid `bg-pf-missing` utility, so the regression now distinguishes
+syntax-aware AST scanning from lexical scanning. Preserved the positive
+legitimate string utility regression. The focused Vitest suite passed all 27
+tests, and focused ESLint completed successfully.
