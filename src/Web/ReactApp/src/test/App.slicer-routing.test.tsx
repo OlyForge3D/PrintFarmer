@@ -1,9 +1,23 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Outlet } from 'react-router';
 
 const mockUseSystemCapabilities = vi.fn();
+const lazyNewSliceJobPageModule = vi.hoisted(() => {
+  type Module = {
+    NewSliceJobPage: () => React.ReactNode;
+  };
+  let resolveImport: (module: Module) => void;
+  const importPromise = new Promise<Module>(resolve => {
+    resolveImport = resolve;
+  });
+
+  return {
+    resolveImport: (module: Module) => resolveImport(module),
+    waitForImport: () => importPromise,
+  };
+});
 
 vi.mock('@/common/hooks/useUnifiedLogging', () => ({
   useUnifiedLogging: () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }),
@@ -97,9 +111,7 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
   useSystemCapabilities: () => mockUseSystemCapabilities(),
 }));
 
-vi.mock('@/features/slicer/pages/NewSliceJobPage', () => ({
-  NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
-}));
+vi.mock('@/features/slicer/pages/NewSliceJobPage', () => lazyNewSliceJobPageModule.waitForImport());
 
 vi.mock('@/features/tasks', () => ({
   ProfileImportWizardPage: () => <div>ProfileImportWizardMock</div>,
@@ -177,7 +189,19 @@ describe('App slicer route consolidation', () => {
     });
     rerender(<App />);
 
-    expect(await screen.findByText('NewSliceJobPageMock')).toBeInTheDocument();
+    expect(await screen.findByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.queryByRole('status', { name: 'Loading platform capabilities' })).not.toBeInTheDocument();
+
+    // The capability gate is open; synchronize with the separate route-level lazy import.
+    const routeModuleImport = import('@/features/slicer/pages/NewSliceJobPage');
+    await act(async () => {
+      lazyNewSliceJobPageModule.resolveImport({
+        NewSliceJobPage: () => <div>NewSliceJobPageMock</div>,
+      });
+      await routeModuleImport;
+    });
+
+    expect(screen.getByText('NewSliceJobPageMock')).toBeInTheDocument();
   });
 
   it('keeps a resolved disabled capability distinct from unresolved data', async () => {

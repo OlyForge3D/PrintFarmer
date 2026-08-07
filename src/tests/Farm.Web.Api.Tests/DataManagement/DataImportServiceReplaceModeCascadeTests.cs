@@ -16,21 +16,100 @@ using Xunit;
 namespace Farm.Web.Api.Tests.DataManagement;
 
 /// <summary>
-/// F1 regression for the Dallas cascade adjudication of #953: DataImportService's Replace
-/// mode must route printer deletion through the authoritative IPrintersRepository.RemoveAsync
-/// path so every compensating cleanup (schedules under the Restrict FK, direct
-/// PartOutputMappings under the Restrict FK, source-GcodeFiles, PrintJobs, etc.) actually
-/// runs. Uses a real relational provider (SQLite with PRAGMA foreign_keys=ON) so the FK
-/// constraints are enforced — the older <c>_context.Printers.RemoveRange(...)</c> path
-/// would FK-fail on any of these compensations.
-/// <para>
-/// Exercises <c>DeleteAllPrintersAsync</c> in isolation via reflection because
-/// <c>ImportFullBackupAsync</c> calls <c>DeleteAllCatalogDataAsync</c> first, which would
-/// FK-fail before ever reaching the F1 code under test.
-/// </para>
+/// Relational regressions for full-backup Replace orchestration and printer cleanup.
+/// SQLite foreign keys are enabled so dependency ordering and rollback behavior match
+/// production relational providers.
 /// </summary>
 public sealed class DataImportServiceReplaceModeCascadeTests
 {
+    [Fact]
+    public async Task ImportFullBackupAsync_ReplaceMode_ReplacesDependentAndCatalogData()
+    {
+        await using SqliteConnection connection =
+            new("Data Source=file:dataimport-replace-success?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(connection);
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+
+        await SeedExistingPrinterAsync(options);
+
+        await using AppDbContext act = new(options);
+        DataImportService service = CreateService(act);
+        FullBackupExportDto backup = CreateReplacementBackup();
+
+        ImportResponseDto result = await service.ImportFullBackupAsync(backup, ImportMode.Replace);
+
+        result.Success.Should().BeTrue();
+        result.Errors.Should().BeEmpty();
+        (await act.Printers.Select(printer => printer.Name).ToListAsync()).Should().Equal("Replacement Printer");
+        (await act.Locations.Select(location => location.Name).ToListAsync()).Should().Equal("Replacement Location");
+        (await act.Manufacturers.Select(manufacturer => manufacturer.Name).ToListAsync()).Should().Equal("Replacement Manufacturer");
+        (await act.PrinterModels.Select(model => model.Name).ToListAsync()).Should().Equal("Replacement Model");
+        (await act.GcodeFiles.SingleAsync()).PrinterModelId.Should().BeNull();
+        (await act.PrintJobStatistics.SingleAsync()).PrinterModelId.Should().BeNull();
+        (await act.CalibrationProjects.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ImportFullBackupAsync_ReplaceMode_WhenCatalogImportFails_RollsBackAndClearsTrackedChanges()
+    {
+        await using SqliteConnection connection =
+            new("Data Source=file:dataimport-replace-rollback?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(connection);
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+
+        await SeedExistingPrinterAsync(options);
+        FullBackupExportDto backup = CreateReplacementBackup();
+        backup.Catalog.PrinterModels[0].ManufacturerName = "Missing Manufacturer";
+
+        await using (AppDbContext act = new(options))
+        {
+            DataImportService service = CreateService(act);
+
+            ImportResponseDto result = await service.ImportFullBackupAsync(backup, ImportMode.Replace);
+
+            result.Success.Should().BeFalse();
+            result.Errors.Should().NotBeEmpty();
+            act.ChangeTracker.Entries().Should().OnlyContain(entry => entry.State == EntityState.Unchanged);
+        }
+
+        await using AppDbContext assert = new(options);
+        (await assert.Printers.Select(printer => printer.Name).ToListAsync()).Should().Equal("Existing Printer");
+        (await assert.Locations.Select(location => location.Name).ToListAsync()).Should().Equal("Existing Location");
+        (await assert.Manufacturers.Select(manufacturer => manufacturer.Name).ToListAsync()).Should().Equal("Existing Manufacturer");
+        (await assert.PrinterModels.Select(model => model.Name).ToListAsync()).Should().Equal("Existing Model");
+        (await assert.CalibrationProjects.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ImportCatalogAsync_ReplaceMode_WhenDeleteFails_DoesNotLeaveDeletedEntitiesTracked()
+    {
+        await using SqliteConnection connection =
+            new("Data Source=file:dataimport-catalog-tracker?mode=memory&cache=shared");
+        await connection.OpenAsync();
+        await EnableSqliteForeignKeysAsync(connection);
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+
+        await SeedExistingPrinterAsync(options);
+
+        await using AppDbContext act = new(options);
+        DataImportService service = CreateService(act);
+        CatalogExportDto replacementCatalog = CreateReplacementBackup().Catalog;
+
+        ImportResponseDto result = await service.ImportCatalogAsync(replacementCatalog, ImportMode.Replace);
+
+        result.Success.Should().BeFalse();
+        result.Errors.Should().NotBeEmpty();
+        act.ChangeTracker.Entries().Should().BeEmpty();
+
+        _ = act.Manufacturers.Add(new Manufacturer { Id = Guid.NewGuid(), Name = "Post-failure Manufacturer" });
+        Func<Task> saveAfterFailure = async () => await act.SaveChangesAsync();
+        await saveAfterFailure.Should().NotThrowAsync();
+        (await act.Manufacturers.CountAsync()).Should().Be(2);
+        (await act.Printers.CountAsync()).Should().Be(1);
+    }
+
     [Fact]
     public async Task DeleteAllPrintersAsync_WithSchedulesAlertsLogsAndDirectMappings_RunsAllCompensatingCleanups()
     {
@@ -166,6 +245,138 @@ public sealed class DataImportServiceReplaceModeCascadeTests
         using System.Data.Common.DbCommand cmd = connection.CreateCommand();
         cmd.CommandText = "PRAGMA foreign_keys = ON;";
         _ = await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static DataImportService CreateService(AppDbContext context)
+    {
+        var sensitiveData = new NullSensitiveDataProtector();
+        IPrintersRepository printersRepository = new EfPrintersRepository(context, sensitiveData);
+        return new DataImportService(context, NullLogger<DataImportService>.Instance, sensitiveData, printersRepository);
+    }
+
+    private static async Task SeedExistingPrinterAsync(DbContextOptions<AppDbContext> options)
+    {
+        await using AppDbContext seed = new(options);
+        _ = await seed.Database.EnsureCreatedAsync();
+        await EnableSqliteForeignKeysAsync(seed.Database.GetDbConnection());
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        Guid locationId = Guid.NewGuid();
+        Guid folderId = Guid.NewGuid();
+        Guid printJobId = Guid.NewGuid();
+        Guid printerId = Guid.NewGuid();
+        _ = seed.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Existing Manufacturer" });
+        _ = seed.PrinterModels.Add(new PrinterModel
+        {
+            Id = modelId,
+            Name = "Existing Model",
+            ManufacturerId = manufacturerId,
+        });
+        _ = seed.Locations.Add(new Location
+        {
+            Id = locationId,
+            Name = "Existing Location",
+            Path = "/existing-location",
+            CreatedAt = DateTime.UtcNow,
+            ModifiedAt = DateTime.UtcNow,
+        });
+        _ = seed.Printers.Add(new Printer
+        {
+            Id = printerId,
+            Name = "Existing Printer",
+            ServerUrl = "http://existing-printer",
+            ManufacturerId = manufacturerId,
+            ModelId = modelId,
+            LocationId = locationId,
+        });
+        _ = seed.CalibrationProjects.Add(new CalibrationProject
+        {
+            Id = Guid.NewGuid(),
+            OwnerUserId = Guid.NewGuid(),
+            PrinterId = printerId,
+            Name = "Existing calibration",
+            FilamentProvider = "local",
+            FilamentProductId = "PLA",
+            FilamentProductName = "PLA",
+            FilamentMaterial = "PLA",
+            CreateRequestId = Guid.NewGuid().ToString(),
+            CreatedBySubject = "test",
+            UpdatedBySubject = "test",
+            CreatedAtUtc = DateTime.UtcNow,
+            UpdatedAtUtc = DateTime.UtcNow,
+        });
+        _ = seed.Set<FolderNode>().Add(new FolderNode
+        {
+            Id = folderId,
+            Path = "/",
+            FolderType = "gcode",
+        });
+        _ = seed.GcodeFiles.Add(new GcodeFile
+        {
+            Id = Guid.NewGuid(),
+            Name = "retained.gcode",
+            FileName = "retained.gcode",
+            FilePath = "/retained.gcode",
+            FileHash = new string('e', 64),
+            FileSizeBytes = 1,
+            FolderId = folderId,
+            PrinterModelId = modelId,
+            UploadedAt = DateTime.UtcNow,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
+        _ = seed.PrintJobs.Add(new PrintJob
+        {
+            Id = printJobId,
+            Name = "Retained job",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        });
+        _ = seed.PrintJobStatistics.Add(new PrintJobStatistics
+        {
+            Id = Guid.NewGuid(),
+            PrintJobId = printJobId,
+            PrinterModelId = modelId,
+        });
+        _ = await seed.SaveChangesAsync();
+    }
+
+    private static FullBackupExportDto CreateReplacementBackup()
+    {
+        return new FullBackupExportDto
+        {
+            Catalog = new CatalogExportDto
+            {
+                Manufacturers =
+                [
+                    new ManufacturerExportDto { Name = "Replacement Manufacturer" },
+                ],
+                PrinterModels =
+                [
+                    new PrinterModelExportDto
+                    {
+                        Name = "Replacement Model",
+                        ManufacturerName = "Replacement Manufacturer",
+                    },
+                ],
+            },
+            Locations =
+            [
+                new LocationExportDto { Name = "Replacement Location" },
+            ],
+            Printers =
+            [
+                new PrinterExportDto
+                {
+                    Name = "Replacement Printer",
+                    ServerUrl = "http://replacement-printer",
+                    ModelName = "Replacement Model",
+                    LocationName = "Replacement Location",
+                },
+            ],
+        };
     }
 
     private sealed class NullSensitiveDataProtector : ISensitiveDataProtector
