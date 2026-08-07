@@ -374,6 +374,76 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         (await File.ReadAllTextAsync(outsidePath)).Should().Be("outside");
     }
 
+    [Fact]
+    public async Task CreateNamedLinuxStagingStream_PublishesBytes()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_root);
+        string stagingDirectory =
+            ArtifactStorageFileSystem.EnsureStagingDirectory(_root);
+        string stagingPath = Path.Combine(
+            stagingDirectory,
+            $"{Guid.NewGuid():N}{ArtifactStorageFileSystem.StagingFileExtension}");
+        string publishedPath =
+            Path.Combine(_root, $"{Guid.NewGuid()}-fallback.gcode");
+        using FileStream stagingStream =
+            ArtifactStorageFileSystem.CreateNamedLinuxStagingStream(stagingPath);
+        await stagingStream.WriteAsync("pinned"u8.ToArray());
+        await stagingStream.FlushAsync();
+
+        ArtifactStorageFileSystem.CreateAtomicHardLink(
+            publishedPath,
+            stagingPath,
+            stagingStream.SafeFileHandle);
+        stagingStream.Dispose();
+        File.Delete(stagingPath);
+
+        (await File.ReadAllTextAsync(publishedPath)).Should().Be("pinned");
+    }
+
+    [Fact]
+    public async Task CreateNamedLinuxStagingStream_PathReplacement_FailsClosed()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_outsideRoot);
+        string stagingDirectory =
+            ArtifactStorageFileSystem.EnsureStagingDirectory(_root);
+        string stagingPath = Path.Combine(
+            stagingDirectory,
+            $"{Guid.NewGuid():N}{ArtifactStorageFileSystem.StagingFileExtension}");
+        string outsidePath = Path.Combine(_outsideRoot, "outside.gcode");
+        string publishedPath =
+            Path.Combine(_root, $"{Guid.NewGuid()}-fallback-race.gcode");
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        using FileStream stagingStream =
+            ArtifactStorageFileSystem.CreateNamedLinuxStagingStream(stagingPath);
+        await stagingStream.WriteAsync("pinned"u8.ToArray());
+        await stagingStream.FlushAsync();
+        File.Delete(stagingPath);
+        _ = File.CreateSymbolicLink(stagingPath, outsidePath);
+
+        Action publish = () =>
+            ArtifactStorageFileSystem.CreateAtomicHardLink(
+                publishedPath,
+                stagingPath,
+                stagingStream.SafeFileHandle);
+        publish.Should().Throw<IOException>();
+        stagingStream.Dispose();
+        File.Delete(stagingPath);
+
+        File.Exists(publishedPath).Should().BeFalse();
+        (await File.ReadAllTextAsync(outsidePath)).Should().Be("outside");
+    }
+
     private Mock<IArtifactsRepository> CreateRepository(
         IReadOnlyList<Artifact>? committedArtifacts = null)
     {

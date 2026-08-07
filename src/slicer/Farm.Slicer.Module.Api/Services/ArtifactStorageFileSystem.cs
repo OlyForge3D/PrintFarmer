@@ -123,12 +123,14 @@ internal static class ArtifactStorageFileSystem
                 stagingHandle.DangerousAddRef(ref handleAdded);
                 int fileDescriptor =
                     stagingHandle.DangerousGetHandle().ToInt32();
+                string descriptorPath =
+                    $"/proc/self/fd/{fileDescriptor}";
                 if (CreateHardLinkUnixFromHandle(
-                        fileDescriptor,
-                        string.Empty,
+                        LinuxCurrentWorkingDirectory,
+                        descriptorPath,
                         LinuxCurrentWorkingDirectory,
                         publicationPath,
-                        LinuxEmptyPath) == 0)
+                        LinuxFollowSymbolicLink) == 0)
                 {
                     return;
                 }
@@ -177,11 +179,41 @@ internal static class ArtifactStorageFileSystem
         if (fileDescriptor < 0)
         {
             int error = Marshal.GetLastPInvokeError();
-            throw new IOException(
-                "Failed to create an anonymous artifact staging file.",
-                new Win32Exception(error));
+            if (error is LinuxInvalidArgument or LinuxOperationNotSupported)
+            {
+                return CreateNamedLinuxStagingStream(stagingPath);
+            }
+            else
+            {
+                throw new IOException(
+                    "Failed to create an anonymous artifact staging file.",
+                    new Win32Exception(error));
+            }
         }
 
+        return CreateLinuxFileStream(fileDescriptor);
+    }
+
+    internal static FileStream CreateNamedLinuxStagingStream(
+        string stagingPath)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException(
+                "Named Linux artifact staging is only available on Linux.");
+        }
+
+        string stagingDirectory = Path.GetDirectoryName(stagingPath) ??
+            throw new IOException(
+                "The artifact staging path has no parent directory.");
+        int fileDescriptor = OpenNamedLinuxFile(
+            stagingDirectory,
+            Path.GetFileName(stagingPath));
+        return CreateLinuxFileStream(fileDescriptor);
+    }
+
+    private static FileStream CreateLinuxFileStream(int fileDescriptor)
+    {
         var handle = new SafeFileHandle(
             new IntPtr(fileDescriptor),
             ownsHandle: true);
@@ -197,6 +229,44 @@ internal static class ArtifactStorageFileSystem
         {
             handle.Dispose();
             throw;
+        }
+    }
+
+    private static int OpenNamedLinuxFile(
+        string stagingDirectory,
+        string stagingFileName)
+    {
+        int directoryFileDescriptor = OpenLinuxFile(
+            stagingDirectory,
+            LinuxDirectoryFlags);
+        if (directoryFileDescriptor < 0)
+        {
+            int error = Marshal.GetLastPInvokeError();
+            throw new IOException(
+                "Failed to open the artifact staging directory.",
+                new Win32Exception(error));
+        }
+
+        try
+        {
+            int fileDescriptor = OpenLinuxFileAt(
+                directoryFileDescriptor,
+                stagingFileName,
+                LinuxNamedFileFlags,
+                LinuxOwnerReadWrite);
+            if (fileDescriptor >= 0)
+            {
+                return fileDescriptor;
+            }
+
+            int error = Marshal.GetLastPInvokeError();
+            throw new IOException(
+                "Failed to create a named artifact staging file.",
+                new Win32Exception(error));
+        }
+        finally
+        {
+            _ = CloseLinuxFile(directoryFileDescriptor);
         }
     }
 
@@ -408,8 +478,12 @@ internal static class ArtifactStorageFileSystem
         IntPtr securityAttributes);
 
     private const int LinuxCurrentWorkingDirectory = -100;
-    private const int LinuxEmptyPath = 0x1000;
+    private const int LinuxFollowSymbolicLink = 0x400;
     private const int LinuxAnonymousFileFlags = 0x4B0002;
+    private const int LinuxDirectoryFlags = 0xB0000;
+    private const int LinuxNamedFileFlags = 0xA00C2;
+    private const int LinuxInvalidArgument = 22;
+    private const int LinuxOperationNotSupported = 95;
     private const uint LinuxOwnerReadWrite = 0x180;
 
     [DllImport(
@@ -443,6 +517,44 @@ internal static class ArtifactStorageFileSystem
         [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
         int flags,
         uint mode);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "open",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [SuppressMessage(
+        "Security",
+        "CA2101:Specify marshaling for P/Invoke string arguments",
+        Justification = "POSIX open paths are explicitly marshaled as UTF-8.")]
+    private static extern int OpenLinuxFile(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "openat",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [SuppressMessage(
+        "Security",
+        "CA2101:Specify marshaling for P/Invoke string arguments",
+        Justification = "POSIX openat paths are explicitly marshaled as UTF-8.")]
+    private static extern int OpenLinuxFileAt(
+        int directoryFileDescriptor,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mode);
+
+    [DllImport(
+        "libc",
+        EntryPoint = "close",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static extern int CloseLinuxFile(int fileDescriptor);
 }
 
 internal sealed class ArtifactWriteLease : IDisposable
