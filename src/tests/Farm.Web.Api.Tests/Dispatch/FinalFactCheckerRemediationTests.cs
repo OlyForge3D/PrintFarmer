@@ -707,7 +707,6 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             [nameof(PrintersController.StopAsync)] = PrintFarmerPermissions.Queue.Cancel,
             [nameof(PrintersController.FirmwareRestartAsync)] = PrintFarmerPermissions.Queue.Start,
             [nameof(PrintersController.DisableMotorsAsync)] = PrintFarmerPermissions.Queue.Start,
-            [nameof(PrintersController.SendGcodeAsync)] = PrintFarmerPermissions.Queue.Start,
             [nameof(PrintersController.SaveZOffsetAsync)] = PrintFarmerPermissions.Queue.Start,
             [nameof(PrintersController.LoadFilamentAsync)] = PrintFarmerPermissions.Queue.Start,
             [nameof(PrintersController.UnloadFilamentAsync)] = PrintFarmerPermissions.Queue.Start,
@@ -797,10 +796,6 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         _ = await controller.StopAsync(printerId, CancellationToken.None);
         _ = await controller.FirmwareRestartAsync(printerId, CancellationToken.None);
         _ = await controller.DisableMotorsAsync(printerId, CancellationToken.None);
-        _ = await controller.SendGcodeAsync(
-            printerId,
-            new GcodeCommandRequest { Command = "M112" },
-            CancellationToken.None);
         _ = await controller.LoadFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.UnloadFilamentAsync(printerId, null, CancellationToken.None);
         _ = await controller.ChangeFilamentAsync(printerId, CancellationToken.None);

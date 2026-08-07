@@ -55,7 +55,7 @@ function createQueryClient() {
   });
 }
 
-function renderPage(initialUrl = '/admin/security/login-audit') {
+function renderPage(initialUrl = '/admin/manage?tab=users&sub=audit') {
   const queryClient = createQueryClient();
   return render(
     <MemoryRouter initialEntries={[initialUrl]}>
@@ -196,7 +196,7 @@ describe('LoginAuditPage', () => {
   it('shows clear filters button when a filter is active', async () => {
     vi.mocked(securityAuditService.fetchLoginAudit).mockResolvedValue(mockPagedResponse);
 
-    renderPage('/admin/security/login-audit?username=admin');
+    renderPage('/admin/manage?tab=users&sub=audit&username=admin');
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /clear all filters/i })).toBeInTheDocument();

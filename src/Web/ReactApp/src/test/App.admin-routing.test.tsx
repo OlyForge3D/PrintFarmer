@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Outlet } from 'react-router';
 
@@ -95,9 +95,9 @@ vi.mock('@/common/hooks/useSystemCapabilities', () => ({
   }),
 }));
 
-// Mock every lazy-loaded page that a legacy redirect can land on. We do not
-// care what these pages render — only that the URL matches after Suspense
-// resolves. Returning a static div keeps rendering synchronous and cheap.
+// Mock the lazy-loaded canonical destinations. We only need to confirm that the
+// URL remains stable after Suspense resolves, so static content keeps rendering
+// synchronous and cheap.
 vi.mock('@/features/settings/pages/SettingsShell', () => ({
   SettingsShell: () => <div>SettingsShellMock</div>,
 }));
@@ -132,50 +132,34 @@ vi.mock('sonner', () => ({
 }));
 
 import App from '../App';
-import { LEGACY_REDIRECTS } from '../features/admin/registry/legacyRedirects';
 
-function splitPath(url: string): { pathname: string; search: string } {
-  const [pathname, search = ''] = url.split('?');
-  return { pathname, search };
-}
-
-function paramsEqual(actual: string, expected: string): boolean {
-  const actualParams = new URLSearchParams(actual.startsWith('?') ? actual.slice(1) : actual);
-  const expectedParams = new URLSearchParams(expected);
-  const actualEntries = [...actualParams.entries()].sort();
-  const expectedEntries = [...expectedParams.entries()].sort();
-  return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
-}
-
-describe('App legacy admin redirects', () => {
+describe('App canonical admin routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  for (const redirect of LEGACY_REDIRECTS) {
-    // `/admin` itself is a special case: it is technically a Route index that
-    // uses <Navigate/>, but React Router doesn't fire that redirect at the
-    // pathname `/admin` in the same way (the index resolves to the parent
-    // path). It's exercised implicitly by every /admin/* redirect and is
-    // covered by the registry-level test, so skip the app-mount assertion.
-    if (redirect.from === '/admin') {
-      continue;
-    }
+  it.each([
+    '/admin/settings?tab=slicing&sub=profiles',
+    '/admin/manage?tab=operations&sub=workers&workerTab=jobs',
+  ])('renders the canonical destination without rewriting %s', async (destination) => {
+    window.history.pushState({}, '', destination);
 
-    it(`redirects ${redirect.from} to ${redirect.to}`, async () => {
-      window.history.pushState({}, '', redirect.from);
+    render(<App />);
 
-      render(<App />);
-
-      const target = splitPath(redirect.to);
-
-      await waitFor(() => {
-        expect(window.location.pathname).toBe(target.pathname);
-        expect(
-          paramsEqual(window.location.search, target.search),
-          `expected search "${target.search}" but got "${window.location.search}"`,
-        ).toBe(true);
-      });
+    expect(await screen.findByText('SettingsShellMock')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(`${window.location.pathname}${window.location.search}`).toBe(destination);
     });
-  }
+  });
+
+  it('uses the locations index route for the dashboard default', async () => {
+    window.history.pushState({}, '', '/locations');
+
+    render(<App />);
+
+    expect(await screen.findByText('LocationDashboardMock')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/locations');
+    });
+  });
 });

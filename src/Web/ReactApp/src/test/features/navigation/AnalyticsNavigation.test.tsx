@@ -64,7 +64,7 @@ vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
 }));
 
 describe('Analytics navigation entry', () => {
-  it('shows one Analytics target and removes the old statistics targets', async () => {
+  it('uses only the canonical Analytics target', async () => {
     const queryClient = createTestQueryClient();
     const { container } = render(
       <QueryClientProvider client={queryClient}>
