@@ -184,13 +184,11 @@ const byFamily = Object.fromEntries(
     .map(([family, familyMatches]) => [family, familyMatches.length]),
 )
 
-let dirty = false
-try {
-  execFileSync('git', ['diff', '--quiet'], { cwd: reactRoot })
-  execFileSync('git', ['diff', '--cached', '--quiet'], { cwd: reactRoot })
-} catch {
-  dirty = true
-}
+const dirty = execFileSync(
+  'git',
+  ['status', '--porcelain'],
+  { cwd: reactRoot, encoding: 'utf8' },
+).trim().length > 0
 
 console.log(JSON.stringify({
   scope: 'src/**/*.{ts,tsx} JSX class/className attributes',
