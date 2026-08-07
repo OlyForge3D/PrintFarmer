@@ -158,6 +158,7 @@ export function FilamentManagementPage() {
         className="transition-opacity duration-200 motion-reduce:transition-none"
       >
         <LazyContentBoundary
+          key={activeTab}
           label={currentTab.label.toLowerCase()}
           onRetry={ActiveTab.retry}
           fallback={(
