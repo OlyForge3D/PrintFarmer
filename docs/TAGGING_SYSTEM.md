@@ -204,7 +204,7 @@ Backend (ASP.NET Core .NET 10)
     ├─ Database operations (EF Core)
     └─ Validation and normalization
 
-Database (SQLite / PostgreSQL / SQL Server / MySQL)
+Database (SQLite / PostgreSQL / SQL Server)
 ├─ Tag (master tags table - shared)
 │   ├─ Id: Guid (primary key)
 │   ├─ Name: string (unique, PascalCase)

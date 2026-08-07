@@ -87,15 +87,15 @@ bash tests/test-user-scenario-complete.sh
 
 ### Compose Generator Tests
 
-✅ **Architectures**:
-- Monolithic (single container, SQLite)
-- Microservices (separate API, frontend, database)
+✅ **Architecture**:
+- Canonical Compose deployment (separate API, frontend, and database services)
 - Alternative advanced network configurations (API on host, others in bridge)
 
 ✅ **Database Providers**:
 - PostgreSQL (default)
 - SQL Server
-- MySQL
+- MySQL rejection (unsupported without provider-correct migration assemblies)
+- SQLite rejection (native local development only)
 
 ✅ **Addon Stacks**:
 - Monitoring (Prometheus, Grafana, ELK)
@@ -324,7 +324,8 @@ When reporting test failures, include:
 
 **Issue**: Monolithic `docker-compose.databases.yml` caused AWK extraction to include dangling `volumes:` keys
 
-**Solution**: Created separate database provider templates (postgres, sqlserver, mysql)
+**Solution**: Created separate database provider templates for the supported
+PostgreSQL and SQL Server providers.
 
 **Result**: ✅ All architectures now pass validation without duplicate volumes
 

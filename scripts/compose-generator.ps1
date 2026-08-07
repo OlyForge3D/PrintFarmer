@@ -15,7 +15,7 @@
     Output directory (default: repository root)
 
 .PARAMETER DbProvider
-    Database provider (postgres|sqlserver|mysql, default: postgres)
+    Database provider (postgres|sqlserver, default: postgres)
 
 .PARAMETER IncludeMonitoring
     Include monitoring stack
@@ -56,16 +56,22 @@ param(
     [switch]$Help
 )
 
-# Normalize database provider names (matching bash script behavior)
+# Normalize and validate database provider names (matching bash script behavior)
 $DbProvider = $DbProvider.ToLower()
 switch -Regex ($DbProvider) {
-    '^(sqlite|sqlite3)$' { $DbProvider = "sqlite"; break }
     '^(postgres|postgresql|pgsql)$' { $DbProvider = "postgres"; break }
     '^(sqlserver|mssql|sql-server)$' { $DbProvider = "sqlserver"; break }
-    '^mysql$' { $DbProvider = "mysql"; break }
+    '^(sqlite|sqlite3)$' {
+        Write-Error "SQLite is not supported for Docker deployments. Use PostgreSQL or SQL Server."
+        exit 1
+    }
+    '^mysql$' {
+        Write-Error "MySQL is not supported for Docker deployments in this release because provider-specific migration assemblies are unavailable. Use PostgreSQL or SQL Server."
+        exit 1
+    }
     default {
-        Write-Warning "Unknown database provider '$DbProvider', defaulting to postgres"
-        $DbProvider = "postgres"
+        Write-Error "Invalid database provider '$DbProvider'. Valid options: postgres, sqlserver."
+        exit 1
     }
 }
 
@@ -176,7 +182,7 @@ try {
 
 # CRITICAL: Remove environment variables for unselected database providers
 # This prevents Docker warnings about unused variables (e.g., MYSQL_ROOT_PASSWORD when using PostgreSQL)
-if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
+if ($Architecture -eq "microservices") {
     Write-Info "Removing environment variables for unselected database providers..."
     
     $ComposeContent = Get-Content -Path $ComposeFile -Raw
@@ -218,18 +224,13 @@ if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
                 $shouldSkip = $false
                 
                 if ($DbProvider -eq "postgres") {
-                    # When using PostgreSQL, skip MySQL and MSSQL variables
+                    # When using PostgreSQL, skip MSSQL variables
                     if ($line -match 'MYSQL_|MSSQL_|ACCEPT_EULA') {
                         $shouldSkip = $true
                     }
                 } elseif ($DbProvider -eq "sqlserver") {
-                    # When using SQL Server, skip MySQL and PostgreSQL variables
+                    # When using SQL Server, skip PostgreSQL variables
                     if ($line -match 'MYSQL_|POSTGRES_') {
-                        $shouldSkip = $true
-                    }
-                } elseif ($DbProvider -eq "mysql") {
-                    # When using MySQL, skip PostgreSQL and MSSQL variables
-                    if ($line -match 'POSTGRES_|MSSQL_|ACCEPT_EULA') {
                         $shouldSkip = $true
                     }
                 }
@@ -248,50 +249,72 @@ if ($Architecture -eq "microservices" -and $DbProvider -ne "sqlite") {
     # Write filtered content back
     $FilteredContent = $filteredLines -join "`n"
     Set-Content -Path $ComposeFile -Value $FilteredContent
-    Write-Info "Removed database provider variables for: PostgreSQL, MySQL, MSSQL (kept only $DbProvider)"
+    Write-Info "Removed unselected database provider variables (kept only $DbProvider)"
 }
 
 # For microservices, we need to handle database configuration
 if ($Architecture -eq "microservices") {
     Write-Info "Configuring database provider: $DbProvider"
-    
-    # For SQLite, skip database service (it's file-based, not containerized)
-    if ($DbProvider -eq "sqlite") {
-        Write-Info "SQLite is file-based; no container database service needed"
-    } else {
-        # Read the base compose file as text
-        $ComposeContent = Get-Content -Path $ComposeFile -Raw
-        
-        # Get database template based on provider
-        $DbTemplate = switch ($DbProvider) {
-            "postgres" { Join-Path $TemplatesDir "docker-compose.database.postgres.yml" }
-            "sqlserver" { Join-Path $TemplatesDir "docker-compose.database.sqlserver.yml" }
-            "mysql" { Join-Path $TemplatesDir "docker-compose.database.mysql.yml" }
+
+    # Read the base compose file as text
+    $ComposeContent = Get-Content -Path $ComposeFile -Raw
+
+    # Get database template based on provider
+    $DbTemplate = switch ($DbProvider) {
+        "postgres" { Join-Path $TemplatesDir "docker-compose.database.postgres.yml" }
+        "sqlserver" { Join-Path $TemplatesDir "docker-compose.database.sqlserver.yml" }
+    }
+
+    if (-not (Test-Path $DbTemplate)) {
+        Write-ErrorMsg "Database template not found: $DbTemplate"
+        exit 1
+    }
+
+    # Read database configuration
+    $DbConfig = Get-Content -Path $DbTemplate -Raw
+
+    $PythonCommand = $null
+    foreach ($Candidate in @("python3", "python")) {
+        $CandidateCommand = Get-Command $Candidate -ErrorAction SilentlyContinue
+        if (-not $CandidateCommand) {
+            continue
         }
-        
-        if (-not (Test-Path $DbTemplate)) {
-            Write-ErrorMsg "Database template not found: $DbTemplate"
+
+        & $CandidateCommand.Source -c "from ruamel.yaml import YAML" *> $null
+        if ($LASTEXITCODE -eq 0) {
+            $PythonCommand = $CandidateCommand
+            break
+        }
+    }
+    if (-not $PythonCommand) {
+        Write-ErrorMsg "Python 3 with the 'ruamel.yaml' module is required for database service configuration"
+        exit 1
+    }
+
+    $ReplacementScript = Join-Path $ScriptDir "docker" "compose-replace-db.py"
+    if (-not (Test-Path $ReplacementScript)) {
+        Write-ErrorMsg "Database replacement script not found: $ReplacementScript"
+        exit 1
+    }
+
+    $TemporaryCompose = [System.IO.Path]::GetTempFileName()
+    $PythonErrors = [System.IO.Path]::GetTempFileName()
+    try {
+        & $PythonCommand.Source $ReplacementScript $ComposeFile $DbConfig 1> $TemporaryCompose 2> $PythonErrors
+        if ($LASTEXITCODE -ne 0) {
+            $ErrorDetail = Get-Content -Path $PythonErrors -Raw
+            Write-ErrorMsg "Failed to configure $DbProvider database service: $ErrorDetail"
             exit 1
         }
-        
-        # Read database configuration
-        $DbConfig = Get-Content -Path $DbTemplate -Raw
-        
-        # Simple replacement: replace the ##DATABASE_SERVICE## marker or similar
-        # Look for common markers in the compose file
-        if ($ComposeContent -match '##DATABASE_SERVICE##|services:.*?db:' -or $ComposeContent -match 'postgres:' -or $ComposeContent -match 'sqlserver:' -or $ComposeContent -match 'mysql:') {
-            Write-Info "Updating database service configuration..."
-            
-            # Extract just the service definition from the database template
-            # For now, we'll use a simple approach: append if not found
-            if (-not ($ComposeContent -match 'db:|database:|postgres:|sqlserver:|mysql:')) {
-                # Simple append to services section - this is a limitation without full YAML parsing
-                Write-Warning "Database configuration requires manual YAML merging"
-                Write-Info "Using basic text replacement approach..."
-            }
+        if ((Get-Item $TemporaryCompose).Length -eq 0) {
+            Write-ErrorMsg "Database replacement produced an empty Compose file"
+            exit 1
         }
-        
+
+        Move-Item -Path $TemporaryCompose -Destination $ComposeFile -Force
         Write-Success "Database service configured for $DbProvider"
+    } finally {
+        Remove-Item -Path $TemporaryCompose, $PythonErrors -Force -ErrorAction SilentlyContinue
     }
 }
 

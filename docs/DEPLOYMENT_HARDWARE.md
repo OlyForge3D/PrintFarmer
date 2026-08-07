@@ -41,7 +41,7 @@ This guide helps you choose the right hardware for your PrintFarmer deployment b
 **Recommended Configuration (Pi 4):**
 ```bash
 # Deployment profile for Pi
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 export ENABLE_MONITORING=false
 export ENABLE_TELEMETRY=false
 export ENABLE_ORCA_WORKER=false
@@ -54,7 +54,7 @@ export ENABLE_DISCOVERY=true
 - ❌ 3D model file slicing (native libs not available on ARM)
 - ❌ Model file upload and thumbnail generation
 - ⚠️  Camera streams may lag with 5+ printers on WiFi
-- ⚠️  SQLite locks under write-heavy workloads (use PostgreSQL if affordable)
+- ⚠️  The PostgreSQL container increases the baseline memory footprint
 
 **Tips for Pi Success:**
 1. **Use USB SSD instead of SD card** — Database file corruption is the #1 Pi failure mode
@@ -112,7 +112,7 @@ export ENABLE_DISCOVERY=true
 - ✅ Multiple concurrent dispatch operations
 
 **Notes:**
-- Consider PostgreSQL over SQLite for write-heavy deployments
+- Budget for PostgreSQL's baseline memory on smaller systems
 - Fanless models preferred for 24/7 reliability
 - Dual Ethernet useful for discovery traffic isolation
 
@@ -182,7 +182,7 @@ This table shows approximate resource consumption for each deployed service. Num
 | **API Server** | 150–300MB | 0.5–1.0 core | — | ✅ Yes | Grows ~5MB per 10 printers; handle 100+ with 2 cores |
 | **React Frontend** | 50MB | 0.1 core | — | ✅ Yes | Static assets; CPU only for serving |
 | **PostgreSQL** | 300–500MB | 0.5–1.0 core | 10GB–50GB+ | ⚠️ Optional | See Storage section; grows ~100–200MB per 10 printers |
-| **SQLite** | — | — | 100MB–5GB | ⚠️ Optional | Embedded; no separate container; suitable for <15 printers |
+| **SQLite** | — | — | 100MB–5GB | ❌ Native only | Available for non-Docker local development |
 | **Prometheus** | 200–500MB | 0.2–0.5 core | 20GB–100GB | ❌ Optional | Retention 200h; grows with scrape interval |
 | **Grafana** | 100–200MB | 0.1–0.2 core | 1GB | ❌ Optional | Dashboard only; minimal compute |
 | **OrcaSlicer Worker** | 512MB–1GB | 1.0–2.0 cores | 5GB temp | ❌ Optional | Scale 1 worker per 15–20 concurrent slices; slower on shared CPU |
@@ -192,7 +192,7 @@ This table shows approximate resource consumption for each deployed service. Num
 
 **Key Insights:**
 - **API growth is sublinear:** 20 printers → 150MB, 100 printers → 250MB
-- **Database dominates storage:** SQLite suitable for <15 printers; PostgreSQL required for 20+
+- **Database dominates storage:** Size PostgreSQL storage for job and telemetry growth
 - **OrcaSlicer workers are CPU-hungry:** 1 worker per 15–20 concurrent users; disable on Pi
 - **Discovery service lightweight:** Safe to enable on all tiers
 - **Monitoring stack optional:** Saves 300–700MB; disable on Pi or constrained hardware
@@ -203,9 +203,10 @@ This table shows approximate resource consumption for each deployed service. Num
 
 ### Database Selection
 
-**SQLite (File-Based)**
-- ✅ **Best for:** 1–15 printers, single-server deployments, no DB admin needed
-- ✅ **Advantages:** Zero setup, embeds in API container, works offline
+**SQLite (File-Based, Native Local Development Only)**
+- ✅ **Best for:** Local development without Docker
+- ✅ **Advantages:** Zero setup and works offline
+- ❌ **Docker:** Rejected by the Compose generators
 - ❌ **Limitations:** Single-writer lock; poor under concurrent writes (30+ printers with real-time updates)
 - **Approximate Size:** 100MB → 500MB for 10 printers, 1–2GB for 20 printers
 - **Disk Space:** Allocate 5–10GB for growth and log accumulation
@@ -217,12 +218,12 @@ This table shows approximate resource consumption for each deployed service. Num
 - **Approximate Size:** 300MB initial, grows 100–150MB per 10 printers
 - **Disk Space:** Allocate 50GB for 50 printers (including logs and backups)
 
-**SQL Server / MySQL**
-- ✅ **Supported** via multi-provider abstraction
-- ⚠️  **Not recommended** for small farms (SQL Server licensing expensive; MySQL less mature for this workload)
+**SQL Server**
+- ✅ **Supported** with provider-correct application and slicer migrations
+- ⚠️  **Not recommended** for small farms because of licensing and resource cost
 
 **Recommendation:**
-- **Pi/NUC (1–20 printers):** Start with SQLite; upgrade to PostgreSQL if write contention occurs
+- **Pi/NUC (1–20 printers):** Use PostgreSQL with monitoring disabled if memory is constrained
 - **Server (50+ printers):** Deploy PostgreSQL immediately with automated backup strategy
 
 ### Storage Device for Pi (Critical!)
@@ -237,7 +238,7 @@ This table shows approximate resource consumption for each deployed service. Num
 | **NVMe (via USB adapter)** | ✅ Excellent | 500+ MB/s | $60–150 | ✅ Best performance |
 
 **Why Pi needs USB storage:**
-- SD cards have **poor random write performance** (SQLite uses random I/O)
+- SD cards have **poor random write performance** for database workloads
 - Wear-leveling in SD cards assumes sequential writes (not applicable to databases)
 - **Database corruption** is common after 1–2 years on SD cards
 - USB SSDs have **hardware wear-leveling** designed for databases
@@ -255,7 +256,7 @@ export EXTERNAL_APP_DATA_PATH=/mnt/ssd/printfarmer-app
 
 **Disk Space Planning:**
 - **Application code:** 500MB
-- **SQLite database:** 100MB → 1GB (10 printers → 20 printers)
+- **Database:** 100MB → 1GB (10 printers → 20 printers)
 - **G-code files:** 5–50MB per job (archive old files monthly)
 - **Logs:** 100–500MB/month (rotate weekly)
 - **Buffer (20% free space):** Important for database performance
@@ -349,7 +350,7 @@ PrintFarmer supports three deployment profiles with different resource footprint
 **Enabled Services:**
 - ✅ API Server
 - ✅ React Frontend
-- ✅ SQLite Database (embedded)
+- ✅ PostgreSQL Database
 - ✅ Printer Discovery
 - ❌ Monitoring (Prometheus/Grafana)
 - ❌ Telemetry (OpenTelemetry)
@@ -359,7 +360,7 @@ PrintFarmer supports three deployment profiles with different resource footprint
 
 **Deployment:**
 ```bash
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 export ENABLE_MONITORING=false
 export ENABLE_TELEMETRY=false
 export ENABLE_ORCA_WORKER=false
@@ -455,7 +456,7 @@ PrintFarmer supports two deployment architectures, each optimized for different 
 export DEPLOYMENT_MODE=monolith
 
 # Minimal Pi configuration
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 export ENABLE_MONITORING=false
 export DEPLOYMENT_MODE=monolith
 
@@ -463,23 +464,8 @@ export DEPLOYMENT_MODE=monolith
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
-**Running the Monolith:**
-
-```bash
-# Pull monolith image from GHCR
-docker pull ghcr.io/olyforge3d/printfarmer-monolith:latest
-
-# Run directly
-docker run -d \
-  --name printfarmer \
-  -p 5000:5000 \
-  -e DB_PROVIDER=sqlite \
-  -e DEPLOYMENT_MODE=monolith \
-  -v printfarmer-data:/app/data \
-  ghcr.io/olyforge3d/printfarmer-monolith:latest
-
-# Application is now at http://localhost:5000
-```
+**Running the Monolith:** Use `deploy-docker.sh` so PostgreSQL credentials,
+connection settings, and persistent storage are generated together.
 
 ---
 
@@ -533,8 +519,8 @@ docker compose -f docker-compose.yml up -d
 
 | Profile | Hardware | Deployment Mode | Database | Container Count | Best For | Annual Cost |
 |---------|----------|-----------------|----------|-----------------|----------|------------|
-| **Lite** | Raspberry Pi 4 (8GB) | Monolith | SQLite | 1 | Home lab, maker space (1–10 printers) | ~$300 |
-| **Standard** | NUC / Mini PC (16GB) | Microservices | SQLite or Postgres | 3–4 | Workshop, studio (10–50 printers) | ~$850 |
+| **Lite** | Raspberry Pi 4 (8GB) | Monolith | Postgres | 2 | Home lab, maker space (1–10 printers) | ~$300 |
+| **Standard** | NUC / Mini PC (16GB) | Microservices | Postgres | 3–4 | Workshop, studio (10–50 printers) | ~$850 |
 | **Full** | Server / VM (32GB+) | Microservices | Postgres or SQL Server | 5–8 | Production farm (50–200+ printers) | ~$2,000 |
 
 ---
@@ -577,9 +563,9 @@ cd PrintFarmer
 # Automatic deployment (interactive prompts)
 ./scripts/deploy-docker.sh
 
-# Or silent deployment with defaults
+# Or silent deployment with the supported default
 export DEPLOYMENT_MODE=monolith
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
@@ -597,7 +583,7 @@ docker stats printfarmer
 # View API logs
 docker logs -f printfarmer
 
-# Monitor database growth (SQLite)
+# Monitor database storage growth
 du -h printfarmer-data/
 
 # If Pi runs low on memory
@@ -613,7 +599,7 @@ docker update --memory 400m printfarmer
 - [ ] Ubuntu 22.04 LTS (64-bit) installed
 - [ ] Docker installed and running
 - [ ] `DEPLOYMENT_MODE=monolith` set for single container
-- [ ] `DB_PROVIDER=sqlite` for embedded database
+- [ ] `DB_PROVIDER=postgres` for the migration-safe database
 - [ ] Port 5000 accessible from your network
 
 ---
@@ -631,7 +617,7 @@ chmod +x scripts/deploy-docker.sh
 The script will:
 1. **Detect your OS** (macOS, Linux, Windows WSL2)
 2. **Prompt for settings:**
-   - Database provider (SQLite, PostgreSQL)
+   - Database provider (PostgreSQL, SQL Server)
    - HTTP port (default 80)
    - Optional services (monitoring, telemetry, slicing workers)
    - Number of OrcaSlicer workers (1–4 recommended)
@@ -770,7 +756,7 @@ docker compose -f docker-compose.yml \
 
 ### Database Write Contention
 
-**Symptoms (SQLite):**
+**Symptoms (native SQLite development only):**
 - "database is locked" errors in API logs
 - Slow UI responses with 10+ concurrent printers
 - Real-time status updates lag
@@ -875,16 +861,9 @@ Docker automatically selects the correct architecture when pulling on ARM64 syst
 
 ### Running from GHCR
 
-**Monolith mode (Pi/ARM):**
-```bash
-docker run -d \
-  --name printfarmer \
-  -p 5000:5000 \
-  -e DB_PROVIDER=sqlite \
-  -e DEPLOYMENT_MODE=monolith \
-  -v printfarmer-data:/app/data \
-  ghcr.io/olyforge3d/printfarmer-monolith:latest
-```
+**Monolith mode (Pi/ARM):** Use `deploy-docker.sh` so the supported PostgreSQL
+service, credentials, connection string, and persistent storage are generated
+together.
 
 **Microservices mode:**
 ```bash
@@ -897,8 +876,8 @@ docker compose -f docker-compose.yml up -d
 **Monolith Image Contents:**
 - ASP.NET Core 10 runtime
 - React 19 frontend (built, static files in wwwroot/)
-- SQLite support built-in
-- PostgreSQL, MySQL, SQL Server drivers
+- SQLite runtime support for native local development
+- PostgreSQL and SQL Server drivers for Docker deployment
 - Health checks configured
 - ~450MB compressed
 

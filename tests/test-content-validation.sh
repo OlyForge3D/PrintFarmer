@@ -330,19 +330,19 @@ test_configuration_consistency_validation() {
     cd "$TEST_TEMP_DIR"
     rm -f docker-compose.yml
     
-    # Generate another config with same architecture but different database
-    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider mysql --output-dir $TEST_TEMP_DIR"
+    # Generate another config with the other migration-safe database provider
+    assert_command_success "$COMPOSE_GENERATOR --enable-orca-worker yes --db-provider sqlserver --output-dir $TEST_TEMP_DIR"
     assert_file_exists "docker-compose.yml"
     
-    local mysql_compose=$(cat "docker-compose.yml")
+    local sqlserver_compose=$(cat "docker-compose.yml")
     
-    # Both should use the same dockerfile approach (with full path to multistage)
-    assert_contains "$generator_compose" "dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage" "PostgreSQL config should use multistage"
-    assert_contains "$mysql_compose" "dockerfile: scripts/docker/dockerfiles/Dockerfile.multistage" "MySQL config should use multistage"
+    # Both should use the same generated multistage Dockerfile.
+    assert_contains "$generator_compose" "dockerfile: Dockerfile.multistage" "PostgreSQL config should use multistage"
+    assert_contains "$sqlserver_compose" "dockerfile: Dockerfile.multistage" "SQL Server config should use multistage"
     
     # Both should have the same basic structure for microservices but different databases
     assert_contains "$generator_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "PostgreSQL config should use environment variable template"
-    assert_contains "$mysql_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "MySQL config should use environment variable template"
+    assert_contains "$sqlserver_compose" "DB_PROVIDER=\${DB_PROVIDER:-Postgres}" "SQL Server config should use environment variable template"
     
     pass_test
 }

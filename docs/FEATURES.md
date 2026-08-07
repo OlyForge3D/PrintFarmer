@@ -463,7 +463,7 @@ PrintFarmer works with multiple database engines.
 - **SQLite** (default) - File-based, no setup required
 - **PostgreSQL** - Enterprise open-source
 - **SQL Server** - Microsoft enterprise
-- **MySQL** - Popular open-source
+- **MySQL** - Not supported in this release; provider-specific migrations are unavailable
 
 ### Switching Databases
 
@@ -478,10 +478,19 @@ export DB_CONNECTION_STRING="Host=localhost;Database=printfarmer;Username=postgr
 export DB_PROVIDER=sqlserver
 export DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;User Id=sa;Password=YourPassword123"
 
-# MySQL
-export DB_PROVIDER=mysql
+```
+
+MySQL is unavailable until provider-correct application and slicer migrations
+exist. The obsolete example is retained only in source history.
+
+<!--
+# MySQL is unavailable in this release.
+# export DB_PROVIDER=mysql
 export DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Uid=root;Pwd=password"
 
+-->
+
+```bash
 # SQLite (default)
 export DB_PROVIDER=sqlite
 # Uses farm.db file in current directory
@@ -489,7 +498,10 @@ export DB_PROVIDER=sqlite
 
 ### Migration
 
-All databases use the same schema and data structure. Switching databases requires no schema changes.
+SQLite, PostgreSQL, and SQL Server use provider-specific migration assemblies.
+Switching providers requires a provider-native backup and data migration;
+MySQL is unavailable until provider-correct application and slicer migrations
+exist.
 
 ---
 

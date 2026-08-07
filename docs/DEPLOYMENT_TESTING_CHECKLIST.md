@@ -68,8 +68,8 @@ git commit -m "Your change description"
 
 | Component | Tested | Coverage |
 |-----------|--------|----------|
-| **Architectures** | Monolithic, Microservices | 2 architectures × 3 providers = 6 combos |
-| **Databases** | PostgreSQL, SQL Server, MySQL | All 3 providers |
+| **Compose generation** | Canonical deployment architecture | PostgreSQL and SQL Server |
+| **Databases** | PostgreSQL, SQL Server | Both supported providers plus explicit MySQL rejection |
 | **Addons** | Monitoring, Telemetry, Security, Registry | All combinations |
 | **Output** | YAML validity, no duplicates, permissions | Full validation |
 | **Error Handling** | Invalid inputs, missing files | Graceful failures |

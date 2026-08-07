@@ -39,7 +39,7 @@ PrintFarmer operates in a unique market position: the **only self-hosted, multi-
 | **Multi-printer dashboard** | ✅ Real-time (SignalR) | ✅ Cloud-based | ✅ Cloud-based | ✅ Web UI | ✅ Unified | ✅ LAN-based |
 | **Printer backend support** | 6+ (Moonraker, PrusaLink, SDCP, OctoPrint, FlashForge, Core) | 5+ (via plugins) | 5+ | Wide (Marlin-based) | 2 (OctoPrint, Klipper) | 1 (Bambu) |
 | **Real-time status** | ✅ SignalR WebSocket | ✅ Cloud polling | ✅ Cloud polling | ✅ Local polling | ✅ WebSocket | ✅ LAN WebSocket |
-| **Multi-database support** | ✅ SQLite/Postgres/MySQL/SQL Server | ❌ Cloud-locked | ❌ Cloud-locked | ✅ (depends on OS) | ✅ Self-host option | ✅ Local SQLite |
+| **Multi-database support** | ✅ SQLite/Postgres/SQL Server | ❌ Cloud-locked | ❌ Cloud-locked | ✅ (depends on OS) | ✅ Self-host option | ✅ Local SQLite |
 | **Job queue management** | ✅ Full control | ✅ Full control | ✅ Full control | ✅ Basic | ✅ Limited | ✅ Batch control |
 | **Hierarchical locations** | ✅ User-defined types, arbitrary depth | ❌ Flat groups | ⚠️ 3-level hierarchy (rigid) | ❌ No | ❌ No | ❌ No |
 | **Remote access** | ✅ (Any network) | ✅ Cloud anywhere | ✅ Cloud anywhere | ✅ VPN/port-forward only | ✅ Cloud + local | ✅ LAN-only (intentional) |

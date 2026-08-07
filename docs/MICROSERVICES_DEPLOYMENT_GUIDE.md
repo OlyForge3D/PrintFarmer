@@ -22,9 +22,9 @@ The PrintFarmer microservices architecture separates components into dedicated c
 │  ┌──────────────────┐  ┌──────────────┐  ┌──────────────┐  │
 │  │ Frontend Service │  │ Database     │  │ OrcaSlicer   │  │
 │  │ (Nginx/React)    │  │ (PostgreSQL/ │  │ Workers     │  │
-│  │ Port 80/8080     │  │  MySQL/MSSQL)│  │ (Optional)  │  │
-│  │                  │  │ Port 5432/  │  │ Port 8081   │  │
-│  │ Proxies to:      │  │ 3306/1433    │  │             │  │
+│  │ Port 80/8080     │  │  MSSQL)      │  │ (Optional)  │  │
+│  │                  │  │ Port 5432/   │  │ Port 8081   │  │
+│  │ Proxies to:      │  │ 1433         │  │             │  │
 │  │ http://api:5245  │  └──────────────┘  └──────────────┘  │
 │  └──────────────────┘                                       │
 │                                                              │
@@ -59,7 +59,7 @@ cd /path/to/PrintFarmer
 
 When prompted, select:
 - **Architecture**: `2` (Microservices)
-- **Database**: PostgreSQL (recommended) or SQL Server/MySQL
+- **Database**: PostgreSQL (recommended) or SQL Server
 - **Network Mode**: Bridge (default - recommended)
 - **HTTP Port**: `8080` (or any available port)
 - **API Port**: `5245` (direct API access)
@@ -144,13 +144,8 @@ SQLSERVER_PASSWORD=your_secure_password
 SQLSERVER_EDITION=Developer  # or Standard/Enterprise (requires license)
 ```
 
-### MySQL
-```bash
-DB_PROVIDER=mysql
-MYSQL_DB=printfarmer
-MYSQL_USER=root
-MYSQL_PASSWORD=your_secure_password
-```
+MySQL is not supported in this release because migration-safe application and
+slicer migration assemblies are unavailable.
 
 ## Distributed Slicing (Optional)
 
@@ -246,7 +241,7 @@ If migrating from monolithic deployment:
 
 1. **Backup existing data**:
    ```bash
-   # Export current database if using embedded SQLite
+   # Use the current provider's native backup tooling.
    ```
 
 2. **Tear down monolithic deployment**:

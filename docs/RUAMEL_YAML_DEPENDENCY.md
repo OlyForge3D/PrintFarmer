@@ -10,7 +10,8 @@ The `compose-generator.sh` script requires the Python `ruamel.yaml` module to pr
 
 ## The Problem
 
-When generating Docker Compose files for **microservices** architectures with non-SQLite database providers (PostgreSQL, SQL Server, MySQL):
+When generating Docker Compose files for **microservices** architectures with
+the supported server database providers (PostgreSQL and SQL Server):
 
 1. **With ruamel.yaml installed** ✅
    - Python script properly parses and regenerates YAML
@@ -132,10 +133,10 @@ If ruamel.yaml is missing, you'll see:
 [ERROR]        Or for system-wide: apt-get install python3-ruamel.yaml (Debian/Ubuntu)
 ```
 
-## Architecture-Specific Notes
+## Compose Generation Note
 
-- **Monolithic**: Uses SQLite, doesn't require ruamel.yaml (no database service to configure)
-- **Microservices**: REQUIRES ruamel.yaml (needs database service generation)
+All generated Docker deployments require `ruamel.yaml` to assemble the
+supported PostgreSQL or SQL Server database service.
 
 ## Historical Context
 

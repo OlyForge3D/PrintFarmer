@@ -36,7 +36,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 ✅ **Printer Calibration Context** - Verified Klipper readiness and credential-free upstream OrcaSlicer snapshots
 ✅ **Secure Versioned API** - Negotiated contracts, scoped permissions, and truthful operational capabilities
 ✅ **CSV Import/Export** - Bulk printer configuration management  
-✅ **Multi-Database Support** - SQLite, PostgreSQL, SQL Server, MySQL (all tested)  
+✅ **Multi-Database Support** - SQLite, PostgreSQL, and SQL Server
 ✅ **Production Ready** - Docker deployment, health checks, comprehensive monitoring
 
 ## 🚀 Quick Start (2 minutes)
@@ -54,7 +54,7 @@ Open **http://localhost** in your browser.
 **Raspberry Pi / ARM64 deployment?** Use monolith mode with a single container:
 ```bash
 export DEPLOYMENT_MODE=monolith
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 ./scripts/deploy-docker.sh --non-interactive
 # Opens http://localhost:5000
 ```
@@ -107,7 +107,7 @@ React TypeScript Frontend (http://localhost:3000)
 ASP.NET Core 10 API Backend (http://localhost:5245)
     ↕ Entity Framework Core ORM
     ↓
-Database: SQLite / PostgreSQL / SQL Server / MySQL
+Database: SQLite / PostgreSQL / SQL Server
 ```
 
 ### Technology Stack
@@ -191,9 +191,18 @@ DB_PROVIDER=postgres DB_CONNECTION_STRING="Host=localhost;Database=printfarmer;U
 # SQL Server
 DB_PROVIDER=sqlserver DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;User=sa;Password=YourPassword123"
 
-# MySQL
-DB_PROVIDER=mysql DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Uid=root;Pwd=password"
 ```
+
+MySQL is unavailable until provider-correct application and slicer migrations
+are shipped.
+
+<!--
+# Obsolete MySQL example
+DB_PROVIDER=mysql DB_CONNECTION_STRING="Server=localhost;Database=printfarmer;Uid=root;Pwd=password"
+
+```
+
+-->
 
 ## 🧪 Testing
 
@@ -218,7 +227,7 @@ npm run test:run
 **Monolith Mode** (single container, perfect for Raspberry Pi):
 ```bash
 export DEPLOYMENT_MODE=monolith
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 ./scripts/deploy-docker.sh --non-interactive
 ```
 
@@ -282,7 +291,7 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 - ✅ Auto-dispatch and bed-clear confirmation
 - ✅ Network discovery and Spoolman integration
 - ✅ Analytics, statistics, and reporting
-- ✅ All database providers (SQLite, PostgreSQL, MySQL)
+- ✅ Native SQLite development and PostgreSQL Docker deployment
 
 **What's disabled on ARM64:**
 - ❌ 3D model file upload (STL, OBJ, STEP, 3MF)
@@ -297,16 +306,11 @@ PrintFarmer runs on ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with aut
 
 # Or silent deployment with monolith mode
 export DEPLOYMENT_MODE=monolith
-export DB_PROVIDER=sqlite
+export DB_PROVIDER=postgres
 ./scripts/deploy-docker.sh --non-interactive
 
-# Or use pre-built image
-docker pull ghcr.io/olyforge3d/printfarmer-monolith:latest
-docker run -d -p 5000:5000 \
-  -e DB_PROVIDER=sqlite \
-  -e DEPLOYMENT_MODE=monolith \
-  -v printfarmer-data:/app/data \
-  ghcr.io/olyforge3d/printfarmer-monolith:latest
+# The deployment script provisions the supported database service,
+# credentials, connection string, and persistent storage together.
 ```
 
 **Minimum specs:** Raspberry Pi 4 (8GB RAM) recommended. Pi 5 ideal.

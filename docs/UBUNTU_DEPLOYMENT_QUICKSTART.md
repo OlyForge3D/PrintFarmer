@@ -63,7 +63,7 @@ cd PrintFarmer
 **First deployment:**
 ```bash
 export ARCHITECTURE=microservices
-export DB_PROVIDER=Postgres
+export DB_PROVIDER=postgres
 export DB_PASSWORD=YourSecurePassword123!
 export ENABLE_DISCOVERY=yes
 export NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
@@ -251,7 +251,7 @@ cat .deploy-config
 
 # Example output:
 # ARCHITECTURE=microservices
-# DB_PROVIDER=Postgres
+# DB_PROVIDER=postgres
 # NETWORK_MODE=host
 # HTTP_PORT=8080
 # ...

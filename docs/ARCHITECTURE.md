@@ -34,7 +34,7 @@ PrintFarmer uses a **two-tier client-server architecture** with real-time commun
 ├────────────────────────────────────────┤
 │      Multi-Database Support            │
 │  SQLite • PostgreSQL                   │
-│  SQL Server • MySQL                    │
+│  SQL Server                            │
 └────────────────────────────────────────┘
 ```
 
@@ -51,7 +51,7 @@ Repositories (Data access)
      ↓
 Entity Framework Core (ORM)
      ↓
-Database (SQLite/PostgreSQL/SQL Server/MySQL)
+Database (SQLite/PostgreSQL/SQL Server)
 ```
 
 ### Key Components
@@ -765,7 +765,7 @@ src/Web/ReactApp/src/
 Docker Container (All services)
 ├── API (port 5245)
 ├── React (port 3000, served by Nginx)
-├── Database (SQLite file or container)
+├── Database Container (PostgreSQL/SQL Server)
 └── Health checks
 ```
 
