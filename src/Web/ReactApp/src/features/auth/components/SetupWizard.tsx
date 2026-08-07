@@ -153,7 +153,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [spoolmanEnabled, setSpoolmanEnabled] = useState(false);
   const [spoolmanUrl, setSpoolmanUrl] = useState('');
   const [spoolmanBootstrapError, setSpoolmanBootstrapError] = useState<string | null>(null);
-  const spoolmanSelectionChangedRef = useRef(false);
+  const spoolmanUrlChangedRef = useRef(false);
+  const spoolmanEnabledChangedRef = useRef(false);
   const [testingSpoolman, setTestingSpoolman] = useState(false);
   const [spoolmanTestResult, setSpoolmanTestResult] = useState<string | null>(null);
   const [spoolmanTestOk, setSpoolmanTestOk] = useState<boolean | null>(null);
@@ -173,15 +174,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
     apiClient.getSetupBootstrap(controller.signal)
       .then(bootstrap => {
-        if (active && bootstrap.baseUrl && !spoolmanSelectionChangedRef.current) {
+        if (active && bootstrap.baseUrl && !spoolmanUrlChangedRef.current) {
           setSpoolmanUrl(bootstrap.baseUrl);
-          setSpoolmanEnabled(true);
+          if (!spoolmanEnabledChangedRef.current) {
+            setSpoolmanEnabled(true);
+          }
         }
       })
       .catch(error => {
         if (
           active &&
-          !spoolmanSelectionChangedRef.current &&
+          !spoolmanUrlChangedRef.current &&
           !(isApiError(error) && error.statusCode === 404)
         ) {
           setSpoolmanBootstrapError(
@@ -397,7 +400,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const selectSpoolmanInstance = (url: string) => {
-    spoolmanSelectionChangedRef.current = true;
+    spoolmanUrlChangedRef.current = true;
     setSpoolmanBootstrapError(null);
     setSpoolmanUrl(url);
     setSpoolmanBaseUrlCtx(url);
@@ -406,7 +409,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   };
 
   const handleNetworkScan = async () => {
-    spoolmanSelectionChangedRef.current = true;
+    spoolmanUrlChangedRef.current = true;
     setSpoolmanBootstrapError(null);
     resetScan();
     await scanNetwork();
@@ -659,7 +662,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         </div>
       )}
       <div className="flex items-center gap-2">
-        <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { spoolmanSelectionChangedRef.current = true; setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
+        <input id="useSpoolman" type="checkbox" checked={spoolmanEnabled} onChange={e => { spoolmanEnabledChangedRef.current = true; setSpoolmanEnabled(e.target.checked); setSpoolmanEnabledCtx(e.target.checked); if (e.target.checked && spoolmanUrl) setSpoolmanBaseUrlCtx(spoolmanUrl); }} />
         <label htmlFor="useSpoolman" className="text-sm">Enable Spoolman</label>
       </div>
   {spoolmanEnabled && (
@@ -727,7 +730,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <input
               type="url"
               value={spoolmanUrl}
-              onChange={e => { spoolmanSelectionChangedRef.current = true; setSpoolmanBootstrapError(null); setSpoolmanUrl(e.target.value); }}
+              onChange={e => { spoolmanUrlChangedRef.current = true; setSpoolmanBootstrapError(null); setSpoolmanUrl(e.target.value); }}
               placeholder="http://spoolman:7912"
               className="w-full px-3 py-2 bg-pf-bg-2 border border-pf-border rounded-sm"
             />

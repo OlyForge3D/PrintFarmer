@@ -64,6 +64,28 @@ public sealed class SetupBootstrapControllerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetBootstrapAsync_CredentialBearingUrl_DoesNotExposeConfiguration()
+    {
+        await using var factory = new CustomWebApplicationFactory(new Dictionary<string, string?>
+        {
+            ["Security:DevModeBypassAuth"] = "false",
+            ["Spoolman:BaseUrl"] = "http://setup-user:setup-password@spoolman.local:7912?token=setup-token",
+        });
+        await factory.ResetDatabaseAsync();
+        using HttpClient anonymousClient = factory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync("/api/setup/bootstrap");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string content = await response.Content.ReadAsStringAsync();
+        using JsonDocument body = JsonDocument.Parse(content);
+        body.RootElement.GetProperty("baseUrl").GetString().Should().BeEmpty();
+        content.Should().NotContain("setup-user");
+        content.Should().NotContain("setup-password");
+        content.Should().NotContain("setup-token");
+    }
+
+    [Fact]
     public async Task GetSpoolmanSettingsAsync_SetupRequiredAndUnauthenticated_RemainsProtected()
     {
         using HttpClient anonymousClient = _factory.CreateClient();

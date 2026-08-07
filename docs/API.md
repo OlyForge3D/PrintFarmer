@@ -25,9 +25,10 @@ compatibility routes secured by service-specific API keys.
 
 `GET /api/setup/bootstrap` is available without authentication only while no
 administrator exists. Its response is limited to `{ "baseUrl": "..." }`, the
-non-secret deployment default used to pre-populate Spoolman in the first-run
-wizard. Once setup is complete it returns `404`; the full Spoolman settings
-section remains authenticated at all times.
+credential-free HTTP(S) deployment default used to pre-populate Spoolman in the
+first-run wizard. URLs containing user information, query parameters, or
+fragments are not returned. Once setup is complete it returns `404`; the full
+Spoolman settings section remains authenticated at all times.
 
 `Security:DevModeBypassAuth` can bypass authorization for safe HTTP methods only
 when the host environment is `Development`. The effective bypass state is logged

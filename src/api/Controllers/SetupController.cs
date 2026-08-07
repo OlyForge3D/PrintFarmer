@@ -53,7 +53,22 @@ public class SetupController(ISetupService setupService) : ControllerBase
         }
 
         SpoolmanSettings settings = settingsService.Get<SpoolmanSettings>() ?? new SpoolmanSettings();
-        return Ok(new SetupBootstrapResponse(settings.BaseUrl ?? string.Empty));
+        return Ok(new SetupBootstrapResponse(GetPublicBootstrapBaseUrl(settings.BaseUrl)));
+    }
+
+    private static string GetPublicBootstrapBaseUrl(string? baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(baseUrl) ||
+            !Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? uri) ||
+            (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            return string.Empty;
+        }
+
+        return baseUrl;
     }
 
     /// <summary>
