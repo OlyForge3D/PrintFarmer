@@ -43,7 +43,7 @@ final class JobAnalyticsViewModelTests: XCTestCase {
                 id: "1",
                 name: "test_print.gcode",
                 status: "queued",
-                priority: 5,
+                priority: .high,
                 queuePosition: 1,
                 assignedPrinterId: nil,
                 printerName: nil,

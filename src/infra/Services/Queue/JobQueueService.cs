@@ -231,7 +231,7 @@ public class JobQueueService : IJobQueueService
             GcodeFileId = j.GcodeFileId,
             AssignedPrinterId = j.AssignedPrinterId,
             Status = (PrintJobStatus?)j.Status,
-            Priority = j.Priority,
+            Priority = (PrintJobPriority)j.Priority,
             QueuePosition = 0,
             RequiredNozzleDiameter = j.RequiredNozzleDiameter,
             RequiredMaterialType = j.RequiredMaterialType,
@@ -830,7 +830,7 @@ public class JobQueueService : IJobQueueService
             AssignedPrinterId = job.AssignedPrinterId,
             AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
             Status = (PrintJobStatus?)job.Status,
-            Priority = job.Priority,
+            Priority = (PrintJobPriority)job.Priority,
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
@@ -1020,9 +1020,9 @@ public class JobQueueService : IJobQueueService
 
         // Reject undefined priority values — every mutation must use a valid semantic priority.
         // PrintJobPriority enum: Low=0, Normal=1, High=2, Urgent=3; any other value is rejected.
-        if (!QueueOrdering.IsDefinedPriority(request.Priority))
+        if (!QueueOrdering.IsDefinedPriority((int)request.Priority))
         {
-            throw new ValidationException(QueueOrdering.UndefinedPriorityMessage(request.Priority));
+            throw new ValidationException(QueueOrdering.UndefinedPriorityMessage((int)request.Priority));
         }
 
         // Invalidate any pending bed-clear ack when priority changes — the ack was issued for a
@@ -1033,7 +1033,7 @@ public class JobQueueService : IJobQueueService
             await AdvanceQueueRevisionAsync(job.AssignedPrinterId.Value, "priority change", ct);
         }
 
-        job.Priority = request.Priority;
+        job.Priority = (int)request.Priority;
         job.UpdatedAt = DateTime.UtcNow;
         await _repo.SaveChangesAsync(ct);
 
@@ -1047,7 +1047,7 @@ public class JobQueueService : IJobQueueService
             AssignedPrinterId = job.AssignedPrinterId,
             AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
             Status = (PrintJobStatus?)job.Status,
-            Priority = job.Priority,
+            Priority = (PrintJobPriority)job.Priority,
             QueuePosition = job.QueuePosition,
             ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
@@ -1344,7 +1344,7 @@ public class JobQueueService : IJobQueueService
             AssignedPrinterId = job.AssignedPrinterId,
             AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
             Status = (PrintJobStatus?)job.Status,
-            Priority = job.Priority,
+            Priority = (PrintJobPriority)job.Priority,
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
@@ -1737,7 +1737,7 @@ public class JobQueueService : IJobQueueService
             AssignedPrinterId = job.AssignedPrinterId,
             AssignedPrinterName = assignedPrinterName,
             Status = (PrintJobStatus?)job.Status,
-            Priority = job.Priority,
+            Priority = (PrintJobPriority)job.Priority,
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,

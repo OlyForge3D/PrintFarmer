@@ -4369,7 +4369,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             fixture.JobId,
             new UpdateJobPriorityDto
             {
-                Priority = (int)PrintJobPriority.Urgent,
+                Priority = PrintJobPriority.Urgent,
                 IfMatchJobRowVersion = Convert.ToBase64String(Guid.NewGuid().ToByteArray()),
             },
             CancellationToken.None);

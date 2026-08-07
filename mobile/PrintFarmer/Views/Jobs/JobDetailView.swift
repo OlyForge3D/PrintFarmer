@@ -220,10 +220,8 @@ struct JobDetailView: View {
                     }
                 }
 
-                if let priority = PrintJobPriority.from(intValue: job.priority) {
-                    Divider()
-                    infoRow(label: "Priority", value: priorityLabel(priority), icon: "flag")
-                }
+                Divider()
+                infoRow(label: "Priority", value: priorityLabel(job.priority), icon: "flag")
 
                 if let material = job.requiredMaterialType {
                     Divider()

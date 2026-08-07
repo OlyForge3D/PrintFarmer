@@ -405,7 +405,7 @@ enum MockResponses {
         {
             "id": "770e8400-e29b-41d4-a716-446655440002",
             "status": "Printing",
-            "priority": 1,
+            "priority": "Normal",
             "queuePosition": 1,
             "gcodeFileName": "benchy.gcode",
             "assignedPrinterId": "550e8400-e29b-41d4-a716-446655440000",
@@ -419,7 +419,7 @@ enum MockResponses {
         {
             "id": "990e8400-e29b-41d4-a716-446655440004",
             "status": "Queued",
-            "priority": 2,
+            "priority": "High",
             "queuePosition": 2,
             "gcodeFileName": "phone_case.gcode",
             "assignedPrinterName": "",

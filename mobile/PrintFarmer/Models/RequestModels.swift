@@ -36,7 +36,7 @@ struct UpdatePrinterRequest: Codable, Sendable {
 
 struct CreatePrintJobRequest: Codable, Sendable {
     let name: String
-    let priority: Int
+    let priority: PrintJobPriority
     let gcodeFileId: UUID
     let hotendTemperature: Double?
     let bedTemperature: Double?
@@ -49,7 +49,7 @@ struct CreatePrintJobRequest: Codable, Sendable {
 
 struct UpdatePrintJobRequest: Codable, Sendable {
     let name: String
-    let priority: Int
+    let priority: PrintJobPriority
     let hotendTemperature: Double?
     let bedTemperature: Double?
     let spoolId: Int?

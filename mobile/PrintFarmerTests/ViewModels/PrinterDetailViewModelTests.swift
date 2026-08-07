@@ -823,7 +823,7 @@ extension PrinterDetailViewModelTests {
             printerName: nil,
             printerModel: nil,
             status: status,
-            priority: 1,
+            priority: .normal,
             queuePosition: position,
             estimatedPrintTimeSeconds: nil,
             actualStartTimeUtc: nil,

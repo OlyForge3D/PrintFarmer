@@ -16,7 +16,7 @@ struct QueuedJobAnalytics: Codable, Sendable, Identifiable {
     let id: String
     let name: String
     let status: String
-    let priority: Int
+    let priority: PrintJobPriority
     let queuePosition: Int
     let assignedPrinterId: String?
     let printerName: String?

@@ -65,7 +65,7 @@ public class QueueOverviewDto
 public class UpdateJobPriorityDto
 #pragma warning restore SA1402 // File may only contain a single type
 {
-    public int Priority { get; set; }
+    public PrintJobPriority Priority { get; set; }
 
     /// <summary>
     /// Base-64 <c>If-Match</c> token for the job row. Required — reordering the queue
@@ -316,7 +316,7 @@ public class JobQueuePrintJobDto
 
     public PrintJobStatus? Status { get; set; }
 
-    public int Priority { get; set; }
+    public PrintJobPriority Priority { get; set; }
 
     public int QueuePosition { get; set; }
 

@@ -11,7 +11,7 @@ final class DemoJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
             QueuedJobWithMeta(
                 job: QueuedJobAnalytics(
                     id: DemoData.job5ID.uuidString, name: "raspberry_pi_case.gcode",
-                    status: "Queued", priority: 1, queuePosition: 1,
+                    status: "Queued", priority: .normal, queuePosition: 1,
                     assignedPrinterId: nil, printerName: nil, printerModel: nil,
                     fileName: "raspberry_pi_case.gcode", thumbnailUrl: nil,
                     createdAt: now.addingTimeInterval(-3600), startedAt: nil, completedAt: nil),
@@ -23,7 +23,7 @@ final class DemoJobAnalyticsService: JobAnalyticsServiceProtocol, @unchecked Sen
             QueuedJobWithMeta(
                 job: QueuedJobAnalytics(
                     id: DemoData.job6ID.uuidString, name: "drone_propeller_guard.gcode",
-                    status: "Queued", priority: 3, queuePosition: 2,
+                    status: "Queued", priority: .urgent, queuePosition: 2,
                     assignedPrinterId: nil, printerName: nil, printerModel: nil,
                     fileName: "drone_propeller_guard.gcode", thumbnailUrl: nil,
                     createdAt: now.addingTimeInterval(-1800), startedAt: nil, completedAt: nil),

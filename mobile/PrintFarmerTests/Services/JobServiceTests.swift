@@ -82,7 +82,7 @@ final class JobServiceTests: XCTestCase {
               "id": "\(jobId)",
               "rowVersion": "job-v2",
               "status": "Starting",
-              "priority": 5,
+              "priority": "Urgent",
               "queuePosition": 1,
               "gcodeFileName": "calibration.gcode",
               "copies": 1,

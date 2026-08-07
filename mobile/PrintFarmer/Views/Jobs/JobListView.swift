@@ -404,15 +404,15 @@ struct JobListView: View {
     }
 
     @ViewBuilder
-    private func priorityIndicator(_ priority: Int) -> some View {
-        if let p = PrintJobPriority.from(intValue: priority), p == .high || p == .urgent {
+    private func priorityIndicator(_ priority: PrintJobPriority) -> some View {
+        if priority == .high || priority == .urgent {
             HStack(spacing: 2) {
-                Image(systemName: p == .urgent ? "exclamationmark.triangle.fill" : "flag.fill")
+                Image(systemName: priority == .urgent ? "exclamationmark.triangle.fill" : "flag.fill")
                     .font(.caption2)
-                Text(p == .urgent ? "Urgent" : "High")
+                Text(priority == .urgent ? "Urgent" : "High")
                     .font(.caption2.weight(.semibold))
             }
-            .foregroundStyle(p == .urgent ? Color.pfError : Color.pfWarning)
+            .foregroundStyle(priority == .urgent ? Color.pfError : Color.pfWarning)
         }
     }
 

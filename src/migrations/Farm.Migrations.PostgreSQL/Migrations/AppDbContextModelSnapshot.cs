@@ -5353,9 +5353,8 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("character varying(64)");
 
                     b.Property<int>("Priority")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(0);
+                        .HasDefaultValue(1);
 
                     b.Property<string>("ProcessProfileSha256")
                         .HasMaxLength(64)
@@ -5501,7 +5500,10 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasDatabaseName("IX_PrintJobs_Idempotency_Calibration")
                         .HasFilter("\"IdempotencyScope\" IS NOT NULL AND \"IdempotencyKey\" IS NOT NULL AND \"JobKind\" = 1");
 
-                    b.ToTable("PrintJobs");
+                    b.ToTable("PrintJobs", t =>
+                        {
+                            t.HasCheckConstraint("CK_PrintJobs_Priority", "\"Priority\" >= 0 AND \"Priority\" <= 3");
+                        });
                 });
 
             modelBuilder.Entity("Farm.Infrastructure.Domain.PrintJobPartOutputSnapshot", b =>

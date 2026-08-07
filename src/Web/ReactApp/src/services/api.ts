@@ -43,6 +43,7 @@ import {
   PrinterBackendCapabilitiesDto,
   PrinterDetails,
   PrinterFast,
+  PrintJobPriority,
   PrintJobObjectListDto,
   PrinterFileDto,
   PrinterGroup,
@@ -2783,7 +2784,7 @@ export class ApiClient {
   async queuePrintJob(
     printerId: string,
     gcodeFileId: string,
-    priority = 0
+    priority: PrintJobPriority = PrintJobPriority.Normal
   ): Promise<JobQueuePrintJob> {
     const response = await this.client.post<JobQueuePrintJob>("/job-queue", {
       printerId,
@@ -4352,7 +4353,7 @@ export class ApiClient {
    */
   async updateJobPriority(
     jobId: string,
-    newPriority: number,
+    newPriority: PrintJobPriority,
     reviewedRowVersion: string
   ): Promise<unknown> {
     const etag = this.queueJobIfMatch(reviewedRowVersion);

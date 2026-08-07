@@ -1222,7 +1222,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             db: editCtx);
 
         // Priority = 99 is not a valid enum value.
-        var updateRequest = new UpdateJobPriorityDto { Priority = 99 };
+        var updateRequest = new UpdateJobPriorityDto { Priority = (PrintJobPriority)99 };
 
         Func<Task> act = async () => await sut.UpdateJobPriorityAsync(jobId, updateRequest, CancellationToken.None);
         await act.Should().ThrowAsync<ValidationException>(
@@ -1251,7 +1251,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             db: editCtx);
 
         // Priority = 3 (Urgent) is valid.
-        var updateRequest = new UpdateJobPriorityDto { Priority = (int)PrintJobPriority.Urgent };
+        var updateRequest = new UpdateJobPriorityDto { Priority = PrintJobPriority.Urgent };
         Func<Task> act = async () =>
             await sut.UpdateJobPriorityAsync(jobId, updateRequest, CancellationToken.None);
         await act.Should().ThrowAsync<InvalidOperationException>(

@@ -105,7 +105,7 @@ export interface JobDetails {
   rowVersion?: string | null;
   name: string;
   status: string;
-  priority: number;
+  priority: import('@/types/api').PrintJobPriority;
   queuePosition: number;
   gcodeFileId?: string;
   fileName?: string; // Original G-code filename for display
