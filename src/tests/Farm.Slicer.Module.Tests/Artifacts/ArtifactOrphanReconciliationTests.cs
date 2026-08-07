@@ -340,6 +340,40 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task Publish_StagingPathReplacement_PublishesPinnedBytes()
+    {
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_outsideRoot);
+        string outsidePath = Path.Combine(_outsideRoot, "outside.gcode");
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        Guid artifactId = Guid.NewGuid();
+        string publishedPath =
+            Path.Combine(_root, $"{artifactId}-pinned.gcode");
+        using ArtifactWriteLease writeLease =
+            ArtifactWriteLease.Create(_root, artifactId);
+        FileStream stagingStream = writeLease.OpenStagingStream();
+        await stagingStream.WriteAsync("pinned"u8.ToArray());
+        await stagingStream.FlushAsync();
+
+        if (OperatingSystem.IsWindows())
+        {
+            Action replaceStagingPath = () => File.Delete(writeLease.StagingPath);
+            replaceStagingPath.Should().Throw<IOException>();
+        }
+        else
+        {
+            File.Delete(writeLease.StagingPath);
+            _ = File.CreateSymbolicLink(writeLease.StagingPath, outsidePath);
+        }
+
+        writeLease.Publish(_root, publishedPath, DateTime.UtcNow);
+        writeLease.Commit();
+
+        (await File.ReadAllTextAsync(publishedPath)).Should().Be("pinned");
+        (await File.ReadAllTextAsync(outsidePath)).Should().Be("outside");
+    }
+
     private Mock<IArtifactsRepository> CreateRepository(
         IReadOnlyList<Artifact>? committedArtifacts = null)
     {

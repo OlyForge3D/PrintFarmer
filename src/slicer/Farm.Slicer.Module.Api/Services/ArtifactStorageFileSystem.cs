@@ -2,6 +2,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace Farm.Slicer.Module.Api.Services;
 
@@ -92,9 +93,14 @@ internal static class ArtifactStorageFileSystem
         return normalizedPath;
     }
 
+    [SuppressMessage(
+        "Reliability",
+        "S3869:SafeHandle.DangerousGetHandle should not be called",
+        Justification = "The handle is pinned with DangerousAddRef and released in finally.")]
     internal static void CreateAtomicHardLink(
         string publicationPath,
-        string stagingPath)
+        string stagingPath,
+        SafeFileHandle stagingHandle)
     {
         int error;
         if (OperatingSystem.IsWindows())
@@ -109,16 +115,33 @@ internal static class ArtifactStorageFileSystem
 
             error = Marshal.GetLastPInvokeError();
         }
-        else if (OperatingSystem.IsLinux() ||
-                 OperatingSystem.IsMacOS() ||
-                 OperatingSystem.IsFreeBSD())
+        else if (OperatingSystem.IsLinux())
         {
-            if (CreateHardLinkUnix(stagingPath, publicationPath) == 0)
+            bool handleAdded = false;
+            try
             {
-                return;
-            }
+                stagingHandle.DangerousAddRef(ref handleAdded);
+                int fileDescriptor =
+                    stagingHandle.DangerousGetHandle().ToInt32();
+                if (CreateHardLinkUnixFromHandle(
+                        fileDescriptor,
+                        string.Empty,
+                        LinuxCurrentWorkingDirectory,
+                        publicationPath,
+                        LinuxEmptyPath) == 0)
+                {
+                    return;
+                }
 
-            error = Marshal.GetLastPInvokeError();
+                error = Marshal.GetLastPInvokeError();
+            }
+            finally
+            {
+                if (handleAdded)
+                {
+                    stagingHandle.DangerousRelease();
+                }
+            }
         }
         else
         {
@@ -338,24 +361,31 @@ internal static class ArtifactStorageFileSystem
         string existingFileName,
         IntPtr securityAttributes);
 
+    private const int LinuxCurrentWorkingDirectory = -100;
+    private const int LinuxEmptyPath = 0x1000;
+
     [DllImport(
         "libc",
-        EntryPoint = "link",
+        EntryPoint = "linkat",
         SetLastError = true,
         ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     [SuppressMessage(
         "Security",
         "CA2101:Specify marshaling for P/Invoke string arguments",
-        Justification = "POSIX link paths are explicitly marshaled as UTF-8.")]
-    private static extern int CreateHardLinkUnix(
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string existingPath,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath);
+        Justification = "POSIX linkat paths are explicitly marshaled as UTF-8.")]
+    private static extern int CreateHardLinkUnixFromHandle(
+        int oldDirectoryFileDescriptor,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string oldPath,
+        int newDirectoryFileDescriptor,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string newPath,
+        int flags);
 }
 
 internal sealed class ArtifactWriteLease : IDisposable
 {
     private readonly FileStream _leaseStream;
+    private FileStream? _stagingStream;
     private bool _committed;
     private bool _disposed;
     private bool _preservePublishedForReconciliation;
@@ -405,13 +435,23 @@ internal sealed class ArtifactWriteLease : IDisposable
             leaseStream);
     }
 
-    internal FileStream OpenStagingStream() => new(
-        StagingPath,
-        FileMode.CreateNew,
-        FileAccess.Write,
-        FileShare.None,
-        bufferSize: 81920,
-        FileOptions.Asynchronous | FileOptions.WriteThrough);
+    internal FileStream OpenStagingStream()
+    {
+        if (_stagingStream is not null)
+        {
+            throw new InvalidOperationException(
+                "The artifact staging stream is already open.");
+        }
+
+        _stagingStream = new FileStream(
+            StagingPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            bufferSize: 81920,
+            FileOptions.Asynchronous | FileOptions.WriteThrough);
+        return _stagingStream;
+    }
 
     internal void Publish(
         string rootPath,
@@ -423,10 +463,16 @@ internal sealed class ArtifactWriteLease : IDisposable
 
         // Hard-link creation atomically publishes on the same filesystem and fails rather
         // than degrading to a cross-volume copy/delete operation.
+        SafeFileHandle stagingHandle = _stagingStream?.SafeFileHandle ??
+            throw new InvalidOperationException(
+                "The artifact staging stream is not open.");
         ArtifactStorageFileSystem.CreateAtomicHardLink(
             publicationPath,
-            StagingPath);
+            StagingPath,
+            stagingHandle);
         PublishedPath = publicationPath;
+        _stagingStream.Dispose();
+        _stagingStream = null;
         File.Delete(StagingPath);
         File.SetLastWriteTimeUtc(publicationPath, publishedAtUtc);
         File.SetLastWriteTimeUtc(LeasePath, publishedAtUtc);
@@ -449,6 +495,7 @@ internal sealed class ArtifactWriteLease : IDisposable
         }
 
         _disposed = true;
+        _stagingStream?.Dispose();
         _leaseStream.Dispose();
         if (!_committed)
         {

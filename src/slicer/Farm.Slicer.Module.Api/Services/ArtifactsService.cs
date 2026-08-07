@@ -141,7 +141,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                ArtifactWriteLease.Create(root, artifactId))
         {
             string sha256;
-            await using (FileStream target = writeLease.OpenStagingStream())
+            FileStream target = writeLease.OpenStagingStream();
             await using (Stream input = file.OpenReadStream())
             using (SHA256 hasher = SHA256.Create())
             {
@@ -326,7 +326,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
                ArtifactWriteLease.Create(root, artifactId))
         {
             string sha256;
-            await using (FileStream target = writeLease.OpenStagingStream())
+            FileStream target = writeLease.OpenStagingStream();
             using (SHA256 hasher = SHA256.Create())
             {
                 // Write and hash
@@ -449,7 +449,14 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         }
 
         string root = ResolveRootPath();
-        string fullPath = Path.Combine(root, artifact.RelativePath.Replace('/', Path.DirectorySeparatorChar));
+        if (!ArtifactStorageFileSystem.TryResolveArtifactPath(
+                root,
+                artifact.RelativePath,
+                out string fullPath))
+        {
+            return null;
+        }
+
         return (artifact, fullPath);
     }
 
