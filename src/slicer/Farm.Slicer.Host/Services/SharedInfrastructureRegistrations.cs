@@ -76,21 +76,23 @@ public static class SharedInfrastructureRegistrations
             }
         });
 
-        services.AddDbContextFactory<AppDbContext>(options =>
-        {
-            if (dbConfig.IsSqlServer)
+        services.AddDbContextFactory<AppDbContext>(
+            options =>
             {
-                options.UseSqlServer(dbConfig.ConnectionString);
-            }
-            else if (dbConfig.IsPostgres)
-            {
-                options.UseNpgsql(dbConfig.ConnectionString);
-            }
-            else
-            {
-                options.UseSqlite(dbConfig.ConnectionString);
-            }
-        });
+                if (dbConfig.IsSqlServer)
+                {
+                    options.UseSqlServer(dbConfig.ConnectionString);
+                }
+                else if (dbConfig.IsPostgres)
+                {
+                    options.UseNpgsql(dbConfig.ConnectionString);
+                }
+                else
+                {
+                    options.UseSqlite(dbConfig.ConnectionString);
+                }
+            },
+            ServiceLifetime.Scoped);
 
         // Data Protection for ISensitiveDataProtector (used by AppUnitOfWork)
         services.AddDataProtection();
