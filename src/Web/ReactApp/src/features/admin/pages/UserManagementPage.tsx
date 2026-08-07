@@ -61,6 +61,8 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isSavingPermissions, setIsSavingPermissions] = useState(false);
   const [userToDelete, setUserToDelete] = useState<User | null>(null);
   const [userToChangePassword, setUserToChangePassword] = useState<User | null>(null);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
@@ -230,7 +232,8 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   };
 
   const saveSelectedUser = async () => {
-    if (!selectedUser) return;
+    if (!selectedUser || isSavingUser) return;
+    setIsSavingUser(true);
     try {
       await apiClient.updateUser(selectedUser.id, {
         firstName: selectedUser.firstName,
@@ -248,11 +251,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       const error = err as { response?: { data?: Record<string, unknown> } };
       const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
       adminToast.error(message);
+    } finally {
+      setIsSavingUser(false);
     }
   };
 
   const savePermissions = async () => {
-    if (!selectedUser) return;
+    if (!selectedUser || isSavingPermissions) return;
+    setIsSavingPermissions(true);
     try {
       const permissions = permissionForm.values.permissions;
       await apiClient.updateUser(selectedUser.id, {
@@ -272,6 +278,8 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       const error = err as { response?: { data?: Record<string, unknown> } };
       const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update permissions';
       adminToast.error(message);
+    } finally {
+      setIsSavingPermissions(false);
     }
   };
 
@@ -797,6 +805,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
           <Modal
             isOpen={showEditModal}
             onClose={() => {
+              if (isSavingUser) return;
               editForm.reset();
               setShowEditModal(false);
             }}
@@ -810,6 +819,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   value={selectedUser.firstName || ''}
                   onChange={e => updateSelectedUser(user => ({ ...user, firstName: e.target.value }))}
                   placeholder="First Name"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
@@ -819,6 +829,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   value={selectedUser.lastName || ''}
                   onChange={e => updateSelectedUser(user => ({ ...user, lastName: e.target.value }))}
                   placeholder="Last Name"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
@@ -828,6 +839,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   value={selectedUser.email}
                   onChange={e => updateSelectedUser(user => ({ ...user, email: e.target.value }))}
                   placeholder="Email"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
@@ -836,12 +848,14 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   checked={selectedUser.isActive}
                   onChange={e => updateSelectedUser(user => ({ ...user, isActive: e.target.checked }))}
                   label="User account is active"
+                  disabled={isSavingUser}
                 />
               </FormField>
 
               <FormField label="Role" required>
                 <Select
                   value={selectedUser.roles[0] || ''}
+                  disabled={isSavingUser}
                   onChange={(e) => {
                     updateSelectedUser(user => {
                       const newRole = e.target.value;
@@ -880,6 +894,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                     type="button"
                     variant="subtle"
                     size="sm"
+                    disabled={isSavingUser}
                     onClick={() => {
                       permissionForm.markPristine({ permissions: selectedUser.permissions });
                       setShowPermissionsModal(true);
@@ -914,6 +929,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 setShowEditModal(false);
               }}
               onSave={saveSelectedUser}
+              isSaving={isSavingUser}
               saveLabel="Save changes"
               discardLabel="Cancel"
               className="-mx-6 -mb-6 mt-6"
@@ -926,6 +942,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
           <Modal
             isOpen={showPermissionsModal}
             onClose={() => {
+              if (isSavingPermissions) return;
               permissionForm.reset();
               setShowPermissionsModal(false);
             }}
@@ -955,7 +972,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                             permissionForm.setValue('permissions', updatedPermissions);
                           }
                         }}
-                        disabled={isDisabled}
+                        disabled={isDisabled || isSavingPermissions}
                       />
                       <div className="flex-1">
                         <div className="text-sm font-medium text-pf-text-primary">{area.name}</div>
@@ -977,6 +994,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 setShowPermissionsModal(false);
               }}
               onSave={savePermissions}
+              isSaving={isSavingPermissions}
               saveLabel="Save permissions"
               discardLabel="Cancel"
               className="-mx-6 -mb-6 mt-6"

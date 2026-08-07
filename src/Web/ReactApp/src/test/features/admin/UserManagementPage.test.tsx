@@ -37,6 +37,14 @@ const testUser = {
   permissions: ['printers'],
 };
 
+function createDeferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 describe('UserManagementPage shared admin patterns', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -90,7 +98,8 @@ describe('UserManagementPage shared admin patterns', () => {
 
   it('saves a dirty profile and clears its pristine baseline', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
-    vi.mocked(apiClient.updateUser).mockResolvedValue(undefined);
+    const update = createDeferred();
+    vi.mocked(apiClient.updateUser).mockReturnValue(update.promise);
     const user = userEvent.setup();
     render(<UserManagementPage />);
 
@@ -98,31 +107,41 @@ describe('UserManagementPage shared admin patterns', () => {
     const firstName = screen.getByPlaceholderText('First Name');
     await user.clear(firstName);
     await user.type(firstName, 'Farm');
-    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    const saveButton = screen.getByRole('button', { name: 'Save changes' });
+    await user.click(saveButton);
+    await user.click(saveButton);
 
-    await waitFor(() => expect(apiClient.updateUser).toHaveBeenCalledWith(
+    expect(apiClient.updateUser).toHaveBeenCalledTimes(1);
+    expect(apiClient.updateUser).toHaveBeenCalledWith(
       'user-1',
       expect.objectContaining({ firstName: 'Farm' }),
-    ));
+    );
+    update.resolve();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
   });
 
   it('saves permissions through an independent dirty-state path', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
-    vi.mocked(apiClient.updateUser).mockResolvedValue(undefined);
+    const update = createDeferred();
+    vi.mocked(apiClient.updateUser).mockReturnValue(update.promise);
     const user = userEvent.setup();
     render(<UserManagementPage />);
 
     await user.click(await screen.findByTitle('Manage permissions'));
     await user.click(screen.getByRole('checkbox', { name: /Files/ }));
-    await user.click(screen.getByRole('button', { name: 'Save permissions' }));
+    const saveButton = screen.getByRole('button', { name: 'Save permissions' });
+    await user.click(saveButton);
+    await user.click(saveButton);
 
-    await waitFor(() => expect(apiClient.updateUser).toHaveBeenCalledWith(
+    expect(apiClient.updateUser).toHaveBeenCalledTimes(1);
+    expect(apiClient.updateUser).toHaveBeenCalledWith(
       'user-1',
       { accessibleAreas: ['printers', 'files'] },
-    ));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    );
+    update.resolve();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('marks the password form pristine after a confirmed password change', async () => {
