@@ -200,6 +200,32 @@ describe('SlicerProvider authenticated settings loading', () => {
     expect(apiTestState.getSettings).toHaveBeenCalledTimes(2);
   });
 
+  it('does not reuse or apply an in-flight settings response from a previous session', async () => {
+    const firstSessionRequest = deferred<{ enabled: boolean }>();
+    const secondSessionRequest = deferred<{ enabled: boolean }>();
+    localStorage.setItem('auth-token', 'first-session');
+    apiTestState.getSettings
+      .mockReturnValueOnce(firstSessionRequest.promise)
+      .mockReturnValueOnce(secondSessionRequest.promise);
+
+    renderProvider();
+    localStorage.removeItem('auth-token');
+    localStorage.setItem('auth-token', 'second-session');
+    window.dispatchEvent(new Event(AUTH_SESSION_ESTABLISHED_EVENT));
+
+    expect(apiTestState.getSettings).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      secondSessionRequest.resolve({ enabled: false });
+    });
+    await waitFor(() => expect(readState().settingEnabled).toBe(false));
+
+    await act(async () => {
+      firstSessionRequest.resolve({ enabled: true });
+    });
+    expect(readState().settingEnabled).toBe(false);
+  });
+
   it('shares the initial request across a StrictMode remount', async () => {
     const settingsRequest = deferred<{ enabled: boolean }>();
     localStorage.setItem('auth-token', 'existing-token');

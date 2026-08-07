@@ -22,7 +22,10 @@ const defaultState: SlicerState = {
 };
 
 let workersRequest: Promise<SlicerSnapshot['workers']> | null = null;
-let snapshotRequest: Promise<SlicerSnapshot> | null = null;
+let snapshotRequest: {
+  authToken: string;
+  promise: Promise<SlicerSnapshot>;
+} | null = null;
 
 function loadWorkers(): Promise<SlicerSnapshot['workers']> {
   if (!workersRequest) {
@@ -39,22 +42,27 @@ function loadWorkers(): Promise<SlicerSnapshot['workers']> {
   return workersRequest;
 }
 
-function loadAuthenticatedSnapshot(): Promise<SlicerSnapshot> {
-  if (!snapshotRequest) {
-    snapshotRequest = Promise.all([
+function loadAuthenticatedSnapshot(authToken: string): Promise<SlicerSnapshot> {
+  if (snapshotRequest?.authToken === authToken) {
+    return snapshotRequest.promise;
+  }
+
+  const promise = Promise.all([
       apiClient.getSettings<SlicerSettings>('Slicer').catch(error => {
         console.warn('[SlicerContext] Failed to fetch slicer settings, using defaults:', error);
         return { enabled: true };
       }),
       loadWorkers(),
-    ])
-      .then(([settings, workers]) => ({ settings, workers }))
-      .finally(() => {
-        snapshotRequest = null;
-      });
-  }
+    ]).then(([settings, workers]) => ({ settings, workers }));
 
-  return snapshotRequest;
+  snapshotRequest = { authToken, promise };
+  void promise.finally(() => {
+    if (snapshotRequest?.promise === promise) {
+        snapshotRequest = null;
+    }
+  });
+
+  return promise;
 }
 
 export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -67,17 +75,19 @@ export const SlicerProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     mountedRef.current = true;
 
     const refreshAuthenticatedState = () => {
-      if (!localStorage.getItem('auth-token')) {
+      const authToken = localStorage.getItem('auth-token');
+      if (!authToken) {
         return;
       }
 
       const settingsGeneration = ++settingsLoadGenerationRef.current;
       const workersGeneration = ++workersLoadGenerationRef.current;
 
-      void loadAuthenticatedSnapshot().then(({ settings, workers }) => {
+      void loadAuthenticatedSnapshot(authToken).then(({ settings, workers }) => {
         if (
           !mountedRef.current
           || settingsGeneration !== settingsLoadGenerationRef.current
+          || localStorage.getItem('auth-token') !== authToken
         ) {
           return;
         }
