@@ -14,8 +14,6 @@ public class PrintProjectConfiguration : IEntityTypeConfiguration<PrintProject>
         builder.HasKey(p => p.Id);
 
         // Concurrency token for optimistic locking
-        builder.Property(p => p.RowVersion).IsRowVersion();
-
         // Basic properties
         builder.Property(p => p.Name).IsRequired().HasMaxLength(255);
         builder.Property(p => p.Description).HasMaxLength(2000);

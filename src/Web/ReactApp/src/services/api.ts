@@ -3612,6 +3612,17 @@ export class ApiClient {
   }
 
   /**
+   * Get non-secret deployment defaults while first-run setup is required.
+   */
+  async getSetupBootstrap(signal?: AbortSignal): Promise<import("@/types/api").SetupBootstrapResponse> {
+    const response = await this.client.get<import("@/types/api").SetupBootstrapResponse>(
+      '/setup/bootstrap',
+      { signal },
+    );
+    return response.data;
+  }
+
+  /**
    * Create initial admin account
    */
   async createInitialAdmin(adminData: Record<string, unknown>): Promise<Record<string, unknown>> {

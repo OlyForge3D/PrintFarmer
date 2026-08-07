@@ -9,13 +9,12 @@ namespace Farm.Slicer.Module.Domain;
 /// this copy is used exclusively by Model3D within the slicer module.
 /// Cross-domain navigation properties (FolderNode, Tags) are replaced by Guid-only soft refs.
 /// </summary>
-public abstract class StoredFileBase
+public abstract class StoredFileBase : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token for optimistic locking during metadata updates.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     /// <summary>Original filename for display.</summary>
     public string Name { get; set; } = string.Empty;

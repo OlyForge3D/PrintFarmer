@@ -124,9 +124,9 @@ public class FarmSettingsService(ISettingsService settingsService, IDbContextFac
             return;
         }
 
-        // Set the original row version so EF enforces the concurrency check
         byte[] expectedBytes = Convert.FromBase64String(expectedRowVersion);
-        db.Entry(entity).Property(e => e.RowVersion).OriginalValue = expectedBytes;
+        db.Entry(entity).Property(e => e.Revision).OriginalValue =
+            RevisionETag.Decode(expectedBytes);
 
         entity.SettingsJson = System.Text.Json.JsonSerializer.Serialize(cost);
         entity.UpdatedAt = DateTime.UtcNow;

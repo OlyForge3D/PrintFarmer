@@ -13,7 +13,6 @@ public class GcodeHarvestQueueItemConfiguration : IEntityTypeConfiguration<Gcode
     public void Configure(EntityTypeBuilder<GcodeHarvestQueueItem> builder)
     {
         _ = builder.HasKey(q => q.Id);
-        _ = builder.Property(q => q.RowVersion).IsRowVersion();
         _ = builder.Property(q => q.PrinterId).IsRequired();
         _ = builder.Property(q => q.QueuedAt).IsRequired();
         _ = builder.Property(q => q.ProcessingStartedAt);

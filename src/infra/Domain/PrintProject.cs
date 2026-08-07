@@ -6,12 +6,12 @@ namespace Farm.Infrastructure.Domain;
 /// Represents a print project that groups multiple gcode files together for tracking.
 /// Used by print farm operators to manage multi-file print jobs (e.g., all parts for a Voron 2.4).
 /// </summary>
-public class PrintProject
+public class PrintProject : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     [Required]
     [MaxLength(255)]

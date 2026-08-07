@@ -14,9 +14,6 @@ public class PrinterConfiguration : IEntityTypeConfiguration<Printer>
     {
         builder.HasKey(p => p.Id);
 
-        // Concurrency token for optimistic locking
-        builder.Property(p => p.RowVersion).IsRowVersion();
-
         builder.Property(p => p.Name).IsRequired().HasMaxLength(128);
         builder.Property(p => p.ServerUrl).IsRequired().HasMaxLength(256);
         builder.Property(p => p.OriginalServerUrl).HasMaxLength(256);

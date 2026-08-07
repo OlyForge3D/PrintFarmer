@@ -1,4 +1,4 @@
-using Farm.Infrastructure;
+﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
@@ -126,7 +126,7 @@ public sealed class PriorityQueueOrderingTests
         return new PrintJob
         {
             Id = Guid.NewGuid(),
-            RowVersion = Guid.NewGuid().ToByteArray(),
+            Revision = 1,
             Name = priority.ToString(),
             Status = PrintJobStatus.Queued,
             Priority = (int)priority,

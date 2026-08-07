@@ -12,13 +12,12 @@ namespace Farm.Infrastructure.Domain;
 /// Abstract base class for all stored files (GCode and 3D Models).
 /// Consolidates common file storage and management properties.
 /// </summary>
-public abstract class StoredFile
+public abstract class StoredFile : IRevisionedEntity
 {
     public Guid Id { get; set; }
 
-    /// <summary>Concurrency token for optimistic locking during metadata updates from multiple sources.</summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    /// <inheritdoc/>
+    public long Revision { get; set; } = 1;
 
     public string Name { get; set; } = string.Empty; // Original filename for display
 

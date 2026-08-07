@@ -35,10 +35,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("varbinary(max)");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SettingsJson")
                         .IsRequired()
@@ -1668,12 +1668,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("float");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2");
@@ -2289,10 +2286,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<double?>("RetractionSpeed")
                         .HasColumnType("float");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SlicerContainerDigest")
                         .HasMaxLength(128)
@@ -2462,10 +2459,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid>("PrinterId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("StartedAt")
                         .HasColumnType("datetime2");
@@ -2540,10 +2537,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime>("QueuedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .HasColumnType("int");
@@ -3081,10 +3078,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("OccurrencePrintJobId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<DateTime>("ScheduledExecutionTime")
                         .HasColumnType("datetime2");
@@ -4631,10 +4628,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<long>("NextSequence")
                         .HasColumnType("bigint");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("Id");
 
@@ -4644,7 +4641,8 @@ namespace Farm.Migrations.SqlServer.Migrations
                         new
                         {
                             Id = 1,
-                            NextSequence = 0L
+                            NextSequence = 0L,
+                            Revision = 1L
                         });
                 });
 
@@ -5425,12 +5423,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(64)");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<Guid?>("SliceJobId")
                         .HasColumnType("uniqueidentifier");
@@ -5750,10 +5745,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("Status")
                         .ValueGeneratedOnAdd()
@@ -5822,10 +5817,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("int")
                         .HasDefaultValue(0);
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .ValueGeneratedOnAdd()
@@ -5895,10 +5890,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(255)
                         .HasColumnType("nvarchar(255)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
@@ -6252,10 +6247,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("PrinterGroupId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("ServerUrl")
                         .IsRequired()
@@ -6496,12 +6491,9 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasColumnType("bigint");
 
                     b.Property<long>("Revision")
-                        .HasColumnType("bigint");
-
-                    b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -6867,10 +6859,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<Guid?>("ObicoServerId")
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.HasKey("PrinterId");
 
@@ -7025,10 +7017,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<bool>("RequiresReconciliation")
                         .HasColumnType("bit");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("StartPathKind")
                         .IsRequired()
@@ -7156,10 +7148,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                     b.Property<DateTime?>("RetryAfterUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("SchemaVersion")
                         .IsRequired()
@@ -7568,10 +7560,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("rowversion");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Sku")
                         .HasMaxLength(256)
@@ -8227,10 +8219,10 @@ namespace Farm.Migrations.SqlServer.Migrations
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
 
-                    b.Property<byte[]>("RowVersion")
+                    b.Property<long>("Revision")
                         .IsConcurrencyToken()
-                        .IsRequired()
-                        .HasColumnType("varbinary(max)");
+                        .HasColumnType("bigint")
+                        .HasDefaultValue(1L);
 
                     b.Property<string>("Theme")
                         .IsRequired()

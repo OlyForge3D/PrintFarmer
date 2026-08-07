@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
@@ -27,6 +28,13 @@ public class SettingsControllerConcurrencyTests : IDisposable
     private readonly DbContextOptions<AppDbContext> _dbOptions;
     private readonly Mock<IFarmSettingsService> _farmSettingsMock;
     private readonly Mock<ILogger<SettingsController>> _loggerMock;
+
+    public static TheoryData<string> NonAdvanceableTokens =>
+    [
+        Convert.ToBase64String(Convert.FromHexString("000000000000002A")),
+        Convert.ToBase64String(Guid.Parse("29e33b8d-b7e9-4f1e-8632-3f687aa99210").ToByteArray()),
+        RevisionETag.Encode(long.MaxValue),
+    ];
 
     public SettingsControllerConcurrencyTests()
     {
@@ -146,6 +154,72 @@ public class SettingsControllerConcurrencyTests : IDisposable
             // Assert: second write gets 409 Conflict due to stale concurrency token
             Assert.IsType<ConflictObjectResult>(result2);
         }
+    }
+
+    [Theory]
+    [MemberData(nameof(NonAdvanceableTokens))]
+    public async Task UpdateUserSettings_NonAdvanceableRowVersion_Returns409(string rowVersion)
+    {
+        Guid userId = Guid.NewGuid();
+        using (var db = new AppDbContext(_dbOptions))
+        {
+            db.Users.Add(new User
+            {
+                Id = userId,
+                Username = "legacy",
+                Email = "legacy@test.com",
+                PasswordHash = "x",
+            });
+            db.UserSettings.Add(new UserSettings
+            {
+                UserId = userId,
+                Theme = "dark",
+                Locale = "en",
+                ItemsPerPage = 25,
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var updateDb = new AppDbContext(_dbOptions);
+        SettingsController controller = CreateController(updateDb, userId);
+        var body = new UpdateUserSettingsBody(
+            Theme: "light",
+            Locale: null,
+            ItemsPerPage: null,
+            DefaultSlicerPreset: null,
+            RowVersion: rowVersion);
+
+        IActionResult result = await controller.UpdateUserSettingsAsync(
+            body,
+            CancellationToken.None);
+
+        Assert.IsType<ConflictObjectResult>(result);
+    }
+
+    [Theory]
+    [MemberData(nameof(NonAdvanceableTokens))]
+    public void UpdateFarmSettings_NonAdvanceableRowVersion_Returns409(string rowVersion)
+    {
+        Guid userId = Guid.NewGuid();
+        _farmSettingsMock
+            .Setup(service => service.GetFarmSettingsRowVersion())
+            .Returns(RevisionETag.Encode(1));
+        _farmSettingsMock
+            .Setup(service => service.UpdateFarmSettings(
+                It.IsAny<UpdateFarmSettingsRequest>(),
+                rowVersion))
+            .Throws<DbUpdateConcurrencyException>();
+        using var db = new AppDbContext(_dbOptions);
+        SettingsController controller = CreateController(db, userId);
+        var body = new UpdateFarmSettingsBody(
+            ElectricityRatePerKwh: 0.2m,
+            DefaultMachineHourlyRate: 2.0m,
+            AveragePrinterWattage: 140m,
+            RowVersion: rowVersion);
+
+        IActionResult result = controller.UpdateFarmSettings(body);
+
+        Assert.IsType<ConflictObjectResult>(result);
     }
 
     [Fact]

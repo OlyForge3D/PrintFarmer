@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -1126,8 +1126,8 @@ public class AutoDispatchService(
         BindDispatchStateVersion(printer.DispatchState, expectedDispatchStateVersion);
         if (expectedPrinterVersion is not null)
         {
-            db.Entry(printer).Property(candidate => candidate.RowVersion).OriginalValue =
-                expectedPrinterVersion;
+            db.Entry(printer).Property(candidate => candidate.Revision).OriginalValue =
+                RevisionETag.Decode(expectedPrinterVersion);
         }
 
         printer.AutoDispatchEnabled = enabled;
@@ -1208,8 +1208,8 @@ public class AutoDispatchService(
                 BindDispatchStateVersion(
                     printer.DispatchState,
                     expected.DispatchStateVersion);
-                db.Entry(printer).Property(candidate => candidate.RowVersion).OriginalValue =
-                    expected.PrinterVersion;
+                db.Entry(printer).Property(candidate => candidate.Revision).OriginalValue =
+                    RevisionETag.Decode(expected.PrinterVersion);
             }
 
             printer.AutoDispatchEnabled = enabled;
@@ -1256,16 +1256,16 @@ public class AutoDispatchService(
                 "The printer dispatch state no longer exists.");
         }
 
-        db.Entry(state).Property(candidate => candidate.RowVersion).OriginalValue =
-            expectedVersion;
+        db.Entry(state).Property(candidate => candidate.Revision).OriginalValue =
+            RevisionETag.Decode(expectedVersion);
     }
 
     private void BindJobVersion(PrintJob job, byte[]? expectedVersion)
     {
         if (expectedVersion is not null)
         {
-            db.Entry(job).Property(candidate => candidate.RowVersion).OriginalValue =
-                expectedVersion;
+            db.Entry(job).Property(candidate => candidate.Revision).OriginalValue =
+                RevisionETag.Decode(expectedVersion);
         }
     }
 

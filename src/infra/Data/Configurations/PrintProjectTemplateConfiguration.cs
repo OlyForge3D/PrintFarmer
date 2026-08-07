@@ -25,9 +25,6 @@ public class PrintProjectTemplateConfiguration : IEntityTypeConfiguration<PrintP
         builder.Property(t => t.DefaultNotes)
             .HasMaxLength(2000);
 
-        builder.Property(t => t.RowVersion)
-            .IsRowVersion();
-
         builder.HasIndex(t => t.Name);
         builder.HasIndex(t => t.Category);
         builder.HasIndex(t => t.SortOrder);

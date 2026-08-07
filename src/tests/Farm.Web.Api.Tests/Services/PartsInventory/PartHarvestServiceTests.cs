@@ -216,6 +216,7 @@ public class PartHarvestServiceTests : IDisposable
         Assert.NotNull(refreshedJob.HarvestedAt);
         Assert.Equal($"harvest:{job.Id:N}", refreshedJob.HarvestOperationKey);
         Assert.Equal("op-1", refreshedJob.HarvestedByUserId);
+        Assert.Equal(job.Revision + 1, refreshedJob.Revision);
 
         List<PartInventoryAdjustment> ledger = await db.PartInventoryAdjustments.ToListAsync();
         _ = Assert.Single(ledger);

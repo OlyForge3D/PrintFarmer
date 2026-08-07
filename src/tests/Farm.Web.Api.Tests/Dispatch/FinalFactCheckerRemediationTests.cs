@@ -1136,7 +1136,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         IPrintersService printers,
         IPrinterPhysicalActuationService actuation)
     {
-        byte[] rowVersion = Guid.NewGuid().ToByteArray();
+        byte[] rowVersion = RevisionETag.EncodeBytes(1);
         Mock.Get(printers).Setup(service => service.FindByIdAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<CancellationToken>()))
@@ -1145,7 +1145,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
                 Id = printerId,
                 Name = "Denied printer",
                 ServerUrl = "http://denied.invalid",
-                RowVersion = rowVersion,
+                Revision = 1,
             });
         Mock.Get(printers).Setup(service => service.UnloadFilamentAsync(
                 It.IsAny<Guid>(),

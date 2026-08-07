@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Farm.Infrastructure.Domain;
 
@@ -8,7 +9,7 @@ namespace Farm.Infrastructure.Domain;
 /// AutoDispatchService writes these fields ~14× per cycle; isolating them in their own
 /// table with their own RowVersion prevents DbUpdateConcurrencyException on the Printer row.
 /// </summary>
-public class PrinterDispatchState
+public class PrinterDispatchState : IRevisionedEntity
 {
     /// <summary>
     /// PK and FK — mirrors <see cref="Printer.Id"/> (1:1 relationship).
@@ -31,11 +32,10 @@ public class PrinterDispatchState
     public bool BedPreConfirmed { get; set; }
 
     /// <summary>
-    /// Independent concurrency token — bumps only when dispatch state changes,
-    /// leaving the Printer.RowVersion undisturbed.
+    /// Opaque compatibility token derived from <see cref="Revision"/>.
     /// </summary>
-    [Timestamp]
-    public byte[]? RowVersion { get; set; }
+    [NotMapped]
+    public byte[]? RowVersion => Revision > 0 ? RevisionETag.EncodeBytes(Revision) : null;
 
     /// <summary>Provider-independent logical revision incremented on every mutation.</summary>
     public long Revision { get; set; } = 1;

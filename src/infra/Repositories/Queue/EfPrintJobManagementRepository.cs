@@ -551,11 +551,14 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public async Task UpdatePrinterLastHistorySeedAsync(Guid printerId, DateTime lastSeedUtc, CancellationToken ct = default)
     {
-        // Use ExecuteUpdateAsync on PrinterServiceState instead of Printer to avoid
-        // bumping Printer.RowVersion which could conflict with concurrent user edits.
+        // Keep history-watermark updates isolated from concurrent user edits to Printer.
         await _context.PrinterServiceStates
             .Where(s => s.PrinterId == printerId)
-            .ExecuteUpdateAsync(s => s.SetProperty(p => p.LastHistorySeedUtc, lastSeedUtc), ct);
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(state => state.LastHistorySeedUtc, lastSeedUtc)
+                    .SetProperty(state => state.Revision, state => state.Revision + 1),
+                ct);
     }
 
     public async Task<HashSet<string>> GetExternalJobIdsForPrinterAsync(Guid printerId, CancellationToken ct = default)
