@@ -43,7 +43,6 @@ function isCanonicalMemberLabel(label) {
 function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-
 /**
  * Whole-word containment test.
  *
@@ -55,28 +54,47 @@ function hasWord(text, word) {
   if (!text || !word) {
     return false;
   }
-  const pattern = escapeRegExp(word.trim()).replace(/\\?\s+/g, '\\s+');
-  // `#` and `.` are non-word characters, so a trailing \b would never match
-  // tokens like `c#` or `.net`. Fall back to a lookaround in that case.
-  const left = /^[\w]/.test(word.trim()) ? '\\b' : '(?<![\\w#])';
-  const right = /[\w]$/.test(word.trim()) ? '\\b' : '(?![\\w#])';
+  const token = word.trim();
+  // `escapeRegExp` never escapes whitespace, so match plain runs of it. An
+  // optional `\\?` here would mangle any keyword containing a backslash.
+  const pattern = escapeRegExp(token).replace(/\s+/g, '\\s+');
+  // `#` and `.` are non-word characters, so a `\b` on that side would never
+  // match tokens like `c#` or `.net`. Fall back to a lookaround in that case.
+  const left = /^\w/.test(token) ? '\\b' : '(?<![\\w#])';
+  const right = /\w$/.test(token) ? '\\b' : '(?![\\w#])';
   return new RegExp(`${left}${pattern}${right}`, 'i').test(text);
 }
 
+// Keywords are grouped into *concepts*. A concept scores at most once no
+// matter how many of its surface forms appear, so `test`/`tests`/`testing`
+// cannot triple-count and a long body cannot win by repetition.
+//
 // Weight 2 = a term that only appears when the domain is genuinely in play.
-// Weight 1 = a term that is suggestive but common across domains (`bug`, `fix`,
-// `design`), so it can break a tie but cannot carry a domain on its own.
+// Weight 1 = suggestive but common across domains, so it can break a tie but
+// cannot carry a domain on its own.
+//
+// Deliberately absent: `bug` and `fix`. They describe the *type* of an issue,
+// not its domain — every domain gets bug reports — and treating them as
+// testing signals routed ordinary frontend and backend bugs to the Tester.
 const DOMAINS = [
   {
     id: 'frontend',
     reason: 'Issue relates to frontend/UI work',
     role: /front[\s-]?end|\bui\b|\bux\b|designer/i,
     keywords: [
-      ['ui', 2], ['ux', 2], ['frontend', 2], ['front-end', 2],
-      ['css', 2], ['tailwind', 2], ['react', 2], ['jsx', 2], ['tsx', 2],
-      ['component', 2], ['components', 2], ['stylesheet', 2],
-      ['button', 1], ['buttons', 1], ['page', 1], ['pages', 1],
-      ['layout', 1], ['design', 1], ['modal', 1], ['dialog', 1],
+      { id: 'ui', weight: 2, forms: ['ui'] },
+      { id: 'ux', weight: 2, forms: ['ux'] },
+      { id: 'frontend', weight: 2, forms: ['frontend', 'front-end', 'front end'] },
+      { id: 'css', weight: 2, forms: ['css', 'stylesheet', 'tailwind'] },
+      { id: 'react', weight: 2, forms: ['react', 'jsx', 'tsx'] },
+      { id: 'component', weight: 2, forms: ['component', 'components'] },
+      { id: 'page', weight: 1, forms: ['page', 'pages'] },
+      { id: 'layout', weight: 1, forms: ['layout'] },
+      { id: 'button', weight: 1, forms: ['button', 'buttons'] },
+      { id: 'modal', weight: 1, forms: ['modal', 'dialog'] },
+      { id: 'design', weight: 1, forms: ['design'] },
+      // The React app is the only npm surface in this .NET repo.
+      { id: 'npm', weight: 1, forms: ['npm', 'package.json', 'node_modules', 'vite'] },
     ],
   },
   {
@@ -84,13 +102,22 @@ const DOMAINS = [
     reason: 'Issue relates to backend/API work',
     role: /back[\s-]?end|\bapi\b|server/i,
     keywords: [
-      ['backend', 2], ['back-end', 2], ['api', 2], ['endpoint', 2],
-      ['endpoints', 2], ['database', 2], ['sql', 2], ['ef core', 2],
-      ['entity framework', 2], ['dbcontext', 2], ['migration', 2],
-      ['migrations', 2], ['signalr', 2], ['controller', 2],
-      ['controllers', 2], ['repository', 1], ['query', 1], ['queries', 1],
-      ['server', 1], ['auth', 1], ['authentication', 1], ['c#', 1],
-      ['.net', 1], ['dotnet', 1],
+      { id: 'backend', weight: 2, forms: ['backend', 'back-end', 'back end'] },
+      { id: 'api', weight: 2, forms: ['api'] },
+      { id: 'endpoint', weight: 2, forms: ['endpoint', 'endpoints'] },
+      {
+        id: 'database',
+        weight: 2,
+        forms: ['database', 'sql', 'dbcontext', 'ef core', 'entity framework'],
+      },
+      { id: 'migration', weight: 2, forms: ['migration', 'migrations'] },
+      { id: 'signalr', weight: 2, forms: ['signalr'] },
+      { id: 'controller', weight: 2, forms: ['controller', 'controllers'] },
+      { id: 'query', weight: 1, forms: ['query', 'queries'] },
+      { id: 'server', weight: 1, forms: ['server'] },
+      { id: 'auth', weight: 1, forms: ['auth', 'authentication'] },
+      { id: 'dotnet', weight: 1, forms: ['c#', '.net', 'asp.net', 'dotnet'] },
+      { id: 'repository', weight: 1, forms: ['repository'] },
     ],
   },
   {
@@ -98,9 +125,17 @@ const DOMAINS = [
     reason: 'Issue relates to testing/quality work',
     role: /test|\bqa\b|quality/i,
     keywords: [
-      ['test', 2], ['tests', 2], ['testing', 2], ['coverage', 2],
-      ['flaky', 2], ['xunit', 2], ['vitest', 2], ['playwright', 2],
-      ['regression', 1], ['bug', 1], ['fix', 1], ['assertion', 1],
+      // Every issue in this repo carries a "How to verify" / "add a regression
+      // test" section, so these words in a *body* are boilerplate, not a
+      // statement of ownership. They only signal the testing domain when the
+      // author put them in the title.
+      { id: 'test', weight: 2, titleOnly: true, forms: ['test', 'tests', 'testing'] },
+      { id: 'regression', weight: 1, titleOnly: true, forms: ['regression'] },
+      { id: 'assertion', weight: 1, titleOnly: true, forms: ['assert', 'assertion'] },
+      { id: 'qa', weight: 2, forms: ['qa'] },
+      { id: 'coverage', weight: 2, forms: ['coverage'] },
+      { id: 'flaky', weight: 2, forms: ['flaky'] },
+      { id: 'harness', weight: 2, forms: ['xunit', 'vitest', 'playwright'] },
     ],
   },
   {
@@ -108,11 +143,17 @@ const DOMAINS = [
     reason: 'Issue relates to DevOps/infrastructure work',
     role: /devops|infra|\bops\b|deploy|platform/i,
     keywords: [
-      ['docker', 2], ['dockerfile', 2], ['kubernetes', 2], ['nginx', 2],
-      ['pipeline', 2], ['infrastructure', 2], ['deploy', 2],
-      ['deployment', 2], ['ci', 2], ['cd', 2], ['workflow', 2],
-      ['github actions', 2], ['compose', 1], ['container', 1],
-      ['runner', 1], ['release', 1],
+      { id: 'docker', weight: 2, forms: ['docker', 'dockerfile', 'compose'] },
+      { id: 'k8s', weight: 2, forms: ['kubernetes', 'k8s'] },
+      { id: 'nginx', weight: 2, forms: ['nginx'] },
+      { id: 'pipeline', weight: 2, forms: ['pipeline'] },
+      { id: 'ci', weight: 2, forms: ['ci', 'ci/cd', 'github actions'] },
+      { id: 'deploy', weight: 2, forms: ['deploy', 'deployment'] },
+      { id: 'infra', weight: 2, forms: ['infrastructure', 'infra'] },
+      { id: 'workflow', weight: 2, forms: ['workflow'] },
+      { id: 'container', weight: 1, forms: ['container'] },
+      { id: 'runner', weight: 1, forms: ['runner'] },
+      { id: 'release', weight: 1, forms: ['release'] },
     ],
   },
 ];
@@ -127,20 +168,23 @@ const BODY_WEIGHT = 1;
 /**
  * Score one domain against an issue.
  *
- * Each keyword contributes at most once regardless of how many times it occurs,
- * so a long body cannot win by repetition alone.
+ * Each *concept* contributes at most once regardless of how many of its surface
+ * forms occur or how often, so neither `test`/`tests`/`testing` nor a long body
+ * can win by repetition. Concepts marked `titleOnly` are ignored in the body.
  */
 function scoreDomain(domain, title, body) {
   let score = 0;
   const matched = [];
-  for (const [word, weight] of domain.keywords) {
-    const inTitle = hasWord(title, word);
-    const inBody = !inTitle && hasWord(body, word);
+  for (const concept of domain.keywords) {
+    const inTitle = concept.forms.some((form) => hasWord(title, form));
+    const inBody = !inTitle
+      && !concept.titleOnly
+      && concept.forms.some((form) => hasWord(body, form));
     if (!inTitle && !inBody) {
       continue;
     }
-    score += weight * (inTitle ? TITLE_WEIGHT : BODY_WEIGHT);
-    matched.push(word);
+    score += concept.weight * (inTitle ? TITLE_WEIGHT : BODY_WEIGHT);
+    matched.push(concept.id);
   }
   return { id: domain.id, score, matched, reason: domain.reason };
 }

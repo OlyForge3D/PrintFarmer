@@ -21,7 +21,7 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const { routeIssue, memberLabel } = require(
+            const { routeIssue, memberLabel, hasWord } = require(
               path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
             );
             const issue = context.payload.issue;
@@ -118,11 +118,15 @@ jobs:
             let triageReason = '';
             let copilotTier = null;
 
-            // First, evaluate @copilot fit if enabled
+            // First, evaluate @copilot fit if enabled.
+            // Word-boundary matched for the same reason routing is: a raw
+            // `includes('auth')` matches *author*, and `includes('format')`
+            // matches *formatting* — and this block short-circuits routing
+            // entirely, so a false positive never reaches the router at all.
             if (hasCopilot) {
-              const isNotSuitable = notSuitableKeywords.some(kw => issueText.includes(kw));
-              const isGoodFit = !isNotSuitable && goodFitKeywords.some(kw => issueText.includes(kw));
-              const isNeedsReview = !isNotSuitable && !isGoodFit && needsReviewKeywords.some(kw => issueText.includes(kw));
+              const isNotSuitable = notSuitableKeywords.some(kw => hasWord(issueText, kw));
+              const isGoodFit = !isNotSuitable && goodFitKeywords.some(kw => hasWord(issueText, kw));
+              const isNeedsReview = !isNotSuitable && !isGoodFit && needsReviewKeywords.some(kw => hasWord(issueText, kw));
 
               if (isGoodFit) {
                 copilotTier = 'good-fit';

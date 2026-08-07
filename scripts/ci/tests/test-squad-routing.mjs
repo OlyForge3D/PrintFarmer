@@ -14,10 +14,11 @@ const {
   routeIssue,
   slugify,
 } = require('../squad-routing.cjs');
+const ralph = require('../../../.squad/templates/ralph-triage.js');
 
-// The live roster from .squad/team.md, in file order. Roster order matters:
-// under the old member-outer loop, Ripley (Frontend) preceding Lambert
-// (Backend) is what made frontend win nearly every race.
+// The full live roster from .squad/team.md, in file order. Roster order
+// matters: under the old member-outer loop, Ripley (Frontend) preceding
+// Lambert (Backend) is what made frontend win nearly every race.
 const members = [
   { name: '🏗️ Dallas', role: 'Lead' },
   { name: '⚛️ Ripley', role: 'Frontend Dev' },
@@ -29,6 +30,12 @@ const members = [
   { name: '🔍 Brett', role: 'Researcher' },
   { name: '⚙️ Parker', role: 'DevOps & Deployment Engineer' },
   { name: '🎨 Newt', role: 'Designer (Industrial UI)' },
+  { name: '🔍 Bishop', role: 'Code Reviewer (Claude Opus 5)' },
+  { name: '🔍 Hicks', role: 'Code Reviewer (GPT-5.6 Sol)' },
+  { name: '🔍 Vasquez', role: 'Code Reviewer (Gemini 3.1 Pro Preview)' },
+  { name: '⚛️ Drake', role: 'Frontend Dev' },
+  { name: '📋 Scribe', role: 'Session Logger' },
+  { name: '🔄 Ralph', role: 'Work Monitor' },
 ];
 const lead = members[0];
 
@@ -62,6 +69,138 @@ test('hasWord matches standalone tokens, not substrings', () => {
   assert.equal(hasWord('the /api/foo endpoint', 'api'), true);
   assert.equal(hasWord('uses EF  Core mapping', 'ef core'), true);
   assert.equal(hasWord('written in C# today', 'c#'), true);
+
+  // Multi-word and punctuated forms the keyword table actually relies on.
+  assert.equal(hasWord('built on ASP.NET Core 10', 'asp.net'), true);
+  assert.equal(hasWord('a front end concern', 'front end'), true);
+  assert.equal(hasWord('uses Entity Framework Core', 'entity framework'), true);
+  assert.equal(hasWord('see GitHub Actions logs', 'github actions'), true);
+
+  // `cd src && dotnet build` in repro steps must not read as DevOps.
+  assert.equal(hasWord('run cd src && dotnet build', 'ci/cd'), false);
+
+  // A keyword containing a backslash must not be silently corrupted into `\s+`.
+  assert.equal(hasWord('a\\ b', 'a\\ b'), true);
+  assert.equal(hasWord('assb', 'a\\ b'), false);
+});
+
+test('boilerplate from the issue template cannot carry the test domain', () => {
+  // Every issue in this repo ships "## Proposed fix" / "## How to verify" /
+  // "add a regression test", so testing boilerplate must not outscore a real
+  // domain signal. This is the regression Bishop and Hicks both flagged.
+  const boilerplate = [
+    '## Proposed fix', 'Rewrite the query.',
+    '## How to verify', '1. Apply the fix and re-measure.',
+    '2. Add a regression test; run the tests. Effort: S/M plus tests.',
+  ].join('\n');
+
+  const backend = routeIssue(
+    { title: 'perf: /api/spools endpoint is slow', body: boilerplate },
+    members,
+    lead,
+  );
+  assert.equal(backend.domain, 'backend', 'backend must beat test boilerplate');
+
+  const frontend = routeIssue(
+    { title: 'perf: Files page fetches 2000 records', body: boilerplate },
+    members,
+    lead,
+  );
+  assert.equal(frontend.domain, 'frontend', 'frontend must beat test boilerplate');
+});
+
+test('ordinary bug reports route to the owning domain, not the Tester', () => {
+  const ui = routeIssue(
+    {
+      title: 'bug: printer screen is blank',
+      body: 'The React view renders nothing. Please fix.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(ui.domain, 'frontend');
+  assert.equal(ui.member.name, '⚛️ Ripley');
+
+  const api = routeIssue(
+    {
+      title: 'fix: saving a printer fails',
+      body: 'The endpoint returns 500.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(api.domain, 'backend');
+  assert.equal(api.member.name, '🔧 Lambert');
+});
+
+test('a QA-titled issue routes to the Tester', () => {
+  const result = routeIssue(
+    {
+      title: 'QA: qualify operator-first redesign for iOS beta',
+      body: 'Run the acceptance pass before shipping.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'test');
+  assert.equal(result.member.name, '🧪 Kane');
+});
+
+test('a keyword concept scores once, not once per surface form', () => {
+  // `test`, `tests` and `testing` are one concept; matching all three must not
+  // score more than matching one.
+  const one = routeIssue({ title: '', body: 'add a test' }, members, lead);
+  const many = routeIssue(
+    { title: '', body: 'add a test; the tests fail; testing is broken' },
+    members,
+    lead,
+  );
+  const scoreOf = (r) => (r.scores.find((s) => s.id === 'test') || {}).score;
+  assert.equal(scoreOf(one), scoreOf(many));
+});
+
+test('Ralph routes identically to the triage workflow', () => {
+  // .squad/templates/ralph-triage.js is a second live router, executed by
+  // squad-heartbeat.yml. It carried the same substring bug. If `squad upgrade`
+  // ever overwrites it and reintroduces member-first substring matching, this
+  // assertion fails.
+  const cases = [
+    { title: issue1236Title, body: issue1236Body },
+    { title: 'fix: PrinterCard component CSS overflow', body: 'Tailwind layout' },
+    { title: 'ci: docker build fails in the deployment pipeline', body: '' },
+    { title: 'test: raise coverage for SliceJobQueue', body: 'flaky xunit' },
+    { title: 'feat: add /api/spools endpoint', body: '' },
+  ];
+  for (const issue of cases) {
+    const expected = routeIssue(issue, members, lead);
+    const actual = ralph.findRoleKeywordMatch(issue, members);
+    assert.ok(actual, `Ralph returned no match for "${issue.title}"`);
+    assert.equal(
+      actual.agent.name,
+      expected.member.name,
+      `Ralph disagreed with squad-triage on "${issue.title}"`,
+    );
+  }
+});
+
+test('Ralph declines ambiguous issues instead of guessing', () => {
+  assert.equal(
+    ralph.findRoleKeywordMatch({ title: 'Improve things', body: '' }, members),
+    null,
+  );
+});
+
+test('malformed issues do not throw', () => {
+  for (const issue of [
+    {},
+    { title: 'only a title' },
+    { title: undefined, body: 'only a body' },
+    { title: 'x', body: null },
+    { title: '', body: '' },
+  ]) {
+    assert.doesNotThrow(() => routeIssue(issue, members, lead));
+    assert.ok(routeIssue(issue, members, lead).member);
+  }
 });
 
 test('issue #1236 routes to Backend, not Frontend (the reported misroute)', () => {
