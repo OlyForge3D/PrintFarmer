@@ -12,6 +12,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Infrastructure;
 
+internal enum DatabaseInitializationOutcome
+{
+    Ready,
+    ReferenceDataSeedingFailed,
+}
+
 public static class DatabaseInitializationExtensions
 {
     /// <summary>
@@ -24,7 +30,7 @@ public static class DatabaseInitializationExtensions
     /// <param name="db">The application database context.</param>
     /// <param name="dbInitializer">The database initializer service for seeding data.</param>
     /// <param name="startupStatus">The startup status tracker to mark application readiness.</param>
-    public static async Task InitializeDatabaseAsync(
+    internal static async Task<DatabaseInitializationOutcome> InitializeDatabaseAsync(
         this WebApplication app,
         ILogger logger,
         AppDbContext db,
@@ -146,6 +152,10 @@ public static class DatabaseInitializationExtensions
                         }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (Exception ex)
                 {
                     logger.LogDebug(ex, "[Startup] Short verification of core tables failed (non-fatal)");
@@ -161,6 +171,13 @@ public static class DatabaseInitializationExtensions
                 {
                     logger.LogError("[Startup] FATAL: Seeding exceeded timeout ({Timeout}s). API will not start.", dbStartupTimeout.TotalSeconds.ToString());
                     throw;
+                }
+                catch (Exception seedingException)
+                {
+                    logger.LogWarning(
+                        seedingException,
+                        "[Startup] Database seeding failed (non-fatal)");
+                    return DatabaseInitializationOutcome.ReferenceDataSeedingFailed;
                 }
 
                 // Diagnostic: ensure key domain tables exist before proceeding
@@ -200,6 +217,10 @@ public static class DatabaseInitializationExtensions
                         }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
                 catch (Exception diagEx)
                 {
                     logger.LogDebug(diagEx, "[Startup] Post-seed diagnostics check for core tables failed (non-fatal)");
@@ -227,6 +248,7 @@ public static class DatabaseInitializationExtensions
             startupStatus.MarkReady();
 
             logger.LogInformation("[Startup] ✓ Database initialization complete - application ready to serve requests");
+            return DatabaseInitializationOutcome.Ready;
         }
         catch (OperationCanceledException ex)
         {

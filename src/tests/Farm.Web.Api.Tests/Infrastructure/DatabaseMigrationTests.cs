@@ -15,6 +15,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 
@@ -221,24 +222,114 @@ public sealed class DatabaseMigrationTests
     }
 
     [Fact]
+    public async Task ProgramHelpersInitialization_NativePushPreStepFailure_PropagatesBeforeMigration()
+    {
+        await using TemporarySqliteDatabase database = await TemporarySqliteDatabase.CreateAsync();
+        SqliteConnection connection = database.Connection;
+        var initializer = new Mock<IDatabaseInitializer>();
+        var startupStatus = new StartupStatus();
+        await using WebApplication app = CreateTestApplication(connection, initializer, startupStatus);
+        await EnsureLegacySchemaAsync(app);
+        await ExecuteSqlAsync(
+            connection,
+            """
+            DROP TABLE "DeviceTokens";
+            CREATE VIEW "DeviceTokens" AS SELECT 'blocked' AS "Id";
+            """);
+
+        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+
+        SqliteException exception = (await initialize.Should().ThrowAsync<SqliteException>()).Which;
+        exception.Message.Should().Contain("Cannot add a column to a view");
+        initializer.Verify(
+            service => service.InitializeAsync(
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()),
+            Times.Never);
+        startupStatus.Phase.Should().Be(StartupPhase.Starting);
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProgramHelpersInitialization_MutationWatermarkPreStepFailure_PropagatesAfterNativePushBeforeMigration()
+    {
+        await using TemporarySqliteDatabase database = await TemporarySqliteDatabase.CreateAsync();
+        SqliteConnection connection = database.Connection;
+        var initializer = new Mock<IDatabaseInitializer>();
+        var startupStatus = new StartupStatus();
+        await using WebApplication app = CreateTestApplication(connection, initializer, startupStatus);
+        await EnsureLegacySchemaAsync(app);
+        await ExecuteSqlAsync(
+            connection,
+            """
+            ALTER TABLE "DeviceTokens" DROP COLUMN "RegistrationVersion";
+            DROP TABLE "MutationCounters";
+            CREATE VIEW "MutationCounters" AS SELECT 1 AS "Id", 0 AS "Value";
+            """);
+
+        Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
+
+        SqliteException exception = (await initialize.Should().ThrowAsync<SqliteException>()).Which;
+        exception.Message.Should().Contain("MutationCounters");
+        (await ColumnExistsAsync(connection, "DeviceTokens", "RegistrationVersion")).Should().BeTrue(
+            "the native-push pre-step must commit before the mutation-watermark pre-step runs");
+        initializer.Verify(
+            service => service.InitializeAsync(
+                It.IsAny<string>(),
+                It.IsAny<int>(),
+                It.IsAny<int>()),
+            Times.Never);
+        startupStatus.Phase.Should().Be(StartupPhase.Starting);
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProgramHelpersInitialization_LegacyPreStepsCompleteBeforeMigrationHistoryIsRecorded()
+    {
+        await using TemporarySqliteDatabase database = await TemporarySqliteDatabase.CreateAsync();
+        SqliteConnection connection = database.Connection;
+        var initializer = new Mock<IDatabaseInitializer>();
+        var startupStatus = new StartupStatus();
+        await using WebApplication app = CreateTestApplication(connection, initializer, startupStatus);
+        await EnsureLegacySchemaAsync(app);
+        await ExecuteSqlAsync(
+            connection,
+            """ALTER TABLE "DeviceTokens" DROP COLUMN "RegistrationVersion";""");
+
+        await ProgramHelpers.InitializeDatabaseAsync(app);
+
+        (await ColumnExistsAsync(connection, "DeviceTokens", "RegistrationVersion")).Should().BeTrue();
+        (await ReadAppliedMigrationIdsAsync(connection)).Should().Equal(
+            "20260730231403_InitialV2",
+            "20260806232640_CanonicalizePrintJobPriority",
+            "20260807023655_UsePortableRevisionConcurrency");
+        startupStatus.Phase.Should().Be(StartupPhase.Ready);
+    }
+
+    [Fact]
     public async Task ProgramHelpersInitialization_SeedingFailure_RemainsNonFatal()
     {
-        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using TemporarySqliteDatabase database = await TemporarySqliteDatabase.CreateAsync();
+        SqliteConnection connection = database.Connection;
         WebApplicationBuilder builder = WebApplication.CreateBuilder();
-        _ = builder.Services.AddLogging();
+        var loggerProvider = new RecordingLoggerProvider();
+        _ = builder.Logging.AddProvider(loggerProvider);
         _ = builder.Services.AddDbContext<AppDbContext>(
             options => options.UseSqlite(
                 connection,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
         var initializer = new Mock<IDatabaseInitializer>();
+        var seedingException = new InvalidOperationException("Synthetic seeding failure");
         _ = initializer
             .Setup(service => service.InitializeAsync(
                 It.IsAny<string>(),
                 It.IsAny<int>(),
                 It.IsAny<int>()))
-            .ThrowsAsync(new InvalidOperationException("Synthetic seeding failure"));
+            .ThrowsAsync(seedingException);
         _ = builder.Services.AddScoped(_ => initializer.Object);
-        _ = builder.Services.AddSingleton<IStartupStatus, StartupStatus>();
+        var startupStatus = new StartupStatus();
+        _ = builder.Services.AddSingleton<IStartupStatus>(startupStatus);
         await using WebApplication app = builder.Build();
 
         Func<Task> initialize = () => ProgramHelpers.InitializeDatabaseAsync(app);
@@ -250,6 +341,15 @@ public sealed class DatabaseMigrationTests
                 It.IsAny<int>(),
                 It.IsAny<int>()),
             Times.Once);
+        startupStatus.Phase.Should().Be(
+            StartupPhase.Starting,
+            "reference-data seeding failure keeps startup degraded rather than reporting ready");
+        (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeTrue(
+            "migration and schema validation must complete before reference-data seeding");
+        loggerProvider.Entries.Should().ContainSingle(entry =>
+            entry.Level == LogLevel.Warning
+            && ReferenceEquals(entry.Exception, seedingException)
+            && entry.Message == "[Startup] Database seeding failed (non-fatal)");
     }
 
     [Fact]
@@ -593,8 +693,39 @@ public sealed class DatabaseMigrationTests
         return new SlicerDbContext(options);
     }
 
+    private static WebApplication CreateTestApplication(
+        SqliteConnection connection,
+        Mock<IDatabaseInitializer> initializer,
+        StartupStatus startupStatus)
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder();
+        _ = builder.Services.AddLogging();
+        _ = builder.Services.AddDbContext<AppDbContext>(
+            options => options.UseSqlite(
+                connection,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
+        _ = builder.Services.AddScoped(_ => initializer.Object);
+        _ = builder.Services.AddSingleton<IStartupStatus>(startupStatus);
+        return builder.Build();
+    }
+
+    private static async Task EnsureLegacySchemaAsync(WebApplication app)
+    {
+        await using AsyncServiceScope scope = app.Services.CreateAsyncScope();
+        AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        _ = await context.Database.EnsureCreatedAsync();
+    }
+
+    private static async Task ExecuteSqlAsync(SqliteConnection connection, string sql)
+    {
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
+        _ = await command.ExecuteNonQueryAsync();
+    }
+
     private static async Task<bool> TableExistsAsync(SqliteConnection connection, string tableName)
     {
+        await EnsureConnectionOpenAsync(connection);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             "SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @tableName)";
@@ -603,9 +734,27 @@ public sealed class DatabaseMigrationTests
         return Convert.ToBoolean(result);
     }
 
+    private static async Task<bool> ColumnExistsAsync(
+        SqliteConnection connection,
+        string tableName,
+        string columnName)
+    {
+        await EnsureConnectionOpenAsync(connection);
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = tableName switch
+        {
+            "DeviceTokens" =>
+                "SELECT 1 FROM pragma_table_info('DeviceTokens') WHERE name = @columnName",
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName), tableName, null),
+        };
+        _ = command.Parameters.AddWithValue("@columnName", columnName);
+        return await command.ExecuteScalarAsync() is not null;
+    }
+
     private static async Task<IReadOnlyList<string>> ReadAppliedMigrationIdsAsync(
         SqliteConnection connection)
     {
+        await EnsureConnectionOpenAsync(connection);
         await using SqliteCommand command = connection.CreateCommand();
         command.CommandText =
             """SELECT "MigrationId" FROM "__EFMigrationsHistory" ORDER BY "MigrationId";""";
@@ -617,6 +766,14 @@ public sealed class DatabaseMigrationTests
         }
 
         return migrationIds;
+    }
+
+    private static async Task EnsureConnectionOpenAsync(SqliteConnection connection)
+    {
+        if (connection.State != System.Data.ConnectionState.Open)
+        {
+            await connection.OpenAsync();
+        }
     }
 
     private static async Task AssertCorruptedLegacySchemaRejectedAsync(
@@ -703,6 +860,78 @@ internal sealed class ArbitraryBaselineDbContext(
 internal sealed class ArbitraryBaselineEntity
 {
     public int Id { get; set; }
+}
+
+internal sealed class TemporarySqliteDatabase : IAsyncDisposable
+{
+    private TemporarySqliteDatabase(string path, SqliteConnection connection)
+    {
+        Path = path;
+        Connection = connection;
+    }
+
+    internal SqliteConnection Connection { get; }
+
+    private string Path { get; }
+
+    internal static async Task<TemporarySqliteDatabase> CreateAsync()
+    {
+        string path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"printfarmer-database-migration-{Guid.NewGuid():N}.db");
+        var connection = new SqliteConnection($"Data Source={path};Pooling=False");
+        await connection.OpenAsync();
+        return new TemporarySqliteDatabase(path, connection);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await Connection.DisposeAsync();
+        File.Delete(Path);
+    }
+}
+
+internal sealed record RecordedLogEntry(
+    LogLevel Level,
+    Exception? Exception,
+    string Message);
+
+internal sealed class RecordingLoggerProvider : ILoggerProvider
+{
+    internal List<RecordedLogEntry> Entries { get; } = [];
+
+    public ILogger CreateLogger(string categoryName)
+    {
+        return new RecordingLogger(Entries);
+    }
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class RecordingLogger(List<RecordedLogEntry> entries) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+        {
+            return null;
+        }
+
+        public bool IsEnabled(LogLevel logLevel)
+        {
+            return true;
+        }
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            entries.Add(new RecordedLogEntry(logLevel, exception, formatter(state, exception)));
+        }
+    }
 }
 
 [DbContext(typeof(ArbitraryBaselineDbContext))]
