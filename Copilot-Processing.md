@@ -96,3 +96,4 @@ Own issue #1232 end-to-end: reproduce and fix the slicer-host startup DI scope-v
 - Corrected the slicer-host `AddDbContextFactory<AppDbContext>` registration to `ServiceLifetime.Scoped`, matching the existing factory pattern in the main API and slicer module.
 - Focused `SlicerHostServiceProviderScopeTests`: 1 passed with `ValidateOnBuild=true` and `ValidateScopes=true`.
 - Full `farm-web.sln` Debug build: 0 warnings, 0 errors.
+- Review follow-up removed the duplicate aliased host project reference, pinned the test composition to non-split mode, and made test factory replacements explicitly scoped.

@@ -96,7 +96,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 _connectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Slicer.Migrations.Sqlite"));
             services.AddSingleton(optionsBuilder.Options);
-            services.AddDbContextFactory<SlicerDbContext>();
+            services.AddDbContextFactory<SlicerDbContext>(_ => { }, ServiceLifetime.Scoped);
 
             ServiceProvider sp = services.BuildServiceProvider();
             using (IServiceScope scope = sp.CreateScope())
@@ -135,7 +135,7 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
                 _connectionString,
                 sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite"));
             services.AddSingleton(appOptionsBuilder.Options);
-            services.AddDbContextFactory<AppDbContext>();
+            services.AddDbContextFactory<AppDbContext>(_ => { }, ServiceLifetime.Scoped);
 
             // Create AppDbContext tables in the shared DB
             ServiceProvider sp2 = services.BuildServiceProvider();

@@ -21,6 +21,7 @@ public sealed class SlicerHostServiceProviderScopeTests
             EnvironmentName = "Testing",
         });
 
+        builder.Configuration["DEPLOYMENT_MODE"] = string.Empty;
         builder.Configuration["DB_PROVIDER"] = "sqlite";
         builder.Configuration["ConnectionStrings:Default"] = "Data Source=:memory:";
 
