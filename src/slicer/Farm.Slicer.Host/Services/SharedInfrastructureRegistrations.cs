@@ -76,21 +76,31 @@ public static class SharedInfrastructureRegistrations
             }
         });
 
-        services.AddDbContextFactory<AppDbContext>(options =>
-        {
-            if (dbConfig.IsSqlServer)
+        // Register the factory with Scoped lifetime so DbContextOptions<AppDbContext>
+        // (registered as Scoped by AddDbContext above) is captured consistently.
+        // Defaulting to Singleton here fails ASP.NET Core DI scope validation with:
+        //   "Cannot consume scoped service 'DbContextOptions<AppDbContext>'
+        //    from singleton 'IDbContextFactory<AppDbContext>'"
+        // and crash-loops slicer-host at startup (issue #1232). This matches the
+        // registration pattern used by the main API (AddPrintFarmerDatabase) and
+        // by SlicerDbContext in AddSlicerModule.
+        services.AddDbContextFactory<AppDbContext>(
+            options =>
             {
-                options.UseSqlServer(dbConfig.ConnectionString);
-            }
-            else if (dbConfig.IsPostgres)
-            {
-                options.UseNpgsql(dbConfig.ConnectionString);
-            }
-            else
-            {
-                options.UseSqlite(dbConfig.ConnectionString);
-            }
-        });
+                if (dbConfig.IsSqlServer)
+                {
+                    options.UseSqlServer(dbConfig.ConnectionString);
+                }
+                else if (dbConfig.IsPostgres)
+                {
+                    options.UseNpgsql(dbConfig.ConnectionString);
+                }
+                else
+                {
+                    options.UseSqlite(dbConfig.ConnectionString);
+                }
+            },
+            ServiceLifetime.Scoped);
 
         // Data Protection for ISensitiveDataProtector (used by AppUnitOfWork)
         services.AddDataProtection();
