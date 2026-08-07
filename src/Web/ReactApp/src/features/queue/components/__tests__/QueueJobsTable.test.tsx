@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
+import { PrintJobPriority } from "@/types/api";
 import "@testing-library/jest-dom";
 
 // Hoisted so the vi.mock factory below can safely reference it before imports resolve.
@@ -55,7 +56,7 @@ describe("QueueJobsTable Component", () => {
       name: "test-print",
       gcodeFileId: "file-1",
       status: "Queued",
-      priority: 0,
+      priority: PrintJobPriority.Low,
       queuePosition: 1,
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),
@@ -87,7 +88,7 @@ describe("QueueJobsTable Component", () => {
         name: "test-print",
         gcodeFileId: "file-1",
         status: "Queued",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -110,7 +111,7 @@ describe("QueueJobsTable Component", () => {
         name: "another-print",
         gcodeFileId: "file-2",
         status: "Printing",
-        priority: 1,
+        priority: PrintJobPriority.Normal,
         queuePosition: 0,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -140,6 +141,27 @@ describe("QueueJobsTable Component", () => {
 
     expect(screen.getByText("No Print Jobs Queued")).toBeInTheDocument();
   });
+
+  it.each(Object.values(PrintJobPriority))(
+    "preserves the %s priority label and emits its canonical enum name",
+    (priority) => {
+      const onPriority = vi.fn();
+      const baseJob = createMockJob();
+      const job = createMockJob({
+        job: {
+          ...baseJob.job,
+          priority,
+        },
+      });
+
+      render(<QueueJobsTable jobs={[job]} onPriority={onPriority} />);
+
+      const control = screen.getByRole("combobox", { name: "Job priority" });
+      expect(control).toHaveValue(priority);
+      fireEvent.change(control, { target: { value: priority } });
+      expect(onPriority).toHaveBeenCalledWith(job.job.id, priority);
+    },
+  );
 
   it("should render loading state", () => {
     const mockHandlers = {
@@ -185,7 +207,7 @@ describe("QueueJobsTable Component", () => {
         name: "due-soon-print",
         gcodeFileId: "file-3",
         status: "Queued",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 2,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -263,7 +285,7 @@ describe("QueueJobsTable Component", () => {
         name: "external-print",
         gcodeFileId: "",
         status: "Printing",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -353,7 +375,7 @@ describe("QueueJobsTable Component", () => {
         name: "waiting-print",
         gcodeFileId: "",
         status: "Queued",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -446,7 +468,7 @@ describe("QueueJobsTable — filament coverage badge", () => {
       name: "badge-test-print",
       gcodeFileId: "f-badge",
       status: "Queued" as const,
-      priority: 0,
+      priority: PrintJobPriority.Low,
       queuePosition: 1,
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),

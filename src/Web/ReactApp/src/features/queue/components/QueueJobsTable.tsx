@@ -1,6 +1,6 @@
 import { Button, ProgressBar, Select, Spinner } from "@/common/components/ui";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
-import type { DispatchUploadProgressDto } from "@/types/api";
+import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
 import { Download, Clock, Layers, DollarSign, Box, Palette, Timer, FolderOpen, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
 import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
@@ -71,7 +71,7 @@ export interface QueueJobsTableProps {
   onResume?: (jobId: string) => void;
   onCancel?: (jobId: string) => void;
   onAbortPrint?: (jobId: string) => void;
-  onPriority?: (jobId: string, priority: number) => void;
+  onPriority?: (jobId: string, priority: PrintJobPriority) => void;
   onEdit?: (jobId: string) => void;
   onDispatch?: (jobId: string) => void;
   onSchedule?: (jobId: string) => void;
@@ -189,7 +189,7 @@ export function QueueJobsTable({
         const model = jobWrapper.assignedPrinter?.modelName || "";
         const material = jobWrapper.gcodeFile?.materialType || job.requiredMaterialType || "";
         const status = job.status || "Unknown";
-        const priority = job.priority || 0;
+        const priority = job.priority;
         const projectName = job.projectName;
 
         const livePrinterId = jobWrapper.assignedPrinter?.id;
@@ -355,14 +355,14 @@ export function QueueJobsTable({
               <td className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
                 <Select
                   value={priority}
-                  onChange={(e) => onPriority?.(jobId, parseInt(e.target.value))}
+                  onChange={(e) => onPriority?.(jobId, e.target.value as PrintJobPriority)}
                   className="text-xs w-full"
                   aria-label="Job priority"
                 >
-                  <option value="0">Normal</option>
-                  <option value="1">High</option>
-                  <option value="2">Urgent</option>
-                  <option value="-1">Low</option>
+                  <option value={PrintJobPriority.Low}>Low</option>
+                  <option value={PrintJobPriority.Normal}>Normal</option>
+                  <option value={PrintJobPriority.High}>High</option>
+                  <option value={PrintJobPriority.Urgent}>Urgent</option>
                 </Select>
               </td>
 

@@ -31,6 +31,7 @@ import {
   PrinterCameraUrls,
   PrinterDetails,
   PrinterFast,
+  PrintJobPriority,
   PrintJobObjectListDto,
   QueuedPrintJobWithFileMetaDto,
   RegisterDiscoveredPrinterRequest,
@@ -1321,10 +1322,10 @@ export function useQueuePrintJob() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ printerId, gcodeFileId, priority = 0 }: { printerId: string; gcodeFileId: string; priority?: number }) =>
+    mutationFn: ({ printerId, gcodeFileId, priority = PrintJobPriority.Normal }: { printerId: string; gcodeFileId: string; priority?: PrintJobPriority }) =>
       apiClient.queuePrintJob(printerId, gcodeFileId, priority),
     onMutate: async (vars) => {
-      const { printerId, gcodeFileId, priority = 0 } = vars;
+      const { printerId, gcodeFileId, priority = PrintJobPriority.Normal } = vars;
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue(printerId) });
       await queryClient.cancelQueries({ queryKey: queryKeys.jobQueue() });
       const printerQueueKey = queryKeys.jobQueue(printerId);

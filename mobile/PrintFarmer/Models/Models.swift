@@ -99,20 +99,6 @@ enum PrintJobPriority: String, Codable, Sendable {
         let str = (try? container.decode(String.self)) ?? ""
         self = Self(rawValue: str) ?? .normal
     }
-
-    /// Maps the backend integer priority value to the enum.
-    /// PrintJobDto serializes `priority` as a raw `int`, not as a `JsonStringEnumConverter` enum,
-    /// so callers that consume that field continue to use this helper.
-
-    static func from(intValue: Int) -> PrintJobPriority? {
-        switch intValue {
-        case 0: .low
-        case 1: .normal
-        case 2: .high
-        case 3: .urgent
-        default: nil
-        }
-    }
 }
 
 enum AutoDispatchState: String, Codable, Sendable {
@@ -577,7 +563,7 @@ struct PrintJob: Codable, Identifiable, Sendable {
     var calibrationProjectId: UUID? = nil
     var pinnedPrinterConfigRevision: Int64? = nil
     let status: PrintJobStatus?
-    let priority: Int
+    let priority: PrintJobPriority
     let queuePosition: Int
     let gcodeFileId: UUID?
     let gcodeFileName: String
@@ -694,7 +680,7 @@ struct QueuedJobInfo: Codable, Identifiable, Sendable {
     let printerName: String?
     let printerModel: String?
     let status: String
-    let priority: Int
+    let priority: PrintJobPriority
     let queuePosition: Int
     let estimatedPrintTimeSeconds: Int?
     let actualStartTimeUtc: Date?

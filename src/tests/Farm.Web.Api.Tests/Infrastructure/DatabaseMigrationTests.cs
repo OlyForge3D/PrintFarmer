@@ -38,10 +38,55 @@ public sealed class DatabaseMigrationTests
             NullLogger.Instance);
 
         first.LegacySchemaBaselined.Should().BeFalse();
-        first.AppliedMigrations.Should().Equal("20260730231403_InitialV2");
+        first.AppliedMigrations.Should().Equal(
+            "20260730231403_InitialV2",
+            "20260806232640_CanonicalizePrintJobPriority");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CoreMigration_NormalizesLegacyPrintJobPrioritiesBeforeAddingConstraint()
+    {
+        await using SqliteConnection connection = await OpenConnectionAsync();
+        await using AppDbContext context = CreateCoreContext(connection);
+        IMigrator migrator = context.Database.GetService<IMigrator>();
+        await migrator.MigrateAsync("20260730231403_InitialV2");
+
+        DateTime now = new(2026, 8, 6, 23, 30, 0, DateTimeKind.Utc);
+        context.PrintJobs.AddRange(
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "Legacy negative priority",
+                Status = PrintJobStatus.Queued,
+                Priority = -1,
+                CreatedAt = now,
+                UpdatedAt = now,
+            },
+            new PrintJob
+            {
+                Id = Guid.NewGuid(),
+                Name = "Legacy oversized priority",
+                Status = PrintJobStatus.Queued,
+                Priority = 100,
+                CreatedAt = now,
+                UpdatedAt = now,
+            });
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+
+        _ = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Core,
+            NullLogger.Instance);
+
+        int[] priorities = await context.PrintJobs
+            .OrderBy(job => job.Name)
+            .Select(job => job.Priority)
+            .ToArrayAsync();
+        priorities.Should().Equal((int)PrintJobPriority.Low, (int)PrintJobPriority.Urgent);
     }
 
     [Fact]

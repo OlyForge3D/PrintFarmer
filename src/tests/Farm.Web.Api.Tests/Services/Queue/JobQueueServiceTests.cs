@@ -652,7 +652,7 @@ public class JobQueueServiceTests
         result.GcodeFileName.Should().Be("test.gcode");
         result.AssignedPrinterId.Should().Be(printerId);
         result.Status.Should().Be(PrintJobStatus.Queued);
-        result.Priority.Should().Be((int)PrintJobPriority.High);
+        result.Priority.Should().Be(PrintJobPriority.High);
         result.QueuePosition.Should().Be(1);
         result.EstimatedPrintTime.Should().Be(TimeSpan.FromMinutes(120));
         result.EstimatedFilamentUsage.Should().Be(25.5);
@@ -912,7 +912,7 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be((int)PrintJobPriority.Urgent);
+        result!.Priority.Should().Be(PrintJobPriority.Urgent);
     }
 
     #endregion
@@ -1313,7 +1313,7 @@ public class JobQueueServiceTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
-        var request = new UpdateJobPriorityDto { Priority = 10 };
+        var request = new UpdateJobPriorityDto { Priority = (PrintJobPriority)10 };
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(jobId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PrintJob?)null);
 
@@ -1332,7 +1332,7 @@ public class JobQueueServiceTests
             .WithPriority(0)
             .AsQueued()
             .Build();
-        var request = new UpdateJobPriorityDto { Priority = (int)PrintJobPriority.High }; // 2 = High
+        var request = new UpdateJobPriorityDto { Priority = PrintJobPriority.High };
 
         _mockDataService.Setup(x => x.GetPrintJobByIdAsync(job.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(job);
@@ -1344,7 +1344,7 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be((int)PrintJobPriority.High);
+        result!.Priority.Should().Be(PrintJobPriority.High);
         job.Priority.Should().Be((int)PrintJobPriority.High);
         job.UpdatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromSeconds(5));
         _mockRepo.Verify(x => x.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
@@ -1416,7 +1416,7 @@ public class JobQueueServiceTests
 
         // Assert
         result.Should().NotBeNull();
-        result!.Priority.Should().Be((int)PrintJobPriority.Urgent);
+        result!.Priority.Should().Be(PrintJobPriority.Urgent);
         job.Priority.Should().Be((int)PrintJobPriority.Urgent);
     }
 

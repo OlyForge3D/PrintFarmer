@@ -2,6 +2,7 @@ import { render, screen, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
 import type { JobDetails } from "@/types/queue";
+import { PrintJobPriority } from "@/types/api";
 
 // Mock the API client used by the modal (fetch job details) and its child
 // JobDetailsSection (filament list — only fires in edit mode).
@@ -20,7 +21,7 @@ const mockDetails: JobDetails = {
   id: "job-1",
   name: "dragon-model.gcode",
   status: "Completed",
-  priority: 0,
+  priority: PrintJobPriority.Low,
   queuePosition: 0,
   printerName: "Snapmaker U1",
   printerModel: "U1",

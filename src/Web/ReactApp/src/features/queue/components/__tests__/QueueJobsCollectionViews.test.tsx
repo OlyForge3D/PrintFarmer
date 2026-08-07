@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { QueueJobsCardView, QueueJobsListView } from "../QueueJobsCollectionViews";
 import { QueueViewModeSelector } from "../QueueViewModeSelector";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
+import { PrintJobPriority } from "@/types/api";
 
 function createMockJob(overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto {
   return {
@@ -13,7 +14,7 @@ function createMockJob(overrides?: Partial<QueuedPrintJobWithFileMetaDto>): Queu
       name: "benchy-print",
       gcodeFileId: "file-1",
       status: "Queued",
-      priority: 0,
+      priority: PrintJobPriority.Low,
       queuePosition: 1,
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),
@@ -86,7 +87,7 @@ describe("Queue view mode + collection renderers", () => {
         name: "external-print",
         gcodeFileId: "",
         status: "Printing",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -114,7 +115,7 @@ describe("Queue view mode + collection renderers", () => {
         name: "waiting-print",
         gcodeFileId: "",
         status: "Queued",
-        priority: 0,
+        priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
         updatedAtUtc: new Date().toISOString(),
@@ -135,4 +136,3 @@ describe("Queue view mode + collection renderers", () => {
     expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
   });
 });
-

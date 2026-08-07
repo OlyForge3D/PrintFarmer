@@ -38,7 +38,7 @@ import {
   mutationErrorStatus,
 } from "@/common/utils/mutationError";
 import { queueSummariesFleetQueryKey } from "@/features/printers/hooks/useQueueSummariesFleet";
-import type { DispatchUploadProgressDto } from "@/types/api";
+import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
 import type {
   QueuedPrintJobWithFileMetaDto,
   QueueStatsDto,
@@ -595,7 +595,7 @@ export function PrintQueueDashboardPage() {
     }
   };
 
-  const handlePriorityChange = async (jobId: string, newPriority: number) => {
+  const handlePriorityChange = async (jobId: string, newPriority: PrintJobPriority) => {
     if (!confirmRefreshedIntent([jobId], "priority update")) return;
     try {
       const rowVersion = jobs.find((entry) => entry.job.id === jobId)?.job.rowVersion;

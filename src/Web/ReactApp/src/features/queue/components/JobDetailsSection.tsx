@@ -1,14 +1,19 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { apiClient } from '@/services/api';
-import { Select, Spinner } from '@/common/components/ui';
-import type { SpoolmanFilament } from '@/types/api';
+import { RadioGroup, Select, Spinner } from '@/common/components/ui';
+import { PrintJobPriority, type SpoolmanFilament } from '@/types/api';
+
+const priorityOptions = Object.values(PrintJobPriority).map((priority) => ({
+  value: priority,
+  label: priority,
+}));
 
 export interface JobDetailsSectionProps {
   jobDetails: {
     id: string;
     name: string;
     status: string;
-    priority: number;
+    priority: PrintJobPriority;
     queuePosition: number;
     printerName?: string;
     printerModel?: string;
@@ -55,30 +60,11 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
     return localDate.toISOString();
   }, []);
 
-  const validatePriority = useCallback((value: number) => {
-    if (value < 0 || value > 100) {
-      setErrors((prev) => ({
-        ...prev,
-        priority: 'Priority must be between 0 and 100',
-      }));
-      return false;
-    }
-    setErrors((prev) => {
-      const newErrors = { ...prev };
-      delete newErrors.priority;
-      return newErrors;
-    });
-    return true;
-  }, []);
-
   const handlePriorityChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = parseInt(e.target.value, 10);
-      if (!isNaN(value) && validatePriority(value)) {
-        onFieldChange('priority', value);
-      }
+    (value: string) => {
+      onFieldChange('priority', value as PrintJobPriority);
     },
-    [validatePriority, onFieldChange]
+    [onFieldChange]
   );
 
   const handleCopiesChange = useCallback(
@@ -209,28 +195,18 @@ const JobDetailsSection: React.FC<JobDetailsSectionProps> = ({
             )}
           </div>
 
-          <div className="space-y-1.5">
-            <label htmlFor="job-priority" className="block text-sm font-medium text-pf-text-secondary">
+          <div className="space-y-2">
+            <span id="job-priority-label" className="block text-sm font-medium text-pf-text-secondary">
               Priority
-              <span className="ml-1 text-xs text-pf-text-muted">(0-100, higher = more urgent)</span>
-            </label>
-            <input
-              id="job-priority"
-              type="number"
-              min="0"
-              max="100"
+            </span>
+            <RadioGroup
+              name="job-priority"
+              options={priorityOptions}
               value={jobDetails.priority}
               onChange={handlePriorityChange}
-              placeholder="Priority (0-100)"
-              className="w-full px-3 py-2 text-sm border border-pf-border rounded-sm bg-pf-bg-0 text-pf-text-primary focus:outline-hidden focus:ring-2 focus:ring-pf-accent focus:border-transparent"
-              aria-invalid={!!errors.priority}
-              aria-describedby={errors.priority ? 'priority-error' : undefined}
+              direction="horizontal"
+              aria-labelledby="job-priority-label"
             />
-            {errors.priority && (
-              <span id="priority-error" className="text-xs text-pf-error" role="alert">
-                {errors.priority}
-              </span>
-            )}
           </div>
 
           <div className="space-y-1.5">

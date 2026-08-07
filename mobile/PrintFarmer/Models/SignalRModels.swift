@@ -36,7 +36,7 @@ struct JobQueueUpdateEntry: Codable, Identifiable, Sendable {
     let id: UUID
     let name: String
     let status: PrintJobStatus
-    let priority: Int
+    let priority: PrintJobPriority
     let queuedAt: Date
     let actualStartTime: Date?
     let actualEndTime: Date?

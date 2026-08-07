@@ -39,7 +39,7 @@ public class PrintJob
 
     public PrintJobStatus Status { get; set; }
 
-    public int Priority { get; set; } // Higher = more important
+    public int Priority { get; set; } = (int)PrintJobPriority.Normal; // Higher = more important
 
     public int QueuePosition { get; set; }
 

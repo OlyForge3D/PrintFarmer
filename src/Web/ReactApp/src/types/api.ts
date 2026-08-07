@@ -1940,6 +1940,13 @@ export enum PrintJobStatus {
   Cancelled = 'Cancelled',
 }
 
+export enum PrintJobPriority {
+  Low = 'Low',
+  Normal = 'Normal',
+  High = 'High',
+  Urgent = 'Urgent',
+}
+
 export interface JobQueuePrintJob {
   id: string;
   rowVersion?: string | null;
@@ -1949,7 +1956,7 @@ export interface JobQueuePrintJob {
   gcodeFileId: string;
   gcodeFileName: string;
   status?: PrintJobStatus;
-  priority: number;
+  priority: PrintJobPriority;
   estimatedDuration?: number;
   queuedAt: Date;
   startedAt?: Date;
@@ -2453,7 +2460,7 @@ export interface QueuedPrintJobDto {
   jobKind?: 'Standard' | 'FilamentCalibration';
   calibrationProjectId?: string | null;
   status: string;
-  priority: number;
+  priority: PrintJobPriority;
   queuePosition: number;
   requiredNozzleDiameter?: number;
   requiredMaterialType?: string;
