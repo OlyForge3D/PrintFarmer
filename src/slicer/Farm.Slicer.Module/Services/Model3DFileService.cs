@@ -1086,18 +1086,18 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             throw new ArgumentException("The model path escapes the configured storage root.", nameof(path));
         }
 
-        if (!_fileSystem.FileExists(requestedPath))
-        {
-            _logger.LogWarning("[Download] File not found: {ResolvedPath}", requestedPath);
-            return null;
-        }
-
         string physicalStorageRoot = ResolvePhysicalPath(storageRoot);
         string physicalRequestedPath = ResolvePhysicalPath(requestedPath);
         if (!IsWithinStorageRoot(physicalStorageRoot, physicalRequestedPath))
         {
             _logger.LogWarning("[Download] Filesystem link escape attempt blocked");
             throw new UnauthorizedAccessException("The resolved model path is outside the configured storage root.");
+        }
+
+        if (!_fileSystem.FileExists(physicalRequestedPath))
+        {
+            _logger.LogWarning("[Download] File not found: {ResolvedPath}", physicalRequestedPath);
+            return null;
         }
 
         try
