@@ -235,6 +235,37 @@ public class StatisticsDateRangeTests : IAsyncLifetime
         summary.TotalCostUsd.Should().Be(10.00m, "3.00 + 7.00 = 10.00");
     }
 
+    [Fact]
+    public async Task Summary_DateOnlyEndDate_IncludesJobsLaterThatDay()
+    {
+        var printer = await CreateTestPrinterAsync();
+        var date = DateTime.UtcNow.Date.AddDays(-5);
+        await CreateCompletedJobAsync(printer, date.AddHours(12));
+
+        HttpResponseMessage response = await _client!.GetAsync(
+            $"/api/statistics/summary?startDate={date:yyyy-MM-dd}&endDate={date:yyyy-MM-dd}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var summary = await response.Content.ReadFromJsonAsync<StatisticsSummaryDto>(JsonOptions);
+        summary!.TotalJobs.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task JobsOverTime_EndOnlyHistoricalDate_UsesDefaultWindow()
+    {
+        var printer = await CreateTestPrinterAsync();
+        var endDate = DateTime.UtcNow.Date.AddDays(-60);
+        await CreateCompletedJobAsync(printer, endDate.AddDays(-10).AddHours(12));
+
+        HttpResponseMessage response = await _client!.GetAsync(
+            $"/api/statistics/jobs-over-time?endDate={endDate:yyyy-MM-dd}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var rows = await response.Content.ReadFromJsonAsync<List<DailyJobCountDto>>(JsonOptions);
+        rows.Should().NotBeNull();
+        rows!.Should().Contain(row => row.Completed == 1);
+    }
+
     #endregion
 
     #region Precedence: startDate/endDate over days

@@ -21,7 +21,19 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
     {
         if (startDate.HasValue || endDate.HasValue)
         {
-            return (startDate, endDate);
+            DateTime? effectiveEnd = endDate;
+            if (effectiveEnd.HasValue && effectiveEnd.Value.TimeOfDay == TimeSpan.Zero)
+            {
+                effectiveEnd = effectiveEnd.Value.Date.AddDays(1).AddTicks(-1);
+            }
+
+            DateTime? effectiveStart = startDate;
+            if (!effectiveStart.HasValue && effectiveEnd.HasValue && defaultDays.HasValue)
+            {
+                effectiveStart = effectiveEnd.Value.AddDays(-defaultDays.Value);
+            }
+
+            return (effectiveStart, effectiveEnd);
         }
 
         if (days.HasValue)
