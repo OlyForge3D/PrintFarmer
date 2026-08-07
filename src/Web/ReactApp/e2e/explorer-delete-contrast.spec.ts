@@ -187,7 +187,7 @@ test.describe('ExplorerView delete contrast (#1141)', () => {
       expect(focus.ratio, `${theme} focus contrast`).toBeGreaterThanOrEqual(AA_NORMAL_TEXT);
       expect(hover.background, `${theme} hover affordance`).not.toEqual(resting.background);
       expect(
-        focus.boxShadow !== 'none' || focus.outlineStyle !== 'none',
+        focus.boxShadow !== resting.boxShadow || focus.outlineStyle !== resting.outlineStyle,
         `${theme} keyboard focus indicator`,
       ).toBe(true);
     }
