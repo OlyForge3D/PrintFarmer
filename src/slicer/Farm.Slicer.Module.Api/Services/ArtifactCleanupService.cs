@@ -182,7 +182,7 @@ public class ArtifactCleanupService(
                 // failures. File.Exists cannot distinguish those failures from absence.
                 try
                 {
-                    DeleteArtifactFile(fullPath);
+                    DeleteArtifactFile(rootPath, fullPath);
                     _logger.LogInformation("Deleted artifact file {Path}", fullPath);
                 }
                 catch (Exception ex) when (
@@ -348,7 +348,7 @@ public class ArtifactCleanupService(
 
                 try
                 {
-                    DeleteArtifactFile(fullPath);
+                    DeleteArtifactFile(rootPath, fullPath);
                     reconciledCount++;
                     _logger.LogInformation(
                         "Reconciled stale orphan artifact file {Path}",
@@ -473,5 +473,6 @@ public class ArtifactCleanupService(
 
     protected virtual bool ArtifactFileExists(string path) => File.Exists(path);
 
-    protected virtual void DeleteArtifactFile(string path) => File.Delete(path);
+    protected virtual void DeleteArtifactFile(string rootPath, string path) =>
+        ArtifactStorageFileSystem.DeleteFileNoFollow(rootPath, path);
 }

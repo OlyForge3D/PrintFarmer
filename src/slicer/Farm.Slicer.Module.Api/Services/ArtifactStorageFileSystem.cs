@@ -105,6 +105,12 @@ internal static class ArtifactStorageFileSystem
         int error;
         if (OperatingSystem.IsWindows())
         {
+            string publicationDirectory =
+                Path.GetDirectoryName(publicationPath) ??
+                throw new IOException(
+                    "The artifact publication path has no parent directory.");
+            using SafeFileHandle publicationDirectoryHandle =
+                OpenPinnedWindowsDirectory(publicationDirectory);
             if (CreateHardLinkWindows(
                     publicationPath,
                     stagingPath,
@@ -125,17 +131,39 @@ internal static class ArtifactStorageFileSystem
                     stagingHandle.DangerousGetHandle().ToInt32();
                 string descriptorPath =
                     $"/proc/self/fd/{fileDescriptor}";
-                if (CreateHardLinkUnixFromHandle(
-                        LinuxCurrentWorkingDirectory,
-                        descriptorPath,
-                        LinuxCurrentWorkingDirectory,
-                        publicationPath,
-                        LinuxFollowSymbolicLink) == 0)
+                string publicationDirectory =
+                    Path.GetDirectoryName(publicationPath) ??
+                    throw new IOException(
+                        "The artifact publication path has no parent directory.");
+                int publicationDirectoryFileDescriptor = OpenLinuxFile(
+                    publicationDirectory,
+                    LinuxDirectoryFlags);
+                if (publicationDirectoryFileDescriptor < 0)
                 {
-                    return;
+                    error = Marshal.GetLastPInvokeError();
                 }
+                else
+                {
+                    try
+                    {
+                        if (CreateHardLinkUnixFromHandle(
+                                LinuxCurrentWorkingDirectory,
+                                descriptorPath,
+                                publicationDirectoryFileDescriptor,
+                                Path.GetFileName(publicationPath),
+                                LinuxFollowSymbolicLink) == 0)
+                        {
+                            return;
+                        }
 
-                error = Marshal.GetLastPInvokeError();
+                        error = Marshal.GetLastPInvokeError();
+                    }
+                    finally
+                    {
+                        _ = CloseLinuxFile(
+                            publicationDirectoryFileDescriptor);
+                    }
+                }
             }
             finally
             {
@@ -154,6 +182,65 @@ internal static class ArtifactStorageFileSystem
         throw new IOException(
             "Failed to atomically publish the artifact on the same filesystem.",
             new Win32Exception(error));
+    }
+
+    private static SafeFileHandle OpenPinnedWindowsDirectory(string path)
+    {
+        SafeFileHandle handle = OpenWindowsFile(
+            path,
+            WindowsReadAttributes,
+            WindowsShareRead | WindowsShareWrite,
+            IntPtr.Zero,
+            WindowsOpenExisting,
+            WindowsOpenReparsePoint | WindowsBackupSemantics,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            int error = Marshal.GetLastPInvokeError();
+            handle.Dispose();
+            ThrowWindowsDeletionException(path, error);
+        }
+
+        try
+        {
+            if (!GetWindowsFileInformation(
+                    handle,
+                    WindowsFileInfoByHandleClass.FileBasicInfo,
+                    out WindowsFileBasicInfo fileInfo,
+                    (uint)Marshal.SizeOf<WindowsFileBasicInfo>()))
+            {
+                ThrowWindowsDeletionException(
+                    path,
+                    Marshal.GetLastPInvokeError());
+            }
+
+            if ((fileInfo.FileAttributes & WindowsDirectoryAttribute) == 0 ||
+                (fileInfo.FileAttributes & WindowsReparsePointAttribute) != 0)
+            {
+                throw new IOException(
+                    $"The artifact publication parent '{path}' is not a safe directory.");
+            }
+
+            string expectedPath = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(path));
+            string resolvedPath = Path.TrimEndingDirectorySeparator(
+                GetWindowsFinalPath(handle));
+            if (!string.Equals(
+                    expectedPath,
+                    resolvedPath,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException(
+                    "The artifact publication directory resolved to an unexpected path.");
+            }
+
+            return handle;
+        }
+        catch
+        {
+            handle.Dispose();
+            throw;
+        }
     }
 
     internal static FileStream CreateStagingStream(string stagingPath)
@@ -440,6 +527,250 @@ internal static class ArtifactStorageFileSystem
         }
     }
 
+    internal static void DeleteFileNoFollow(string rootPath, string fullPath)
+    {
+        string normalizedRoot = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(rootPath));
+        string normalizedPath = Path.GetFullPath(fullPath);
+        if (!IsWithinRoot(normalizedRoot, normalizedPath))
+        {
+            throw new IOException(
+                "The artifact deletion path is outside the artifact root.");
+        }
+
+        string relativePath = Path.GetRelativePath(
+            normalizedRoot,
+            normalizedPath);
+        string[] components = relativePath.Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries);
+        if (components.Length == 0 ||
+            components.Any(component => component is "." or ".."))
+        {
+            throw new IOException(
+                "The artifact deletion path is not safely contained.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            DeleteWindowsFileNoFollow(
+                normalizedRoot,
+                normalizedPath);
+            return;
+        }
+
+        if (OperatingSystem.IsLinux())
+        {
+            DeleteLinuxFileNoFollow(
+                normalizedRoot,
+                components,
+                normalizedPath);
+            return;
+        }
+
+        throw new PlatformNotSupportedException(
+            "Race-safe artifact deletion is not supported on this platform.");
+    }
+
+    private static void DeleteLinuxFileNoFollow(
+        string rootPath,
+        string[] components,
+        string fullPath)
+    {
+        int directoryFileDescriptor = OpenLinuxFile(
+            rootPath,
+            LinuxDirectoryFlags);
+        if (directoryFileDescriptor < 0)
+        {
+            ThrowLinuxDeletionException(
+                fullPath,
+                Marshal.GetLastPInvokeError());
+            return;
+        }
+
+        try
+        {
+            for (int index = 0; index < components.Length - 1; index++)
+            {
+                int childFileDescriptor = OpenLinuxFileAt(
+                    directoryFileDescriptor,
+                    components[index],
+                    LinuxDirectoryFlags,
+                    mode: 0);
+                if (childFileDescriptor < 0)
+                {
+                    ThrowLinuxDeletionException(
+                        fullPath,
+                        Marshal.GetLastPInvokeError());
+                    return;
+                }
+
+                _ = CloseLinuxFile(directoryFileDescriptor);
+                directoryFileDescriptor = childFileDescriptor;
+            }
+
+            if (DeleteLinuxFileAt(
+                    directoryFileDescriptor,
+                    components[^1],
+                    flags: 0) != 0)
+            {
+                ThrowLinuxDeletionException(
+                    fullPath,
+                    Marshal.GetLastPInvokeError());
+            }
+        }
+        finally
+        {
+            _ = CloseLinuxFile(directoryFileDescriptor);
+        }
+    }
+
+    private static void ThrowLinuxDeletionException(
+        string path,
+        int error)
+    {
+        if (error is LinuxNoSuchFileOrDirectory)
+        {
+            return;
+        }
+
+        var innerException = new Win32Exception(error);
+        if (error is LinuxAccessDenied or LinuxOperationNotPermitted)
+        {
+            throw new UnauthorizedAccessException(
+                $"Access was denied while deleting artifact file '{path}'.",
+                innerException);
+        }
+
+        throw new IOException(
+            $"Failed to safely delete artifact file '{path}'.",
+            innerException);
+    }
+
+    private static void DeleteWindowsFileNoFollow(
+        string rootPath,
+        string fullPath)
+    {
+        using SafeFileHandle handle = OpenWindowsFile(
+            fullPath,
+            WindowsDelete | WindowsReadAttributes,
+            WindowsShareRead | WindowsShareWrite,
+            IntPtr.Zero,
+            WindowsOpenExisting,
+            WindowsOpenReparsePoint | WindowsBackupSemantics,
+            IntPtr.Zero);
+        if (handle.IsInvalid)
+        {
+            int error = Marshal.GetLastPInvokeError();
+            if (error is WindowsFileNotFound or WindowsPathNotFound)
+            {
+                return;
+            }
+
+            ThrowWindowsDeletionException(fullPath, error);
+        }
+
+        WindowsFileBasicInfo fileInfo;
+        if (!GetWindowsFileInformation(
+                handle,
+                WindowsFileInfoByHandleClass.FileBasicInfo,
+                out fileInfo,
+                (uint)Marshal.SizeOf<WindowsFileBasicInfo>()))
+        {
+            ThrowWindowsDeletionException(
+                fullPath,
+                Marshal.GetLastPInvokeError());
+        }
+
+        if ((fileInfo.FileAttributes &
+                (WindowsDirectoryAttribute | WindowsReparsePointAttribute)) != 0)
+        {
+            throw new IOException(
+                $"Refusing to delete directory or reparse entry '{fullPath}'.");
+        }
+
+        string resolvedPath = GetWindowsFinalPath(handle);
+        if (!IsWithinRoot(rootPath, resolvedPath))
+        {
+            throw new IOException(
+                "The artifact deletion handle resolved outside the artifact root.");
+        }
+
+        var disposition = new WindowsFileDispositionInfo
+        {
+            DeleteFile = true,
+        };
+        if (!SetWindowsFileInformation(
+                handle,
+                WindowsFileInfoByHandleClass.FileDispositionInfo,
+                ref disposition,
+                (uint)Marshal.SizeOf<WindowsFileDispositionInfo>()))
+        {
+            ThrowWindowsDeletionException(
+                fullPath,
+                Marshal.GetLastPInvokeError());
+        }
+    }
+
+    private static string GetWindowsFinalPath(SafeFileHandle handle)
+    {
+        uint requiredLength = GetWindowsFinalPathName(
+            handle,
+            path: null,
+            capacity: 0,
+            WindowsNormalizedDosPath);
+        if (requiredLength == 0)
+        {
+            throw new IOException(
+                "Failed to resolve the artifact deletion handle.",
+                new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+
+        var path = new char[checked((int)requiredLength + 1)];
+        uint written = GetWindowsFinalPathName(
+            handle,
+            path,
+            path.Length,
+            WindowsNormalizedDosPath);
+        if (written == 0 || written >= path.Length)
+        {
+            throw new IOException(
+                "Failed to resolve the artifact deletion handle.",
+                new Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+
+        string resolvedPath = new(path, 0, (int)written);
+        if (resolvedPath.StartsWith(
+                WindowsExtendedUncPrefix,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return @"\\" + resolvedPath[WindowsExtendedUncPrefix.Length..];
+        }
+
+        return resolvedPath.StartsWith(
+            WindowsExtendedPathPrefix,
+            StringComparison.OrdinalIgnoreCase)
+            ? resolvedPath[WindowsExtendedPathPrefix.Length..]
+            : resolvedPath;
+    }
+
+    private static void ThrowWindowsDeletionException(
+        string path,
+        int error)
+    {
+        var innerException = new Win32Exception(error);
+        if (error is WindowsAccessDenied or WindowsSharingViolation)
+        {
+            throw new UnauthorizedAccessException(
+                $"Access was denied while deleting artifact file '{path}'.",
+                innerException);
+        }
+
+        throw new IOException(
+            $"Failed to safely delete artifact file '{path}'.",
+            innerException);
+    }
+
     private static bool ContainsReparsePoint(string rootPath, string candidatePath)
     {
         var root = new DirectoryInfo(Path.GetFullPath(rootPath));
@@ -484,7 +815,26 @@ internal static class ArtifactStorageFileSystem
     private const int LinuxNamedFileFlags = 0xA00C2;
     private const int LinuxInvalidArgument = 22;
     private const int LinuxOperationNotSupported = 95;
+    private const int LinuxNoSuchFileOrDirectory = 2;
+    private const int LinuxOperationNotPermitted = 1;
+    private const int LinuxAccessDenied = 13;
     private const uint LinuxOwnerReadWrite = 0x180;
+    private const uint WindowsDelete = 0x00010000;
+    private const uint WindowsReadAttributes = 0x00000080;
+    private const uint WindowsShareRead = 0x00000001;
+    private const uint WindowsShareWrite = 0x00000002;
+    private const uint WindowsOpenExisting = 3;
+    private const uint WindowsOpenReparsePoint = 0x00200000;
+    private const uint WindowsBackupSemantics = 0x02000000;
+    private const uint WindowsDirectoryAttribute = 0x00000010;
+    private const uint WindowsReparsePointAttribute = 0x00000400;
+    private const uint WindowsNormalizedDosPath = 0;
+    private const int WindowsFileNotFound = 2;
+    private const int WindowsPathNotFound = 3;
+    private const int WindowsAccessDenied = 5;
+    private const int WindowsSharingViolation = 32;
+    private const string WindowsExtendedPathPrefix = @"\\?\";
+    private const string WindowsExtendedUncPrefix = @"\\?\UNC\";
 
     [DllImport(
         "libc",
@@ -550,11 +900,104 @@ internal static class ArtifactStorageFileSystem
 
     [DllImport(
         "libc",
+        EntryPoint = "unlinkat",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    [SuppressMessage(
+        "Security",
+        "CA2101:Specify marshaling for P/Invoke string arguments",
+        Justification = "POSIX unlinkat paths are explicitly marshaled as UTF-8.")]
+    private static extern int DeleteLinuxFileAt(
+        int directoryFileDescriptor,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags);
+
+    [DllImport(
+        "libc",
         EntryPoint = "close",
         SetLastError = true,
         ExactSpelling = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
     private static extern int CloseLinuxFile(int fileDescriptor);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "CreateFileW",
+        SetLastError = true,
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern SafeFileHandle OpenWindowsFile(
+        string fileName,
+        uint desiredAccess,
+        uint shareMode,
+        IntPtr securityAttributes,
+        uint creationDisposition,
+        uint flagsAndAttributes,
+        IntPtr templateFile);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "GetFileInformationByHandleEx",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowsFileInformation(
+        SafeFileHandle handle,
+        WindowsFileInfoByHandleClass fileInformationClass,
+        out WindowsFileBasicInfo fileInformation,
+        uint bufferSize);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "GetFinalPathNameByHandleW",
+        SetLastError = true,
+        CharSet = CharSet.Unicode,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern uint GetWindowsFinalPathName(
+        SafeFileHandle handle,
+        [Out] char[]? path,
+        int capacity,
+        uint flags);
+
+    [DllImport(
+        "kernel32.dll",
+        EntryPoint = "SetFileInformationByHandle",
+        SetLastError = true,
+        ExactSpelling = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowsFileInformation(
+        SafeFileHandle handle,
+        WindowsFileInfoByHandleClass fileInformationClass,
+        ref WindowsFileDispositionInfo fileInformation,
+        uint bufferSize);
+
+    private enum WindowsFileInfoByHandleClass
+    {
+        FileBasicInfo,
+        FileDispositionInfo = 4,
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsFileBasicInfo
+    {
+        internal long CreationTime;
+        internal long LastAccessTime;
+        internal long LastWriteTime;
+        internal long ChangeTime;
+        internal uint FileAttributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WindowsFileDispositionInfo
+    {
+        [MarshalAs(UnmanagedType.Bool)]
+        internal bool DeleteFile;
+    }
 }
 
 internal sealed class ArtifactWriteLease : IDisposable

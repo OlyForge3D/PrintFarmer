@@ -1608,11 +1608,13 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
             protected override bool ArtifactFileExists(string path) =>
                 _artifactFileExists?.Invoke(path) ?? base.ArtifactFileExists(path);
 
-            protected override void DeleteArtifactFile(string path)
+            protected override void DeleteArtifactFile(
+                string rootPath,
+                string path)
             {
                 if (_deleteArtifactFile is null)
                 {
-                    base.DeleteArtifactFile(path);
+                    base.DeleteArtifactFile(rootPath, path);
                     return;
                 }
 

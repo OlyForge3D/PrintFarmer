@@ -264,6 +264,58 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanAndCleanupAsync_AncestorReplacedDuringRepositoryLookup_PreservesOutsideFile()
+    {
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_outsideRoot);
+        Guid artifactId = Guid.NewGuid();
+        string legacyDirectory = Path.Combine(_root, "legacy");
+        string movedLegacyDirectory = Path.Combine(_root, "legacy-moved");
+        Directory.CreateDirectory(legacyDirectory);
+        string fileName = $"{artifactId}-orphan.gcode";
+        string orphanPath = Path.Combine(legacyDirectory, fileName);
+        string movedOrphanPath = Path.Combine(movedLegacyDirectory, fileName);
+        string outsidePath = Path.Combine(_outsideRoot, fileName);
+        await File.WriteAllTextAsync(orphanPath, "orphan");
+        await File.WriteAllTextAsync(outsidePath, "outside");
+        SetStale(orphanPath);
+        SetStale(outsidePath);
+        Mock<IArtifactsRepository> repository = CreateRepository();
+        repository
+            .Setup(candidate => candidate.GetByIdAsync(
+                artifactId,
+                It.IsAny<CancellationToken>()))
+            .Returns<Guid, CancellationToken>(
+                (_, _) =>
+                {
+                    Directory.Move(
+                        legacyDirectory,
+                        movedLegacyDirectory);
+                    _ = Directory.CreateSymbolicLink(
+                        legacyDirectory,
+                        _outsideRoot);
+                    return Task.FromResult<Artifact?>(null);
+                });
+
+        try
+        {
+            int deleted = await CreateCleanupService(repository.Object)
+                .ScanAndCleanupAsync(CancellationToken.None);
+
+            deleted.Should().Be(0);
+            File.Exists(outsidePath).Should().BeTrue();
+            File.Exists(movedOrphanPath).Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(legacyDirectory))
+            {
+                Directory.Delete(legacyDirectory);
+            }
+        }
+    }
+
+    [Fact]
     public async Task UploadAsync_ReparseStagingDirectory_RejectsWriteOutsideRoot()
     {
         Directory.CreateDirectory(_root);
