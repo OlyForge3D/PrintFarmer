@@ -53,17 +53,18 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             query = query.Where(j => j.QueuedAt <= effectiveEnd.Value);
         }
 
-        int totalJobs = await query.CountAsync(ct);
-        int completed = await query.CountAsync(j => j.Status == PrintJobStatus.Completed, ct);
-        int failed = await query.CountAsync(j => j.Status == PrintJobStatus.Failed, ct);
-        int cancelled = await query.CountAsync(j => j.Status == PrintJobStatus.Cancelled, ct);
-
-        decimal totalCost = await query
-            .Where(j => j.ActualCost.HasValue)
-            .SumAsync(j => j.ActualCost!.Value, ct);
-        double totalFilamentGrams = await query
-            .Where(j => j.ActualFilamentUsage.HasValue)
-            .SumAsync(j => j.ActualFilamentUsage!.Value, ct);
+        var aggregate = await query
+            .GroupBy(_ => 1)
+            .Select(g => new
+            {
+                TotalJobs = g.Count(),
+                Completed = g.Count(j => j.Status == PrintJobStatus.Completed),
+                Failed = g.Count(j => j.Status == PrintJobStatus.Failed),
+                Cancelled = g.Count(j => j.Status == PrintJobStatus.Cancelled),
+                TotalCost = g.Sum(j => j.ActualCost ?? 0m),
+                TotalFilamentGrams = g.Sum(j => j.ActualFilamentUsage ?? 0d),
+            })
+            .SingleOrDefaultAsync(ct);
 
         var ticksList = await query
             .Where(j => j.ActualPrintTime.HasValue)
@@ -71,6 +72,10 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             .ToListAsync(ct);
         double totalPrintHours = ticksList.Sum(t => TimeSpan.FromTicks(t).TotalHours);
 
+        int totalJobs = aggregate?.TotalJobs ?? 0;
+        int completed = aggregate?.Completed ?? 0;
+        int failed = aggregate?.Failed ?? 0;
+        int cancelled = aggregate?.Cancelled ?? 0;
         int finishedJobs = completed + failed + cancelled;
         double successRate = finishedJobs > 0 ? (double)completed / finishedJobs * 100 : 0;
 
@@ -81,8 +86,8 @@ public class StatisticsService(AppDbContext db) : IStatisticsService
             FailedJobs = failed,
             CancelledJobs = cancelled,
             SuccessRate = Math.Round(successRate, 1),
-            TotalCost = totalCost,
-            TotalFilamentGrams = Math.Round(totalFilamentGrams, 1),
+            TotalCost = aggregate?.TotalCost ?? 0m,
+            TotalFilamentGrams = Math.Round(aggregate?.TotalFilamentGrams ?? 0d, 1),
             TotalPrintHours = Math.Round(totalPrintHours, 1),
         };
     }

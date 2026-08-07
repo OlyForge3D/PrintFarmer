@@ -19,3 +19,44 @@ Implement issue #1160: add a real, authorization-safe printer summary projection
 ## Summary
 
 Implemented the additive `/api/printers/summary` projected endpoint with admin-safe disabled-printer handling, cached live status merging, and minimal DTO fields. Migrated dashboard, alert, and catalog-update consumers to the shared React summary query/cache and updated focused tests. Targeted backend tests, React lint, React build, and focused React tests pass. Commit, push, adversarial review, PR, CI, trusted verdict, merge, and issue closure remain.
+
+## Issue #871 Tracking
+
+### Request
+
+Perform an evidence-based cross-stack performance audit, rank ten concrete opportunities by impact, effort, risk, and measurability, implement only the best high-impact low-effort optimization, add focused regression coverage and a reproducible performance validation proxy, and complete the required delivery lifecycle.
+
+### Action Plan
+
+- [x] Audit backend, frontend, database, SignalR, slicer, and deployment performance hotspots.
+- [x] Rank ten opportunities and select the best high-impact low-effort candidate.
+- [x] Implement the focused optimization without broad refactoring.
+- [x] Add focused regression coverage and a reproducible performance validation proxy.
+- [x] Run targeted validation and fix regressions.
+- [ ] Commit and push with exact SHA tracking.
+- [ ] Obtain Bishop/Hicks/Vasquez exact-head consensus.
+- [ ] Open a non-draft PR targeting development with `Closes #871` and verify linkage.
+- [ ] Track CI, trusted verdict, safe merge, issue closure, archival, and report lifecycle state to Ralph.
+
+### Audit Findings And Ranking
+
+| Rank | Opportunity | Impact | Effort | Risk | Measurability |
+|---:|---|---|---|---|---|
+| 1 | Collapse statistics summary's seven sequential database commands into two aggregate reads | High | Low | Low | Exact EF command-count regression test |
+| 2 | Batch per-job resource authorization in queue history instead of one call per returned job | High | Medium | Medium | SQL command count and endpoint timing |
+| 3 | Add a shared query/cache for analytics dashboard requests that overlap across views | Medium | Low | Low | Browser request count and React Query cache assertions |
+| 4 | Replace repeated daily chart row scans with keyed lookups | Medium | Low | Low | Benchmark synthetic 730-day result |
+| 5 | Add bounded caching for rarely changing printer catalog metadata | Medium | Low | Medium | Cache-hit counter and endpoint latency |
+| 6 | Batch maintenance dashboard's per-printer schedule lookups | High | Medium | Medium | SQL command count under fleet fixture |
+| 7 | Add database indexes for common print-job date/status analytics filters | High | Medium | Medium | Query plan and seeded database timing |
+| 8 | Coalesce duplicate SignalR status broadcasts per printer per short interval | Medium | Medium | Medium | Broadcast count under event burst |
+| 9 | Lazy-load additional slicer profile schemas only after selection | Medium | Medium | Low | Network transfer and route chunk size |
+| 10 | Stream large admin export responses instead of materializing full collections | Medium | High | Medium | Peak allocation and response timing |
+
+Selected #1 because it removes five round trips from a frequently used analytics KPI endpoint with no contract, schema, or authorization change.
+
+### Validation Evidence
+
+- `dotnet test .\tests\Farm.Web.Api.Tests\Farm.Web.Api.Tests.csproj -c Debug --no-restore --filter 'FullyQualifiedName~StatisticsDateRangeTests|FullyQualifiedName~StatisticsServicePerformanceTests'`
+- Result: 18 tests passed.
+- Performance proxy: `StatisticsServicePerformanceTests.GetSummaryAsync_UsesTwoDatabaseCommandsForAggregateMetrics` asserts the endpoint preserves totals while using exactly two non-schema EF reader commands.
