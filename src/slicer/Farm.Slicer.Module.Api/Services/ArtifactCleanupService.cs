@@ -288,9 +288,15 @@ public class ArtifactCleanupService(
                 continue;
             }
 
-            if (!TryAcquireInactiveLease(
+            string leasePath = isDirectStagingFile
+                ? ArtifactStorageFileSystem.GetStagingLeasePath(
                     rootPath,
-                    artifactId,
+                    artifactId)
+                : ArtifactStorageFileSystem.GetPublishedLeasePath(
+                    rootPath,
+                    artifactId);
+            if (!TryAcquireInactiveLease(
+                    leasePath,
                     staleBeforeUtc,
                     out FileStream? leaseStream))
             {
@@ -331,11 +337,10 @@ public class ArtifactCleanupService(
                     continue;
                 }
 
-                bool deletingLeaseFile = isDirectStagingFile &&
-                    string.Equals(
-                        Path.GetExtension(fullPath),
-                        ArtifactStorageFileSystem.LeaseFileExtension,
-                        StringComparison.Ordinal);
+                bool deletingLeaseFile = string.Equals(
+                    fullPath,
+                    leasePath,
+                    pathComparison);
                 if (deletingLeaseFile)
                 {
                     if (leaseStream is not null)
@@ -423,17 +428,11 @@ public class ArtifactCleanupService(
     }
 
     private static bool TryAcquireInactiveLease(
-        string rootPath,
-        Guid artifactId,
+        string leasePath,
         DateTime staleBeforeUtc,
         out FileStream? leaseStream)
     {
         leaseStream = null;
-        string leaseFileName = artifactId.ToString("N") +
-            ArtifactStorageFileSystem.LeaseFileExtension;
-        string leasePath = Path.Combine(
-            ArtifactStorageFileSystem.GetStagingDirectory(rootPath),
-            leaseFileName);
         var leaseFile = new FileInfo(leasePath);
         try
         {
@@ -466,11 +465,15 @@ public class ArtifactCleanupService(
         }
         catch (FileNotFoundException)
         {
+            leaseStream?.Dispose();
+            leaseStream = null;
             return true;
         }
         catch (Exception exception) when (
             exception is IOException or UnauthorizedAccessException)
         {
+            leaseStream?.Dispose();
+            leaseStream = null;
             return false;
         }
     }

@@ -188,13 +188,18 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             pendingArtifact.RelativePath.Replace(
                 '/',
                 Path.DirectorySeparatorChar));
-        string leasePath = Path.Combine(
-            ArtifactStorageFileSystem.GetStagingDirectory(_root),
-            pendingArtifact.Id.ToString("N") +
-                ArtifactStorageFileSystem.LeaseFileExtension);
+        string leasePath = ArtifactStorageFileSystem.GetPublishedLeasePath(
+            _root,
+            pendingArtifact.Id);
         SetStale(permanentPath);
         if (OperatingSystem.IsLinux())
         {
+            string stagingDirectory =
+                ArtifactStorageFileSystem.GetStagingDirectory(_root);
+            Directory.Move(
+                stagingDirectory,
+                Path.Combine(_root, ".staging-moved"));
+            Directory.CreateDirectory(stagingDirectory);
             SetStale(leasePath);
         }
 

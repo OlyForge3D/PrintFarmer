@@ -43,6 +43,25 @@ internal static class ArtifactStorageFileSystem
     internal static string GetStagingDirectory(string rootPath) =>
         Path.Combine(rootPath, StagingDirectoryName);
 
+    internal static string GetPublishedLeasePath(
+        string rootPath,
+        Guid artifactId)
+    {
+        string leaseFileName =
+            artifactId.ToString("N", CultureInfo.InvariantCulture) +
+            LeaseFileExtension;
+        return Path.Combine(
+            rootPath,
+            leaseFileName);
+    }
+
+    internal static string GetStagingLeasePath(
+        string rootPath,
+        Guid artifactId) =>
+        Path.Combine(
+            GetStagingDirectory(rootPath),
+            Path.GetFileName(GetPublishedLeasePath(rootPath, artifactId)));
+
     internal static string EnsureArtifactRoot(string rootPath)
     {
         DirectoryInfo rootDirectory =
@@ -183,6 +202,135 @@ internal static class ArtifactStorageFileSystem
             "Failed to atomically publish the artifact on the same filesystem.",
             new Win32Exception(error));
     }
+
+    [SuppressMessage(
+        "Reliability",
+        "S3869:SafeHandle.DangerousGetHandle should not be called",
+        Justification = "Both handles are pinned with DangerousAddRef and released in finally.")]
+    internal static void CreateAtomicPublication(
+        string leasePublicationPath,
+        string leasePath,
+        SafeFileHandle leaseHandle,
+        string artifactPublicationPath,
+        string stagingPath,
+        SafeFileHandle stagingHandle)
+    {
+        string leasePublicationDirectory =
+            Path.GetDirectoryName(leasePublicationPath) ??
+            throw new IOException(
+                "The artifact lease publication path has no parent directory.");
+        string artifactPublicationDirectory =
+            Path.GetDirectoryName(artifactPublicationPath) ??
+            throw new IOException(
+                "The artifact publication path has no parent directory.");
+        StringComparison pathComparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!string.Equals(
+                leasePublicationDirectory,
+                artifactPublicationDirectory,
+                pathComparison))
+        {
+            throw new IOException(
+                "Artifact bytes and their lease must share a publication directory.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            using SafeFileHandle publicationDirectoryHandle =
+                OpenPinnedWindowsDirectory(artifactPublicationDirectory);
+            CreateWindowsHardLink(leasePublicationPath, leasePath);
+            CreateWindowsHardLink(artifactPublicationPath, stagingPath);
+            return;
+        }
+
+        if (!OperatingSystem.IsLinux())
+        {
+            throw new PlatformNotSupportedException(
+                "Atomic artifact publication is not supported on this platform.");
+        }
+
+        bool leaseHandleAdded = false;
+        bool stagingHandleAdded = false;
+        int publicationDirectoryFileDescriptor = -1;
+        try
+        {
+            leaseHandle.DangerousAddRef(ref leaseHandleAdded);
+            stagingHandle.DangerousAddRef(ref stagingHandleAdded);
+            publicationDirectoryFileDescriptor = OpenLinuxFile(
+                artifactPublicationDirectory,
+                LinuxDirectoryFlags);
+            if (publicationDirectoryFileDescriptor < 0)
+            {
+                ThrowAtomicPublicationException(
+                    Marshal.GetLastPInvokeError());
+            }
+
+            CreateLinuxHardLinkFromHandle(
+                leaseHandle.DangerousGetHandle().ToInt32(),
+                publicationDirectoryFileDescriptor,
+                leasePublicationPath);
+            CreateLinuxHardLinkFromHandle(
+                stagingHandle.DangerousGetHandle().ToInt32(),
+                publicationDirectoryFileDescriptor,
+                artifactPublicationPath);
+        }
+        finally
+        {
+            if (publicationDirectoryFileDescriptor >= 0)
+            {
+                _ = CloseLinuxFile(publicationDirectoryFileDescriptor);
+            }
+
+            if (stagingHandleAdded)
+            {
+                stagingHandle.DangerousRelease();
+            }
+
+            if (leaseHandleAdded)
+            {
+                leaseHandle.DangerousRelease();
+            }
+        }
+    }
+
+    private static void CreateWindowsHardLink(
+        string publicationPath,
+        string sourcePath)
+    {
+        if (!CreateHardLinkWindows(
+                publicationPath,
+                sourcePath,
+                IntPtr.Zero))
+        {
+            ThrowAtomicPublicationException(
+                Marshal.GetLastPInvokeError());
+        }
+    }
+
+    private static void CreateLinuxHardLinkFromHandle(
+        int sourceFileDescriptor,
+        int publicationDirectoryFileDescriptor,
+        string publicationPath)
+    {
+        string descriptorPath =
+            $"/proc/self/fd/{sourceFileDescriptor}";
+        if (CreateHardLinkUnixFromHandle(
+                LinuxCurrentWorkingDirectory,
+                descriptorPath,
+                publicationDirectoryFileDescriptor,
+                Path.GetFileName(publicationPath),
+                LinuxFollowSymbolicLink) != 0)
+        {
+            ThrowAtomicPublicationException(
+                Marshal.GetLastPInvokeError());
+        }
+    }
+
+    private static void ThrowAtomicPublicationException(int error) =>
+        throw new IOException(
+            "Failed to atomically publish the artifact on the same filesystem.",
+            new Win32Exception(error));
 
     private static SafeFileHandle OpenPinnedWindowsDirectory(string path)
     {
@@ -1133,6 +1281,8 @@ internal sealed class ArtifactWriteLease : IDisposable
 
     internal string? PublishedPath { get; private set; }
 
+    internal string? PublishedLeasePath { get; private set; }
+
     internal static ArtifactWriteLease Create(string rootPath, Guid artifactId)
     {
         string stagingDirectory =
@@ -1183,11 +1333,21 @@ internal sealed class ArtifactWriteLease : IDisposable
         SafeFileHandle stagingHandle = _stagingStream?.SafeFileHandle ??
             throw new InvalidOperationException(
                 "The artifact staging stream is not open.");
+        string publishedLeasePath =
+            ArtifactStorageFileSystem.EnsureSafePublicationPath(
+                rootPath,
+                ArtifactStorageFileSystem.GetPublishedLeasePath(
+                    rootPath,
+                    ArtifactId));
+        PublishedLeasePath = publishedLeasePath;
         File.SetLastWriteTimeUtc(stagingHandle, publishedAtUtc);
         File.SetLastWriteTimeUtc(
             _leaseStream.SafeFileHandle,
             publishedAtUtc);
-        ArtifactStorageFileSystem.CreateAtomicHardLink(
+        ArtifactStorageFileSystem.CreateAtomicPublication(
+            publishedLeasePath,
+            LeasePath,
+            _leaseStream.SafeFileHandle,
             publicationPath,
             StagingPath,
             stagingHandle);
@@ -1229,6 +1389,10 @@ internal sealed class ArtifactWriteLease : IDisposable
         }
 
         TryDelete(LeasePath);
+        if (PublishedLeasePath is not null)
+        {
+            TryDelete(PublishedLeasePath);
+        }
     }
 
     private void TryDelete(string path)
