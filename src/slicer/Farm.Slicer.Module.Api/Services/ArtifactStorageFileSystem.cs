@@ -39,6 +39,27 @@ internal static class ArtifactStorageFileSystem
     internal static string GetStagingDirectory(string rootPath) =>
         Path.Combine(rootPath, StagingDirectoryName);
 
+    internal static string EnsureStagingDirectory(string rootPath)
+    {
+        string normalizedRoot = Path.GetFullPath(rootPath);
+        string stagingPath = Path.GetFullPath(
+            GetStagingDirectory(normalizedRoot));
+        if (!IsWithinRoot(normalizedRoot, stagingPath))
+        {
+            throw new IOException(
+                "The artifact staging directory is outside the artifact root.");
+        }
+
+        DirectoryInfo stagingDirectory = Directory.CreateDirectory(stagingPath);
+        if (IsReparsePoint(stagingDirectory))
+        {
+            throw new IOException(
+                "The artifact staging directory must not be a reparse point.");
+        }
+
+        return stagingDirectory.FullName;
+    }
+
     internal static bool TryGetProtocolArtifactId(string path, out Guid artifactId)
     {
         string fileName = Path.GetFileName(path);
@@ -263,8 +284,7 @@ internal sealed class ArtifactWriteLease : IDisposable
     internal static ArtifactWriteLease Create(string rootPath, Guid artifactId)
     {
         string stagingDirectory =
-            ArtifactStorageFileSystem.GetStagingDirectory(rootPath);
-        _ = Directory.CreateDirectory(stagingDirectory);
+            ArtifactStorageFileSystem.EnsureStagingDirectory(rootPath);
         string identity = artifactId.ToString("N", CultureInfo.InvariantCulture);
         string stagingPath = Path.Combine(
             stagingDirectory,

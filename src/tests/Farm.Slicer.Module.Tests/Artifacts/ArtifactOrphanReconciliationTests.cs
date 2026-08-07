@@ -263,6 +263,39 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task UploadAsync_ReparseStagingDirectory_RejectsWriteOutsideRoot()
+    {
+        Directory.CreateDirectory(_root);
+        Directory.CreateDirectory(_outsideRoot);
+        string stagingPath =
+            ArtifactStorageFileSystem.GetStagingDirectory(_root);
+        _ = Directory.CreateSymbolicLink(stagingPath, _outsideRoot);
+        var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
+        using ArtifactsMetrics metrics = new();
+        ArtifactsService artifactsService =
+            CreateArtifactsService(repository.Object, metrics);
+        IFormFile formFile = CreateFormFile("hostile.gcode", "artifact");
+
+        try
+        {
+            Func<Task> upload = () => artifactsService.UploadAsync(
+                formFile,
+                Guid.NewGuid(),
+                workerId: null,
+                "gcode",
+                CancellationToken.None);
+
+            await upload.Should().ThrowAsync<IOException>()
+                .WithMessage("*staging directory must not be a reparse point*");
+            Directory.EnumerateFileSystemEntries(_outsideRoot).Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(stagingPath);
+        }
+    }
+
     private Mock<IArtifactsRepository> CreateRepository(
         IReadOnlyList<Artifact>? committedArtifacts = null)
     {
