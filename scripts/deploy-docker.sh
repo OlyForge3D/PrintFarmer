@@ -1384,8 +1384,19 @@ save_images_to_tar() {
     
     # Export OrcaSlicer binaries image if it exists
     for image in "${DOCKER_LOCAL_IMAGES[@]}"; do
-        # Check if image exists locally
-        if ! docker images --quiet "$image" >/dev/null 2>&1; then
+        # Check if image exists locally. `docker images --quiet <ref>` is NOT
+        # a reliable presence test: it returns exit status 0 even when the
+        # reference is missing (it just prints an empty line). Because
+        # `DOCKER_LOCAL_IMAGES` always includes `orcaslicer-binaries:*`, a
+        # fresh host with no OrcaSlicer image cached would fall through to
+        # the strict-attestation guard below, `validate_orcaslicer_binary_image`
+        # would (correctly) fail because the tag does not exist, and this
+        # function would return rc 2 — misclassifying "image not present" as
+        # "unattested image refused". Use `docker image inspect` instead: it
+        # exits non-zero when the reference is not resolvable locally, giving
+        # us honest presence detection while preserving the rc 2 refusal for
+        # present-but-unattested Orca tags.
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
             print_info "Skipping $image (not built locally)"
             continue
         fi

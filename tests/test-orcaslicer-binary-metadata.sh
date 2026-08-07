@@ -1765,7 +1765,7 @@ test_cli_pull_and_save_images_propagates_orca_attestation_refusal() {
 # ── flows don't accidentally start failing.                                 ──
 
 test_save_images_returns_zero_when_no_orca_image_present() {
-    start_test "save_images_to_tar returns 0 when DOCKER_LOCAL_IMAGES has no orcaslicer-binaries entry"
+    start_test "save_images_to_tar returns 0 when orcaslicer-binaries:* tag is absent from local Docker state"
 
     local output
     local exit_code
@@ -1777,11 +1777,22 @@ test_save_images_returns_zero_when_no_orca_image_present() {
     output=$(
         set --
         export PATH="$MOCK_BIN:$PATH"
-        # No local OrcaSlicer image at all — save_images_to_tar should just
-        # skip it and return 0 as it did pre-fix (partial-success semantics).
-        # We empty DOCKER_LOCAL_IMAGES to model the "orcaslicer worker
-        # disabled" configuration; without an orcaslicer-binaries:* entry
-        # the attestation loop never fires and rc must be 0.
+        # Production-faithful regression for blocker F: on a fresh host where
+        # DOCKER_LOCAL_IMAGES still lists orcaslicer-binaries:${ORCASLICER_VERSION}
+        # (as it always does — this is the config production ships), but the
+        # tag has never been built locally, save_images_to_tar MUST detect
+        # the absent image and skip it with rc 0 partial-success. The
+        # previous test evaded production by setting `DOCKER_LOCAL_IMAGES=()`,
+        # which bypassed the presence check entirely — that hid the bug
+        # where `docker images --quiet` returns rc 0 for missing refs and
+        # let the strict-attestation guard misclassify absence as refusal.
+        #
+        # Model "tag absent" by NOT seeding it into the mock's present-tag
+        # state. In legacy mode, `MOCK_IMAGE_EXISTS=false` makes both
+        # `docker images --quiet` return empty output AND `docker image
+        # inspect` return non-zero — matching real Docker's behavior for a
+        # missing reference.
+        export MOCK_IMAGE_EXISTS=false
         unset MOCK_LOCAL_TAGS
         export MOCK_SAVE_LOG="$export_dir/save.log"
         : > "$MOCK_SAVE_LOG"
@@ -1792,22 +1803,38 @@ test_save_images_returns_zero_when_no_orca_image_present() {
 
         DOCKER_UPGRADED_IMAGES=()
         DOCKER_BASE_IMAGES=()
-        # Also empty DOCKER_LOCAL_IMAGES to model the "no OrcaSlicer at all"
-        # config (`ENABLE_ORCA_WORKER=false`). Production's own `docker
-        # images --quiet` presence check is not sufficient to detect a
-        # missing image (it returns 0 with empty output for missing refs),
-        # so the honest way to model "OrcaSlicer is not in scope for this
-        # save" is to remove it from the list save_images_to_tar iterates.
-        DOCKER_LOCAL_IMAGES=()
+        # Critical: leave DOCKER_LOCAL_IMAGES populated so the loop iterates
+        # over the orcaslicer-binaries:${ORCASLICER_VERSION} entry exactly
+        # as it does in production. The presence check is what must correctly
+        # identify the image as absent and skip it.
+        DOCKER_LOCAL_IMAGES=("orcaslicer-binaries:2.4.2")
 
         save_images_to_tar "$export_dir" 2>&1
     )
     exit_code=$?
     set -e
 
-    assert_equals "0" "$exit_code" "no OrcaSlicer image in scope → happy-path rc 0"
-    assert_contains "$output" "Images exported successfully!" "success banner is present on the happy path"
-    assert_not_contains "$output" "Refusing to export unattested" "no refusal message when there is nothing to refuse"
+    assert_equals "0" "$exit_code" "absent orcaslicer-binaries:* tag → happy-path rc 0 (partial-success)"
+    assert_contains "$output" "Skipping orcaslicer-binaries:2.4.2 (not built locally)" \
+        "presence check emits the skip message for the absent tag"
+    assert_not_contains "$output" "Refusing to export unattested" \
+        "no attestation refusal is triggered when the image is simply not present"
+    assert_contains "$output" "Images exported successfully!" \
+        "success banner is present because absence is not a failure"
+
+    # The presence check must have prevented any docker save invocation on
+    # the absent orcaslicer-binaries tag — no tarball may have been written.
+    local save_log_contents=""
+    if [ -f "$export_dir/save.log" ]; then
+        save_log_contents=$(cat "$export_dir/save.log")
+    fi
+    assert_not_contains "$save_log_contents" "orcaslicer-binaries:2.4.2" \
+        "docker save must not be invoked on the absent orcaslicer-binaries tag"
+
+    local orca_tars=""
+    orca_tars=$(find "$export_dir" -maxdepth 1 -name 'orcaslicer-binaries-2.4.2*.tar' -print 2>/dev/null || true)
+    assert_equals "" "$orca_tars" \
+        "no orcaslicer-binaries-2.4.2*.tar file is written when the image is absent"
 
     pass_test
 }
