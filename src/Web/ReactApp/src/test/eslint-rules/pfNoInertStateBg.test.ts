@@ -13,10 +13,19 @@ const ruleTester = new RuleTester({
   },
 })
 
-const overflowingClassExpression = `<div className={clsx(${Array.from(
-  { length: 8 },
-  (_, index) => `condition${index} && "bg-pf-bg-${index}"`,
-).join(', ')})} />`
+const overflowBackgrounds = [
+  'bg-pf-bg-0',
+  'bg-pf-bg-1',
+  'bg-pf-bg-2',
+  'bg-pf-accent',
+  'bg-pf-accent-bg',
+  'bg-pf-border',
+  'bg-pf-error',
+  'bg-pf-success',
+]
+const overflowingClassExpression = `<div className={clsx(${overflowBackgrounds
+  .map((background, index) => `condition${index} && "${background}"`)
+  .join(', ')})} />`
 
 ruleTester.run('pf-no-inert-state-bg', rule, {
   valid: [
