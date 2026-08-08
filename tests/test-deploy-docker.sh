@@ -1521,9 +1521,16 @@ EOF
 test_postgres_password_authentication_integration() {
     start_test "PostgreSQL password authentication (integration test)"
     
-    # Only run this test if Docker and Docker Compose are available
-    if ! command -v docker &> /dev/null || ! command -v docker-compose &> /dev/null; then
-        skip_test "Docker/Docker Compose not available"
+    # Only run this test if Docker and the `docker compose` (v2 plugin)
+    # subcommand are available. `skip_test` is not a defined function in
+    # test-framework.sh, and CI runners (e.g. ubuntu-latest) ship the v2
+    # `docker compose` plugin without the deprecated standalone
+    # `docker-compose` binary, so checking for the latter always fails
+    # there and previously aborted the whole suite with "command not
+    # found" (exit 127) instead of skipping gracefully.
+    if ! command -v docker &> /dev/null || ! docker compose version &> /dev/null; then
+        test_warning "Skipping: Docker/Docker Compose not available"
+        pass_test
         return 0
     fi
     
