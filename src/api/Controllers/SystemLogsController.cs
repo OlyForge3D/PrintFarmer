@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
@@ -32,22 +30,8 @@ public class SystemLogsController(ISystemLogService systemLogService, ISystemLog
         return Ok(logs);
     }
 
-    [HttpGet("query")]
-    public async Task<IActionResult> QueryLogsAsync(
-        [FromQuery] string? q,
-        CancellationToken ct)
-    {
-        // Get all logs and apply Lucene query filter
-        IReadOnlyList<SystemLog> allLogs = await _service.QueryAllLogsAsync(null, null, null, null, null, ct);
-
-        Func<SystemLog, bool> filter = LuceneLogQueryParser.Parse(q);
-        var filteredLogs = allLogs.Where(filter).ToList();
-
-        return Ok(filteredLogs);
-    }
-
     [HttpGet("export")]
-    public async Task<IActionResult> ExportLogsAsync(
+    public async Task ExportLogsAsync(
         [FromQuery] string? correlationId,
         [FromQuery] string? level,
         [FromQuery] DateTime? from,
@@ -55,9 +39,11 @@ public class SystemLogsController(ISystemLogService systemLogService, ISystemLog
         [FromQuery] string? metadata,
         CancellationToken ct)
     {
-        IReadOnlyList<SystemLog> logs = await _service.QueryAllLogsAsync(correlationId, level, from, to, metadata, ct);
-        string json = JsonSerializer.Serialize(logs);
-        return File(Encoding.UTF8.GetBytes(json), "application/json", $"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json");
+        Response.ContentType = "application/json";
+        Response.Headers.ContentDisposition = $"attachment; filename=\"systemlogs_{DateTime.UtcNow:yyyyMMddHHmmss}.json\"";
+
+        IAsyncEnumerable<SystemLog> logs = _service.QueryAllLogsAsync(correlationId, level, from, to, metadata, ct);
+        await JsonSerializer.SerializeAsync(Response.Body, logs, cancellationToken: ct);
     }
 
     [HttpGet("stats")]

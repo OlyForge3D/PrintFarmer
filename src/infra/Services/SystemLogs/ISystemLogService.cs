@@ -13,6 +13,6 @@ public interface ISystemLogService
     /// <summary>Queries logs with optional filtering, returning recent entries.</summary>
     Task<IReadOnlyList<SystemLog>> QueryLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
 
-    /// <summary>Queries all logs without row limits (admin-only).</summary>
-    Task<IReadOnlyList<SystemLog>> QueryAllLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
+    /// <summary>Streams all logs matching filters without row limits (admin-only).</summary>
+    IAsyncEnumerable<SystemLog> QueryAllLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
 }

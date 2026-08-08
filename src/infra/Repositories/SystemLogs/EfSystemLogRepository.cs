@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -48,9 +49,9 @@ public class EfSystemLogRepository(AppDbContext db) : ISystemLogRepository
         }
     }
 
-    public async Task<IReadOnlyList<SystemLog>> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
+    public async IAsyncEnumerable<SystemLog> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, [EnumeratorCancellation] CancellationToken ct)
     {
-        IQueryable<SystemLog> query = _db.SystemLogs.AsQueryable();
+        IQueryable<SystemLog> query = _db.SystemLogs.AsNoTracking().AsQueryable();
         if (!string.IsNullOrWhiteSpace(correlationId))
         {
             query = query.Where(l => l.CorrelationId == correlationId);
@@ -77,8 +78,10 @@ public class EfSystemLogRepository(AppDbContext db) : ISystemLogRepository
             query = query.Where(l => l.Metadata != null && EF.Functions.Like(l.Metadata.ToLower(), $"%{lower}%"));
         }
 
-        List<SystemLog> result = await query.OrderByDescending(l => l.Timestamp).ToListAsync(ct);
-        return (IReadOnlyList<SystemLog>)result;
+        await foreach (SystemLog item in query.OrderByDescending(l => l.Timestamp).AsAsyncEnumerable().WithCancellation(ct))
+        {
+            yield return item;
+        }
     }
 
     public Task AddAsync(SystemLog log, CancellationToken ct)

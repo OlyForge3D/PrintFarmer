@@ -28,7 +28,7 @@ public class SystemLogService(Farm.Infrastructure.Repositories.SystemLogs.ISyste
         return list;
     }
 
-    public Task<IReadOnlyList<SystemLog>> QueryAllLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
+    public IAsyncEnumerable<SystemLog> QueryAllLogsAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct)
     {
         return _repo.QueryAllAsync(correlationId, level, from, to, metadata, ct);
     }
