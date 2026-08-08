@@ -663,6 +663,20 @@ public sealed class DatabaseMigrationTests
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");
+
+        string[] expectedSlicerMigrations = provider == "postgres"
+            ?
+            [
+                "20260730231413_SlicerInitialV2",
+                "20260807023657_UsePortableRevisionConcurrency",
+            ]
+            :
+            [
+                "20260730231416_SlicerInitialV2",
+                "20260807023659_UsePortableRevisionConcurrency",
+            ];
+        _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
+            $"the {provider} slicer migration set must apply in the exact recorded order");
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()
