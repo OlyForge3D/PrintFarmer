@@ -109,9 +109,14 @@ or rejection from a PR that never had squad evidence.
     merge on it; someone unverifiable tried to assert a review.
   - `fork PR needs a repository administrator` — fork PR, agent records are not
     read at all. Only a real administrator approval can clear it.
-  - `have N/3, missing <agents>` — too few reviewers for this change's scope.
+  - `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha>, ...)]` —
+    too few accepted records for this change's scope. Match this as a **pattern,
+    not a fixed string**: the `missing` and `stale at` clauses each appear only
+    when they apply, so real forms include `have 1/3, missing hicks+vasquez`,
+    `have 0/1 (stale at dallas@<sha>)`, and
+    `have 0/3, missing bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
+    A `stale at` clause means those reviewers reviewed a superseded head.
   - `reviewer <agent> is the PR author` — the only record came from the author.
-  - `have 0/3 (stale at <agent>@<sha>)` — records name a superseded head.
   Act on the named condition — do not park the PR, and do not route it back to
   the author as review feedback.
 - Merge an approved PR with

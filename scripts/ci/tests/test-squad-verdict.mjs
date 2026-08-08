@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  evaluateGate,
+  rosterFromLabels,
+} from '../squad-verdict-gate.mjs';
+import {
   bindStatusToHead,
   selectSquadVerdict,
   verdictContext,
@@ -219,24 +223,109 @@ test('a gate block is missing evidence, not a reviewer rejection', () => {
   // "no squad evidence", which permits the administrator fallback. Conflating
   // the two would suppress that fallback for PRs nobody has reviewed yet.
   //
-  // The subcases are materially different from one another, so the gate's own
-  // reason must survive verbatim: telling an operator "no review recorded" when
-  // an unauthenticated party posted one, or when the PR is from a fork, would
-  // report the opposite of what happened.
-  for (const detail of [
-    `no review recorded for ${shortSha}`,
-    `no authenticated review for ${shortSha} (3 unauthenticated)`,
-    'fork PR needs a repository administrator',
-    'have 1/3, missing hicks+vasquez',
-    'reviewer parker is the PR author',
-    `have 0/3 (stale at bishop@${movedHeadSha.slice(0, 12)})`,
-  ]) {
-    const evidence = fixture('REQUEST_CHANGES');
-    evidence.status.description = `BLOCKED @ ${shortSha}: ${detail}`;
+  // This case is produced by the workflow rather than by evaluateGate, so it is
+  // asserted literally. Every gate-produced form is covered by the round-trip
+  // test below, which derives its strings from evaluateGate itself.
+  const evidence = fixture('REQUEST_CHANGES');
+  const detail = 'fork PR needs a repository administrator';
+  evidence.status.description = `BLOCKED @ ${shortSha}: ${detail}`;
+  const verdict = verifySquadVerdict(evidence);
+  assert.equal(verdict.classification, 'MISSING');
+  assert.equal(verdict.blockedReason, detail);
+  assert.match(verdict.reason, /fork PR needs a repository administrator/);
+});
+
+test('every description evaluateGate can emit round-trips through the verifier', () => {
+  // Derived from the gate, never hand-written: a hand-written fixture proves
+  // only that the verifier parses the string someone imagined, not the string
+  // the gate actually produces. Contract drift between the two would either
+  // block every merge or silently downgrade a reason operators act on.
+  const roster = rosterFromLabels([
+    'squad:bishop', 'squad:hicks', 'squad:vasquez', 'squad:parker', 'squad:dallas',
+  ]);
+  const codePaths = ['src/api/Program.cs'];
+  const docPaths = ['docs/ARCHITECTURE.md'];
+  const record = (reviewer, verdict, sha = reviewedHeadSha, extra = {}) => ({
+    body: [
+      '<!-- squad-verdict -->',
+      `Squad-Reviewer: ${reviewer}`,
+      `Squad-Verdict: ${verdict}`,
+      `Squad-Head-SHA: ${sha}`,
+    ].join('\n'),
+    user: { login: 'jpapiez' },
+    author_association: 'OWNER',
+    squadWriteAccess: true,
+    created_at: '2026-08-08T01:00:00Z',
+    updated_at: '2026-08-08T01:00:00Z',
+    ...extra,
+  });
+  const base = {
+    headSha: reviewedHeadSha,
+    roster,
+    authorMembers: new Set(['parker']),
+    authorSource: 'squad: label on linked issue',
+  };
+  const panel = ['bishop', 'hicks', 'vasquez'];
+
+  const scenarios = [
+    ['no record at all', { changedPaths: codePaths }, 'MISSING'],
+    ['unauthenticated author', {
+      changedPaths: codePaths,
+      comments: panel.map((m) => record(m, 'APPROVE', reviewedHeadSha, {
+        user: { login: 'stranger' }, author_association: 'NONE',
+        squadWriteAccess: false,
+      })),
+    }, 'MISSING'],
+    ['too few reviewers for a code change', {
+      changedPaths: codePaths, comments: [record('bishop', 'APPROVE')],
+    }, 'MISSING'],
+    ['full gate, every record stale', {
+      changedPaths: codePaths,
+      comments: panel.map((m) => record(m, 'APPROVE', movedHeadSha)),
+    }, 'MISSING'],
+    ['docs-only, record stale', {
+      changedPaths: docPaths, comments: [record('dallas', 'APPROVE', movedHeadSha)],
+    }, 'MISSING'],
+    ['reviewer is the PR author', {
+      changedPaths: docPaths, comments: [record('parker', 'APPROVE')],
+    }, 'MISSING'],
+    ['reviewer requested changes', {
+      changedPaths: codePaths, comments: [record('vasquez', 'REQUEST_CHANGES')],
+    }, 'CHANGES_REQUESTED'],
+    ['full panel recorded a review', {
+      changedPaths: codePaths, comments: panel.map((m) => record(m, 'APPROVE')),
+    }, 'REVIEWED'],
+    ['docs-only, one record', {
+      changedPaths: docPaths, comments: [record('dallas', 'APPROVE')],
+    }, 'REVIEWED'],
+    ['owner override by comment', {
+      changedPaths: codePaths,
+      comments: [record('jpapiez', 'APPROVE', reviewedHeadSha, {
+        squadAdminOverride: true,
+      })],
+    }, 'APPROVED'],
+    ['owner override by GitHub review', {
+      changedPaths: codePaths,
+      reviews: [{
+        state: 'APPROVED', commitId: reviewedHeadSha, login: 'jpapiez', isAdmin: true,
+      }],
+    }, 'APPROVED'],
+  ];
+
+  for (const [name, input, expected] of scenarios) {
+    const result = evaluateGate({ ...base, ...input });
+    const evidence = fixture();
+    evidence.status.state = result.state;
+    evidence.status.description = result.description;
     const verdict = verifySquadVerdict(evidence);
-    assert.equal(verdict.classification, 'MISSING', detail);
-    assert.equal(verdict.blockedReason, detail);
-    assert.match(verdict.reason, new RegExp(detail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.equal(verdict.classification, expected, `${name}: ${result.description}`);
+    if (result.description.startsWith('BLOCKED')) {
+      assert.equal(
+        verdict.blockedReason,
+        result.description.slice(`BLOCKED @ ${shortSha}: `.length),
+        `${name}: blockedReason must be preserved verbatim`,
+      );
+    }
   }
 });
 

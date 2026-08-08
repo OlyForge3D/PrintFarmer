@@ -381,11 +381,12 @@ verifier preserves that reason verbatim, because the subcases differ materially:
 | `no review recorded for <sha12>` | Nothing was posted for this head. |
 | `no authenticated review for <sha12> (N unauthenticated)` | Records exist, but their authors could not be authenticated with repository write access. **Security-relevant — do not read this as "nobody reviewed".** |
 | `fork PR needs a repository administrator` | Fork PR; agent records are not read at all. |
-| `have 1/3, missing hicks+vasquez` | Too few reviewers for this change's scope. |
-| `reviewer parker is the PR author` | The only record came from the authoring agent. |
-| `have 0/3 (stale at bishop@<sha12>)` | Records exist but name a superseded head. |
+| `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha12>, …)]` | Too few accepted records for this change's scope. `missing` lists expected panel members with no record; the `stale at` clause lists reviewers whose only record names a superseded head. Both clauses are omitted when they do not apply, so a docs-only PR reads e.g. `have 0/1 (stale at dallas@<sha12>)` and a code PR reads e.g. `have 1/3, missing hicks+vasquez`. |
+| `reviewer <agent> is the PR author` | The only record came from the authoring agent. |
 
 A session reading the failure therefore knows what to do instead of parking indefinitely.
+The verifier preserves this text verbatim in `blockedReason`, so it is safe to branch on —
+but match the `have …` case as a pattern, not as a fixed string.
 
 Run the verifier before treating the squad record as merge evidence:
 
