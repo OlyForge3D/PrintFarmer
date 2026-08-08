@@ -282,8 +282,11 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
                 # confined to $STACK_DIR so strict interpolation can resolve without
                 # weakening the production requirement or touching any tracked file.
                 echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab" > "$STACK_DIR/.env"
-                compose_config_output=$(cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet 2>&1)
-                compose_config_status=$?
+                # Use an if/else to capture output+status so a failing `docker compose
+                # config` (a plain assignment from a failing command substitution) does
+                # not trigger `set -e` and abort the script before it can be reported.
+                compose_config_status=0
+                compose_config_output=$(cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet 2>&1) || compose_config_status=$?
                 if [ "$compose_config_status" -ne 0 ]; then
                     echo -e "${YELLOW}⚠️  docker compose config failed:${NC}"
                     echo "$compose_config_output" | sed 's/^/    /'
