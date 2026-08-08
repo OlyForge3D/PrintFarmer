@@ -12,6 +12,11 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         UNUserNotificationCenter.current().delegate = PushNotificationManager.shared
+        // Issue #1321: category/action registration only needs
+        // `setNotificationCategories` — it does not require notification
+        // permission — so register unconditionally at launch, before the
+        // user is ever prompted to allow notifications.
+        PushNotificationManager.registerNotificationCategories()
         return true
     }
 
