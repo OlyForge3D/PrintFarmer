@@ -663,22 +663,12 @@ public class AutoDispatchService(
 
         // Perform filament pre-flight check
         FilamentCheckResult filamentCheck = await CheckFilamentAsync(printer, nextJob, ct);
-        NextJobDto nextJobDto = new()
-        {
-            Id = nextJob.Id,
-            Name = nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown",
-            EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
-            RequiredMaterialType = nextJob.RequiredMaterialType,
-            EstimatedPrintTime = nextJob.EstimatedPrintTime,
-            JobKind = (
-                nextJob.JobKind ??
-                Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
-            JobETag = nextJob.RowVersion is { Length: > 0 }
-                ? Convert.ToBase64String(nextJob.RowVersion)
-                : null,
-            ExpectedPrinterConfigRevision =
-                nextJob.PinnedPrinterConfigRevision,
-        };
+
+        // nextJob may be an unassigned candidate merely scored as dispatch-eligible for this
+        // printer (see #1324) rather than a job this printer's operator has any ownership of.
+        // Redact identifying fields until the job is actually assigned/dispatched to printerId.
+        bool nextJobAssignedToPrinter = nextJob.AssignedPrinterId == printerId;
+        NextJobDto nextJobDto = BuildNextJobDto(nextJob, nextJobAssignedToPrinter);
         bool filamentOverrideRequired =
             filamentCheck.Outcome != FilamentCheckOutcome.Compatible;
         byte[] filamentCheckVersion =
@@ -828,10 +818,15 @@ public class AutoDispatchService(
         AutoDispatchStatusDto status = await BuildStatusDtoAsync(printer, ct);
         await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
             .SendAsync(AutoDispatchStateChangedEventName, status, ct);
+
+        // The job has now genuinely been dispatched to printerId, so the caller (who is
+        // authorized for this printer) is entitled to see full details regardless of
+        // whether the job started out unassigned.
+        NextJobDto dispatchedNextJobDto = BuildNextJobDto(nextJob, jobAssignedToPrinter: true);
         return new AutoDispatchReadyResult
         {
             Status = status,
-            NextJob = nextJobDto,
+            NextJob = dispatchedNextJobDto,
             FilamentCheck = filamentCheck,
             FilamentCheckETag = filamentCheckETag,
             DispatchInitiated = true,
@@ -1347,6 +1342,31 @@ public class AutoDispatchService(
     /// </summary>
     private static bool IsAssignedToPrinter(PrintJob? nextJob, Printer printer) =>
         nextJob is not null && nextJob.AssignedPrinterId == printer.Id;
+
+    /// <summary>
+    /// Builds the exact-job RPC response DTO for the ready-dispatch workflow. When
+    /// <paramref name="jobAssignedToPrinter"/> is false — i.e. the candidate job merely
+    /// scored as dispatch-eligible for this printer rather than actually being assigned to
+    /// it — identifying fields are redacted for the same reason as <see cref="BuildStatusDto"/>.
+    /// See issue #1324.
+    /// </summary>
+    private static NextJobDto BuildNextJobDto(PrintJob nextJob, bool jobAssignedToPrinter) => new()
+    {
+        Id = nextJob.Id,
+        Name = jobAssignedToPrinter
+            ? nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown"
+            : string.Empty,
+        EstimatedFilamentUsageG = jobAssignedToPrinter ? nextJob.EstimatedFilamentUsage : null,
+        RequiredMaterialType = jobAssignedToPrinter ? nextJob.RequiredMaterialType : null,
+        EstimatedPrintTime = jobAssignedToPrinter ? nextJob.EstimatedPrintTime : null,
+        JobKind = jobAssignedToPrinter
+            ? (nextJob.JobKind ?? Farm.Infrastructure.Domain.JobKind.Standard).ToString()
+            : string.Empty,
+        JobETag = nextJob.RowVersion is { Length: > 0 } jobRowVersion
+            ? Convert.ToBase64String(jobRowVersion)
+            : null,
+        ExpectedPrinterConfigRevision = jobAssignedToPrinter ? nextJob.PinnedPrinterConfigRevision : null,
+    };
 
     private async Task<AutoDispatchStatusDto> BuildStatusDtoAsync(Printer printer, CancellationToken ct)
     {

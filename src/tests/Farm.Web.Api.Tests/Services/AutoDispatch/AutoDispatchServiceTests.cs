@@ -1175,6 +1175,104 @@ public sealed class AutoDispatchServiceTests : IDisposable
         status.NextJobPrinterConfigRevision.Should().Be(9);
     }
 
+    [Fact]
+    public async Task MarkReadyAsync_WhenNextJobIsUnassignedCandidate_RedactsNameKindAndRevisionInBlockedResponse()
+    {
+        // Regression test for #1324: a job that merely scored as dispatch-eligible for this
+        // printer — but was never assigned to it — must not leak its name, kind, or pinned
+        // config revision through the ready-dispatch RPC response either, mirroring the
+        // redaction applied to the SignalR status broadcast.
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        await _db.SaveChangesAsync();
+        PrintJob unassignedJob = await CreateUnassignedQueuedJobAsync(
+            "another-tenants-secret-job-name",
+            queuePosition: 1);
+        unassignedJob.PinnedPrinterConfigRevision = 7;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IDispatchScorer> dispatchScorer = CreateScorerReturningEligible(unassignedJob.Id, printer.Id);
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchScorer: dispatchScorer.Object);
+
+        // No spool assigned to the printer, so the filament check comes back Unknown and
+        // dispatch is blocked pending explicit confirmation — nextJob has not been assigned.
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
+
+        result.DispatchInitiated.Should().BeFalse();
+        result.RequiresFilamentOverride.Should().BeTrue();
+        result.NextJob.Should().NotBeNull();
+        result.NextJob!.Id.Should().Be(unassignedJob.Id);
+        result.NextJob.Name.Should().BeEmpty();
+        result.NextJob.JobKind.Should().BeEmpty();
+        result.NextJob.ExpectedPrinterConfigRevision.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task MarkReadyAsync_WhenUnassignedCandidateJobIsDispatched_ReturnsFullNameKindAndRevision()
+    {
+        // Regression guard: once the previously-unassigned candidate job IS actually
+        // dispatched to this printer, the RPC response must still deliver full details —
+        // the redaction must not over-apply once assignment genuinely occurs.
+        Printer printer = await CreatePrinterAsync();
+        printer.DispatchState = new PrinterDispatchState
+        {
+            PrinterId = printer.Id,
+            AutoDispatchState = AutoDispatchState.PendingReady,
+        };
+        printer.CurrentSpoolId = 42;
+        await _db.SaveChangesAsync();
+
+        PrintJob unassignedJob = await CreateUnassignedQueuedJobAsync("now-dispatched-job", queuePosition: 1);
+        unassignedJob.RequiredMaterialType = "PLA";
+        unassignedJob.EstimatedFilamentUsage = 10;
+        unassignedJob.PinnedPrinterConfigRevision = 3;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IDispatchScorer> dispatchScorer = CreateScorerReturningEligible(unassignedJob.Id, printer.Id);
+        Mock<ISpoolmanService> spoolmanService = new();
+        spoolmanService
+            .Setup(service => service.GetSpoolByIdAsync(42, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpoolmanSpoolDto(42, "PLA spool", "PLA", 1000, null, false));
+        Mock<IJobDispatchService> jobDispatchService = new();
+        jobDispatchService
+            .Setup(service => service.DispatchReviewedJobAsync(
+                unassignedJob.Id,
+                printer.Id,
+                QueueActorIdentity.AutoDispatch,
+                It.IsAny<string>(),
+                It.IsAny<byte[]>(),
+                It.Is<FilamentOverrideAuthorization>(authorization =>
+                    !authorization.OverrideApproved),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(AcceptedDispatch(unassignedJob.Id, printer.Id));
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            spoolmanService: spoolmanService.Object,
+            dispatchScorer: dispatchScorer.Object,
+            jobDispatchService: jobDispatchService.Object);
+
+        AutoDispatchReadyResult result = await service.MarkReadyAsync(printer.Id);
+
+        result.DispatchInitiated.Should().BeTrue();
+        result.NextJob.Should().NotBeNull();
+        result.NextJob!.Id.Should().Be(unassignedJob.Id);
+        result.NextJob.Name.Should().Be("now-dispatched-job");
+        result.NextJob.JobKind.Should().Be(nameof(JobKind.Standard));
+        result.NextJob.ExpectedPrinterConfigRevision.Should().Be(3);
+    }
+
     private static Mock<IDispatchScorer> CreateScorerReturningEligible(Guid jobId, Guid printerId)
     {
         Mock<IDispatchScorer> dispatchScorer = new();
