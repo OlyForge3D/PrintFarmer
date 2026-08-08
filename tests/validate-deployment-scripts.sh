@@ -94,9 +94,74 @@ else
     check_result false "PrusaSlicer references removed"
 fi
 
-# Test 6: Standard deployment dry-run generates expected config
+# Test 6: Monolithic compatibility dry-run remains free of shell errors
 echo
-echo "Test 6: Standard deployment dry-run generates expected config"
+echo "Test 6: Monolithic dry-run generates expected config"
+MONO_DIR="$TEMP_DIR/monolith-dryrun"
+rm -rf "$MONO_DIR" 2>/dev/null || true
+mkdir -p "$MONO_DIR/src/Web/ReactApp"
+pushd "$MONO_DIR" >/dev/null
+cat > ".deploy-config" << 'EOF'
+ARCHITECTURE=monolithic
+ENVIRONMENT=Development
+DB_PROVIDER=postgres
+POSTGRES_DB=printfarmer
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+DB_PASSWORD=postgres
+INCLUDE_POSTGRES=yes
+CONNECTION_STRING=Host=database;Database=printfarmer;Username=postgres;Password=postgres
+NETWORK_MODE=bridge
+HTTP_PORT=8080
+HTTPS_PORT=0
+ENABLE_DISCOVERY=yes
+ALLOW_LOCAL_NETWORK=true
+NETWORK_RANGES=192.168.0.0/16
+ENABLE_SWAGGER=true
+ENABLE_DETAILED_LOGGING=true
+ENABLE_DISTRIBUTED_SLICING=no
+ENABLE_ORCA_WORKER=no
+ORCA_WORKER_COUNT=0
+ENABLE_SPOOLMAN=no
+INCLUDE_MONITORING=no
+INCLUDE_TELEMETRY=no
+INCLUDE_SECURITY=no
+INCLUDE_REGISTRY=no
+INCLUDE_DISCOVERY=no
+EOF
+
+set +e
+mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+    --config-file "$MONO_DIR/.deploy-config" \
+    --env-file "$MONO_DIR/.env" \
+    --output-dir "$MONO_DIR/generated" \
+    --dry-run \
+    --batch 2>&1)
+mono_status=$?
+set -e
+
+mono_checks_pass=true
+if grep -q 'unbound variable' <<<"$mono_output"; then
+    echo "$mono_output"
+    mono_checks_pass=false
+elif [ "$mono_status" -eq 0 ]; then
+    if [ ! -f ".env" ]; then
+        mono_checks_pass=false
+        echo -e "${YELLOW}⚠️  .env not generated${NC}"
+    elif ! grep -q 'DB_PROVIDER=postgres' ".env" 2>/dev/null; then
+        mono_checks_pass=false
+        echo -e "${YELLOW}⚠️  Monolithic database provider missing expected PostgreSQL value${NC}"
+    fi
+else
+    echo "$mono_output"
+    mono_checks_pass=false
+fi
+check_result "$mono_checks_pass" "Monolithic dry-run generates expected config without shell errors"
+popd >/dev/null
+
+# Test 7: Standard deployment dry-run generates expected config
+echo
+echo "Test 7: Standard deployment dry-run generates expected config"
 MS_DIR="$TEMP_DIR/microservices-dryrun"
 rm -rf "$MS_DIR" 2>/dev/null || true
 mkdir -p "$MS_DIR/src/Web/ReactApp"
@@ -118,8 +183,8 @@ NETWORK_RANGES=192.168.0.0/16
 ALLOWED_NETWORK_RANGES=192.168.0.0/16
 ENABLE_DISCOVERY=yes
 HTTP_PORT=8080
-API_PORT=5245
 HTTPS_PORT=0
+API_PORT=5245
 SERVER_HOST=localhost
 INCLUDE_MONITORING=false
 INCLUDE_TELEMETRY=false
@@ -134,14 +199,21 @@ ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
 EOF
 
-if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
+set +e
+host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
     --config-file "$MS_DIR/.deploy-config" \
     --env-file "$MS_DIR/.env" \
     --output-dir "$MS_DIR/generated" \
     --dry-run \
-    --batch 2>&1); then
-    host_checks_pass=true
+    --batch 2>&1)
+host_status=$?
+set -e
 
+host_checks_pass=true
+if grep -q 'unbound variable' <<<"$host_output"; then
+    echo "$host_output"
+    host_checks_pass=false
+elif [ "$host_status" -eq 0 ]; then
     if [ ! -f ".env" ]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  .env not generated${NC}"
@@ -155,21 +227,16 @@ if host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.s
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
     fi
-
-    if [ "$host_checks_pass" = true ]; then
-        check_result true "Standard deployment dry-run generates expected config"
-    else
-        check_result false "Standard deployment configuration validation"
-    fi
 else
     echo "$host_output"
-    check_result false "Standard deployment dry-run execution"
+    host_checks_pass=false
 fi
+check_result "$host_checks_pass" "Standard deployment dry-run generates expected config without shell errors"
 popd >/dev/null
 
-# Test 7: Generated compose files contain no Redis services
+# Test 8: Generated compose files contain no Redis services
 echo
-echo "Test 7: Generated compose files contain no Redis services"
+echo "Test 8: Generated compose files contain no Redis services"
 MS_COMPOSE_DIR="$TEMP_DIR/ms-compose"
 rm -rf "$MS_COMPOSE_DIR" 2>/dev/null || true
 mkdir -p "$MS_COMPOSE_DIR"
@@ -190,9 +257,9 @@ else
     fi
 fi
 
-# Test 8: Telemetry and monitoring coexistence
+# Test 9: Telemetry and monitoring coexistence
 echo
-echo "Test 8: Telemetry and monitoring coexistence"
+echo "Test 9: Telemetry and monitoring coexistence"
 STACK_DIR="$TEMP_DIR/telemetry"
 rm -rf "$STACK_DIR" 2>/dev/null || true
 mkdir -p "$STACK_DIR"
