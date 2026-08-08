@@ -68,8 +68,12 @@ describe('OpenTelemetry deferred from first paint (#1238)', () => {
     outDirs.push(outDir);
 
     // Explicitly unset so this assertion holds regardless of the ambient
-    // shell environment the test happens to run in.
-    const env = { ...process.env };
+    // shell environment the test happens to run in. Force NODE_ENV to
+    // production so `import.meta.env.DEV` resolves the same way it does in
+    // a real production deploy (Vitest's own process may run under
+    // NODE_ENV=test, which would otherwise leak into this child build and
+    // make Vite treat it as a dev build).
+    const env = { ...process.env, NODE_ENV: 'production' };
     delete env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT;
 
     const bundle = await build(outDir, env);
@@ -99,6 +103,7 @@ describe('OpenTelemetry deferred from first paint (#1238)', () => {
 
     const env = {
       ...process.env,
+      NODE_ENV: 'production',
       VITE_OTEL_EXPORTER_OTLP_ENDPOINT: 'http://localhost:4318/v1/traces',
     };
 

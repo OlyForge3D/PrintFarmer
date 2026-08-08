@@ -47,13 +47,15 @@ function mount() {
   )
 }
 
-// OpenTelemetry is only loaded when an OTLP endpoint is configured. In the
-// default (unconfigured) build this branch never executes, so Rollup keeps
-// the whole SDK graph out of the critical path and first paint is never
-// blocked waiting on telemetry setup. When an endpoint IS configured we
-// await initialization before mounting so document-load and early request
-// spans aren't missed.
-if (import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT) {
+// OpenTelemetry is only loaded when it will actually do something: either an
+// OTLP endpoint is configured, or we're in dev (where initializeTelemetry
+// also wires up the ConsoleSpanExporter — see telemetry/config.ts). In a
+// default production build with no endpoint configured, this branch is a
+// statically-false constant and Rollup drops the whole SDK graph from the
+// bundle, so first paint is never blocked waiting on telemetry setup. When
+// telemetry IS enabled we await initialization before mounting so
+// document-load and early request spans aren't missed.
+if (import.meta.env.DEV || import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT) {
   import('./telemetry/config')
     .then(({ initializeTelemetry }) => initializeTelemetry())
     .catch((error: unknown) => {
