@@ -467,8 +467,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                 // empty/legacy (null/[]) OR when any advertised worker capability tag
                 // appears as a quoted JSON string token in RequiredCapabilitiesJson.
                 compatible = compatible.Where(j =>
-                    j.RequiredCapabilitiesJson == null ||
-                    j.RequiredCapabilitiesJson == string.Empty ||
+                    string.IsNullOrEmpty(j.RequiredCapabilitiesJson) ||
                     j.RequiredCapabilitiesJson == "[]" ||
                     capabilities.Any(cap =>
                         EF.Functions.Like(j.RequiredCapabilitiesJson!, "%\"" + cap + "\"%")));
