@@ -255,7 +255,7 @@ every round with no recorded reason. Resolve their blockers and dispatch or reco
   landed before spawning.
 - Spawn with `create_session`, `base_branch: development`, one session per issue.
 
-Each kickoff prompt must state:
+Each **implementation** kickoff prompt must state:
 
 - the assigned squad member and the issue number
 - the acceptance criteria
@@ -265,6 +265,17 @@ Each kickoff prompt must state:
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
 - the **verbatim closing clause and rider** from SESSION LIFECYCLE AND REAPING, as the
   final two paragraphs of the kickoff prompt. A kickoff prompt without both is malformed.
+
+Each **analysis or research** kickoff prompt, including every Dallas dispatch, must instead
+state:
+
+- the assigned squad member and the issue number
+- the exact non-code deliverable and where to publish it
+- that the session must not implement code or open a PR
+- that its final report must link the completed deliverable, record the linked issue's
+  disposition, and explicitly attest `working tree clean` and `all commits pushed`
+- that the session must report and stop without calling `archive_session`; Ralph will keep
+  it under `Sessions retained` until all reap-readiness criteria are proven
 
 ## ACCOUNT FOR EVERY ISSUE
 
@@ -359,10 +370,12 @@ gets cleaned up, and **a human performs the removal**. Treat it as load-bearing.
 Each round, call `list_sessions_and_chats`. A session is ready to reap only when **all four**
 of these criteria are proven:
 
-1. **Terminal PR state** — the PR is squash-safely verified as merged, or it is definitively
-   closed without merge.
-2. **Final status recorded** — the owning session reported the terminal state, the linked
-   issue's disposition, and, for a closed-unmerged PR, the reason it was closed.
+1. **Terminal deliverable state** — an implementation PR is squash-safely verified as
+   merged or definitively closed without merge, or a non-PR analysis/research deliverable
+   is verified at its required publication location.
+2. **Final status recorded** — the owning session reported the terminal state and linked
+   issue's disposition, plus the closure reason for a closed-unmerged PR or the deliverable
+   link and result for non-PR work.
 3. **Clean worktree attested** — the owning session explicitly reported
    `working tree clean`.
 4. **Push complete attested** — the owning session explicitly reported
@@ -376,8 +389,8 @@ List every session that meets all four criteria under a `🧹 Ready to reap` hea
 
 - session name
 - branch
-- PR number
-- merged / closed state
+- PR number and merged / closed state, or non-PR deliverable type and link
+- linked issue disposition
 
 **This is REPORT ONLY.** Ralph archives nothing. A human evaluates the report and performs
 the reaping.
@@ -456,8 +469,9 @@ Report each round, in this order:
 7. **Sessions retained** — every session that does not satisfy all four reap-readiness
    criteria, with each failed or unknown criterion named
 8. **`🧹 Ready to reap`** — every session satisfying all four conjunctive readiness
-   criteria, with session name, branch, PR number, and merged/closed state. Report only;
-   emit the heading every round even when the list is empty.
+   criteria, with session name, branch, terminal PR or non-PR deliverable evidence, and
+   linked issue disposition. Report only; emit the heading every round even when the list
+   is empty.
 9. Active slot count (`n/5`)
 10. Gate failures
 11. PRs awaiting review or merge
@@ -484,6 +498,8 @@ When nothing is eligible, report exactly:
 - Assuming any automation reaps sessions, or calling `delete_item` on one. Nothing reaps
   automatically; the `🧹 Ready to reap` report plus a human is the whole mechanism.
 - Writing a kickoff prompt that omits the verbatim closing clause or rider.
+- Giving an analysis or research session the implementation-only branch, PR, validation,
+  or closed-unmerged instructions instead of its non-PR deliverable contract.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
 - Listing a session as ready to reap when any of the four readiness criteria is false,
   missing, or unknown.
