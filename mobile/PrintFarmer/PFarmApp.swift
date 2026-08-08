@@ -85,6 +85,12 @@ struct PFarmApp: App {
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
                         PushNotificationManager.shared.configure(notificationService: services.notificationService)
+                        // Issue #1321: wire the services job-attention lock-screen
+                        // actions (Pause/Resume/Cancel/Snooze) execute against.
+                        PushNotificationManager.shared.configureActionHandling(
+                            printerService: services.printerService,
+                            attentionService: services.attentionService
+                        )
                         await PushNotificationManager.shared.refreshPermissionStatus()
                         if PushNotificationManager.shared.pushEnabled {
                             await PushNotificationManager.shared.requestPermissionAndRegister()

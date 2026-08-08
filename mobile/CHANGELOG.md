@@ -6,6 +6,12 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Lock-screen notification actions for job attention** — Job-attention pushes
+  now register `Pause`, `Resume`, `Cancel`, `Snooze`, and `Open Swap` actions
+  directly on the lock screen / Notification Center banner, so you can react
+  without opening the app. Pause/Resume/Cancel run against the printer,
+  Snooze defers the attention item for an hour, and Open Swap deep-links into
+  the printer using the same routing as tapping the notification.
 - **Actionable Attention cards** — Server-provided actions now run in place
   with item-scoped progress, retry, and canonical refresh. Failure cards load
   camera snapshots independently, and every card links to its printer and
