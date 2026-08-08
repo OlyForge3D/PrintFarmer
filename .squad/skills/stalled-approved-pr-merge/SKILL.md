@@ -4,8 +4,9 @@
 
 ### When to Use
 
-- PR has a current non-author human approval or a verifier result of
-  `APPROVED` from `scripts/ci/verify-squad-verdict.mjs`.
+- PR has a current administrator GitHub approval, or a verifier result of
+  `APPROVED` or `REVIEWED` from `scripts/ci/verify-squad-verdict.mjs`
+  (`REVIEWED` is a self-attested squad record, not independent approval).
 - CI on the current head is green or expected to be green after a mechanical rebase.
 - `gh` cannot submit the merge because the token is invalid, but git HTTPS credentials still exist in the keychain.
 

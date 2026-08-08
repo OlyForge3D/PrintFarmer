@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 
+// Verifies the provenance of the `squad/pre-pr-verdict` commit status.
+//
+// ⚠️ "Verified" here means the status really was written by the trusted
+// workflow for the exact commit it names. It does NOT mean an independent party
+// approved the change. A `REVIEWED` classification is a SELF-ATTESTED record
+// that reviewer agents examined the commit: every squad agent runs under the
+// repository owner's authority, so there is no separation of duties. Only
+// `APPROVED` reflects a repository administrator authorising directly. See
+// .github/copilot-instructions.md § "Repository verdict evidence".
+
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -7,8 +17,17 @@ export const verdictContext = 'squad/pre-pr-verdict';
 export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
 
 const trustedStatusCreator = 'github-actions[bot]';
-const displayTitlePattern =
-  /^Squad verdict (APPROVE|CHANGES_REQUESTED|REJECT) for PR #([1-9]\d*) @ ([0-9a-f]{40}) by ([A-Za-z0-9-]+)$/;
+const displayTitlePattern = /^Squad review record for PR #([1-9]\d*)$/;
+
+// The gate runs only from events whose workflow definition comes from the
+// default branch. A pull_request (head-ref) trigger would let a PR rewrite the
+// logic that judges it.
+const trustedEvents = new Set([
+  'pull_request_target',
+  'issue_comment',
+  'pull_request_review',
+  'workflow_dispatch',
+]);
 
 function result(classification, reason, evidence = {}) {
   return { classification, reason, ...evidence };
@@ -42,12 +61,46 @@ function parseDisplayTitle(displayTitle) {
   if (!match) {
     return undefined;
   }
-  return {
-    verdict: match[1],
-    prNumber: Number.parseInt(match[2], 10),
-    reviewedHeadSha: match[3],
-    actor: match[4],
-  };
+  return { prNumber: Number.parseInt(match[1], 10) };
+}
+
+// The record encodes its outcome in the status state and description:
+//   success  `REVIEWED (self-attested) @ <sha12> by <agents>` -> agents reviewed
+//   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
+//   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>`        -> findings raised
+//   failure  `BLOCKED @ <sha12>: <reason>`                    -> nothing recorded
+//
+// REVIEWED and APPROVE are kept distinct on purpose. Only the owner path is a
+// real authorisation by a distinct principal; REVIEWED is a self-attested record
+// that reviewer agents examined the commit, and must never be reported as though
+// an independent party approved it.
+function parseStatusDescription(status, statusSha) {
+  const description = status.description ?? '';
+  const shortSha = statusSha.slice(0, 12);
+  if (status.state === 'success') {
+    const reviewed = new RegExp(
+      `^REVIEWED \\(self-attested\\) @ ${shortSha} by (\\S.*)$`,
+    ).exec(description);
+    if (reviewed) {
+      return { verdict: 'REVIEWED', reviewers: reviewed[1] };
+    }
+    const owner = new RegExp(
+      `^APPROVE \\(owner\\) @ ${shortSha} by (\\S.*)$`,
+    ).exec(description);
+    return owner ? { verdict: 'APPROVE', reviewers: owner[1] } : undefined;
+  }
+  if (status.state === 'failure') {
+    const rejected =
+      new RegExp(`^REQUEST_CHANGES @ ${shortSha} by (\\S.*)$`).exec(description);
+    if (rejected) {
+      return { verdict: 'REQUEST_CHANGES', reviewers: rejected[1] };
+    }
+    const blocked = new RegExp(`^BLOCKED @ ${shortSha}: (\\S.*)$`).exec(description);
+    if (blocked) {
+      return { verdict: 'BLOCKED', reviewers: '', detail: blocked[1] };
+    }
+  }
+  return undefined;
 }
 
 function isStatusCreatedDuringRun(status, run) {
@@ -72,10 +125,10 @@ export function verifySquadVerdict({ pull, status, run }) {
 
   const repository = pull.base?.repo?.full_name;
   const defaultBranch = pull.base?.repo?.default_branch;
-  const author = pull.user?.login;
+  const baseRef = pull.base?.ref;
   const currentHeadSha = pull.head?.sha?.toLowerCase();
   const statusSha = status.sha?.toLowerCase();
-  if (!repository || !defaultBranch || !author || !currentHeadSha || !statusSha) {
+  if (!repository || !defaultBranch || !currentHeadSha || !statusSha) {
     return result('INVALID', 'PR or status metadata is incomplete.');
   }
   if (status.creator?.login !== trustedStatusCreator) {
@@ -88,10 +141,14 @@ export function verifySquadVerdict({ pull, status, run }) {
   }
   if (
     run.path !== verdictWorkflowPath ||
-    run.event !== 'workflow_dispatch' ||
+    !trustedEvents.has(run.event) ||
     run.run_attempt !== 1 ||
     run.triggering_actor?.login?.toLowerCase() !== run.actor?.login?.toLowerCase() ||
-    run.head_branch !== defaultBranch ||
+    // The gate only ever runs from a protected ref: issue_comment and
+    // pull_request_review runs sit on the default branch, pull_request_target
+    // runs sit on the PR's base ref. A run on the PR head branch would mean the
+    // PR supplied the logic that judged it.
+    (run.head_branch !== defaultBranch && run.head_branch !== baseRef) ||
     run.default_branch_contains_run !== true ||
     run.repository?.full_name !== repository ||
     run.status !== 'completed' ||
@@ -101,44 +158,51 @@ export function verifySquadVerdict({ pull, status, run }) {
   }
 
   const title = parseDisplayTitle(run.display_title);
-  if (
-    !title ||
-    title.prNumber !== pull.number ||
-    title.reviewedHeadSha !== statusSha ||
-    title.actor.toLowerCase() !== run.actor?.login?.toLowerCase()
-  ) {
+  if (!title || title.prNumber !== pull.number) {
     return result('INVALID', 'The workflow run metadata does not match the status.');
   }
-  if (title.actor.toLowerCase() === author.toLowerCase()) {
-    return result('INVALID', 'The PR author recorded the verdict.');
+
+  const outcome = parseStatusDescription(status, statusSha);
+  if (!outcome || !isStatusCreatedDuringRun(status, run)) {
+    return result('INVALID', 'The status does not match the trusted workflow verdict.');
   }
 
-  const expectedState = title.verdict === 'APPROVE' ? 'success' : 'failure';
-  const expectedDescription =
-    `${title.verdict} @ ${statusSha.slice(0, 12)} by ${title.actor}`;
-  if (
-    status.state !== expectedState ||
-    status.description !== expectedDescription ||
-    !isStatusCreatedDuringRun(status, run)
-  ) {
-    return result('INVALID', 'The status does not match the trusted workflow verdict.');
+  // A block means no usable review record was accepted. The gate's own reason is
+  // preserved verbatim because the subcases are materially different — an
+  // unauthenticated author or a fork PR is not the same as nobody reviewing —
+  // and collapsing them would tell the caller the opposite of what happened.
+  if (outcome.verdict === 'BLOCKED') {
+    return result(
+      'MISSING',
+      `The gate blocked ${statusSha}: ${outcome.detail}`,
+      { reviewedHeadSha: statusSha, blockedReason: outcome.detail },
+    );
   }
 
   if (statusSha !== currentHeadSha) {
     return result(
       'SUPERSEDED',
-      `${title.verdict} applies to ${statusSha}, not current head ${currentHeadSha}.`,
-      { verdict: title.verdict, reviewedHeadSha: statusSha, actor: title.actor },
+      `${outcome.verdict} applies to ${statusSha}, not current head ${currentHeadSha}.`,
+      { verdict: outcome.verdict, reviewedHeadSha: statusSha, actor: outcome.reviewers },
     );
   }
 
-  const classification = title.verdict === 'APPROVE'
-    ? 'APPROVED'
-    : 'CHANGES_REQUESTED';
-  return result(classification, 'Verified SHA-pinned squad verdict.', {
-    verdict: title.verdict,
+  // REVIEWED is a self-attested agent record; APPROVED is an owner
+  // authorisation. Both permit merge under this repository's single-maintainer
+  // policy, but they are reported separately so nothing downstream can present
+  // a self-attested record as independent approval.
+  const classification = outcome.verdict === 'REVIEWED'
+    ? 'REVIEWED'
+    : outcome.verdict === 'APPROVE'
+      ? 'APPROVED'
+      : 'CHANGES_REQUESTED';
+  const reason = classification === 'REVIEWED'
+    ? 'Verified SHA-pinned self-attested squad review record (not independent review).'
+    : 'Verified SHA-pinned squad record.';
+  return result(classification, reason, {
+    verdict: outcome.verdict,
     reviewedHeadSha: statusSha,
-    actor: title.actor,
+    actor: outcome.reviewers,
     workflowRunUrl: run.html_url,
   });
 }
@@ -164,6 +228,8 @@ export function selectSquadVerdict({
       return result('INVALID', 'The newest verdict status has no trusted run target.');
     }
     const run = loadRun(runId);
+    // Deliberately fail closed on the newest candidate only: an older approval
+    // must never be resurrected by a newer status being unusable.
     return verifySquadVerdict({ pull, status, run });
   }
   return result('MISSING', 'No squad verdict status exists on the current head.');
@@ -242,7 +308,7 @@ async function main() {
     process.stdout.write(`${verdict.classification}: ${verdict.reason}\n`);
   }
 
-  if (verdict.classification === 'APPROVED') {
+  if (verdict.classification === 'APPROVED' || verdict.classification === 'REVIEWED') {
     return;
   }
   // Exit 2 is a current rejection; exit 3 means no usable squad evidence.

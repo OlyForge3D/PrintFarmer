@@ -34,8 +34,8 @@ Each platform tracks issue lifecycle differently. Squad normalizes these into a 
 | Open, no assignee | `state: open`, `assignee: null` | `untriaged` |
 | Open, assigned, no branch | `state: open`, `assignee: @user`, no linked PR | `assigned` |
 | Open, branch exists | `state: open`, linked branch exists | `inProgress` |
-| Open, PR opened | No current human approval or verified squad verdict | `needsReview` |
-| Open, PR approved | Current human approval or verified `squad/pre-pr-verdict` approval | `readyToMerge` |
+| Open, PR opened | No current human approval or verified squad review record | `needsReview` |
+| Open, PR approved | Current human approval or verified `squad/pre-pr-verdict` review record | `readyToMerge` |
 | Open, changes requested | Current human changes request or verified squad rejection | `changesRequested` |
 | Open, CI failure | `state: open`, PR `statusCheckRollup: FAILURE` | `ciFailure` |
 | Closed | `state: closed` | `done` |
@@ -329,7 +329,7 @@ Ralph (the work monitor) continuously checks issue and PR state:
 1. **Triage:** Detects untriaged issues, assigns `squad:{member}` labels
 2. **Spawn:** Launches agents for assigned issues
 3. **Monitor:** Tracks PR state transitions and verifies SHA-pinned squad verdict evidence
-4. **Merge:** Automatically merges only PRs with current human or verified squad approval
+4. **Merge:** Automatically merges only PRs with a current human approval or a verified (self-attested) squad review record
 5. **Cleanup:** Marks issues as done when PRs merge
 
 **Ralph's work-check cycle:**
@@ -358,19 +358,25 @@ If the project requires human approval:
 4. If approved + CI passes, Ralph merges
 5. If changes requested, agent addresses feedback
 
-### Squad Pre-PR Verdict
+### Squad Pre-PR Review Record
 
-For repositories with the Bishop, Hicks, and Vasquez pre-PR gate:
+For repositories with the Bishop, Hicks, and Vasquez pre-PR gate. ⚠️ This is a
+self-attested quality gate, not independent review: every squad agent runs under
+the repository owner's authority, so it provides no separation of duties. See
+`.github/copilot-instructions.md` § "Repository verdict evidence".
 
 1. The trio reviews and approves the exact branch head before PR creation.
-2. After the PR opens, a non-author repository administrator dispatches
-   `.github/workflows/squad-review-verdict.yml` for that PR and SHA.
-3. Ralph runs `scripts/ci/verify-squad-verdict.mjs` and accepts only the
+2. After the PR opens, each reviewer posts a canonical record comment naming
+   themselves, the verdict, and the exact head SHA. See
+   `.github/copilot-instructions.md` § "Repository verdict evidence".
+3. `.github/workflows/squad-review-verdict.yml` re-evaluates on every comment,
+   review, and push, and publishes the `squad/pre-pr-verdict` status.
+4. Ralph runs `scripts/ci/verify-squad-verdict.mjs` and accepts only the
    trusted default-branch workflow run and its exact current-head status.
-4. Any head movement supersedes both approval and rejection. The new head
-   returns to `needsReview` until fresh evidence exists.
-5. Author comments never count. Until the workflow and a non-author administrator
-   are available, require human GitHub approval.
+5. Any head movement supersedes both the review record and any rejection. The
+   new head returns to `needsReview` until fresh evidence exists.
+6. Free-text comments never count — only the canonical block, and only through
+   the resulting commit status. A repository administrator overrides the gate.
 
 Documentation-only changes use a single reviewer in step 1 instead of the trio; every
 other step above is unchanged. See `.github/copilot-instructions.md` §
@@ -381,7 +387,7 @@ other step above is unchanged. See `.github/copilot-instructions.md` §
 If the issue was assigned to a squad member and they authored the PR:
 1. The required squad panel reviews before PR creation
 2. If changes are requested, **the original author addresses them** — there is no rejection lockout
-3. A non-author administrator records the exact-head verdict, or a human reviewer approves on GitHub
+3. Reviewers record exact-head verdict comments, or a repository administrator approves on GitHub
 
 ## Common Issue Lifecycle Patterns
 

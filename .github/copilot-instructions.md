@@ -152,6 +152,16 @@ the current `?scope`, `?tab`, and `?sub` search params. See
 
 **All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
 
+> **⚠️ This is a quality gate, not an independence gate.** Every squad agent — reviewers
+> and authors alike — runs under the repository owner's authority and acts through the
+> owner's token. Bishop reviewing Lambert's work is therefore the owner reviewing the
+> owner's own work. It is genuinely useful (a second agent with fresh context catches
+> what the author re-reading its own output misses), but it is **self-attested review**:
+> it provides **no separation of duties**, satisfies **no four-eyes requirement**, and
+> must never be presented as independent approval. The owner has accepted this trade
+> deliberately for single-maintainer operation — see issue #1310 and § "Repository
+> verdict evidence".
+
 Flow:
 
 1. Commit code to a feature branch (do not push yet).
@@ -159,9 +169,9 @@ Flow:
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
 5. Once APPROVED, open the PR via `gh pr create`.
-6. After the PR exists, have a repository administrator other than the PR author
-   dispatch `.github/workflows/squad-review-verdict.yml` with the PR number,
-   exact reviewed 40-character head SHA, and consensus verdict.
+6. After the PR exists, each reviewer records their review as a PR comment in the
+   canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
+   automatically on every comment, review, and push.
 
 This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
 
@@ -211,6 +221,29 @@ file is **not** documentation-only.
 **Be conservative — when in doubt, use the full gate.** Fail toward the stricter path whenever
 the classification is not obvious.
 
+**How the gate automates this.** `scripts/ci/squad-verdict-gate.mjs` implements the allowlist
+and the denylist, and takes the conservative reading of the safety-boundary carve-out. The
+following **always** take the full gate, even when the only change is markdown:
+
+- `.github/**` (in full — process configuration, not product documentation; it holds the
+  merge-evidence rules the unattended merger itself obeys)
+- `.squad/**`
+- `.copilot/**`
+- `.claude/**`
+- `.cursor/**`
+- root-level agent-instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `COPILOT.md`,
+  `.cursorrules`
+
+Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
+single review record must never be able to rewrite these. Prose is matched by extension
+(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/`
+correctly take the full gate. If a change is misclassified as full-gate, the cost is two extra
+review records; the reverse would be a real review gap.
+
+This list is exported from the module as `fullGatePrefixes` / `fullGateFiles`, and a test
+asserts that this section enumerates exactly it — the code and this documentation drifted apart
+once, which is how an agent-instruction file could have taken the one-reviewer path unnoticed.
+
 **Who the single reviewer is.** Route to the reviewer whose domain the document actually
 concerns — for example, Bishop for storage/integration docs, Hicks for testing and contract
 docs, Vasquez for security and concurrency docs. **Default to the squad Lead (Dallas) when the
@@ -220,14 +253,157 @@ reviewer's verdict.
 
 ### Repository verdict evidence
 
-The workflow publishes the `squad/pre-pr-verdict` commit status on the reviewed
-SHA. The workflow run is the provenance record: its immutable run metadata
-names the workflow path, default-branch ref, non-author administrator, PR number,
-verdict, and exact reviewed SHA. An author-written PR comment, status from a
-different workflow, or status whose workflow run does not match those fields is
-not gate evidence.
+> **⚠️ What a green `squad/pre-pr-verdict` actually means.** It means *a reviewer agent
+> examined this exact commit and recorded its findings*. It is **self-attested**. It does
+> **not** mean a second party approved the change, and it is **not** separation of duties,
+> four-eyes, or an independent audit control. Every squad agent runs under the repository
+> owner's authority through the owner's token, so agent review is the owner reviewing the
+> owner's work. Do not cite this status as independent approval in a release note, audit
+> response, or compliance artefact. The only status form that reflects a real
+> authorisation by a distinct principal is `APPROVE (owner)`.
+>
+> This was a deliberate decision. The previous gate demanded a non-author administrator
+> who does not exist, so it never once passed. Parker's analysis on issue #1310 showed
+> that every alternative preserving genuine separation of duties needs a second human, a
+> machine identity controlled by someone other than the owner, or a real independent CI
+> adjudicator. None exists here, and manufacturing the *appearance* of independence
+> (e.g. bot-hopping the dispatch so `github.actor` becomes `github-actions[bot]`) would
+> be worse than no gate: false assurance. The owner chose the honest option — keep the
+> controls that are real, and say plainly that independence is not one of them.
 
-Run the verifier before treating the squad verdict as merge evidence:
+#### What keeps outsiders out — and why author authentication is mandatory
+
+**Repository permissions are the control that prevents an outsider merging.** Only
+`jpapiez` has write access to `OlyForge3D/PrintFarmer` and `OlyForge3D/PrintFarmerDesktop`.
+The verdict gate is **not** that control and must never be described as if it were. Its job
+is to establish that a review actually happened at the current head before Ralph merges.
+
+But both repositories are **public**, and on a public repository **any GitHub user can
+comment on a pull request** — no write access, no collaborator status, no permission at
+all. Because Ralph merges autonomously using the *owner's* write access, a forgeable
+record would effectively lend the owner's privileges to whoever forged it. The attack
+chain that closes:
+
+1. An outsider forks the repository and opens a PR containing malicious code.
+2. The outsider posts a comment in the canonical record format: `APPROVE` at the PR's
+   current head SHA.
+3. Ralph sees "record present at current head, CI green" and merges it, unattended,
+   into `development`.
+
+That is an unauthenticated path from a stranger to the default branch. Author
+authentication is therefore mandatory, not optional:
+
+- **Write or better, verified live.** Every record's author is resolved through
+  `GET /repos/{owner}/{repo}/collaborators/{login}/permission` at evaluation time.
+  Only `admin`, `maintain`, `write`/`push` are accepted. `read` — which is what a
+  non-collaborator returns on a public repository — and `triage` are rejected.
+- **`author_association` is a pre-filter only.** `NONE`, `FIRST_TIME_CONTRIBUTOR`,
+  `FIRST_TIMER`, `CONTRIBUTOR` and `MANNEQUIN` are rejected outright, but a permitted
+  association is never sufficient on its own, because its meaning varies with
+  organisation configuration.
+- **Fail closed.** A failed, rate-limited, or unexpectedly shaped permission lookup
+  yields `unresolved`, which is not write access. An unverifiable author is never
+  acceptable, and the block reason says `no authenticated review` so the failure is not
+  mistaken for "nobody reviewed".
+- **Identity comes from the account, never the text.** The owner-override path requires
+  the API-supplied comment author to *be* an administrator whose login matches the named
+  reviewer. A comment merely claiming to be from `jpapiez` proves nothing.
+- **Fork PRs get no agent record at all.** The gate reads no record from a fork — anyone
+  can open one on a public repository, so a record there could only be self-asserted by an
+  unauthenticated party. It posts
+  `BLOCKED @ <sha12>: fork PR needs a repository administrator`. An administrator's native
+  GitHub approval at the current head is still honoured on that path and is evaluated by
+  the same code, because it reads only API-supplied logins and the live head SHA — never
+  fork-controlled input.
+- **No bot identity is allowlisted.** Allowlisting one would re-create the bot-hop
+  laundering pattern rejected above.
+
+Reviewers record reviews as PR comments. `.github/workflows/squad-review-verdict.yml`
+re-evaluates on every PR comment, review, and push, and publishes the
+`squad/pre-pr-verdict` commit status on the PR's live head SHA. The canonical
+comment format is:
+
+```text
+<!-- squad-verdict -->
+Squad-Reviewer: bishop
+Squad-Verdict: APPROVE
+Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
+```
+
+- `Squad-Reviewer` is a squad identity, validated against the repository's
+  `squad:{member}` labels. It should differ from the squad member who authored the
+  PR — a **quality heuristic**, since fresh context catches more than self-review,
+  and explicitly *not* an independence guarantee. Authorship is resolved from
+  `Squad-Author:` in the PR body, then the `squad:{member}` label on the issues the
+  PR closes, then the head branch name. GitHub-account authorship is deliberately
+  *not* used: every agent acts through the same owner token, which is exactly what
+  made the previous gate unsatisfiable.
+- `Squad-Verdict` is `APPROVE` (the reviewer agent found nothing blocking) or
+  `REQUEST_CHANGES` (it did). It records that agent's conclusion; it authorises
+  nothing.
+- `Squad-Head-SHA` must equal the PR's live head SHA when the gate runs. A
+  record naming any other SHA is stale and does not count, and can never
+  displace a reviewer's record on the current head.
+- The `<!-- squad-verdict -->` marker is required. Fenced code blocks (including
+  an unterminated fence, which GitHub renders as code to the end of the comment),
+  quoted (`>`) lines, and every other HTML comment are stripped before parsing.
+  Prose that illustrates, quotes, or hides the format is therefore not a binding
+  record — what the gate counts is what a human reading the thread can see, which
+  is what makes the audit trail meaningful. Each field must appear exactly once in
+  what remains. **Put the record block first in the comment:** sanitisation fails
+  closed, so an unterminated `<!--` or code fence earlier in the comment hides
+  everything after it — exactly as GitHub renders it — and would drop your record.
+- The commenting account must be authenticated as holding real repository write access,
+  resolved live through the collaborator permission API. Both repositories are public,
+  so anyone can comment on a PR; `author_association` is a pre-filter only and is never
+  sufficient on its own. Lookups fail closed. See "What keeps outsiders out" above.
+- A repository administrator satisfies the gate unconditionally, either by
+  approving through GitHub's native review UI at the current head, or by posting
+  a record whose `Squad-Reviewer` is their own GitHub login. The owner
+  is never locked out. Only each administrator's **most recent decisive** review
+  at that head counts (`APPROVED` / `CHANGES_REQUESTED` / `DISMISSED`;
+  `COMMENTED` is not decisive), so a later change request outranks an earlier
+  approval on the same commit and vice versa.
+
+**What this record genuinely buys you**, despite being self-attested:
+
+- **SHA binding** — a record is valid only for the exact commit it names. Push again
+  and it goes stale and the gate fails. This really does prevent review-then-push-more,
+  and it is the strongest control here.
+- **Presence** — the gate fails when nothing reviewed the change at all, catching the
+  real failure mode of a PR merging with zero examination.
+- **Audit trail** — which reviewer agent ran, which SHA it examined, what it concluded.
+- **Legible failure** — the status names the exact failing condition.
+
+The workflow job always succeeds; the gate outcome is the commit status, which
+takes exactly one of four forms:
+
+| Status | Description | Verifier classification |
+| --- | --- | --- |
+| `success` | `REVIEWED (self-attested) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
+| `success` | `APPROVE (owner) @ <sha12> by <login>` | `APPROVED` (exit 0) |
+| `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
+| `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
+
+`REVIEWED` and `APPROVED` are kept distinct on purpose: only the latter is an
+authorisation by a distinct principal. `REQUEST_CHANGES` is a reviewer decision and
+routes back to the author. `BLOCKED` means **no usable review record was accepted**,
+which is not the same as "nobody looked". Its reason names the exact condition and the
+verifier preserves that reason verbatim, because the subcases differ materially:
+
+| `BLOCKED` reason | What it means |
+| --- | --- |
+| `no review recorded for <sha12>` | Nothing was posted for this head. |
+| `no authenticated review for <sha12> (N unauthenticated)` | Records exist, but their authors could not be authenticated with repository write access. **Security-relevant — do not read this as "nobody reviewed".** |
+| `fork PR needs a repository administrator` | Fork PR; agent records are not read at all. |
+| `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha12>, …)]` | Too few accepted records for this change's scope. `missing` lists expected panel members with no record; the `stale at` clause lists reviewers whose only record names a superseded head. Both clauses are omitted when they do not apply, so a docs-only PR reads e.g. `have 0/1 (stale at dallas@<sha12>)` and a code PR reads e.g. `have 1/3, missing hicks+vasquez`. |
+| `reviewer <agent> is the PR author` | The only record came from the authoring agent. |
+
+A session reading the failure therefore knows what to do instead of parking indefinitely.
+The verifier preserves this text verbatim in `blockedReason`, so it is safe to branch on —
+but match the `have …` case as a pattern, not as a fixed string.
+
+Run the verifier before treating the squad record as merge evidence:
 
 ```bash
 node scripts/ci/verify-squad-verdict.mjs \
@@ -237,17 +413,14 @@ node scripts/ci/verify-squad-verdict.mjs \
 ```
 
 Pass `--expected-head <recorded-sha>` when auditing a previously recorded
-verdict after the PR head may have moved. The verifier then reports
-`SUPERSEDED` for either an old approval or an old rejection.
+review after the PR head may have moved. The verifier then reports
+`SUPERSEDED` for either an old review record or an old rejection.
 
-Any head movement supersedes the recorded verdict. This rule applies equally
-to `APPROVE`, `CHANGES_REQUESTED`, and `REJECT`, including rebases and force
-pushes. The trio must review the new head and a non-author administrator must
-record a new verdict.
+Any head movement supersedes the recorded review. This rule applies equally
+to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including rebases and force
+pushes. The panel must review the new head and record fresh reviews naming it.
 
-Until the workflow is merged to the default branch and a non-author administrator
-can dispatch it, author-opened squad PRs require a human GitHub approval before
-merge. Missing, invalid, or superseded squad evidence never becomes approval.
+Missing, invalid, or superseded squad evidence never becomes a review record.
 After verification, merge with
 `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...` so a
 force-push between verification and merge cannot substitute unreviewed code.
