@@ -39,7 +39,7 @@ If it is absent, follow the normal routing tables below.
 | Architecture, design, scope | Dallas | System design, technical decisions, cross-domain concerns |
 | React, TypeScript, UI, frontend | Ripley | Components, pages, styling, frontend state, SignalR client |
 | C#, .NET, API, database, backend | Lambert | Controllers, EF Core, migrations, backend plugins, SignalR hubs |
-| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: Claude Opus 5, GPT-5.6 Sol, Gemini 3.1 Pro Preview — all three review in parallel; must achieve consensus APPROVE before PR creation |
+| Code review (pre-commit gate) | Bishop + Hicks + Vasquez | Triple-model review: Claude Opus 5, GPT-5.6 Sol, Gemini 3.1 Pro Preview — all three review in parallel; must achieve consensus APPROVE before PR creation. **Documentation-only changes take a single reviewer instead — see rule 11.** |
 | Testing, QA, coverage | Kane | Write tests, find edge cases, run test suites, coverage analysis |
 | Documentation, API docs, user guides, README | Ash | API reference, user docs, changelogs, migration guides, config docs |
 | Research, competitive analysis, features | Brett | Market research, competitor analysis, feature recommendations, trends |
@@ -125,3 +125,11 @@ When work is repo-specific, pass the correct repo path as `WORKTREE_PATH` in the
     read-only capability is unavailable, the reviewer reports an explicit environment
     blocker naming the capability and blocked review step. Implementation agents retain
     the full process-tracking requirement.
+11. **Documentation-only changes route to ONE reviewer, not three.** Pick the reviewer whose
+    domain the document concerns; default to Dallas (Lead) when unclear. The single reviewer
+    still performs a real review — this reduces reviewer count, not rigour. The canonical
+    definition of "documentation-only", including the manifest/workflow denylist and the
+    security, API-contract, and agent-safety-boundary carve-outs, lives in
+    `.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer". Do not
+    restate it here. If a change is not clearly documentation-only, use the full
+    Bishop + Hicks + Vasquez gate.
