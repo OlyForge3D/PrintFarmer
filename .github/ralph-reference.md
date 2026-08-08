@@ -84,9 +84,10 @@ or rejection from a PR that never had squad evidence.
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
   `squad/pre-pr-verdict` status. The status is the evidence; the comment is not.
-- If the gate reports `BLOCKED`, its status description names the exact failing
-  condition (no verdict, stale SHA, reviewer-is-author, or insufficient count).
-  Act on that condition — do not park the PR.
+- If the gate reports a `BLOCKED` status, its description names the exact
+  failing condition (no verdict, stale SHA, reviewer-is-author, or insufficient
+  count). That is missing evidence, not a rejection: act on the condition —
+  do not park the PR, and do not route it back to the author as feedback.
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.

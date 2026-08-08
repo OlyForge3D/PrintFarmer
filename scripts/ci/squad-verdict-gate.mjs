@@ -19,6 +19,16 @@ export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 /** Comment authors we accept a verdict from at all. */
 const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 
+/**
+ * Sentinel that must appear in a verdict comment. Requiring it stops prose that
+ * merely *illustrates* the format — a reviewer explaining the protocol, a doc
+ * excerpt — from being read as a binding verdict.
+ */
+export const verdictMarker = '<!-- squad-verdict -->';
+
+const fencedBlock = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*?^[ \t]*(?:```|~~~)[ \t]*$/gm;
+const quotedLine = /^[ \t]*>.*$/gm;
+
 const verdictAliases = new Map([
   ['APPROVE', 'APPROVE'],
   ['APPROVED', 'APPROVE'],
@@ -27,27 +37,38 @@ const verdictAliases = new Map([
   ['REJECT', 'REQUEST_CHANGES'],
 ]);
 
-const reviewerLine = /^[ \t>]*Squad-Reviewer:[ \t]*(.+?)[ \t]*$/gim;
-const verdictLine = /^[ \t>]*Squad-Verdict:[ \t]*([A-Za-z_]+)[ \t]*$/gim;
-const headShaLine = /^[ \t>]*Squad-Head-SHA:[ \t]*([0-9a-fA-F]{40})[ \t]*$/gim;
+const reviewerLine = /^[ \t]*Squad-Reviewer:[ \t]*(.+?)[ \t]*$/gim;
+const verdictLine = /^[ \t]*Squad-Verdict:[ \t]*([A-Za-z_]+)[ \t]*$/gim;
+const headShaLine = /^[ \t]*Squad-Head-SHA:[ \t]*([0-9a-fA-F]{40})[ \t]*$/gim;
 
 // Prose file extensions. Path prefixes alone are not enough: `docs/**` can hold
 // binary or image assets, which the policy denylist excludes.
 const proseExtensions = ['.md', '.markdown', '.rst', '.adoc', '.txt'];
 
-// Paths that always take the full gate even when they look like prose. The
-// agent-instruction trees govern real agent behaviour (merge safety,
-// destructive-operation permissions), which is the safety-boundary carve-out in
-// .github/copilot-instructions.md. Path matching cannot judge whether a given
-// edit crosses that boundary, so the conservative reading is applied: these
-// trees never qualify for the one-reviewer exemption.
+// Trees that always take the full gate even when they look like prose. These
+// hold agent instructions, review policy, and CI definitions: whether a given
+// edit moves an agent's safety boundary cannot be judged from the path, so the
+// conservative reading of the carve-out in .github/copilot-instructions.md is
+// applied. `.github/**` is covered in full — it is process configuration, not
+// product documentation, and it contains the merge-evidence rules that the
+// unattended merger itself obeys.
 const fullGatePrefixes = [
-  '.github/workflows/',
+  '.github/',
   '.squad/',
-  '.github/agents/',
-  '.github/skills/',
-  '.copilot/skills/',
+  '.copilot/',
+  '.claude/',
+  '.cursor/',
 ];
+
+// Root-level agent-instruction files, which are agent behaviour by content even
+// though nothing in their path says so.
+const fullGateFiles = new Set([
+  'agents.md',
+  'claude.md',
+  'gemini.md',
+  'copilot.md',
+  '.cursorrules',
+]);
 
 // Dependency manifests and lockfiles, matched by basename anywhere in the tree.
 const manifestBasenames = new Set([
@@ -110,16 +131,30 @@ export function rosterFromLabels(labelNames) {
   return roster;
 }
 
-function singleMatch(pattern, body) {
+/**
+ * Strip anything that only *quotes* or *illustrates* content: fenced code
+ * blocks and Markdown quote lines. A verbatim quote-reply of someone else's
+ * verdict must not re-register as a fresh verdict.
+ */
+function sanitizeBody(body) {
+  return body.replace(fencedBlock, '').replace(quotedLine, '');
+}
+
+function countMatches(pattern, body) {
   pattern.lastIndex = 0;
-  const values = new Set();
+  const values = [];
   let match = pattern.exec(body);
   while (match) {
-    values.add(match[1].trim());
+    values.push(match[1].trim());
     match = pattern.exec(body);
   }
-  // Ambiguity (a comment quoting another verdict) is not evidence.
-  return values.size === 1 ? [...values][0] : undefined;
+  // More than one occurrence of a field is ambiguous regardless of whether the
+  // values agree, so it is not evidence.
+  return values.length === 1 ? values[0] : undefined;
+}
+
+function singleMatch(pattern, body) {
+  return countMatches(pattern, sanitizeBody(body));
 }
 
 /**
@@ -128,9 +163,13 @@ function singleMatch(pattern, body) {
  */
 export function parseVerdictComment(comment) {
   const body = typeof comment?.body === 'string' ? comment.body : '';
-  const reviewerRaw = singleMatch(reviewerLine, body);
-  const verdictRaw = singleMatch(verdictLine, body);
-  const headShaRaw = singleMatch(headShaLine, body);
+  const clean = sanitizeBody(body);
+  if (clean.split(verdictMarker).length !== 2) {
+    return undefined;
+  }
+  const reviewerRaw = countMatches(reviewerLine, clean);
+  const verdictRaw = countMatches(verdictLine, clean);
+  const headShaRaw = countMatches(headShaLine, clean);
   if (!reviewerRaw || !verdictRaw || !headShaRaw) {
     return undefined;
   }
@@ -145,7 +184,12 @@ export function parseVerdictComment(comment) {
     headSha: headShaRaw.toLowerCase(),
     commenter: comment.user?.login ?? '',
     association: comment.author_association ?? '',
-    trusted: trustedAssociations.has(comment.author_association ?? ''),
+    // Two independent conditions, both required. `author_association` is not a
+    // permission level — GitHub reports MEMBER for any organisation member and
+    // COLLABORATOR for read-only collaborators — so the caller must also
+    // confirm write access through the collaborator permission API.
+    trusted: trustedAssociations.has(comment.author_association ?? '') &&
+      comment.squadWriteAccess === true,
     // Set by the caller when the commenting account is a repository
     // administrator naming its own GitHub login as the reviewer. That is the
     // human owner speaking rather than an agent, and it is decisive.
@@ -156,25 +200,36 @@ export function parseVerdictComment(comment) {
 }
 
 /**
- * Collect the most recent trusted verdict per reviewer identity.
- * Untrusted commenters are dropped: anyone can comment on a public PR.
+ * Split trusted verdicts into the reviewer's decision *on the current head* and
+ * everything else.
+ *
+ * Current-head records and stale records are ranked in separate pools on
+ * purpose. Taking a single newest-overall record per reviewer would let a
+ * comment naming an old SHA erase that reviewer's live REQUEST_CHANGES, since
+ * the stale record would win on timestamp and then be filtered out of the
+ * current pool. A stale comment can never displace a current-head one.
  */
-export function collectVerdicts(comments) {
-  const latest = new Map();
+export function collectVerdicts(comments, headSha) {
+  const head = String(headSha ?? '').toLowerCase();
+  const current = new Map();
+  const staleLatest = new Map();
   for (const comment of comments ?? []) {
     const record = parseVerdictComment(comment);
     if (!record || !record.trusted) {
       continue;
     }
-    const previous = latest.get(record.reviewer);
+    const pool = record.headSha === head ? current : staleLatest;
+    const previous = pool.get(record.reviewer);
     if (
       !previous ||
       Date.parse(record.recordedAt || 0) >= Date.parse(previous.recordedAt || 0)
     ) {
-      latest.set(record.reviewer, record);
+      pool.set(record.reviewer, record);
     }
   }
-  return latest;
+  const stale = [...staleLatest.values()]
+    .filter((record) => !current.has(record.reviewer));
+  return { current, stale };
 }
 
 function isProse(path) {
@@ -196,6 +251,9 @@ export function classifyChangeScope(paths) {
     const basename = path.split('/').pop().toLowerCase();
     if (fullGatePrefixes.some((prefix) => path.startsWith(prefix))) {
       return { docsOnly: false, reason: `${path} governs agent or CI behaviour` };
+    }
+    if (!path.includes('/') && fullGateFiles.has(basename)) {
+      return { docsOnly: false, reason: `${path} is a root agent-instruction file` };
     }
     if (manifestBasenames.has(basename)) {
       return { docsOnly: false, reason: `${path} is a dependency manifest` };
@@ -309,16 +367,7 @@ export function evaluateGate({
     };
   }
 
-  const verdicts = collectVerdicts(comments);
-  const stale = [];
-  const current = new Map();
-  for (const [member, record] of verdicts) {
-    if (record.headSha === head) {
-      current.set(member, record);
-    } else {
-      stale.push(record);
-    }
-  }
+  const { current, stale } = collectVerdicts(comments, head);
 
   // 2. Human owner override via verdict comment: an administrator who names
   //    their own GitHub login as the reviewer is speaking as the owner, not as
@@ -333,7 +382,7 @@ export function evaluateGate({
         description: truncate(
           passed
             ? `APPROVE @ ${shortSha(head)} by ${record.commenter}`
-            : `BLOCKED @ ${shortSha(head)}: owner ${record.commenter} requested changes`,
+            : `REQUEST_CHANGES @ ${shortSha(head)} by ${record.commenter}`,
         ),
         reason: `repository administrator ${record.commenter} recorded ${record.verdict}`,
         notes,
@@ -387,7 +436,10 @@ export function evaluateGate({
     eligible.set(member, record);
   }
 
-  // 4. Any current-head rejection blocks, regardless of approval count.
+  // 4. Any current-head rejection blocks, regardless of approval count. This is
+  //    the only path that emits a REQUEST_CHANGES status: it is a reviewer
+  //    decision, unlike the BLOCKED states below, which mean evidence is
+  //    absent rather than negative.
   const rejection = [...eligible.values()].find(
     (record) => record.verdict === 'REQUEST_CHANGES');
   if (rejection) {
@@ -395,7 +447,7 @@ export function evaluateGate({
       state: 'failure',
       passed: false,
       description: truncate(
-        `BLOCKED @ ${shortSha(head)}: ${rejection.reviewer} requested changes`,
+        `REQUEST_CHANGES @ ${shortSha(head)} by ${rejection.reviewer}`,
       ),
       reason: `${rejection.reviewer} recorded REQUEST_CHANGES on the current head`,
       notes,

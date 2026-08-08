@@ -212,13 +212,15 @@ file is **not** documentation-only.
 the classification is not obvious.
 
 **How the gate automates this.** `scripts/ci/squad-verdict-gate.mjs` implements the allowlist
-and the denylist, and takes the conservative reading of the safety-boundary carve-out: the
-agent-instruction trees (`.squad/**`, `.github/agents/**`, `.github/skills/**`,
-`.copilot/skills/**`) and `.github/workflows/**` **always** take the full gate, because whether
-a given edit moves an agent's safety boundary cannot be judged from the path. Prose is matched
-by extension (`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under
-`docs/` correctly take the full gate. If a change is misclassified as full-gate, the cost is two
-extra verdict comments; the reverse would be a real review gap.
+and the denylist, and takes the conservative reading of the safety-boundary carve-out: `.github/**`
+in full, plus `.squad/**`, `.copilot/**`, `.claude/**` and root agent-instruction files
+(`AGENTS.md`, `CLAUDE.md`), **always** take the full gate. Whether a given edit moves an agent's
+safety boundary cannot be judged from the path, and `.github/**` is process configuration rather
+than product documentation — it holds the merge-evidence rules that the unattended merger itself
+obeys, so a single verdict must not be able to rewrite them. Prose is matched by extension
+(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/` correctly
+take the full gate. If a change is misclassified as full-gate, the cost is two extra verdict
+comments; the reverse would be a real review gap.
 
 **Who the single reviewer is.** Route to the reviewer whose domain the document actually
 concerns — for example, Bishop for storage/integration docs, Hicks for testing and contract
@@ -250,17 +252,42 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   (issue #1310).
 - `Squad-Verdict` is `APPROVE` or `REQUEST_CHANGES`.
 - `Squad-Head-SHA` must equal the PR's live head SHA when the gate runs. A
-  verdict naming any other SHA is stale and does not count.
-- Only comments from `OWNER`/`MEMBER`/`COLLABORATOR` accounts are considered, and
-  a comment that quotes a second, different verdict is ambiguous and ignored.
+  verdict naming any other SHA is stale and does not count, and can never
+  displace a reviewer's verdict on the current head.
+- The `<!-- squad-verdict -->` marker is required. Fenced code blocks and quoted
+  (`>`) lines are stripped before parsing, so prose that merely illustrates or
+  quotes the format is not a binding verdict, and each field must appear exactly
+  once in what remains.
+- The commenting account must hold real repository write access, confirmed
+  through the collaborator permission API. GitHub's `author_association` is not
+  a permission level — it reports `MEMBER` for any organisation member and
+  `COLLABORATOR` for read-only collaborators — so it is not sufficient on its
+  own.
 - A repository administrator satisfies the gate unconditionally, either by
   approving through GitHub's native review UI at the current head, or by posting
   a verdict comment whose `Squad-Reviewer` is their own GitHub login. The owner
   is never locked out.
 
-The workflow job always succeeds; the gate outcome is the commit status. A block
-carries a precise reason — `no verdict found`, `have 1/3, missing hicks+vasquez`,
-`reviewer parker is the PR author`, or the stale reviewed SHA — so a session
+**Trust boundary.** Every squad agent posts through the repository owner's
+token, so an account that can record a verdict already has write access and
+could merge directly. Reviewer separation is a process control at squad-identity
+level, not an authentication boundary — a single write-capable account can
+record the whole panel. That is the owner's explicit decision. The controls that
+carry real weight are SHA binding and the write-access requirement.
+
+The workflow job always succeeds; the gate outcome is the commit status, which
+takes exactly one of three forms:
+
+| Status | Description | Verifier classification |
+| --- | --- | --- |
+| `success` | `APPROVE @ <sha12> by <reviewers>` | `APPROVED` (exit 0) |
+| `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
+| `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
+
+`REQUEST_CHANGES` is a reviewer decision and routes back to the author.
+`BLOCKED` means no usable evidence exists yet — `no verdict found`,
+`have 1/3, missing hicks+vasquez`, `reviewer parker is the PR author`, or the
+stale reviewed SHA. The reason names the exact failing condition, so a session
 reading the failure knows what to do instead of parking.
 
 Run the verifier before treating the squad verdict as merge evidence:

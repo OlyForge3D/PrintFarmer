@@ -54,8 +54,14 @@ function parseDisplayTitle(displayTitle) {
   return { prNumber: Number.parseInt(match[1], 10) };
 }
 
-// The gate encodes its outcome in the status state and description. Approvals
-// are `APPROVE @ <sha12> by <reviewers>`; blocks are `BLOCKED @ <sha12>: ...`.
+// The gate encodes its outcome in the status state and description:
+//   success  `APPROVE @ <sha12> by <reviewers>`        -> a real approval
+//   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>` -> a real rejection
+//   failure  `BLOCKED @ <sha12>: <reason>`             -> no usable evidence
+// The third form covers "no verdict yet", "have 1/3", stale-only evidence and
+// reviewer-is-author. Those are absent evidence, not a reviewer decision, and
+// must not be reported as CHANGES_REQUESTED — that would suppress the
+// administrator fallback path.
 function parseStatusDescription(status, statusSha) {
   const description = status.description ?? '';
   const shortSha = statusSha.slice(0, 12);
@@ -64,8 +70,15 @@ function parseStatusDescription(status, statusSha) {
     return match ? { verdict: 'APPROVE', reviewers: match[1] } : undefined;
   }
   if (status.state === 'failure') {
-    const match = new RegExp(`^BLOCKED @ ${shortSha}: (\\S.*)$`).exec(description);
-    return match ? { verdict: 'REQUEST_CHANGES', reviewers: '' } : undefined;
+    const rejected =
+      new RegExp(`^REQUEST_CHANGES @ ${shortSha} by (\\S.*)$`).exec(description);
+    if (rejected) {
+      return { verdict: 'REQUEST_CHANGES', reviewers: rejected[1] };
+    }
+    const blocked = new RegExp(`^BLOCKED @ ${shortSha}: (\\S.*)$`).exec(description);
+    if (blocked) {
+      return { verdict: 'BLOCKED', reviewers: '', detail: blocked[1] };
+    }
   }
   return undefined;
 }
@@ -134,6 +147,15 @@ export function verifySquadVerdict({ pull, status, run }) {
     return result('INVALID', 'The status does not match the trusted workflow verdict.');
   }
 
+  // A gate block is the absence of usable evidence, not a reviewer decision.
+  if (outcome.verdict === 'BLOCKED') {
+    return result(
+      'MISSING',
+      `The gate blocked ${statusSha} without a reviewer verdict: ${outcome.detail}`,
+      { reviewedHeadSha: statusSha },
+    );
+  }
+
   if (statusSha !== currentHeadSha) {
     return result(
       'SUPERSEDED',
@@ -174,6 +196,8 @@ export function selectSquadVerdict({
       return result('INVALID', 'The newest verdict status has no trusted run target.');
     }
     const run = loadRun(runId);
+    // Deliberately fail closed on the newest candidate only: an older approval
+    // must never be resurrected by a newer status being unusable.
     return verifySquadVerdict({ pull, status, run });
   }
   return result('MISSING', 'No squad verdict status exists on the current head.');

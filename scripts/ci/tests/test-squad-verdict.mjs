@@ -17,7 +17,7 @@ function fixture(verdict = 'APPROVE') {
   const state = verdict === 'APPROVE' ? 'success' : 'failure';
   const description = verdict === 'APPROVE'
     ? `APPROVE @ ${shortSha} by bishop+hicks+vasquez`
-    : `BLOCKED @ ${shortSha}: vasquez requested changes`;
+    : `REQUEST_CHANGES @ ${shortSha} by vasquez`;
   const pull = {
     number: 1116,
     user: { login: 'pr-author' },
@@ -186,6 +186,25 @@ test('rejects an approval description pinned to a different short SHA', () => {
   const evidence = fixture();
   evidence.status.description = `APPROVE @ ${movedHeadSha.slice(0, 12)} by bishop`;
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('a gate block is missing evidence, not a reviewer rejection', () => {
+  // Ralph routes CHANGES_REQUESTED back to the author but treats MISSING as
+  // "no squad evidence", which permits the administrator fallback. Conflating
+  // the two would suppress that fallback for PRs nobody has reviewed yet.
+  for (const detail of [
+    `no verdict found for ${shortSha}`,
+    'have 1/3, missing hicks+vasquez',
+    'reviewer parker is the PR author',
+    `have 0/3 (stale at bishop@${movedHeadSha.slice(0, 12)})`,
+    'cross-repository PR needs human review',
+  ]) {
+    const evidence = fixture('REQUEST_CHANGES');
+    evidence.status.description = `BLOCKED @ ${shortSha}: ${detail}`;
+    const verdict = verifySquadVerdict(evidence);
+    assert.equal(verdict.classification, 'MISSING', detail);
+    assert.match(verdict.reason, /without a reviewer verdict/);
+  }
 });
 
 test('author-authored lookalike comments cannot satisfy the verifier', () => {

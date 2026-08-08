@@ -35,6 +35,7 @@ function comment(reviewer, verdict, sha = headSha, overrides = {}) {
     ].join('\n'),
     user: { login: 'jpapiez' },
     author_association: 'OWNER',
+    squadWriteAccess: true,
     created_at: '2026-08-08T01:00:00Z',
     updated_at: '2026-08-08T01:00:00Z',
     ...overrides,
@@ -76,17 +77,62 @@ test('normalizes REJECT and CHANGES_REQUESTED to REQUEST_CHANGES', () => {
   }
 });
 
-test('ignores a comment that quotes a second, different verdict', () => {
+test('ignores a comment carrying two different verdicts', () => {
   const ambiguous = comment('bishop', 'APPROVE');
-  ambiguous.body += '\n> Squad-Verdict: REQUEST_CHANGES';
+  ambiguous.body += '\nSquad-Verdict: REQUEST_CHANGES';
   assert.equal(parseVerdictComment(ambiguous), undefined);
+});
+
+test('requires the squad-verdict marker', () => {
+  const unmarked = comment('bishop', 'APPROVE');
+  unmarked.body = unmarked.body.replace('<!-- squad-verdict -->', 'Looks good:');
+  assert.equal(parseVerdictComment(unmarked), undefined);
+});
+
+test('a fenced example of the format is not a binding verdict', () => {
+  const illustration = comment('bishop', 'APPROVE');
+  illustration.body = [
+    'Record verdicts like this:',
+    '```text',
+    '<!-- squad-verdict -->',
+    'Squad-Reviewer: bishop',
+    'Squad-Verdict: APPROVE',
+    `Squad-Head-SHA: ${headSha}`,
+    '```',
+  ].join('\n');
+  assert.equal(parseVerdictComment(illustration), undefined);
+});
+
+test('a verbatim quote-reply of a verdict is not a fresh verdict', () => {
+  const quoted = comment('bishop', 'APPROVE');
+  quoted.body = quoted.body.split('\n').map((line) => `> ${line}`).join('\n') +
+    '\n\nAgreed.';
+  assert.equal(parseVerdictComment(quoted), undefined);
+});
+
+test('a repeated field is ambiguous even when the values agree', () => {
+  const doubled = comment('bishop', 'APPROVE');
+  doubled.body += '\nSquad-Verdict: APPROVE';
+  assert.equal(parseVerdictComment(doubled), undefined);
+});
+
+test('drops verdicts from accounts without repository write access', () => {
+  // author_association alone is not a permission level: GitHub reports MEMBER
+  // for any organisation member and COLLABORATOR for read-only collaborators.
+  const readOnlyMember = comment('bishop', 'APPROVE', headSha, {
+    author_association: 'MEMBER', user: { login: 'org-member' },
+    squadWriteAccess: false,
+  });
+  assert.equal(parseVerdictComment(readOnlyMember).trusted, false);
+  assert.equal(collectVerdicts([readOnlyMember], headSha).current.size, 0);
 });
 
 test('drops verdicts from untrusted commenters', () => {
   const outsider = comment('bishop', 'APPROVE', headSha, {
     author_association: 'NONE', user: { login: 'drive-by' },
+    squadWriteAccess: false,
   });
-  assert.equal(collectVerdicts([outsider]).size, 0);
+  assert.equal(collectVerdicts([outsider], headSha).current.size, 0);
 });
 
 test('keeps only the newest verdict per reviewer', () => {
@@ -96,8 +142,27 @@ test('keeps only the newest verdict per reviewer', () => {
   const newer = comment('bishop', 'REQUEST_CHANGES', headSha, {
     updated_at: '2026-08-08T02:00:00Z',
   });
-  const latest = collectVerdicts([older, newer]);
-  assert.equal(latest.get('bishop').verdict, 'REQUEST_CHANGES');
+  const { current } = collectVerdicts([older, newer], headSha);
+  assert.equal(current.get('bishop').verdict, 'REQUEST_CHANGES');
+});
+
+test('a stale verdict cannot erase a live rejection from the same reviewer', () => {
+  const rejection = comment('bishop', 'REQUEST_CHANGES', headSha, {
+    updated_at: '2026-08-08T01:00:00Z',
+  });
+  const staleApproval = comment('bishop', 'APPROVE', staleSha, {
+    updated_at: '2026-08-08T03:00:00Z',
+  });
+  const { current, stale } = collectVerdicts([rejection, staleApproval], headSha);
+  assert.equal(current.get('bishop').verdict, 'REQUEST_CHANGES');
+  assert.equal(stale.length, 0);
+
+  const result = gate({
+    changedPaths: ['docs/ARCHITECTURE.md'],
+    comments: [rejection, staleApproval, comment('hicks', 'APPROVE')],
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.description, /^REQUEST_CHANGES @ .* by bishop$/);
 });
 
 test('accepts a full panel approval at the current head', () => {
@@ -159,7 +224,23 @@ test('any current-head rejection blocks even with enough approvals', () => {
     ],
   });
   assert.equal(result.state, 'failure');
-  assert.match(result.description, /vasquez requested changes/);
+  assert.equal(result.description, `REQUEST_CHANGES @ ${headSha.slice(0, 12)} by vasquez`);
+});
+
+test('only a reviewer decision emits REQUEST_CHANGES; absent evidence is BLOCKED', () => {
+  // verify-squad-verdict.mjs distinguishes these: REQUEST_CHANGES routes back
+  // to the author, BLOCKED means no usable evidence exists yet.
+  const noVerdict = gate();
+  const insufficient = gate({ comments: [comment('bishop', 'APPROVE')] });
+  const authorReview = gate({
+    changedPaths: ['docs/ARCHITECTURE.md'],
+    comments: [comment('parker', 'APPROVE')],
+  });
+  const staleOnly = gate({ comments: [comment('bishop', 'APPROVE', staleSha)] });
+  for (const result of [noVerdict, insufficient, authorReview, staleOnly]) {
+    assert.match(result.description, /^BLOCKED @ /);
+    assert.doesNotMatch(result.description, /^REQUEST_CHANGES/);
+  }
 });
 
 test('an unknown reviewer identity is ignored, not counted', () => {
@@ -202,6 +283,7 @@ test('the owner can also block through the same override path', () => {
   const result = gate({ comments: [owner] });
   assert.equal(result.state, 'failure');
   assert.equal(result.override, 'owner-comment');
+  assert.match(result.description, /^REQUEST_CHANGES @ /);
 });
 
 test('unresolved head SHA fails closed', () => {
@@ -210,14 +292,20 @@ test('unresolved head SHA fails closed', () => {
 
 test('documentation-only classification honours the policy carve-outs', () => {
   assert.equal(classifyChangeScope(['docs/API.md']).docsOnly, true);
-  assert.equal(classifyChangeScope(['.github/instructions/a11y.instructions.md']).docsOnly, true);
+  assert.equal(classifyChangeScope(['README.md']).docsOnly, true);
   assert.equal(classifyChangeScope([]).docsOnly, false);
   for (const carveOut of [
     '.github/workflows/ci.yml',
+    '.github/copilot-instructions.md',
+    '.github/ralph-reference.md',
+    '.github/instructions/a11y.instructions.md',
+    '.github/chatmodes/debug.chatmode.md',
     '.squad/templates/ralph-reference.md',
     '.github/agents/squad.agent.md',
     '.github/skills/testing/SKILL.md',
     '.copilot/skills/reflect/SKILL.md',
+    'AGENTS.md',
+    'CLAUDE.md',
     'SECURITY.md',
     'LICENSE',
     'docs/api-contract.md',
@@ -295,6 +383,9 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /squad-verdict-gate\.mjs/);
+  assert.match(workflow, /getCollaboratorPermissionLevel/);
+  assert.match(workflow, /squadWriteAccess: await canWrite\(login\)/);
+  assert.match(workflow, /types: \[created, edited, deleted\]/);
   assert.match(
     workflow,
     /run-name: "Squad verdict gate for PR #\$\{\{ github\.event\.pull_request\.number/,

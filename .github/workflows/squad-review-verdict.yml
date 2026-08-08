@@ -22,11 +22,24 @@ name: Record squad review verdict
 #     on the linked issue, then the head branch name).
 #   * `Squad-Verdict` is APPROVE or REQUEST_CHANGES.
 #   * `Squad-Head-SHA` must equal the PR's live head SHA at evaluation time. A
-#     verdict recorded against an older SHA is stale and does not count. This is
-#     the load-bearing control: it makes review-then-push-more detectable.
-#   * Only comments from OWNER/MEMBER/COLLABORATOR accounts are considered.
-#   * Each line must appear exactly once; a comment quoting another verdict is
-#     ambiguous and is ignored.
+#     verdict recorded against an older SHA is stale and does not count, and can
+#     never displace a reviewer's verdict on the current head. This is the
+#     load-bearing control: it makes review-then-push-more detectable.
+#   * The `<!-- squad-verdict -->` marker is REQUIRED. Fenced code blocks and
+#     quoted (`>`) lines are stripped before parsing, so prose that merely
+#     illustrates or quotes the format is not a binding verdict. Each field must
+#     appear exactly once in the remaining text.
+#   * The commenting account must hold real repository write access. GitHub's
+#     `author_association` is not a permission level — it reports MEMBER for any
+#     organisation member and COLLABORATOR for read-only collaborators — so
+#     permission is confirmed through the collaborator permission API.
+#
+# TRUST BOUNDARY: every squad agent posts through the repository owner's token,
+# so an account that can record a verdict is by construction an account that
+# already has write access and could merge directly. Reviewer separation is a
+# process control at squad-identity level, not an authentication boundary. This
+# is the owner's explicit decision (issue #1310); the controls that carry real
+# weight are SHA binding and the write-access requirement.
 #
 # REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
 # Changes: One Reviewer": documentation-only PRs need one verdict, everything
@@ -46,7 +59,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, edited]
   issue_comment:
-    types: [created, edited]
+    types: [created, edited, deleted]
   pull_request_review:
     types: [submitted, edited, dismissed]
   workflow_dispatch:
@@ -139,23 +152,29 @@ jobs:
             }
 
             const permissionCache = new Map();
-            async function isAdmin(login) {
-              if (!login) return false;
+            async function permissionOf(login) {
+              if (!login) return 'none';
               const key = login.toLowerCase();
               if (permissionCache.has(key)) return permissionCache.get(key);
-              let admin = false;
+              let permission = 'none';
               try {
                 const { data } =
                   await github.rest.repos.getCollaboratorPermissionLevel({
                     owner, repo, username: login,
                   });
-                admin = data.permission === 'admin';
+                permission = data.permission ?? 'none';
               } catch (error) {
                 core.debug(`Permission lookup failed for ${login}: ${error.message}`);
               }
-              permissionCache.set(key, admin);
-              return admin;
+              permissionCache.set(key, permission);
+              return permission;
             }
+            const isAdmin = async (login) => await permissionOf(login) === 'admin';
+            // author_association is not a permission level: GitHub reports
+            // MEMBER for any organisation member and COLLABORATOR for read-only
+            // collaborators. Verdicts require real write access.
+            const canWrite = async (login) =>
+              ['admin', 'maintain', 'write', 'push'].includes(await permissionOf(login));
 
             const [labelData, rawComments, rawReviews, fileData] = await Promise.all([
               github.paginate(github.rest.issues.listLabelsForRepo,
@@ -171,18 +190,25 @@ jobs:
             const roster = gate.rosterFromLabels(labelData.map((label) => label.name));
             const changedPaths = fileData.map((file) => file.filename);
 
-            // Mark verdict comments where an administrator names their own
-            // GitHub login as the reviewer: that is the repository owner
-            // speaking, not an agent, and it is decisive.
+            // Resolve real repository permission for every account that posted
+            // something shaped like a verdict, and flag the owner override.
             const comments = [];
-            for (const comment of rawComments) {
-              const record = gate.parseVerdictComment(comment);
-              const selfDeclared = Boolean(record) && record.trusted &&
-                record.reviewer === gate.normalizeMember(record.commenter) &&
-                await isAdmin(record.commenter);
-              comments.push(
-                selfDeclared ? { ...comment, squadAdminOverride: true } : comment,
-              );
+            for (const raw of rawComments) {
+              const shape = gate.parseVerdictComment({
+                ...raw, squadWriteAccess: true,
+              });
+              if (!shape) {
+                comments.push(raw);
+                continue;
+              }
+              const login = shape.commenter;
+              const comment = { ...raw, squadWriteAccess: await canWrite(login) };
+              if (comment.squadWriteAccess &&
+                  shape.reviewer === gate.normalizeMember(login) &&
+                  await isAdmin(login)) {
+                comment.squadAdminOverride = true;
+              }
+              comments.push(comment);
             }
 
             const reviews = [];
