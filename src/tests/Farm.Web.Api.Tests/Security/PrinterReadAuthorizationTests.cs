@@ -57,6 +57,28 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         _printers
             .Setup(service => service.GetCameraUrlsForPrinterAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(("http://camera.example.invalid/stream", "http://camera.example.invalid/snapshot"));
+        _printers
+            .Setup(service => service.GetCameraSnapshotAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new byte[] { 0xFF, 0xD8, 0xFF, 0xD9 });
+        _printers
+            .Setup(service => service.ListPrinterSpoolsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IReadOnlyList<SpoolmanSpoolDto>?)Array.Empty<SpoolmanSpoolDto>());
+        _printers
+            .Setup(service => service.GetHistoryListAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse { Count = 0, Jobs = [] });
+        _printers
+            .Setup(service => service.GetHistoryJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob { JobId = "job-1", Exists = true });
+        _printers
+            .Setup(service => service.GetHistoryTotalsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryTotals { JobTotals = new JobTotals() });
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -73,6 +95,46 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         yield return new object[] { "camera/url" };
         yield return new object[] { "camera/stream" };
         yield return new object[] { "camera/snapshot" };
+        yield return new object[] { "snapshot" };
+        yield return new object[] { "spoolman/spools" };
+        yield return new object[] { "history" };
+        yield return new object[] { "history/totals" };
+    }
+
+    /// <summary>
+    /// Endpoints backed by services other than <see cref="IPrintersService"/> (version cache,
+    /// backend-capabilities service, guided-swap validator). These are only exercised on the
+    /// cross-group-denied path, which returns before those dependencies are ever invoked, so no
+    /// additional mocking is required to prove the group check runs first.
+    /// </summary>
+    public static IEnumerable<object[]> DenyOnlyRestrictedReadEndpoints()
+    {
+        yield return new object[] { "version" };
+        yield return new object[] { "backend-capabilities" };
+        yield return new object[] { "toolheads/0/swap-validation?spoolId=1" };
+    }
+
+    [Theory]
+    [MemberData(nameof(DenyOnlyRestrictedReadEndpoints))]
+    public async Task DenyOnlyEndpoint_CrossGroupCallerDenied_Returns404(string suffix)
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+
+        HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DeleteHistoryJob_CrossGroupCallerDenied_Returns404()
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+
+        HttpResponseMessage response = await client.DeleteAsync(BuildUrl(printerId, "history/job-1"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Theory]

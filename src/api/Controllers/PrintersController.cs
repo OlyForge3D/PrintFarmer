@@ -199,7 +199,8 @@ public class PrintersController(
     {
         try
         {
-            IEnumerable<PrinterBackendCapabilitiesDto> capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
+            PrinterBackendCapabilitiesDto[] capabilities = (await _printerBackendCapabilitiesService.GetAllAsync(ct)).ToArray();
+            capabilities = await FilterAccessiblePrintersAsync(capabilities, dto => dto.PrinterId, ct);
             return Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -226,6 +227,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
         try
         {
             PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
@@ -258,6 +264,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterBackendCapabilitiesDto>> GetPrinterBackendCapabilitiesAsync(Guid printerId, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
         try
         {
             PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
@@ -2271,6 +2282,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> GetSnapshotAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         byte[]? bytes = await _printersService.GetCameraSnapshotAsync(id, ct);
         return bytes is null ? NotFound() : File(bytes, "image/jpeg");
     }
@@ -3421,6 +3437,11 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetPrinterSpoolsAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         IReadOnlyList<SpoolmanSpoolDto>? spools = await _printersService.ListPrinterSpoolsAsync(id, ct);
         if (spools is null)
         {
@@ -3729,6 +3750,11 @@ public class PrintersController(
         [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
         // ProblemDetails before any read/validation/telemetry.
         if (!await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false))
@@ -4344,7 +4370,14 @@ public class PrintersController(
         Func<T, Guid> getId,
         CancellationToken ct)
     {
-        if (_queueResourceAuthorization is null || items.Length == 0)
+        if (_queueResourceAuthorization is null)
+        {
+            // Fail closed to match CanAccessPrinterAsync: an unavailable authorization
+            // dependency must not silently disclose every printer in a collection response.
+            return Array.Empty<T>();
+        }
+
+        if (items.Length == 0)
         {
             return items;
         }
@@ -4374,6 +4407,11 @@ public class PrintersController(
         [FromQuery] int take = Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService.DefaultTake,
         CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterSessionTimelineDto timeline = await _printerSessionTimelineService.GetRecentAsync(id, take, ct);
@@ -4400,6 +4438,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
@@ -4458,6 +4501,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
@@ -4511,6 +4559,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
@@ -4534,6 +4587,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult> DeleteHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             bool success = await _printersService.DeleteHistoryJobAsync(id, jobId, ct);

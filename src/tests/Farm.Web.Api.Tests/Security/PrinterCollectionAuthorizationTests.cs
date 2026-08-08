@@ -75,6 +75,21 @@ public sealed class PrinterCollectionAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task BackendCapabilitiesEndpoint_ExcludesPrinterFromRestrictedGroup()
+    {
+        Guid restrictedId = await SeedRestrictedPrinterAsync();
+        Guid openId = await SeedOpenPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+
+        HttpResponseMessage response = await client.GetAsync("/api/printers/backend-capabilities");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(openId.ToString());
+        body.Should().NotContain(restrictedId.ToString());
+    }
+
+    [Fact]
     public async Task ListEndpoint_FarmAdmin_SeesAllPrinters()
     {
         Guid restrictedId = await SeedRestrictedPrinterAsync();
