@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Sockets;
 using Farm.Infrastructure.Network;
 
 namespace Farm.Web.Api.Startup;
@@ -69,6 +70,25 @@ public static class CorsStartup
             return true;
         }
 
-        return IPAddress.TryParse(uri.Host, out IPAddress? ip) && NetworkDestinationClassifier.IsPrivateOrReserved(ip);
+        if (IPAddress.TryParse(uri.Host, out IPAddress? literalIp))
+        {
+            return NetworkDestinationClassifier.IsPrivateOrReserved(literalIp);
+        }
+
+        // Not an IP literal — resolve the hostname so LAN mDNS/DHCP names (e.g.
+        // "printfarmer.local", "mybox") keep working, same as they did before this fix.
+        // The browser sets the Origin header to the page's own host, so resolving it here
+        // reflects the real network location of the calling page, not an attacker-supplied
+        // value. Every resolved address must be private/loopback — if any address is public,
+        // the origin is rejected rather than allowed on a partial match.
+        try
+        {
+            IPAddress[] addresses = Dns.GetHostAddresses(uri.Host);
+            return addresses.Length > 0 && addresses.All(NetworkDestinationClassifier.IsPrivateOrReserved);
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
     }
 }

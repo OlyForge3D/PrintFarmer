@@ -175,7 +175,14 @@ chown $USER:$USER .deploy-config
 ### Network Discovery
 - `ENABLE_DISCOVERY` - `yes` or `no`
 - `NETWORK_RANGES` - `192.168.0.0/16,10.0.0.0/8`
-- `ALLOW_LOCAL_NETWORK` - `true` or `false`
+- `ALLOW_LOCAL_NETWORK` - `true` or `false` (default: `false`). Widens CORS acceptance to
+  origins that resolve to a private/loopback network address (RFC1918, localhost) in
+  addition to `ALLOWED_ORIGINS`/`CORS__AllowedOrigins` — it never reflects an arbitrary
+  origin. Prefer setting `ALLOWED_ORIGINS` to the exact origin(s) you access the UI from
+  instead of enabling this flag.
+- `ALLOWED_ORIGINS` / `CORS__AllowedOrigins` - comma-separated list of exact origins
+  (e.g. `http://192.168.1.50:8080`) always permitted for CORS, regardless of
+  `ALLOW_LOCAL_NETWORK`.
 
 ### Workers
 - `ENABLE_DISTRIBUTED_SLICING` - `true` or `false`

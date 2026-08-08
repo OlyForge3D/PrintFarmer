@@ -280,6 +280,13 @@ release.
 
 ## Network Configuration
 
+> **CORS note:** `ALLOW_LOCAL_NETWORK` defaults to `false`. When enabled, CORS accepts
+> origins that resolve to a private/loopback network address (RFC1918, localhost) in
+> addition to the explicit `ALLOWED_ORIGINS`/`CORS__AllowedOrigins` list — it never
+> reflects an arbitrary origin, so `AllowCredentials()` stays safe to combine with it.
+> Prefer setting `ALLOWED_ORIGINS` to the exact origin(s) you access the UI from over
+> enabling this flag.
+
 ### Option 1: Bridge Network with Host Gateway (Recommended)
 ```yaml
 api:

@@ -69,4 +69,21 @@ public class CorsStartupTests
     {
         Assert.False(CorsStartup.IsOriginAllowed("not-a-uri", ConfiguredOrigins, allowLocalNetwork: true));
     }
+
+    [Fact]
+    public void UnresolvableHostnameOrigin_IsRejected_WhenLocalNetworkEnabled()
+    {
+        // A hostname that cannot be resolved must fail closed rather than being allowed.
+        Assert.False(CorsStartup.IsOriginAllowed(
+            "http://this-host-does-not-exist.invalid:3000",
+            ConfiguredOrigins,
+            allowLocalNetwork: true));
+    }
+
+    [Fact]
+    public void PublicHostnameOrigin_IsRejected_WhenLocalNetworkEnabled()
+    {
+        // example.com resolves to a public IP, so it must never be treated as local-network.
+        Assert.False(CorsStartup.IsOriginAllowed("https://example.com", ConfiguredOrigins, allowLocalNetwork: true));
+    }
 }
