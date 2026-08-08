@@ -56,6 +56,12 @@ jobs:
       - name: Provide default registry host env
         run: echo "REGISTRY_HOST=local.registry:5000" >> $GITHUB_ENV
 
+      - name: Provide throwaway JWT signing key for validation
+        # docker-compose.yml requires Jwt__Key (${Jwt__Key:?...}) so it fails closed instead of
+        # booting with a shipped placeholder. CI only renders/validates the template here — it
+        # never runs the API — so a throwaway 32+ byte value is sufficient and is not a real secret.
+        run: echo "Jwt__Key=ci-compose-validation-only-not-a-real-secret-32bytes" >> $GITHUB_ENV
+
       - name: Show Docker Compose version
         run: docker compose version
 
