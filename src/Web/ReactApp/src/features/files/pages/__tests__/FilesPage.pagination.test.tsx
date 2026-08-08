@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import type { FileItem, UseFileBrowserConfig } from '@/features/fileBrowser/types';
 
 const apiMocks = vi.hoisted(() => ({
+  downloadModel3dFile: vi.fn(),
   getUnifiedFiles: vi.fn(),
 }));
 
@@ -13,6 +14,7 @@ let forwardedSignal: AbortSignal | undefined;
 
 vi.mock('@/services/api', () => ({
   apiClient: {
+    downloadModel3dFile: apiMocks.downloadModel3dFile,
     getHarvestOperations: vi.fn().mockResolvedValue([]),
     getUnifiedFiles: apiMocks.getUnifiedFiles,
   },
@@ -41,7 +43,13 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
   const ReactModule = await import('react');
   return {
     FileBrowser: ReactModule.forwardRef(function FileBrowserMock(
-      { config }: { config: UseFileBrowserConfig<unknown> },
+      {
+        config,
+        renderItemActions,
+      }: {
+        config: UseFileBrowserConfig<unknown>;
+        renderItemActions?: (file: FileItem) => React.ReactNode;
+      },
       ref,
     ) {
       void ref;
@@ -73,6 +81,7 @@ vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
               <li key={file.id}>
                 {file.fileName}
                 {file.tags?.map((tag) => <span key={tag.id}>{tag.name}</span>)}
+                {renderItemActions?.(file)}
               </li>
             ))}
           </ol>
@@ -153,6 +162,12 @@ describe('FilesPage unified pagination', () => {
     expect(screen.getByLabelText('total files')).toHaveTextContent('2505');
     expect(screen.getAllByRole('listitem').map((item) => item.textContent))
       .toEqual(['z-last.gcode', 'a-first.stlFunctional']);
+
+    const modelItem = screen.getAllByRole('listitem')[1];
+    fireEvent.click(within(modelItem).getByTitle('Download file'));
+    await waitFor(() => {
+      expect(apiMocks.downloadModel3dFile).toHaveBeenCalledWith('model-1', 'a-first.stl');
+    });
 
     view.unmount();
     expect(forwardedSignal?.aborted).toBe(true);

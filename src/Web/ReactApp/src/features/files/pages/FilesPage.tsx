@@ -552,7 +552,7 @@ export function FilesPage() {
     }
 
     try {
-      await apiClient.downloadModel3dFile(model.id, model.originalFileName || model.fileName || model.name);
+      await apiClient.downloadModel3dFile(model.id, model.name || model.fileName);
     } catch {
       toast.error('Failed to download model');
     }
