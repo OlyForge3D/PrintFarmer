@@ -136,11 +136,23 @@ export default defineConfig({
           // Combining PDF, HTML capture, ZIP, and 3MF parsing in one manual
           // chunk makes every interaction pay for all of them and can pull
           // Vite's preload helper into that otherwise optional chunk.
+          // `@opentelemetry/api` gets its OWN chunk, separate from the
+          // heavy SDK below. unifiedLogging.ts imports it eagerly (it's
+          // just the no-op-by-default tracer interface, used from the main
+          // app entry regardless of whether telemetry is configured). If it
+          // were grouped into `vendor-otel`, Rollup would merge that whole
+          // manual-chunk group into one file and have the eager entry
+          // statically import from it — dragging the (otherwise lazy) SDK
+          // chunk back onto the critical path. Keeping it isolated ensures
+          // only this tiny API shim loads eagerly.
+          'vendor-otel-api': ['@opentelemetry/api'],
           // OpenTelemetry web SDK — instrumentation stack used by the
-          // telemetry provider. Grouping keeps the main bundle from
-          // pulling in the whole SDK on first paint.
+          // telemetry provider. main.tsx only dynamically imports
+          // telemetry/config.ts when VITE_OTEL_EXPORTER_OTLP_ENDPOINT is
+          // set, so this chunk is excluded from the critical path (and from
+          // index.html's modulepreload list) in the default, unconfigured
+          // build.
           'vendor-otel': [
-            '@opentelemetry/api',
             '@opentelemetry/semantic-conventions',
             '@opentelemetry/exporter-trace-otlp-http',
             '@opentelemetry/auto-instrumentations-web',
