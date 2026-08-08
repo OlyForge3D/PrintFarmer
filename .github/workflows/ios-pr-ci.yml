@@ -225,3 +225,89 @@ jobs:
           name: ios-attention-xcui-${{ matrix.key }}
           path: mobile/build-${{ matrix.key }}/AttentionActions.xcresult
           retention-days: 7
+
+  xcui-suites:
+    name: XCUI (${{ matrix.family }}, ${{ matrix.suite }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        family: [iPhone, iPad]
+        suite:
+          - LoginFlowUITests
+          - OperatorShellUITests
+          - ScanStationUITests
+          - HarvestUITests
+          - PartsInventoryUITests
+          - PrinterListUITests
+          - FilamentCoverageUITests
+          - ColdOfflineShellUITests
+          - JobDetailIPadNavigationUITests
+          - TaskActionRoutingUITests
+        include:
+          - family: iPhone
+            key: iphone
+            prefix: iPhone
+            device_preference: iPhone 15,iPhone 16,iPhone 17,iPhone 17 Pro,iPhone 17e
+          - family: iPad
+            key: ipad
+            prefix: iPad
+            device_preference: iPad Pro 13-inch (M5),iPad Pro 11-inch (M5),iPad Air 13-inch (M4),iPad Air 11-inch (M4),iPad (A16),iPad mini (A17 Pro)
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Select Xcode
+        run: |
+          XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE_PATH" ]; then
+            XCODE_PATH="/Applications/Xcode.app"
+          fi
+          sudo xcode-select -s "$XCODE_PATH/Contents/Developer"
+          xcodebuild -version
+
+      - name: Resolve package dependencies
+        run: |
+          xcodebuild -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -resolvePackageDependencies \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}-${{ matrix.suite }}/SourcePackages"
+
+      - name: Resolve ${{ matrix.family }} simulator destination
+        env:
+          IOS_SIMULATOR_DEVICE_FAMILY: ${{ matrix.family }}
+          IOS_SIMULATOR_DEVICE_PREFIX: ${{ matrix.prefix }}
+          IOS_SIMULATOR_DEVICE_PREFERENCE: ${{ matrix.device_preference }}
+        run: ../scripts/ci/resolve-ios-simulator.sh
+
+      - name: Boot ${{ matrix.family }} simulator
+        run: ../scripts/ci/boot-ios-simulator.sh "$SIMULATOR_UDID"
+
+      - name: Run ${{ matrix.suite }} XCUI
+        timeout-minutes: 25
+        run: |
+          xcodebuild test \
+            -project PrintFarmer.xcodeproj \
+            -scheme PrintFarmer \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,id=$SIMULATOR_UDID" \
+            -destination-timeout 90 \
+            -derivedDataPath "build-${{ matrix.key }}-${{ matrix.suite }}" \
+            -clonedSourcePackagesDirPath "build-${{ matrix.key }}-${{ matrix.suite }}/SourcePackages" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            -only-testing:PrintFarmerUITests/${{ matrix.suite }} \
+            -parallel-testing-enabled NO \
+            -disable-concurrent-destination-testing \
+            -resultBundlePath "build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult"
+
+      - name: Upload ${{ matrix.suite }} XCUI results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ios-xcui-${{ matrix.key }}-${{ matrix.suite }}
+          path: mobile/build-${{ matrix.key }}-${{ matrix.suite }}/${{ matrix.suite }}.xcresult
+          retention-days: 7
