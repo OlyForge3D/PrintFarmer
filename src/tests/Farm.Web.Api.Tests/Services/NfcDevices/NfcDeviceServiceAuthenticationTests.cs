@@ -213,6 +213,36 @@ public class NfcDeviceServiceAuthenticationTests
         device.WifiRssi.Should().Be(-55);
     }
 
+    // ─── Token rotation: re-approving a device issues a fresh token and ─────
+    // ─── invalidates the previously issued one. ─────────────────────────────
+
+    [Fact]
+    public async Task ApproveAsync_CalledAgainOnSameDevice_RotatesTokenAndInvalidatesThePrevious()
+    {
+        await using AppDbContext db = CreateDbContext();
+        NfcDeviceService service = CreateService(db);
+        Guid printerId = Guid.NewGuid();
+
+        NfcDeviceApprovalResultDto firstApproval = await ApproveNewDeviceAsync(db, service, printerId);
+        NfcDeviceApprovalResultDto secondApproval = await service.ApproveAsync(firstApproval.DeviceId, CancellationToken.None)
+            ?? throw new InvalidOperationException("Re-approval unexpectedly returned null.");
+
+        secondApproval.DeviceToken.Should().NotBe(firstApproval.DeviceToken);
+
+        NfcScanEventDto scanWithOldToken = new() { PrinterId = printerId.ToString(), SpoolId = 1, TagFormat = "nfc" };
+        (NfcScanHistoryDto? oldTokenResult, bool oldTokenUnauthorized) = await service.ProcessScanEventAsync(
+            scanWithOldToken, firstApproval.DeviceToken, CancellationToken.None);
+        oldTokenUnauthorized.Should().BeTrue("the token issued by the first approval must be invalidated once a new one is issued");
+        oldTokenResult.Should().BeNull();
+
+        NfcScanEventDto scanWithNewToken = new() { PrinterId = printerId.ToString(), SpoolId = 2, TagFormat = "nfc" };
+        (NfcScanHistoryDto? newTokenResult, bool newTokenUnauthorized) = await service.ProcessScanEventAsync(
+            scanWithNewToken, secondApproval.DeviceToken, CancellationToken.None);
+        newTokenUnauthorized.Should().BeFalse();
+        newTokenResult.Should().NotBeNull();
+        newTokenResult!.SpoolId.Should().Be(2);
+    }
+
     /// <summary>
     /// Announces a device via heartbeat (creating it pending), then approves it,
     /// returning the issued approval result (including the raw device token).

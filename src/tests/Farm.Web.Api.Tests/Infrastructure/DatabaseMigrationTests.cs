@@ -645,6 +645,24 @@ public sealed class DatabaseMigrationTests
         _ = coreMigrations.Should().NotBeEmpty();
         _ = slicerMigrations.Should().NotBeEmpty();
         _ = coreMigrations.Should().NotIntersectWith(slicerMigrations);
+
+        string[] expectedCoreMigrations = provider == "postgres"
+            ?
+            [
+                "20260730231346_InitialV2",
+                "20260806230920_CanonicalizePrintJobPriority",
+                "20260807023649_UsePortableRevisionConcurrency",
+                "20260808052051_AddNfcDeviceApproval",
+            ]
+            :
+            [
+                "20260730231359_InitialV2",
+                "20260806230929_CanonicalizePrintJobPriority",
+                "20260807023652_UsePortableRevisionConcurrency",
+                "20260808052059_AddNfcDeviceApproval",
+            ];
+        _ = coreMigrations.Should().Equal(expectedCoreMigrations,
+            $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()

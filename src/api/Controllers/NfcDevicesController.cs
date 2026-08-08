@@ -96,9 +96,12 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// <summary>
     /// Approves a pending NFC device, issuing a fresh device token. The raw token is
     /// returned exactly once — provision it into the device firmware immediately, since it
-    /// cannot be retrieved again after this response. Requires an authenticated operator.
+    /// cannot be retrieved again after this response. This mints a durable bearer credential
+    /// that subsequently grants unauthenticated write access via <see cref="ScanEventAsync"/>
+    /// and <see cref="HeartbeatAsync"/>, so it is restricted to farm administrators (same
+    /// gate used for every other credential-issuing/administrative action in this API).
     /// </summary>
-    [Authorize]
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(NfcDeviceApprovalResultDto), 200)]
     [ProducesResponseType(404)]
