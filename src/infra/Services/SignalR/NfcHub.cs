@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SignalR;
@@ -6,7 +7,10 @@ namespace Farm.Infrastructure.Services.SignalR;
 /// <summary>
 /// SignalR hub for broadcasting NFC tag scan events to connected clients.
 /// Clients subscribe to nfctagread and nfctagunknown events.
+/// Requires an authenticated user — spool and printer identifiers are farm-private data,
+/// consistent with the other farm hubs (PrinterHub, HarvestHub, MaintenanceHub).
 /// </summary>
+[Authorize]
 public class NfcHub(ILogger<NfcHub> logger) : Hub
 {
     public override Task OnConnectedAsync()

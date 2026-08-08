@@ -25,6 +25,7 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
     [InlineData("/hubs/printers/negotiate?negotiateVersion=1")]
     [InlineData("/hubs/harvest/negotiate?negotiateVersion=1")]
     [InlineData("/hubs/maintenance/negotiate?negotiateVersion=1")]
+    [InlineData("/hubs/nfc/negotiate?negotiateVersion=1")]
     public async Task NegotiateAsync_WithoutAuthentication_IsDenied(string route)
     {
         using HttpClient client = _factory.CreateClient();
@@ -42,6 +43,19 @@ public sealed class HubAuthorizationIntegrationTests : IAsyncLifetime
 
         HttpResponseMessage response = await client.PostAsync(
             $"/hubs/printers/negotiate?negotiateVersion=1&access_token={Uri.EscapeDataString(token)}",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task NfcHub_ProductionJwtQueryToken_AuthenticatesHandshake()
+    {
+        (_, string token) = await CreateUserAndTokenAsync();
+        using HttpClient client = _factory.CreateClient();
+
+        HttpResponseMessage response = await client.PostAsync(
+            $"/hubs/nfc/negotiate?negotiateVersion=1&access_token={Uri.EscapeDataString(token)}",
             content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

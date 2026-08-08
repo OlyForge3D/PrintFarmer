@@ -4,7 +4,7 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { getHubUrl } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl, getSignalRAccessToken } from '@/common/utils/apiUrlHelpers';
 import type { NfcTagReadEvent, NfcTagUnknownEvent } from '@/features/nfc/types';
 
 type NfcTagReadCallback = (event: NfcTagReadEvent) => void;
@@ -76,7 +76,10 @@ class NfcHubService {
   private buildConnection(): void {
     const url = getHubUrl('/hubs/nfc');
     this.connection = new HubConnectionBuilder()
-      .withUrl(url)
+      .withUrl(url, {
+        accessTokenFactory: getSignalRAccessToken,
+        withCredentials: true,
+      })
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Warning)
       .build();
