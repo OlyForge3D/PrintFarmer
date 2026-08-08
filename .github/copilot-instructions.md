@@ -222,15 +222,27 @@ file is **not** documentation-only.
 the classification is not obvious.
 
 **How the gate automates this.** `scripts/ci/squad-verdict-gate.mjs` implements the allowlist
-and the denylist, and takes the conservative reading of the safety-boundary carve-out: `.github/**`
-in full, plus `.squad/**`, `.copilot/**`, `.claude/**` and root agent-instruction files
-(`AGENTS.md`, `CLAUDE.md`), **always** take the full gate. Whether a given edit moves an agent's
-safety boundary cannot be judged from the path, and `.github/**` is process configuration rather
-than product documentation — it holds the merge-evidence rules that the unattended merger itself
-obeys, so a single verdict must not be able to rewrite them. Prose is matched by extension
-(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/` correctly
-take the full gate. If a change is misclassified as full-gate, the cost is two extra verdict
-comments; the reverse would be a real review gap.
+and the denylist, and takes the conservative reading of the safety-boundary carve-out. The
+following **always** take the full gate, even when the only change is markdown:
+
+- `.github/**` (in full — process configuration, not product documentation; it holds the
+  merge-evidence rules the unattended merger itself obeys)
+- `.squad/**`
+- `.copilot/**`
+- `.claude/**`
+- `.cursor/**`
+- root-level agent-instruction files: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `COPILOT.md`,
+  `.cursorrules`
+
+Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
+single review record must never be able to rewrite these. Prose is matched by extension
+(`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/`
+correctly take the full gate. If a change is misclassified as full-gate, the cost is two extra
+review records; the reverse would be a real review gap.
+
+This list is exported from the module as `fullGatePrefixes` / `fullGateFiles`, and a test
+asserts that this section enumerates exactly it — the code and this documentation drifted apart
+once, which is how an agent-instruction file could have taken the one-reviewer path unnoticed.
 
 **Who the single reviewer is.** Route to the reviewer whose domain the document actually
 concerns — for example, Bishop for storage/integration docs, Hicks for testing and contract
@@ -348,7 +360,10 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 - A repository administrator satisfies the gate unconditionally, either by
   approving through GitHub's native review UI at the current head, or by posting
   a record whose `Squad-Reviewer` is their own GitHub login. The owner
-  is never locked out.
+  is never locked out. Only each administrator's **most recent decisive** review
+  at that head counts (`APPROVED` / `CHANGES_REQUESTED` / `DISMISSED`;
+  `COMMENTED` is not decisive), so a later change request outranks an earlier
+  approval on the same commit and vice versa.
 
 **What this record genuinely buys you**, despite being self-attested:
 

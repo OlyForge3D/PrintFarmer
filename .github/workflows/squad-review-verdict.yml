@@ -92,8 +92,11 @@ name: Record squad review (self-attested)
 #
 # OWNER OVERRIDE: a repository administrator satisfies the gate unconditionally,
 # either by approving through GitHub's native review UI at the current head, or
-# by posting a record whose `Squad-Reviewer` is their own GitHub login. The owner
-# is never locked out of their own repository.
+# by posting a record whose `Squad-Reviewer` is their own GitHub login. Only each
+# administrator's MOST RECENT decisive review at that head counts (APPROVED /
+# CHANGES_REQUESTED / DISMISSED; COMMENTED is not decisive), so a later change
+# request outranks an earlier approval on the same commit. The owner is never
+# locked out of their own repository.
 #
 # The job itself always succeeds; the gate result is the `squad/pre-pr-verdict`
 # commit status. Keeping the run conclusion at `success` is what lets
@@ -227,16 +230,22 @@ jobs:
             const canWrite = async (login) =>
               gate.hasWriteAccess(await permissionOf(login));
 
+            const decisiveReviewStates = ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'];
             async function loadReviews() {
               const raw = await github.paginate(github.rest.pulls.listReviews,
                 { owner, repo, pull_number: prNumber, per_page: 100 });
               const reviews = [];
               for (const review of raw) {
+                // Permission is resolved for every decisive state, not just
+                // APPROVED: an administrator's later CHANGES_REQUESTED has to be
+                // able to outrank their own earlier approval on the same commit.
                 reviews.push({
+                  id: review.id,
                   state: review.state,
+                  submittedAt: review.submitted_at,
                   commitId: review.commit_id,
                   login: review.user?.login ?? '',
-                  isAdmin: review.state === 'APPROVED'
+                  isAdmin: decisiveReviewStates.includes(review.state)
                     ? await isAdmin(review.user?.login)
                     : false,
                 });
@@ -257,7 +266,7 @@ jobs:
               });
               if (forkResult.override === 'github-review') {
                 await postStatus(forkResult.state, forkResult.description);
-                core.notice(`squad/pre-pr-verdict APPROVE (owner): ${forkResult.reason}`);
+                core.notice(`squad/pre-pr-verdict ${forkResult.description}`);
                 return;
               }
               await postStatus(

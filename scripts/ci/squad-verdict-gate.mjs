@@ -112,7 +112,11 @@ const proseExtensions = ['.md', '.markdown', '.rst', '.adoc', '.txt'];
 // applied. `.github/**` is covered in full — it is process configuration, not
 // product documentation, and it contains the merge-evidence rules that the
 // unattended merger itself obeys.
-const fullGatePrefixes = [
+//
+// Exported so a test can assert the docs enumerate exactly this list. The two
+// drifted apart once already, which is how an agent-instruction file could have
+// taken the one-reviewer path without anyone noticing.
+export const fullGatePrefixes = [
   '.github/',
   '.squad/',
   '.copilot/',
@@ -122,7 +126,7 @@ const fullGatePrefixes = [
 
 // Root-level agent-instruction files, which are agent behaviour by content even
 // though nothing in their path says so.
-const fullGateFiles = new Set([
+export const fullGateFiles = new Set([
   'agents.md',
   'claude.md',
   'gemini.md',
@@ -426,13 +430,61 @@ export function evaluateGate({
     };
   }
 
-  // 1. Human owner override — a repository administrator approving through
-  //    GitHub's native review UI at the exact current head always satisfies the
-  //    gate. The owner is never locked out of the repository.
-  const adminApproval = reviews.find((review) =>
-    review?.state === 'APPROVED' &&
-    review.isAdmin === true &&
-    String(review.commitId ?? '').toLowerCase() === head);
+  // 1. Owner override through GitHub's native review UI at the exact current
+  //    head. Only each administrator's MOST RECENT decisive review at that head
+  //    counts: taking any matching approval would let an earlier APPROVED
+  //    survive after the same administrator later recorded CHANGES_REQUESTED on
+  //    the same commit. COMMENTED reviews are not decisive — GitHub itself does
+  //    not treat them as changing approval state — and DISMISSED clears.
+  const latestAdminReview = new Map();
+  for (const review of reviews ?? []) {
+    if (
+      review?.isAdmin !== true ||
+      String(review.commitId ?? '').toLowerCase() !== head ||
+      !['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)
+    ) {
+      continue;
+    }
+    const login = String(review.login ?? '').toLowerCase();
+    const previous = latestAdminReview.get(login);
+    const rank = (entry) => [
+      Date.parse(entry.submittedAt ?? '') || 0,
+      Number(entry.id) || 0,
+    ];
+    if (!previous) {
+      latestAdminReview.set(login, review);
+      continue;
+    }
+    const [newTime, newId] = rank(review);
+    const [oldTime, oldId] = rank(previous);
+    if (newTime > oldTime || (newTime === oldTime && newId >= oldId)) {
+      latestAdminReview.set(login, review);
+    }
+  }
+
+  // A standing administrator change request outranks another approval.
+  const adminBlock = [...latestAdminReview.values()]
+    .find((review) => review.state === 'CHANGES_REQUESTED');
+  if (adminBlock) {
+    return {
+      state: 'failure',
+      passed: false,
+      override: 'github-review',
+      description: truncate(
+        `REQUEST_CHANGES @ ${shortSha(head)} by ${adminBlock.login}`,
+      ),
+      reason:
+        `administrator ${adminBlock.login} requested changes on the current ` +
+        'head through GitHub review',
+      notes,
+      requiredMembers: [],
+      approvals: [],
+      stale: [],
+    };
+  }
+
+  const adminApproval = [...latestAdminReview.values()]
+    .find((review) => review.state === 'APPROVED');
   if (adminApproval) {
     return {
       state: 'success',

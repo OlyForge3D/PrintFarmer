@@ -7,6 +7,8 @@ import {
   classifyChangeScope,
   collectVerdicts,
   evaluateGate,
+  fullGateFiles,
+  fullGatePrefixes,
   hasAdminAccess,
   hasWriteAccess,
   normalizeMember,
@@ -388,6 +390,89 @@ test('an administrator GitHub approval at a stale head does not satisfy the gate
   assert.equal(result.state, 'failure');
 });
 
+test('a later administrator change request outranks their earlier approval', () => {
+  // Same admin, same SHA, approval first. Taking any matching approval would let
+  // the superseded one keep satisfying the gate.
+  const result = gate({
+    reviews: [
+      {
+        id: 1, state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T01:00:00Z',
+      },
+      {
+        id: 2, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-08T02:00:00Z',
+      },
+    ],
+  });
+  assert.equal(result.state, 'failure');
+  assert.equal(result.override, 'github-review');
+  assert.match(result.description, /^REQUEST_CHANGES @ .* by jpapiez$/);
+});
+
+test('a later administrator approval clears their earlier change request', () => {
+  const result = gate({
+    reviews: [
+      {
+        id: 1, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-08T01:00:00Z',
+      },
+      {
+        id: 2, state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T02:00:00Z',
+      },
+    ],
+  });
+  assert.equal(result.state, 'success');
+  assert.match(result.description, /^APPROVE \(owner\) @ /);
+});
+
+test('review recency falls back to id when timestamps tie', () => {
+  const result = gate({
+    reviews: [
+      {
+        id: 7, state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T01:00:00Z',
+      },
+      {
+        id: 8, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-08T01:00:00Z',
+      },
+    ],
+  });
+  assert.equal(result.state, 'failure');
+});
+
+test('a COMMENTED review is not decisive and cannot clear a change request', () => {
+  // GitHub does not treat COMMENTED as changing approval state; neither do we.
+  const result = gate({
+    reviews: [
+      {
+        id: 1, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-08T01:00:00Z',
+      },
+      {
+        id: 2, state: 'COMMENTED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T03:00:00Z',
+      },
+    ],
+  });
+  assert.equal(result.state, 'failure');
+  assert.match(result.description, /^REQUEST_CHANGES @ /);
+});
+
+test('a change request from a non-administrator does not block the gate', () => {
+  const result = gate({
+    changedPaths: ['docs/ARCHITECTURE.md'],
+    comments: [comment('dallas', 'APPROVE')],
+    reviews: [{
+      id: 1, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'stranger',
+      isAdmin: false, submittedAt: '2026-08-08T02:00:00Z',
+    }],
+  });
+  assert.equal(result.state, 'success');
+});
+
 test('the owner overrides the panel by naming their own login as reviewer', () => {
   const owner = comment('jpapiez', 'APPROVE', headSha, {
     squadAdminOverride: true,
@@ -440,6 +525,50 @@ test('documentation-only classification honours the policy carve-outs', () => {
     );
   }
   assert.equal(classifyChangeScope(['docs/API.md', 'src/api/Program.cs']).docsOnly, false);
+});
+
+test('the documented full-gate escalation list matches the code exactly', async () => {
+  // These drifted apart once: the code force-escalated paths the docs never
+  // mentioned, so a reader could not tell which changes take the full gate.
+  const instructions = await readFile(
+    path.join(repositoryRoot, '.github', 'copilot-instructions.md'), 'utf8',
+  );
+  const section = instructions.slice(
+    instructions.indexOf('**How the gate automates this.**'),
+  ).slice(0, 2000);
+
+  for (const prefix of fullGatePrefixes) {
+    assert.ok(
+      section.includes(`\`${prefix}**\``),
+      `${prefix}** must be documented as always taking the full gate`,
+    );
+  }
+  for (const file of fullGateFiles) {
+    // Documented in their conventional casing.
+    assert.match(
+      section, new RegExp(file.replace('.', '\\.'), 'i'),
+      `${file} must be documented as always taking the full gate`,
+    );
+  }
+  // ...and nothing may be documented that the code does not actually escalate.
+  const documentedPrefixes = [...section.matchAll(/`(\.[a-z]+\/)\*\*`/g)]
+    .map((match) => match[1]);
+  for (const documented of documentedPrefixes) {
+    assert.ok(
+      fullGatePrefixes.includes(documented),
+      `${documented}** is documented but not escalated by the code`,
+    );
+  }
+});
+
+test('every exported full-gate path is actually escalated', () => {
+  for (const prefix of fullGatePrefixes) {
+    assert.equal(classifyChangeScope([`${prefix}notes.md`]).docsOnly, false, prefix);
+  }
+  for (const file of fullGateFiles) {
+    assert.equal(classifyChangeScope([file]).docsOnly, false, file);
+    assert.equal(classifyChangeScope([file.toUpperCase()]).docsOnly, false, file);
+  }
 });
 
 test('PR authorship prefers an explicit declaration over inference', () => {
