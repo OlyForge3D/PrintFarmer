@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
@@ -50,7 +51,11 @@ public class SystemLogServiceTests
 
         EfSystemLogRepository repo = new EfSystemLogRepository(db);
         SystemLogService svc = new SystemLogService(repo);
-        IReadOnlyList<SystemLog> results = await svc.QueryAllLogsAsync(null, null, null, null, "ba", default);
+        List<SystemLog> results = [];
+        await foreach (SystemLog log in svc.QueryAllLogsAsync(null, null, null, null, "ba", default))
+        {
+            results.Add(log);
+        }
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.Metadata!.Contains("bar"));

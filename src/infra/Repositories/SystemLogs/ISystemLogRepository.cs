@@ -19,14 +19,14 @@ public interface ISystemLogRepository
     /// <param name="metadata">Optional metadata filter.</param>
     IAsyncEnumerable<SystemLog> QueryAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata);
 
-    /// <summary>Queries all logs matching filters and returns as a list.</summary>
+    /// <summary>Streams all logs matching filters as a no-tracking async stream, with no row cap.</summary>
     /// <param name="correlationId">Optional correlation ID to filter by.</param>
     /// <param name="level">Optional log level to filter by.</param>
     /// <param name="from">Optional start date for filtering.</param>
     /// <param name="to">Optional end date for filtering.</param>
     /// <param name="metadata">Optional metadata filter.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task<IReadOnlyList<SystemLog>> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
+    IAsyncEnumerable<SystemLog> QueryAllAsync(string? correlationId, string? level, DateTime? from, DateTime? to, string? metadata, CancellationToken ct);
 
     /// <summary>Adds a new system log entry.</summary>
     /// <param name="log">The log entry to add.</param>
