@@ -29,7 +29,9 @@ namespace Farm.Web.Api.Tests.TestInfrastructure;
 /// </remarks>
 internal static class SlicerModulePreloader
 {
+#pragma warning disable CA2255 // Test assembly preload must run before any factory or test code.
     [ModuleInitializer]
+#pragma warning restore CA2255
     internal static void Preload()
     {
         // Touching a type from each assembly forces the runtime to load it into the AppDomain.

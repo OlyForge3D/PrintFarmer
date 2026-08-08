@@ -134,6 +134,20 @@ poison the check.
 - Successful verifications are cached; subsequent pushes of the same tree
   under the same SDK & formatter version skip the run.
 
+### C# encoding and generated migrations
+
+- `src/.editorconfig` requires UTF-8 with a BOM for C# files. Preserve the BOM
+  when creating or rewriting a `.cs` file; otherwise the unfiltered gate reports
+  `CHARSET` even when the source text is unchanged.
+- EF Core scaffolds migration history with block-scoped namespaces. The
+  migration-only `IDE0161` override keeps the file-scoped namespace preference
+  for handwritten code while avoiding mass indentation churn in generated
+  migration bodies. Do not manually reformat generated migrations solely to
+  satisfy that style rule.
+- Intentional analyzer exceptions in handwritten code remain local to the
+  behavior that requires them; do not add those diagnostics to the solution-wide
+  suppression list.
+
 ### Cache
 
 Successful verifications are stamped at:

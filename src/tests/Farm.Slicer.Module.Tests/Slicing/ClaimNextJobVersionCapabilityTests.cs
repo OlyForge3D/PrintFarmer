@@ -36,7 +36,7 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
 
     private static string CapsJson(params string[] caps) => JsonSerializer.Serialize(caps);
 
-    private async Task<Guid> InsertQueuedJobAsync(string requiredCapsJson, string? engineVersion = null)
+    private async Task<Guid> InsertQueuedJobAsync(string? requiredCapsJson, string? engineVersion = null)
     {
         SliceJob job = new SliceJob
         {
@@ -106,6 +106,38 @@ public class ClaimNextJobVersionCapabilityTests : IAsyncDisposable
 
         _ = claimed.Should().NotBeNull();
         _ = claimed!.Id.Should().Be(unpinned);
+    }
+
+    [Theory]
+    [InlineData(null, true)]
+    [InlineData("", true)]
+    [InlineData("[]", true)]
+    [InlineData("[\"orcaslicer:2.3.1\"]", true)]
+    [InlineData("[\"orcaslicer:9.9.9\"]", false)]
+    public async Task ClaimNextJobAsync_RequiredCapabilitiesJson_MatchesExpectedSemantics(
+        string? requiredCapabilitiesJson,
+        bool expectedClaim)
+    {
+        Guid jobId = await InsertQueuedJobAsync(requiredCapabilitiesJson);
+        var repository = new EfSliceJobRepository(_db);
+
+        SliceJob? claimed = await repository.ClaimNextJobAsync(
+            WorkerClaimIdentity.CreateUnattested(
+                Guid.NewGuid(),
+                ["orcaslicer", "orcaslicer:2.3.1", "stl-processing"]),
+            30,
+            3,
+            CancellationToken.None);
+
+        if (expectedClaim)
+        {
+            _ = claimed.Should().NotBeNull();
+            _ = claimed!.Id.Should().Be(jobId);
+        }
+        else
+        {
+            _ = claimed.Should().BeNull();
+        }
     }
 
     public async ValueTask DisposeAsync()

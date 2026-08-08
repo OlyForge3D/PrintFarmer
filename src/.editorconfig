@@ -739,3 +739,9 @@ dotnet_diagnostic.S1313.severity = none
 [tests/**/*.cs]
 dotnet_diagnostic.S5332.severity = none
 dotnet_diagnostic.S1313.severity = none
+
+# EF Core emits block-scoped namespaces in generated migration history. Keep the
+# repository's file-scoped preference for handwritten code without rewriting
+# generated migration bodies whenever a migration is scaffolded.
+[migrations/**/Migrations/*.cs]
+dotnet_diagnostic.IDE0161.severity = none
