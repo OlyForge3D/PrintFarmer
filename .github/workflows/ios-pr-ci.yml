@@ -236,6 +236,7 @@ jobs:
         suite:
           - LoginFlowUITests
           - OperatorShellUITests
+          - AttentionDisabledFallbackUITests
           - ScanStationUITests
           - HarvestUITests
           - PartsInventoryUITests
@@ -244,6 +245,9 @@ jobs:
           - ColdOfflineShellUITests
           - JobDetailIPadNavigationUITests
           - TaskActionRoutingUITests
+          - ShiftTasksUITests
+          - ShiftTasksGroupedUITests
+          - ShiftTasksFailedRefreshUITests
         include:
           - family: iPhone
             key: iphone
