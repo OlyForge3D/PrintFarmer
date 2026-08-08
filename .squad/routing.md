@@ -133,3 +133,18 @@ When work is repo-specific, pass the correct repo path as `WORKTREE_PATH` in the
     `.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer". Do not
     restate it here. If a change is not clearly documentation-only, use the full
     Bishop + Hicks + Vasquez gate.
+12. **Excluded roster entries (📋 Scribe, 🔄 Ralph) are never dispatch owners, but their
+    `squad:*` labels stay resolvable — for two different reasons.** 📋 Scribe (Session Logger)
+    and 🔄 Ralph (Work Monitor) are infrastructure roles, not implementation owners, so
+    `squad-triage.yml`, `sync-squad-labels.yml`, and `.squad/templates/ralph-triage.js` all
+    exclude them from the routable/labelled member list via `isRosterExcluded()` in
+    `scripts/ci/squad-routing.cjs`. `squad-issue-assign.yml` (the manual-label path) is
+    different: it must still resolve `squad:scribe` / `squad:ralph` to a name so it can post a
+    legible **refusal** — "🚫 Not a dispatchable owner" — instead of a silent no-op, but it must
+    never post a work-assignment comment for them. This is distinct from a genuinely **retired**
+    label whose member has left `.squad/team.md` entirely (e.g. old `squad:kaylee` /
+    `squad:mal` / `squad:apone` / `squad:crowe` labels on closed issues): those already fail to
+    match any roster row and fall through to the pre-existing "⚠️ no member found" warning,
+    unchanged, which preserves how historical assignment comments render. See
+    `scripts/ci/squad-routing.cjs`'s `isRosterExcluded()` doc comment and
+    `.github/workflows/squad-issue-assign.yml` for the full policy.
