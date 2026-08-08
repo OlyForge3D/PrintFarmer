@@ -362,6 +362,25 @@ test('an administrator GitHub approval at the current head satisfies the gate', 
   assert.equal(result.override, 'github-review');
 });
 
+test('the owner override needs no comments, files or roster — the fork path', () => {
+  // Fork PRs are evaluated with reviews only, so this call shape must work.
+  const result = evaluateGate({
+    headSha,
+    reviews: [{ state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true }],
+  });
+  assert.equal(result.state, 'success');
+  assert.equal(result.override, 'github-review');
+  assert.match(result.description, /^APPROVE \(owner\) @ /);
+
+  // ...and a non-admin approval on that same path must not pass.
+  const outsider = evaluateGate({
+    headSha,
+    reviews: [{ state: 'APPROVED', commitId: headSha, login: 'stranger', isAdmin: false }],
+  });
+  assert.equal(outsider.state, 'failure');
+  assert.notEqual(outsider.override, 'github-review');
+});
+
 test('an administrator GitHub approval at a stale head does not satisfy the gate', () => {
   const result = gate({
     reviews: [{ state: 'APPROVED', commitId: staleSha, login: 'jpapiez', isAdmin: true }],
@@ -489,8 +508,10 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /squadWriteAccess: await canWrite\(login\)/);
-  // Fork PRs must never receive a passing squad status.
+  // Fork PRs must never accept an agent record, but an administrator's native
+  // approval is still evaluated in code rather than deferred to prose.
   assert.match(workflow, /fork PR needs a repository administrator/);
+  assert.match(workflow, /if \(forkResult\.override === 'github-review'\)/);
   assert.match(workflow, /types: \[created, edited, deleted\]/);
   assert.match(
     workflow,

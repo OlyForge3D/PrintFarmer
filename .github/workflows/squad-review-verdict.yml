@@ -80,9 +80,11 @@ name: Record squad review (self-attested)
 #   * PUT THE RECORD BLOCK FIRST in the comment. Sanitisation fails closed: an
 #     unterminated `<!--` or code fence earlier in the comment hides everything
 #     after it, exactly as GitHub renders it, which would drop your record.
-#   * FORK PRs receive no agent record at all: the gate posts BLOCKED and stops
-#     before reading any record, so a fork PR can pass only through a real
-#     administrator approval.
+#   * FORK PRs never accept an agent record: anyone can open one on a public
+#     repository, so a record there could only be self-asserted by an
+#     unauthenticated party. An administrator's native GitHub approval at the
+#     current head is still honoured on that path, evaluated by the same code —
+#     it reads only API-supplied logins and the live head SHA.
 #
 # REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
 # Changes: One Reviewer": documentation-only PRs need one record, everything
@@ -188,20 +190,7 @@ jobs:
                 description, target_url: targetUrl,
               });
 
-            if (pull.head.repo?.full_name !== repository) {
-              // Fork PRs never receive a passing squad status. A fork PR can be
-              // opened by anyone on a public repository, so a record on one
-              // could only ever be self-asserted by an unauthenticated party.
-              await postStatus(
-                'failure',
-                `BLOCKED @ ${headSha.slice(0, 12)}: fork PR needs a repository administrator`,
-              );
-              core.warning(
-                'Fork pull request: agent review records are not accepted. ' +
-                'A repository administrator must review and approve directly.',
-              );
-              return;
-            }
+            const isFork = pull.head.repo?.full_name !== repository;
 
             // Author authentication. Both repositories are PUBLIC, so any GitHub
             // user can comment on a PR with no permission at all. Ralph merges
@@ -238,13 +227,55 @@ jobs:
             const canWrite = async (login) =>
               gate.hasWriteAccess(await permissionOf(login));
 
-            const [labelData, rawComments, rawReviews, fileData] = await Promise.all([
+            async function loadReviews() {
+              const raw = await github.paginate(github.rest.pulls.listReviews,
+                { owner, repo, pull_number: prNumber, per_page: 100 });
+              const reviews = [];
+              for (const review of raw) {
+                reviews.push({
+                  state: review.state,
+                  commitId: review.commit_id,
+                  login: review.user?.login ?? '',
+                  isAdmin: review.state === 'APPROVED'
+                    ? await isAdmin(review.user?.login)
+                    : false,
+                });
+              }
+              return reviews;
+            }
+
+            if (isFork) {
+              // Fork PRs never accept an agent record: anyone can open one on a
+              // public repository, so a record there could only be self-asserted
+              // by an unauthenticated party. An administrator's native GitHub
+              // approval is still honoured, and is evaluated by the same code
+              // path as everywhere else — it reads only API-supplied logins and
+              // the live head SHA, never fork-controlled input, so fork-PR
+              // authorisation stays in code rather than falling back to prose.
+              const forkResult = gate.evaluateGate({
+                headSha, reviews: await loadReviews(),
+              });
+              if (forkResult.override === 'github-review') {
+                await postStatus(forkResult.state, forkResult.description);
+                core.notice(`squad/pre-pr-verdict APPROVE (owner): ${forkResult.reason}`);
+                return;
+              }
+              await postStatus(
+                'failure',
+                `BLOCKED @ ${headSha.slice(0, 12)}: fork PR needs a repository administrator`,
+              );
+              core.warning(
+                'Fork pull request: agent review records are not accepted. ' +
+                'A repository administrator must review and approve directly.',
+              );
+              return;
+            }
+
+            const [labelData, rawComments, fileData] = await Promise.all([
               github.paginate(github.rest.issues.listLabelsForRepo,
                 { owner, repo, per_page: 100 }),
               github.paginate(github.rest.issues.listComments,
                 { owner, repo, issue_number: prNumber, per_page: 100 }),
-              github.paginate(github.rest.pulls.listReviews,
-                { owner, repo, pull_number: prNumber, per_page: 100 }),
               github.paginate(github.rest.pulls.listFiles,
                 { owner, repo, pull_number: prNumber, per_page: 100 }),
             ]);
@@ -273,17 +304,7 @@ jobs:
               comments.push(comment);
             }
 
-            const reviews = [];
-            for (const review of rawReviews) {
-              reviews.push({
-                state: review.state,
-                commitId: review.commit_id,
-                login: review.user?.login ?? '',
-                isAdmin: review.state === 'APPROVED'
-                  ? await isAdmin(review.user?.login)
-                  : false,
-              });
-            }
+            const reviews = await loadReviews();
 
             let linkedIssueLabels = [];
             try {

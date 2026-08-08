@@ -296,9 +296,13 @@ authentication is therefore mandatory, not optional:
 - **Identity comes from the account, never the text.** The owner-override path requires
   the API-supplied comment author to *be* an administrator whose login matches the named
   reviewer. A comment merely claiming to be from `jpapiez` proves nothing.
-- **Fork PRs get no agent record at all.** The gate posts
-  `BLOCKED @ <sha12>: fork PR needs a repository administrator` and stops before reading
-  any record, so a fork PR can only ever pass through a real administrator approval.
+- **Fork PRs get no agent record at all.** The gate reads no record from a fork — anyone
+  can open one on a public repository, so a record there could only be self-asserted by an
+  unauthenticated party. It posts
+  `BLOCKED @ <sha12>: fork PR needs a repository administrator`. An administrator's native
+  GitHub approval at the current head is still honoured on that path and is evaluated by
+  the same code, because it reads only API-supplied logins and the live head SHA — never
+  fork-controlled input.
 - **No bot identity is allowlisted.** Allowlisting one would re-create the bot-hop
   laundering pattern rejected above.
 
