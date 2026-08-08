@@ -1,0 +1,77 @@
+name: Deployment script tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/deploy-docker.sh'
+      - 'scripts/docker/**'
+      - 'tests/**'
+  push:
+    branches:
+      - development
+      - main
+      - master
+    paths:
+      - 'scripts/deploy-docker.sh'
+      - 'scripts/docker/**'
+      - 'tests/**'
+
+permissions:
+  contents: read
+
+jobs:
+  deployment-tests:
+    name: Run deployment regression tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Ensure scripts are executable
+        run: |
+          chmod +x ./scripts/deploy-docker.sh
+          chmod +x ./scripts/docker/compose-generator.sh
+          chmod +x ./tests/*.sh
+
+      - name: Install Python deps
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install ruamel.yaml
+
+      - name: Show Docker Compose version
+        run: docker compose version
+
+      # These four suites are the documented, CI-safe subset called out in
+      # issue #1308: they guard scripts/deploy-docker.sh and
+      # scripts/docker/compose-generator.sh, need only Docker + Python (both
+      # preinstalled on ubuntu-latest), and require no interactive input.
+      # interactive_prompt_harness.sh is included because it is already
+      # non-interactive by construction (NON_INTERACTIVE=true, no `read`
+      # calls) despite its name.
+      #
+      # Suites intentionally NOT run here:
+      #   - phase-1b-integration-test.sh: requires a live API server
+      #     (http://127.0.0.1:5245) and frontend (http://127.0.0.1:8080);
+      #     not a unit/regression harness and out of scope for this job.
+      #   - test-user-scenario-complete.sh, test-integration.sh: broader
+      #     end-to-end scenarios layered on top of the suites below; can be
+      #     wired in a follow-up once their runtime/isolation is verified.
+      #   - test-compose-generator.sh, test-orcaslicer-binary-metadata.sh,
+      #     test-tls-certificate-cleanup.sh, test-auto-admin-setup.sh,
+      #     test-content-validation.sh: already covered in spirit by
+      #     compose-validate.yml or out of scope for this issue's minimum
+      #     acceptance criteria; can be added in a follow-up.
+      - name: Run validate-deployment-scripts.sh
+        run: bash tests/validate-deployment-scripts.sh
+
+      - name: Run test-deploy-docker.sh
+        run: bash tests/test-deploy-docker.sh
+
+      - name: Run test-config-persistence.sh
+        run: bash tests/test-config-persistence.sh
+
+      - name: Run interactive_prompt_harness.sh
+        run: bash tests/interactive_prompt_harness.sh
