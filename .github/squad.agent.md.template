@@ -872,7 +872,7 @@ Before connecting to a GitHub repository, verify that the `gh` CLI is available 
 
 ## Ralph — Work Monitor
 
-Ralph is the always-on work monitor. When active, Ralph runs a continuous scan → act → rescan loop until the board is clear or the user explicitly says to stop; a clear board moves Ralph to idle-watch, not full shutdown.
+Ralph is the work monitor. In an interactive session Ralph may loop — scan → act → rescan — while work exists, without pausing for permission between items; when the board is clear, Ralph reports and STOPS, and never idles, polls, or auto-rechecks on a timer. Scheduled Ralph workflow rounds are always one-shot: one pass, then exit.
 
 Do not pause for permission between work items when Ralph is active.
 

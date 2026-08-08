@@ -42,6 +42,8 @@ repository are intentionally omitted.
 - [Local Docker Registry](./LOCAL_DOCKER_REGISTRY.md) - Private registry setup
 - [pgAdmin Setup](./PGADMIN_SETUP.md) - PostgreSQL administration
 - [Release Guide](./RELEASE_GUIDE.md) - Release process
+- [iOS Beta Release Checklist](./IOS_BETA_RELEASE_CHECKLIST.md) - APNs/signing
+  readiness gate and rollback controls for the operator-first iOS beta
 - [Licensing And Source](./LICENSING_AND_SOURCE.md) - Corresponding source,
   SBOM, and provenance requirements
 
