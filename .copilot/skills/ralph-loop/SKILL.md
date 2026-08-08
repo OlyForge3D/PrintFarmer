@@ -255,7 +255,7 @@ every round with no recorded reason. Resolve their blockers and dispatch or reco
   landed before spawning.
 - Spawn with `create_session`, `base_branch: development`, one session per issue.
 
-Each kickoff prompt must state:
+Each **implementation** kickoff prompt must state:
 
 - the assigned squad member and the issue number
 - the acceptance criteria
@@ -263,8 +263,19 @@ Each kickoff prompt must state:
 - required PR linkage (`Closes #N` in the PR body)
 - the targeted validation commands for the touched layer
   (`cd src && dotnet test ...` / `cd src/Web/ReactApp && npm run test:run ...`)
-- the **verbatim closing clause** from SESSION LIFECYCLE AND REAPING, as the final
-  paragraph of the kickoff prompt. A kickoff prompt without it is malformed.
+- the **verbatim closing clause and rider** from SESSION LIFECYCLE AND REAPING, as the
+  final two paragraphs of the kickoff prompt. A kickoff prompt without both is malformed.
+
+Each **analysis or research** kickoff prompt, including every Dallas dispatch, must instead
+state:
+
+- the assigned squad member and the issue number
+- the exact non-code deliverable and where to publish it
+- that the session must not implement code or open a PR
+- that its final report must link the completed deliverable, record the linked issue's
+  disposition, and explicitly attest `working tree clean` and `all commits pushed`
+- that the session must report and stop without calling `archive_session`; Ralph will keep
+  it under `Sessions retained` until all reap-readiness criteria are proven
 
 ## ACCOUNT FOR EVERY ISSUE
 
@@ -317,12 +328,12 @@ Two platform limits, both verified against the live runtime:
 
 Together these close every automatic route for any session that outlives the round that
 spawned it — which, because rounds exit within minutes, is every real implementation
-session. Ralph must never attempt either failing call.
+session. Although the runtime could let a live round archive a child that both started
+and finished during that same round, normal implementation work never completes that
+fast. That own-child path is not a cleanup mechanism and nothing may depend on it.
 
-The sole archivable case is a child that both started **and** finished inside the round
-that spawned it — effectively only instant-failure sessions. Normal implementation work
-never completes that fast, so this is never a cleanup mechanism and nothing may depend
-on it.
+**Ralph archives nothing, ever** — not a prior round's session, not its own current-round
+child, and not itself. Ralph must never attempt any of these calls.
 
 ### Why hand-off was tried and removed
 
@@ -340,12 +351,14 @@ Do not reintroduce hand-off in any form.
 
 ### The closing clause a finished session gets instead
 
-Every dispatch kickoff prompt Ralph writes MUST end with this **closing clause**, verbatim,
-as its final paragraph. It must match Ralph's workflow prompt word-for-word; the two must
-not drift.
+Every implementation dispatch kickoff prompt Ralph writes MUST end with this **closing
+clause and rider**, verbatim, as its final two paragraphs. They must match Ralph's workflow
+prompt word-for-word; the two must not drift.
 
 ```
-When your PR is merged (or definitively closed) and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled by Ralph's `🧹 Ready to reap` report.
+When your PR is merged and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. If your PR is definitively closed without merge, report `CLOSED WITHOUT MERGE`, the reason, and the linked issue's current disposition instead; do not claim the issue closed unless you verified it. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled only by Ralph's `🧹 Ready to reap` report and a human.
+
+Before stopping in either terminal path, make the worktree clean and push every intended commit. Your final report MUST explicitly attest `working tree clean` and `all commits pushed`. If either statement is false or unknown, report that fact; Ralph must keep the session under `Sessions retained` and must not list it as ready to reap.
 ```
 
 ### The reap report is the ONLY mechanism
@@ -354,24 +367,41 @@ Because no automated path reaches a session that outlives its round, the `🧹 R
 report is not one safety net among several — it is the only way a finished session ever
 gets cleaned up, and **a human performs the removal**. Treat it as load-bearing.
 
-Each round, call `list_sessions_and_chats` and list **every session in the project whose PR
-is merged or definitively closed** under a `🧹 Ready to reap` heading, with:
+Each round, call `list_sessions_and_chats`. A session is ready to reap only when **all four**
+of these criteria are proven:
+
+1. **Terminal deliverable state** — an implementation PR is squash-safely verified as
+   merged or definitively closed without merge, or a non-PR analysis/research deliverable
+   is verified at its required publication location.
+2. **Final status recorded** — the owning session reported the terminal state and linked
+   issue's disposition, plus the closure reason for a closed-unmerged PR or the deliverable
+   link and result for non-PR work.
+3. **Clean worktree attested** — the owning session explicitly reported
+   `working tree clean`.
+4. **Push complete attested** — the owning session explicitly reported
+   `all commits pushed`.
+
+These criteria are conjunctive. Missing evidence or an unknown state for **any** criterion
+is disqualifying: keep the session under `Sessions retained`, naming the unknown or failed
+criterion. Do not infer a clean or pushed state from PR status.
+
+List every session that meets all four criteria under a `🧹 Ready to reap` heading, with:
 
 - session name
 - branch
-- PR number
-- merged / closed state
+- PR number and merged / closed state, or non-PR deliverable type and link
+- linked issue disposition
 
-**This is REPORT ONLY.** Ralph never archives another round's session, and never lists a
-session whose PR is still open or which holds uncommitted or unpushed work. A human does
+**This is REPORT ONLY.** Ralph archives nothing. A human evaluates the report and performs
 the reaping.
 
 Produce the `🧹 Ready to reap` heading **every round, even when it is empty** — a missing
 section is indistinguishable from an unchecked one.
 
-Note: `delete_item` **does** work across sessions regardless of creator, unlike
-`archive_session`. That does not make it available to automation. Reaping stays a **human**
-decision, and Ralph must never call `delete_item` on a session: squash-merge verification is
+Note: `delete_item` **does** work across sessions regardless of creator, unlike the
+creator-scoped `archive_session`. It is destructive deletion, not archival, and that does
+not make it available to automation. Reaping stays a **human** decision, and Ralph or any
+autopilot session must never call `delete_item` on a session: squash-merge verification is
 error-prone (see below) and a false positive destroys unpushed work.
 
 ### Merge verification is squash-merge-safe
@@ -397,6 +427,11 @@ git branch -r --contains <sha>
 
 A PR counts as merged for reaping only when `state` is `MERGED` **and** its
 `mergeCommit.oid` is contained in `origin/development` after a fresh fetch.
+
+For a PR closed without merge, require `state: CLOSED` plus the owning session's explicit
+`CLOSED WITHOUT MERGE` final report and reason. The linked issue may remain open, be
+reassigned, or be closed separately; record its actual disposition rather than treating
+the closed PR as proof that the issue closed.
 
 ## MERGE SAFETY
 
@@ -431,10 +466,12 @@ Report each round, in this order:
 4. **Analysis gate** — issues newly gated, Dallas sessions dispatched, gates satisfied
 5. Queue order (issue numbers in dispatch order)
 6. Sessions dispatched this round
-7. Sessions retained for open PRs
-8. **`🧹 Ready to reap`** — every session whose PR is merged or definitively closed, with
-   session name, branch, PR number, and merged/closed state. Report only; emit the heading
-   every round even when the list is empty.
+7. **Sessions retained** — every session that does not satisfy all four reap-readiness
+   criteria, with each failed or unknown criterion named
+8. **`🧹 Ready to reap`** — every session satisfying all four conjunctive readiness
+   criteria, with session name, branch, terminal PR or non-PR deliverable evidence, and
+   linked issue disposition. Report only; emit the heading every round even when the list
+   is empty.
 9. Active slot count (`n/5`)
 10. Gate failures
 11. PRs awaiting review or merge
@@ -452,7 +489,7 @@ When nothing is eligible, report exactly:
 
 - Reading `.github/agents/squad.agent.md` wholesale for label or member lookups.
 - Deep-inspecting issues or PRs whose comparison fields did not change.
-- Archiving a session while its PR is still open.
+- Calling `archive_session` from Ralph for any session, including a current-round child.
 - Calling `archive_session` on a session created by a previous round — the call fails.
 - Instructing a session to archive itself — `archive_session` on your own id returns
   `Cannot archive the current session`.
@@ -460,8 +497,14 @@ When nothing is eligible, report exactly:
   creating round has already exited, and waking an idle round can make it re-run its logic.
 - Assuming any automation reaps sessions, or calling `delete_item` on one. Nothing reaps
   automatically; the `🧹 Ready to reap` report plus a human is the whole mechanism.
-- Writing a kickoff prompt that omits the verbatim closing clause.
+- Writing a kickoff prompt that omits the verbatim closing clause or rider.
+- Giving an analysis or research session the implementation-only branch, PR, validation,
+  or closed-unmerged instructions instead of its non-PR deliverable contract.
 - Omitting the `🧹 Ready to reap` heading because the list is empty.
+- Listing a session as ready to reap when any of the four readiness criteria is false,
+  missing, or unknown.
+- Treating a closed-unmerged PR as proof that its linked issue closed, or omitting the
+  owning session's closure reason and clean/pushed attestations.
 - Treating "this branch's commits are not on `development`" as proof the work is unmerged —
   squash merges never put branch commits on `development`.
 - Phrasing a cleanup rule as a permission ("may archive once…") instead of an instruction
