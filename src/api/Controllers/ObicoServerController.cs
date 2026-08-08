@@ -2,7 +2,10 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FailureDetection;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,25 +14,32 @@ namespace Farm.Web.Api.Controllers;
 
 /// <summary>
 /// Controller for managing Obico ML API servers used for AI-powered print failure detection.
+/// This is an administrative integration-management surface: every action requires the
+/// <c>obico:manage</c> permission (farm_admin holds it implicitly).
 /// </summary>
 [ApiController]
 [Route("api/obico-servers")]
 [Authorize]
+[RequirePermission(PrintFarmerPermissions.Integrations.ManageObico)]
 public class ObicoServerController : ControllerBase
 {
     private const string UpstreamHealthProbeSnapshotUrl = "http://printfarmer.local/obico-health-probe.jpg";
+    private const string VettedEgressClientName = "VettedEgress";
 
     private readonly AppDbContext _dbContext;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IEgressGuard _egressGuard;
     private readonly ILogger<ObicoServerController> _logger;
 
     public ObicoServerController(
         AppDbContext dbContext,
         IHttpClientFactory httpClientFactory,
+        IEgressGuard egressGuard,
         ILogger<ObicoServerController> logger)
     {
         _dbContext = dbContext ?? throw new ArgumentNullException(nameof(dbContext));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
+        _egressGuard = egressGuard ?? throw new ArgumentNullException(nameof(egressGuard));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -144,15 +154,14 @@ public class ObicoServerController : ControllerBase
         }
 
         // Validate URL format if changed
-        if (dto.Url != null && dto.Url != server.Url)
+        bool urlChanged = dto.Url != null && dto.Url != server.Url;
+        if (urlChanged)
         {
             if (!Uri.TryCreate(dto.Url, UriKind.Absolute, out Uri? uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
                 return BadRequest("URL must be a valid HTTP or HTTPS URL");
             }
-
-            server.Url = dto.Url;
         }
 
         // Check for duplicate names if changed
@@ -165,30 +174,50 @@ public class ObicoServerController : ControllerBase
             {
                 return BadRequest($"An Obico server with the name '{dto.Name}' already exists");
             }
+        }
 
+        bool apiKeyChanged = dto.ApiKey is not null;
+        string? resolvedApiKey = apiKeyChanged
+            ? (string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim())
+            : server.ApiKey;
+        string resolvedUrl = dto.Url ?? server.Url;
+        bool resolvedEnabled = dto.IsEnabled ?? server.IsEnabled;
+
+        // Revalidate connectivity whenever the resulting server will be enabled AND either
+        // (a) it is transitioning from disabled to enabled, or (b) its destination (Url) or
+        // credentials (ApiKey) are changing. (a) catches a disabled server (e.g. stale,
+        // seeded, or imported with a blocked/invalid destination) being enabled unchanged;
+        // (b) catches an already-enabled server having its Url/ApiKey swapped to a blocked
+        // destination without ever being re-probed through the egress guard. Neither check
+        // alone is sufficient — both gaps allowed a forbidden target to be persisted.
+        bool enablingTransition = resolvedEnabled && !server.IsEnabled;
+        bool destinationChanging = urlChanged || apiKeyChanged;
+        if (resolvedEnabled && (enablingTransition || destinationChanging))
+        {
+            ObicoServer probeServer = new()
+            {
+                Url = resolvedUrl,
+                ApiKey = resolvedApiKey
+            };
+            ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(probeServer, ct);
+            if (!healthResult.Healthy)
+            {
+                return BadRequest($"Obico server validation failed: {healthResult.ErrorMessage}");
+            }
+        }
+
+        if (urlChanged)
+        {
+            server.Url = dto.Url!;
+        }
+
+        if (dto.Name != null && dto.Name != server.Name)
+        {
             server.Name = dto.Name;
         }
 
         if (dto.IsEnabled.HasValue)
         {
-            // Validate connectivity when enabling a server
-            if (dto.IsEnabled.Value && !server.IsEnabled)
-            {
-                // Apply URL/ApiKey changes before validation
-                ObicoServer probeServer = new()
-                {
-                    Url = dto.Url ?? server.Url,
-                    ApiKey = dto.ApiKey is not null
-                        ? (string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim())
-                        : server.ApiKey
-                };
-                ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(probeServer, ct);
-                if (!healthResult.Healthy)
-                {
-                    return BadRequest($"Cannot enable server — validation failed: {healthResult.ErrorMessage}");
-                }
-            }
-
             server.IsEnabled = dto.IsEnabled.Value;
         }
 
@@ -198,9 +227,9 @@ public class ObicoServerController : ControllerBase
         }
 
         // ApiKey: null means "don't change", empty string means "clear it"
-        if (dto.ApiKey is not null)
+        if (apiKeyChanged)
         {
-            server.ApiKey = string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim();
+            server.ApiKey = resolvedApiKey;
         }
 
         server.UpdatedAt = DateTime.UtcNow;
@@ -287,7 +316,20 @@ public class ObicoServerController : ControllerBase
 
         try
         {
-            using HttpClient httpClient = _httpClientFactory.CreateClient();
+            EgressCheckResult egressCheck = await _egressGuard.CheckAsync(server.Url, ct);
+            if (!egressCheck.IsAllowed)
+            {
+                errors.Add(egressCheck.DenyReason ?? "Configured server URL is not allowed");
+                stopwatch.Stop();
+                return new ObicoServerHealthDto
+                {
+                    Healthy = false,
+                    LatencyMs = stopwatch.ElapsedMilliseconds,
+                    ErrorMessage = string.Join("; ", errors)
+                };
+            }
+
+            using HttpClient httpClient = _httpClientFactory.CreateClient(VettedEgressClientName);
             httpClient.Timeout = TimeSpan.FromSeconds(10);
             httpClient.BaseAddress = new Uri(server.Url.TrimEnd('/') + "/");
 
@@ -359,7 +401,7 @@ public class ObicoServerController : ControllerBase
                     return (false, null);
                 }
 
-                return (true, $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}");
+                return (true, $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}");
             }
 
             if (HasDetectionsArray(responseBody))
@@ -392,7 +434,7 @@ public class ObicoServerController : ControllerBase
 
         return endpointReachable
             ? null
-            : $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}: {response.ReasonPhrase}";
+            : $"Prediction endpoint /p/ returned HTTP {(int)response.StatusCode}";
     }
 
     /// <summary>

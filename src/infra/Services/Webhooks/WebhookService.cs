@@ -7,6 +7,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain.Webhooks;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -293,27 +294,7 @@ public sealed class WebhookService(
             addresses = await Dns.GetHostAddressesAsync(uri.Host, ct);
         }
 
-        return addresses.Length > 0 && addresses.All(ip => !IsPrivateOrReserved(ip));
-    }
-
-    private static bool IsPrivateOrReserved(IPAddress ip)
-    {
-        if (IPAddress.IsLoopback(ip))
-        {
-            return true;
-        }
-
-        byte[] bytes = ip.GetAddressBytes();
-        return bytes.Length switch
-        {
-            4 => bytes[0] == 10
-                || (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31)
-                || (bytes[0] == 192 && bytes[1] == 168)
-                || (bytes[0] == 169 && bytes[1] == 254)
-                || bytes[0] == 0,
-            16 => ip.IsIPv6LinkLocal || ip.IsIPv6SiteLocal || bytes.All(b => b == 0),
-            _ => false,
-        };
+        return addresses.Length > 0 && addresses.All(ip => !NetworkDestinationClassifier.IsPrivateOrReserved(ip));
     }
 
     private async Task CleanupOldDeliveryLogsAsync(CancellationToken ct)

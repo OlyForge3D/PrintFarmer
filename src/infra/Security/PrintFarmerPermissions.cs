@@ -63,6 +63,20 @@ public static class PrintFarmerPermissions
         public const string Manage = "dispatch-settings:manage";
     }
 
+    [SuppressMessage(
+        "Design",
+        "CA1034:Nested types should not be visible",
+        Justification = "Nested permission groups keep the public resource:action contract discoverable and typo-resistant.")]
+    public static class Integrations
+    {
+        /// <summary>
+        /// Managing the Obico ML failure-detection integration (create/update/delete server
+        /// records, run connectivity probes). This is an administrative surface: farm_admin
+        /// holds it implicitly, and it is not granted to farm_user by default.
+        /// </summary>
+        public const string ManageObico = "obico:manage";
+    }
+
     public static IReadOnlyList<string> CalibrationFoundation { get; } =
     [
         Calibration.Create,

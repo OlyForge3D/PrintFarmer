@@ -525,7 +525,7 @@ public class CamerasController(
 
         try
         {
-            HttpClient client = _httpClientFactory.CreateClient();
+            HttpClient client = _httpClientFactory.CreateClient("VettedEgress");
             using var request = new HttpRequestMessage(HttpMethod.Get, targetUri);
             HttpResponseMessage response = await client.SendAsync(
                 request,

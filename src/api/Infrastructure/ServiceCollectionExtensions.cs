@@ -780,6 +780,16 @@ public static class ServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // Vetted egress HTTP client: outbound calls to user-influenced destinations
+        // (Obico connectivity probes, camera proxying) must not auto-follow redirects,
+        // since a redirect to an internal address would otherwise bypass egress vetting.
+        _ = services.AddHttpClient("VettedEgress")
+            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+            {
+                AllowAutoRedirect = false
+            });
+        _ = services.AddSingleton<Farm.Infrastructure.Network.IEgressGuard, Farm.Infrastructure.Network.EgressGuard>();
+
         // Smart plug HTTP client shared by Tasmota, Shelly, and HomeAssistant providers (5s timeout for LAN devices)
         _ = services.AddHttpClient("SmartPlug", client =>
         {

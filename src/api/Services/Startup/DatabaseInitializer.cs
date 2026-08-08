@@ -278,7 +278,8 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             new { Name = "calibration", DisplayName = "Printer Calibration", ResourceType = "calibration", Description = "Printer calibration projects and generation" },
             new { Name = "queue", DisplayName = "Calibration Queue", ResourceType = "queue", Description = "Authorized queue operations" },
             new { Name = "slicing", DisplayName = "Slicing", ResourceType = "slicer", Description = "Authorized slicing and artifact operations" },
-            new { Name = "dispatch-settings", DisplayName = "Dispatch Settings", ResourceType = "system", Description = "Dispatch configuration management" }
+            new { Name = "dispatch-settings", DisplayName = "Dispatch Settings", ResourceType = "system", Description = "Dispatch configuration management" },
+            new { Name = "obico", DisplayName = "Obico Integration", ResourceType = "integration", Description = "Obico ML failure-detection server management and connectivity probes" }
         };
         foreach (var resource in resources)
         {

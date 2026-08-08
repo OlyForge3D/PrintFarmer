@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
@@ -206,8 +207,209 @@ public class ObicoServerControllerTests
         requests[0].PathAndQuery.Should().StartWith("/p/?img=");
     }
 
+    [Fact]
+    public async Task CreateServerAsync_WhenEgressGuardDeniesDestination_RejectsServerWithoutOutboundCall()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        CreateObicoServerDto dto = new()
+        {
+            Name = "Loopback Obico",
+            Url = "http://127.0.0.1:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 2,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.CreateServerAsync(dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("Obico server validation failed");
+        message.Should().Contain("loopback");
+        dbContext.ObicoServers.Should().BeEmpty();
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+    }
+
+    [Fact]
+    public async Task TestServerHealthAsync_WhenEgressGuardDeniesDestination_ReturnsUnhealthyWithoutOutboundCall()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Loopback Obico",
+            Url = "http://169.254.169.254/",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        ActionResult<ObicoServerHealthDto> result = await controller.TestServerHealthAsync(server.Id, CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        ObicoServerHealthDto health = Assert.IsType<ObicoServerHealthDto>(okResult.Value);
+        health.Healthy.Should().BeFalse();
+        health.ErrorMessage.Should().Contain("loopback");
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+    }
+
+    [Fact]
+    public async Task UpdateServerAsync_WhenEnabledServerUrlChangesToBlockedDestination_RejectsUpdateWithoutOutboundCallOrMutation()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Already Enabled Obico",
+            Url = "http://obico.local:3333",
+            ApiKey = "original-key",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        UpdateObicoServerDto dto = new()
+        {
+            Url = "http://127.0.0.1:3333",
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(server.Id, dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("Obico server validation failed");
+        message.Should().Contain("loopback");
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+
+        ObicoServer persisted = await dbContext.ObicoServers.SingleAsync(s => s.Id == server.Id);
+        persisted.Url.Should().Be("http://obico.local:3333", "the blocked URL must not be persisted");
+        persisted.ApiKey.Should().Be("original-key");
+    }
+
+    [Fact]
+    public async Task UpdateServerAsync_WhenEnabledServerApiKeyChangesAndDestinationBlocked_RejectsUpdateWithoutOutboundCallOrMutation()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Already Enabled Obico With Blocked Url",
+            Url = "http://127.0.0.1:3333",
+            ApiKey = "original-key",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        UpdateObicoServerDto dto = new()
+        {
+            ApiKey = "rotated-key",
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(server.Id, dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+
+        ObicoServer persisted = await dbContext.ObicoServers.SingleAsync(s => s.Id == server.Id);
+        persisted.ApiKey.Should().Be("original-key", "the API key must not be rotated when revalidation fails");
+    }
+
+    [Fact]
+    public async Task UpdateServerAsync_WhenEnablingDisabledServerWithUnchangedBlockedDestination_RejectsUpdateWithoutOutboundCallOrMutation()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Disabled Obico With Blocked Url",
+            Url = "http://127.0.0.1:3333",
+            ApiKey = "original-key",
+            IsEnabled = false,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        // Neither Url nor ApiKey is changing — only the disabled -> enabled transition.
+        UpdateObicoServerDto dto = new()
+        {
+            IsEnabled = true,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(server.Id, dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("loopback");
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+
+        ObicoServer persisted = await dbContext.ObicoServers.SingleAsync(s => s.Id == server.Id);
+        persisted.IsEnabled.Should().BeFalse("the server must not be enabled when connectivity revalidation fails");
+    }
+
+    private static IEgressGuard DenyingEgressGuard(string reason)
+    {
+        Mock<IEgressGuard> egressGuard = new(MockBehavior.Strict);
+        egressGuard
+            .Setup(guard => guard.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, CancellationToken _) => EgressCheckResult.Deny(reason, new Uri(url)));
+        return egressGuard.Object;
+    }
+
     private static (ObicoServerController Controller, AppDbContext DbContext) CreateController(
-        Func<HttpRequestMessage, HttpResponseMessage> responder)
+        Func<HttpRequestMessage, HttpResponseMessage> responder,
+        IEgressGuard? egressGuard = null)
     {
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
             .UseInMemoryDatabase($"ObicoServerControllerTests_{Guid.NewGuid()}")
@@ -219,8 +421,17 @@ public class ObicoServerControllerTests
             .Setup(factory => factory.CreateClient(It.IsAny<string>()))
             .Returns(new HttpClient(new RecordingHandler(responder)));
 
+        if (egressGuard == null)
+        {
+            Mock<IEgressGuard> allowingEgressGuard = new(MockBehavior.Strict);
+            allowingEgressGuard
+                .Setup(guard => guard.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string url, CancellationToken _) => EgressCheckResult.Allow(new Uri(url)));
+            egressGuard = allowingEgressGuard.Object;
+        }
+
         Mock<ILogger<ObicoServerController>> logger = new();
-        ObicoServerController controller = new(dbContext, httpClientFactory.Object, logger.Object);
+        ObicoServerController controller = new(dbContext, httpClientFactory.Object, egressGuard, logger.Object);
         return (controller, dbContext);
     }
 
