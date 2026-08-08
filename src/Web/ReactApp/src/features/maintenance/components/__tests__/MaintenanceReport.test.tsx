@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { MaintenanceReport } from '../MaintenanceReport';
@@ -60,6 +60,12 @@ describe('MaintenanceReport', () => {
 
     await user.click(screen.getByText('Export PDF'));
 
+    // exportPDF is async and awaits the dynamic import() chain before
+    // touching jsPDF, so the click's returned promise resolves after
+    // userEvent's own act/flush — assertions must wait for it (Hicks #1:
+    // asserting immediately here is a race and fails most runs).
+    await waitFor(() => expect(saveMock).toHaveBeenCalledWith('maintenance-report.pdf'));
+
     expect(textMock).toHaveBeenCalledWith('Maintenance Report', 14, 16);
     expect(autoTableMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -67,6 +73,5 @@ describe('MaintenanceReport', () => {
         startY: 22,
       })
     );
-    expect(saveMock).toHaveBeenCalledWith('maintenance-report.pdf');
   });
 });
