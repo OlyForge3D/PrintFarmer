@@ -87,6 +87,73 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         XCTAssertTrue(action.options.contains(.foreground))
     }
 
+    // MARK: - Response routing (issue #1329)
+    //
+    // The `nonisolated` `UNUserNotificationCenterDelegate` callback funnels
+    // every tap/action through `routeNotificationResponse` on the main actor.
+    // These exercise that router directly so the three routes (job-attention
+    // dispatch, bed-clear deep-link, plain push deep-link) stay wired after the
+    // async-delegate refactor that fixed the strict-concurrency build break.
+
+    func testRouteNotificationResponseDispatchesJobAttentionAction() async {
+        let printerId = UUID()
+        await PushNotificationManager.shared.routeNotificationResponse(
+            category: PushNotificationManager.jobAttentionCategory,
+            actionIdentifier: JobAttentionAction.pauseJob.rawValue,
+            requestIdentifier: "irrelevant",
+            userInfo: ["printerId": printerId.uuidString]
+        )
+
+        XCTAssertEqual(printerService.pauseCalledWith, printerId,
+                       "A job-attention action must be dispatched to the wired service.")
+    }
+
+    func testRouteNotificationResponsePostsLocalTapForPendingReady() async {
+        var receivedPrinterId: String?
+        let observer = NotificationCenter.default.addObserver(
+            forName: .localNotificationTapped,
+            object: nil,
+            queue: nil
+        ) { notification in
+            receivedPrinterId = notification.userInfo?["printerId"] as? String
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        let printerId = UUID().uuidString
+        await PushNotificationManager.shared.routeNotificationResponse(
+            category: "PENDING_READY",
+            actionIdentifier: UNNotificationDefaultActionIdentifier,
+            requestIdentifier: "pending-ready-\(printerId)",
+            userInfo: [:]
+        )
+
+        XCTAssertEqual(receivedPrinterId, printerId,
+                       "A bed-clear notification tap must deep-link to its printer.")
+    }
+
+    func testRouteNotificationResponsePostsPushTapForRemoteNotification() async {
+        let link = "printfarmer://printer/\(UUID().uuidString)"
+        var receivedLink: String?
+        let observer = NotificationCenter.default.addObserver(
+            forName: .pushNotificationTapped,
+            object: nil,
+            queue: nil
+        ) { notification in
+            receivedLink = notification.userInfo?["link"] as? String
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        await PushNotificationManager.shared.routeNotificationResponse(
+            category: "SOME_OTHER_CATEGORY",
+            actionIdentifier: UNNotificationDefaultActionIdentifier,
+            requestIdentifier: "whatever",
+            userInfo: ["link": link]
+        )
+
+        XCTAssertEqual(receivedLink, link,
+                       "A plain remote-notification tap must forward through the deep-link route.")
+    }
+
     // MARK: - Pause / Resume / Cancel wiring
 
     func testPauseJobActionCallsPrinterServicePauseWithPrinterIdFromUserInfo() async {

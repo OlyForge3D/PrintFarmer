@@ -156,8 +156,51 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         case .openSwap:
             // Foreground action (#1321): behaves like the existing tap-to-open
             // deep-link routing so it lands on the printer detail where the
-            // guided filament swap lives — mirrors `didReceive response:`'s
-            // default-tap branch below.
+            // guided filament swap lives — mirrors the default-tap routing in
+            // `routeNotificationResponse` below.
+            NotificationCenter.default.post(
+                name: .pushNotificationTapped,
+                object: nil,
+                userInfo: userInfo
+            )
+        }
+    }
+
+    /// Routes a tapped/actioned notification once the delegate callback has
+    /// hopped onto the main actor. Split out of the `nonisolated` delegate shim
+    /// (issue #1329) so routing runs in the manager's `@MainActor` domain —
+    /// where the job-attention services and the deep-link `NotificationCenter`
+    /// posts belong — and so it is unit-testable without a live
+    /// `UNUserNotificationCenter`. `requestIdentifier` is the
+    /// `UNNotificationRequest.identifier`, used to parse the printer id out of a
+    /// local bed-clear (`PENDING_READY`) alert.
+    func routeNotificationResponse(
+        category: String,
+        actionIdentifier: String,
+        requestIdentifier: String,
+        userInfo: [AnyHashable: Any]
+    ) async {
+        // Issue #1321: a job-attention action button (Pause/Resume/Cancel/
+        // Snooze/Open Swap) was tapped rather than the notification body.
+        // Dispatch to the wired services; Open Swap performs the same tap
+        // routing itself via `handleJobAttentionAction`.
+        if category == Self.jobAttentionCategory,
+           let action = JobAttentionAction(rawValue: actionIdentifier) {
+            await handleJobAttentionAction(action, userInfo: userInfo)
+            return
+        }
+
+        if category == "PENDING_READY" {
+            // Local bed-clear notification — extract printer ID and deep-link to
+            // detail. Identifier format: "pending-ready-{UUID}".
+            let printerId = requestIdentifier.replacingOccurrences(of: "pending-ready-", with: "")
+            NotificationCenter.default.post(
+                name: .localNotificationTapped,
+                object: nil,
+                userInfo: ["tab": "printers", "printerId": printerId]
+            )
+        } else {
+            // Remote push notification (or a plain body tap) — deep-link handling.
             NotificationCenter.default.post(
                 name: .pushNotificationTapped,
                 object: nil,
@@ -340,47 +383,29 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
-    ) {
+        didReceive response: UNNotificationResponse
+    ) async {
+        // Adopt the `async` delegate variant rather than the
+        // `withCompletionHandler:` form (issue #1329). The completion-handler
+        // form forced this `nonisolated` callback to capture a non-Sendable
+        // `@escaping () -> Void` inside a `@MainActor` task to run the
+        // main-actor routing — a Swift 6 strict-concurrency data race that broke
+        // the iOS build. The `async` form has no completion handler to send
+        // across the actor boundary: the system simply awaits it (and keeps the
+        // app alive while a lock-screen action runs). Pull the primitive,
+        // `Sendable` values out of the non-Sendable response here, then hop to
+        // the manager's `@MainActor` router.
         let userInfo = response.notification.request.content.userInfo
         let category = response.notification.request.content.categoryIdentifier
         let actionIdentifier = response.actionIdentifier
+        let requestIdentifier = response.notification.request.identifier
 
-        // Issue #1321: a job-attention action button (Pause/Resume/Cancel/
-        // Snooze/Open Swap) was tapped rather than the notification body
-        // itself. Dispatch to the wired services and skip the default
-        // tap/dismiss routing below — Open Swap is the one exception, and it
-        // performs that same routing itself via `handleJobAttentionAction`.
-        if category == Self.jobAttentionCategory,
-           let action = JobAttentionAction(rawValue: actionIdentifier) {
-            Task { @MainActor in
-                await PushNotificationManager.shared.handleJobAttentionAction(action, userInfo: userInfo)
-                completionHandler()
-            }
-            return
-        }
-
-        if category == "PENDING_READY" {
-            // Local bed-clear notification — extract printer ID and deep-link to detail
-            let identifier = response.notification.request.identifier
-            // Identifier format: "pending-ready-{UUID}"
-            let printerId = identifier.replacingOccurrences(of: "pending-ready-", with: "")
-            NotificationCenter.default.post(
-                name: .localNotificationTapped,
-                object: nil,
-                userInfo: ["tab": "printers", "printerId": printerId]
-            )
-        } else {
-            // Remote push notification — deep-link handling
-            NotificationCenter.default.post(
-                name: .pushNotificationTapped,
-                object: nil,
-                userInfo: userInfo
-            )
-        }
-
-        completionHandler()
+        await PushNotificationManager.shared.routeNotificationResponse(
+            category: category,
+            actionIdentifier: actionIdentifier,
+            requestIdentifier: requestIdentifier,
+            userInfo: userInfo
+        )
     }
 }
 
