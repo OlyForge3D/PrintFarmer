@@ -111,6 +111,28 @@ chmod +x "$mock_repo/scripts/docker/compose-generator.sh"
 
 cat > "$mock_repo/bin/docker" <<'EOF'
 #!/bin/bash
+# Minimal "docker compose ... config" stub used by the regression suite. It
+# does not perform real variable interpolation (that would require a full
+# compose implementation), but it does parse the target file as YAML so a
+# deliberately corrupted compose file still fails, matching real docker's
+# behavior closely enough to exercise validate-deployment-scripts.sh's
+# negative-control assertion.
+if [[ "${1:-}" == "compose" ]]; then
+    shift
+    compose_file="docker-compose.yml"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -f)
+                compose_file="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+    exec python3 -c "import sys, yaml; yaml.safe_load(open(sys.argv[1]))" "$compose_file"
+fi
 exit 0
 EOF
 chmod +x "$mock_repo/bin/docker"

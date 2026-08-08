@@ -275,8 +275,33 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ] && [ "$prometheus_line" -gt 0 ] && [ "$networks_line" -gt 0 ] && [ "$prometheus_line" -lt "$networks_line" ]; then
             check_result true "Telemetry and monitoring stack merge cleanly"
             if command -v docker >/dev/null 2>&1; then
-                if ! (cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
+                # docker compose config performs strict interpolation, and Jwt__Key is a
+                # required variable with no default since #1301. compose-generator.sh is
+                # invoked directly here (bypassing scripts/deploy-docker.sh, which is what
+                # normally supplies a real key via .env). Write a throwaway, test-only key
+                # confined to $STACK_DIR so strict interpolation can resolve without
+                # weakening the production requirement or touching any tracked file.
+                echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab" > "$STACK_DIR/.env"
+                compose_config_output=$(cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet 2>&1)
+                compose_config_status=$?
+                if [ "$compose_config_status" -ne 0 ]; then
+                    echo -e "${YELLOW}⚠️  docker compose config failed:${NC}"
+                    echo "$compose_config_output" | sed 's/^/    /'
                     check_result false "docker compose config validation"
+                else
+                    check_result true "docker compose config validation"
+
+                    # Negative control: prove the assertion above is genuinely live (not
+                    # merely satisfied by chance) by corrupting the generated compose file
+                    # and confirming validation now fails.
+                    cp "$STACK_DIR/docker-compose.yml" "$STACK_DIR/docker-compose.yml.bak"
+                    printf '\n  this is not valid yaml: [\n' >> "$STACK_DIR/docker-compose.yml"
+                    if (cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
+                        check_result false "docker compose config validation detects a malformed compose file"
+                    else
+                        check_result true "docker compose config validation detects a malformed compose file"
+                    fi
+                    mv "$STACK_DIR/docker-compose.yml.bak" "$STACK_DIR/docker-compose.yml"
                 fi
             fi
         else
