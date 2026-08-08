@@ -1,4 +1,7 @@
-﻿namespace Farm.Web.Api.Startup;
+﻿using System.Net;
+using Farm.Infrastructure.Network;
+
+namespace Farm.Web.Api.Startup;
 
 /// <summary>
 /// Configures CORS policies for API access.
@@ -20,17 +23,14 @@ public static class CorsStartup
                     ?? Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
                     ?? "http://localhost:3000,https://localhost:3000,http://localhost:8081,https://localhost:8443,http://localhost:5000,http://localhost:5001";
                 bool allowLocalNetwork = Environment.GetEnvironmentVariable("ALLOW_LOCAL_NETWORK") == "true";
-                _ = policy.SetIsOriginAllowed(origin =>
-                {
-                    if (allowLocalNetwork)
-                    {
-                        return true;
-                    }
+                string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.Trim()).ToArray();
 
-                    string[] configuredOrigins = allowedOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(o => o.Trim()).ToArray();
-                    return configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase);
-                });
+                // This policy is paired with AllowCredentials(), so the origin predicate must
+                // never reflect an unrestricted set of origins (equivalent to AllowAnyOrigin()).
+                // ALLOW_LOCAL_NETWORK only widens acceptance to origins that actually resolve to
+                // a private/loopback network address — it does not accept arbitrary origins.
+                _ = policy.SetIsOriginAllowed(origin => IsOriginAllowed(origin, configuredOrigins, allowLocalNetwork));
                 _ = policy.AllowCredentials();
                 _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with");
                 _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
@@ -38,5 +38,37 @@ public static class CorsStartup
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Determines whether a CORS request origin is allowed. An explicit match against the
+    /// configured origin allowlist always succeeds. When <paramref name="allowLocalNetwork"/> is
+    /// enabled, origins whose host is <c>localhost</c> or resolves to a private/loopback network
+    /// address (RFC1918, 127.0.0.0/8, link-local) are also accepted, so LAN deployments keep
+    /// working without reflecting every possible origin.
+    /// </summary>
+    internal static bool IsOriginAllowed(string origin, string[] configuredOrigins, bool allowLocalNetwork)
+    {
+        if (configuredOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return allowLocalNetwork && IsLocalNetworkOrigin(origin);
+    }
+
+    private static bool IsLocalNetworkOrigin(string origin)
+    {
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? uri))
+        {
+            return false;
+        }
+
+        if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return IPAddress.TryParse(uri.Host, out IPAddress? ip) && NetworkDestinationClassifier.IsPrivateOrReserved(ip);
     }
 }
