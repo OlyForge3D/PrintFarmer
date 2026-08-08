@@ -64,9 +64,9 @@ public sealed class AnonymousEndpointArchitectureTests
             ["Farm.Web.Api.Controllers.MonitoringController.VerifySessionAsync [api/monitoring/verify]"] =
                 "GET /api/monitoring/verify - verifies the monitoring cookie presented by a reverse proxy.",
             ["Farm.Web.Api.Controllers.NfcDevicesController.HeartbeatAsync [api/nfc-devices/heartbeat]"] =
-                "POST /api/nfc-devices/heartbeat - lets unprovisioned NFC firmware request approval.",
+                "POST /api/nfc-devices/heartbeat - lets unprovisioned NFC firmware announce itself (claim-only, creates a pending device); already-approved devices must still present a valid X-Nfc-Device-Token.",
             ["Farm.Web.Api.Controllers.NfcDevicesController.ScanEventAsync [api/nfc-devices/scan]"] =
-                "POST /api/nfc-devices/scan - identifies approved NFC firmware without a user JWT.",
+                "POST /api/nfc-devices/scan - requires an approved device presenting a valid X-Nfc-Device-Token header, enforced in the service rather than via [Authorize] since firmware has no user JWT.",
             ["Farm.Web.Api.Controllers.SystemSourceController.GetSource [api/system/source]"] =
                 "GET /api/system/source - keeps corresponding-source availability public to every recipient.",
             ["Farm.Web.Api.Controllers.GcodeFilesController.GetGcodeThumbnailAsync [api/gcode-files/thumbnail/{id:guid}]"] =

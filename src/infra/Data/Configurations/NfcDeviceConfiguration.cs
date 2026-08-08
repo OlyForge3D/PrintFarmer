@@ -20,6 +20,12 @@ public class NfcDeviceConfiguration : IEntityTypeConfiguration<NfcDevice>
         builder.Property(n => n.FirmwareVersion)
             .HasMaxLength(32);
 
+        builder.Property(n => n.DeviceTokenHash)
+            .HasMaxLength(128);
+
+        builder.Property(n => n.IsApproved)
+            .HasDefaultValue(false);
+
         builder.HasOne(n => n.Printer)
             .WithMany()
             .HasForeignKey(n => n.PrinterId)

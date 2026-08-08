@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Security.Cryptography;
+using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -98,12 +100,39 @@ public class NfcDeviceService(
         return true;
     }
 
-    public async Task<NfcDeviceDto?> ProcessHeartbeatAsync(NfcDeviceHeartbeatDto dto, CancellationToken ct)
+    public async Task<NfcDeviceApprovalResultDto?> ApproveAsync(Guid id, CancellationToken ct)
+    {
+        var device = await db.NfcDevices.FindAsync([id], ct);
+        if (device is null)
+        {
+            return null;
+        }
+
+        var rawToken = GenerateDeviceToken();
+        device.DeviceTokenHash = HashToken(rawToken);
+        device.IsApproved = true;
+        device.ApprovedAt ??= DateTime.UtcNow;
+        device.UpdatedAt = DateTime.UtcNow;
+
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("NFC device approved: {Name} ({Id})", device.Name, device.Id);
+
+        return new NfcDeviceApprovalResultDto
+        {
+            DeviceId = device.Id,
+            DeviceToken = rawToken
+        };
+    }
+
+    public async Task<(NfcDeviceDto? Device, bool Unauthorized)> ProcessHeartbeatAsync(
+        NfcDeviceHeartbeatDto dto,
+        string? presentedToken,
+        CancellationToken ct)
     {
         var printerId = Guid.TryParse(dto.PrinterId, out var pid) ? pid : (Guid?)null;
         if (printerId is null)
         {
-            return null;
+            return (null, false);
         }
 
         var device = await db.NfcDevices
@@ -112,6 +141,9 @@ public class NfcDeviceService(
 
         if (device is null)
         {
+            // Claim-only: an unknown printer ID creates a pending, unapproved device row.
+            // This is an announcement, not a credential — it grants no write access to
+            // spool/scan data until an operator explicitly approves it.
             device = new NfcDevice
             {
                 Id = Guid.NewGuid(),
@@ -119,10 +151,17 @@ public class NfcDeviceService(
                 PrinterId = printerId,
                 IpAddress = dto.Ip,
                 FirmwareVersion = dto.FirmwareVersion,
+                IsApproved = false,
                 CreatedAt = DateTime.UtcNow
             };
             db.NfcDevices.Add(device);
-            logger.LogInformation("NFC device auto-registered via heartbeat: {Ip} → printer {PrinterId}", dto.Ip, printerId);
+            logger.LogInformation("NFC device auto-registered via heartbeat (pending approval): {Ip} → printer {PrinterId}", dto.Ip, printerId);
+        }
+        else if (device.IsApproved && !ValidateToken(device, presentedToken))
+        {
+            // The printer already has an approved device bound to it; only that device's
+            // real token may update its heartbeat state.
+            return (null, true);
         }
 
         device.WifiRssi = dto.WifiRssi;
@@ -141,23 +180,28 @@ public class NfcDeviceService(
             await nfcTagService.FlushOfflineQueueAsync(device.Id, ct);
         }
 
-        return MapToDto(device, DateTime.UtcNow);
+        return (MapToDto(device, DateTime.UtcNow), false);
     }
 
-    public async Task<NfcScanHistoryDto?> ProcessScanEventAsync(NfcScanEventDto dto, CancellationToken ct)
+    public async Task<(NfcScanHistoryDto? Result, bool Unauthorized)> ProcessScanEventAsync(
+        NfcScanEventDto dto,
+        string? presentedToken,
+        CancellationToken ct)
     {
         var printerId = Guid.TryParse(dto.PrinterId, out var pid) ? pid : (Guid?)null;
         if (printerId is null)
         {
-            return null;
+            return (null, false);
         }
 
         var device = await db.NfcDevices
             .FirstOrDefaultAsync(d => d.PrinterId == printerId, ct);
 
-        if (device is null)
+        // Reject unknown, unapproved, or token-mismatched devices identically so the
+        // response gives no oracle on which of these conditions actually failed.
+        if (device is null || !ValidateToken(device, presentedToken))
         {
-            return null;
+            return (null, true);
         }
 
         var scanEvent = new NfcScanEvent
@@ -190,7 +234,7 @@ public class NfcDeviceService(
             await nfcTagService.ProcessTagReadAsync(dto.TagUid, device.Id, device.PrinterId, scanEvent.ScannedAt, ct);
         }
 
-        return new NfcScanHistoryDto
+        return (new NfcScanHistoryDto
         {
             Id = scanEvent.Id,
             NfcDeviceId = device.Id,
@@ -201,7 +245,7 @@ public class NfcDeviceService(
             BrandName = scanEvent.BrandName,
             Action = scanEvent.Action,
             ScannedAt = scanEvent.ScannedAt
-        };
+        }, false);
     }
 
     public async Task<NfcScanHistoryDto[]> GetScanHistoryAsync(Guid deviceId, int limit, int offset, CancellationToken ct)
@@ -244,8 +288,40 @@ public class NfcDeviceService(
             LastHeartbeat = d.LastHeartbeat,
             LastScanAt = d.LastScanAt,
             LastScannedSpoolId = d.LastScannedSpoolId,
+            IsApproved = d.IsApproved,
+            ApprovedAt = d.ApprovedAt,
             CreatedAt = d.CreatedAt,
             UpdatedAt = d.UpdatedAt
         };
+    }
+
+    /// <summary>
+    /// Generates a cryptographically random device token. Returned once to the caller;
+    /// only its hash (<see cref="HashToken"/>) is ever persisted.
+    /// </summary>
+    private static string GenerateDeviceToken() =>
+        Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .Replace('+', '-')
+            .Replace('/', '_')
+            .TrimEnd('=');
+
+    private static string HashToken(string token) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));
+
+    /// <summary>
+    /// Validates a presented device token against an approved device's stored hash using a
+    /// constant-time comparison. Unapproved devices, missing hashes, or missing/blank
+    /// presented tokens always fail.
+    /// </summary>
+    private static bool ValidateToken(NfcDevice device, string? presentedToken)
+    {
+        if (!device.IsApproved || string.IsNullOrEmpty(device.DeviceTokenHash) || string.IsNullOrEmpty(presentedToken))
+        {
+            return false;
+        }
+
+        byte[] expected = Encoding.UTF8.GetBytes(device.DeviceTokenHash);
+        byte[] presented = Encoding.UTF8.GetBytes(HashToken(presentedToken));
+        return expected.Length == presented.Length && CryptographicOperations.FixedTimeEquals(expected, presented);
     }
 }
