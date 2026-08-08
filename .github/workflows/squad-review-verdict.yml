@@ -77,6 +77,9 @@ name: Record squad review (self-attested)
 #     record. Identity always comes from the API-supplied account, never from
 #     the comment text. No bot identity is allowlisted — that would re-create
 #     the bot-hop laundering rejected above.
+#   * PUT THE RECORD BLOCK FIRST in the comment. Sanitisation fails closed: an
+#     unterminated `<!--` or code fence earlier in the comment hides everything
+#     after it, exactly as GitHub renders it, which would drop your record.
 #   * FORK PRs receive no agent record at all: the gate posts BLOCKED and stops
 #     before reading any record, so a fork PR can pass only through a real
 #     administrator approval.
@@ -321,16 +324,26 @@ jobs:
             await postStatus(result.state, result.description);
 
             const summary = core.summary
-              .addHeading('Squad pre-PR verdict gate')
+              .addHeading('Squad review record (self-attested)')
+              .addRaw(
+                '\n> ⚠️ This is **not** independent review and provides **no** ' +
+                'separation of duties. Every squad agent runs under the ' +
+                'repository owner\'s authority, so this records that a reviewer ' +
+                'agent examined this exact commit — it is not approval by a ' +
+                'second party. Only an `APPROVE (owner)` result is an ' +
+                'authorisation by a distinct principal.\n\n',
+              )
               .addTable([
                 [{ data: 'Field', header: true }, { data: 'Value', header: true }],
                 ['PR', `#${prNumber}`],
                 ['Head SHA', headSha],
-                ['Result', result.passed ? 'PASS' : 'BLOCKED'],
+                ['Result', result.passed
+                  ? (result.override ? 'APPROVE (owner)' : 'REVIEWED (self-attested)')
+                  : 'BLOCKED'],
                 ['Reason', result.reason],
-                ['Approvals', result.approvals.join(', ') || '(none)'],
-                ['Required panel', result.requiredMembers.join(', ') || 'n/a'],
-                ['Stale verdicts', result.stale
+                ['Self-attested review records', result.approvals.join(', ') || '(none)'],
+                ['Expected reviewers', result.requiredMembers.join(', ') || 'n/a'],
+                ['Stale records', result.stale
                   .map((r) => `${r.reviewer} @ ${r.headSha}`).join(', ') || '(none)'],
               ]);
             for (const note of result.notes) {
@@ -339,7 +352,10 @@ jobs:
             await summary.write();
 
             if (result.passed) {
-              core.notice(`squad/pre-pr-verdict PASS: ${result.reason}`);
+              core.notice(
+                `squad/pre-pr-verdict ${result.override ? 'APPROVE (owner)' : 'REVIEWED (self-attested)'}: ` +
+                `${result.reason}`,
+              );
             } else {
               core.warning(`squad/pre-pr-verdict BLOCKED: ${result.reason}`);
             }

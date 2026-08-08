@@ -334,7 +334,9 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   Prose that illustrates, quotes, or hides the format is therefore not a binding
   record — what the gate counts is what a human reading the thread can see, which
   is what makes the audit trail meaningful. Each field must appear exactly once in
-  what remains.
+  what remains. **Put the record block first in the comment:** sanitisation fails
+  closed, so an unterminated `<!--` or code fence earlier in the comment hides
+  everything after it — exactly as GitHub renders it — and would drop your record.
 - The commenting account must be authenticated as holding real repository write access,
   resolved live through the collaborator permission API. Both repositories are public,
   so anyone can comment on a PR; `author_association` is a pre-filter only and is never

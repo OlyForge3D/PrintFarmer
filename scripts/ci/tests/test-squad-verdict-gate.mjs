@@ -500,4 +500,11 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /THIS IS NOT INDEPENDENT REVIEW/);
   assert.match(workflow, /NO SEPARATION OF DUTIES/);
   assert.match(workflow, /QUALITY\s*#?\s*HEURISTIC/i);
+  // ...including in the job summary, which is the surface a human scans first.
+  assert.match(workflow, /addHeading\('Squad review record \(self-attested\)'\)/);
+  assert.match(workflow, /Self-attested review records/);
+  assert.doesNotMatch(workflow, /'Approvals'/);
+  assert.doesNotMatch(workflow, /Stale verdicts/);
+  assert.doesNotMatch(workflow, /Squad pre-PR verdict gate/);
+  assert.doesNotMatch(workflow, /\? 'PASS'/);
 });
