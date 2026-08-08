@@ -260,12 +260,20 @@ public class AutoDispatchStatusDto
 
     public Guid? NextJobId { get; set; }
 
+    /// <summary>
+    /// Redacted (null) when <see cref="NextJobId"/> refers to an unassigned queued job that has
+    /// merely scored as a dispatch candidate for this printer but has no ownership/permission
+    /// relationship to this printer's authorized viewers. Populated once the job is actually
+    /// assigned to this printer.
+    /// </summary>
     public string? NextJobName { get; set; }
 
     public string? NextJobETag { get; set; }
 
+    /// <summary>Redacted for unassigned candidate jobs — see <see cref="NextJobName"/>.</summary>
     public string? NextJobKind { get; set; }
 
+    /// <summary>Redacted for unassigned candidate jobs — see <see cref="NextJobName"/>.</summary>
     public long? NextJobPrinterConfigRevision { get; set; }
 
     public string? AttentionMessage { get; set; }
@@ -655,22 +663,12 @@ public class AutoDispatchService(
 
         // Perform filament pre-flight check
         FilamentCheckResult filamentCheck = await CheckFilamentAsync(printer, nextJob, ct);
-        NextJobDto nextJobDto = new()
-        {
-            Id = nextJob.Id,
-            Name = nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown",
-            EstimatedFilamentUsageG = nextJob.EstimatedFilamentUsage,
-            RequiredMaterialType = nextJob.RequiredMaterialType,
-            EstimatedPrintTime = nextJob.EstimatedPrintTime,
-            JobKind = (
-                nextJob.JobKind ??
-                Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
-            JobETag = nextJob.RowVersion is { Length: > 0 }
-                ? Convert.ToBase64String(nextJob.RowVersion)
-                : null,
-            ExpectedPrinterConfigRevision =
-                nextJob.PinnedPrinterConfigRevision,
-        };
+
+        // nextJob may be an unassigned candidate merely scored as dispatch-eligible for this
+        // printer (see #1324) rather than a job this printer's operator has any ownership of.
+        // Redact identifying fields until the job is actually assigned/dispatched to printerId.
+        bool nextJobAssignedToPrinter = nextJob.AssignedPrinterId == printerId;
+        NextJobDto nextJobDto = BuildNextJobDto(nextJob, nextJobAssignedToPrinter);
         bool filamentOverrideRequired =
             filamentCheck.Outcome != FilamentCheckOutcome.Compatible;
         byte[] filamentCheckVersion =
@@ -820,10 +818,15 @@ public class AutoDispatchService(
         AutoDispatchStatusDto status = await BuildStatusDtoAsync(printer, ct);
         await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
             .SendAsync(AutoDispatchStateChangedEventName, status, ct);
+
+        // The job has now genuinely been dispatched to printerId, so the caller (who is
+        // authorized for this printer) is entitled to see full details regardless of
+        // whether the job started out unassigned.
+        NextJobDto dispatchedNextJobDto = BuildNextJobDto(nextJob, jobAssignedToPrinter: true);
         return new AutoDispatchReadyResult
         {
             Status = status,
-            NextJob = nextJobDto,
+            NextJob = dispatchedNextJobDto,
             FilamentCheck = filamentCheck,
             FilamentCheckETag = filamentCheckETag,
             DispatchInitiated = true,
@@ -1312,20 +1315,58 @@ public class AutoDispatchService(
                 ? Convert.ToBase64String(printerRowVersion)
                 : null,
             NextJobId = nextJob?.Id,
-            NextJobName = nextJob?.Name ?? nextJob?.GcodeFile?.Name,
+            NextJobName = IsAssignedToPrinter(nextJob, printer)
+                ? nextJob!.Name ?? nextJob.GcodeFile?.Name
+                : null,
             NextJobETag = nextJob?.RowVersion is { Length: > 0 } jobRowVersion
                 ? Convert.ToBase64String(jobRowVersion)
                 : null,
-            NextJobKind = nextJob is null
-                ? null
-                : (
-                    nextJob.JobKind ??
-                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
-            NextJobPrinterConfigRevision =
-                nextJob?.PinnedPrinterConfigRevision,
+            NextJobKind = IsAssignedToPrinter(nextJob, printer)
+                ? (
+                    nextJob!.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString()
+                : null,
+            NextJobPrinterConfigRevision = IsAssignedToPrinter(nextJob, printer)
+                ? nextJob!.PinnedPrinterConfigRevision
+                : null,
             AttentionMessage = attentionMessage,
         };
     }
+
+    /// <summary>
+    /// A candidate <c>NextJob</c> may come from the unassigned queue (scored as dispatch-
+    /// eligible for this printer) rather than being actually assigned to it. Only an assigned
+    /// job has passed the ownership/permission checks implied by the receiving printer's
+    /// authorized audience, so name/kind/revision must be redacted for unassigned candidates.
+    /// See issue #1324.
+    /// </summary>
+    private static bool IsAssignedToPrinter(PrintJob? nextJob, Printer printer) =>
+        nextJob is not null && nextJob.AssignedPrinterId == printer.Id;
+
+    /// <summary>
+    /// Builds the exact-job RPC response DTO for the ready-dispatch workflow. When
+    /// <paramref name="jobAssignedToPrinter"/> is false — i.e. the candidate job merely
+    /// scored as dispatch-eligible for this printer rather than actually being assigned to
+    /// it — identifying fields are redacted for the same reason as <see cref="BuildStatusDto"/>.
+    /// See issue #1324.
+    /// </summary>
+    private static NextJobDto BuildNextJobDto(PrintJob nextJob, bool jobAssignedToPrinter) => new()
+    {
+        Id = nextJob.Id,
+        Name = jobAssignedToPrinter
+            ? nextJob.Name ?? nextJob.GcodeFile?.Name ?? "Unknown"
+            : string.Empty,
+        EstimatedFilamentUsageG = jobAssignedToPrinter ? nextJob.EstimatedFilamentUsage : null,
+        RequiredMaterialType = jobAssignedToPrinter ? nextJob.RequiredMaterialType : null,
+        EstimatedPrintTime = jobAssignedToPrinter ? nextJob.EstimatedPrintTime : null,
+        JobKind = jobAssignedToPrinter
+            ? (nextJob.JobKind ?? Farm.Infrastructure.Domain.JobKind.Standard).ToString()
+            : string.Empty,
+        JobETag = nextJob.RowVersion is { Length: > 0 } jobRowVersion
+            ? Convert.ToBase64String(jobRowVersion)
+            : null,
+        ExpectedPrinterConfigRevision = jobAssignedToPrinter ? nextJob.PinnedPrinterConfigRevision : null,
+    };
 
     private async Task<AutoDispatchStatusDto> BuildStatusDtoAsync(Printer printer, CancellationToken ct)
     {
