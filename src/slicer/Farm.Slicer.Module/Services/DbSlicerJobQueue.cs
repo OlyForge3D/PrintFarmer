@@ -13,12 +13,20 @@ namespace Farm.Slicer.Module.Services;
 /// </summary>
 public class DbSlicerJobQueue(
     ISliceJobRepository repo,
-    IOptions<JobDispatchRetrySettings>? retryOptions = null) : ISlicerJobQueue
+    IOptions<JobDispatchRetrySettings>? retryOptions = null,
+    IOptions<StaleWorkerCleanupSettings>? staleWorkerOptions = null,
+    TimeProvider? timeProvider = null) : ISlicerJobQueue
 {
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly int _maxClaimRetries = Math.Max(
         0,
         retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
+
+    private readonly int _staleWorkerAfterMinutes = Math.Max(
+        0,
+        staleWorkerOptions?.Value.StaleAfterMinutes ?? new StaleWorkerCleanupSettings().StaleAfterMinutes);
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
@@ -125,27 +133,71 @@ public class DbSlicerJobQueue(
     {
         IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int> counts =
             await _repo.GetQueueCountsAsync(cancellationToken);
+        DateTime lastUpdated = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime workerHeartbeatCutoffUtc = lastUpdated.AddMinutes(-_staleWorkerAfterMinutes);
+        IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate> metrics =
+            await _repo.GetQueueMetricAggregatesAsync(
+                lastUpdated,
+                workerHeartbeatCutoffUtc,
+                cancellationToken);
 
-        DateTime lastUpdated = DateTime.UtcNow;
         return Enum.GetValues<SlicerEngineType>().ToDictionary(
             engine => engine,
             engine =>
             {
                 long GetCount(string status) =>
                     counts.TryGetValue((engine, status), out int count) ? count : 0;
+                SlicerQueueMetricAggregate metric = metrics[engine];
+                long queuedJobs = GetCount(SliceJobStatus.Queued);
+                double averageProcessingTimeSeconds = metric.TimingSampleCount == 0
+                    ? 0
+                    : Math.Round(
+                        metric.AverageProcessingTimeSeconds,
+                        0,
+                        MidpointRounding.AwayFromZero);
 
                 return new SlicerQueueStats
                 {
                     Engine = engine,
-                    QueuedJobs = GetCount(SliceJobStatus.Queued),
+                    QueuedJobs = queuedJobs,
                     ProcessingJobs = GetCount(SliceJobStatus.Processing),
                     CompletedJobs = GetCount(SliceJobStatus.Completed),
                     FailedJobs = GetCount(SliceJobStatus.Failed),
-                    ActiveWorkers = 0,
-                    AverageProcessingTimeSeconds = 0,
+                    ActiveWorkers = metric.ActiveWorkers,
+                    AverageProcessingTimeSeconds = averageProcessingTimeSeconds,
+                    EstimatedWaitTime = CalculateEstimatedWaitTime(
+                        queuedJobs,
+                        averageProcessingTimeSeconds,
+                        metric),
                     LastUpdated = lastUpdated
                 };
             });
+    }
+
+    private static TimeSpan? CalculateEstimatedWaitTime(
+        long queuedJobs,
+        double averageProcessingTimeSeconds,
+        SlicerQueueMetricAggregate metric)
+    {
+        if (metric.DispatchCapacity <= 0 ||
+            metric.TimingSampleCount <= 0 ||
+            !double.IsFinite(averageProcessingTimeSeconds) ||
+            averageProcessingTimeSeconds < 0)
+        {
+            return null;
+        }
+
+        long workload = queuedJobs + metric.ActiveLeasedJobs;
+        if (workload <= 0)
+        {
+            return TimeSpan.Zero;
+        }
+
+        double processingWaves = Math.Ceiling((double)workload / metric.DispatchCapacity);
+        double estimatedSeconds = processingWaves * averageProcessingTimeSeconds;
+        return estimatedSeconds >= TimeSpan.MaxValue.TotalSeconds
+            ? TimeSpan.MaxValue
+            : TimeSpan.FromSeconds(estimatedSeconds);
     }
 
     public Task<List<DistributedSlicingJob>> GetUserJobsAsync(Guid userId, int? limit = null, CancellationToken cancellationToken = default)
