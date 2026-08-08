@@ -897,6 +897,16 @@ detect_lan_ip() {
 
 LAN_IP="$(detect_lan_ip)"
 
+# Explicitly allowlist the detected LAN origin so the "Network:" URL printed at the end of
+# this script keeps working without falling back to ALLOW_LOCAL_NETWORK's broader RFC1918
+# reflection (see issue #1254 — CORS must never reflect an unrestricted origin set while
+# AllowCredentials() is enabled).
+if [[ "$LAN_IP" != "localhost" ]]; then
+    CORS_LAN_ORIGIN=",http://${LAN_IP}:${HTTP_PORT}"
+else
+    CORS_LAN_ORIGIN=""
+fi
+
 # ─── Generate .env ──────────────────────────────────────────────────────────
 info "Writing configuration..."
 
@@ -939,7 +949,8 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
-ALLOW_LOCAL_NETWORK=true
+CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
@@ -967,7 +978,8 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
-ALLOW_LOCAL_NETWORK=true
+CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
@@ -1326,9 +1338,9 @@ ${compose_api_depends}
       - ASPNETCORE_URLS=http://+:5245
       - DB_PROVIDER=\${DB_PROVIDER:-Sqlite}
       - ConnectionStrings__Default=\${ConnectionStrings__Default}
-      - CORS__AllowedOrigins=http://localhost:3000,http://localhost:\${HTTP_PORT:-8080}
+      - CORS__AllowedOrigins=\${CORS__AllowedOrigins:-http://localhost:3000,http://localhost:\${HTTP_PORT:-8080}}
       - DEPLOYMENT_MODE=microservices
-      - ALLOW_LOCAL_NETWORK=\${ALLOW_LOCAL_NETWORK:-true}
+      - ALLOW_LOCAL_NETWORK=\${ALLOW_LOCAL_NETWORK:-false}
       - ALLOWED_NETWORK_RANGES=\${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
       - Jwt__Key=\${Jwt__Key}
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}

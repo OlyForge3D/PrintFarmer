@@ -76,7 +76,7 @@ services:
       - SlicerOrchestrator__EnableDistributedSlicing=${ENABLE_DISTRIBUTED_SLICING:-true}
       - WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}
       - DiscoveryAuth__SharedKey=${DISCOVERY_SHARED_API_KEY:-}
-      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-true}
+      - ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-false}
       - ALLOWED_NETWORK_RANGES=${ALLOWED_NETWORK_RANGES:-192.168.0.0/16,10.0.0.0/8}
       - DOCKER_HOST_NETWORK=${DOCKER_HOST_NETWORK:-false}
       - Logging__LogLevel__Default=Information

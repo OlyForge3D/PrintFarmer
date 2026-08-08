@@ -563,7 +563,7 @@ DB_PROVIDER=$DbProvider
 
 # Network Configuration
 CORS__AllowedOrigins=$CorsOrigins
-ALLOW_LOCAL_NETWORK=true
+ALLOW_LOCAL_NETWORK=false
 NETWORK_MODE=bridge
 
 # Port Configuration
