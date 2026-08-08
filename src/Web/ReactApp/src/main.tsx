@@ -6,10 +6,6 @@ import './styles/tour-theme.css'
 import 'driver.js/dist/driver.css'
 import App from './App.tsx'
 import { SpoolmanProvider } from './contexts/SpoolmanContext'
-import { initializeTelemetry } from './telemetry/config'
-
-// Initialize OpenTelemetry as early as possible
-initializeTelemetry();
 
 // Service worker control: allow disabling & forced unregister via build-time flag
 // Set VITE_DISABLE_SW=true to completely unregister and clear caches.
@@ -41,10 +37,31 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   })
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <SpoolmanProvider>
-      <App />
-    </SpoolmanProvider>
-  </StrictMode>,
-)
+function mount() {
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <SpoolmanProvider>
+        <App />
+      </SpoolmanProvider>
+    </StrictMode>,
+  )
+}
+
+// OpenTelemetry is only loaded when it will actually do something: either an
+// OTLP endpoint is configured, or we're in dev (where initializeTelemetry
+// also wires up the ConsoleSpanExporter — see telemetry/config.ts). In a
+// default production build with no endpoint configured, this branch is a
+// statically-false constant and Rollup drops the whole SDK graph from the
+// bundle, so first paint is never blocked waiting on telemetry setup. When
+// telemetry IS enabled we await initialization before mounting so
+// document-load and early request spans aren't missed.
+if (import.meta.env.DEV || import.meta.env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT) {
+  import('./telemetry/config')
+    .then(({ initializeTelemetry }) => initializeTelemetry())
+    .catch((error: unknown) => {
+      console.error('[Telemetry] Failed to load OpenTelemetry SDK:', error);
+    })
+    .finally(mount);
+} else {
+  mount();
+}
