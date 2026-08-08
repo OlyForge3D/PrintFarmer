@@ -2,7 +2,13 @@
 
 ################################################################################
 # run-deployment-tests.sh
-# 
+#
+# Note: as of issue #1308, tests/validate-deployment-scripts.sh,
+# tests/test-deploy-docker.sh, tests/test-config-persistence.sh, and
+# tests/interactive_prompt_harness.sh are also run directly by
+# .github/workflows/deployment-tests.yml on every PR/push touching
+# scripts/deploy-docker.sh, scripts/docker/**, or tests/**.
+#
 # Comprehensive test suite for Docker deployment scripts
 # Runs all compose-generator and deploy-docker tests with detailed reporting
 #
