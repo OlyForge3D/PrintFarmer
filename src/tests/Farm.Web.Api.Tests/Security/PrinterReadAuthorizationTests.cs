@@ -103,6 +103,28 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         _printers
             .Setup(service => service.GetHistoryTotalsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HistoryTotals { JobTotals = new JobTotals() });
+
+        // These "success path" setups exist so that a matching-role caller (or a hypothetical
+        // guard regression) is *distinguishable* from the authorization-shaped 404: if the
+        // PrinterGroup gate on these mutating endpoints were removed, the mocked service would
+        // now report success (200/428, not the coincidental 404 an unconfigured mock produces),
+        // which is what proves the deny tests below are load-bearing rather than tautological.
+        _printers
+            .Setup(service => service.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid id, CancellationToken _) => Task.FromResult<Printer?>(new Printer
+            {
+                Id = id,
+                Name = "Stub printer",
+                ServerUrl = $"http://stub-{id:N}",
+                ManufacturerId = Guid.NewGuid(),
+                ModelId = Guid.NewGuid(),
+            }));
+        _printers
+            .Setup(service => service.EnableCameraAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _printers
+            .Setup(service => service.DisableCameraAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
     }
 
     public Task InitializeAsync() => Task.CompletedTask;
@@ -134,7 +156,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
     public async Task DeleteHistoryJob_CrossGroupCallerDenied_Returns404()
     {
         Guid printerId = await SeedRestrictedPrinterAsync();
-        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid(), PrintFarmerPermissions.Queue.Write);
 
         HttpResponseMessage response = await client.DeleteAsync(BuildUrl(printerId, "history/job-1"));
 
@@ -169,7 +191,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
     public async Task EnableCamera_CrossGroupCallerDenied_Returns404()
     {
         Guid printerId = await SeedRestrictedPrinterAsync();
-        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid(), PrintFarmerPermissions.Queue.Write);
 
         HttpResponseMessage response = await client.PostAsync(BuildUrl(printerId, "camera/enable"), content: null);
 
@@ -180,7 +202,7 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
     public async Task DisableCamera_CrossGroupCallerDenied_Returns404()
     {
         Guid printerId = await SeedRestrictedPrinterAsync();
-        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid(), PrintFarmerPermissions.Queue.Write);
 
         HttpResponseMessage response = await client.PostAsync(BuildUrl(printerId, "camera/disable"), content: null);
 

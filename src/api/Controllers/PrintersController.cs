@@ -3826,6 +3826,7 @@ public class PrintersController(
     /// Camera must be physically connected and configured in the printer backend for this to work.
     /// </remarks>
     [HttpPost("{id:guid}/camera/enable")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -3854,6 +3855,7 @@ public class PrintersController(
     /// Can be used to reduce network load or disable camera access temporarily.
     /// </remarks>
     [HttpPost("{id:guid}/camera/disable")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
@@ -4596,6 +4598,7 @@ public class PrintersController(
     }
 
     [HttpDelete("{id}/history/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]

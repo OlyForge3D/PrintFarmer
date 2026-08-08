@@ -723,6 +723,9 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             [nameof(PrintersController.EnsureMmuToolheadsAsync)] = PrintFarmerPermissions.Queue.Write,
             [nameof(PrintersController.UploadGcodeAsync)] = PrintFarmerPermissions.Queue.Write,
             [nameof(PrintersController.StartPrintAsync)] = PrintFarmerPermissions.Queue.Start,
+            [nameof(PrintersController.EnableCameraAsync)] = PrintFarmerPermissions.Queue.Write,
+            [nameof(PrintersController.DisableCameraAsync)] = PrintFarmerPermissions.Queue.Write,
+            [nameof(PrintersController.DeleteHistoryJobAsync)] = PrintFarmerPermissions.Queue.Write,
         };
 
         foreach ((string methodName, string permission) in expected)
@@ -798,6 +801,13 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         _ = await controller.DisableMotorsAsync(printerId, CancellationToken.None);
         _ = await controller.LoadFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.UnloadFilamentAsync(printerId, null, CancellationToken.None);
+        _ = await controller.SetToolheadSpoolAsync(
+            printerId,
+            0,
+            new SetActiveSpoolRequest { SpoolId = 1 },
+            Mock.Of<IPrinterToolheadSwapValidator>(),
+            Mock.Of<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(),
+            CancellationToken.None);
         _ = await controller.ChangeFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.MmuChangeToolAsync(printerId, 1, CancellationToken.None);
         _ = await controller.MmuEjectAsync(printerId, CancellationToken.None);
@@ -829,6 +839,19 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         // where unload requests bypassed the resource check entirely.
         printers.Verify(service => service.UnloadFilamentAsync(
             It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // SetToolheadSpoolAsync (controller) also enforces its own fail-closed
+        // CanAccessPrinterAsync guard ahead of its direct backend call (issue #1292 round 3):
+        // unlike ClearToolheadSpoolAsync, it does not route through the physical-actuation
+        // service, so it needed its own explicit gate. Assert the backend spool bind is never
+        // reached under this denied-authorization construction.
+        printers.Verify(service => service.SetToolheadSpoolAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int>(),
+            It.IsAny<int>(),
+            It.IsAny<FilamentSwapOverrideContext?>(),
+            It.IsAny<SpoolBindPolicy>(),
+            It.IsAny<CancellationToken>()), Times.Never);
         printers.VerifyNoOtherCalls();
     }
 
