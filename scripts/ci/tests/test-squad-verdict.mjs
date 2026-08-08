@@ -1,8 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
 import {
   bindStatusToHead,
   selectSquadVerdict,
@@ -11,21 +8,22 @@ import {
   verifySquadVerdict,
 } from '../verify-squad-verdict.mjs';
 
-const repositoryRoot = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..', '..', '..',
-);
 const reviewedHeadSha = 'a'.repeat(40);
 const movedHeadSha = 'b'.repeat(40);
+const shortSha = reviewedHeadSha.slice(0, 12);
 
 function fixture(verdict = 'APPROVE') {
-  const actor = 'trusted-maintainer';
+  const actor = 'jpapiez';
   const state = verdict === 'APPROVE' ? 'success' : 'failure';
+  const description = verdict === 'APPROVE'
+    ? `APPROVE @ ${shortSha} by bishop+hicks+vasquez`
+    : `BLOCKED @ ${shortSha}: vasquez requested changes`;
   const pull = {
     number: 1116,
     user: { login: 'pr-author' },
     head: { sha: reviewedHeadSha },
     base: {
+      ref: 'development',
       repo: {
         full_name: 'OlyForge3D/PrintFarmer',
         default_branch: 'development',
@@ -37,7 +35,7 @@ function fixture(verdict = 'APPROVE') {
     context: verdictContext,
     state,
     sha: reviewedHeadSha,
-    description: `${verdict} @ ${reviewedHeadSha.slice(0, 12)} by ${actor}`,
+    description,
     target_url:
       'https://github.com/OlyForge3D/PrintFarmer/actions/runs/123456',
     creator: { login: 'github-actions[bot]' },
@@ -47,7 +45,7 @@ function fixture(verdict = 'APPROVE') {
     id: 123456,
     html_url: status.target_url,
     path: verdictWorkflowPath,
-    event: 'workflow_dispatch',
+    event: 'issue_comment',
     run_attempt: 1,
     head_branch: 'development',
     head_sha: 'c'.repeat(40),
@@ -55,8 +53,7 @@ function fixture(verdict = 'APPROVE') {
     repository: { full_name: 'OlyForge3D/PrintFarmer' },
     actor: { login: actor },
     triggering_actor: { login: actor },
-    display_title:
-      `Squad verdict ${verdict} for PR #1116 @ ${reviewedHeadSha} by ${actor}`,
+    display_title: 'Squad verdict gate for PR #1116',
     status: 'completed',
     conclusion: 'success',
     run_started_at: '2026-08-07T03:00:00Z',
@@ -70,6 +67,32 @@ test('accepts a trusted approval for the exact current head', () => {
   const verdict = verifySquadVerdict(evidence);
   assert.equal(verdict.classification, 'APPROVED');
   assert.equal(verdict.reviewedHeadSha, reviewedHeadSha);
+  assert.equal(verdict.actor, 'bishop+hicks+vasquez');
+});
+
+test('accepts the agent-verdict events the gate actually runs on', () => {
+  for (const event of [
+    'pull_request_target', 'issue_comment', 'pull_request_review', 'workflow_dispatch',
+  ]) {
+    const evidence = fixture();
+    evidence.run.event = event;
+    assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED', event);
+  }
+});
+
+test('rejects a run triggered from the pull request head ref', () => {
+  const evidence = fixture();
+  evidence.run.event = 'pull_request';
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('accepts a verdict recorded by the PR author account', () => {
+  // Every squad agent acts through the owner token, so GitHub-account-level
+  // author checking is exactly what made the old gate unsatisfiable. Reviewer
+  // separation is enforced at squad-identity level inside the gate itself.
+  const evidence = fixture();
+  evidence.pull.user.login = 'jpapiez';
+  assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED');
 });
 
 test('binds the list-statuses API shape to the requested head', () => {
@@ -90,10 +113,10 @@ test('rejects a status whose explicit SHA disagrees with the requested head', ()
 });
 
 test('blocks a trusted changes-requested verdict for the exact current head', () => {
-  const evidence = fixture('CHANGES_REQUESTED');
+  const evidence = fixture('REQUEST_CHANGES');
   const verdict = verifySquadVerdict(evidence);
   assert.equal(verdict.classification, 'CHANGES_REQUESTED');
-  assert.equal(verdict.verdict, 'CHANGES_REQUESTED');
+  assert.equal(verdict.verdict, 'REQUEST_CHANGES');
 });
 
 test('supersedes an approval when rebase or force-push moves the head', () => {
@@ -105,14 +128,14 @@ test('supersedes an approval when rebase or force-push moves the head', () => {
 });
 
 test('supersedes a rejection when rebase or force-push moves the head', () => {
-  const evidence = fixture('REJECT');
+  const evidence = fixture('REQUEST_CHANGES');
   evidence.pull.head.sha = movedHeadSha;
   const verdict = verifySquadVerdict(evidence);
   assert.equal(verdict.classification, 'SUPERSEDED');
-  assert.equal(verdict.verdict, 'REJECT');
+  assert.equal(verdict.verdict, 'REQUEST_CHANGES');
 });
 
-for (const verdictName of ['APPROVE', 'REJECT']) {
+for (const verdictName of ['APPROVE', 'REQUEST_CHANGES']) {
   test(`selector supersedes stale ${verdictName} evidence from an expected head`, () => {
     const evidence = fixture(verdictName);
     evidence.pull.head.sha = movedHeadSha;
@@ -133,19 +156,35 @@ test('rejects a status not created by GitHub Actions', () => {
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
 });
 
-test('rejects a workflow run dispatched by the PR author', () => {
-  const evidence = fixture();
-  evidence.run.actor.login = 'pr-author';
-  evidence.run.display_title =
-    `Squad verdict APPROVE for PR #1116 @ ${reviewedHeadSha} by pr-author`;
-  evidence.status.description =
-    `APPROVE @ ${reviewedHeadSha.slice(0, 12)} by pr-author`;
-  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
-});
-
 test('rejects a lookalike status from an untrusted workflow', () => {
   const evidence = fixture();
   evidence.run.path = '.github/workflows/lookalike.yml';
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('rejects a run whose workflow definition came off the default branch', () => {
+  const evidence = fixture();
+  evidence.run.head_branch = 'dev/jpapiez/rewrite-the-gate';
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('accepts a pull_request_target run sitting on a non-default base ref', () => {
+  const evidence = fixture();
+  evidence.pull.base.ref = 'main';
+  evidence.run.event = 'pull_request_target';
+  evidence.run.head_branch = 'main';
+  assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED');
+});
+
+test('rejects a success status whose description is not a gate approval', () => {
+  const evidence = fixture();
+  evidence.status.description = 'looks fine to me';
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('rejects an approval description pinned to a different short SHA', () => {
+  const evidence = fixture();
+  evidence.status.description = `APPROVE @ ${movedHeadSha.slice(0, 12)} by bishop`;
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
 });
 
@@ -155,7 +194,7 @@ test('author-authored lookalike comments cannot satisfy the verifier', () => {
     pull: evidence.pull,
     comments: [{
       user: { login: 'pr-author' },
-      body: evidence.run.display_title,
+      body: `APPROVE @ ${shortSha} by bishop+hicks+vasquez`,
     }],
   });
   assert.equal(verdict.classification, 'MISSING');
@@ -166,15 +205,13 @@ test('newest trusted-run evidence fails closed instead of reviving an older appr
   older.status.id = 41;
   older.status.created_at = '2026-08-07T02:59:10Z';
 
-  const newer = fixture('REJECT');
+  const newer = fixture('REQUEST_CHANGES');
   newer.status.id = 43;
   newer.status.target_url =
     'https://github.com/OlyForge3D/PrintFarmer/actions/runs/123457';
+  newer.status.description = 'BLOCKED: something else entirely';
   newer.run.id = 123457;
   newer.run.html_url = newer.status.target_url;
-  newer.run.display_title =
-    `Squad verdict REJECT for PR #1116 @ ${reviewedHeadSha.toUpperCase()} ` +
-    'by trusted-maintainer';
 
   const verdict = selectSquadVerdict({
     pull: newer.pull,
@@ -185,7 +222,7 @@ test('newest trusted-run evidence fails closed instead of reviving an older appr
 });
 
 test('rerunning an older approval cannot supersede a newer rejection', () => {
-  const rejection = fixture('REJECT');
+  const rejection = fixture('REQUEST_CHANGES');
   rejection.status.id = 44;
   rejection.status.created_at = '2026-08-07T03:01:10Z';
   rejection.status.target_url =
@@ -197,7 +234,6 @@ test('rerunning an older approval cannot supersede a newer rejection', () => {
   replayedApproval.status.id = 45;
   replayedApproval.status.created_at = '2026-08-07T03:02:10Z';
   replayedApproval.run.run_attempt = 2;
-  replayedApproval.run.triggering_actor.login = 'write-collaborator';
 
   const verdict = selectSquadVerdict({
     pull: replayedApproval.pull,
@@ -206,29 +242,4 @@ test('rerunning an older approval cannot supersede a newer rejection', () => {
       runId === replayedApproval.run.id ? replayedApproval.run : rejection.run,
   });
   assert.equal(verdict.classification, 'INVALID');
-});
-
-test('workflow keeps the independent recorder and exact-head controls', async () => {
-  const workflow = (await readFile(
-    path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'),
-    'utf8',
-  )).replaceAll('\r\n', '\n');
-  assert.ok(
-    workflow.includes(
-      'run-name: "Squad verdict ${{ inputs.verdict }} for PR ' +
-      '#${{ inputs.pr_number }} @ ${{ inputs.reviewed_head_sha }} ' +
-      'by ${{ github.actor }}"',
-    ),
-  );
-  assert.match(workflow, /^\s+statuses: write$/m);
-  assert.match(workflow, /\/\^\[1-9\]\\d\*\$\/\.test\(prNumberInput\)/);
-  assert.match(workflow, /\/\^\[0-9a-f\]\{40\}\$\/\.test\(reviewedHeadSha\)/);
-  assert.match(workflow, /pull\.user\.login\.toLowerCase\(\) === actor\.toLowerCase\(\)/);
-  assert.match(workflow, /pull\.head\.sha\.toLowerCase\(\) !== reviewedHeadSha/);
-  assert.match(workflow, /getCollaboratorPermissionLevel/);
-  assert.match(workflow, /actorPermission\.permission !== 'admin'/);
-  assert.match(workflow, /runAttempt !== '1'/);
-  assert.match(workflow, /triggeringActor\.toLowerCase\(\) !== actor\.toLowerCase\(\)/);
-  assert.match(workflow, /context: 'squad\/pre-pr-verdict'/);
-  assert.doesNotMatch(workflow, /pull-requests: write/);
 });

@@ -1,128 +1,260 @@
 name: Record squad review verdict
 
-run-name: "Squad verdict ${{ inputs.verdict }} for PR #${{ inputs.pr_number }} @ ${{ inputs.reviewed_head_sha }} by ${{ github.actor }}"
+# Squad pre-PR review gate.
+#
+# WHY THIS SHAPE: the previous version of this workflow required a *non-author
+# repository administrator* to dispatch it by hand. This repository has exactly
+# one administrator, who authors effectively every PR, so that guard could never
+# be satisfied — the workflow's entire run history was failures (issue #1310).
+# The gate now accepts SHA-bound verdicts recorded by the actors that actually
+# exist: squad review agents, posting PR comments.
+#
+# HOW TO RECORD A VERDICT — post a PR comment containing these three lines:
+#
+#     <!-- squad-verdict -->
+#     Squad-Reviewer: bishop
+#     Squad-Verdict: APPROVE
+#     Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
+#
+#   * `Squad-Reviewer` is a squad identity, validated against the repository's
+#     `squad:{member}` labels. It must not be the squad member who authored the
+#     PR (resolved from `Squad-Author:` in the PR body, then the `squad:` label
+#     on the linked issue, then the head branch name).
+#   * `Squad-Verdict` is APPROVE or REQUEST_CHANGES.
+#   * `Squad-Head-SHA` must equal the PR's live head SHA at evaluation time. A
+#     verdict recorded against an older SHA is stale and does not count. This is
+#     the load-bearing control: it makes review-then-push-more detectable.
+#   * Only comments from OWNER/MEMBER/COLLABORATOR accounts are considered.
+#   * Each line must appear exactly once; a comment quoting another verdict is
+#     ambiguous and is ignored.
+#
+# REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
+# Changes: One Reviewer": documentation-only PRs need one verdict, everything
+# else needs the bishop/hicks/vasquez panel.
+#
+# HUMAN OVERRIDE: a repository administrator satisfies the gate unconditionally,
+# either by approving through GitHub's native review UI at the current head, or
+# by posting a verdict comment whose `Squad-Reviewer` is their own GitHub login.
+#
+# The job itself always succeeds; the gate result is the `squad/pre-pr-verdict`
+# commit status. Keeping the run conclusion at `success` is what lets
+# scripts/ci/verify-squad-verdict.mjs treat the run as a provenance record.
+
+run-name: "Squad verdict gate for PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}"
 
 on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  issue_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Pull request number
+        description: Pull request number to re-evaluate
         required: true
         type: string
-      reviewed_head_sha:
-        description: Exact 40-character PR head SHA reviewed by the squad panel
-        required: true
-        type: string
-      verdict:
-        description: Bishop, Hicks, and Vasquez consensus verdict
-        required: true
-        type: choice
-        options:
-          - APPROVE
-          - CHANGES_REQUESTED
-          - REJECT
 
 permissions:
   contents: read
+  issues: read
   pull-requests: read
   statuses: write
+
+concurrency:
+  group: >-
+    squad-verdict-${{ github.event.pull_request.number
+    || github.event.issue.number || inputs.pr_number }}
+  cancel-in-progress: true
 
 jobs:
   record:
     name: Record SHA-pinned verdict
+    # issue_comment also fires for plain issues; only PR conversations qualify.
+    if: >-
+      github.event_name != 'issue_comment'
+      || github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     steps:
-      - name: Validate provenance and record verdict
+      # Checks out the default branch, never the pull request head, so a PR can
+      # never supply the logic that judges it. pull_request_target already runs
+      # the workflow definition from the default branch; this keeps the helper
+      # module on the same footing.
+      - name: Check out gate logic from the default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Evaluate squad verdict evidence
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3  # v9
         env:
-          PR_NUMBER: ${{ inputs.pr_number }}
-          REVIEWED_HEAD_SHA: ${{ inputs.reviewed_head_sha }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
-          VERDICT: ${{ inputs.verdict }}
+          PR_NUMBER: >-
+            ${{ github.event.pull_request.number || github.event.issue.number
+            || inputs.pr_number }}
         with:
           script: |
-            const prNumberInput = process.env.PR_NUMBER;
-            const prNumber = Number.parseInt(prNumberInput, 10);
-            const reviewedHeadSha = process.env.REVIEWED_HEAD_SHA;
-            const runAttempt = process.env.RUN_ATTEMPT;
-            const triggeringActor = process.env.TRIGGERING_ACTOR;
-            const verdict = process.env.VERDICT;
-            const actor = context.actor;
+            const gate = await import(
+              `${process.env.GITHUB_WORKSPACE}/scripts/ci/squad-verdict-gate.mjs`
+            );
 
-            if (runAttempt !== '1' || triggeringActor.toLowerCase() !== actor.toLowerCase()) {
-              core.setFailed('Verdict workflow reruns are not trusted. Dispatch a new run.');
+            const prNumberInput = String(process.env.PR_NUMBER ?? '');
+            if (!/^[1-9]\d*$/.test(prNumberInput)) {
+              core.setFailed('Could not resolve a pull request number.');
               return;
             }
-            if (!/^[1-9]\d*$/.test(prNumberInput) || !Number.isSafeInteger(prNumber)) {
-              core.setFailed('pr_number must be a positive integer.');
-              return;
-            }
-            if (!/^[0-9a-f]{40}$/.test(reviewedHeadSha)) {
-              core.setFailed(
-                'reviewed_head_sha must be an exact lowercase 40-character commit SHA.',
-              );
-              return;
-            }
+            const prNumber = Number.parseInt(prNumberInput, 10);
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const repository = `${owner}/${repo}`;
 
             const { data: pull } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
+              owner, repo, pull_number: prNumber,
             });
             if (pull.state !== 'open') {
-              core.setFailed(`PR #${prNumber} is not open.`);
-              return;
-            }
-            if (pull.head.repo?.full_name !== context.payload.repository.full_name) {
-              core.setFailed('Squad verdict recording supports same-repository PRs only.');
-              return;
-            }
-            if (pull.user.login.toLowerCase() === actor.toLowerCase()) {
-              core.setFailed('The PR author cannot record their own squad verdict.');
+              core.notice(`PR #${prNumber} is not open; nothing to gate.`);
               return;
             }
 
-            const { data: actorPermission } =
-              await github.rest.repos.getCollaboratorPermissionLevel({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                username: actor,
-              });
-            if (actorPermission.permission !== 'admin') {
-              core.setFailed('The recorder must be a repository administrator.');
-              return;
-            }
-            if (pull.head.sha.toLowerCase() !== reviewedHeadSha) {
-              core.setFailed(
-                `Stale verdict: PR head is ${pull.head.sha}, not ${reviewedHeadSha}.`,
-              );
-              return;
-            }
-
-            const state = verdict === 'APPROVE' ? 'success' : 'failure';
-            const description = `${verdict} @ ${reviewedHeadSha.slice(0, 12)} by ${actor}`;
+            const headSha = String(pull.head?.sha ?? '').toLowerCase();
             const targetUrl =
-              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}` +
-              `/actions/runs/${context.runId}`;
+              `${context.serverUrl}/${repository}/actions/runs/${context.runId}`;
 
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha: reviewedHeadSha,
-              state,
-              context: 'squad/pre-pr-verdict',
-              description,
-              target_url: targetUrl,
+            const postStatus = (state, description) =>
+              github.rest.repos.createCommitStatus({
+                owner, repo, sha: headSha, state,
+                context: gate.verdictContext,
+                description, target_url: targetUrl,
+              });
+
+            if (pull.head.repo?.full_name !== repository) {
+              await postStatus(
+                'failure',
+                `BLOCKED @ ${headSha.slice(0, 12)}: cross-repository PR needs human review`,
+              );
+              core.warning('Cross-repository PR: agent verdicts are not accepted.');
+              return;
+            }
+
+            const permissionCache = new Map();
+            async function isAdmin(login) {
+              if (!login) return false;
+              const key = login.toLowerCase();
+              if (permissionCache.has(key)) return permissionCache.get(key);
+              let admin = false;
+              try {
+                const { data } =
+                  await github.rest.repos.getCollaboratorPermissionLevel({
+                    owner, repo, username: login,
+                  });
+                admin = data.permission === 'admin';
+              } catch (error) {
+                core.debug(`Permission lookup failed for ${login}: ${error.message}`);
+              }
+              permissionCache.set(key, admin);
+              return admin;
+            }
+
+            const [labelData, rawComments, rawReviews, fileData] = await Promise.all([
+              github.paginate(github.rest.issues.listLabelsForRepo,
+                { owner, repo, per_page: 100 }),
+              github.paginate(github.rest.issues.listComments,
+                { owner, repo, issue_number: prNumber, per_page: 100 }),
+              github.paginate(github.rest.pulls.listReviews,
+                { owner, repo, pull_number: prNumber, per_page: 100 }),
+              github.paginate(github.rest.pulls.listFiles,
+                { owner, repo, pull_number: prNumber, per_page: 100 }),
+            ]);
+
+            const roster = gate.rosterFromLabels(labelData.map((label) => label.name));
+            const changedPaths = fileData.map((file) => file.filename);
+
+            // Mark verdict comments where an administrator names their own
+            // GitHub login as the reviewer: that is the repository owner
+            // speaking, not an agent, and it is decisive.
+            const comments = [];
+            for (const comment of rawComments) {
+              const record = gate.parseVerdictComment(comment);
+              const selfDeclared = Boolean(record) && record.trusted &&
+                record.reviewer === gate.normalizeMember(record.commenter) &&
+                await isAdmin(record.commenter);
+              comments.push(
+                selfDeclared ? { ...comment, squadAdminOverride: true } : comment,
+              );
+            }
+
+            const reviews = [];
+            for (const review of rawReviews) {
+              reviews.push({
+                state: review.state,
+                commitId: review.commit_id,
+                login: review.user?.login ?? '',
+                isAdmin: review.state === 'APPROVED'
+                  ? await isAdmin(review.user?.login)
+                  : false,
+              });
+            }
+
+            let linkedIssueLabels = [];
+            try {
+              const linked = await github.graphql(`
+                query($owner: String!, $repo: String!, $number: Int!) {
+                  repository(owner: $owner, name: $repo) {
+                    pullRequest(number: $number) {
+                      closingIssuesReferences(first: 20) {
+                        nodes { number labels(first: 50) { nodes { name } } }
+                      }
+                    }
+                  }
+                }`, { owner, repo, number: prNumber });
+              linkedIssueLabels = (linked.repository.pullRequest
+                .closingIssuesReferences.nodes ?? [])
+                .flatMap((node) => (node.labels?.nodes ?? []).map((l) => l.name));
+            } catch (error) {
+              core.warning(`Could not read linked issues: ${error.message}`);
+            }
+
+            const author = gate.resolveAuthorMembers({
+              prBody: pull.body ?? '',
+              branchName: pull.head?.ref ?? '',
+              linkedIssueLabels,
+              roster,
             });
 
-            await core.summary
-              .addHeading('Squad pre-PR verdict')
+            const result = gate.evaluateGate({
+              headSha,
+              changedPaths,
+              comments,
+              reviews,
+              roster,
+              authorMembers: author.members,
+              authorSource: author.source,
+            });
+
+            await postStatus(result.state, result.description);
+
+            const summary = core.summary
+              .addHeading('Squad pre-PR verdict gate')
               .addTable([
                 [{ data: 'Field', header: true }, { data: 'Value', header: true }],
                 ['PR', `#${prNumber}`],
-                ['Reviewed head', reviewedHeadSha],
-                ['Verdict', verdict],
-                ['Recorded by', actor],
-              ])
-              .write();
+                ['Head SHA', headSha],
+                ['Result', result.passed ? 'PASS' : 'BLOCKED'],
+                ['Reason', result.reason],
+                ['Approvals', result.approvals.join(', ') || '(none)'],
+                ['Required panel', result.requiredMembers.join(', ') || 'n/a'],
+                ['Stale verdicts', result.stale
+                  .map((r) => `${r.reviewer} @ ${r.headSha}`).join(', ') || '(none)'],
+              ]);
+            for (const note of result.notes) {
+              summary.addRaw(`\n- ${note}`);
+            }
+            await summary.write();
+
+            if (result.passed) {
+              core.notice(`squad/pre-pr-verdict PASS: ${result.reason}`);
+            } else {
+              core.warning(`squad/pre-pr-verdict BLOCKED: ${result.reason}`);
+            }

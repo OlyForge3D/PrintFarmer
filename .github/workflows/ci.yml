@@ -185,6 +185,9 @@ jobs:
       - name: Test squad verdict provenance
         run: node --test scripts/ci/tests/test-squad-verdict.mjs
 
+      - name: Test squad verdict gate rules
+        run: node --test scripts/ci/tests/test-squad-verdict-gate.mjs
+
       - name: Test squad triage routing
         run: node --test scripts/ci/tests/test-squad-routing.mjs
 

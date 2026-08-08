@@ -77,14 +77,16 @@ or rejection from a PR that never had squad evidence.
 - `APPROVED` is valid merge evidence only for the PR's exact current head.
 - `CHANGES_REQUESTED` routes the findings back to the original author.
 - `SUPERSEDED`, `MISSING`, or `INVALID` is not approval and does not preserve
-  an old rejection. Require a new trio review record or a human GitHub
-  approval.
-- A current non-author human GitHub approval remains valid merge evidence.
-- Never infer approval from PR comments. The author can write an identical
-  comment, so comments have no provenance.
-- Until `.github/workflows/squad-review-verdict.yml` is operational on the
-  default branch with a non-author administrator, author-opened squad PRs require
-  human approval.
+  an old rejection. Require fresh panel verdict comments naming the new head,
+  or an administrator override.
+- A current administrator GitHub approval remains valid merge evidence.
+- Never infer approval from a free-text PR comment. Only the canonical
+  `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
+  `.github/workflows/squad-review-verdict.yml`, produces the trusted
+  `squad/pre-pr-verdict` status. The status is the evidence; the comment is not.
+- If the gate reports `BLOCKED`, its status description names the exact failing
+  condition (no verdict, stale SHA, reviewer-is-author, or insufficient count).
+  Act on that condition — do not park the PR.
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
@@ -92,7 +94,7 @@ or rejection from a PR that never had squad evidence.
   missing, invalid, or superseded evidence, and `1` for verifier/tool failure.
   Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3` means
   squad evidence is unavailable and permits only a verified current
-  non-author human GitHub approval as fallback.
+  administrator GitHub approval as fallback.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

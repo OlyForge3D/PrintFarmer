@@ -7,8 +7,17 @@ export const verdictContext = 'squad/pre-pr-verdict';
 export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
 
 const trustedStatusCreator = 'github-actions[bot]';
-const displayTitlePattern =
-  /^Squad verdict (APPROVE|CHANGES_REQUESTED|REJECT) for PR #([1-9]\d*) @ ([0-9a-f]{40}) by ([A-Za-z0-9-]+)$/;
+const displayTitlePattern = /^Squad verdict gate for PR #([1-9]\d*)$/;
+
+// The gate runs only from events whose workflow definition comes from the
+// default branch. A pull_request (head-ref) trigger would let a PR rewrite the
+// logic that judges it.
+const trustedEvents = new Set([
+  'pull_request_target',
+  'issue_comment',
+  'pull_request_review',
+  'workflow_dispatch',
+]);
 
 function result(classification, reason, evidence = {}) {
   return { classification, reason, ...evidence };
@@ -42,12 +51,23 @@ function parseDisplayTitle(displayTitle) {
   if (!match) {
     return undefined;
   }
-  return {
-    verdict: match[1],
-    prNumber: Number.parseInt(match[2], 10),
-    reviewedHeadSha: match[3],
-    actor: match[4],
-  };
+  return { prNumber: Number.parseInt(match[1], 10) };
+}
+
+// The gate encodes its outcome in the status state and description. Approvals
+// are `APPROVE @ <sha12> by <reviewers>`; blocks are `BLOCKED @ <sha12>: ...`.
+function parseStatusDescription(status, statusSha) {
+  const description = status.description ?? '';
+  const shortSha = statusSha.slice(0, 12);
+  if (status.state === 'success') {
+    const match = new RegExp(`^APPROVE @ ${shortSha} by (\\S.*)$`).exec(description);
+    return match ? { verdict: 'APPROVE', reviewers: match[1] } : undefined;
+  }
+  if (status.state === 'failure') {
+    const match = new RegExp(`^BLOCKED @ ${shortSha}: (\\S.*)$`).exec(description);
+    return match ? { verdict: 'REQUEST_CHANGES', reviewers: '' } : undefined;
+  }
+  return undefined;
 }
 
 function isStatusCreatedDuringRun(status, run) {
@@ -72,10 +92,10 @@ export function verifySquadVerdict({ pull, status, run }) {
 
   const repository = pull.base?.repo?.full_name;
   const defaultBranch = pull.base?.repo?.default_branch;
-  const author = pull.user?.login;
+  const baseRef = pull.base?.ref;
   const currentHeadSha = pull.head?.sha?.toLowerCase();
   const statusSha = status.sha?.toLowerCase();
-  if (!repository || !defaultBranch || !author || !currentHeadSha || !statusSha) {
+  if (!repository || !defaultBranch || !currentHeadSha || !statusSha) {
     return result('INVALID', 'PR or status metadata is incomplete.');
   }
   if (status.creator?.login !== trustedStatusCreator) {
@@ -88,10 +108,14 @@ export function verifySquadVerdict({ pull, status, run }) {
   }
   if (
     run.path !== verdictWorkflowPath ||
-    run.event !== 'workflow_dispatch' ||
+    !trustedEvents.has(run.event) ||
     run.run_attempt !== 1 ||
     run.triggering_actor?.login?.toLowerCase() !== run.actor?.login?.toLowerCase() ||
-    run.head_branch !== defaultBranch ||
+    // The gate only ever runs from a protected ref: issue_comment and
+    // pull_request_review runs sit on the default branch, pull_request_target
+    // runs sit on the PR's base ref. A run on the PR head branch would mean the
+    // PR supplied the logic that judged it.
+    (run.head_branch !== defaultBranch && run.head_branch !== baseRef) ||
     run.default_branch_contains_run !== true ||
     run.repository?.full_name !== repository ||
     run.status !== 'completed' ||
@@ -101,44 +125,30 @@ export function verifySquadVerdict({ pull, status, run }) {
   }
 
   const title = parseDisplayTitle(run.display_title);
-  if (
-    !title ||
-    title.prNumber !== pull.number ||
-    title.reviewedHeadSha !== statusSha ||
-    title.actor.toLowerCase() !== run.actor?.login?.toLowerCase()
-  ) {
+  if (!title || title.prNumber !== pull.number) {
     return result('INVALID', 'The workflow run metadata does not match the status.');
   }
-  if (title.actor.toLowerCase() === author.toLowerCase()) {
-    return result('INVALID', 'The PR author recorded the verdict.');
-  }
 
-  const expectedState = title.verdict === 'APPROVE' ? 'success' : 'failure';
-  const expectedDescription =
-    `${title.verdict} @ ${statusSha.slice(0, 12)} by ${title.actor}`;
-  if (
-    status.state !== expectedState ||
-    status.description !== expectedDescription ||
-    !isStatusCreatedDuringRun(status, run)
-  ) {
+  const outcome = parseStatusDescription(status, statusSha);
+  if (!outcome || !isStatusCreatedDuringRun(status, run)) {
     return result('INVALID', 'The status does not match the trusted workflow verdict.');
   }
 
   if (statusSha !== currentHeadSha) {
     return result(
       'SUPERSEDED',
-      `${title.verdict} applies to ${statusSha}, not current head ${currentHeadSha}.`,
-      { verdict: title.verdict, reviewedHeadSha: statusSha, actor: title.actor },
+      `${outcome.verdict} applies to ${statusSha}, not current head ${currentHeadSha}.`,
+      { verdict: outcome.verdict, reviewedHeadSha: statusSha, actor: outcome.reviewers },
     );
   }
 
-  const classification = title.verdict === 'APPROVE'
+  const classification = outcome.verdict === 'APPROVE'
     ? 'APPROVED'
     : 'CHANGES_REQUESTED';
   return result(classification, 'Verified SHA-pinned squad verdict.', {
-    verdict: title.verdict,
+    verdict: outcome.verdict,
     reviewedHeadSha: statusSha,
-    actor: title.actor,
+    actor: outcome.reviewers,
     workflowRunUrl: run.html_url,
   });
 }

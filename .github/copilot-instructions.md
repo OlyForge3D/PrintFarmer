@@ -159,9 +159,9 @@ Flow:
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
 5. Once APPROVED, open the PR via `gh pr create`.
-6. After the PR exists, have a repository administrator other than the PR author
-   dispatch `.github/workflows/squad-review-verdict.yml` with the PR number,
-   exact reviewed 40-character head SHA, and consensus verdict.
+6. After the PR exists, each reviewer records their verdict as a PR comment in the
+   canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
+   automatically on every comment, review, and push.
 
 This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
 
@@ -211,6 +211,15 @@ file is **not** documentation-only.
 **Be conservative — when in doubt, use the full gate.** Fail toward the stricter path whenever
 the classification is not obvious.
 
+**How the gate automates this.** `scripts/ci/squad-verdict-gate.mjs` implements the allowlist
+and the denylist, and takes the conservative reading of the safety-boundary carve-out: the
+agent-instruction trees (`.squad/**`, `.github/agents/**`, `.github/skills/**`,
+`.copilot/skills/**`) and `.github/workflows/**` **always** take the full gate, because whether
+a given edit moves an agent's safety boundary cannot be judged from the path. Prose is matched
+by extension (`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under
+`docs/` correctly take the full gate. If a change is misclassified as full-gate, the cost is two
+extra verdict comments; the reverse would be a real review gap.
+
 **Who the single reviewer is.** Route to the reviewer whose domain the document actually
 concerns — for example, Bishop for storage/integration docs, Hicks for testing and contract
 docs, Vasquez for security and concurrency docs. **Default to the squad Lead (Dallas) when the
@@ -220,12 +229,39 @@ reviewer's verdict.
 
 ### Repository verdict evidence
 
-The workflow publishes the `squad/pre-pr-verdict` commit status on the reviewed
-SHA. The workflow run is the provenance record: its immutable run metadata
-names the workflow path, default-branch ref, non-author administrator, PR number,
-verdict, and exact reviewed SHA. An author-written PR comment, status from a
-different workflow, or status whose workflow run does not match those fields is
-not gate evidence.
+Reviewers record verdicts as PR comments. `.github/workflows/squad-review-verdict.yml`
+re-evaluates on every PR comment, review, and push, and publishes the
+`squad/pre-pr-verdict` commit status on the PR's live head SHA. The canonical
+comment format is:
+
+```text
+<!-- squad-verdict -->
+Squad-Reviewer: bishop
+Squad-Verdict: APPROVE
+Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
+```
+
+- `Squad-Reviewer` is a squad identity, validated against the repository's
+  `squad:{member}` labels. It must differ from the squad member who authored the
+  PR. Authorship is resolved from `Squad-Author:` in the PR body, then the
+  `squad:{member}` label on the issues the PR closes, then the head branch name.
+  GitHub-account authorship is deliberately *not* used: every agent acts through
+  the same owner token, which is what made the previous gate unsatisfiable
+  (issue #1310).
+- `Squad-Verdict` is `APPROVE` or `REQUEST_CHANGES`.
+- `Squad-Head-SHA` must equal the PR's live head SHA when the gate runs. A
+  verdict naming any other SHA is stale and does not count.
+- Only comments from `OWNER`/`MEMBER`/`COLLABORATOR` accounts are considered, and
+  a comment that quotes a second, different verdict is ambiguous and ignored.
+- A repository administrator satisfies the gate unconditionally, either by
+  approving through GitHub's native review UI at the current head, or by posting
+  a verdict comment whose `Squad-Reviewer` is their own GitHub login. The owner
+  is never locked out.
+
+The workflow job always succeeds; the gate outcome is the commit status. A block
+carries a precise reason — `no verdict found`, `have 1/3, missing hicks+vasquez`,
+`reviewer parker is the PR author`, or the stale reviewed SHA — so a session
+reading the failure knows what to do instead of parking.
 
 Run the verifier before treating the squad verdict as merge evidence:
 
@@ -241,14 +277,11 @@ verdict after the PR head may have moved. The verifier then reports
 `SUPERSEDED` for either an old approval or an old rejection.
 
 Any head movement supersedes the recorded verdict. This rule applies equally
-to `APPROVE`, `CHANGES_REQUESTED`, and `REJECT`, including rebases and force
-pushes. The trio must review the new head and a non-author administrator must
-record a new verdict.
+to `APPROVE` and `REQUEST_CHANGES`, including rebases and force pushes. The
+panel must review the new head and record fresh verdicts naming it.
 
-Until the workflow is merged to the default branch and a non-author administrator
-can dispatch it, author-opened squad PRs require a human GitHub approval before
-merge. Missing, invalid, or superseded squad evidence never becomes approval.
-After verification, merge with
+Missing, invalid, or superseded squad evidence never becomes approval. After
+verification, merge with
 `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...` so a
 force-push between verification and merge cannot substitute unreviewed code.
 
