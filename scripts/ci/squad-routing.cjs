@@ -40,6 +40,92 @@ function isCanonicalMemberLabel(label) {
   return suffix.length > 0 && slugify(suffix) === suffix;
 }
 
+function labelName(label) {
+  if (typeof label === 'string') {
+    return label;
+  }
+  return typeof label?.name === 'string' ? label.name : undefined;
+}
+
+/**
+ * Canonicalize either spelling of a `squad:*` owner label.
+ *
+ * `squad:⚛️ ripley` and `squad:ripley` both resolve to `squad:ripley`.
+ * The bare `squad` triage label is not an owner and resolves to `undefined`.
+ */
+function canonicalMemberLabel(label) {
+  const name = labelName(label)?.trim();
+  if (!name || !name.toLowerCase().startsWith('squad:')) {
+    return undefined;
+  }
+  const suffix = name.slice('squad:'.length);
+  const canonical = memberLabel(suffix);
+  return canonical === 'squad:' ? undefined : canonical;
+}
+
+/**
+ * Return unique canonical owner labels.
+ */
+function canonicalOwnerLabels(labels) {
+  return [...new Set(
+    (labels || []).map(canonicalMemberLabel).filter(Boolean),
+  )].sort();
+}
+
+/**
+ * Count current open issues per canonical roster label.
+ *
+ * Duplicate emoji/plain labels on one issue collapse to one owner count.
+ * Pull requests and explicitly closed issues are not squad-owned issue load.
+ */
+function countOpenSquadIssuesByMember(issues, members) {
+  const rosterLabels = new Set(members.map((member) => memberLabel(member.name)));
+  const counts = {};
+  for (const label of [...rosterLabels].sort()) {
+    counts[label] = 0;
+  }
+
+  for (const issue of issues || []) {
+    if (
+      issue?.pull_request
+      || String(issue?.state || '').toLowerCase() === 'closed'
+    ) {
+      continue;
+    }
+    const owners = canonicalOwnerLabels(issue?.labels)
+      .filter((label) => rosterLabels.has(label));
+    for (const owner of owners) {
+      counts[owner] += 1;
+    }
+  }
+  return counts;
+}
+
+/**
+ * Return raw labels that must be removed to leave one canonical owner label.
+ */
+function ownerLabelsToRemove(labels, assignedLabel) {
+  const assigned = canonicalMemberLabel(assignedLabel);
+  const removals = new Set();
+
+  for (const label of labels || []) {
+    const name = labelName(label);
+    if (!name) {
+      continue;
+    }
+    if (name.toLowerCase() === 'squad') {
+      removals.add(name);
+      continue;
+    }
+    const canonical = canonicalMemberLabel(name);
+    if (canonical && (canonical !== assigned || name !== assigned)) {
+      removals.add(name);
+    }
+  }
+
+  return [...removals].sort();
+}
+
 /**
  * True when a roster row should be excluded from labelling and routing.
  *
@@ -102,6 +188,7 @@ const DOMAINS = [
     id: 'frontend',
     reason: 'Issue relates to frontend/UI work',
     role: /front[\s-]?end|\bui\b|\bux\b|designer/i,
+    defaultRole: /front[\s-]?end/i,
     keywords: [
       { id: 'ui', weight: 2, forms: ['ui'] },
       { id: 'ux', weight: 2, forms: ['ux'] },
@@ -138,7 +225,11 @@ const DOMAINS = [
       { id: 'server', weight: 1, forms: ['server'] },
       { id: 'auth', weight: 1, forms: ['auth', 'authentication'] },
       { id: 'dotnet', weight: 1, forms: ['c#', '.net', 'asp.net', 'dotnet'] },
-      { id: 'repository', weight: 1, forms: ['repository'] },
+      {
+        id: 'repository-pattern',
+        weight: 1,
+        forms: ['repository pattern', 'irepository'],
+      },
     ],
   },
   {
@@ -205,6 +296,17 @@ const DOMAINS = [
       { id: 'container', weight: 1, forms: ['container'] },
       { id: 'runner', weight: 1, forms: ['runner'] },
       { id: 'release', weight: 1, forms: ['release'] },
+      {
+        id: 'security-platform',
+        weight: 2,
+        forms: [
+          'codeql',
+          'secret scanning',
+          'push protection',
+          'code scanning',
+          'dependabot',
+        ],
+      },
     ],
   },
   {
@@ -357,17 +459,40 @@ function scoreDomain(domain, title, body) {
   };
 }
 
-function findDomainMember(domain, members, title) {
+function findDomainMembers(domain, members, title) {
   for (const rule of domain.ownerRules || []) {
     if (rule.titleForms.some((form) => hasWord(title, form))) {
-      const specialist = members.find((member) => rule.role.test(member.role || ''));
-      if (specialist) {
-        return specialist;
+      const specialists = members.filter((member) => rule.role.test(member.role || ''));
+      if (specialists.length > 0) {
+        return specialists;
       }
     }
   }
-  return members.find((member) => domain.defaultRole?.test(member.role || ''))
-    || members.find((member) => domain.role.test(member.role || ''));
+
+  const defaultMembers = members.filter(
+    (member) => domain.defaultRole?.test(member.role || ''),
+  );
+  return defaultMembers.length > 0
+    ? defaultMembers
+    : members.filter((member) => domain.role.test(member.role || ''));
+}
+
+function memberOpenIssueCount(member, openIssueCounts) {
+  const count = openIssueCounts?.[memberLabel(member.name)];
+  return Number.isFinite(count) && count >= 0 ? count : 0;
+}
+
+function selectLeastLoadedMember(candidates, openIssueCounts) {
+  return [...candidates].sort((left, right) => {
+    const loadDifference = memberOpenIssueCount(left, openIssueCounts)
+      - memberOpenIssueCount(right, openIssueCounts);
+    if (loadDifference !== 0) {
+      return loadDifference;
+    }
+    const leftLabel = memberLabel(left.name);
+    const rightLabel = memberLabel(right.name);
+    return leftLabel < rightLabel ? -1 : leftLabel > rightLabel ? 1 : 0;
+  })[0];
 }
 
 /**
@@ -381,9 +506,10 @@ function findDomainMember(domain, members, title) {
  * @param {{title?: string, body?: string}} issue
  * @param {Array<{name: string, role: string}>} members roster order preserved
  * @param {{name: string, role: string}} lead fallback owner
+ * @param {Record<string, number>} openIssueCounts canonical label -> open count
  * @returns {{member: object, reason: string, domain: string|null, scores: object[]}}
  */
-function routeIssue(issue, members, lead) {
+function routeIssue(issue, members, lead, openIssueCounts = {}) {
   const title = issue.title || '';
   const body = issue.body || '';
 
@@ -397,28 +523,35 @@ function routeIssue(issue, members, lead) {
   const best = scores[0];
   const runnerUp = scores[1];
 
-  // A tie is genuine ambiguity, not a reason to pick whoever sorted first.
-  if (
-    !best
-    || (
-      runnerUp
-      && runnerUp.priority === best.priority
-      && runnerUp.score === best.score
-    )
-  ) {
+  const lowConfidence = best && best.score < 3;
+  // Title-intent priority is compared before score, so only equal-priority
+  // scores have a meaningful confidence margin.
+  const narrowMargin = best
+    && runnerUp
+    && best.priority === runnerUp.priority
+    && best.score - runnerUp.score < 2;
+
+  if (!best || lowConfidence || narrowMargin) {
     return {
       member: lead,
-      reason: best
-        ? 'Ambiguous domain signals — assigned to Lead for further analysis'
-        : 'No specific domain match — assigned to Lead for further analysis',
+      reason: !best
+        ? 'No specific domain match — assigned to Lead for further analysis'
+        : lowConfidence
+          ? 'Low-confidence domain signals — assigned to Lead for further analysis'
+          : 'Ambiguous domain signals — assigned to Lead for further analysis',
       domain: null,
       scores,
     };
   }
 
   const domain = DOMAINS.find((d) => d.id === best.id);
-  const member = findDomainMember(domain, members, title);
-  return { member, reason: best.reason, domain: best.id, scores };
+  const candidates = findDomainMembers(domain, members, title);
+  const member = selectLeastLoadedMember(candidates, openIssueCounts);
+  const reason = candidates.length > 1
+    ? `${best.reason}; selected least-loaded member with `
+      + `${memberOpenIssueCount(member, openIssueCounts)} open squad-owned issue(s)`
+    : best.reason;
+  return { member, reason, domain: best.id, scores };
 }
 
 /**
@@ -457,11 +590,15 @@ function classifySquadLabels(existingNames, rosterLabels) {
 
 module.exports = {
   DOMAINS,
+  canonicalMemberLabel,
+  canonicalOwnerLabels,
   classifySquadLabels,
+  countOpenSquadIssuesByMember,
   hasWord,
   isCanonicalMemberLabel,
   isRosterExcluded,
   memberLabel,
+  ownerLabelsToRemove,
   routeIssue,
   scoreDomain,
   slugify,

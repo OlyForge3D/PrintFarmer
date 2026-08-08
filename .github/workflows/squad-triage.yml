@@ -11,6 +11,9 @@ permissions:
 jobs:
   triage:
     if: github.event.label.name == 'squad'
+    concurrency:
+      group: squad-triage-${{ github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -21,10 +24,18 @@ jobs:
           script: |
             const fs = require('fs');
             const path = require('path');
-            const { routeIssue, memberLabel, hasWord, isRosterExcluded } = require(
+            const {
+              canonicalOwnerLabels,
+              countOpenSquadIssuesByMember,
+              hasWord,
+              isRosterExcluded,
+              memberLabel,
+              ownerLabelsToRemove,
+              routeIssue,
+            } = require(
               path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
             );
-            const issue = context.payload.issue;
+            let issue = context.payload.issue;
 
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
@@ -106,6 +117,16 @@ jobs:
               return;
             }
 
+            ({ data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number
+            }));
+            if (canonicalOwnerLabels(issue.labels).length > 0) {
+              core.info(`Issue #${issue.number} already has an owner — skipping triage`);
+              return;
+            }
+
             // Build triage context
             const memberList = members.map(m =>
               `- **${m.name}** (${m.role}) → label: \`${memberLabel(m.name)}\``
@@ -145,12 +166,24 @@ jobs:
             // If not routed to @copilot, use keyword-based routing.
             // Scoring is domain-outer / member-inner: every domain is scored
             // independently and the highest scorer wins, so roster ordering no
-            // longer decides the assignment. Ties fall through to the Lead.
+            // longer decides the assignment. Low-confidence and narrow-margin
+            // wins fall through to the Lead.
             if (!assignedMember) {
+              const openIssues = await github.paginate(
+                github.rest.issues.listForRepo,
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: 'open',
+                  per_page: 100
+                }
+              );
+              const openIssueCounts = countOpenSquadIssuesByMember(openIssues, members);
               const routed = routeIssue(
                 { title: issue.title, body: issue.body },
                 members,
-                lead
+                lead,
+                openIssueCounts
               );
               core.info(`Routing scores: ${JSON.stringify(routed.scores)}`);
               assignedMember = routed.member;
@@ -166,6 +199,16 @@ jobs:
             const isCopilot = assignedMember.name === '@copilot';
             const assignLabel = isCopilot ? 'squad:copilot' : memberLabel(assignedMember.name);
 
+            const { data: issueBeforeAssignment } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number
+            });
+            if (canonicalOwnerLabels(issueBeforeAssignment.labels).length > 0) {
+              core.info(`Issue #${issue.number} was assigned while routing — skipping`);
+              return;
+            }
+
             // Add the member-specific label
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
@@ -173,6 +216,22 @@ jobs:
               issue_number: issue.number,
               labels: [assignLabel]
             });
+
+            for (const label of ownerLabelsToRemove(issueBeforeAssignment.labels, assignLabel)) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  name: label
+                });
+              } catch (err) {
+                if (err.status !== 404) {
+                  throw err;
+                }
+                core.info(`Owner label already removed: ${label}`);
+              }
+            }
 
             // Apply default triage verdict
             await github.rest.issues.addLabels({

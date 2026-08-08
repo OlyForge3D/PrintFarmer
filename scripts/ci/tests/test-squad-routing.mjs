@@ -8,11 +8,15 @@ import { createRequire } from 'node:module';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const {
+  canonicalMemberLabel,
+  canonicalOwnerLabels,
   classifySquadLabels,
+  countOpenSquadIssuesByMember,
   hasWord,
   isCanonicalMemberLabel,
   isRosterExcluded,
   memberLabel,
+  ownerLabelsToRemove,
   routeIssue,
   slugify,
 } = require('../squad-routing.cjs');
@@ -114,19 +118,19 @@ test('boilerplate from the issue template cannot carry the test domain', () => {
 test('ordinary bug reports route to the owning domain, not the Tester', () => {
   const ui = routeIssue(
     {
-      title: 'bug: printer screen is blank',
-      body: 'The React view renders nothing. Please fix.',
+      title: 'bug: React printer screen is blank',
+      body: 'The view renders nothing. Please fix.',
     },
     members,
     lead,
   );
   assert.equal(ui.domain, 'frontend');
-  assert.equal(ui.member.name, '⚛️ Ripley');
+  assert.equal(ui.member.name, '⚛️ Drake');
 
   const api = routeIssue(
     {
-      title: 'fix: saving a printer fails',
-      body: 'The endpoint returns 500.',
+      title: 'fix: printer API endpoint fails to save',
+      body: 'The request returns 500.',
     },
     members,
     lead,
@@ -195,6 +199,97 @@ test('Ralph declines ambiguous issues instead of guessing', () => {
   );
 });
 
+test('Ralph uses the injected open-issue counts for domain load balancing', () => {
+  const issue = {
+    title: 'fix: React component CSS overflow',
+    body: '',
+  };
+  const counts = {
+    'squad:ripley': 0,
+    'squad:drake': 5,
+  };
+  const roleMatch = ralph.findRoleKeywordMatch(issue, members, counts);
+  assert.equal(roleMatch.agent.name, '⚛️ Ripley');
+
+  const decision = ralph.triageIssue(issue, [], [], members, counts);
+  assert.equal(decision.agent.name, '⚛️ Ripley');
+  assert.equal(decision.source, 'role-keyword');
+});
+
+test('Ralph reserves load across a multi-issue triage batch', () => {
+  const counts = {
+    'squad:ripley': 0,
+    'squad:drake': 0,
+  };
+  const decisions = ralph.triageIssues(
+    [
+      { number: 1, title: 'fix: React component CSS overflow', body: '' },
+      { number: 2, title: 'fix: React dialog layout overflow', body: '' },
+    ],
+    [],
+    [],
+    members,
+    counts,
+  );
+
+  assert.deepEqual(
+    decisions.map((decision) => decision.label),
+    ['squad:drake', 'squad:ripley'],
+  );
+  assert.equal(counts['squad:drake'], 1);
+  assert.equal(counts['squad:ripley'], 1);
+});
+
+test('live workflows inject counts and clean up prior owner labels', () => {
+  const triageWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-triage.yml'),
+    'utf8',
+  );
+  assert.match(triageWorkflow, /countOpenSquadIssuesByMember\(openIssues, members\)/);
+  assert.match(triageWorkflow, /lead,\s+openIssueCounts\s+\)/);
+  assert.match(
+    triageWorkflow,
+    /ownerLabelsToRemove\(issueBeforeAssignment\.labels, assignLabel\)/,
+  );
+  assert.match(
+    triageWorkflow,
+    /group: squad-triage-\$\{\{ github\.event\.issue\.number \}\}/,
+  );
+  assert.match(
+    triageWorkflow,
+    /canonicalOwnerLabels\(issueBeforeAssignment\.labels\)/,
+  );
+  assert.match(triageWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
+
+  const heartbeatWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-heartbeat.yml'),
+    'utf8',
+  );
+  assert.match(
+    heartbeatWorkflow,
+    /ownerLabelsToRemove\(currentIssue\.labels, decision\.label\)/,
+  );
+  assert.match(
+    heartbeatWorkflow,
+    /group: squad-triage-\$\{\{ matrix\.decision\.issueNumber \}\}/,
+  );
+  assert.match(
+    heartbeatWorkflow,
+    /decision: \$\{\{ fromJSON\(needs\.heartbeat\.outputs\.decisions\) \}\}/,
+  );
+  assert.match(heartbeatWorkflow, /TRIAGE_DECISION: \$\{\{ toJSON\(matrix\.decision\) \}\}/);
+  assert.match(
+    heartbeatWorkflow,
+    /canonicalOwnerLabels\(currentIssue\.labels\)/,
+  );
+
+  const labelSyncWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'sync-squad-labels.yml'),
+    'utf8',
+  );
+  assert.match(labelSyncWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
+});
+
 test('malformed issues do not throw', () => {
   for (const issue of [
     {},
@@ -248,7 +343,7 @@ test('a genuine frontend issue still routes to Frontend', () => {
     lead,
   );
   assert.equal(result.domain, 'frontend');
-  assert.equal(result.member.name, '⚛️ Ripley');
+  assert.equal(result.member.name, '⚛️ Drake');
 });
 
 test('a DevOps issue routes to DevOps', () => {
@@ -263,6 +358,34 @@ test('a DevOps issue routes to DevOps', () => {
   );
   assert.equal(result.domain, 'devops');
   assert.equal(result.member.name, '⚙️ Parker');
+});
+
+test('GitHub repository security language routes to DevOps', () => {
+  for (const title of [
+    'security: enable secret scanning and push protection on this public repository',
+    'security: enable CodeQL code scanning — no analysis has run on this repository',
+    'chore: configure Dependabot alerts for the GitHub repository',
+  ]) {
+    const result = routeIssue({ title, body: '' }, members, lead);
+    assert.equal(result.domain, 'devops', title);
+    assert.equal(result.member.name, '⚙️ Parker', title);
+    assert.equal(
+      result.scores.find((score) => score.id === 'backend'),
+      undefined,
+      title,
+    );
+  }
+});
+
+test('repository-pattern language still routes to Backend', () => {
+  for (const title of [
+    'refactor: introduce the repository pattern for printers',
+    'refactor: extract IRepository abstraction',
+  ]) {
+    const result = routeIssue({ title, body: '' }, members, lead);
+    assert.equal(result.domain, 'backend', title);
+    assert.equal(result.member.name, '🔧 Lambert', title);
+  }
 });
 
 test('a testing issue routes to the Tester', () => {
@@ -351,7 +474,7 @@ test('incidental iOS and docs references do not steal unrelated issues', () => {
         body: 'Update the CSS component; the native iOS app is unaffected.',
       },
       domain: 'frontend',
-      member: '⚛️ Ripley',
+      member: '⚛️ Drake',
     },
     {
       issue: {
@@ -476,6 +599,37 @@ test('an ambiguous issue falls through to the Lead', () => {
   assert.match(result.reason, /Lead/);
 });
 
+test('a low-confidence winning score falls through to the Lead', () => {
+  const result = routeIssue(
+    {
+      title: '3-column band flow shreds field labels at 1920px',
+      body: 'The existing database-backed screen needs attention.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.scores[0].score, 2);
+  assert.equal(result.domain, null);
+  assert.equal(result.member.name, lead.name);
+  assert.match(result.reason, /Low-confidence/);
+});
+
+test('a narrow winning margin falls through to the Lead', () => {
+  const result = routeIssue(
+    {
+      title: 'Improve things',
+      body: 'The component button and database behavior both need work.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.scores[0].score, 3);
+  assert.equal(result.scores[1].score, 2);
+  assert.equal(result.domain, null);
+  assert.equal(result.member.name, lead.name);
+  assert.match(result.reason, /Ambiguous/);
+});
+
 test('an evenly balanced issue falls through to the Lead, not roster order', () => {
   const result = routeIssue(
     { title: 'css endpoint', body: '' },
@@ -494,6 +648,38 @@ test('roster order does not decide the winner', () => {
   assert.equal(forward.domain, 'backend');
   assert.equal(reversed.domain, 'backend');
   assert.equal(forward.member.name, reversed.member.name);
+});
+
+test('the least-loaded member in the winning domain is selected', () => {
+  const issue = { title: 'fix: React component CSS overflow', body: '' };
+  const counts = {
+    'squad:ripley': 4,
+    'squad:drake': 1,
+  };
+  const forward = routeIssue(issue, members, lead, counts);
+  const reversed = routeIssue(issue, [...members].reverse(), lead, counts);
+  assert.equal(forward.member.name, '⚛️ Drake');
+  assert.equal(reversed.member.name, '⚛️ Drake');
+
+  const shifted = routeIssue(issue, members, lead, {
+    'squad:ripley': 0,
+    'squad:drake': 3,
+  });
+  assert.equal(shifted.member.name, '⚛️ Ripley');
+});
+
+test('load ties and missing counts use a stable canonical tie-break', () => {
+  const issue = { title: 'fix: React component CSS overflow', body: '' };
+  for (const counts of [
+    {},
+    { 'squad:ripley': 2, 'squad:drake': 2 },
+    { 'squad:ripley': 2 },
+  ]) {
+    const forward = routeIssue(issue, members, lead, counts);
+    const reversed = routeIssue(issue, [...members].reverse(), lead, counts);
+    assert.equal(forward.member.name, '⚛️ Drake');
+    assert.equal(reversed.member.name, '⚛️ Drake');
+  }
 });
 
 test('a title match outranks incidental body noise', () => {
@@ -528,6 +714,82 @@ test('the roster exclusion fires despite the emoji prefix', () => {
   assert.equal(isRosterExcluded('🔄 Ralph', ['scribe', 'ralph']), true);
   assert.equal(isRosterExcluded('🔧 Lambert', ['scribe', 'ralph']), false);
   assert.equal(isRosterExcluded('⚛️ Ripley', ['scribe']), false);
+});
+
+test('owner labels canonicalize across recasts and emoji spellings', () => {
+  assert.equal(canonicalMemberLabel('squad:⚛️ Ripley'), 'squad:ripley');
+  assert.equal(canonicalMemberLabel('SQUAD:🪐 Drake'), 'squad:drake');
+  assert.equal(canonicalMemberLabel('squad:ripley'), 'squad:ripley');
+  assert.equal(canonicalMemberLabel('squad'), undefined);
+  assert.equal(canonicalMemberLabel('area:frontend'), undefined);
+  assert.deepEqual(
+    canonicalOwnerLabels([
+      'squad',
+      'squad:⚛️ Ripley',
+      'squad:ripley',
+      'squad:drake',
+    ]),
+    ['squad:drake', 'squad:ripley'],
+  );
+});
+
+test('open squad-owned issue counts normalize labels and ignore exclusions', () => {
+  const recastMembers = [
+    { name: '🧬 Ripley', role: 'Frontend Dev' },
+    { name: '🪐 Drake', role: 'Frontend Dev' },
+  ];
+  const counts = countOpenSquadIssuesByMember(
+    [
+      { state: 'open', labels: ['squad:ripley'] },
+      {
+        state: 'open',
+        labels: [{ name: 'squad:⚛️ ripley' }, { name: 'squad:ripley' }],
+      },
+      { state: 'open', labels: [{ name: 'squad:⚛️ drake' }] },
+      { state: 'CLOSED', labels: ['squad:ripley'] },
+      { state: 'open', pull_request: {}, labels: ['squad:drake'] },
+      { state: 'open', labels: ['squad:scribe', 'squad:kaylee'] },
+    ],
+    recastMembers,
+  );
+  assert.deepEqual(counts, {
+    'squad:drake': 1,
+    'squad:ripley': 2,
+  });
+});
+
+test('owner label cleanup preserves exactly one canonical owner', () => {
+  const removals = ownerLabelsToRemove(
+    [
+      'squad',
+      'squad:drake',
+      'squad:⚛️ drake',
+      'squad:ripley',
+      'area:frontend',
+    ],
+    'squad:drake',
+  );
+  assert.deepEqual(
+    new Set(removals),
+    new Set(['squad', 'squad:⚛️ drake', 'squad:ripley']),
+  );
+});
+
+test('Ralph treats emoji owner labels as already triaged after a recast', () => {
+  const memberLabels = members.map((member) => memberLabel(member.name));
+  assert.equal(
+    ralph.isUntriagedIssue(
+      {
+        labels: ['squad', 'squad:⚛️ ripley'],
+      },
+      memberLabels,
+    ),
+    false,
+  );
+  assert.equal(
+    ralph.isUntriagedIssue({ labels: ['squad'] }, memberLabels),
+    true,
+  );
 });
 
 test('Ralph parses the real roster without Scribe or Ralph', () => {

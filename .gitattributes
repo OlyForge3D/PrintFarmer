@@ -27,6 +27,7 @@ install.sh text eol=lf
 /compliance/licenses/*.txt text eol=lf
 /Directory.Build.props whitespace=cr-at-eol
 /src/.editorconfig whitespace=cr-at-eol
+/.squad/templates/ralph-triage.js -text whitespace=cr-at-eol
 
 # EF Core migration scaffolding is machine-generated and enormous: every
 # *.Designer.cs embeds a full ~10,000-line model snapshot, and each new migration
