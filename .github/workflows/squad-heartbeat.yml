@@ -52,13 +52,17 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const path = 'triage-results.json';
-            if (!fs.existsSync(path)) {
+            const path = require('path');
+            const { ownerLabelsToRemove } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
+            const resultsPath = 'triage-results.json';
+            if (!fs.existsSync(resultsPath)) {
               core.info('No triage results — board is clear');
               return;
             }
-            
-            const results = JSON.parse(fs.readFileSync(path, 'utf8'));
+
+            const results = JSON.parse(fs.readFileSync(resultsPath, 'utf8'));
             if (results.length === 0) {
               core.info('📋 Board is clear — Ralph found no untriaged issues');
               return;
@@ -72,7 +76,23 @@ jobs:
                   issue_number: decision.issueNumber,
                   labels: [decision.label]
                 });
-                
+
+                for (const label of ownerLabelsToRemove(decision.existingLabels, decision.label)) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: decision.issueNumber,
+                      name: label
+                    });
+                  } catch (error) {
+                    if (error.status !== 404) {
+                      throw error;
+                    }
+                    core.info(`Owner label already removed: ${label}`);
+                  }
+                }
+
                 await github.rest.issues.createComment({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
