@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.Queue.Dispatch;
+﻿using Farm.Infrastructure.Services.Queue.Dispatch;
 using FluentAssertions;
 
 namespace Farm.Web.Api.Tests.Dispatch;

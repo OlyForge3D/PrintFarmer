@@ -1,7 +1,4 @@
-extern alias SlicerHost;
-
-using SlicerHost::Farm.Slicer.Host;
-using SlicerHost::Farm.Slicer.Host.Services;
+﻿extern alias SlicerHost;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
@@ -9,6 +6,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using SlicerHost::Farm.Slicer.Host;
+using SlicerHost::Farm.Slicer.Host.Services;
 using Xunit;
 
 namespace Farm.Slicer.Module.Tests.SlicerHost;
