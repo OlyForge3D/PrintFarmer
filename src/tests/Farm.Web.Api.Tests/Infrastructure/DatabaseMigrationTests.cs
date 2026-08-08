@@ -42,7 +42,8 @@ public sealed class DatabaseMigrationTests
         first.AppliedMigrations.Should().Equal(
             "20260730231403_InitialV2",
             "20260806232640_CanonicalizePrintJobPriority",
-            "20260807023655_UsePortableRevisionConcurrency");
+            "20260807023655_UsePortableRevisionConcurrency",
+            "20260808054302_AddNfcDeviceApproval");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -303,7 +304,8 @@ public sealed class DatabaseMigrationTests
         (await ReadAppliedMigrationIdsAsync(connection)).Should().Equal(
             "20260730231403_InitialV2",
             "20260806232640_CanonicalizePrintJobPriority",
-            "20260807023655_UsePortableRevisionConcurrency");
+            "20260807023655_UsePortableRevisionConcurrency",
+            "20260808054302_AddNfcDeviceApproval");
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
 
@@ -643,6 +645,38 @@ public sealed class DatabaseMigrationTests
         _ = coreMigrations.Should().NotBeEmpty();
         _ = slicerMigrations.Should().NotBeEmpty();
         _ = coreMigrations.Should().NotIntersectWith(slicerMigrations);
+
+        string[] expectedCoreMigrations = provider == "postgres"
+            ?
+            [
+                "20260730231346_InitialV2",
+                "20260806230920_CanonicalizePrintJobPriority",
+                "20260807023649_UsePortableRevisionConcurrency",
+                "20260808052051_AddNfcDeviceApproval",
+            ]
+            :
+            [
+                "20260730231359_InitialV2",
+                "20260806230929_CanonicalizePrintJobPriority",
+                "20260807023652_UsePortableRevisionConcurrency",
+                "20260808052059_AddNfcDeviceApproval",
+            ];
+        _ = coreMigrations.Should().Equal(expectedCoreMigrations,
+            $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");
+
+        string[] expectedSlicerMigrations = provider == "postgres"
+            ?
+            [
+                "20260730231413_SlicerInitialV2",
+                "20260807023657_UsePortableRevisionConcurrency",
+            ]
+            :
+            [
+                "20260730231416_SlicerInitialV2",
+                "20260807023659_UsePortableRevisionConcurrency",
+            ];
+        _ = slicerMigrations.Should().Equal(expectedSlicerMigrations,
+            $"the {provider} slicer migration set must apply in the exact recorded order");
     }
 
     private static async Task<SqliteConnection> OpenConnectionAsync()

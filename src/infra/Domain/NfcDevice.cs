@@ -69,6 +69,25 @@ public class NfcDevice
     /// </summary>
     public int? LastScannedSpoolId { get; set; }
 
+    /// <summary>
+    /// Whether an operator has approved this device to authenticate scan/heartbeat traffic.
+    /// Devices are created unapproved (pending) via <c>/heartbeat</c> and must be explicitly
+    /// approved — which issues a device token — before <c>/scan</c> will accept their events.
+    /// </summary>
+    public bool IsApproved { get; set; }
+
+    /// <summary>
+    /// SHA-256 hash (hex) of the device token issued at approval time. The raw token is
+    /// never persisted; it is returned once to the caller of the approval endpoint.
+    /// </summary>
+    [MaxLength(128)]
+    public string? DeviceTokenHash { get; set; }
+
+    /// <summary>
+    /// When the device was approved and its token was issued.
+    /// </summary>
+    public DateTime? ApprovedAt { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime? UpdatedAt { get; set; }

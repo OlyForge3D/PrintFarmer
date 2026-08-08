@@ -94,32 +94,75 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     }
 
     /// <summary>
+    /// Approves a pending NFC device, issuing a fresh device token. The raw token is
+    /// returned exactly once — provision it into the device firmware immediately, since it
+    /// cannot be retrieved again after this response. This mints a durable bearer credential
+    /// that subsequently grants unauthenticated write access via <see cref="ScanEventAsync"/>
+    /// and <see cref="HeartbeatAsync"/>, so it is restricted to farm administrators (same
+    /// gate used for every other credential-issuing/administrative action in this API).
+    /// </summary>
+    [Authorize(Roles = "farm_admin")]
+    [HttpPost("{id:guid}/approve")]
+    [ProducesResponseType(typeof(NfcDeviceApprovalResultDto), 200)]
+    [ProducesResponseType(404)]
+    public async Task<ActionResult<NfcDeviceApprovalResultDto>> ApproveAsync(Guid id, CancellationToken ct)
+    {
+        var result = await nfcDeviceService.ApproveAsync(id, ct);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    /// <summary>
     /// Receives a heartbeat from an NFC device.
-    /// Auto-registers the device if not already known.
+    /// Auto-registers the device as pending/unapproved if not already known — this is a
+    /// claim-only announcement, not a credential, and grants no write access to spool data.
+    /// Once a device has been approved (see <see cref="ApproveAsync"/>), subsequent
+    /// heartbeats for its bound printer must present the issued device token via the
+    /// <c>X-Nfc-Device-Token</c> header or are rejected with 401.
     /// Called periodically by the ESP32 firmware (every 60 seconds).
     /// </summary>
-    [AllowAnonymous] // Public because unprovisioned firmware must announce itself before approval.
+    [AllowAnonymous] // Public because unprovisioned firmware must announce itself before approval; approved devices must still present a valid X-Nfc-Device-Token to update their record.
     [HttpPost("heartbeat")]
     [ProducesResponseType(typeof(NfcDeviceDto), 200)]
     [ProducesResponseType(400)]
-    public async Task<ActionResult<NfcDeviceDto>> HeartbeatAsync([FromBody] NfcDeviceHeartbeatDto dto, CancellationToken ct)
+    [ProducesResponseType(401)]
+    public async Task<ActionResult<NfcDeviceDto>> HeartbeatAsync(
+        [FromBody] NfcDeviceHeartbeatDto dto,
+        [FromHeader(Name = NfcDeviceAuthHeaders.DeviceToken)] string? presentedToken,
+        CancellationToken ct)
     {
-        var device = await nfcDeviceService.ProcessHeartbeatAsync(dto, ct);
+        var (device, unauthorized) = await nfcDeviceService.ProcessHeartbeatAsync(dto, presentedToken, ct);
+        if (unauthorized)
+        {
+            return Unauthorized(new { error = "Invalid or missing device token" });
+        }
+
         return device is null ? BadRequest(new { error = "Invalid printer ID" }) : Ok(device);
     }
 
     /// <summary>
     /// Receives a scan event from an NFC device.
+    /// Requires the device to be approved and to present its issued device token via the
+    /// <c>X-Nfc-Device-Token</c> header; unapproved devices, unknown printer IDs, and
+    /// missing/invalid tokens are all rejected with 401 and no event is recorded.
     /// Called when a tag is scanned by the ESP32 firmware.
     /// </summary>
-    [AllowAnonymous] // Public because approved NFC firmware identifies itself without a user JWT.
+    [AllowAnonymous] // Public route, but requires a valid X-Nfc-Device-Token from an approved device — enforced in the service, not by [Authorize], since firmware carries a device token rather than a user JWT.
     [HttpPost("scan")]
     [ProducesResponseType(typeof(NfcScanHistoryDto), 200)]
     [ProducesResponseType(400)]
-    public async Task<ActionResult<NfcScanHistoryDto>> ScanEventAsync([FromBody] NfcScanEventDto dto, CancellationToken ct)
+    [ProducesResponseType(401)]
+    public async Task<ActionResult<NfcScanHistoryDto>> ScanEventAsync(
+        [FromBody] NfcScanEventDto dto,
+        [FromHeader(Name = NfcDeviceAuthHeaders.DeviceToken)] string? presentedToken,
+        CancellationToken ct)
     {
-        var result = await nfcDeviceService.ProcessScanEventAsync(dto, ct);
-        return result is null ? BadRequest(new { error = "Device not found for printer ID" }) : Ok(result);
+        var (result, unauthorized) = await nfcDeviceService.ProcessScanEventAsync(dto, presentedToken, ct);
+        if (unauthorized)
+        {
+            return Unauthorized(new { error = "Device not approved or invalid device token" });
+        }
+
+        return result is null ? BadRequest(new { error = "Invalid printer ID" }) : Ok(result);
     }
 
     /// <summary>

@@ -3,6 +3,19 @@
 namespace Farm.Infrastructure;
 
 /// <summary>
+/// HTTP header names used to authenticate NFC device requests.
+/// </summary>
+public static class NfcDeviceAuthHeaders
+{
+    /// <summary>
+    /// Header carrying the raw device token issued at approval time
+    /// (<see cref="NfcDeviceApprovalResultDto"/>). Required on <c>/scan</c> for approved
+    /// devices, and on <c>/heartbeat</c> once a device has been approved.
+    /// </summary>
+    public const string DeviceToken = "X-Nfc-Device-Token";
+}
+
+/// <summary>
 /// DTO for reading NFC device data.
 /// </summary>
 public class NfcDeviceDto
@@ -33,9 +46,30 @@ public class NfcDeviceDto
 
     public int? LastScannedSpoolId { get; set; }
 
+    /// <summary>
+    /// Whether an operator has approved this device. Unapproved (pending) devices were
+    /// created by an unauthenticated heartbeat announcement and cannot authenticate scans
+    /// until approved via <c>POST /api/nfc-devices/{id}/approve</c>.
+    /// </summary>
+    public bool IsApproved { get; set; }
+
+    public DateTime? ApprovedAt { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>
+/// Returned once by the approval endpoint. The raw <see cref="DeviceToken"/> is never
+/// persisted or retrievable again — the caller must provision it into the device firmware
+/// immediately and store it securely.
+/// </summary>
+public class NfcDeviceApprovalResultDto
+{
+    public Guid DeviceId { get; set; } = Guid.Empty;
+
+    public string DeviceToken { get; set; } = string.Empty;
 }
 
 /// <summary>
