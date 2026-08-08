@@ -5091,9 +5091,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("PowerMonitorId");
-
                     b.HasIndex("RecordedAt");
+
+                    b.HasIndex("PowerMonitorId", "RecordedAt");
 
                     b.ToTable("PowerReadings");
                 });
