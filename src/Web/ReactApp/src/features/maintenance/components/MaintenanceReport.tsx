@@ -2,8 +2,6 @@ import React, { useRef } from 'react';
 import { Button } from '@/common/components/ui';
 import { useMaintenanceTrends } from '../hooks/useMaintenanceTrends';
 import { CSVLink } from 'react-csv';
-import jsPDF from 'jspdf';
-import 'jspdf-autotable';
 
 interface MaintenanceReportRow {
   date: string;
@@ -30,7 +28,8 @@ export const MaintenanceReport: React.FC = () => {
     { label: 'Cost', key: 'cost' },
   ];
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
+    const [{ jsPDF }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
     const doc = new jsPDF();
     doc.text('Maintenance Report', 14, 16);
     // @ts-expect-error jspdf-autotable adds autoTable to jsPDF prototype
