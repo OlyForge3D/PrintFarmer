@@ -455,6 +455,23 @@ final class ServiceContainer: @unchecked Sendable {
         }
     }
 
+    /// Resolved capability snapshot used by demo (mock) services.
+    ///
+    /// Mirrors ``ResolvedSystemCapabilities/defaults`` except for
+    /// `printedPartsInventoryEnabled`, which the demo fleet enables so the
+    /// full #714 harvest flow is reachable and demonstrable end-to-end
+    /// without a real server's SKU/output-mapping configuration. #1002
+    /// correctly changed the *production* default to `false` (harvest is
+    /// gated until an admin configures part SKUs), but the demo/UI-test
+    /// bootstrap must keep showcasing harvest — see `HarvestUITests`,
+    /// `JobDetailIPadNavigationUITests`, and `TaskActionRoutingUITests`,
+    /// which all depend on this flag being enabled here (issue #1344).
+    private static let demoCapabilitiesDefaults: ResolvedSystemCapabilities = {
+        var defaults = ResolvedSystemCapabilities.defaults
+        defaults.printedPartsInventoryEnabled = true
+        return defaults
+    }()
+
     /// Creates a ServiceContainer wired with demo (mock) services.
     ///
     /// A production `serverRegistry` may be supplied so that persisted-demo mode
@@ -486,7 +503,7 @@ final class ServiceContainer: @unchecked Sendable {
             predictiveService: DemoPredictiveService(),
             dispatchService: DemoDispatchService(),
             failureDetectionService: DemoFailureDetectionService(),
-            capabilitiesService: StubSystemCapabilitiesService(),
+            capabilitiesService: StubSystemCapabilitiesService(resolved: demoCapabilitiesDefaults),
             serverRegistry: serverRegistry,
             farmSnapshotAuthority: farmSnapshotAuthority,
             farmSnapshotStore: farmSnapshotStore,
@@ -541,7 +558,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.predictiveService = DemoPredictiveService()
         self.dispatchService = DemoDispatchService()
         self.failureDetectionService = DemoFailureDetectionService()
-        self.capabilitiesService = StubSystemCapabilitiesService()
+        self.capabilitiesService = StubSystemCapabilitiesService(resolved: Self.demoCapabilitiesDefaults)
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
