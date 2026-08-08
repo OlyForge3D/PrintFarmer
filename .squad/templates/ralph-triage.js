@@ -501,6 +501,36 @@ function isUntriagedIssue(issue, memberLabels) {
   );
 }
 
+function triageIssues(issues, rules, modules, roster, openIssueCounts) {
+  const results = [];
+  for (const issue of issues) {
+    const decision = triageIssue(
+      {
+        number: issue.number,
+        title: issue.title || '',
+        body: issue.body || '',
+        labels: issue.labels || [],
+      },
+      rules,
+      modules,
+      roster,
+      openIssueCounts,
+    );
+
+    if (!decision) continue;
+    const label = memberLabel(decision.agent.name);
+    openIssueCounts[label] = (openIssueCounts[label] || 0) + 1;
+    results.push({
+      issueNumber: issue.number,
+      assignTo: decision.agent.name,
+      label,
+      reason: decision.reason,
+      source: decision.source,
+    });
+  }
+  return results;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const token = process.env.GITHUB_TOKEN;
@@ -523,30 +553,7 @@ async function main() {
   const memberLabels = roster.map((member) => member.label);
   const untriaged = openIssues.filter((issue) => isUntriagedIssue(issue, memberLabels));
 
-  const results = [];
-  for (const issue of untriaged) {
-    const decision = triageIssue(
-      {
-        number: issue.number,
-        title: issue.title || '',
-        body: issue.body || '',
-        labels: issue.labels || [],
-      },
-      rules,
-      modules,
-      roster,
-      openIssueCounts,
-    );
-
-    if (!decision) continue;
-    results.push({
-      issueNumber: issue.number,
-      assignTo: decision.agent.name,
-      label: decision.agent.label,
-      reason: decision.reason,
-      source: decision.source,
-    });
-  }
+  const results = triageIssues(untriaged, rules, modules, roster, openIssueCounts);
 
   const outputPath = path.resolve(process.cwd(), args.output);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
@@ -567,4 +574,5 @@ module.exports = {
   isUntriagedIssue,
   parseRoster,
   triageIssue,
+  triageIssues,
 };

@@ -4,10 +4,6 @@ on:
   issues:
     types: [labeled]
 
-concurrency:
-  group: squad-triage
-  cancel-in-progress: false
-
 permissions:
   issues: write
   contents: read
@@ -15,6 +11,9 @@ permissions:
 jobs:
   triage:
     if: github.event.label.name == 'squad'
+    concurrency:
+      group: squad-triage-${{ github.event.issue.number }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

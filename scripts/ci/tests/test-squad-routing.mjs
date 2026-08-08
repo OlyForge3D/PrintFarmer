@@ -216,6 +216,30 @@ test('Ralph uses the injected open-issue counts for domain load balancing', () =
   assert.equal(decision.source, 'role-keyword');
 });
 
+test('Ralph reserves load across a multi-issue triage batch', () => {
+  const counts = {
+    'squad:ripley': 0,
+    'squad:drake': 0,
+  };
+  const decisions = ralph.triageIssues(
+    [
+      { number: 1, title: 'fix: React component CSS overflow', body: '' },
+      { number: 2, title: 'fix: React dialog layout overflow', body: '' },
+    ],
+    [],
+    [],
+    members,
+    counts,
+  );
+
+  assert.deepEqual(
+    decisions.map((decision) => decision.label),
+    ['squad:drake', 'squad:ripley'],
+  );
+  assert.equal(counts['squad:drake'], 1);
+  assert.equal(counts['squad:ripley'], 1);
+});
+
 test('live workflows inject counts and clean up prior owner labels', () => {
   const triageWorkflow = readFileSync(
     path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-triage.yml'),
@@ -227,7 +251,10 @@ test('live workflows inject counts and clean up prior owner labels', () => {
     triageWorkflow,
     /ownerLabelsToRemove\(issueBeforeAssignment\.labels, assignLabel\)/,
   );
-  assert.match(triageWorkflow, /group: squad-triage/);
+  assert.match(
+    triageWorkflow,
+    /group: squad-triage-\$\{\{ github\.event\.issue\.number \}\}/,
+  );
   assert.match(
     triageWorkflow,
     /canonicalOwnerLabels\(issueBeforeAssignment\.labels\)/,
@@ -242,7 +269,15 @@ test('live workflows inject counts and clean up prior owner labels', () => {
     heartbeatWorkflow,
     /ownerLabelsToRemove\(currentIssue\.labels, decision\.label\)/,
   );
-  assert.match(heartbeatWorkflow, /group: squad-triage/);
+  assert.match(
+    heartbeatWorkflow,
+    /group: squad-triage-\$\{\{ matrix\.decision\.issueNumber \}\}/,
+  );
+  assert.match(
+    heartbeatWorkflow,
+    /decision: \$\{\{ fromJSON\(needs\.heartbeat\.outputs\.decisions\) \}\}/,
+  );
+  assert.match(heartbeatWorkflow, /TRIAGE_DECISION: \$\{\{ toJSON\(matrix\.decision\) \}\}/);
   assert.match(
     heartbeatWorkflow,
     /canonicalOwnerLabels\(currentIssue\.labels\)/,
