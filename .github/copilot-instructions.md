@@ -259,6 +259,49 @@ reviewer's verdict.
 > be worse than no gate: false assurance. The owner chose the honest option — keep the
 > controls that are real, and say plainly that independence is not one of them.
 
+#### What keeps outsiders out — and why author authentication is mandatory
+
+**Repository permissions are the control that prevents an outsider merging.** Only
+`jpapiez` has write access to `OlyForge3D/PrintFarmer` and `OlyForge3D/PrintFarmerDesktop`.
+The verdict gate is **not** that control and must never be described as if it were. Its job
+is to establish that a review actually happened at the current head before Ralph merges.
+
+But both repositories are **public**, and on a public repository **any GitHub user can
+comment on a pull request** — no write access, no collaborator status, no permission at
+all. Because Ralph merges autonomously using the *owner's* write access, a forgeable
+record would effectively lend the owner's privileges to whoever forged it. The attack
+chain that closes:
+
+1. An outsider forks the repository and opens a PR containing malicious code.
+2. The outsider posts a comment in the canonical record format: `APPROVE` at the PR's
+   current head SHA.
+3. Ralph sees "record present at current head, CI green" and merges it, unattended,
+   into `development`.
+
+That is an unauthenticated path from a stranger to the default branch. Author
+authentication is therefore mandatory, not optional:
+
+- **Write or better, verified live.** Every record's author is resolved through
+  `GET /repos/{owner}/{repo}/collaborators/{login}/permission` at evaluation time.
+  Only `admin`, `maintain`, `write`/`push` are accepted. `read` — which is what a
+  non-collaborator returns on a public repository — and `triage` are rejected.
+- **`author_association` is a pre-filter only.** `NONE`, `FIRST_TIME_CONTRIBUTOR`,
+  `FIRST_TIMER`, `CONTRIBUTOR` and `MANNEQUIN` are rejected outright, but a permitted
+  association is never sufficient on its own, because its meaning varies with
+  organisation configuration.
+- **Fail closed.** A failed, rate-limited, or unexpectedly shaped permission lookup
+  yields `unresolved`, which is not write access. An unverifiable author is never
+  acceptable, and the block reason says `no authenticated review` so the failure is not
+  mistaken for "nobody reviewed".
+- **Identity comes from the account, never the text.** The owner-override path requires
+  the API-supplied comment author to *be* an administrator whose login matches the named
+  reviewer. A comment merely claiming to be from `jpapiez` proves nothing.
+- **Fork PRs get no agent record at all.** The gate posts
+  `BLOCKED @ <sha12>: fork PR needs a repository administrator` and stops before reading
+  any record, so a fork PR can only ever pass through a real administrator approval.
+- **No bot identity is allowlisted.** Allowlisting one would re-create the bot-hop
+  laundering pattern rejected above.
+
 Reviewers record reviews as PR comments. `.github/workflows/squad-review-verdict.yml`
 re-evaluates on every PR comment, review, and push, and publishes the
 `squad/pre-pr-verdict` commit status on the PR's live head SHA. The canonical
@@ -292,13 +335,10 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   record — what the gate counts is what a human reading the thread can see, which
   is what makes the audit trail meaningful. Each field must appear exactly once in
   what remains.
-- The commenting account must hold real repository write access, confirmed
-  through the collaborator permission API. GitHub's `author_association` is not
-  a permission level — it reports `MEMBER` for any organisation member and
-  `COLLABORATOR` for read-only collaborators — so it is not sufficient on its
-  own. This keeps drive-by comments out; it is not an independence claim, since
-  any write-capable account can record the whole panel and could equally merge
-  directly.
+- The commenting account must be authenticated as holding real repository write access,
+  resolved live through the collaborator permission API. Both repositories are public,
+  so anyone can comment on a PR; `author_association` is a pre-filter only and is never
+  sufficient on its own. Lookups fail closed. See "What keeps outsiders out" above.
 - A repository administrator satisfies the gate unconditionally, either by
   approving through GitHub's native review UI at the current head, or by posting
   a record whose `Squad-Reviewer` is their own GitHub login. The owner

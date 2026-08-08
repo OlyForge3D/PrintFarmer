@@ -76,6 +76,13 @@ owner attesting to the owner's own work. It provides no separation of duties.
 Merge on it if the owner's policy says so, but never report it as independent
 approval. Only `APPROVED` reflects an administrator authorising directly.
 
+⚠️ **The gate is not what keeps outsiders out — repository permissions are.**
+Both repositories are public, so anyone can comment on a PR. Because Ralph merges
+with the owner's write access, the gate authenticates every record's author
+against the live collaborator permission API and fails closed. Never relax that,
+and never treat a `BLOCKED … no authenticated review` as "nobody has reviewed
+yet" — it means a record existed and its author could not be verified.
+
 When Ralph already has a recorded reviewed SHA and the PR head may have moved,
 add `--expected-head <recorded-sha>`. This distinguishes a superseded record
 or rejection from a PR that never had squad evidence.

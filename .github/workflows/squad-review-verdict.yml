@@ -65,13 +65,21 @@ name: Record squad review (self-attested)
 #     format is therefore not a binding record — what the gate counts is what a
 #     human reading the thread can see. Each field must appear exactly once in
 #     the remaining text.
-#   * The commenting account must hold real repository write access. GitHub's
-#     `author_association` is not a permission level — it reports MEMBER for any
-#     organisation member and COLLABORATOR for read-only collaborators — so
-#     permission is confirmed through the collaborator permission API. This is an
-#     integrity control (keep drive-by comments out), not an independence claim:
-#     any write-capable account can record the whole panel, and could equally
-#     merge directly.
+#   * The commenting account must be AUTHENTICATED as holding repository write
+#     access. Both repositories are PUBLIC, so any GitHub user can comment on a
+#     PR with no permission at all, and Ralph merges autonomously using the
+#     OWNER's write access — a forgeable record would lend those privileges to
+#     whoever forged it. Permission is resolved live through the collaborator
+#     permission API (`admin`/`maintain`/`write` only; `read`, which is what a
+#     non-collaborator returns on a public repo, and `triage` are rejected).
+#     `author_association` is a cheap pre-filter, never the authorisation.
+#     Lookups FAIL CLOSED: an error, rate limit, or unexpected shape rejects the
+#     record. Identity always comes from the API-supplied account, never from
+#     the comment text. No bot identity is allowlisted — that would re-create
+#     the bot-hop laundering rejected above.
+#   * FORK PRs receive no agent record at all: the gate posts BLOCKED and stops
+#     before reading any record, so a fork PR can pass only through a real
+#     administrator approval.
 #
 # REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
 # Changes: One Reviewer": documentation-only PRs need one record, everything
@@ -178,38 +186,54 @@ jobs:
               });
 
             if (pull.head.repo?.full_name !== repository) {
+              // Fork PRs never receive a passing squad status. A fork PR can be
+              // opened by anyone on a public repository, so a record on one
+              // could only ever be self-asserted by an unauthenticated party.
               await postStatus(
                 'failure',
-                `BLOCKED @ ${headSha.slice(0, 12)}: cross-repository PR needs human review`,
+                `BLOCKED @ ${headSha.slice(0, 12)}: fork PR needs a repository administrator`,
               );
-              core.warning('Cross-repository PR: agent verdicts are not accepted.');
+              core.warning(
+                'Fork pull request: agent review records are not accepted. ' +
+                'A repository administrator must review and approve directly.',
+              );
               return;
             }
 
+            // Author authentication. Both repositories are PUBLIC, so any GitHub
+            // user can comment on a PR with no permission at all. Ralph merges
+            // autonomously using the owner's write access, so a forgeable record
+            // would lend the owner's privileges to whoever forged it. Resolve the
+            // live collaborator permission for every commenter and fail closed on
+            // any error, rate limit, or unexpected shape.
             const permissionCache = new Map();
             async function permissionOf(login) {
-              if (!login) return 'none';
+              if (typeof login !== 'string' || login === '') return 'unresolved';
               const key = login.toLowerCase();
               if (permissionCache.has(key)) return permissionCache.get(key);
-              let permission = 'none';
+              let permission = 'unresolved';
               try {
                 const { data } =
                   await github.rest.repos.getCollaboratorPermissionLevel({
                     owner, repo, username: login,
                   });
-                permission = data.permission ?? 'none';
+                permission = typeof data?.permission === 'string'
+                  ? data.permission
+                  : 'unresolved';
               } catch (error) {
-                core.debug(`Permission lookup failed for ${login}: ${error.message}`);
+                core.warning(
+                  `Could not verify repository permission for ${login}: ` +
+                  `${error.message}. Failing closed; any record from this ` +
+                  'account is rejected.',
+                );
               }
               permissionCache.set(key, permission);
               return permission;
             }
-            const isAdmin = async (login) => await permissionOf(login) === 'admin';
-            // author_association is not a permission level: GitHub reports
-            // MEMBER for any organisation member and COLLABORATOR for read-only
-            // collaborators. Verdicts require real write access.
+            const isAdmin = async (login) =>
+              gate.hasAdminAccess(await permissionOf(login));
             const canWrite = async (login) =>
-              ['admin', 'maintain', 'write', 'push'].includes(await permissionOf(login));
+              gate.hasWriteAccess(await permissionOf(login));
 
             const [labelData, rawComments, rawReviews, fileData] = await Promise.all([
               github.paginate(github.rest.issues.listLabelsForRepo,

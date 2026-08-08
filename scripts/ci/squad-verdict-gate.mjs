@@ -32,8 +32,44 @@ export const verdictContext = 'squad/pre-pr-verdict';
  */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 
-/** Comment authors we accept a verdict from at all. */
+/**
+ * Comment `author_association` values accepted as a cheap PRE-FILTER only.
+ *
+ * ⚠️ This is NOT the authorisation check. Both repositories are public, so ANY
+ * GitHub user can comment on a pull request without any permission at all, and
+ * `author_association` varies with organisation configuration. The authoritative
+ * check is `hasWriteAccess` below, applied to the live collaborator-permission
+ * API result. Never accept a record on association alone.
+ */
 const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+/**
+ * Repository permission levels that may record a review.
+ *
+ * The authoritative author-authentication check. Ralph merges autonomously
+ * using the OWNER's write access, so a forgeable record would effectively lend
+ * the owner's privileges to whoever forged it — an unauthenticated path from a
+ * stranger to `development`. Everything below write is rejected, including
+ * `read` (which is what a non-collaborator returns on a public repository) and
+ * `triage`.
+ *
+ * FAILS CLOSED by construction: an unresolved lookup, a rate-limited call, an
+ * unexpected shape, `undefined`, or any unrecognised string all return false.
+ *
+ * No bot identity is allowlisted. Allowlisting one would re-create the
+ * bot-hop laundering pattern rejected on issue #1310: a workflow dispatched by
+ * the owner posting as `github-actions[bot]` adds no judgement, it only makes
+ * the metadata imply someone else reviewed.
+ */
+export function hasWriteAccess(permission) {
+  return permission === 'admin' || permission === 'maintain' ||
+    permission === 'write' || permission === 'push';
+}
+
+/** Repository permission level required for the owner-override path. */
+export function hasAdminAccess(permission) {
+  return permission === 'admin';
+}
 
 /**
  * Sentinel that must appear in a verdict comment. Requiring it stops prose that
@@ -251,9 +287,17 @@ export function collectVerdicts(comments, headSha) {
   const head = String(headSha ?? '').toLowerCase();
   const current = new Map();
   const staleLatest = new Map();
+  const unauthenticated = [];
   for (const comment of comments ?? []) {
     const record = parseVerdictComment(comment);
-    if (!record || !record.trusted) {
+    if (!record) {
+      continue;
+    }
+    if (!record.trusted) {
+      // Kept and reported rather than silently dropped: "no review recorded" is
+      // a misleading failure message when a record existed but its author could
+      // not be authenticated.
+      unauthenticated.push(record);
       continue;
     }
     const pool = record.headSha === head ? current : staleLatest;
@@ -267,7 +311,7 @@ export function collectVerdicts(comments, headSha) {
   }
   const stale = [...staleLatest.values()]
     .filter((record) => !current.has(record.reviewer));
-  return { current, stale };
+  return { current, stale, unauthenticated };
 }
 
 function isProse(path) {
@@ -405,7 +449,16 @@ export function evaluateGate({
     };
   }
 
-  const { current, stale } = collectVerdicts(comments, head);
+  const { current, stale, unauthenticated } = collectVerdicts(comments, head);
+  if (unauthenticated.length > 0) {
+    notes.push(
+      `Rejected ${unauthenticated.length} record(s) whose author could not be ` +
+      'authenticated with repository write access: ' +
+      `${[...new Set(unauthenticated.map((r) => r.commenter || '(unknown)'))].join(', ')}. ` +
+      'Both repositories are public, so anyone can comment; only verified ' +
+      'write-access authors count.',
+    );
+  }
 
   // 2. Owner override via record comment: an administrator who names their own
   //    GitHub login as the reviewer is speaking as the owner rather than as an
@@ -525,7 +578,10 @@ export function evaluateGate({
       ? ` (stale at ${stale.map((r) => `${r.reviewer}@${shortSha(r.headSha)}`).join(', ')})`
       : '';
     const detail = approvals.length === 0 && stale.length === 0
-      ? `no review recorded for ${shortSha(head)}`
+      ? (unauthenticated.length > 0
+        ? `no authenticated review for ${shortSha(head)} ` +
+          `(${unauthenticated.length} unauthenticated)`
+        : `no review recorded for ${shortSha(head)}`)
       : `have ${approvals.length}/${requiredCount}` +
         (missingPanel.length > 0 ? `, missing ${missingPanel.join('+')}` : '') +
         staleNote;

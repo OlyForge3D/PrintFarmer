@@ -7,6 +7,8 @@ import {
   classifyChangeScope,
   collectVerdicts,
   evaluateGate,
+  hasAdminAccess,
+  hasWriteAccess,
   normalizeMember,
   parseVerdictComment,
   resolveAuthorMembers,
@@ -149,6 +151,75 @@ test('drops verdicts from accounts without repository write access', () => {
   });
   assert.equal(parseVerdictComment(readOnlyMember).trusted, false);
   assert.equal(collectVerdicts([readOnlyMember], headSha).current.size, 0);
+});
+
+test('only write or better may record a review, and lookups fail closed', () => {
+  // Both repositories are public: any GitHub user can comment on a PR with no
+  // permission at all, and a non-collaborator resolves to `read`.
+  for (const permission of ['admin', 'maintain', 'write', 'push']) {
+    assert.equal(hasWriteAccess(permission), true, permission);
+  }
+  for (const permission of [
+    'read', 'triage', 'none', '', 'ADMIN', 'Write', 'unresolved',
+    undefined, null, 0, {}, [], NaN, true,
+  ]) {
+    assert.equal(hasWriteAccess(permission), false, String(permission));
+  }
+  // The owner override needs admin specifically, not merely write.
+  assert.equal(hasAdminAccess('admin'), true);
+  for (const permission of ['maintain', 'write', 'push', 'read', 'unresolved', undefined]) {
+    assert.equal(hasAdminAccess(permission), false, String(permission));
+  }
+});
+
+test('an outsider on a public repo cannot forge a review record', () => {
+  // The attack this closes: a stranger opens a PR, posts a canonical APPROVE
+  // comment at the current head, and Ralph merges it unattended using the
+  // owner's write access.
+  const outsiders = ['bishop', 'hicks', 'vasquez'].map((member) =>
+    comment(member, 'APPROVE', headSha, {
+      user: { login: 'drive-by-stranger' },
+      author_association: 'NONE',
+      // Models the live permission lookup returning `read`, which is what a
+      // non-collaborator resolves to on a public repository.
+      squadWriteAccess: hasWriteAccess('read'),
+    }));
+  const result = gate({ comments: outsiders });
+  assert.equal(result.state, 'failure');
+  assert.match(result.description, /^BLOCKED @ /);
+  assert.match(result.description, /no authenticated review/);
+  assert.ok(result.notes.some((note) => note.includes('could not be authenticated')));
+});
+
+test('an unresolvable permission lookup fails closed rather than open', () => {
+  const unresolved = comment('bishop', 'APPROVE', headSha, {
+    user: { login: 'rate-limited-user' },
+    // Models the workflow's catch path: the lookup threw or returned an
+    // unexpected shape, so no write access could be established.
+    squadWriteAccess: hasWriteAccess('unresolved'),
+  });
+  const { current, unauthenticated } = collectVerdicts([unresolved], headSha);
+  assert.equal(current.size, 0);
+  assert.equal(unauthenticated.length, 1);
+  assert.equal(gate({
+    changedPaths: ['docs/ARCHITECTURE.md'], comments: [unresolved],
+  }).state, 'failure');
+});
+
+test('identity comes from the account, never from the comment text', () => {
+  // A comment merely *claiming* to be the owner is not the owner. The override
+  // flag is set by the workflow from the API-supplied login plus an admin
+  // permission lookup, so text alone can never trigger it.
+  const impostor = comment('jpapiez', 'APPROVE', headSha, {
+    user: { login: 'not-jpapiez' },
+    author_association: 'NONE',
+    squadWriteAccess: hasWriteAccess('read'),
+  });
+  const parsed = parseVerdictComment(impostor);
+  assert.equal(parsed.commenter, 'not-jpapiez');
+  assert.equal(parsed.trusted, false);
+  assert.equal(parsed.isSelfDeclaredAdmin, false);
+  assert.equal(gate({ comments: [impostor] }).state, 'failure');
 });
 
 test('drops verdicts from untrusted commenters', () => {
@@ -415,7 +486,11 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /persist-credentials: false/);
   assert.match(workflow, /squad-verdict-gate\.mjs/);
   assert.match(workflow, /getCollaboratorPermissionLevel/);
+  assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
+  assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /squadWriteAccess: await canWrite\(login\)/);
+  // Fork PRs must never receive a passing squad status.
+  assert.match(workflow, /fork PR needs a repository administrator/);
   assert.match(workflow, /types: \[created, edited, deleted\]/);
   assert.match(
     workflow,
