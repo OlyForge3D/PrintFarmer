@@ -4,6 +4,10 @@ on:
   issues:
     types: [labeled]
 
+concurrency:
+  group: squad-triage
+  cancel-in-progress: false
+
 permissions:
   issues: write
   contents: read
@@ -22,6 +26,7 @@ jobs:
             const fs = require('fs');
             const path = require('path');
             const {
+              canonicalOwnerLabels,
               countOpenSquadIssuesByMember,
               hasWord,
               isRosterExcluded,
@@ -31,7 +36,7 @@ jobs:
             } = require(
               path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
             );
-            const issue = context.payload.issue;
+            let issue = context.payload.issue;
 
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
@@ -113,6 +118,16 @@ jobs:
               return;
             }
 
+            ({ data: issue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number
+            }));
+            if (canonicalOwnerLabels(issue.labels).length > 0) {
+              core.info(`Issue #${issue.number} already has an owner — skipping triage`);
+              return;
+            }
+
             // Build triage context
             const memberList = members.map(m =>
               `- **${m.name}** (${m.role}) → label: \`${memberLabel(m.name)}\``
@@ -185,6 +200,16 @@ jobs:
             const isCopilot = assignedMember.name === '@copilot';
             const assignLabel = isCopilot ? 'squad:copilot' : memberLabel(assignedMember.name);
 
+            const { data: issueBeforeAssignment } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number
+            });
+            if (canonicalOwnerLabels(issueBeforeAssignment.labels).length > 0) {
+              core.info(`Issue #${issue.number} was assigned while routing — skipping`);
+              return;
+            }
+
             // Add the member-specific label
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
@@ -193,7 +218,7 @@ jobs:
               labels: [assignLabel]
             });
 
-            for (const label of ownerLabelsToRemove(issue.labels, assignLabel)) {
+            for (const label of ownerLabelsToRemove(issueBeforeAssignment.labels, assignLabel)) {
               try {
                 await github.rest.issues.removeLabel({
                   owner: context.repo.owner,

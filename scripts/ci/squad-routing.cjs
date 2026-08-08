@@ -64,6 +64,15 @@ function canonicalMemberLabel(label) {
 }
 
 /**
+ * Return unique canonical owner labels.
+ */
+function canonicalOwnerLabels(labels) {
+  return [...new Set(
+    (labels || []).map(canonicalMemberLabel).filter(Boolean),
+  )].sort();
+}
+
+/**
  * Count current open issues per canonical roster label.
  *
  * Duplicate emoji/plain labels on one issue collapse to one owner count.
@@ -83,11 +92,8 @@ function countOpenSquadIssuesByMember(issues, members) {
     ) {
       continue;
     }
-    const owners = new Set(
-      (issue?.labels || [])
-        .map(canonicalMemberLabel)
-        .filter((label) => label && rosterLabels.has(label)),
-    );
+    const owners = canonicalOwnerLabels(issue?.labels)
+      .filter((label) => rosterLabels.has(label));
     for (const owner of owners) {
       counts[owner] += 1;
     }
@@ -585,6 +591,7 @@ function classifySquadLabels(existingNames, rosterLabels) {
 module.exports = {
   DOMAINS,
   canonicalMemberLabel,
+  canonicalOwnerLabels,
   classifySquadLabels,
   countOpenSquadIssuesByMember,
   hasWord,

@@ -545,9 +545,6 @@ async function main() {
       label: decision.agent.label,
       reason: decision.reason,
       source: decision.source,
-      existingLabels: (issue.labels || [])
-        .map((label) => (typeof label === 'string' ? label : label?.name))
-        .filter(Boolean),
     });
   }
 

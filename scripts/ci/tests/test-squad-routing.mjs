@@ -9,6 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const {
   canonicalMemberLabel,
+  canonicalOwnerLabels,
   classifySquadLabels,
   countOpenSquadIssuesByMember,
   hasWord,
@@ -222,7 +223,16 @@ test('live workflows inject counts and clean up prior owner labels', () => {
   );
   assert.match(triageWorkflow, /countOpenSquadIssuesByMember\(openIssues, members\)/);
   assert.match(triageWorkflow, /lead,\s+openIssueCounts\s+\)/);
-  assert.match(triageWorkflow, /ownerLabelsToRemove\(issue\.labels, assignLabel\)/);
+  assert.match(
+    triageWorkflow,
+    /ownerLabelsToRemove\(issueBeforeAssignment\.labels, assignLabel\)/,
+  );
+  assert.match(triageWorkflow, /group: squad-triage/);
+  assert.match(
+    triageWorkflow,
+    /canonicalOwnerLabels\(issueBeforeAssignment\.labels\)/,
+  );
+  assert.match(triageWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
 
   const heartbeatWorkflow = readFileSync(
     path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-heartbeat.yml'),
@@ -230,8 +240,19 @@ test('live workflows inject counts and clean up prior owner labels', () => {
   );
   assert.match(
     heartbeatWorkflow,
-    /ownerLabelsToRemove\(decision\.existingLabels, decision\.label\)/,
+    /ownerLabelsToRemove\(currentIssue\.labels, decision\.label\)/,
   );
+  assert.match(heartbeatWorkflow, /group: squad-triage/);
+  assert.match(
+    heartbeatWorkflow,
+    /canonicalOwnerLabels\(currentIssue\.labels\)/,
+  );
+
+  const labelSyncWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'sync-squad-labels.yml'),
+    'utf8',
+  );
+  assert.match(labelSyncWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
 });
 
 test('malformed issues do not throw', () => {
@@ -666,6 +687,15 @@ test('owner labels canonicalize across recasts and emoji spellings', () => {
   assert.equal(canonicalMemberLabel('squad:ripley'), 'squad:ripley');
   assert.equal(canonicalMemberLabel('squad'), undefined);
   assert.equal(canonicalMemberLabel('area:frontend'), undefined);
+  assert.deepEqual(
+    canonicalOwnerLabels([
+      'squad',
+      'squad:⚛️ Ripley',
+      'squad:ripley',
+      'squad:drake',
+    ]),
+    ['squad:drake', 'squad:ripley'],
+  );
 });
 
 test('open squad-owned issue counts normalize labels and ignore exclusions', () => {
