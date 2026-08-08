@@ -183,13 +183,16 @@ public class ObicoServerController : ControllerBase
         string resolvedUrl = dto.Url ?? server.Url;
         bool resolvedEnabled = dto.IsEnabled ?? server.IsEnabled;
 
-        // Revalidate connectivity whenever the resulting server will be enabled AND
-        // its destination (Url) or credentials (ApiKey) are changing. This closes the
-        // gap where an already-enabled server could have its Url swapped to a blocked
-        // destination (e.g. loopback/link-local) without ever being re-probed through
-        // the egress guard — the enable-transition-only check previously missed this.
+        // Revalidate connectivity whenever the resulting server will be enabled AND either
+        // (a) it is transitioning from disabled to enabled, or (b) its destination (Url) or
+        // credentials (ApiKey) are changing. (a) catches a disabled server (e.g. stale,
+        // seeded, or imported with a blocked/invalid destination) being enabled unchanged;
+        // (b) catches an already-enabled server having its Url/ApiKey swapped to a blocked
+        // destination without ever being re-probed through the egress guard. Neither check
+        // alone is sufficient — both gaps allowed a forbidden target to be persisted.
+        bool enablingTransition = resolvedEnabled && !server.IsEnabled;
         bool destinationChanging = urlChanged || apiKeyChanged;
-        if (resolvedEnabled && destinationChanging)
+        if (resolvedEnabled && (enablingTransition || destinationChanging))
         {
             ObicoServer probeServer = new()
             {

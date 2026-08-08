@@ -355,6 +355,49 @@ public class ObicoServerControllerTests
         persisted.ApiKey.Should().Be("original-key", "the API key must not be rotated when revalidation fails");
     }
 
+    [Fact]
+    public async Task UpdateServerAsync_WhenEnablingDisabledServerWithUnchangedBlockedDestination_RejectsUpdateWithoutOutboundCallOrMutation()
+    {
+        int callCount = 0;
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                callCount++;
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            },
+            egressGuard: DenyingEgressGuard("Destination resolves to a loopback, link-local, or multicast address"));
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Disabled Obico With Blocked Url",
+            Url = "http://127.0.0.1:3333",
+            ApiKey = "original-key",
+            IsEnabled = false,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        // Neither Url nor ApiKey is changing — only the disabled -> enabled transition.
+        UpdateObicoServerDto dto = new()
+        {
+            IsEnabled = true,
+        };
+
+        ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(server.Id, dto, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        string message = Assert.IsType<string>(badRequest.Value);
+        message.Should().Contain("loopback");
+        callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
+
+        ObicoServer persisted = await dbContext.ObicoServers.SingleAsync(s => s.Id == server.Id);
+        persisted.IsEnabled.Should().BeFalse("the server must not be enabled when connectivity revalidation fails");
+    }
+
     private static IEgressGuard DenyingEgressGuard(string reason)
     {
         Mock<IEgressGuard> egressGuard = new(MockBehavior.Strict);
