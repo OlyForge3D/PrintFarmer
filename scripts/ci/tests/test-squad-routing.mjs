@@ -290,6 +290,88 @@ test('live workflows inject counts and clean up prior owner labels', () => {
   assert.match(labelSyncWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
 });
 
+test('squad-issue-assign.yml refuses excluded labels but keeps retired ones falling through', () => {
+  // Issue #1285: squad-issue-assign.yml resolves squad:* labels applied
+  // manually, and unlike squad-triage.yml / sync-squad-labels.yml it must
+  // *still* resolve a roster row for an excluded member (Scribe, Ralph) — it
+  // just must refuse to turn that into a work assignment. Reusing
+  // isRosterExcluded() keeps that decision on the same shared source of
+  // truth as the other three call sites instead of a second comparison rule.
+  const assignWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-issue-assign.yml'),
+    'utf8',
+  );
+  assert.match(
+    assignWorkflow,
+    /const \{ slugify, isRosterExcluded \} = require\(/,
+  );
+  assert.match(assignWorkflow, /EXCLUDED_SLUGS = \['scribe', 'ralph'\]/);
+  assert.match(
+    assignWorkflow,
+    /isRosterExcluded\(cells\[0\], EXCLUDED_SLUGS\)/,
+  );
+  // The refusal path must exist and must return before the pre-existing
+  // "no member found" fallback that retired labels keep hitting unchanged.
+  assert.match(assignWorkflow, /Not a dispatchable owner/);
+  const excludedBranchIndex = assignWorkflow.indexOf('if (excludedMember)');
+  const notFoundBranchIndex = assignWorkflow.indexOf('if (!assignedMember)');
+  assert.ok(excludedBranchIndex > -1, 'excludedMember branch must exist');
+  assert.ok(notFoundBranchIndex > -1, 'assignedMember fallback must exist');
+  assert.ok(
+    excludedBranchIndex < notFoundBranchIndex,
+    'excluded-member refusal must be checked before the not-found fallback',
+  );
+});
+
+test('excluded-member and retired-member squad:* labels resolve to distinct outcomes', () => {
+  // Mirrors the roster-row loop in squad-issue-assign.yml: for each row that
+  // matches the label's slug, branch on isRosterExcluded() exactly as the
+  // workflow does, and confirm a genuinely retired label (removed from the
+  // roster entirely) never matches any row at all.
+  const EXCLUDED_SLUGS = ['scribe', 'ralph'];
+  const roster = [
+    { name: '🔧 Lambert', role: 'Backend Dev' },
+    { name: '📋 Scribe', role: 'Session Logger' },
+    { name: '🔄 Ralph', role: 'Work Monitor' },
+  ];
+
+  function resolve(label) {
+    const memberName = slugify(label.replace('squad:', ''));
+    for (const row of roster) {
+      if (slugify(row.name) === memberName) {
+        return isRosterExcluded(row.name, EXCLUDED_SLUGS)
+          ? { outcome: 'excluded', row }
+          : { outcome: 'active', row };
+      }
+    }
+    return { outcome: 'not-found' };
+  }
+
+  // Excluded — still resolves a name, so the refusal comment is legible.
+  assert.deepEqual(resolve('squad:scribe'), {
+    outcome: 'excluded',
+    row: { name: '📋 Scribe', role: 'Session Logger' },
+  });
+  assert.deepEqual(resolve('squad:ralph'), {
+    outcome: 'excluded',
+    row: { name: '🔄 Ralph', role: 'Work Monitor' },
+  });
+
+  // Active — normal assignment path, unaffected by the exclusion list.
+  assert.deepEqual(resolve('squad:lambert'), {
+    outcome: 'active',
+    row: { name: '🔧 Lambert', role: 'Backend Dev' },
+  });
+
+  // Retired — the member has been removed from the roster entirely (as
+  // squad:kaylee / squad:mal / squad:apone / squad:crowe are today), so it
+  // never matches any row and must land on the distinct "not-found" outcome,
+  // not "excluded". This is the outcome that must keep falling through to
+  // the pre-existing "no member found" warning so historical assignment
+  // comments keep rendering unchanged.
+  assert.deepEqual(resolve('squad:kaylee'), { outcome: 'not-found' });
+});
+
 test('malformed issues do not throw', () => {
   for (const issue of [
     {},
