@@ -223,22 +223,40 @@ public interface ISlicerProgressNotifier
 public class SlicerQueueStats
 #pragma warning restore SA1402
 {
+    /// <summary>Gets or sets the slicer engine represented by these metrics.</summary>
     public SlicerEngineType Engine { get; set; }
 
+    /// <summary>Gets or sets the number of jobs waiting for the engine.</summary>
     public long QueuedJobs { get; set; }
 
+    /// <summary>Gets or sets all jobs persisted in the processing status.</summary>
     public long ProcessingJobs { get; set; }
 
+    /// <summary>Gets or sets all successfully completed jobs.</summary>
     public long CompletedJobs { get; set; }
 
+    /// <summary>Gets or sets all failed jobs.</summary>
     public long FailedJobs { get; set; }
 
+    /// <summary>
+    /// Gets or sets live, enabled, non-draining workers registered for this engine.
+    /// </summary>
     public int ActiveWorkers { get; set; }
 
+    /// <summary>
+    /// Gets or sets the arithmetic mean duration of completed jobs with valid start and completion
+    /// timestamps in the recent history window, rounded to milliseconds. The value is zero when no
+    /// valid timing history exists.
+    /// </summary>
     public double AverageProcessingTimeSeconds { get; set; }
 
+    /// <summary>
+    /// Gets or sets the estimated completion time for queued and actively leased work.
+    /// A null value means no live capacity or no valid timing history is available.
+    /// </summary>
     public TimeSpan? EstimatedWaitTime { get; set; }
 
+    /// <summary>Gets or sets the UTC instant at which all fields were evaluated.</summary>
     public DateTime LastUpdated { get; set; } = DateTime.UtcNow;
 }
 

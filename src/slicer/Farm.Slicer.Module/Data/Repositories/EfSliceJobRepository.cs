@@ -68,7 +68,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     public async Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
         CancellationToken ct = default)
     {
-        string ordinalCollation = GetOrdinalEngineNameCollation();
+        string ordinalCollation = GetOrdinalEngineNameCollation(_db);
         var counts = await _db.SliceJobs
             .AsNoTracking()
             .Where(job =>
@@ -101,9 +101,214 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             count => count.Count);
     }
 
-    private string GetOrdinalEngineNameCollation()
+    /// <inheritdoc/>
+    public async Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate>>
+        GetQueueMetricAggregatesAsync(
+            DateTime nowUtc,
+            DateTime workerHeartbeatCutoffUtc,
+            DateTime timingHistoryCutoffUtc,
+            CancellationToken ct = default)
     {
-        return _db.Database.ProviderName switch
+        List<QueueWorkerMetricRow> workerMetrics = await BuildQueueWorkerMetricQuery(
+                _db,
+                workerHeartbeatCutoffUtc)
+            .ToListAsync(ct);
+        List<QueueJobMetricRow> jobMetrics = await BuildQueueJobMetricQuery(
+                _db,
+                nowUtc,
+                workerHeartbeatCutoffUtc,
+                timingHistoryCutoffUtc)
+            .ToListAsync(ct);
+
+        Dictionary<SlicerEngineType, QueueWorkerMetricRow> workersByEngine =
+            workerMetrics.ToDictionary(metric => metric.Engine);
+        Dictionary<SlicerEngineType, QueueJobMetricRow> jobsByEngine =
+            jobMetrics.ToDictionary(metric => metric.Engine);
+
+        return Enum.GetValues<SlicerEngineType>().ToDictionary(
+            engine => engine,
+            engine =>
+            {
+                _ = workersByEngine.TryGetValue(engine, out QueueWorkerMetricRow? workerMetric);
+                _ = jobsByEngine.TryGetValue(engine, out QueueJobMetricRow? jobMetric);
+                return new SlicerQueueMetricAggregate
+                {
+                    ActiveWorkers = workerMetric?.ActiveWorkers ?? 0,
+                    DispatchCapacity = workerMetric?.DispatchCapacity ?? 0,
+                    ActiveLeasedJobs = jobMetric?.ActiveLeasedJobs ?? 0,
+                    TimingSampleCount = jobMetric?.TimingSampleCount ?? 0,
+                    AverageProcessingTimeSeconds = jobMetric?.AverageProcessingTimeSeconds ?? 0,
+                };
+            });
+    }
+
+    internal static IQueryable<QueueWorkerMetricRow> BuildQueueWorkerMetricQuery(
+        SlicerDbContext db,
+        DateTime workerHeartbeatCutoffUtc)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        return
+            from worker in db.Workers.AsNoTracking()
+            join service in db.SlicerServices.AsNoTracking()
+                on worker.ServiceId.ToLower() equals service.Id.ToString().ToLower()
+            where
+                !worker.IsDisabled &&
+                worker.LastHeartbeat >= workerHeartbeatCutoffUtc &&
+                service.LastSeen >= workerHeartbeatCutoffUtc &&
+                (worker.Status == WorkerStatus.Online || worker.Status == WorkerStatus.Busy) &&
+                (service.Status == WorkerStatus.Online || service.Status == WorkerStatus.Busy) &&
+                (service.SlicerType == (int)SlicerType.OrcaSlicer ||
+                 service.SlicerType == (int)SlicerType.PrusaSlicer ||
+                 service.SlicerType == (int)SlicerType.SuperSlicer ||
+                 service.SlicerType == (int)SlicerType.Cura)
+            group worker by
+                service.SlicerType == (int)SlicerType.PrusaSlicer
+                    ? SlicerEngineType.PrusaSlicer
+                    : service.SlicerType == (int)SlicerType.SuperSlicer
+                        ? SlicerEngineType.SuperSlicer
+                        : service.SlicerType == (int)SlicerType.Cura
+                            ? SlicerEngineType.Cura
+                            : SlicerEngineType.OrcaSlicer
+            into engineGroup
+            select new QueueWorkerMetricRow
+            {
+                Engine = engineGroup.Key,
+                ActiveWorkers = engineGroup.Count(),
+                DispatchCapacity = engineGroup.Sum(
+                    worker => (long)(worker.TotalSlots > 0 ? worker.TotalSlots : 0)),
+            };
+    }
+
+    internal static IQueryable<QueueJobMetricRow> BuildQueueJobMetricQuery(
+        SlicerDbContext db,
+        DateTime nowUtc,
+        DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        string ordinalCollation = GetOrdinalEngineNameCollation(db);
+        IQueryable<QueueJobMetricSourceRow> source =
+            from job in db.SliceJobs.AsNoTracking()
+            join worker in db.Workers.AsNoTracking()
+                on job.WorkerId equals (Guid?)worker.Id into workerGroup
+            from worker in workerGroup.DefaultIfEmpty()
+            where
+                (job.Status == SliceJobStatus.Completed &&
+                 job.StartedAt != null &&
+                 job.CompletedAt != null &&
+                 job.CompletedAt >= timingHistoryCutoffUtc &&
+                 job.CompletedAt >= job.StartedAt) ||
+                job.Status == SliceJobStatus.Processing
+            select new QueueJobMetricSourceRow
+            {
+                Engine =
+                    EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) ==
+                    nameof(SlicerEngineType.PrusaSlicer) + "#"
+                        ? SlicerEngineType.PrusaSlicer
+                        : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) ==
+                          nameof(SlicerEngineType.SuperSlicer) + "#"
+                        ? SlicerEngineType.SuperSlicer
+                        : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) ==
+                          nameof(SlicerEngineType.Cura) + "#"
+                            ? SlicerEngineType.Cura
+                            : SlicerEngineType.OrcaSlicer,
+                Status = job.Status,
+                WorkerId = job.WorkerId,
+                ClaimToken = job.ClaimToken,
+                LeaseToken = job.LeaseToken,
+                LeaseFence = job.LeaseFence,
+                LeaseExpiresAt = job.LeaseExpiresAt,
+                StartedAt = job.StartedAt,
+                CompletedAt = job.CompletedAt,
+                WorkerStatus = worker == null ? null : worker.Status,
+                WorkerIsDisabled = worker != null && worker.IsDisabled,
+                WorkerLastHeartbeat = worker == null ? null : worker.LastHeartbeat,
+            };
+
+        return db.Database.ProviderName switch
+        {
+            "Microsoft.EntityFrameworkCore.SqlServer" => source
+                .GroupBy(row => row.Engine)
+                .Select(group => new QueueJobMetricRow
+                {
+                    Engine = group.Key,
+                    ActiveLeasedJobs = group.Count(row =>
+                        row.Status == SliceJobStatus.Processing &&
+                        row.WorkerId != null &&
+                        row.ClaimToken != null &&
+                        row.LeaseToken != null &&
+                        row.LeaseFence > 0 &&
+                        row.LeaseExpiresAt > nowUtc &&
+                        row.WorkerStatus != null &&
+                        !row.WorkerIsDisabled &&
+                        row.WorkerLastHeartbeat >= workerHeartbeatCutoffUtc &&
+                        row.WorkerStatus != WorkerStatus.Offline &&
+                        row.WorkerStatus != WorkerStatus.Error),
+                    TimingSampleCount = group.Count(row => row.Status == SliceJobStatus.Completed),
+                    AverageProcessingTimeSeconds = group
+                        .Where(row => row.Status == SliceJobStatus.Completed)
+                        .Average(row =>
+                            (double?)EF.Functions.DateDiffSecond(row.StartedAt, row.CompletedAt) +
+                            ((row.CompletedAt!.Value.Millisecond -
+                              row.StartedAt!.Value.Millisecond) / 1000.0)) ?? 0,
+                }),
+            "Microsoft.EntityFrameworkCore.Sqlite" => source
+                .GroupBy(row => row.Engine)
+                .Select(group => new QueueJobMetricRow
+                {
+                    Engine = group.Key,
+                    ActiveLeasedJobs = group.Count(row =>
+                        row.Status == SliceJobStatus.Processing &&
+                        row.WorkerId != null &&
+                        row.ClaimToken != null &&
+                        row.LeaseToken != null &&
+                        row.LeaseFence > 0 &&
+                        row.LeaseExpiresAt > nowUtc &&
+                        row.WorkerStatus != null &&
+                        !row.WorkerIsDisabled &&
+                        row.WorkerLastHeartbeat >= workerHeartbeatCutoffUtc &&
+                        row.WorkerStatus != WorkerStatus.Offline &&
+                        row.WorkerStatus != WorkerStatus.Error),
+                    TimingSampleCount = group.Count(row => row.Status == SliceJobStatus.Completed),
+                    AverageProcessingTimeSeconds = group
+                        .Where(row => row.Status == SliceJobStatus.Completed)
+                        .Average(row => (double?)(row.CompletedAt!.Value.Ticks -
+                            row.StartedAt!.Value.Ticks) / TimeSpan.TicksPerSecond) ?? 0,
+                }),
+            "Npgsql.EntityFrameworkCore.PostgreSQL" or "Pomelo.EntityFrameworkCore.MySql" =>
+                source.GroupBy(row => row.Engine).Select(group => new QueueJobMetricRow
+                {
+                    Engine = group.Key,
+                    ActiveLeasedJobs = group.Count(row =>
+                        row.Status == SliceJobStatus.Processing &&
+                        row.WorkerId != null &&
+                        row.ClaimToken != null &&
+                        row.LeaseToken != null &&
+                        row.LeaseFence > 0 &&
+                        row.LeaseExpiresAt > nowUtc &&
+                        row.WorkerStatus != null &&
+                        !row.WorkerIsDisabled &&
+                        row.WorkerLastHeartbeat >= workerHeartbeatCutoffUtc &&
+                        row.WorkerStatus != WorkerStatus.Offline &&
+                        row.WorkerStatus != WorkerStatus.Error),
+                    TimingSampleCount = group.Count(row => row.Status == SliceJobStatus.Completed),
+                    AverageProcessingTimeSeconds = group
+                        .Where(row => row.Status == SliceJobStatus.Completed)
+                        .Average(row => (double?)(row.CompletedAt!.Value -
+                            row.StartedAt!.Value).TotalSeconds) ?? 0,
+                }),
+            string provider => throw new NotSupportedException(
+                $"Queue metric timing aggregation is not supported for provider '{provider}'."),
+            null => throw new NotSupportedException(
+                "Queue metric timing aggregation requires a relational provider."),
+        };
+    }
+
+    private static string GetOrdinalEngineNameCollation(SlicerDbContext db)
+    {
+        return db.Database.ProviderName switch
         {
             "Microsoft.EntityFrameworkCore.Sqlite" => "BINARY",
             "Microsoft.EntityFrameworkCore.SqlServer" => "Latin1_General_100_BIN2",
@@ -114,6 +319,53 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
             null => throw new NotSupportedException(
                 "Queue statistics require a relational provider with a binary engine-name collation."),
         };
+    }
+
+    internal sealed class QueueWorkerMetricRow
+    {
+        public SlicerEngineType Engine { get; init; }
+
+        public int ActiveWorkers { get; init; }
+
+        public long DispatchCapacity { get; init; }
+    }
+
+    internal sealed class QueueJobMetricRow
+    {
+        public SlicerEngineType Engine { get; init; }
+
+        public int ActiveLeasedJobs { get; init; }
+
+        public int TimingSampleCount { get; init; }
+
+        public double AverageProcessingTimeSeconds { get; init; }
+    }
+
+    internal sealed class QueueJobMetricSourceRow
+    {
+        public SlicerEngineType Engine { get; init; }
+
+        public string Status { get; init; } = string.Empty;
+
+        public Guid? WorkerId { get; init; }
+
+        public Guid? ClaimToken { get; init; }
+
+        public Guid? LeaseToken { get; init; }
+
+        public long LeaseFence { get; init; }
+
+        public DateTime? LeaseExpiresAt { get; init; }
+
+        public DateTime? StartedAt { get; init; }
+
+        public DateTime? CompletedAt { get; init; }
+
+        public string? WorkerStatus { get; init; }
+
+        public bool WorkerIsDisabled { get; init; }
+
+        public DateTime? WorkerLastHeartbeat { get; init; }
     }
 
     /// <inheritdoc/>

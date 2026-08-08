@@ -48,8 +48,7 @@ public class SlicersController(ISlicersService service, ISlicerRegistry registry
         // so if a crashed worker looked "Online" for another 60s+ we would
         // dispatch jobs into a black hole. Require the row to have heartbeated
         // recently (twice the default health-monitor interval, 60s).
-        const int OnlineFreshnessSeconds = 60;
-        DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
+        DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-WorkerStatus.OnlineFreshnessSeconds);
         HashSet<(string Engine, string Version)> online = services
             .Where(s => string.Equals(s.Status, "Online", StringComparison.OrdinalIgnoreCase)
                         && !string.IsNullOrWhiteSpace(s.Version)

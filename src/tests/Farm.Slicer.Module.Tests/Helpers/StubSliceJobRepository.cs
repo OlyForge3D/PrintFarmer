@@ -26,6 +26,18 @@ public class StubSliceJobRepository : ISliceJobRepository
             .ToDictionary(group => group.Key, group => group.Count());
         return Task.FromResult(counts);
     }
+    public Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate>> GetQueueMetricAggregatesAsync(
+        DateTime nowUtc,
+        DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc,
+        CancellationToken ct = default)
+    {
+        IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate> metrics =
+            Enum.GetValues<SlicerEngineType>().ToDictionary(
+                engine => engine,
+                _ => new SlicerQueueMetricAggregate());
+        return Task.FromResult(metrics);
+    }
     public Task<IReadOnlyList<SliceJob>> GetQueuedJobsAsync(int? limit = null, CancellationToken ct = default)
     {
         List<SliceJob> queued = Jobs.FindAll(j => j.Status == SliceJobStatus.Queued);

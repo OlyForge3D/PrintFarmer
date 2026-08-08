@@ -2874,8 +2874,7 @@ public class ProfilesService(
             // before the old row is reaped. Requiring a recent heartbeat before
             // trusting either the Status or the (host, version) mapping closes
             // that wrong-version data-serving gap.
-            const int OnlineFreshnessSeconds = 60;
-            DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-OnlineFreshnessSeconds);
+            DateTime freshnessCutoff = DateTime.UtcNow.AddSeconds(-WorkerStatus.OnlineFreshnessSeconds);
 
             string? trimmedVersion = string.IsNullOrWhiteSpace(engineVersion) ? null : engineVersion.Trim();
 

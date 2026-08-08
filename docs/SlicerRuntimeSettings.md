@@ -40,6 +40,36 @@ The admin UI controls the global `JitterPercent` used by the worker. If the DB v
   with `GET /api/settings/Slicer` or `GET /api/admin/slicer/settings`.
 - `appsettings.json` and environment variable `SlicerWorker:JitterPercent` are used for default initial values on startup
 
+## Queue metric semantics
+
+Queue statistics are calculated separately for each slicer engine. Legacy jobs
+without an exact canonical engine name are reported as OrcaSlicer jobs.
+
+- `activeWorkers` counts workers that are linked to a registered slicer service
+  for the engine, are enabled, have both worker and service heartbeats inside the
+  60-second operational freshness window, and are `Online` or `Busy`.
+  Draining, offline, errored, disabled, missing-heartbeat, and stale workers are
+  excluded.
+- `averageProcessingTimeSeconds` is the arithmetic mean duration of completed
+  jobs from the last 30 days with both `startedAt` and `completedAt`, rounded
+  to milliseconds.
+  Missing or reversed timestamps and non-completed jobs are excluded. The value
+  is `0` when no valid history exists.
+- `estimatedWaitTime` estimates the completion time of queued jobs plus jobs
+  that still have an unexpired, fenced lease on a live worker. The workload is
+  divided into waves using the total slots of active workers, then multiplied
+  by the average processing time.
+- `estimatedWaitTime` is `null` when the engine has no dispatch capacity or no
+  valid timing history. It is zero when capacity and history exist but there is
+  no queued or actively leased work.
+- `processingJobs` is the raw persisted status count. It can exceed the active
+  leased workload used by `estimatedWaitTime` when processing rows have
+  expired, incomplete, orphaned, or stale-worker leases.
+
+All engine and status counts remain SQL-side aggregates. Worker capacity,
+active leases, and timing history are also aggregated in a fixed number of
+queries, independent of engine, status, worker, or job counts.
+
 ## Migration notes
 
 - Existing deployments upgrading from Alpha/Beta may need to ensure the `SlicerSettings` row exists in the DB.
@@ -63,4 +93,3 @@ This value will be used as the initial persisted value if DB is empty and remain
 
 - Start with conservative jitter (5–15%) and a moderate base retry to avoid rapid retries.
 - Monitor queue pressure in the Admin > Slicer status pages and increase jitter when many concurrent retries are observed.
-

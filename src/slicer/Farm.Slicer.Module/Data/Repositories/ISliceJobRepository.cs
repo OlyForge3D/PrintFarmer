@@ -30,6 +30,23 @@ public interface ISliceJobRepository
     Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Gets worker capacity, active lease, and completed-job timing aggregates for every engine.
+    /// </summary>
+    /// <param name="nowUtc">The shared UTC instant used to evaluate lease expiry.</param>
+    /// <param name="workerHeartbeatCutoffUtc">
+    /// The oldest heartbeat that qualifies a worker as live.
+    /// </param>
+    /// <param name="timingHistoryCutoffUtc">
+    /// The oldest completion timestamp included in processing-time history.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate>> GetQueueMetricAggregatesAsync(
+        DateTime nowUtc,
+        DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc,
+        CancellationToken ct = default);
+
     /// <summary>Gets active jobs assigned to a specific worker.</summary>
     Task<IReadOnlyList<SliceJob>> GetJobsByWorkerIdAsync(Guid workerId, CancellationToken ct = default);
 
@@ -177,4 +194,35 @@ public interface ISliceJobRepository
 
     /// <summary>Saves pending changes to the database.</summary>
     Task SaveChangesAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// Bounded per-engine inputs used to build public slicer queue statistics.
+/// </summary>
+public sealed class SlicerQueueMetricAggregate
+{
+    /// <summary>
+    /// Gets the number of live, enabled workers linked to a registered service for the engine.
+    /// </summary>
+    public int ActiveWorkers { get; init; }
+
+    /// <summary>
+    /// Gets the total configured slots across active workers.
+    /// </summary>
+    public long DispatchCapacity { get; init; }
+
+    /// <summary>
+    /// Gets the number of processing jobs with an authoritative active worker lease.
+    /// </summary>
+    public int ActiveLeasedJobs { get; init; }
+
+    /// <summary>
+    /// Gets the number of valid completed-job timing samples.
+    /// </summary>
+    public int TimingSampleCount { get; init; }
+
+    /// <summary>
+    /// Gets the arithmetic mean duration of valid completed-job timing samples in seconds.
+    /// </summary>
+    public double AverageProcessingTimeSeconds { get; init; }
 }
