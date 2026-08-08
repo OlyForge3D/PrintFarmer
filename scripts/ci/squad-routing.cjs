@@ -73,6 +73,12 @@ function hasWord(text, word) {
 // Weight 1 = suggestive but common across domains, so it can break a tie but
 // cannot carry a domain on its own.
 //
+// `titlePriority` is reserved for explicit ownership intent and applies whenever
+// its concept matches in a title. `prefixPriority` applies only when the title
+// starts with one of the concept's `priorityPrefixes`. Priority is compared
+// before score. Conventional ownership prefixes are the strongest signal,
+// followed by explicit documentation artifacts, then iOS implementation terms.
+//
 // Deliberately absent: `bug` and `fix`. They describe the *type* of an issue,
 // not its domain — every domain gets bug reports — and treating them as
 // testing signals routed ordinary frontend and backend bugs to the Tester.
@@ -129,13 +135,43 @@ const DOMAINS = [
       // test" section, so these words in a *body* are boilerplate, not a
       // statement of ownership. They only signal the testing domain when the
       // author put them in the title.
-      { id: 'test', weight: 2, titleOnly: true, forms: ['test', 'tests', 'testing'] },
-      { id: 'regression', weight: 1, titleOnly: true, forms: ['regression'] },
-      { id: 'assertion', weight: 1, titleOnly: true, forms: ['assert', 'assertion'] },
-      { id: 'qa', weight: 2, forms: ['qa'] },
+      //
+      // Priority is deliberately prefix-only. A plain title mention such as
+      // "Deployment tests mutate Docker config" belongs to DevOps (#1250).
+      {
+        id: 'test',
+        weight: 2,
+        titleOnly: true,
+        prefixPriority: 4,
+        priorityPrefixes: ['test:', 'tests:', 'testing:'],
+        forms: ['test', 'tests', 'testing'],
+      },
+      {
+        id: 'regression',
+        weight: 1,
+        titleOnly: true,
+        forms: ['regression'],
+      },
+      {
+        id: 'assertion',
+        weight: 1,
+        titleOnly: true,
+        forms: ['assert', 'assertion'],
+      },
+      {
+        id: 'qa',
+        weight: 2,
+        prefixPriority: 4,
+        priorityPrefixes: ['qa:'],
+        forms: ['qa'],
+      },
       { id: 'coverage', weight: 2, forms: ['coverage'] },
       { id: 'flaky', weight: 2, forms: ['flaky'] },
-      { id: 'harness', weight: 2, forms: ['xunit', 'vitest', 'playwright'] },
+      {
+        id: 'harness',
+        weight: 2,
+        forms: ['xunit', 'vitest', 'playwright'],
+      },
     ],
   },
   {
@@ -156,6 +192,104 @@ const DOMAINS = [
       { id: 'release', weight: 1, forms: ['release'] },
     ],
   },
+  {
+    id: 'ios',
+    reason: 'Issue relates to iOS/mobile app work',
+    role: /\bios\b|swift|mobile/i,
+    defaultRole: /\bios\b.*\bdeveloper\b/i,
+    keywords: [
+      { id: 'native-app', weight: 2, forms: ['ios app', 'mobile app'] },
+      { id: 'swiftui', weight: 2, titlePriority: 1, forms: ['swiftui'] },
+      { id: 'swift', weight: 2, forms: ['swift'] },
+      { id: 'xcode', weight: 2, forms: ['xcode', 'xcodebuild'] },
+      {
+        id: 'ios-networking',
+        weight: 3,
+        titlePriority: 1,
+        forms: [
+          'ios networking',
+          'ios api client',
+          'ios rest client',
+          'ios http client',
+          'ios signalr client',
+          'ios json decoding',
+          'ios codable',
+          'urlsession',
+        ],
+      },
+      {
+        id: 'apple-ecosystem',
+        weight: 1,
+        forms: ['iphone', 'ipad', 'apns', 'testflight'],
+      },
+    ],
+    ownerRules: [
+      {
+        role: /\bios networking\b/i,
+        titleForms: [
+          'ios networking',
+          'urlsession',
+          'ios api client',
+          'ios rest client',
+          'ios http client',
+          'ios signalr client',
+          'ios json decoding',
+          'ios codable',
+        ],
+      },
+    ],
+  },
+  {
+    id: 'docs',
+    reason: 'Issue relates to documentation work',
+    role: /documentation|technical writer|\bdocs\b/i,
+    keywords: [
+      {
+        id: 'docs-intent',
+        weight: 5,
+        titleOnly: true,
+        titlePriority: 4,
+        titlePrefixes: ['docs:', 'doc:', 'documentation:'],
+        forms: [],
+      },
+      {
+        id: 'readme',
+        weight: 5,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: ['readme'],
+      },
+      {
+        id: 'changelog',
+        weight: 3,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: ['changelog'],
+      },
+      {
+        id: 'api-docs',
+        weight: 3,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: ['api docs', 'api documentation', 'api reference'],
+      },
+      {
+        id: 'guide',
+        weight: 3,
+        titleOnly: true,
+        titlePriority: 3,
+        forms: [
+          'user guide',
+          'developer guide',
+          'deployment guide',
+          'configuration guide',
+          'installation guide',
+          'tutorial',
+          'tutorials',
+        ],
+      },
+    ],
+  },
 ];
 
 // A term in the title is a deliberate statement of what the issue is about; the
@@ -174,9 +308,13 @@ const BODY_WEIGHT = 1;
  */
 function scoreDomain(domain, title, body) {
   let score = 0;
+  let priority = 0;
   const matched = [];
+  const normalizedTitle = (title || '').trimStart().toLowerCase();
   for (const concept of domain.keywords) {
-    const inTitle = concept.forms.some((form) => hasWord(title, form));
+    const inTitle = (concept.titlePrefixes || [])
+      .some((prefix) => normalizedTitle.startsWith(prefix))
+      || concept.forms.some((form) => hasWord(title, form));
     const inBody = !inTitle
       && !concept.titleOnly
       && concept.forms.some((form) => hasWord(body, form));
@@ -184,9 +322,37 @@ function scoreDomain(domain, title, body) {
       continue;
     }
     score += concept.weight * (inTitle ? TITLE_WEIGHT : BODY_WEIGHT);
+    if (inTitle) {
+      priority = Math.max(priority, concept.titlePriority || 0);
+      if (
+        (concept.priorityPrefixes || [])
+          .some((prefix) => normalizedTitle.startsWith(prefix))
+      ) {
+        priority = Math.max(priority, concept.prefixPriority || 0);
+      }
+    }
     matched.push(concept.id);
   }
-  return { id: domain.id, score, matched, reason: domain.reason };
+  return {
+    id: domain.id,
+    score,
+    priority,
+    matched,
+    reason: domain.reason,
+  };
+}
+
+function findDomainMember(domain, members, title) {
+  for (const rule of domain.ownerRules || []) {
+    if (rule.titleForms.some((form) => hasWord(title, form))) {
+      const specialist = members.find((member) => rule.role.test(member.role || ''));
+      if (specialist) {
+        return specialist;
+      }
+    }
+  }
+  return members.find((member) => domain.defaultRole?.test(member.role || ''))
+    || members.find((member) => domain.role.test(member.role || ''));
 }
 
 /**
@@ -211,13 +377,20 @@ function routeIssue(issue, members, lead) {
     .filter((domain) => members.some((m) => domain.role.test(m.role || '')))
     .map((domain) => scoreDomain(domain, title, body))
     .filter((entry) => entry.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => b.priority - a.priority || b.score - a.score);
 
   const best = scores[0];
   const runnerUp = scores[1];
 
   // A tie is genuine ambiguity, not a reason to pick whoever sorted first.
-  if (!best || (runnerUp && runnerUp.score === best.score)) {
+  if (
+    !best
+    || (
+      runnerUp
+      && runnerUp.priority === best.priority
+      && runnerUp.score === best.score
+    )
+  ) {
     return {
       member: lead,
       reason: best
@@ -229,7 +402,7 @@ function routeIssue(issue, members, lead) {
   }
 
   const domain = DOMAINS.find((d) => d.id === best.id);
-  const member = members.find((m) => domain.role.test(m.role || ''));
+  const member = findDomainMember(domain, members, title);
   return { member, reason: best.reason, domain: best.id, scores };
 }
 

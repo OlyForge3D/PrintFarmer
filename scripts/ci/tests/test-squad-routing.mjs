@@ -171,6 +171,9 @@ test('Ralph routes identically to the triage workflow', () => {
     { title: 'ci: docker build fails in the deployment pipeline', body: '' },
     { title: 'test: raise coverage for SliceJobQueue', body: 'flaky xunit' },
     { title: 'feat: add /api/spools endpoint', body: '' },
+    { title: 'feat: build SwiftUI printer controls', body: 'iPhone app screen' },
+    { title: 'fix: iOS networking URLSession retries', body: 'REST client' },
+    { title: 'docs: update the deployment README', body: 'Documentation only.' },
   ];
   for (const issue of cases) {
     const expected = routeIssue(issue, members, lead);
@@ -272,6 +275,193 @@ test('a testing issue routes to the Tester', () => {
   );
   assert.equal(result.domain, 'test');
   assert.equal(result.member.name, '🧪 Kane');
+});
+
+test('a SwiftUI issue routes to the iOS developer', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: build SwiftUI printer controls for the iPhone app',
+      body: 'Add the native mobile app screen and VoiceOver labels.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('an iOS networking issue routes to the iOS networking specialist', () => {
+  for (const title of [
+    'fix: iOS networking URLSession retries',
+    'fix: iOS API client timeout',
+    'fix: iOS SignalR client reconnect',
+    'fix: iOS API client decodes /api/printers endpoint',
+  ]) {
+    const result = routeIssue(
+      {
+        title,
+        body: 'The REST client should decode the API response with Codable.',
+      },
+      members,
+      lead,
+    );
+    assert.equal(result.domain, 'ios', title);
+    assert.equal(result.member.name, '🌐 Gorman', title);
+  }
+});
+
+test('a documentation-only issue routes to the documentation specialist', () => {
+  for (const title of [
+    'docs: document the API endpoint',
+    'docs: add a deployment guide',
+    'docs: explain the Docker deployment pipeline workflow',
+    'docs: document the API server endpoint query parameters',
+    'docs: explain the React CSS component layout',
+    'update the API reference',
+    'update the API reference endpoint query parameters',
+    'add deployment guide for Docker pipeline workflow',
+  ]) {
+    const result = routeIssue(
+      {
+        title,
+        body: 'Documentation-only change; no application behavior changes.',
+      },
+      members,
+      lead,
+    );
+    assert.equal(result.domain, 'docs', title);
+    assert.equal(result.member.name, '📝 Ash', title);
+  }
+});
+
+test('incidental iOS and docs references do not steal unrelated issues', () => {
+  const cases = [
+    {
+      issue: {
+        title: 'fix: /api/printers endpoint returns 500',
+        body: 'The iOS client documentation will be updated after the backend fix.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
+    },
+    {
+      issue: {
+        title: 'fix: React mobile layout overflows',
+        body: 'Update the CSS component; the native iOS app is unaffected.',
+      },
+      domain: 'frontend',
+      member: '⚛️ Ripley',
+    },
+    {
+      issue: {
+        title: 'QA: qualify operator-first redesign for iOS beta',
+        body: 'Run the TestFlight acceptance pass on iPhone and iPad with APNs.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+    {
+      issue: {
+        title: 'ci: deploy the API and publish release documentation',
+        body: 'The Docker pipeline supports the mobile app deployment.',
+      },
+      domain: 'devops',
+      member: '⚙️ Parker',
+    },
+    {
+      issue: {
+        title: 'perf: optimize query',
+        body: 'Update the README documentation after the query fix.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
+    },
+    {
+      issue: {
+        title: 'test: add XCTest coverage for the printer list view',
+        body: 'Exercise the iPhone and iPad variants.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+    {
+      issue: {
+        title: 'ci: deployment tests mutate Docker config',
+        body: 'Isolate the deployment harness from developer configuration.',
+      },
+      domain: 'devops',
+      member: '⚙️ Parker',
+    },
+    {
+      issue: {
+        title: 'Backend API endpoint for Swift client',
+        body: 'Implement the server controller.',
+      },
+      domain: 'backend',
+      member: '🔧 Lambert',
+    },
+    {
+      issue: {
+        title: 'test: add xunit coverage for the changelog generator',
+        body: 'Validate the generated artifact.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+    {
+      issue: {
+        title: 'QA: verify the installation guide on a clean host',
+        body: 'Run the acceptance pass.',
+      },
+      domain: 'test',
+      member: '🧪 Kane',
+    },
+  ];
+
+  for (const { issue, domain, member } of cases) {
+    const result = routeIssue(issue, members, lead);
+    assert.equal(result.domain, domain, issue.title);
+    assert.equal(result.member.name, member, issue.title);
+  }
+});
+
+test('incidental networking references do not steal SwiftUI work from Hudson', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: add SwiftUI printer detail view',
+      body: 'Display data from the existing REST client; networking is unaffected.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('explicit SwiftUI intent beats generic frontend vocabulary', () => {
+  const result = routeIssue(
+    {
+      title: 'feat: SwiftUI component layout for printer controls',
+      body: 'Build the native view.',
+    },
+    members,
+    lead,
+  );
+  assert.equal(result.domain, 'ios');
+  assert.equal(result.member.name, '📱 Hudson');
+});
+
+test('generic iOS ownership does not depend on roster order', () => {
+  const issue = {
+    title: 'feat: add SwiftUI printer detail view',
+    body: 'Build the native screen.',
+  };
+  const forward = routeIssue(issue, members, lead);
+  const reversed = routeIssue(issue, [...members].reverse(), lead);
+  assert.equal(forward.domain, 'ios');
+  assert.equal(reversed.domain, 'ios');
+  assert.equal(forward.member.name, '📱 Hudson');
+  assert.equal(reversed.member.name, '📱 Hudson');
 });
 
 test('an ambiguous issue falls through to the Lead', () => {
