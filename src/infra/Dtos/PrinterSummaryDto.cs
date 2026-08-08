@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure;
+﻿namespace Farm.Infrastructure;
 
 /// <summary>
 /// Minimal printer projection used by dashboard statistics and alert widgets.

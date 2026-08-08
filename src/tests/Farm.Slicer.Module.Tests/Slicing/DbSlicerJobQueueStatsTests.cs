@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
