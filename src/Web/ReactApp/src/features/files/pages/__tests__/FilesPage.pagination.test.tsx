@@ -1,0 +1,145 @@
+import React, { useEffect, useState } from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router';
+import { describe, expect, it, vi } from 'vitest';
+import type { FileItem, UseFileBrowserConfig } from '@/features/fileBrowser/types';
+
+const apiMocks = vi.hoisted(() => ({
+  getUnifiedFiles: vi.fn(),
+}));
+
+let forwardedSignal: AbortSignal | undefined;
+
+vi.mock('@/services/api', () => ({
+  apiClient: {
+    getHarvestOperations: vi.fn().mockResolvedValue([]),
+    getUnifiedFiles: apiMocks.getUnifiedFiles,
+  },
+}));
+
+vi.mock('@/features/auth/hooks/useAuth', () => ({
+  useAuth: () => ({ hasPermission: () => false }),
+}));
+
+vi.mock('@/common/hooks/useApi', () => ({
+  usePrinters: () => ({ data: [] }),
+}));
+
+vi.mock('@/common/hooks/useViewModePreference', () => ({
+  useViewModePreference: () => ({ viewMode: 'grid', setViewMode: vi.fn() }),
+}));
+
+vi.mock('@/common/components/modals/ModelUploadModal', () => ({ ModelUploadModal: () => null }));
+vi.mock('@/common/components/modals/GcodeUploadModal', () => ({ GcodeUploadModal: () => null }));
+vi.mock('@/common/components/modals/BulkTagAssignmentModal', () => ({ BulkTagAssignmentModal: () => null }));
+vi.mock('@/components/TaggingModal', () => ({ TaggingModal: () => null }));
+vi.mock('@/features/projects/components/AddToProjectModal', () => ({ AddToProjectModal: () => null }));
+vi.mock('@/common/components/modals/ConfirmationModal', () => ({ ConfirmationModal: () => null }));
+
+vi.mock('@/features/fileBrowser/components/FileBrowser', async () => {
+  const ReactModule = await import('react');
+  return {
+    FileBrowser: ReactModule.forwardRef(function FileBrowserMock(
+      { config }: { config: UseFileBrowserConfig<unknown> },
+      ref,
+    ) {
+      void ref;
+      const [files, setFiles] = useState<FileItem[]>([]);
+      const [totalItems, setTotalItems] = useState(0);
+
+      useEffect(() => {
+        const cancellation = new AbortController();
+        forwardedSignal = cancellation.signal;
+        void config.fetcher({
+          page: 2,
+          pageSize: 50,
+          search: 'part',
+          sortBy: 'name',
+          sortOrder: 'asc',
+          filter: 'all',
+        }, cancellation.signal).then((response) => {
+          setFiles(response.items.map(config.mapDomainToFileItem));
+          setTotalItems(response.totalItems);
+        });
+        return () => cancellation.abort();
+      }, [config]);
+
+      return (
+        <div>
+          <output aria-label="total files">{totalItems}</output>
+          <ol>
+            {files.map((file) => <li key={file.id}>{file.fileName}</li>)}
+          </ol>
+        </div>
+      );
+    }),
+  };
+});
+
+import { FilesPage } from '../FilesPage';
+
+describe('FilesPage unified pagination', () => {
+  it('requests only the displayed page, preserves server order and forwards cancellation', async () => {
+    apiMocks.getUnifiedFiles.mockResolvedValue({
+      items: [
+        {
+          source: 'Gcode',
+          id: 'gcode-1',
+          path: '/gcode',
+          name: 'z-last.gcode',
+          fileName: 'stored.gcode',
+          fileSize: 20,
+          fileType: 'gcode',
+          uploadedAt: '2026-08-07T00:00:00Z',
+          url: '/api/gcode-files/file/gcode-1',
+        },
+        {
+          source: 'Model',
+          id: 'model-1',
+          path: '/models',
+          name: 'a-first.stl',
+          fileName: 'stored.stl',
+          fileSize: 10,
+          fileType: 'stl',
+          uploadedAt: '2026-08-06T00:00:00Z',
+          url: '/api/3d-models/file/model-1',
+        },
+      ],
+      totalItems: 2505,
+      totalSize: 30,
+      page: 2,
+      pageSize: 50,
+      totalPages: 51,
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={['/files']}>
+          <FilesPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => expect(apiMocks.getUnifiedFiles).toHaveBeenCalledTimes(1));
+    expect(apiMocks.getUnifiedFiles).toHaveBeenCalledWith({
+      page: 2,
+      pageSize: 50,
+      search: 'part',
+      sortBy: 'name',
+      sortOrder: 'asc',
+      filter: 'all',
+      harvestId: undefined,
+      printerId: undefined,
+    }, forwardedSignal);
+    expect(screen.getByLabelText('total files')).toHaveTextContent('2505');
+    expect(screen.getAllByRole('listitem').map((item) => item.textContent))
+      .toEqual(['z-last.gcode', 'a-first.stl']);
+
+    view.unmount();
+    expect(forwardedSignal?.aborted).toBe(true);
+  });
+});

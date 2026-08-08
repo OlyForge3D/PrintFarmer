@@ -1879,6 +1879,59 @@ export interface GetGcodeFilesResponse {
   availablePrinterModels?: Array<{ id: string | null; name: string }>;
 }
 
+export type UnifiedFileSource = 'Model' | 'Gcode';
+export type UnifiedFileTypeFilter = 'all' | 'models' | 'gcode' | 'other';
+export type UnifiedFileSortBy = 'name' | 'size' | 'date';
+export type UnifiedFileSortOrder = 'asc' | 'desc';
+
+export interface UnifiedFilesQueryRequest {
+  page: number;
+  pageSize: number;
+  search?: string;
+  sortBy: UnifiedFileSortBy;
+  sortOrder: UnifiedFileSortOrder;
+  filter: UnifiedFileTypeFilter;
+  harvestId?: string;
+  printerId?: string;
+}
+
+export interface UnifiedFile {
+  source: UnifiedFileSource;
+  id: string;
+  path: string;
+  name: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  uploadedAt: string;
+  url: string;
+  thumbnailUrl?: string;
+  tags?: Array<{ id: string; name: string; color?: string; description?: string }>;
+  requiredMaterial?: string;
+  extractedSlicerName?: string;
+  extractedSlicerVersion?: string;
+  extractedPrintTime?: number;
+  extractedFilamentLength?: number;
+  extractedNozzleDiameter?: number;
+  extractedMaterial?: string;
+  extractedPrinterModel?: string;
+  extractedPrinterModelName?: string;
+  extractedLayerHeight?: number;
+  extractedInfill?: number;
+  extractedPerimeters?: number;
+  extractedHotendTemp?: number;
+  extractedBedTemp?: number;
+}
+
+export interface UnifiedFilesQueryResponse {
+  items: UnifiedFile[];
+  totalItems: number;
+  totalSize: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
 // 3D Model file entry (hierarchical browser)
 export interface Model3DFile {
   path: string;

@@ -41,8 +41,8 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PrintablesIcon } from '@/common/components/icons/PrintablesIcon';
 import { Badge, Button, Checkbox, TagChip } from '@/common/components/ui';
-import type { Model, Model3DSearchResponse } from '@/types/models';
-import type { GcodeFile, GetGcodeFilesResponse } from '@/types/api';
+import type { Model } from '@/types/models';
+import type { GcodeFile, UnifiedFile } from '@/types/api';
 import type { ModelViewerProps } from '@/features/models3d/components/3d/ModelViewer3D';
 
 const ModelViewer = lazyWithPreload<ModelViewerProps, React.FC<ModelViewerProps>>(
@@ -120,8 +120,6 @@ const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
 const LEGACY_ACTION_SEGMENTS = new Set(['harvest']);
 const MODEL_FILE_EXTENSIONS = new Set(['3mf', 'stl', 'step', 'stp']);
 const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'gco', 'g', 'ngc', 'gc']);
-const DEFAULT_FETCH_PAGE_SIZE = 100;
-const MAX_FETCH_PAGES = 10; // Cap at 1000 files per source to prevent runaway requests
 const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'date', label: 'Date' },
   { value: 'name', label: 'Name' },
@@ -182,18 +180,67 @@ function toUnifiedGcode(file: GcodeFile): UnifiedFileRecord {
   };
 }
 
-function compareFiles(a: UnifiedFileRecord, b: UnifiedFileRecord, sortBy: SortOption, sortOrder: 'asc' | 'desc') {
-  const comparison = sortBy === 'size'
-    ? (a.fileSize ?? 0) - (b.fileSize ?? 0)
-    : sortBy === 'date'
-      ? new Date(a.uploadedAt ?? 0).getTime() - new Date(b.uploadedAt ?? 0).getTime()
-      : (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' });
+function isModelFileType(fileType: string): fileType is Model['fileType'] {
+  return fileType === 'stl'
+    || fileType === '3mf'
+    || fileType === 'obj'
+    || fileType === 'ply'
+    || fileType === 'step'
+    || fileType === 'stp';
+}
 
-  const fallbackComparison = comparison === 0
-    ? (a.displayName ?? '').localeCompare(b.displayName ?? '', undefined, { sensitivity: 'base' })
-    : comparison;
+function toUnifiedFile(file: UnifiedFile): UnifiedFileRecord {
+  const tags = file.tags?.map((tag) => ({
+    id: tag.id,
+    name: tag.name,
+    color: tag.color,
+  }));
 
-  return sortOrder === 'asc' ? fallbackComparison : fallbackComparison * -1;
+  if (file.source === 'Model') {
+    const fileType = isModelFileType(file.fileType)
+      ? file.fileType
+      : getNormalizedExtension(file.name, file.fileType);
+    const model: Model = {
+      id: file.id,
+      path: file.path,
+      name: file.name,
+      fileName: file.fileName,
+      fileSize: file.fileSize,
+      fileType: isModelFileType(fileType) ? fileType : 'stl',
+      uploadedAt: file.uploadedAt,
+      url: file.url,
+      thumbnailUrl: file.thumbnailUrl,
+      tags,
+    };
+    return toUnifiedModel(model);
+  }
+
+  const gcode: GcodeFile = {
+    id: file.id,
+    path: file.path,
+    fileName: file.fileName,
+    name: file.name,
+    fileSize: file.fileSize,
+    uploadedAt: new Date(file.uploadedAt),
+    isDirectory: false,
+    thumbnailUrl: file.thumbnailUrl,
+    tags: file.tags,
+    requiredMaterial: file.requiredMaterial,
+    extractedSlicerName: file.extractedSlicerName,
+    extractedSlicerVersion: file.extractedSlicerVersion,
+    extractedPrintTime: file.extractedPrintTime,
+    extractedFilamentLength: file.extractedFilamentLength,
+    extractedNozzleDiameter: file.extractedNozzleDiameter,
+    extractedMaterial: file.extractedMaterial,
+    extractedPrinterModel: file.extractedPrinterModel,
+    extractedPrinterModelName: file.extractedPrinterModelName,
+    extractedLayerHeight: file.extractedLayerHeight,
+    extractedInfill: file.extractedInfill,
+    extractedPerimeters: file.extractedPerimeters,
+    extractedHotendTemp: file.extractedHotendTemp,
+    extractedBedTemp: file.extractedBedTemp,
+  };
+  return toUnifiedGcode(gcode);
 }
 
 function getFilterValueFromSearchParams(searchParams: URLSearchParams): FileTypeFilter {
@@ -397,79 +444,6 @@ function buildModelCard(
   );
 }
 
-async function fetchAllModels(search: string, sortBy: SortOption, sortOrder: 'asc' | 'desc', signal?: AbortSignal) {
-  const request = {
-    query: search || undefined,
-    page: 1,
-    pageSize: DEFAULT_FETCH_PAGE_SIZE,
-    sortBy: sortBy === 'size' ? 'size' : sortBy === 'name' ? 'name' : 'uploadedAt',
-    descending: sortOrder === 'desc',
-  };
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  const firstPage = (await apiClient.get3DModelsQuery(request)) as unknown as Model3DSearchResponse;
-  const totalPages = Math.min(firstPage.totalPages ?? 1, MAX_FETCH_PAGES);
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  const remainingPages = totalPages > 1
-    ? await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, index) =>
-          apiClient.get3DModelsQuery({ ...request, page: index + 2 }) as Promise<unknown>
-        )
-      )
-    : [];
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  return [
-    ...(firstPage.models ?? []),
-    ...remainingPages.flatMap((page) => ((page as Model3DSearchResponse).models ?? [])),
-  ];
-}
-
-async function fetchAllGcode(
-  search: string,
-  sortBy: SortOption,
-  sortOrder: 'asc' | 'desc',
-  harvestId?: string,
-  printerId?: string,
-  signal?: AbortSignal
-) {
-  const request = {
-    search: search || undefined,
-    harvestId,
-    printerId,
-    page: 1,
-    pageSize: DEFAULT_FETCH_PAGE_SIZE,
-    sortBy,
-    sortOrder,
-  };
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  const firstPage = await apiClient.getGcodeFilesQuery(request as never) as GetGcodeFilesResponse;
-  const totalPages = Math.min(firstPage.totalPages ?? 1, MAX_FETCH_PAGES);
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  const remainingPages = totalPages > 1
-    ? await Promise.all(
-        Array.from({ length: totalPages - 1 }, (_, index) =>
-          apiClient.getGcodeFilesQuery({ ...request, page: index + 2 } as never)
-        )
-      )
-    : [];
-
-  if (signal?.aborted) throw new Error('Query was cancelled');
-
-  return [
-    ...(firstPage.files ?? []),
-    ...remainingPages.flatMap((page) => page.files ?? []),
-  ].filter((file) => !file.isDirectory);
-}
-
 export function FilesPage() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -597,34 +571,23 @@ export function FilesPage() {
 
   const fetcher = useCallback(async (params: unknown, signal?: AbortSignal) => {
     const query = params as UnifiedQueryParams;
-    // 'other' can contain uncategorized files from either source, so fetch both
-    const shouldFetchModels = query.filter !== 'gcode';
-    const shouldFetchGcode = query.filter === 'all' || query.filter === 'gcode' || query.filter === 'other';
-
-    const [models, gcodeFiles] = await Promise.all([
-      shouldFetchModels ? fetchAllModels(query.search, query.sortBy, query.sortOrder, signal) : Promise.resolve([]),
-      shouldFetchGcode ? fetchAllGcode(query.search, query.sortBy, query.sortOrder, harvestId, printerId, signal) : Promise.resolve([]),
-    ]);
-
-    const mergedFiles = [
-      ...models.filter((model): model is Model => model != null).map(toUnifiedModel),
-      ...gcodeFiles.filter((file): file is GcodeFile => file != null).map(toUnifiedGcode),
-    ].filter((file) => query.filter === 'all' || file.filter === query.filter);
-
-    mergedFiles.sort((left, right) => compareFiles(left, right, query.sortBy, query.sortOrder));
-
-    const totalItems = mergedFiles.length;
-    const totalPages = Math.max(1, Math.ceil(totalItems / query.pageSize));
-    const page = Math.min(query.page, totalPages);
-    const startIndex = (page - 1) * query.pageSize;
-    const pagedFiles = mergedFiles.slice(startIndex, startIndex + query.pageSize);
+    const response = await apiClient.getUnifiedFiles({
+      page: query.page,
+      pageSize: query.pageSize,
+      search: query.search || undefined,
+      sortBy: query.sortBy,
+      sortOrder: query.sortOrder,
+      filter: query.filter,
+      harvestId,
+      printerId,
+    }, signal);
 
     return {
-      items: pagedFiles,
-      totalItems,
-      totalPages,
-      totalSize: mergedFiles.reduce((sum, file) => sum + (file.fileSize ?? 0), 0),
-      page,
+      items: response.items.map(toUnifiedFile),
+      totalItems: response.totalItems,
+      totalPages: response.totalPages,
+      totalSize: response.totalSize,
+      page: response.page,
       folders: [],
       currentPath: '/',
     };

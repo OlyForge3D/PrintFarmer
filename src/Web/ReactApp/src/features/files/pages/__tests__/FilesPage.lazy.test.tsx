@@ -123,8 +123,14 @@ vi.mock('@/common/hooks/useViewModePreference', () => ({
 vi.mock('@/services/api', () => ({
   apiClient: {
     getHarvestOperations: vi.fn().mockResolvedValue([]),
-    get3DModelsQuery: vi.fn().mockResolvedValue({ models: [], totalPages: 1 }),
-    getGcodeFilesQuery: vi.fn().mockResolvedValue({ files: [], totalPages: 1 }),
+    getUnifiedFiles: vi.fn().mockResolvedValue({
+      items: [],
+      totalItems: 0,
+      totalSize: 0,
+      page: 1,
+      pageSize: 50,
+      totalPages: 1,
+    }),
   },
 }));
 
