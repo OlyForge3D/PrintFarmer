@@ -61,14 +61,15 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 
     /// <inheritdoc/>
     /// <remarks>
-    /// This aggregate scans all historical rows in the four reported statuses. It avoids loading
-    /// entities or large payload columns, but a future covering engine/status index could reduce
-    /// database I/O further.
+    /// Groups by the persisted <see cref="SliceJob.NormalizedEngine"/> column (kept in sync with
+    /// <see cref="SliceJob.SlicerEngineName"/> by <see cref="SlicerDbContext"/> on every save), so
+    /// this aggregate is backed by the covering <c>IX_SliceJobs_Status_NormalizedEngine</c> index
+    /// (Status leads so the four reported statuses can be seeked directly, skipping Cancelled
+    /// rows) instead of scanning every row and re-evaluating a collate expression per row.
     /// </remarks>
     public async Task<IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int>> GetQueueCountsAsync(
         CancellationToken ct = default)
     {
-        string ordinalCollation = GetOrdinalEngineNameCollation(_db);
         var counts = await _db.SliceJobs
             .AsNoTracking()
             .Where(job =>
@@ -76,28 +77,17 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                 job.Status == SliceJobStatus.Processing ||
                 job.Status == SliceJobStatus.Completed ||
                 job.Status == SliceJobStatus.Failed)
-            .GroupBy(job => new
-            {
-                Engine =
-                    EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.PrusaSlicer) + "#"
-                        ? SlicerEngineType.PrusaSlicer
-                        : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.SuperSlicer) + "#"
-                            ? SlicerEngineType.SuperSlicer
-                            : EF.Functions.Collate(job.SlicerEngineName! + "#", ordinalCollation) == nameof(SlicerEngineType.Cura) + "#"
-                                ? SlicerEngineType.Cura
-                                : SlicerEngineType.OrcaSlicer,
-                job.Status,
-            })
+            .GroupBy(job => new { job.NormalizedEngine, job.Status })
             .Select(group => new
             {
-                group.Key.Engine,
+                group.Key.NormalizedEngine,
                 group.Key.Status,
                 Count = group.Count(),
             })
             .ToListAsync(ct);
 
         return counts.ToDictionary(
-            count => (count.Engine, count.Status),
+            count => ((SlicerEngineType)count.NormalizedEngine, count.Status),
             count => count.Count);
     }
 

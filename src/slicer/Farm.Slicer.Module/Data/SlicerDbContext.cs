@@ -1,7 +1,9 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Slicer.Module.Data.Configurations;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Metadata;
 
 namespace Farm.Slicer.Module.Data;
@@ -75,6 +77,7 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
     /// <inheritdoc/>
     public override int SaveChanges(bool acceptAllChangesOnSuccess)
     {
+        NormalizeSliceJobEngines();
         RevisionConcurrency.Advance(ChangeTracker);
         return base.SaveChanges(acceptAllChangesOnSuccess);
     }
@@ -84,8 +87,32 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
+        NormalizeSliceJobEngines();
         RevisionConcurrency.Advance(ChangeTracker);
         return await base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    /// <summary>
+    /// Keeps <see cref="SliceJob.NormalizedEngine"/> — the persisted column backing the
+    /// (NormalizedEngine, Status) covering index used by queue-stat aggregation — in sync with
+    /// <see cref="SliceJob.SlicerEngineName"/> on every insert/update.
+    /// </summary>
+    /// <remarks>
+    /// Uses the same fallback rule as <see cref="SlicerEngineNames.ResolvePersistedName(string?)"/>:
+    /// a missing or malformed engine name resolves to OrcaSlicer. Computing this here (rather than
+    /// requiring every call site that constructs a <see cref="SliceJob"/> to set it) guarantees the
+    /// column can never drift out of sync with <see cref="SliceJob.SlicerEngineName"/>.
+    /// </remarks>
+    private void NormalizeSliceJobEngines()
+    {
+        foreach (EntityEntry<SliceJob> entry in ChangeTracker.Entries<SliceJob>())
+        {
+            if (entry.State is EntityState.Added or EntityState.Modified)
+            {
+                entry.Entity.NormalizedEngine =
+                    (int)SlicerEngineNames.ResolvePersistedName(entry.Entity.SlicerEngineName);
+            }
+        }
     }
 
     /// <summary>

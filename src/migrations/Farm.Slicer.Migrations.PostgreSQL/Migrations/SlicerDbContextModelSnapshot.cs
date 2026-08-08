@@ -739,6 +739,11 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.Property<string>("ModelTransformJson")
                         .HasColumnType("text");
 
+                    b.Property<int>("NormalizedEngine")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid?>("OperationId")
                         .HasColumnType("uuid");
 
@@ -848,6 +853,9 @@ namespace Farm.Slicer.Migrations.PostgreSQL.Migrations
                     b.HasIndex("UserId");
 
                     b.HasIndex("WorkerId");
+
+                    b.HasIndex("Status", "NormalizedEngine")
+                        .HasDatabaseName("IX_SliceJobs_Status_NormalizedEngine");
 
                     b.HasIndex("Status", "Priority", "QueuedAt");
 
