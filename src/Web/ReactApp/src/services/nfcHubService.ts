@@ -4,7 +4,8 @@ import {
   HubConnectionState,
   LogLevel,
 } from '@microsoft/signalr';
-import { getHubUrl } from '@/common/utils/apiUrlHelpers';
+import { getHubUrl, getSignalRAccessToken } from '@/common/utils/apiUrlHelpers';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
 import type { NfcTagReadEvent, NfcTagUnknownEvent } from '@/features/nfc/types';
 
 type NfcTagReadCallback = (event: NfcTagReadEvent) => void;
@@ -19,6 +20,7 @@ class NfcHubService {
   private connection: HubConnection | null = null;
   private connected = false;
   private connecting = false;
+  private lifecycleGeneration = 0;
 
   private tagReadCallbacks: NfcTagReadCallback[] = [];
   private tagUnknownCallbacks: NfcTagUnknownCallback[] = [];
@@ -29,6 +31,7 @@ class NfcHubService {
       this.buildConnection();
     }
     const conn = this.connection!;
+    const generation = this.lifecycleGeneration;
     if (conn.state === HubConnectionState.Connected) return;
     if (conn.state === HubConnectionState.Connecting) return;
     if (conn.state !== HubConnectionState.Disconnected) return;
@@ -36,17 +39,37 @@ class NfcHubService {
     this.connecting = true;
     try {
       await conn.start();
-      this.setConnected(true);
+      if (generation === this.lifecycleGeneration) this.setConnected(true);
     } catch (err) {
       console.error('[nfcHub] connect failed:', err);
-      this.setConnected(false);
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
     } finally {
-      this.connecting = false;
+      if (generation === this.lifecycleGeneration) this.connecting = false;
     }
   }
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Stops and discards the current connection. Called on logout (via
+   * registerAuthenticatedSignalRTransport) so a revoked session doesn't keep
+   * receiving farm-private NFC broadcasts on an already-established connection.
+   */
+  async stop(): Promise<void> {
+    this.lifecycleGeneration++;
+    const conn = this.connection;
+    this.connection = null;
+    this.connecting = false;
+    this.setConnected(false);
+    if (conn) {
+      try {
+        await conn.stop();
+      } catch (e) {
+        console.error('[nfcHub] error stopping connection:', e);
+      }
+    }
   }
 
   onTagRead(callback: NfcTagReadCallback): () => void {
@@ -74,9 +97,13 @@ class NfcHubService {
   }
 
   private buildConnection(): void {
+    const generation = ++this.lifecycleGeneration;
     const url = getHubUrl('/hubs/nfc');
     this.connection = new HubConnectionBuilder()
-      .withUrl(url)
+      .withUrl(url, {
+        accessTokenFactory: getSignalRAccessToken,
+        withCredentials: true,
+      })
       .withAutomaticReconnect()
       .configureLogging(LogLevel.Warning)
       .build();
@@ -93,9 +120,15 @@ class NfcHubService {
       });
     });
 
-    this.connection.onclose(() => this.setConnected(false));
-    this.connection.onreconnecting(() => this.setConnected(false));
-    this.connection.onreconnected(() => this.setConnected(true));
+    this.connection.onclose(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
+    });
+    this.connection.onreconnecting(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
+    });
+    this.connection.onreconnected(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(true);
+    });
   }
 
   private setConnected(value: boolean): void {
@@ -107,3 +140,7 @@ class NfcHubService {
 }
 
 export const nfcHubService = new NfcHubService();
+registerAuthenticatedSignalRTransport(
+  'nfc-hub',
+  () => nfcHubService.stop(),
+);

@@ -537,8 +537,10 @@ app.MapHub<PrinterHub>("/hubs/printers");
 app.MapHub<HarvestHub>("/hubs/harvest");
 app.MapHub<MaintenanceHub>("/hubs/maintenance");
 
-// Public because unprovisioned NFC firmware connects before an admin approves the device.
-app.MapHub<NfcHub>("/hubs/nfc").AllowAnonymous();
+// Requires an authenticated user — broadcasts carry farm-wide spool and printer identifiers.
+// NFC firmware never connects to this hub; devices ingest scans via a separate REST path
+// (NfcDevicesController) authenticated with X-Nfc-Device-Token.
+app.MapHub<NfcHub>("/hubs/nfc");
 
 // Slicer hubs (registry + progress): delegated to runtime-loaded ISlicerHubRegistrar
 if (slicerModuleEnabled)
