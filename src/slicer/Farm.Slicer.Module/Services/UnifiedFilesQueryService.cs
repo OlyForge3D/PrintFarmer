@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Text;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Repositories.Tags;
@@ -50,8 +51,17 @@ public sealed class UnifiedFilesQueryService(
         int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / pageSize));
         int page = Math.Min(requestedPage, totalPages);
         int offset = checked((page - 1) * pageSize);
-        string modelNameCollation = GetOrdinalNameCollation(_slicerDb.Database.ProviderName);
-        string gcodeNameCollation = GetOrdinalNameCollation(_appDb.Database.ProviderName);
+        string? modelProvider = _slicerDb.Database.ProviderName;
+        string? gcodeProvider = _appDb.Database.ProviderName;
+        if (!string.Equals(modelProvider, gcodeProvider, StringComparison.Ordinal))
+        {
+            throw new NotSupportedException(
+                $"Unified file pagination requires both sources to use the same provider; found '{modelProvider}' and '{gcodeProvider}'.");
+        }
+
+        string modelNameCollation = GetBinaryNameCollation(modelProvider);
+        string gcodeNameCollation = GetBinaryNameCollation(gcodeProvider);
+        IComparer<string> nameComparer = GetBinaryNameComparer(modelProvider);
         IOrderedQueryable<Model3D> orderedModels = OrderModels(
             modelQuery,
             request.SortBy,
@@ -71,6 +81,7 @@ public sealed class UnifiedFilesQueryService(
             offset,
             request.SortBy,
             request.SortOrder,
+            nameComparer,
             ct);
         Task<List<UnifiedFileCandidate>> modelCandidatesTask = QueryModelCandidatesAsync(
             orderedModels,
@@ -88,6 +99,7 @@ public sealed class UnifiedFilesQueryService(
             await gcodeCandidatesTask,
             request.SortBy,
             request.SortOrder,
+            nameComparer,
             pageSize);
 
         IReadOnlyList<UnifiedFileDto> items = await HydratePageAsync(pageCandidates, ct);
@@ -307,6 +319,7 @@ public sealed class UnifiedFilesQueryService(
         int offset,
         UnifiedFileSortBy sortBy,
         UnifiedFileSortOrder sortOrder,
+        IComparer<string> nameComparer,
         CancellationToken ct)
     {
         int low = Math.Max(0, offset - gcodeCount);
@@ -332,13 +345,23 @@ public sealed class UnifiedFilesQueryService(
             CandidateBoundary gcodeBoundary = await gcodeBoundaryTask;
             if (modelBoundary.Left is not null &&
                 gcodeBoundary.Right is not null &&
-                CompareAcrossSources(modelBoundary.Left, gcodeBoundary.Right, sortBy, sortOrder) > 0)
+                CompareAcrossSources(
+                    modelBoundary.Left,
+                    gcodeBoundary.Right,
+                    sortBy,
+                    sortOrder,
+                    nameComparer) > 0)
             {
                 high = modelOffset - 1;
             }
             else if (gcodeBoundary.Left is not null &&
                      modelBoundary.Right is not null &&
-                     CompareAcrossSources(gcodeBoundary.Left, modelBoundary.Right, sortBy, sortOrder) > 0)
+                     CompareAcrossSources(
+                         gcodeBoundary.Left,
+                         modelBoundary.Right,
+                         sortBy,
+                         sortOrder,
+                         nameComparer) > 0)
             {
                 low = modelOffset + 1;
             }
@@ -390,6 +413,7 @@ public sealed class UnifiedFilesQueryService(
         IReadOnlyList<UnifiedFileCandidate> gcodeFiles,
         UnifiedFileSortBy sortBy,
         UnifiedFileSortOrder sortOrder,
+        IComparer<string> nameComparer,
         int take)
     {
         var merged = new List<UnifiedFileCandidate>(Math.Min(take, models.Count + gcodeFiles.Count));
@@ -412,7 +436,7 @@ public sealed class UnifiedFilesQueryService(
 
             UnifiedFileCandidate model = models[modelIndex];
             UnifiedFileCandidate gcode = gcodeFiles[gcodeIndex];
-            if (CompareAcrossSources(model, gcode, sortBy, sortOrder) <= 0)
+            if (CompareAcrossSources(model, gcode, sortBy, sortOrder, nameComparer) <= 0)
             {
                 merged.Add(model);
                 modelIndex++;
@@ -431,18 +455,19 @@ public sealed class UnifiedFilesQueryService(
         UnifiedFileCandidate left,
         UnifiedFileCandidate right,
         UnifiedFileSortBy sortBy,
-        UnifiedFileSortOrder sortOrder)
+        UnifiedFileSortOrder sortOrder,
+        IComparer<string> nameComparer)
     {
         int comparison = sortBy switch
         {
             UnifiedFileSortBy.Size => left.FileSize.CompareTo(right.FileSize),
             UnifiedFileSortBy.Date => left.UploadedAt.CompareTo(right.UploadedAt),
-            _ => string.CompareOrdinal(left.DisplayName, right.DisplayName),
+            _ => nameComparer.Compare(left.DisplayName, right.DisplayName),
         };
 
         if (comparison == 0 && sortBy != UnifiedFileSortBy.Name)
         {
-            comparison = string.CompareOrdinal(left.DisplayName, right.DisplayName);
+            comparison = nameComparer.Compare(left.DisplayName, right.DisplayName);
         }
 
         if (comparison == 0)
@@ -571,7 +596,7 @@ public sealed class UnifiedFilesQueryService(
             .ToList();
     }
 
-    private static string GetOrdinalNameCollation(string? providerName)
+    private static string GetBinaryNameCollation(string? providerName)
     {
         return providerName switch
         {
@@ -583,6 +608,21 @@ public sealed class UnifiedFilesQueryService(
                 $"Unified file pagination requires a binary name collation for provider '{provider}'."),
             null => throw new NotSupportedException(
                 "Unified file pagination requires a relational provider with a binary name collation."),
+        };
+    }
+
+    private static IComparer<string> GetBinaryNameComparer(string? providerName)
+    {
+        return providerName switch
+        {
+            "Microsoft.EntityFrameworkCore.SqlServer" => OrdinalPadSpaceComparer.Instance,
+            "Microsoft.EntityFrameworkCore.Sqlite" or
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => UnicodeScalarComparer.Instance,
+            "Pomelo.EntityFrameworkCore.MySql" => UnicodeScalarComparer.PadSpaceInstance,
+            string provider => throw new NotSupportedException(
+                $"Unified file pagination requires a binary name comparer for provider '{provider}'."),
+            null => throw new NotSupportedException(
+                "Unified file pagination requires a relational provider with a binary name comparer."),
         };
     }
 
@@ -602,5 +642,86 @@ public sealed class UnifiedFilesQueryService(
     private sealed record SourceSummary(int Count, long Size)
     {
         public static SourceSummary Empty { get; } = new(0, 0);
+    }
+
+    private sealed class UnicodeScalarComparer : IComparer<string>
+    {
+        private readonly bool _trimTrailingSpaces;
+
+        private UnicodeScalarComparer(bool trimTrailingSpaces)
+        {
+            _trimTrailingSpaces = trimTrailingSpaces;
+        }
+
+        public static UnicodeScalarComparer Instance { get; } = new(false);
+
+        public static UnicodeScalarComparer PadSpaceInstance { get; } = new(true);
+
+        public int Compare(string? left, string? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left is null)
+            {
+                return -1;
+            }
+
+            if (right is null)
+            {
+                return 1;
+            }
+
+            if (_trimTrailingSpaces)
+            {
+                left = left.TrimEnd(' ');
+                right = right.TrimEnd(' ');
+            }
+
+            var leftRunes = left.EnumerateRunes().GetEnumerator();
+            var rightRunes = right.EnumerateRunes().GetEnumerator();
+            while (true)
+            {
+                bool hasLeft = leftRunes.MoveNext();
+                bool hasRight = rightRunes.MoveNext();
+                if (!hasLeft || !hasRight)
+                {
+                    return hasLeft.CompareTo(hasRight);
+                }
+
+                int comparison = leftRunes.Current.Value.CompareTo(rightRunes.Current.Value);
+                if (comparison != 0)
+                {
+                    return comparison;
+                }
+            }
+        }
+    }
+
+    private sealed class OrdinalPadSpaceComparer : IComparer<string>
+    {
+        public static OrdinalPadSpaceComparer Instance { get; } = new();
+
+        public int Compare(string? left, string? right)
+        {
+            if (ReferenceEquals(left, right))
+            {
+                return 0;
+            }
+
+            if (left is null)
+            {
+                return -1;
+            }
+
+            if (right is null)
+            {
+                return 1;
+            }
+
+            return string.CompareOrdinal(left.TrimEnd(' '), right.TrimEnd(' '));
+        }
     }
 }

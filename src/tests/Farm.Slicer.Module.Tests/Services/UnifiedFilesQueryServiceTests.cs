@@ -225,6 +225,31 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         response.Items.Select(item => item.Name).Should().Equal("beta.gcode", "Éclair.stl");
     }
 
+    [Theory]
+    [InlineData(UnifiedFileSortOrder.Asc, "😀.gcode")]
+    [InlineData(UnifiedFileSortOrder.Desc, "\uE000.stl")]
+    public async Task QueryAsync_BinaryNameOrdering_MatchesUnicodeScalarPageBoundary(
+        UnifiedFileSortOrder sortOrder,
+        string expectedSecondName)
+    {
+        _slicerDb.Models3D.Add(CreateModel("\uE000.stl", 1));
+        _appDb.GcodeFiles.Add(CreateGcode("😀.gcode", 1));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto
+            {
+                Page = 2,
+                PageSize = 1,
+                SortBy = UnifiedFileSortBy.Name,
+                SortOrder = sortOrder,
+            },
+            CancellationToken.None);
+
+        response.Items.Should().ContainSingle()
+            .Which.Name.Should().Be(expectedSecondName);
+    }
+
     [Fact]
     public async Task QueryAsync_TaggedModel_PreservesTagsInUnifiedResponse()
     {
