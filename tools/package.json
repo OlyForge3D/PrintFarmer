@@ -18,5 +18,8 @@
   "type": "commonjs",
   "dependencies": {
     "@microsoft/signalr": "^9.0.6"
+  },
+  "overrides": {
+    "ws": ">=7.5.11 <8.0.0"
   }
 }
