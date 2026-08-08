@@ -20,7 +20,7 @@ const signalRTestState = vi.hoisted(() => {
   builder.withAutomaticReconnect.mockReturnValue(builder);
   builder.configureLogging.mockReturnValue(builder);
   builder.build.mockReturnValue(connection);
-  return { builder };
+  return { builder, connection };
 });
 
 vi.mock('@microsoft/signalr', () => ({
@@ -42,12 +42,24 @@ vi.mock('@/common/utils/apiUrlHelpers', () => ({
   getSignalRAccessToken: vi.fn(() => localStorage.getItem('auth-token') || ''),
 }));
 
+const registeredTransports = vi.hoisted(() => new Map<string, () => Promise<void>>());
+
+vi.mock('@/common/auth/authenticatedSignalRSession', () => ({
+  registerAuthenticatedSignalRTransport: vi.fn(
+    (name: string, reset: () => Promise<void>) => {
+      registeredTransports.set(name, reset);
+      return () => registeredTransports.delete(name);
+    },
+  ),
+}));
+
 describe('nfcHubService authentication', () => {
   beforeEach(() => {
     // Re-evaluate the singleton after each mock setup; per-test isolation is intentional.
     vi.resetModules();
     vi.clearAllMocks();
     localStorage.clear();
+    registeredTransports.clear();
   });
 
   it('uses the canonical auth token for the now-secured NFC hub', async () => {
@@ -62,5 +74,23 @@ describe('nfcHubService authentication', () => {
     };
     expect(options.accessTokenFactory()).toBe('jwt-nfc');
     expect(options.withCredentials).toBe(true);
+  });
+
+  it('registers itself as an authenticated transport so logout tears down an existing connection', async () => {
+    await import('../nfcHubService');
+
+    expect(registeredTransports.has('nfc-hub')).toBe(true);
+  });
+
+  it('stops the underlying connection when the authenticated session resets', async () => {
+    const { nfcHubService } = await import('../nfcHubService');
+    await nfcHubService.ensureConnected();
+
+    const reset = registeredTransports.get('nfc-hub');
+    expect(reset).toBeDefined();
+    await reset!();
+
+    expect(signalRTestState.connection.stop).toHaveBeenCalledOnce();
+    expect(nfcHubService.isConnected()).toBe(false);
   });
 });

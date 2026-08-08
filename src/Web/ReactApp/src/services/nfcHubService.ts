@@ -5,6 +5,7 @@ import {
   LogLevel,
 } from '@microsoft/signalr';
 import { getHubUrl, getSignalRAccessToken } from '@/common/utils/apiUrlHelpers';
+import { registerAuthenticatedSignalRTransport } from '@/common/auth/authenticatedSignalRSession';
 import type { NfcTagReadEvent, NfcTagUnknownEvent } from '@/features/nfc/types';
 
 type NfcTagReadCallback = (event: NfcTagReadEvent) => void;
@@ -47,6 +48,25 @@ class NfcHubService {
 
   isConnected(): boolean {
     return this.connected;
+  }
+
+  /**
+   * Stops and discards the current connection. Called on logout (via
+   * registerAuthenticatedSignalRTransport) so a revoked session doesn't keep
+   * receiving farm-private NFC broadcasts on an already-established connection.
+   */
+  async stop(): Promise<void> {
+    const conn = this.connection;
+    this.connection = null;
+    this.connecting = false;
+    if (conn) {
+      try {
+        await conn.stop();
+      } catch (e) {
+        console.error('[nfcHub] error stopping connection:', e);
+      }
+    }
+    this.setConnected(false);
   }
 
   onTagRead(callback: NfcTagReadCallback): () => void {
@@ -110,3 +130,7 @@ class NfcHubService {
 }
 
 export const nfcHubService = new NfcHubService();
+registerAuthenticatedSignalRTransport(
+  'nfc-hub',
+  () => nfcHubService.stop(),
+);
