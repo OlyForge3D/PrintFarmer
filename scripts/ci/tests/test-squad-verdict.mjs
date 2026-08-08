@@ -218,18 +218,25 @@ test('a gate block is missing evidence, not a reviewer rejection', () => {
   // Ralph routes CHANGES_REQUESTED back to the author but treats MISSING as
   // "no squad evidence", which permits the administrator fallback. Conflating
   // the two would suppress that fallback for PRs nobody has reviewed yet.
+  //
+  // The subcases are materially different from one another, so the gate's own
+  // reason must survive verbatim: telling an operator "no review recorded" when
+  // an unauthenticated party posted one, or when the PR is from a fork, would
+  // report the opposite of what happened.
   for (const detail of [
     `no review recorded for ${shortSha}`,
+    `no authenticated review for ${shortSha} (3 unauthenticated)`,
+    'fork PR needs a repository administrator',
     'have 1/3, missing hicks+vasquez',
     'reviewer parker is the PR author',
     `have 0/3 (stale at bishop@${movedHeadSha.slice(0, 12)})`,
-    'cross-repository PR needs human review',
   ]) {
     const evidence = fixture('REQUEST_CHANGES');
     evidence.status.description = `BLOCKED @ ${shortSha}: ${detail}`;
     const verdict = verifySquadVerdict(evidence);
     assert.equal(verdict.classification, 'MISSING', detail);
-    assert.match(verdict.reason, /no review recorded/);
+    assert.equal(verdict.blockedReason, detail);
+    assert.match(verdict.reason, new RegExp(detail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   }
 });
 

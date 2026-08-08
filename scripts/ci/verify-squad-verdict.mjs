@@ -167,12 +167,15 @@ export function verifySquadVerdict({ pull, status, run }) {
     return result('INVALID', 'The status does not match the trusted workflow verdict.');
   }
 
-  // A block is the absence of any recorded review, not a reviewer decision.
+  // A block means no usable review record was accepted. The gate's own reason is
+  // preserved verbatim because the subcases are materially different — an
+  // unauthenticated author or a fork PR is not the same as nobody reviewing —
+  // and collapsing them would tell the caller the opposite of what happened.
   if (outcome.verdict === 'BLOCKED') {
     return result(
       'MISSING',
-      `The gate blocked ${statusSha} with no review recorded: ${outcome.detail}`,
-      { reviewedHeadSha: statusSha },
+      `The gate blocked ${statusSha}: ${outcome.detail}`,
+      { reviewedHeadSha: statusSha, blockedReason: outcome.detail },
     );
   }
 

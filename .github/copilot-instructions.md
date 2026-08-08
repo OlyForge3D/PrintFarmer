@@ -368,10 +368,20 @@ takes exactly one of four forms:
 
 `REVIEWED` and `APPROVED` are kept distinct on purpose: only the latter is an
 authorisation by a distinct principal. `REQUEST_CHANGES` is a reviewer decision and
-routes back to the author. `BLOCKED` means nothing was recorded — `no review recorded`,
-`have 1/3, missing hicks+vasquez`, `reviewer parker is the PR author`, or the stale
-reviewed SHA. The reason names the exact failing condition, so a session reading the
-failure knows what to do instead of parking indefinitely.
+routes back to the author. `BLOCKED` means **no usable review record was accepted**,
+which is not the same as "nobody looked". Its reason names the exact condition and the
+verifier preserves that reason verbatim, because the subcases differ materially:
+
+| `BLOCKED` reason | What it means |
+| --- | --- |
+| `no review recorded for <sha12>` | Nothing was posted for this head. |
+| `no authenticated review for <sha12> (N unauthenticated)` | Records exist, but their authors could not be authenticated with repository write access. **Security-relevant — do not read this as "nobody reviewed".** |
+| `fork PR needs a repository administrator` | Fork PR; agent records are not read at all. |
+| `have 1/3, missing hicks+vasquez` | Too few reviewers for this change's scope. |
+| `reviewer parker is the PR author` | The only record came from the authoring agent. |
+| `have 0/3 (stale at bishop@<sha12>)` | Records exist but name a superseded head. |
+
+A session reading the failure therefore knows what to do instead of parking indefinitely.
 
 Run the verifier before treating the squad record as merge evidence:
 

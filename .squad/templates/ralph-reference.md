@@ -98,11 +98,22 @@ or rejection from a PR that never had squad evidence.
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
   `squad/pre-pr-verdict` status. The status is the evidence; the comment is not.
-- If the gate reports a `BLOCKED` status, its description names the exact
-  failing condition (no review recorded, stale SHA, reviewer-is-author, or
-  insufficient count). That is missing evidence, not a rejection: act on the
-  condition — do not park the PR, and do not route it back to the author as
-  feedback.
+- If the gate reports a `BLOCKED` status, it means no usable review record was
+  accepted — which is **not** the same as "nobody looked". Its description names
+  the exact condition and the verifier preserves it verbatim in `blockedReason`.
+  Read it before acting:
+  - `no review recorded for <sha>` — nothing was posted for this head.
+  - `no authenticated review for <sha> (N unauthenticated)` — records exist but
+    their authors could not be authenticated with repository write access.
+    **Security-relevant.** Do not treat this as "nobody reviewed", and never
+    merge on it; someone unverifiable tried to assert a review.
+  - `fork PR needs a repository administrator` — fork PR, agent records are not
+    read at all. Only a real administrator approval can clear it.
+  - `have N/3, missing <agents>` — too few reviewers for this change's scope.
+  - `reviewer <agent> is the PR author` — the only record came from the author.
+  - `have 0/3 (stale at <agent>@<sha>)` — records name a superseded head.
+  Act on the named condition — do not park the PR, and do not route it back to
+  the author as review feedback.
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
