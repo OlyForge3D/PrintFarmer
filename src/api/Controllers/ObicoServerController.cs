@@ -154,15 +154,14 @@ public class ObicoServerController : ControllerBase
         }
 
         // Validate URL format if changed
-        if (dto.Url != null && dto.Url != server.Url)
+        bool urlChanged = dto.Url != null && dto.Url != server.Url;
+        if (urlChanged)
         {
             if (!Uri.TryCreate(dto.Url, UriKind.Absolute, out Uri? uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
                 return BadRequest("URL must be a valid HTTP or HTTPS URL");
             }
-
-            server.Url = dto.Url;
         }
 
         // Check for duplicate names if changed
@@ -175,30 +174,47 @@ public class ObicoServerController : ControllerBase
             {
                 return BadRequest($"An Obico server with the name '{dto.Name}' already exists");
             }
+        }
 
+        bool apiKeyChanged = dto.ApiKey is not null;
+        string? resolvedApiKey = apiKeyChanged
+            ? (string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim())
+            : server.ApiKey;
+        string resolvedUrl = dto.Url ?? server.Url;
+        bool resolvedEnabled = dto.IsEnabled ?? server.IsEnabled;
+
+        // Revalidate connectivity whenever the resulting server will be enabled AND
+        // its destination (Url) or credentials (ApiKey) are changing. This closes the
+        // gap where an already-enabled server could have its Url swapped to a blocked
+        // destination (e.g. loopback/link-local) without ever being re-probed through
+        // the egress guard — the enable-transition-only check previously missed this.
+        bool destinationChanging = urlChanged || apiKeyChanged;
+        if (resolvedEnabled && destinationChanging)
+        {
+            ObicoServer probeServer = new()
+            {
+                Url = resolvedUrl,
+                ApiKey = resolvedApiKey
+            };
+            ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(probeServer, ct);
+            if (!healthResult.Healthy)
+            {
+                return BadRequest($"Obico server validation failed: {healthResult.ErrorMessage}");
+            }
+        }
+
+        if (urlChanged)
+        {
+            server.Url = dto.Url!;
+        }
+
+        if (dto.Name != null && dto.Name != server.Name)
+        {
             server.Name = dto.Name;
         }
 
         if (dto.IsEnabled.HasValue)
         {
-            // Validate connectivity when enabling a server
-            if (dto.IsEnabled.Value && !server.IsEnabled)
-            {
-                // Apply URL/ApiKey changes before validation
-                ObicoServer probeServer = new()
-                {
-                    Url = dto.Url ?? server.Url,
-                    ApiKey = dto.ApiKey is not null
-                        ? (string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim())
-                        : server.ApiKey
-                };
-                ObicoServerHealthDto healthResult = await ValidateServerConnectivityAsync(probeServer, ct);
-                if (!healthResult.Healthy)
-                {
-                    return BadRequest($"Cannot enable server — validation failed: {healthResult.ErrorMessage}");
-                }
-            }
-
             server.IsEnabled = dto.IsEnabled.Value;
         }
 
@@ -208,9 +224,9 @@ public class ObicoServerController : ControllerBase
         }
 
         // ApiKey: null means "don't change", empty string means "clear it"
-        if (dto.ApiKey is not null)
+        if (apiKeyChanged)
         {
-            server.ApiKey = string.IsNullOrWhiteSpace(dto.ApiKey) ? null : dto.ApiKey.Trim();
+            server.ApiKey = resolvedApiKey;
         }
 
         server.UpdatedAt = DateTime.UtcNow;

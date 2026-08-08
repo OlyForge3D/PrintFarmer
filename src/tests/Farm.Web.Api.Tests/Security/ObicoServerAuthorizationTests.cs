@@ -171,6 +171,41 @@ public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
         await redirectFactory.DisposeAsync();
     }
 
+    [Fact]
+    public async Task FarmAdmin_UpstreamRedirectsToInternalAddress_ProductionHandlerDoesNotFollowRedirect()
+    {
+        // Unlike FarmAdmin_UpstreamRedirectsToInternalAddress_RedirectIsNotFollowed above (which
+        // swaps in a spy as the primary handler and therefore never actually exercises the
+        // production AllowAutoRedirect=false HttpClientHandler configured in
+        // ServiceCollectionExtensions), this test leaves the "VettedEgress" named HttpClient
+        // registration untouched and instead serves the 302 from a real local HTTP listener, so
+        // the *actual* production handler processes the response.
+        using LoopbackRedirectServer redirectServer = LoopbackRedirectServer.Start(
+            redirectTarget: "http://127.0.0.1:1/admin-secret");
+
+        // The loopback destination is only reachable in this test because it is explicitly
+        // allow-listed; the redirect target (a different loopback port) is NOT allow-listed and
+        // must never be contacted, proving both that the guard vets the initial destination and
+        // that the real handler refuses to auto-follow the redirect.
+        ObicoTestFactory factory = new(allowedRanges: $"127.0.0.1/32");
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Id", Guid.NewGuid().ToString());
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "farm_admin");
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/obico-servers",
+            new { Name = "Real Redirecting Obico", Url = redirectServer.BaseUrl, IsEnabled = true });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("HTTP 302");
+        redirectServer.RequestCount.Should().Be(
+            1,
+            "the production VettedEgress HttpClientHandler (AllowAutoRedirect=false) must not follow the redirect");
+
+        await factory.DisposeAsync();
+    }
+
     private async Task<Guid> SeedObicoServerAsync()
     {
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
@@ -243,7 +278,7 @@ public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
 
     private sealed class ObicoTestFactory : CustomWebApplicationFactory
     {
-        private readonly SpyHttpMessageHandler _handler;
+        private readonly SpyHttpMessageHandler? _handler;
 
         public ObicoTestFactory(SpyHttpMessageHandler handler, string? allowedRanges = null)
             : base(BuildConfigOverrides(allowedRanges))
@@ -251,14 +286,29 @@ public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
             _handler = handler;
         }
 
+        /// <summary>
+        /// Leaves the production "VettedEgress" HttpClient registration untouched (real
+        /// <see cref="HttpClientHandler"/> with AllowAutoRedirect=false), for tests that need to
+        /// prove the actual production wiring rather than a substituted spy handler.
+        /// </summary>
+        public ObicoTestFactory(string? allowedRanges = null)
+            : base(BuildConfigOverrides(allowedRanges))
+        {
+            _handler = null;
+        }
+
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
-            builder.ConfigureServices(services =>
+            if (_handler is not null)
             {
-                services.AddHttpClient("VettedEgress")
-                    .ConfigurePrimaryHttpMessageHandler(() => _handler);
-            });
+                SpyHttpMessageHandler handler = _handler;
+                builder.ConfigureServices(services =>
+                {
+                    services.AddHttpClient("VettedEgress")
+                        .ConfigurePrimaryHttpMessageHandler(() => handler);
+                });
+            }
         }
 
         private static Dictionary<string, string?> BuildConfigOverrides(string? allowedRanges)
@@ -274,6 +324,78 @@ public sealed class ObicoServerAuthorizationTests : IAsyncLifetime
             }
 
             return overrides;
+        }
+    }
+
+    /// <summary>
+    /// A minimal real HTTP server bound to loopback that always responds 302 to a caller-supplied
+    /// redirect target, used to prove that the production VettedEgress HttpClientHandler
+    /// (AllowAutoRedirect=false) is actually wired in — as opposed to a substituted test handler.
+    /// </summary>
+    private sealed class LoopbackRedirectServer : IDisposable
+    {
+        private readonly HttpListener _listener;
+        private readonly string _redirectTarget;
+        private readonly CancellationTokenSource _cts = new();
+        private int _requestCount;
+
+        private LoopbackRedirectServer(HttpListener listener, string baseUrl, string redirectTarget)
+        {
+            _listener = listener;
+            BaseUrl = baseUrl;
+            _redirectTarget = redirectTarget;
+            _ = AcceptLoopAsync();
+        }
+
+        public string BaseUrl { get; }
+
+        public int RequestCount => _requestCount;
+
+        public static LoopbackRedirectServer Start(string redirectTarget)
+        {
+            int port = GetFreeLoopbackPort();
+            string baseUrl = $"http://127.0.0.1:{port}/";
+            HttpListener listener = new();
+            listener.Prefixes.Add(baseUrl);
+            listener.Start();
+            return new LoopbackRedirectServer(listener, baseUrl.TrimEnd('/'), redirectTarget);
+        }
+
+        private static int GetFreeLoopbackPort()
+        {
+            using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
+            probe.Start();
+            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+            probe.Stop();
+            return port;
+        }
+
+        private async Task AcceptLoopAsync()
+        {
+            while (!_cts.IsCancellationRequested)
+            {
+                HttpListenerContext context;
+                try
+                {
+                    context = await _listener.GetContextAsync();
+                }
+                catch (Exception) when (_cts.IsCancellationRequested || !_listener.IsListening)
+                {
+                    return;
+                }
+
+                Interlocked.Increment(ref _requestCount);
+                context.Response.StatusCode = (int)HttpStatusCode.Found;
+                context.Response.RedirectLocation = _redirectTarget;
+                context.Response.Close();
+            }
+        }
+
+        public void Dispose()
+        {
+            _cts.Cancel();
+            _listener.Close();
+            _cts.Dispose();
         }
     }
 }
