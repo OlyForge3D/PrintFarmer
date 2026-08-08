@@ -14,6 +14,63 @@ namespace Farm.Web.Api.Startup;
 public static class AuthenticationStartup
 {
     /// <summary>
+    /// Minimum required length, in bytes, for a production JWT signing key. This is a
+    /// floor on key length, not a measure of secret entropy/strength.
+    /// </summary>
+    public const int MinimumKeyLengthBytes = 32;
+
+    /// <summary>
+    /// JWT signing key values shipped as committed defaults anywhere in this repository's
+    /// deployment templates (e.g. compose files). These must never be accepted outside
+    /// Development, since anyone with repo access already knows them. Intentionally not
+    /// documented further here beyond what already exists in the templates themselves.
+    /// </summary>
+    internal static readonly string[] ShippedPlaceholderKeys =
+    [
+        "dev-super-secret-key-change-this-please-1234567890",
+    ];
+
+    /// <summary>
+    /// Validates that a configured JWT signing key is safe to use outside the
+    /// <c>Development</c> environment: it must not be one of the placeholder values shipped
+    /// in this repository's templates, and it must meet the minimum byte-length floor.
+    /// Always allowed (no further checks) when running in <c>Development</c>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the key is empty, or (outside Development) is a known shipped placeholder
+    /// or shorter than <see cref="MinimumKeyLengthBytes"/> bytes.
+    /// </exception>
+    public static void ValidateJwtKey(string? key, string environmentName)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            throw new InvalidOperationException("JWT Key not configured. Provide a 32+ byte secret via environment variable Jwt__Key or user-secrets in development.");
+        }
+
+        if (string.Equals(environmentName, "Development", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        foreach (string placeholder in ShippedPlaceholderKeys)
+        {
+            if (string.Equals(key, placeholder, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    "JWT Key matches a placeholder value shipped in this repository's deployment templates. " +
+                    "Configure a unique secret via environment variable Jwt__Key (the deploy installer generates one automatically).");
+            }
+        }
+
+        int keyByteLength = Encoding.UTF8.GetByteCount(key);
+        if (keyByteLength < MinimumKeyLengthBytes)
+        {
+            throw new InvalidOperationException(
+                $"JWT Key is too short ({keyByteLength} bytes). A minimum of {MinimumKeyLengthBytes} bytes is required outside Development.");
+        }
+    }
+
+    /// <summary>
     /// Adds PrintFarmer JWT Authentication and Authorization configuration.
     /// </summary>
     public static IServiceCollection AddPrintFarmerAuthentication(
@@ -36,10 +93,7 @@ public static class AuthenticationStartup
                 }
 
                 string? key = configuration["Jwt:Key"];
-                if (string.IsNullOrWhiteSpace(key))
-                {
-                    throw new InvalidOperationException("JWT Key not configured. Provide a 32+ character secret via environment variable Jwt__Key or user-secrets in development.");
-                }
+                ValidateJwtKey(key, environment.EnvironmentName);
 
                 string issuer = configuration["Jwt:Issuer"] ?? "PrintFarmer";
                 string audience = configuration["Jwt:Audience"] ?? "PrintFarmer";
@@ -47,7 +101,7 @@ public static class AuthenticationStartup
                 TokenValidationParameters tvp = new()
                 {
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key)),
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key!)),
                     ValidateIssuer = true,
                     ValidIssuer = issuer,
                     ValidateAudience = true,

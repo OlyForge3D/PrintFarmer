@@ -87,8 +87,10 @@ services:
       - PFARM__NetworkDiscovery__DiscoverySubnets=${PFARM__NetworkDiscovery__DiscoverySubnets:-}
       - PFARM__Go2Rtc__Enabled=${PFARM__Go2Rtc__Enabled:-false}
       - PFARM__Go2Rtc__BaseUrl=${PFARM__Go2Rtc__BaseUrl:-http://go2rtc:1984}
-      # Required JWT signing key (32+ chars) for auth configuration
-      - Jwt__Key=${Jwt__Key:-dev-super-secret-key-change-this-please-1234567890}
+      # Required JWT signing key (32+ bytes) for auth configuration.
+      # No default is provided: an unset value must fail compose rendering
+      # rather than silently booting the API with a committed secret.
+      - Jwt__Key=${Jwt__Key:?Jwt__Key must be set to a unique 32+ byte secret. Run the deploy installer (scripts/deploy-docker.sh) to generate one, or set Jwt__Key in your environment/.env file.}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
       # DevMode: Set to true to bypass auth for GET requests (debugging only!)
