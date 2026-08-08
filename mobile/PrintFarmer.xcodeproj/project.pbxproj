@@ -2104,6 +2104,7 @@
 		161CBFE1D9E3AC5B0978FF78 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = development;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrintFarmer/PrintFarmer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
@@ -2275,6 +2276,7 @@
 		EA36E572E090D0265D8B797D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				APS_ENVIRONMENT = production;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = PrintFarmer/PrintFarmer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
