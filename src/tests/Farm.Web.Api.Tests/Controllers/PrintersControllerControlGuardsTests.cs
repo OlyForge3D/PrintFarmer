@@ -100,6 +100,15 @@ public class PrintersControllerControlGuardsTests
                 It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
+        var resourceAuthorization = new Mock<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                It.IsAny<Farm.Infrastructure.Domain.PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         var controller = new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
@@ -115,7 +124,8 @@ public class PrintersControllerControlGuardsTests
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
-            physicalActuationService: actuation.Object);
+            physicalActuationService: actuation.Object,
+            queueResourceAuthorization: resourceAuthorization.Object);
         controller.ControllerContext = new ControllerContext
         {
             HttpContext = new DefaultHttpContext

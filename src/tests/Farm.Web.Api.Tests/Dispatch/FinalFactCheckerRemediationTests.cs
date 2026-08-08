@@ -723,6 +723,9 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             [nameof(PrintersController.EnsureMmuToolheadsAsync)] = PrintFarmerPermissions.Queue.Write,
             [nameof(PrintersController.UploadGcodeAsync)] = PrintFarmerPermissions.Queue.Write,
             [nameof(PrintersController.StartPrintAsync)] = PrintFarmerPermissions.Queue.Start,
+            [nameof(PrintersController.EnableCameraAsync)] = PrintFarmerPermissions.Queue.Write,
+            [nameof(PrintersController.DisableCameraAsync)] = PrintFarmerPermissions.Queue.Write,
+            [nameof(PrintersController.DeleteHistoryJobAsync)] = PrintFarmerPermissions.Queue.Write,
         };
 
         foreach ((string methodName, string permission) in expected)
@@ -798,6 +801,13 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         _ = await controller.DisableMotorsAsync(printerId, CancellationToken.None);
         _ = await controller.LoadFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.UnloadFilamentAsync(printerId, null, CancellationToken.None);
+        _ = await controller.SetToolheadSpoolAsync(
+            printerId,
+            0,
+            new SetActiveSpoolRequest { SpoolId = 1 },
+            Mock.Of<IPrinterToolheadSwapValidator>(),
+            Mock.Of<Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate>(),
+            CancellationToken.None);
         _ = await controller.ChangeFilamentAsync(printerId, CancellationToken.None);
         _ = await controller.MmuChangeToolAsync(printerId, 1, CancellationToken.None);
         _ = await controller.MmuEjectAsync(printerId, CancellationToken.None);
@@ -809,6 +819,10 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             printerId,
             new SetActiveSpoolRequest { SpoolId = 42 },
             CancellationToken.None);
+        _ = await controller.ClearToolheadSpoolAsync(printerId, 0, CancellationToken.None);
+        _ = await controller.EnableCameraAsync(printerId, CancellationToken.None);
+        _ = await controller.DisableCameraAsync(printerId, CancellationToken.None);
+        _ = await controller.DeleteHistoryJobAsync(printerId, "job-1", CancellationToken.None);
         _ = await controller.UploadGcodeAsync(
             printerId,
             upload,
@@ -818,11 +832,49 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             new ExcludePrintJobObjectRequest("part"),
             CancellationToken.None);
 
+        // FindByIdAsync is invoked by both SetActiveSpoolAsync and ClearToolheadSpoolAsync
+        // (each fetches the printer for the If-Match precondition before routing through the
+        // actuation service, which then denies the request) — exactly twice, never more.
         printers.Verify(service => service.FindByIdAsync(
             printerId,
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+
+        // UnloadFilamentAsync now enforces the same PrinterGroup access check as the other
+        // physical-actuation routes (issue #1292). This controller has no
+        // IQueueResourceAuthorizationService wired, so the check fails closed and the
+        // backend service must never be invoked here — the opposite of the pre-fix behavior
+        // where unload requests bypassed the resource check entirely.
         printers.Verify(service => service.UnloadFilamentAsync(
-            printerId, (int?)null, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // SetToolheadSpoolAsync (controller) also enforces its own fail-closed
+        // CanAccessPrinterAsync guard ahead of its direct backend call (issue #1292 round 3):
+        // it does not route through the physical-actuation service, so it needed its own
+        // explicit gate. Assert the backend spool bind is never reached under this
+        // denied-authorization construction.
+        printers.Verify(service => service.SetToolheadSpoolAsync(
+            It.IsAny<Guid>(),
+            It.IsAny<int>(),
+            It.IsAny<int>(),
+            It.IsAny<FilamentSwapOverrideContext?>(),
+            It.IsAny<SpoolBindPolicy>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        // ClearToolheadSpoolAsync routes through ExecuteDirectCommandControlAsync /
+        // BeginPhysicalControlAsync, whose actuation.AcquireDirectAsync mock is configured
+        // above to always deny — the backend clear must never be invoked either.
+        printers.Verify(service => service.ClearToolheadSpoolAsync(
+            It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        // EnableCameraAsync/DisableCameraAsync/DeleteHistoryJobAsync each gained their own
+        // fail-closed CanAccessPrinterAsync guard in round 3/4 remediation (issue #1292) —
+        // assert the underlying backend calls are never reached under denied authorization.
+        printers.Verify(service => service.EnableCameraAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.DisableCameraAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.DeleteHistoryJobAsync(
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         printers.VerifyNoOtherCalls();
     }
 

@@ -112,6 +112,7 @@ public class PrintersController(
         try
         {
             PrinterCameraUrlsDto[] dtos = await _printersService.GetCameraUrlsAsync(ct);
+            dtos = await FilterAccessiblePrintersAsync(dtos, dto => dto.Id, ct);
             return Ok(dtos.Select(CreateSafeCameraUrls).ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -168,6 +169,8 @@ public class PrintersController(
                 summaries = summaries.Where(summary => summary.IsEnabled).ToArray();
             }
 
+            summaries = await FilterAccessiblePrintersAsync(summaries, summary => summary.Id, ct);
+
             return Ok(summaries);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -196,7 +199,8 @@ public class PrintersController(
     {
         try
         {
-            IEnumerable<PrinterBackendCapabilitiesDto> capabilities = await _printerBackendCapabilitiesService.GetAllAsync(ct);
+            PrinterBackendCapabilitiesDto[] capabilities = (await _printerBackendCapabilitiesService.GetAllAsync(ct)).ToArray();
+            capabilities = await FilterAccessiblePrintersAsync(capabilities, dto => dto.PrinterId, ct);
             return Ok(capabilities);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -223,6 +227,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
         try
         {
             PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
@@ -255,6 +264,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterBackendCapabilitiesDto>> GetPrinterBackendCapabilitiesAsync(Guid printerId, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound($"Printer with ID {printerId} not found");
+        }
+
         try
         {
             PrinterBackendCapabilitiesDto? capabilities = await _printerBackendCapabilitiesService.GetByPrinterIdAsync(printerId, ct);
@@ -633,7 +647,12 @@ public class PrintersController(
                 result = result.Where(p => p.BedTypeId == bedTypeId.Value);
             }
 
-            return Ok(result.ToList());
+            CompletePrinterDto[] filtered = await FilterAccessiblePrintersAsync(
+                result.ToArray(),
+                dto => dto.Id,
+                ct);
+
+            return Ok(filtered.ToList());
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
         {
@@ -804,6 +823,11 @@ public class PrintersController(
                 return NotFound(new { message = $"Printer {id} not found" });
             }
 
+            if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+            {
+                return NotFound(new { message = $"Printer {id} not found" });
+            }
+
             _logger.LogInformation("[PrintJob] Getting print job status for printer {PrinterName}", printer.Name);
 
             // Delegate to service for actual retrieval logic
@@ -844,6 +868,11 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<PrintJobObjectListDto>> GetPrintJobObjectsAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound(new { message = $"Printer {id} not found" });
+        }
+
         PrintJobObjectListDto? objects = await _printersService.GetPrintJobObjectsAsync(id, ct);
         if (objects is null)
         {
@@ -895,6 +924,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterStatusDto>> GetStatusAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterStatusDto dto = await _printersService.GetStatusDtoAsync(id, ct);
@@ -925,6 +959,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterDto>> GetAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterDto dto = await _printersService.GetPrinterDtoAsync(id, ct);
@@ -990,6 +1029,11 @@ public class PrintersController(
     {
         Printer? p = await _printersService.FindByIdWithIncludesAsync(id, ct);
         if (p is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();
         }
@@ -2238,6 +2282,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<IActionResult> GetSnapshotAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         byte[]? bytes = await _printersService.GetCameraSnapshotAsync(id, ct);
         return bytes is null ? NotFound() : File(bytes, "image/jpeg");
     }
@@ -3062,6 +3111,11 @@ public class PrintersController(
         [FromQuery] int? toolheadIndex,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
         _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
         return MapFilamentUnloadResult(result);
@@ -3388,6 +3442,11 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<IEnumerable<SpoolmanSpoolDto>>> GetPrinterSpoolsAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         IReadOnlyList<SpoolmanSpoolDto>? spools = await _printersService.ListPrinterSpoolsAsync(id, ct);
         if (spools is null)
         {
@@ -3443,6 +3502,11 @@ public class PrintersController(
         [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
         if (request?.SpoolId is not { } spoolId)
         {
             return BadRequest(new CommandResult(false, "SpoolId is required"));
@@ -3696,6 +3760,11 @@ public class PrintersController(
         [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         // Guided-swap gate (#725): when disabled, return the standard featureDisabled 404
         // ProblemDetails before any read/validation/telemetry.
         if (!await featureGate.IsEnabledAsync(Farm.Infrastructure.Services.OperatorFeatures.OperatorFeature.GuidedSwap, ct).ConfigureAwait(false))
@@ -3757,11 +3826,17 @@ public class PrintersController(
     /// Camera must be physically connected and configured in the printer backend for this to work.
     /// </remarks>
     [HttpPost("{id:guid}/camera/enable")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         bool ok = await _printersService.EnableCameraAsync(id, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -3780,11 +3855,17 @@ public class PrintersController(
     /// Can be used to reduce network load or disable camera access temporarily.
     /// </remarks>
     [HttpPost("{id:guid}/camera/disable")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         bool ok = await _printersService.DisableCameraAsync(id, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -3806,6 +3887,11 @@ public class PrintersController(
     [ProducesResponseType(404)]
     public async Task<ActionResult<CameraUrlResult>> GetCameraUrlAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
         return streamUrl == null && snapshotUrl == null
             ? NotFound()
@@ -3842,6 +3928,11 @@ public class PrintersController(
 
     private async Task<IActionResult> ProxyCameraAsync(Guid id, bool useSnapshot, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         (string? streamUrl, string? snapshotUrl) = await _printersService.GetCameraUrlsForPrinterAsync(id, ct);
         string? target = useSnapshot ? snapshotUrl : streamUrl;
         if (target is null)
@@ -3979,7 +4070,7 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<PrinterFileDto[]>> GetFileListAsync(Guid id, CancellationToken ct)
     {
-        if (!await CanAccessPrinterFilesAsync(
+        if (!await CanAccessPrinterAsync(
                 id,
                 PrinterGroupAccessLevel.View,
                 ct))
@@ -4032,7 +4123,7 @@ public class PrintersController(
             return BadRequest(new { error = "filename query parameter is required" });
         }
 
-        if (!await CanAccessPrinterFilesAsync(
+        if (!await CanAccessPrinterAsync(
                 id,
                 PrinterGroupAccessLevel.View,
                 ct))
@@ -4088,12 +4179,7 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
-        if (_queueResourceAuthorization is not null &&
-            !await _queueResourceAuthorization.CanAccessPrinterAsync(
-                User,
-                id,
-                PrinterGroupAccessLevel.Submit,
-                ct))
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
         {
             return NotFound();
         }
@@ -4212,7 +4298,7 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
-        if (!await CanAccessPrinterFilesAsync(
+        if (!await CanAccessPrinterAsync(
                 id,
                 PrinterGroupAccessLevel.Submit,
                 ct))
@@ -4272,7 +4358,12 @@ public class PrintersController(
         }
     }
 
-    private async Task<bool> CanAccessPrinterFilesAsync(
+    /// <summary>
+    /// Enforces the same PrinterGroup access rules on this printer as the mutating/physical
+    /// paths and the SignalR hub, so per-printer reads (status, details, job info, camera) and
+    /// file operations cannot be reached by a caller outside the printer's group.
+    /// </summary>
+    private async Task<bool> CanAccessPrinterAsync(
         Guid printerId,
         PrinterGroupAccessLevel accessLevel,
         CancellationToken ct)
@@ -4283,6 +4374,38 @@ public class PrintersController(
                 printerId,
                 accessLevel,
                 ct);
+    }
+
+    /// <summary>
+    /// Applies the same PrinterGroup access rules as <see cref="CanAccessPrinterAsync"/> to a
+    /// collection result, so restricted printers are omitted from list/summary/camera-urls
+    /// responses instead of merely blocking the per-id reads (issue #1292: filtering only the
+    /// per-id endpoints would still let restricted printer IDs be discovered via these lists).
+    /// </summary>
+    private async Task<T[]> FilterAccessiblePrintersAsync<T>(
+        T[] items,
+        Func<T, Guid> getId,
+        CancellationToken ct)
+    {
+        if (_queueResourceAuthorization is null)
+        {
+            // Fail closed to match CanAccessPrinterAsync: an unavailable authorization
+            // dependency must not silently disclose every printer in a collection response.
+            return Array.Empty<T>();
+        }
+
+        if (items.Length == 0)
+        {
+            return items;
+        }
+
+        Guid[] ids = items.Select(getId).ToArray();
+        IReadOnlySet<Guid> allowed = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            ids,
+            PrinterGroupAccessLevel.View,
+            ct);
+        return items.Where(item => allowed.Contains(getId(item))).ToArray();
     }
 
     /// <summary>
@@ -4301,6 +4424,11 @@ public class PrintersController(
         [FromQuery] int take = Farm.Infrastructure.Services.Printers.PrinterSessionTimelineService.DefaultTake,
         CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             PrinterSessionTimelineDto timeline = await _printerSessionTimelineService.GetRecentAsync(id, take, ct);
@@ -4327,6 +4455,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryListResponse resp = await _printersService.GetHistoryListAsync(id, limit, start, since, before, order, ct);
@@ -4385,6 +4518,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryJob>> GetHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryJob job = await _printersService.GetHistoryJobAsync(id, jobId, ct);
@@ -4438,6 +4576,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             HistoryTotals totals = await _printersService.GetHistoryTotalsAsync(id, ct);
@@ -4455,12 +4598,18 @@ public class PrintersController(
     }
 
     [HttpDelete("{id}/history/{jobId}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
     public async Task<ActionResult> DeleteHistoryJobAsync(Guid id, string jobId, CancellationToken ct = default)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         try
         {
             bool success = await _printersService.DeleteHistoryJobAsync(id, jobId, ct);

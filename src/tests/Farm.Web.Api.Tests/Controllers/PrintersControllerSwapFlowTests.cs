@@ -53,6 +53,15 @@ public class PrintersControllerSwapFlowTests
                 .UseInMemoryDatabase($"swap-{Guid.NewGuid():N}")
                 .Options);
 
+        var resourceAuthorization = new Mock<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                It.IsAny<PrinterGroupAccessLevel>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
         return new PrintersController(
             logger: Mock.Of<ILogger<PrintersController>>(),
             printersService: printersService.Object,
@@ -68,7 +77,8 @@ public class PrintersControllerSwapFlowTests
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
-            appDbContext: db);
+            appDbContext: db,
+            queueResourceAuthorization: resourceAuthorization.Object);
     }
 
     /// <summary>
