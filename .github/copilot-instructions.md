@@ -165,6 +165,59 @@ Flow:
 
 This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
 
+The single exception is a documentation-only change — see the next section. Nothing else
+reduces the trio to fewer than three reviewers.
+
+### Documentation-Only Changes: One Reviewer
+
+**This section is the canonical definition of the documentation-only review exemption. Every
+other mention of it in this repository must link here rather than restate it, so the definition
+cannot drift.**
+
+**A documentation-only change requires ONE reviewer, not three.** Three specialist reviewers
+have essentially nothing to assess in prose that changes no runtime behaviour, so the full gate
+burns three dispatches for no signal. This reduces reviewer **count**, not review **rigour** —
+the single reviewer still performs a real review and can still REJECT.
+
+**Definition (allowlist).** A change is documentation-only when **every** changed path is prose
+or agent-instruction content:
+
+- `**/*.md`
+- `docs/**`
+- `.squad/**`
+- `.github/agents/**`
+- `.github/instructions/**`
+- `.copilot/skills/**` and `.github/skills/**`
+- `LICENSE` and similar top-level prose files
+
+**Denylist — if ANY changed file falls outside the allowlist, the change is NOT
+documentation-only and the full three-reviewer gate applies in full.** This includes, but is not
+limited to: source files, tests, `package.json` or any dependency manifest, lockfiles, workflow
+YAML, scripts, EF Core migrations, and binary or image assets. Match manifests and lockfiles by
+basename, wherever they live in the tree. A PR that touches both a markdown file and a source
+file is **not** documentation-only.
+
+**Carve-outs that always keep the full gate**, even when only markdown changes:
+
+- Anything under `.github/workflows/**`. Workflow YAML is not documentation.
+- Any change to a SECURITY policy, threat model, licensing terms, or a published API contract
+  document. These are prose whose contents carry real consequences.
+- Any change that alters an agent's **safety boundary**, merge-safety rules, or
+  destructive-operation permissions. A markdown file that governs whether an autopilot agent
+  may merge, delete, or force-push is not low-risk prose. This carve-out matters specifically
+  because the agent-instruction files under `.squad/` and `.copilot/skills/` are documentation
+  by path but govern real behaviour.
+
+**Be conservative — when in doubt, use the full gate.** Fail toward the stricter path whenever
+the classification is not obvious.
+
+**Who the single reviewer is.** Route to the reviewer whose domain the document actually
+concerns — for example, Bishop for storage/integration docs, Hicks for testing and contract
+docs, Vasquez for security and concurrency docs. **Default to the squad Lead (Dallas) when the
+domain is unclear.** Everything else in this section — the verdict evidence rules, supersession
+on head movement, and the reviewer session contract below — applies unchanged to the single
+reviewer's verdict.
+
 ### Repository verdict evidence
 
 The workflow publishes the `squad/pre-pr-verdict` commit status on the reviewed

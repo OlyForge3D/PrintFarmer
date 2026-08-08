@@ -773,6 +773,16 @@ When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead):
 
 Reassignment is a routing decision like any other. It is never a consequence of being rejected.
 
+### Documentation-Only Changes Need One Reviewer
+
+Documentation-only changes require **one** reviewer, not the full three-reviewer pre-PR gate.
+This lowers reviewer count, not review rigour — the single reviewer still performs a real
+review. The canonical definition of "documentation-only" (allowlist, manifest/workflow
+denylist, and the carve-outs for security, API-contract, and agent-safety-boundary prose)
+lives in **`.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer"**.
+Read it there; do not restate it elsewhere. When a change is not clearly documentation-only,
+use the full gate.
+
 ---
 
 ## Multi-Agent Artifact Format

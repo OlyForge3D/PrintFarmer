@@ -53,7 +53,7 @@ Ralph is a **monitor, not an implementer**.
 | `squad:brett` | 🔍 Brett | Research |
 | `squad:parker` | ⚙️ Parker | DevOps, Docker, CI/CD, deployment |
 | `squad:newt` | 🎨 Newt | UI/UX design, design tokens |
-| `squad:bishop` / `squad:hicks` / `squad:vasquez` | 🔍 Reviewers | Pre-PR review gate only — never a dispatch owner |
+| `squad:bishop` / `squad:hicks` / `squad:vasquez` | 🔍 Reviewers | Pre-PR review gate only — never a dispatch owner. Documentation-only changes take one reviewer, not three (see `.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer") |
 | `squad:scribe` | 📋 Scribe | Session logging — never a dispatch owner |
 | `squad:ralph` | 🔄 Ralph | This monitor — never a dispatch owner |
 | `squad:copilot` | 🤖 @copilot | Well-defined async issue work |

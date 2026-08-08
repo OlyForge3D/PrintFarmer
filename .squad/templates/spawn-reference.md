@@ -30,6 +30,10 @@ When `create_session` is available, spawn commit-producing agents as **sub-sessi
 > 2. Each sub-session leaves a stale worktree on disk holding duplicate copies of commits, requiring manual cleanup.
 >
 > This holds even when several reviewers run concurrently in a multi-reviewer review round — spawn all of them with `task`, in parallel. There is no exception for visibility, for review size, or for reviewer count.
+>
+> **Reviewer count for documentation-only changes is one, not three.** See
+> `.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer" for the
+> canonical definition; the `task`-only spawn rule above is unchanged either way.
 
 **Sub-session parameters:**
 - **`name`**: `"{Name} {verb}ing {noun}"` — 40-char max, sentence case (e.g., "EECOM refactoring auth", "Flight reviewing arch")

@@ -372,6 +372,10 @@ For repositories with the Bishop, Hicks, and Vasquez pre-PR gate:
 5. Author comments never count. Until the workflow and a non-author administrator
    are available, require human GitHub approval.
 
+Documentation-only changes use a single reviewer in step 1 instead of the trio; every
+other step above is unchanged. See `.github/copilot-instructions.md` §
+"Documentation-Only Changes: One Reviewer" for the canonical definition.
+
 ### Squad Member Review
 
 If the issue was assigned to a squad member and they authored the PR:
