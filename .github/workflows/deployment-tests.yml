@@ -6,6 +6,7 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/docker/**'
       - 'tests/**'
+      - '.github/workflows/deployment-tests.yml'
   push:
     branches:
       - development
@@ -15,6 +16,7 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/docker/**'
       - 'tests/**'
+      - '.github/workflows/deployment-tests.yml'
 
 permissions:
   contents: read
