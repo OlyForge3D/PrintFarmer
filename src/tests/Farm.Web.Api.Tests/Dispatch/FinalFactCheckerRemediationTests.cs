@@ -821,8 +821,14 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
         printers.Verify(service => service.FindByIdAsync(
             printerId,
             It.IsAny<CancellationToken>()), Times.Once);
+
+        // UnloadFilamentAsync now enforces the same PrinterGroup access check as the other
+        // physical-actuation routes (issue #1292). This controller has no
+        // IQueueResourceAuthorizationService wired, so the check fails closed and the
+        // backend service must never be invoked here — the opposite of the pre-fix behavior
+        // where unload requests bypassed the resource check entirely.
         printers.Verify(service => service.UnloadFilamentAsync(
-            printerId, (int?)null, It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
         printers.VerifyNoOtherCalls();
     }
 

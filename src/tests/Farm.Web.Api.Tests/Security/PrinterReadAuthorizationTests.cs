@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Http.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -23,11 +24,34 @@ namespace Farm.Web.Api.Tests.Security;
 public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
 {
     private readonly Mock<IPrintersService> _printers = new();
+    private readonly Mock<IPrinterVersionCache> _versionCache = new();
+    private readonly Mock<Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator> _swapValidator = new();
     private readonly PrinterReadFactory _factory;
 
     public PrinterReadAuthorizationTests()
     {
-        _factory = new PrinterReadFactory(_printers);
+        _factory = new PrinterReadFactory(_printers, _versionCache, _swapValidator);
+
+        _versionCache
+            .Setup(cache => cache.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => new PrinterVersionInfoDto(
+                id,
+                PrinterBackend.Moonraker,
+                Supported: true,
+                FirmwareVersion: "1.0.0",
+                BackendVersion: "1.0.0",
+                ApiVersion: "1",
+                RetrievedAtUtc: DateTime.UtcNow));
+        _swapValidator
+            .Setup(validator => validator.ValidateAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Farm.Infrastructure.Services.Printers.SwapValidationResult(
+                Farm.Infrastructure.Services.Printers.SwapValidationOutcome.Validated,
+                new Farm.Infrastructure.Services.Printers.SwapValidationResultDto(
+                    Farm.Infrastructure.Services.Printers.SwapValidationStatus.Ok,
+                    null,
+                    null,
+                    Array.Empty<Farm.Infrastructure.Services.Printers.SwapValidationAffectedJobDto>(),
+                    null)));
 
         _printers
             .Setup(service => service.FindByIdWithIncludesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -99,31 +123,11 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         yield return new object[] { "spoolman/spools" };
         yield return new object[] { "history" };
         yield return new object[] { "history/totals" };
-    }
-
-    /// <summary>
-    /// Endpoints backed by services other than <see cref="IPrintersService"/> (version cache,
-    /// backend-capabilities service, guided-swap validator). These are only exercised on the
-    /// cross-group-denied path, which returns before those dependencies are ever invoked, so no
-    /// additional mocking is required to prove the group check runs first.
-    /// </summary>
-    public static IEnumerable<object[]> DenyOnlyRestrictedReadEndpoints()
-    {
+        yield return new object[] { "history/job-1" };
+        yield return new object[] { "session-timeline" };
         yield return new object[] { "version" };
         yield return new object[] { "backend-capabilities" };
         yield return new object[] { "toolheads/0/swap-validation?spoolId=1" };
-    }
-
-    [Theory]
-    [MemberData(nameof(DenyOnlyRestrictedReadEndpoints))]
-    public async Task DenyOnlyEndpoint_CrossGroupCallerDenied_Returns404(string suffix)
-    {
-        Guid printerId = await SeedRestrictedPrinterAsync();
-        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
-
-        HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]
@@ -133,6 +137,52 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
 
         HttpResponseMessage response = await client.DeleteAsync(BuildUrl(printerId, "history/job-1"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task UnloadFilament_CrossGroupCallerDenied_Returns404()
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid(), PrintFarmerPermissions.Queue.Start);
+
+        HttpResponseMessage response = await client.PostAsync(BuildUrl(printerId, "filament-unload"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task SetToolheadSpool_CrossGroupCallerDenied_Returns404()
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid(), PrintFarmerPermissions.Queue.Write);
+
+        HttpResponseMessage response = await client.PutAsJsonAsync(
+            BuildUrl(printerId, "toolheads/0/spool"),
+            new { spoolId = 1 });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task EnableCamera_CrossGroupCallerDenied_Returns404()
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+
+        HttpResponseMessage response = await client.PostAsync(BuildUrl(printerId, "camera/enable"), content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task DisableCamera_CrossGroupCallerDenied_Returns404()
+    {
+        Guid printerId = await SeedRestrictedPrinterAsync();
+        using HttpClient client = CreateForeignRoleClient(Guid.NewGuid());
+
+        HttpResponseMessage response = await client.PostAsync(BuildUrl(printerId, "camera/disable"), content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -149,6 +199,18 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    /// <summary>
+    /// Endpoints that proxy an outbound HTTP call to the printer's camera (via
+    /// <see cref="ProxyCameraAsync"/>) against a non-routable stub URL. The proxy's upstream
+    /// failure surfaces as some non-2xx status, so these can only be asserted "not the
+    /// authorization-shaped 404" rather than a specific success code.
+    /// </summary>
+    private static readonly HashSet<string> ProxyEndpoints = new(StringComparer.Ordinal)
+    {
+        "camera/stream",
+        "camera/snapshot",
+    };
+
     [Theory]
     [MemberData(nameof(RestrictedReadEndpoints))]
     public async Task ReadEndpoint_MatchingRoleCaller_IsNotDeniedByGroupCheck(string suffix)
@@ -158,10 +220,22 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
 
         HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
 
-        // A caller holding a role granted access on the printer's group must never be turned
-        // away by the PrinterGroup gate. Any downstream failure (e.g. camera upstream 502) is
-        // acceptable here; only the authorization-shaped 404 is disallowed.
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        if (ProxyEndpoints.Contains(suffix))
+        {
+            // A caller holding a role granted access on the printer's group must never be
+            // turned away by the PrinterGroup gate. The upstream camera call against a
+            // non-routable stub URL fails independently of authorization (e.g. 502/503); only
+            // the authorization-shaped 404 is disallowed here.
+            response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        }
+        else
+        {
+            // Every other route here is backed by a deterministic mock/real service that
+            // succeeds for an existing, accessible printer, so a matching-role caller must
+            // observe an actual 2xx success — not just "any non-404" — to prove the group
+            // gate let the request through to the real handler logic.
+            ((int)response.StatusCode).Should().BeInRange(200, 299);
+        }
     }
 
     [Theory]
@@ -175,7 +249,14 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
 
         HttpResponseMessage response = await client.GetAsync(BuildUrl(printerId, suffix));
 
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        if (ProxyEndpoints.Contains(suffix))
+        {
+            response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        }
+        else
+        {
+            ((int)response.StatusCode).Should().BeInRange(200, 299);
+        }
     }
 
     private static string BuildUrl(Guid printerId, string suffix) =>
@@ -183,11 +264,15 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
             ? $"/api/printers/{printerId}"
             : $"/api/printers/{printerId}/{suffix}";
 
-    private HttpClient CreateForeignRoleClient(Guid actorId)
+    private HttpClient CreateForeignRoleClient(Guid actorId, params string[] permissions)
     {
         HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Id", actorId.ToString());
         client.DefaultRequestHeaders.Add("X-Test-Roles", "unrelated-role");
+        if (permissions.Length > 0)
+        {
+            client.DefaultRequestHeaders.Add("X-Test-Permissions", string.Join(',', permissions));
+        }
 
         // Deliberately do not grant this actor any UserRole row: the actor has no role
         // that could ever satisfy a PrinterGroupAccess rule, so the group check must deny.
@@ -305,7 +390,10 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         return (printer.Id, allowedRole.Id);
     }
 
-    private sealed class PrinterReadFactory(Mock<IPrintersService> printers)
+    private sealed class PrinterReadFactory(
+        Mock<IPrintersService> printers,
+        Mock<IPrinterVersionCache> versionCache,
+        Mock<Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator> swapValidator)
         : CustomWebApplicationFactory(
             new Dictionary<string, string?>
             {
@@ -320,6 +408,10 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
             {
                 services.RemoveAll<IPrintersService>();
                 services.AddSingleton(printers.Object);
+                services.RemoveAll<IPrinterVersionCache>();
+                services.AddSingleton(versionCache.Object);
+                services.RemoveAll<Farm.Infrastructure.Services.Printers.IPrinterToolheadSwapValidator>();
+                services.AddSingleton(swapValidator.Object);
             });
         }
     }

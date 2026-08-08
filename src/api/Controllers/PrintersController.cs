@@ -3111,6 +3111,11 @@ public class PrintersController(
         [FromQuery] int? toolheadIndex,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         FilamentUnloadResult result = await _printersService.UnloadFilamentAsync(id, toolheadIndex, ct);
         _telemetryService.RecordPrinterOperation("unload_filament", id.ToString(), result.Success);
         return MapFilamentUnloadResult(result);
@@ -3497,6 +3502,11 @@ public class PrintersController(
         [FromServices] Farm.Infrastructure.Services.OperatorFeatures.IOperatorFeatureGate featureGate,
         CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
         if (request?.SpoolId is not { } spoolId)
         {
             return BadRequest(new CommandResult(false, "SpoolId is required"));
@@ -3821,6 +3831,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EnableCameraAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         bool ok = await _printersService.EnableCameraAsync(id, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -3844,6 +3859,11 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> DisableCameraAsync(Guid id, CancellationToken ct)
     {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
+        {
+            return NotFound();
+        }
+
         bool ok = await _printersService.DisableCameraAsync(id, ct);
         return !ok ? NotFound() : new CommandResult(true, null);
     }
@@ -4157,12 +4177,7 @@ public class PrintersController(
             return BadRequest(new CommandResult(false, "fileName is required"));
         }
 
-        if (_queueResourceAuthorization is not null &&
-            !await _queueResourceAuthorization.CanAccessPrinterAsync(
-                User,
-                id,
-                PrinterGroupAccessLevel.Submit,
-                ct))
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.Submit, ct))
         {
             return NotFound();
         }
