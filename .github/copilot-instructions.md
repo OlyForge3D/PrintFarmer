@@ -285,10 +285,13 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 - `Squad-Head-SHA` must equal the PR's live head SHA when the gate runs. A
   record naming any other SHA is stale and does not count, and can never
   displace a reviewer's record on the current head.
-- The `<!-- squad-verdict -->` marker is required. Fenced code blocks and quoted
-  (`>`) lines are stripped before parsing, so prose that merely illustrates or
-  quotes the format is not a binding record, and each field must appear exactly
-  once in what remains.
+- The `<!-- squad-verdict -->` marker is required. Fenced code blocks (including
+  an unterminated fence, which GitHub renders as code to the end of the comment),
+  quoted (`>`) lines, and every other HTML comment are stripped before parsing.
+  Prose that illustrates, quotes, or hides the format is therefore not a binding
+  record — what the gate counts is what a human reading the thread can see, which
+  is what makes the audit trail meaningful. Each field must appear exactly once in
+  what remains.
 - The commenting account must hold real repository write access, confirmed
   through the collaborator permission API. GitHub's `author_association` is not
   a permission level — it reports `MEMBER` for any organisation member and

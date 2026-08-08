@@ -58,10 +58,13 @@ name: Record squad review (self-attested)
 #   * `Squad-Head-SHA` must equal the PR's live head SHA at evaluation time. A
 #     record against an older SHA is stale, does not count, and can never
 #     displace a reviewer's record on the current head.
-#   * The `<!-- squad-verdict -->` marker is REQUIRED. Fenced code blocks and
-#     quoted (`>`) lines are stripped before parsing, so prose that merely
-#     illustrates or quotes the format is not a binding record. Each field must
-#     appear exactly once in the remaining text.
+#   * The `<!-- squad-verdict -->` marker is REQUIRED. Fenced code blocks
+#     (including an unterminated fence, which GitHub renders as code to the end
+#     of the comment), quoted (`>`) lines, and every other HTML comment are
+#     stripped before parsing. Prose that illustrates, quotes, or hides the
+#     format is therefore not a binding record — what the gate counts is what a
+#     human reading the thread can see. Each field must appear exactly once in
+#     the remaining text.
 #   * The commenting account must hold real repository write access. GitHub's
 #     `author_association` is not a permission level — it reports MEMBER for any
 #     organisation member and COLLABORATOR for read-only collaborators — so

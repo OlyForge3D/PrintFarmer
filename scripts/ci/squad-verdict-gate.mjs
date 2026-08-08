@@ -43,7 +43,15 @@ const trustedAssociations = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 export const verdictMarker = '<!-- squad-verdict -->';
 
 const fencedBlock = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*?^[ \t]*(?:```|~~~)[ \t]*$/gm;
+// An opening fence with no closing fence is fenced through end of body, which
+// is how GitHub renders it. Without this, an unterminated fence displays as
+// code but parses as live text.
+const unterminatedFence = /^[ \t]*(?:```|~~~)[^\n]*\n[\s\S]*$/m;
 const quotedLine = /^[ \t]*>.*$/gm;
+// Any HTML comment other than the marker. Fields hidden inside one render as
+// nothing on GitHub, so counting them would break the audit-trail property:
+// a human reading the thread could not see the evidence the gate used.
+const htmlComment = /<!--[\s\S]*?(?:-->|$)/g;
 
 const verdictAliases = new Map([
   ['APPROVE', 'APPROVE'],
@@ -148,12 +156,23 @@ export function rosterFromLabels(labelNames) {
 }
 
 /**
- * Strip anything that only *quotes* or *illustrates* content: fenced code
- * blocks and Markdown quote lines. A verbatim quote-reply of someone else's
- * verdict must not re-register as a fresh verdict.
+ * Remove anything GitHub renders as code or as a quotation of someone else's
+ * text. A verbatim quote-reply of a record, or an example inside a fence, must
+ * not register as a fresh record.
+ */
+function stripQuotedAndFenced(body) {
+  return body
+    .replace(fencedBlock, '')
+    .replace(unterminatedFence, '')
+    .replace(quotedLine, '');
+}
+
+/**
+ * Everything the gate is willing to read: visible text only, with hidden HTML
+ * comments removed so the parsed evidence matches what a human sees.
  */
 function sanitizeBody(body) {
-  return body.replace(fencedBlock, '').replace(quotedLine, '');
+  return stripQuotedAndFenced(body).replace(htmlComment, '');
 }
 
 function countMatches(pattern, body) {
@@ -174,15 +193,18 @@ function singleMatch(pattern, body) {
 }
 
 /**
- * Parse one PR comment into a verdict record, or undefined when the comment is
- * not a well-formed verdict from a trusted account.
+ * Parse one PR comment into a review record, or undefined when the comment is
+ * not a well-formed record from a trusted account.
  */
 export function parseVerdictComment(comment) {
   const body = typeof comment?.body === 'string' ? comment.body : '';
-  const clean = sanitizeBody(body);
-  if (clean.split(verdictMarker).length !== 2) {
+  const visible = stripQuotedAndFenced(body);
+  if (visible.split(verdictMarker).length !== 2) {
     return undefined;
   }
+  // Drop the marker itself, then every remaining HTML comment, so fields cannot
+  // be smuggled in text that renders as nothing.
+  const clean = visible.split(verdictMarker).join('\n').replace(htmlComment, '');
   const reviewerRaw = countMatches(reviewerLine, clean);
   const verdictRaw = countMatches(verdictLine, clean);
   const headShaRaw = countMatches(headShaLine, clean);

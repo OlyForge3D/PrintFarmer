@@ -116,6 +116,30 @@ test('a repeated field is ambiguous even when the values agree', () => {
   assert.equal(parseVerdictComment(doubled), undefined);
 });
 
+test('fields hidden in an HTML comment are not a record', () => {
+  // Such a comment renders as two innocuous sentences on GitHub. Counting it
+  // would break the audit-trail property: a human reading the thread could not
+  // see the evidence the gate used.
+  const hidden = comment('bishop', 'APPROVE');
+  hidden.body = [
+    'Thanks, looks fine to me!',
+    '<!-- squad-verdict -->',
+    '<!--',
+    'Squad-Reviewer: bishop',
+    'Squad-Verdict: APPROVE',
+    `Squad-Head-SHA: ${headSha}`,
+    '-->',
+    'Nothing to see here.',
+  ].join('\n');
+  assert.equal(parseVerdictComment(hidden), undefined);
+});
+
+test('an unterminated fence hides its contents, matching how GitHub renders it', () => {
+  const unterminated = comment('bishop', 'APPROVE');
+  unterminated.body = ['Here is the format:', '```text', unterminated.body].join('\n');
+  assert.equal(parseVerdictComment(unterminated), undefined);
+});
+
 test('drops verdicts from accounts without repository write access', () => {
   // author_association alone is not a permission level: GitHub reports MEMBER
   // for any organisation member and COLLABORATOR for read-only collaborators.
