@@ -351,9 +351,9 @@ Do not reintroduce hand-off in any form.
 
 ### The closing clause a finished session gets instead
 
-Every dispatch kickoff prompt Ralph writes MUST end with this **closing clause and rider**,
-verbatim, as its final two paragraphs. They must match Ralph's workflow prompt
-word-for-word; the two must not drift.
+Every implementation dispatch kickoff prompt Ralph writes MUST end with this **closing
+clause and rider**, verbatim, as its final two paragraphs. They must match Ralph's workflow
+prompt word-for-word; the two must not drift.
 
 ```
 When your PR is merged and you have verified the merge landed and the linked issue closed, report your final status as your last action and stop. If your PR is definitively closed without merge, report `CLOSED WITHOUT MERGE`, the reason, and the linked issue's current disposition instead; do not claim the issue closed unless you verified it. Do NOT attempt to archive yourself — the runtime refuses `archive_session` on the current session and the call will fail. Do not attempt to archive any other session either. Cleanup is handled only by Ralph's `🧹 Ready to reap` report and a human.
