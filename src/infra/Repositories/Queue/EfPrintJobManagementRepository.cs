@@ -270,16 +270,38 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     // ============= STATISTICS & ANALYTICS =============
     public async Task<(int queued, int printing, int paused, int completed, int failed)> GetQueueStatsAsync(CancellationToken ct = default)
     {
-        List<PrintJob> allJobs = await _context.PrintJobs.ToListAsync(ct);
+        QueueStatsAggregate? counts = await BuildQueueStatsQuery(_context.PrintJobs)
+            .SingleOrDefaultAsync(ct);
 
-        // Count both Queued and Assigned status as "queued" for display purposes
-        // Assigned = job is assigned to a printer but not yet printing
+        if (counts is null)
+        {
+            return (queued: 0, printing: 0, paused: 0, completed: 0, failed: 0);
+        }
+
         return (
-            queued: allJobs.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned),
-            printing: allJobs.Count(j => j.Status == PrintJobStatus.Printing),
-            paused: allJobs.Count(j => j.Status == PrintJobStatus.Paused),
-            completed: allJobs.Count(j => j.Status == PrintJobStatus.Completed),
-            failed: allJobs.Count(j => j.Status == PrintJobStatus.Failed));
+            counts.Queued,
+            counts.Printing,
+            counts.Paused,
+            counts.Completed,
+            counts.Failed);
+    }
+
+    internal static IQueryable<QueueStatsAggregate> BuildQueueStatsQuery(IQueryable<PrintJob> jobs)
+    {
+        return jobs
+            .Where(j => j.Status == PrintJobStatus.Queued
+                     || j.Status == PrintJobStatus.Assigned
+                     || j.Status == PrintJobStatus.Printing
+                     || j.Status == PrintJobStatus.Paused
+                     || j.Status == PrintJobStatus.Completed
+                     || j.Status == PrintJobStatus.Failed)
+            .GroupBy(j => j.Id != Guid.Empty)
+            .Select(g => new QueueStatsAggregate(
+                g.Count(j => j.Status == PrintJobStatus.Queued || j.Status == PrintJobStatus.Assigned),
+                g.Count(j => j.Status == PrintJobStatus.Printing),
+                g.Count(j => j.Status == PrintJobStatus.Paused),
+                g.Count(j => j.Status == PrintJobStatus.Completed),
+                g.Count(j => j.Status == PrintJobStatus.Failed)));
     }
 
     public async Task<double> GetAverageWaitTimeMinutesAsync(Guid? printerModelId = null, int lookbackDays = 30, CancellationToken ct = default)
@@ -310,6 +332,13 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
         return totalWaitMinutes / completedJobs.Count;
     }
+
+    internal sealed record QueueStatsAggregate(
+        int Queued,
+        int Printing,
+        int Paused,
+        int Completed,
+        int Failed);
 
     public async Task<List<PrinterModelQueueStats>> GetModelStatsAsync(CancellationToken ct = default)
     {

@@ -1,10 +1,12 @@
-﻿using Farm.Infrastructure;
+﻿using System.Data.Common;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Web.Api.Tests.Builders;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace Farm.Web.Api.Tests.Infrastructure.Repositories.Queue;
 
@@ -315,5 +317,120 @@ public class EfPrintJobManagementRepositoryTests
         Assert.Equal(2, summaryB.QueuedCount);
         Assert.Equal(0, summaryB.PrintingCount);
         Assert.Null(summaryB.PrintingPosition);
+    }
+
+    [Fact]
+    public async Task GetQueueStatsAsync_MixedStatuses_ReturnsCountsUsingOneAggregateQuery()
+    {
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        var interceptor = new PrintJobQueryInterceptor();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .AddInterceptors(interceptor)
+            .Options;
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            await seedContext.Database.EnsureCreatedAsync();
+            seedContext.PrintJobs.AddRange(
+                CreateJob(PrintJobStatus.Queued),
+                CreateJob(PrintJobStatus.Queued),
+                CreateJob(PrintJobStatus.Assigned),
+                CreateJob(PrintJobStatus.Printing),
+                CreateJob(PrintJobStatus.Paused),
+                CreateJob(PrintJobStatus.Completed),
+                CreateJob(PrintJobStatus.Failed),
+                CreateJob(PrintJobStatus.Starting),
+                CreateJob(PrintJobStatus.Cancelled));
+            await seedContext.SaveChangesAsync();
+        }
+
+        interceptor.Reset();
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        (int queued, int printing, int paused, int completed, int failed) = await repository.GetQueueStatsAsync();
+
+        Assert.Equal(3, queued);
+        Assert.Equal(1, printing);
+        Assert.Equal(1, paused);
+        Assert.Equal(1, completed);
+        Assert.Equal(1, failed);
+        string sql = Assert.Single(interceptor.PrintJobCommands);
+        Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("\"Name\"", sql, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GetQueueStatsAsync_NoJobs_ReturnsZeroCounts()
+    {
+        DbContextOptions<AppDbContext> options = CreateInMemoryOptions(nameof(GetQueueStatsAsync_NoJobs_ReturnsZeroCounts));
+        await using AppDbContext context = new(options);
+        EfPrintJobManagementRepository repository = new(context);
+
+        (int queued, int printing, int paused, int completed, int failed) = await repository.GetQueueStatsAsync();
+
+        Assert.Equal(0, queued);
+        Assert.Equal(0, printing);
+        Assert.Equal(0, paused);
+        Assert.Equal(0, completed);
+        Assert.Equal(0, failed);
+    }
+
+    [Theory]
+    [InlineData("sqlite")]
+    [InlineData("postgres")]
+    [InlineData("sqlserver")]
+    public void BuildQueueStatsQuery_SupportedProvider_TranslatesToAggregateSql(string provider)
+    {
+        var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+        _ = provider switch
+        {
+            "sqlite" => optionsBuilder.UseSqlite("Data Source=:memory:"),
+            "postgres" => optionsBuilder.UseNpgsql("Host=localhost;Database=printfarmer"),
+            "sqlserver" => optionsBuilder.UseSqlServer("Server=(localdb)\\MSSQLLocalDB;Database=printfarmer"),
+            _ => throw new ArgumentOutOfRangeException(nameof(provider), provider, "Unsupported provider test case."),
+        };
+
+        using var context = new AppDbContext(optionsBuilder.Options);
+        string sql = EfPrintJobManagementRepository.BuildQueueStatsQuery(context.PrintJobs).ToQueryString();
+
+        Assert.Contains("GROUP BY", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("COUNT", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static PrintJob CreateJob(PrintJobStatus status)
+    {
+        PrintJob job = new PrintJobBuilder()
+            .WithAssignedPrinterId(null)
+            .WithStatus(status)
+            .Build();
+        job.GcodeFileId = null;
+        job.GcodeFile = null;
+        return job;
+    }
+
+    private sealed class PrintJobQueryInterceptor : DbCommandInterceptor
+    {
+        private readonly List<string> _printJobCommands = [];
+
+        public IReadOnlyList<string> PrintJobCommands => _printJobCommands;
+
+        public void Reset() => _printJobCommands.Clear();
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("PrintJobs", StringComparison.Ordinal))
+            {
+                _printJobCommands.Add(command.CommandText);
+            }
+
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }
