@@ -109,7 +109,7 @@ interface UnifiedQueryParams {
 const FILE_TYPE_OPTIONS: Array<{ value: FileTypeFilter; label: string; hint: string }> = [
   { value: 'all', label: 'All', hint: 'Everything in one list' },
   { value: 'models', label: '3D Models', hint: '.3mf, .stl, .step' },
-  { value: 'gcode', label: 'G-Code', hint: '.gcode' },
+  { value: 'gcode', label: 'G-Code', hint: '.gcode, .bgcode' },
   { value: 'other', label: 'Other', hint: 'OBJ, PLY, and uncategorized files' },
 ];
 const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
@@ -119,7 +119,7 @@ const LEGACY_SEGMENT_TO_FILTER: Partial<Record<string, FileTypeFilter>> = {
 };
 const LEGACY_ACTION_SEGMENTS = new Set(['harvest']);
 const MODEL_FILE_EXTENSIONS = new Set(['3mf', 'stl', 'step', 'stp']);
-const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'gco', 'g', 'ngc', 'gc']);
+const GCODE_FILE_EXTENSIONS = new Set(['gcode', 'bgcode', 'gco', 'g', 'ngc', 'gc']);
 const FILE_BROWSER_SORT_OPTIONS: Array<{ value: SortOption; label: string }> = [
   { value: 'date', label: 'Date' },
   { value: 'name', label: 'Name' },
@@ -145,7 +145,7 @@ function normalizeUploadedAt(value: Date | string | undefined): string | undefin
 }
 
 function classifyModel(model: Model): Exclude<FileTypeFilter, 'all'> {
-  return MODEL_FILE_EXTENSIONS.has(getNormalizedExtension(model.name, model.fileType)) ? 'models' : 'other';
+  return MODEL_FILE_EXTENSIONS.has(getNormalizedExtension(undefined, model.fileType)) ? 'models' : 'other';
 }
 
 function toUnifiedModel(model: Model): UnifiedFileRecord {
@@ -165,6 +165,7 @@ function toUnifiedModel(model: Model): UnifiedFileRecord {
 }
 
 function toUnifiedGcode(file: GcodeFile): UnifiedFileRecord {
+  const extension = getNormalizedExtension(file.fileName, file.fileType);
   return {
     source: 'gcode',
     actualId: file.id ?? '',
@@ -174,8 +175,8 @@ function toUnifiedGcode(file: GcodeFile): UnifiedFileRecord {
     uploadedAt: normalizeUploadedAt(file.uploadedAt),
     thumbnailUrl: file.thumbnailUrl,
     tags: file.tags?.map((tag) => ({ id: tag.id, name: tag.name, color: tag.color })),
-    extension: getNormalizedExtension(file.name),
-    filter: GCODE_FILE_EXTENSIONS.has(getNormalizedExtension(file.name)) ? 'gcode' : 'other',
+    extension,
+    filter: GCODE_FILE_EXTENSIONS.has(extension) ? 'gcode' : 'other',
     gcode: file,
   };
 }
@@ -220,6 +221,7 @@ function toUnifiedFile(file: UnifiedFile): UnifiedFileRecord {
     path: file.path,
     fileName: file.fileName,
     name: file.name,
+    fileType: file.fileType,
     fileSize: file.fileSize,
     uploadedAt: new Date(file.uploadedAt),
     isDirectory: false,

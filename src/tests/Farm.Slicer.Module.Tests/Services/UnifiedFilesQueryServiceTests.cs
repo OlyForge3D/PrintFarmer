@@ -1,7 +1,9 @@
-﻿using System.Text.Json;
+﻿using System.Data.Common;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
@@ -10,6 +12,7 @@ using Farm.Slicer.Module.Services;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Moq;
 
 namespace Farm.Slicer.Module.Tests.Services;
@@ -20,7 +23,10 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
     private readonly SqliteConnection _appConnection;
     private readonly SlicerDbContext _slicerDb;
     private readonly AppDbContext _appDb;
+    private readonly CountingCommandInterceptor _commandCounter = new();
+    private readonly Mock<ITagRepository> _tagRepository;
     private readonly UnifiedFilesQueryService _service;
+    private IReadOnlyCollection<Guid> _lastRequestedModelTagIds = [];
 
     public UnifiedFilesQueryServiceTests()
     {
@@ -31,10 +37,12 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         _slicerDb = new SlicerDbContext(
             new DbContextOptionsBuilder<SlicerDbContext>()
                 .UseSqlite(_slicerConnection)
+                .AddInterceptors(_commandCounter)
                 .Options);
         _appDb = new AppDbContext(
             new DbContextOptionsBuilder<AppDbContext>()
                 .UseSqlite(_appConnection)
+                .AddInterceptors(_commandCounter)
                 .Options);
         _slicerDb.Database.EnsureCreated();
         _appDb.Database.EnsureCreated();
@@ -58,7 +66,22 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
             .Setup(service => service.BuildGcodeThumbnailUrl(It.IsAny<Guid>()))
             .Returns<Guid>(id => $"/api/gcode-files/thumbnail/{id}");
 
-        _service = new UnifiedFilesQueryService(_slicerDb, _appDb, fileOperations.Object);
+        _tagRepository = new Mock<ITagRepository>(MockBehavior.Strict);
+        _tagRepository
+            .Setup(repository => repository.GetTagsByObjectsAsync(
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                "Model3D",
+                It.IsAny<CancellationToken>()))
+            .Callback<IReadOnlyCollection<Guid>, string, CancellationToken>(
+                (ids, _, _) => _lastRequestedModelTagIds = ids)
+            .ReturnsAsync(new Dictionary<Guid, IReadOnlyList<Tag>>());
+
+        _service = new UnifiedFilesQueryService(
+            _slicerDb,
+            _appDb,
+            fileOperations.Object,
+            _tagRepository.Object);
+        _commandCounter.Reset();
     }
 
     [Fact]
@@ -106,15 +129,16 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
     {
         const int itemsPerSource = 1001;
         _slicerDb.Models3D.AddRange(
-            Enumerable.Range(1, itemsPerSource).Select(index => CreateModel($"model-{index:D4}.stl", 1)));
+            Enumerable.Range(1, itemsPerSource).Select(index => CreateModel($"item-{(index * 2) - 1:D4}.stl", 1)));
         _appDb.GcodeFiles.AddRange(
-            Enumerable.Range(1, itemsPerSource).Select(index => CreateGcode($"print-{index:D4}.gcode", 1)));
+            Enumerable.Range(1, itemsPerSource).Select(index => CreateGcode($"item-{index * 2:D4}.gcode", 1)));
         await SaveChangesAsync();
+        _commandCounter.Reset();
 
         UnifiedFilesQueryResponse response = await _service.QueryAsync(
             new UnifiedFilesQueryRequestDto
             {
-                Page = 1,
+                Page = 41,
                 PageSize = 25,
                 SortBy = UnifiedFileSortBy.Name,
                 SortOrder = UnifiedFileSortOrder.Asc,
@@ -125,6 +149,11 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         response.TotalItems.Should().Be(itemsPerSource * 2);
         response.TotalSize.Should().Be(itemsPerSource * 2);
         response.TotalPages.Should().Be(81);
+        response.Items.Select(item => item.Name).Should().Equal(
+            Enumerable.Range(1001, 25).Select(rank =>
+                $"item-{rank:D4}.{(rank % 2 == 0 ? "gcode" : "stl")}"));
+        _lastRequestedModelTagIds.Should().HaveCountLessThanOrEqualTo(13);
+        _commandCounter.ReaderCount.Should().BeLessThan(40);
     }
 
     [Fact]
@@ -138,6 +167,7 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         _appDb.GcodeFiles.AddRange(
             CreateGcode("target-print.bin", 40, requestedPrinterId),
             CreateGcode("target-print.gcode", 50, requestedPrinterId),
+            CreateGcode("target-binary.bgcode", 55, requestedPrinterId),
             CreateGcode("target-other.gcode", 60, Guid.NewGuid()));
         await SaveChangesAsync();
 
@@ -165,8 +195,79 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
         otherResponse.Items.Select(item => item.Name).Should().Equal("target-part.obj", "target-print.bin");
         otherResponse.TotalItems.Should().Be(2);
         otherResponse.TotalSize.Should().Be(50);
-        gcodeResponse.Items.Select(item => item.Name).Should().Equal("target-print.gcode");
-        gcodeResponse.TotalItems.Should().Be(1);
+        gcodeResponse.Items.Select(item => item.Name).Should().Equal(
+            "target-binary.bgcode",
+            "target-print.gcode");
+        gcodeResponse.TotalItems.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task QueryAsync_BinaryNameOrdering_PreservesMixedCasePageBoundary()
+    {
+        _slicerDb.Models3D.AddRange(
+            CreateModel("Zulu.stl", 1),
+            CreateModel("Éclair.stl", 1));
+        _appDb.GcodeFiles.AddRange(
+            CreateGcode("alpha.gcode", 1),
+            CreateGcode("beta.gcode", 1));
+        await SaveChangesAsync();
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto
+            {
+                Page = 2,
+                PageSize = 2,
+                SortBy = UnifiedFileSortBy.Name,
+                SortOrder = UnifiedFileSortOrder.Asc,
+            },
+            CancellationToken.None);
+
+        response.Items.Select(item => item.Name).Should().Equal("beta.gcode", "Éclair.stl");
+    }
+
+    [Fact]
+    public async Task QueryAsync_TaggedModel_PreservesTagsInUnifiedResponse()
+    {
+        Model3D model = CreateModel("tagged.stl", 1);
+        var tag = new Tag
+        {
+            Id = Guid.NewGuid(),
+            Name = "Functional",
+            Category = "manual",
+            Color = "#123456",
+            Revision = 3,
+            ConcurrencyToken = Guid.NewGuid(),
+        };
+        _slicerDb.Models3D.Add(model);
+        await SaveChangesAsync();
+        _tagRepository
+            .Setup(repository => repository.GetTagsByObjectsAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Count == 1 && ids.Contains(model.Id)),
+                "Model3D",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<Guid, IReadOnlyList<Tag>>
+            {
+                [model.Id] = [tag],
+            });
+
+        UnifiedFilesQueryResponse response = await _service.QueryAsync(
+            new UnifiedFilesQueryRequestDto
+            {
+                Filter = UnifiedFileTypeFilter.Models,
+            },
+            CancellationToken.None);
+
+        response.Items.Should().ContainSingle();
+        response.Items[0].Tags.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new
+            {
+                tag.Id,
+                tag.Name,
+                tag.Category,
+                tag.Color,
+                tag.Revision,
+                tag.ConcurrencyToken,
+            });
     }
 
     [Fact]
@@ -271,5 +372,27 @@ public sealed class UnifiedFilesQueryServiceTests : IAsyncDisposable
             CreatedAt = now,
             UpdatedAt = now,
         };
+    }
+
+    private sealed class CountingCommandInterceptor : DbCommandInterceptor
+    {
+        private int _readerCount;
+
+        public int ReaderCount => _readerCount;
+
+        public void Reset()
+        {
+            _readerCount = 0;
+        }
+
+        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+            DbCommand command,
+            CommandEventData eventData,
+            InterceptionResult<DbDataReader> result,
+            CancellationToken cancellationToken = default)
+        {
+            _ = Interlocked.Increment(ref _readerCount);
+            return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
+        }
     }
 }

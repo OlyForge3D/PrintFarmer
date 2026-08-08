@@ -1816,6 +1816,7 @@ export interface GcodeFile {
   path: string;
   fileName: string; // GUID-based filename for internal storage
   name: string; // Original filename uploaded by user (for display)
+  fileType?: string; // Canonical extension derived by the API when available
   fileSize: number; // File size in bytes
   uploadedAt: Date; // Upload timestamp
   isDirectory: boolean;

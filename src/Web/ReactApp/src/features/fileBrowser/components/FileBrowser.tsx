@@ -85,6 +85,9 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
             renderItemActions={renderItemActions}
             renderMetadata={renderMetadata}
             renderCard={renderCard}
+            page={browser.page}
+            totalPages={browser.totalPages}
+            onPageChange={browser.setPage}
             isBusy={browser.isMutating}
           />
         ) : (

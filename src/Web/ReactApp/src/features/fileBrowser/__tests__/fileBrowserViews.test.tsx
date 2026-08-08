@@ -28,11 +28,34 @@ describe('GridView', () => {
         onToggle={vi.fn()}
         onSelectAll={onSelectAll}
         renderItemActions={() => null}
+        page={1}
+        totalPages={1}
+        onPageChange={vi.fn()}
       />
     );
 
     await userEvent.click(screen.getByLabelText('Select all files'));
     expect(onSelectAll).toHaveBeenCalled();
+  });
+
+  it('navigates to the next server page', async () => {
+    const onPageChange = vi.fn();
+    render(
+      <GridView
+        files={files}
+        selectedIds={[]}
+        onToggle={vi.fn()}
+        onSelectAll={vi.fn()}
+        page={1}
+        totalPages={3}
+        onPageChange={onPageChange}
+      />
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(onPageChange).toHaveBeenCalledWith(2);
+    expect(screen.getByText('Page 1 of 3')).toBeVisible();
   });
 });
 

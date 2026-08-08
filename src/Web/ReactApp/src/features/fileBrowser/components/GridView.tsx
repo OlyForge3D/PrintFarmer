@@ -1,5 +1,6 @@
 import { ReactNode } from 'react';
-import { Checkbox } from '@/common/components/ui';
+import { ArrowLeftIcon, ArrowRightIcon } from '@/common/components/icons/MdiIcons';
+import { Button, Checkbox } from '@/common/components/ui';
 import { type FileItem } from '../types';
 
 interface GridViewProps {
@@ -10,6 +11,9 @@ interface GridViewProps {
   renderItemActions?: (file: FileItem) => ReactNode;
   renderMetadata?: (file: FileItem) => ReactNode;
   renderCard?: (file: FileItem, isSelected: boolean, onToggle: () => void) => ReactNode;
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
   isBusy?: boolean;
 }
 
@@ -29,6 +33,9 @@ export const GridView = ({
   renderItemActions,
   renderMetadata,
   renderCard,
+  page,
+  totalPages,
+  onPageChange,
   isBusy,
 }: GridViewProps) => {
   const isAllSelected = selectedIds.length > 0 && selectedIds.length === files.length;
@@ -149,6 +156,34 @@ export const GridView = ({
           </div>
         )}
       </div>
+
+      {totalPages > 1 && (
+        <div className="border-t border-pf-border bg-pf-bg-1 px-3 py-1 flex items-center justify-between text-xs text-pf-text-secondary">
+          <div>
+            Page {page} of {totalPages}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="subtle"
+              disabled={page === 1 || isBusy}
+              onClick={() => onPageChange(page - 1)}
+              aria-label="Previous page"
+              iconCenter={<ArrowLeftIcon className="h-4 w-4" />}
+            />
+            <Button
+              type="button"
+              size="sm"
+              variant="subtle"
+              disabled={page === totalPages || isBusy}
+              onClick={() => onPageChange(page + 1)}
+              aria-label="Next page"
+              iconCenter={<ArrowRightIcon className="h-4 w-4" />}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };

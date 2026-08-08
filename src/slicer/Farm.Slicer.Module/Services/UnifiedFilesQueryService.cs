@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
@@ -15,13 +16,15 @@ namespace Farm.Slicer.Module.Services;
 public sealed class UnifiedFilesQueryService(
     SlicerDbContext slicerDb,
     AppDbContext appDb,
-    IStoredFileOperationsService fileOperations) : IUnifiedFilesQueryService
+    IStoredFileOperationsService fileOperations,
+    ITagRepository tagRepository) : IUnifiedFilesQueryService
 {
     private const int MaximumPageSize = 500;
 
     private readonly SlicerDbContext _slicerDb = slicerDb;
     private readonly AppDbContext _appDb = appDb;
     private readonly IStoredFileOperationsService _fileOperations = fileOperations;
+    private readonly ITagRepository _tagRepository = tagRepository;
 
     /// <inheritdoc/>
     public async Task<UnifiedFilesQueryResponse> QueryAsync(
@@ -47,32 +50,45 @@ public sealed class UnifiedFilesQueryService(
         int totalPages = Math.Max(1, (int)Math.Ceiling((double)totalItems / pageSize));
         int page = Math.Min(requestedPage, totalPages);
         int offset = checked((page - 1) * pageSize);
-        int mergeWindowSize = checked(offset + pageSize);
-
-        Task<List<UnifiedFileCandidate>> modelCandidatesTask = QueryModelCandidatesAsync(
+        string modelNameCollation = GetOrdinalNameCollation(_slicerDb.Database.ProviderName);
+        string gcodeNameCollation = GetOrdinalNameCollation(_appDb.Database.ProviderName);
+        IOrderedQueryable<Model3D> orderedModels = OrderModels(
             modelQuery,
             request.SortBy,
             request.SortOrder,
-            mergeWindowSize,
-            ct);
-        Task<List<UnifiedFileCandidate>> gcodeCandidatesTask = QueryGcodeCandidatesAsync(
+            modelNameCollation);
+        IOrderedQueryable<GcodeFile> orderedGcodeFiles = OrderGcodeFiles(
             gcodeQuery,
             request.SortBy,
             request.SortOrder,
-            mergeWindowSize,
+            gcodeNameCollation);
+
+        SourcePartition partition = await FindPartitionAsync(
+            orderedModels,
+            modelSummary.Count,
+            orderedGcodeFiles,
+            gcodeSummary.Count,
+            offset,
+            request.SortBy,
+            request.SortOrder,
+            ct);
+        Task<List<UnifiedFileCandidate>> modelCandidatesTask = QueryModelCandidatesAsync(
+            orderedModels,
+            partition.ModelOffset,
+            pageSize,
+            ct);
+        Task<List<UnifiedFileCandidate>> gcodeCandidatesTask = QueryGcodeCandidatesAsync(
+            orderedGcodeFiles,
+            partition.GcodeOffset,
+            pageSize,
             ct);
         await Task.WhenAll(modelCandidatesTask, gcodeCandidatesTask);
-
-        List<UnifiedFileCandidate> mergedPrefix = MergeSortedCandidates(
+        List<UnifiedFileCandidate> pageCandidates = MergeSortedCandidates(
             await modelCandidatesTask,
             await gcodeCandidatesTask,
             request.SortBy,
             request.SortOrder,
-            mergeWindowSize);
-        List<UnifiedFileCandidate> pageCandidates = mergedPrefix
-            .Skip(offset)
-            .Take(pageSize)
-            .ToList();
+            pageSize);
 
         IReadOnlyList<UnifiedFileDto> items = await HydratePageAsync(pageCandidates, ct);
         return new UnifiedFilesQueryResponse(items, totalItems, totalSize, page, pageSize, totalPages);
@@ -97,15 +113,13 @@ public sealed class UnifiedFilesQueryService(
         {
             UnifiedFileTypeFilter.Gcode => query.Where(_ => false),
             UnifiedFileTypeFilter.Models => query.Where(model =>
-                model.Name.ToLower().EndsWith(".3mf") ||
-                model.Name.ToLower().EndsWith(".stl") ||
-                model.Name.ToLower().EndsWith(".step") ||
-                model.Name.ToLower().EndsWith(".stp")),
+                model.FileFormat == ModelFileFormat.TMF ||
+                model.FileFormat == ModelFileFormat.STL ||
+                model.FileFormat == ModelFileFormat.STEP),
             UnifiedFileTypeFilter.Other => query.Where(model =>
-                !model.Name.ToLower().EndsWith(".3mf") &&
-                !model.Name.ToLower().EndsWith(".stl") &&
-                !model.Name.ToLower().EndsWith(".step") &&
-                !model.Name.ToLower().EndsWith(".stp")),
+                model.FileFormat != ModelFileFormat.TMF &&
+                model.FileFormat != ModelFileFormat.STL &&
+                model.FileFormat != ModelFileFormat.STEP),
             _ => query,
         };
 
@@ -139,17 +153,19 @@ public sealed class UnifiedFilesQueryService(
         {
             UnifiedFileTypeFilter.Models => query.Where(_ => false),
             UnifiedFileTypeFilter.Gcode => query.Where(file =>
-                file.Name.ToLower().EndsWith(".gcode") ||
-                file.Name.ToLower().EndsWith(".gco") ||
-                file.Name.ToLower().EndsWith(".g") ||
-                file.Name.ToLower().EndsWith(".ngc") ||
-                file.Name.ToLower().EndsWith(".gc")),
+                file.FileName.ToLower().EndsWith(".gcode") ||
+                file.FileName.ToLower().EndsWith(".bgcode") ||
+                file.FileName.ToLower().EndsWith(".gco") ||
+                file.FileName.ToLower().EndsWith(".g") ||
+                file.FileName.ToLower().EndsWith(".ngc") ||
+                file.FileName.ToLower().EndsWith(".gc")),
             UnifiedFileTypeFilter.Other => query.Where(file =>
-                !file.Name.ToLower().EndsWith(".gcode") &&
-                !file.Name.ToLower().EndsWith(".gco") &&
-                !file.Name.ToLower().EndsWith(".g") &&
-                !file.Name.ToLower().EndsWith(".ngc") &&
-                !file.Name.ToLower().EndsWith(".gc")),
+                !file.FileName.ToLower().EndsWith(".gcode") &&
+                !file.FileName.ToLower().EndsWith(".bgcode") &&
+                !file.FileName.ToLower().EndsWith(".gco") &&
+                !file.FileName.ToLower().EndsWith(".g") &&
+                !file.FileName.ToLower().EndsWith(".ngc") &&
+                !file.FileName.ToLower().EndsWith(".gc")),
             _ => query,
         };
 
@@ -179,41 +195,48 @@ public sealed class UnifiedFilesQueryService(
         return summary ?? SourceSummary.Empty;
     }
 
-    private static Task<List<UnifiedFileCandidate>> QueryModelCandidatesAsync(
+    private static IOrderedQueryable<Model3D> OrderModels(
         IQueryable<Model3D> query,
         UnifiedFileSortBy sortBy,
         UnifiedFileSortOrder sortOrder,
-        int take,
-        CancellationToken ct)
+        string nameCollation)
     {
         bool descending = sortOrder == UnifiedFileSortOrder.Desc;
-        IOrderedQueryable<Model3D> orderedQuery = (sortBy, descending) switch
+        return (sortBy, descending) switch
         {
             (UnifiedFileSortBy.Size, true) => query
                 .OrderByDescending(model => model.FileSizeBytes)
-                .ThenByDescending(model => model.Name)
+                .ThenByDescending(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenByDescending(model => model.Id),
             (UnifiedFileSortBy.Size, false) => query
                 .OrderBy(model => model.FileSizeBytes)
-                .ThenBy(model => model.Name)
+                .ThenBy(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenBy(model => model.Id),
             (UnifiedFileSortBy.Date, true) => query
                 .OrderByDescending(model => model.UploadedAt)
-                .ThenByDescending(model => model.Name)
+                .ThenByDescending(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenByDescending(model => model.Id),
             (UnifiedFileSortBy.Date, false) => query
                 .OrderBy(model => model.UploadedAt)
-                .ThenBy(model => model.Name)
+                .ThenBy(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenBy(model => model.Id),
             (UnifiedFileSortBy.Name, true) => query
-                .OrderByDescending(model => model.Name)
+                .OrderByDescending(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenByDescending(model => model.Id),
             _ => query
-                .OrderBy(model => model.Name)
+                .OrderBy(model => EF.Functions.Collate(model.Name, nameCollation))
                 .ThenBy(model => model.Id),
         };
+    }
 
+    private static Task<List<UnifiedFileCandidate>> QueryModelCandidatesAsync(
+        IOrderedQueryable<Model3D> orderedQuery,
+        int skip,
+        int take,
+        CancellationToken ct)
+    {
         return orderedQuery
+            .Skip(skip)
             .Take(take)
             .Select(model => new UnifiedFileCandidate(
                 UnifiedFileSource.Model,
@@ -224,41 +247,48 @@ public sealed class UnifiedFilesQueryService(
             .ToListAsync(ct);
     }
 
-    private static Task<List<UnifiedFileCandidate>> QueryGcodeCandidatesAsync(
+    private static IOrderedQueryable<GcodeFile> OrderGcodeFiles(
         IQueryable<GcodeFile> query,
         UnifiedFileSortBy sortBy,
         UnifiedFileSortOrder sortOrder,
-        int take,
-        CancellationToken ct)
+        string nameCollation)
     {
         bool descending = sortOrder == UnifiedFileSortOrder.Desc;
-        IOrderedQueryable<GcodeFile> orderedQuery = (sortBy, descending) switch
+        return (sortBy, descending) switch
         {
             (UnifiedFileSortBy.Size, true) => query
                 .OrderByDescending(file => file.FileSizeBytes)
-                .ThenByDescending(file => file.Name)
+                .ThenByDescending(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenByDescending(file => file.Id),
             (UnifiedFileSortBy.Size, false) => query
                 .OrderBy(file => file.FileSizeBytes)
-                .ThenBy(file => file.Name)
+                .ThenBy(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenBy(file => file.Id),
             (UnifiedFileSortBy.Date, true) => query
                 .OrderByDescending(file => file.UploadedAt)
-                .ThenByDescending(file => file.Name)
+                .ThenByDescending(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenByDescending(file => file.Id),
             (UnifiedFileSortBy.Date, false) => query
                 .OrderBy(file => file.UploadedAt)
-                .ThenBy(file => file.Name)
+                .ThenBy(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenBy(file => file.Id),
             (UnifiedFileSortBy.Name, true) => query
-                .OrderByDescending(file => file.Name)
+                .OrderByDescending(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenByDescending(file => file.Id),
             _ => query
-                .OrderBy(file => file.Name)
+                .OrderBy(file => EF.Functions.Collate(file.Name, nameCollation))
                 .ThenBy(file => file.Id),
         };
+    }
 
+    private static Task<List<UnifiedFileCandidate>> QueryGcodeCandidatesAsync(
+        IOrderedQueryable<GcodeFile> orderedQuery,
+        int skip,
+        int take,
+        CancellationToken ct)
+    {
         return orderedQuery
+            .Skip(skip)
             .Take(take)
             .Select(file => new UnifiedFileCandidate(
                 UnifiedFileSource.Gcode,
@@ -267,6 +297,92 @@ public sealed class UnifiedFilesQueryService(
                 file.FileSizeBytes,
                 file.UploadedAt))
             .ToListAsync(ct);
+    }
+
+    private static async Task<SourcePartition> FindPartitionAsync(
+        IOrderedQueryable<Model3D> orderedModels,
+        int modelCount,
+        IOrderedQueryable<GcodeFile> orderedGcodeFiles,
+        int gcodeCount,
+        int offset,
+        UnifiedFileSortBy sortBy,
+        UnifiedFileSortOrder sortOrder,
+        CancellationToken ct)
+    {
+        int low = Math.Max(0, offset - gcodeCount);
+        int high = Math.Min(offset, modelCount);
+
+        while (low <= high)
+        {
+            int modelOffset = low + ((high - low) / 2);
+            int gcodeOffset = offset - modelOffset;
+            Task<CandidateBoundary> modelBoundaryTask = QueryModelBoundaryAsync(
+                orderedModels,
+                modelOffset,
+                modelCount,
+                ct);
+            Task<CandidateBoundary> gcodeBoundaryTask = QueryGcodeBoundaryAsync(
+                orderedGcodeFiles,
+                gcodeOffset,
+                gcodeCount,
+                ct);
+            await Task.WhenAll(modelBoundaryTask, gcodeBoundaryTask);
+
+            CandidateBoundary modelBoundary = await modelBoundaryTask;
+            CandidateBoundary gcodeBoundary = await gcodeBoundaryTask;
+            if (modelBoundary.Left is not null &&
+                gcodeBoundary.Right is not null &&
+                CompareAcrossSources(modelBoundary.Left, gcodeBoundary.Right, sortBy, sortOrder) > 0)
+            {
+                high = modelOffset - 1;
+            }
+            else if (gcodeBoundary.Left is not null &&
+                     modelBoundary.Right is not null &&
+                     CompareAcrossSources(gcodeBoundary.Left, modelBoundary.Right, sortBy, sortOrder) > 0)
+            {
+                low = modelOffset + 1;
+            }
+            else
+            {
+                return new SourcePartition(modelOffset, gcodeOffset);
+            }
+        }
+
+        throw new InvalidOperationException("Unable to locate the unified file page boundary.");
+    }
+
+    private static async Task<CandidateBoundary> QueryModelBoundaryAsync(
+        IOrderedQueryable<Model3D> orderedQuery,
+        int offset,
+        int count,
+        CancellationToken ct)
+    {
+        int skip = Math.Max(0, offset - 1);
+        int take = offset > 0 && offset < count ? 2 : 1;
+        List<UnifiedFileCandidate> candidates = await QueryModelCandidatesAsync(orderedQuery, skip, take, ct);
+        return CreateBoundary(candidates, offset, count);
+    }
+
+    private static async Task<CandidateBoundary> QueryGcodeBoundaryAsync(
+        IOrderedQueryable<GcodeFile> orderedQuery,
+        int offset,
+        int count,
+        CancellationToken ct)
+    {
+        int skip = Math.Max(0, offset - 1);
+        int take = offset > 0 && offset < count ? 2 : 1;
+        List<UnifiedFileCandidate> candidates = await QueryGcodeCandidatesAsync(orderedQuery, skip, take, ct);
+        return CreateBoundary(candidates, offset, count);
+    }
+
+    private static CandidateBoundary CreateBoundary(
+        IReadOnlyList<UnifiedFileCandidate> candidates,
+        int offset,
+        int count)
+    {
+        UnifiedFileCandidate? left = offset > 0 && candidates.Count > 0 ? candidates[0] : null;
+        UnifiedFileCandidate? right = offset < count && candidates.Count > 0 ? candidates[^1] : null;
+        return new CandidateBoundary(left, right);
     }
 
     private static List<UnifiedFileCandidate> MergeSortedCandidates(
@@ -321,12 +437,12 @@ public sealed class UnifiedFilesQueryService(
         {
             UnifiedFileSortBy.Size => left.FileSize.CompareTo(right.FileSize),
             UnifiedFileSortBy.Date => left.UploadedAt.CompareTo(right.UploadedAt),
-            _ => string.Compare(left.DisplayName, right.DisplayName, StringComparison.Ordinal),
+            _ => string.CompareOrdinal(left.DisplayName, right.DisplayName),
         };
 
         if (comparison == 0 && sortBy != UnifiedFileSortBy.Name)
         {
-            comparison = string.Compare(left.DisplayName, right.DisplayName, StringComparison.Ordinal);
+            comparison = string.CompareOrdinal(left.DisplayName, right.DisplayName);
         }
 
         if (comparison == 0)
@@ -364,18 +480,30 @@ public sealed class UnifiedFilesQueryService(
 
         Dictionary<Guid, Model3D> models = await modelsTask;
         Dictionary<Guid, GcodeFile> gcodeFiles = await gcodeTask;
+        IReadOnlyDictionary<Guid, IReadOnlyList<Tag>> modelTags =
+            await _tagRepository.GetTagsByObjectsAsync(modelIds, "Model3D", ct);
         var items = new List<UnifiedFileDto>(candidates.Count);
         foreach (UnifiedFileCandidate candidate in candidates)
         {
-            items.Add(candidate.Source == UnifiedFileSource.Model
-                ? MapModel(models[candidate.Id])
-                : MapGcode(gcodeFiles[candidate.Id]));
+            if (candidate.Source == UnifiedFileSource.Model &&
+                models.TryGetValue(candidate.Id, out Model3D? model))
+            {
+                IReadOnlyList<Tag> tags = modelTags.TryGetValue(candidate.Id, out IReadOnlyList<Tag>? value)
+                    ? value
+                    : [];
+                items.Add(MapModel(model, tags));
+            }
+            else if (candidate.Source == UnifiedFileSource.Gcode &&
+                     gcodeFiles.TryGetValue(candidate.Id, out GcodeFile? gcodeFile))
+            {
+                items.Add(MapGcode(gcodeFile));
+            }
         }
 
         return items;
     }
 
-    private UnifiedFileDto MapModel(Model3D model)
+    private UnifiedFileDto MapModel(Model3D model, IReadOnlyList<Tag> tags)
     {
         string fileType = model.FileFormat == ModelFileFormat.TMF
             ? "3mf"
@@ -390,24 +518,13 @@ public sealed class UnifiedFilesQueryService(
             fileType,
             model.UploadedAt,
             _fileOperations.BuildModel3DFileUrl(model.Id, model.FileFormat),
-            model.ThumbnailFileName is null ? null : _fileOperations.BuildModel3DThumbnailUrl(model.Id));
+            model.ThumbnailFileName is null ? null : _fileOperations.BuildModel3DThumbnailUrl(model.Id),
+            MapTags(tags));
     }
 
     private UnifiedFileDto MapGcode(GcodeFile file)
     {
-        IReadOnlyList<TagDto> tags = file.Tags
-            .Select(tag => new TagDto
-            {
-                Id = tag.Id,
-                Name = tag.Name,
-                Category = tag.Category,
-                IsAutoGenerated = tag.IsAutoGenerated,
-                Color = tag.Color,
-                Description = tag.Description,
-                Revision = tag.Revision,
-                ConcurrencyToken = tag.ConcurrencyToken,
-            })
-            .ToList();
+        IReadOnlyList<TagDto> tags = MapTags(file.Tags);
 
         return new UnifiedFileDto(
             UnifiedFileSource.Gcode,
@@ -437,12 +554,50 @@ public sealed class UnifiedFilesQueryService(
             file.BedTemperature);
     }
 
+    private static List<TagDto> MapTags(IEnumerable<Tag> tags)
+    {
+        return tags
+            .Select(tag => new TagDto
+            {
+                Id = tag.Id,
+                Name = tag.Name,
+                Category = tag.Category,
+                IsAutoGenerated = tag.IsAutoGenerated,
+                Color = tag.Color,
+                Description = tag.Description,
+                Revision = tag.Revision,
+                ConcurrencyToken = tag.ConcurrencyToken,
+            })
+            .ToList();
+    }
+
+    private static string GetOrdinalNameCollation(string? providerName)
+    {
+        return providerName switch
+        {
+            "Microsoft.EntityFrameworkCore.Sqlite" => "BINARY",
+            "Microsoft.EntityFrameworkCore.SqlServer" => "Latin1_General_100_BIN2",
+            "Npgsql.EntityFrameworkCore.PostgreSQL" => "C",
+            "Pomelo.EntityFrameworkCore.MySql" => "utf8mb4_bin",
+            string provider => throw new NotSupportedException(
+                $"Unified file pagination requires a binary name collation for provider '{provider}'."),
+            null => throw new NotSupportedException(
+                "Unified file pagination requires a relational provider with a binary name collation."),
+        };
+    }
+
     private sealed record UnifiedFileCandidate(
         UnifiedFileSource Source,
         Guid Id,
         string DisplayName,
         long FileSize,
         DateTime UploadedAt);
+
+    private sealed record CandidateBoundary(
+        UnifiedFileCandidate? Left,
+        UnifiedFileCandidate? Right);
+
+    private sealed record SourcePartition(int ModelOffset, int GcodeOffset);
 
     private sealed record SourceSummary(int Count, long Size)
     {
