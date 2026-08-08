@@ -1094,6 +1094,125 @@ public sealed class AutoDispatchServiceTests : IDisposable
         status.AttentionMessage.Should().Be("Printer is in maintenance mode. 1 queued job will not start until maintenance is complete and the printer is available.");
     }
 
+    [Fact]
+    public async Task GetStatusAsync_WhenNextJobIsUnassignedCandidate_RedactsNameKindAndRevision()
+    {
+        // Regression test for #1324: a job that has merely scored as dispatch-eligible for
+        // this printer — but is not actually assigned to it — must not leak its name, kind,
+        // or pinned config revision to viewers authorized only for this printer's group.
+        Printer printer = await CreatePrinterAsync();
+        PrintJob unassignedJob = await CreateUnassignedQueuedJobAsync(
+            "another-tenants-secret-job-name",
+            queuePosition: 1);
+        unassignedJob.PinnedPrinterConfigRevision = 7;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IDispatchScorer> dispatchScorer = CreateScorerReturningEligible(unassignedJob.Id, printer.Id);
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchScorer: dispatchScorer.Object);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.NextJobId.Should().Be(unassignedJob.Id);
+        status.NextJobName.Should().BeNull();
+        status.NextJobKind.Should().BeNull();
+        status.NextJobPrinterConfigRevision.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetAllStatusAsync_WhenNextJobIsUnassignedCandidate_RedactsNameKindAndRevision()
+    {
+        Printer printer = await CreatePrinterAsync();
+        PrintJob unassignedJob = await CreateUnassignedQueuedJobAsync(
+            "another-tenants-secret-job-name",
+            queuePosition: 1);
+        unassignedJob.PinnedPrinterConfigRevision = 7;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        Mock<IDispatchScorer> dispatchScorer = CreateScorerReturningEligible(unassignedJob.Id, printer.Id);
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance,
+            dispatchScorer: dispatchScorer.Object);
+
+        AutoDispatchGlobalStatusDto result = await service.GetAllStatusAsync();
+
+        AutoDispatchStatusDto status = result.Printers.Should().ContainSingle().Subject;
+        status.NextJobId.Should().Be(unassignedJob.Id);
+        status.NextJobName.Should().BeNull();
+        status.NextJobKind.Should().BeNull();
+        status.NextJobPrinterConfigRevision.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_WhenNextJobIsAssignedToPrinter_ReturnsFullNameKindAndRevision()
+    {
+        // Regression guard: once a job IS assigned to the printer, the full fields must
+        // still be delivered — the redaction must not over-apply to the legitimate case.
+        Printer printer = await CreatePrinterAsync();
+        PrintJob assignedJob = await CreateQueuedJobAsync(printer, "assigned-job-name", queuePosition: 1);
+        assignedJob.JobKind = JobKind.Standard;
+        assignedJob.PinnedPrinterConfigRevision = 9;
+        await _db.SaveChangesAsync();
+
+        var (hubContext, _) = CreateHubContextMockWithProxy();
+        AutoDispatchService service = new(
+            _db,
+            hubContext.Object,
+            NullLogger<AutoDispatchService>.Instance);
+
+        AutoDispatchStatusDto status = await service.GetStatusAsync(printer.Id);
+
+        status.NextJobId.Should().Be(assignedJob.Id);
+        status.NextJobName.Should().Be("assigned-job-name");
+        status.NextJobKind.Should().Be(nameof(JobKind.Standard));
+        status.NextJobPrinterConfigRevision.Should().Be(9);
+    }
+
+    private static Mock<IDispatchScorer> CreateScorerReturningEligible(Guid jobId, Guid printerId)
+    {
+        Mock<IDispatchScorer> dispatchScorer = new();
+        dispatchScorer
+            .Setup(scorer => scorer.ScorePrintersForJobAsync(jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(
+            [
+                new DispatchScore(
+                    printerId,
+                    "Test Printer",
+                    TotalScore: 100,
+                    ScoreBreakdown: new Dictionary<string, FactorScore>(),
+                    Eliminated: false,
+                    EliminationReasons: []),
+            ]);
+        return dispatchScorer;
+    }
+
+    private async Task<PrintJob> CreateUnassignedQueuedJobAsync(string name, int queuePosition)
+    {
+        PrintJob job = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            AssignedPrinterId = null,
+            Status = PrintJobStatus.Queued,
+            Priority = 0,
+            QueuePosition = queuePosition,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            QueuedAt = DateTime.UtcNow,
+        };
+
+        _db.PrintJobs.Add(job);
+        await _db.SaveChangesAsync();
+        return job;
+    }
+
     private async Task<Printer> CreatePrinterAsync()
     {
         Manufacturer manufacturer = new()

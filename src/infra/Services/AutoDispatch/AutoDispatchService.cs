@@ -260,12 +260,20 @@ public class AutoDispatchStatusDto
 
     public Guid? NextJobId { get; set; }
 
+    /// <summary>
+    /// Redacted (null) when <see cref="NextJobId"/> refers to an unassigned queued job that has
+    /// merely scored as a dispatch candidate for this printer but has no ownership/permission
+    /// relationship to this printer's authorized viewers. Populated once the job is actually
+    /// assigned to this printer.
+    /// </summary>
     public string? NextJobName { get; set; }
 
     public string? NextJobETag { get; set; }
 
+    /// <summary>Redacted for unassigned candidate jobs — see <see cref="NextJobName"/>.</summary>
     public string? NextJobKind { get; set; }
 
+    /// <summary>Redacted for unassigned candidate jobs — see <see cref="NextJobName"/>.</summary>
     public long? NextJobPrinterConfigRevision { get; set; }
 
     public string? AttentionMessage { get; set; }
@@ -1312,20 +1320,33 @@ public class AutoDispatchService(
                 ? Convert.ToBase64String(printerRowVersion)
                 : null,
             NextJobId = nextJob?.Id,
-            NextJobName = nextJob?.Name ?? nextJob?.GcodeFile?.Name,
+            NextJobName = IsAssignedToPrinter(nextJob, printer)
+                ? nextJob!.Name ?? nextJob.GcodeFile?.Name
+                : null,
             NextJobETag = nextJob?.RowVersion is { Length: > 0 } jobRowVersion
                 ? Convert.ToBase64String(jobRowVersion)
                 : null,
-            NextJobKind = nextJob is null
-                ? null
-                : (
-                    nextJob.JobKind ??
-                    Farm.Infrastructure.Domain.JobKind.Standard).ToString(),
-            NextJobPrinterConfigRevision =
-                nextJob?.PinnedPrinterConfigRevision,
+            NextJobKind = IsAssignedToPrinter(nextJob, printer)
+                ? (
+                    nextJob!.JobKind ??
+                    Farm.Infrastructure.Domain.JobKind.Standard).ToString()
+                : null,
+            NextJobPrinterConfigRevision = IsAssignedToPrinter(nextJob, printer)
+                ? nextJob!.PinnedPrinterConfigRevision
+                : null,
             AttentionMessage = attentionMessage,
         };
     }
+
+    /// <summary>
+    /// A candidate <c>NextJob</c> may come from the unassigned queue (scored as dispatch-
+    /// eligible for this printer) rather than being actually assigned to it. Only an assigned
+    /// job has passed the ownership/permission checks implied by the receiving printer's
+    /// authorized audience, so name/kind/revision must be redacted for unassigned candidates.
+    /// See issue #1324.
+    /// </summary>
+    private static bool IsAssignedToPrinter(PrintJob? nextJob, Printer printer) =>
+        nextJob is not null && nextJob.AssignedPrinterId == printer.Id;
 
     private async Task<AutoDispatchStatusDto> BuildStatusDtoAsync(Printer printer, CancellationToken ct)
     {
