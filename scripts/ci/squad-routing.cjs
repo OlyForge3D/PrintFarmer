@@ -40,6 +40,21 @@ function isCanonicalMemberLabel(label) {
   return suffix.length > 0 && slugify(suffix) === suffix;
 }
 
+/**
+ * True when a roster row should be excluded from labelling and routing.
+ *
+ * Compares on the slug, not the raw cell. Roster names carry an emoji prefix
+ * (`📋 Scribe`), so a literal `cells[0] !== 'Scribe'` never fires — which is
+ * why `squad:scribe` exists as a synced label today and why the session logger
+ * was an eligible triage target.
+ *
+ * @param {string} name roster name cell, e.g. `📋 Scribe`
+ * @param {string[]} excludedSlugs canonical slugs to exclude, e.g. `['scribe']`
+ */
+function isRosterExcluded(name, excludedSlugs) {
+  return excludedSlugs.includes(slugify(name));
+}
+
 function escapeRegExp(text) {
   return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -445,6 +460,7 @@ module.exports = {
   classifySquadLabels,
   hasWord,
   isCanonicalMemberLabel,
+  isRosterExcluded,
   memberLabel,
   routeIssue,
   scoreDomain,

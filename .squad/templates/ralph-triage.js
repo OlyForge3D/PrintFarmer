@@ -64,7 +64,7 @@ function printUsage() {
 
 // Label spelling comes from the shared module so Ralph, squad-triage.yml and
 // sync-squad-labels.yml can never disagree on a member's canonical label.
-const { memberLabel, slugify } = require(
+const { memberLabel, slugify, isRosterExcluded } = require(
   path.join(__dirname, '..', '..', 'scripts', 'ci', 'squad-routing.cjs'),
 );
 
@@ -129,14 +129,16 @@ function parseRoster(teamMd) {
   const roleIndex = findColumnIndex(table.headers, ['role']);
   if (nameIndex < 0 || roleIndex < 0) return [];
 
-  const excluded = new Set(['scribe', 'ralph']);
+  const excluded = ['scribe', 'ralph'];
   const members = [];
 
   for (const row of table.rows) {
     const name = cleanCell(row[nameIndex] || '');
     const role = cleanCell(row[roleIndex] || '');
     if (!name || !role) continue;
-    if (excluded.has(name.toLowerCase())) continue;
+    // Roster names carry an emoji prefix ("📋 Scribe"), so comparing the raw
+    // name never matched and neither Scribe nor Ralph was actually excluded.
+    if (isRosterExcluded(name, excluded)) continue;
 
     members.push({
       name,

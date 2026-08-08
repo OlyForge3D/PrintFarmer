@@ -11,6 +11,7 @@ const {
   classifySquadLabels,
   hasWord,
   isCanonicalMemberLabel,
+  isRosterExcluded,
   memberLabel,
   routeIssue,
   slugify,
@@ -516,6 +517,42 @@ test('domains with nobody on the roster are never selected', () => {
     lead,
   );
   assert.notEqual(result.domain, 'frontend');
+});
+
+test('the roster exclusion fires despite the emoji prefix', () => {
+  // `.squad/team.md` rows are "| 📋 Scribe | Session Logger | … |", so the
+  // literal `cells[0] !== 'Scribe'` this replaces never fired: squad:scribe
+  // was synced as a label and Scribe was an eligible triage target.
+  assert.equal(isRosterExcluded('📋 Scribe', ['scribe']), true);
+  assert.equal(isRosterExcluded('Scribe', ['scribe']), true);
+  assert.equal(isRosterExcluded('🔄 Ralph', ['scribe', 'ralph']), true);
+  assert.equal(isRosterExcluded('🔧 Lambert', ['scribe', 'ralph']), false);
+  assert.equal(isRosterExcluded('⚛️ Ripley', ['scribe']), false);
+});
+
+test('Ralph parses the real roster without Scribe or Ralph', () => {
+  const teamMd = readFileSync(
+    path.join(here, '..', '..', '..', '.squad', 'team.md'),
+    'utf8',
+  );
+  const roster = ralph.parseRoster(teamMd);
+
+  assert.ok(roster.length > 0, 'roster must parse');
+  const labels = roster.map((m) => m.label);
+  assert.equal(labels.includes('squad:scribe'), false, 'Scribe must be excluded');
+  assert.equal(labels.includes('squad:ralph'), false, 'Ralph must be excluded');
+  assert.equal(labels.includes('squad:lambert'), true);
+  assert.equal(labels.includes('squad:dallas'), true);
+
+  // Every generated label must round-trip: the label a member is given
+  // resolves back to that same member, which is what squad-issue-assign.yml
+  // does when a `squad:*` label is applied.
+  for (const member of roster) {
+    assert.match(member.label, /^squad:[a-z0-9-]+$/, `${member.label} not canonical`);
+    const suffix = member.label.slice('squad:'.length);
+    const resolved = roster.find((m) => slugify(m.name) === suffix);
+    assert.equal(resolved.name, member.name, `${member.label} did not round-trip`);
+  }
 });
 
 test('slugify produces exactly one canonical label per member', () => {
