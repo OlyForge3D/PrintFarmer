@@ -225,15 +225,19 @@ public class PowerMonitorPollingService(
         DateTime start = job.ActualStartTime!.Value;
         DateTime end = job.ActualEndTime!.Value;
 
-        List<decimal> watts = await db.PowerReadings
+        // Aggregate server-side (COUNT + SUM in one round trip) instead of materializing
+        // every reading into memory — the query filters on PowerMonitorId AND RecordedAt,
+        // which the composite index on PowerReading covers with a single seek.
+        var aggregate = await db.PowerReadings
             .Where(r =>
                 monitorIds.Contains(r.PowerMonitorId) &&
                 r.RecordedAt >= start &&
                 r.RecordedAt <= end)
-            .Select(r => r.WattsNow)
-            .ToListAsync(ct);
+            .GroupBy(r => 1)
+            .Select(g => new { Count = g.Count(), WattsSum = g.Sum(r => r.WattsNow) })
+            .FirstOrDefaultAsync(ct);
 
-        if (watts.Count == 0)
+        if (aggregate is null || aggregate.Count == 0)
         {
             logger.LogDebug(
                 "PowerMonitorPollingService: no readings in window [{Start:u}, {End:u}] for job {JobId}",
@@ -245,7 +249,7 @@ public class PowerMonitorPollingService(
 
         // kWh = sum(watts × intervalSeconds) / 3_600_000  (W·s → kWh)
         double intervalSeconds = pollInterval.TotalSeconds;
-        decimal kwh = watts.Sum(w => w * (decimal)intervalSeconds / 3_600_000m);
+        decimal kwh = aggregate.WattsSum * (decimal)intervalSeconds / 3_600_000m;
 
         job.KwhUsed = Math.Round(kwh, 4);
         await db.SaveChangesAsync(ct);
@@ -254,7 +258,7 @@ public class PowerMonitorPollingService(
             "PowerMonitorPollingService: set KwhUsed={Kwh:F4} for job {JobId} ({Count} readings)",
             job.KwhUsed,
             job.Id,
-            watts.Count);
+            aggregate.Count);
 
         try
         {

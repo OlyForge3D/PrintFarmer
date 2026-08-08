@@ -13,7 +13,13 @@ public class PowerReadingConfiguration : IEntityTypeConfiguration<PowerReading>
         builder.Property(r => r.WattsNow).HasPrecision(10, 2);
         builder.Property(r => r.KwhTotal).HasPrecision(14, 4);
 
-        // Index for efficient time-range queries and pruning
+        // Composite index for the aggregation window query in
+        // PowerMonitorPollingService.SetKwhUsedAsync, which filters on both
+        // PowerMonitorId and RecordedAt — the single-column RecordedAt index below
+        // cannot seek on that combined filter.
+        builder.HasIndex(r => new { r.PowerMonitorId, r.RecordedAt });
+
+        // Index for efficient time-range pruning (PowerReadingPruneService).
         builder.HasIndex(r => r.RecordedAt);
     }
 }
