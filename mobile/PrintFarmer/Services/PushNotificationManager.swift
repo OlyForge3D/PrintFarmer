@@ -99,7 +99,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     // this can and should run unconditionally at launch (`AppDelegate`).
 
     /// Category identifier stamped on job-attention push/local notifications.
-    static let jobAttentionCategory = "JOB_ATTENTION"
+    nonisolated static let jobAttentionCategory = "JOB_ATTENTION"
 
     /// Registers `UNNotificationCategory`/`UNNotificationAction`s for the
     /// job-attention category. Safe to call multiple times; the last call wins.
@@ -341,7 +341,7 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
-        withCompletionHandler completionHandler: @escaping () -> Void
+        withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
         let userInfo = response.notification.request.content.userInfo
         let category = response.notification.request.content.categoryIdentifier
