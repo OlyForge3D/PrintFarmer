@@ -44,9 +44,10 @@ public static class CorsStartup
     /// <summary>
     /// Determines whether a CORS request origin is allowed. An explicit match against the
     /// configured origin allowlist always succeeds. When <paramref name="allowLocalNetwork"/> is
-    /// enabled, origins whose host is <c>localhost</c> or resolves to a private/loopback network
-    /// address (RFC1918, 127.0.0.0/8, link-local) are also accepted, so LAN deployments keep
-    /// working without reflecting every possible origin.
+    /// enabled, origins whose host is <c>localhost</c>, a private/loopback IP literal (RFC1918,
+    /// 127.0.0.0/8, link-local), or a <c>.local</c> mDNS hostname that resolves only to
+    /// private/loopback addresses are also accepted, so LAN deployments keep working without
+    /// reflecting every possible origin.
     /// </summary>
     internal static bool IsOriginAllowed(string origin, string[] configuredOrigins, bool allowLocalNetwork)
     {
@@ -75,8 +76,18 @@ public static class CorsStartup
             return NetworkDestinationClassifier.IsPrivateOrReserved(literalIp);
         }
 
-        // Not an IP literal — resolve the hostname so LAN mDNS/DHCP names (e.g.
-        // "printfarmer.local", "mybox") keep working, same as they did before this fix.
+        // Not an IP literal. Only resolve hostnames under the ".local" mDNS/Bonjour TLD
+        // (RFC 6762), so LAN device names such as "printfarmer.local" keep working. This TLD
+        // is reserved and cannot be delegated in the public DNS namespace, unlike arbitrary
+        // internet domains. We deliberately do NOT resolve other hostnames: public "DNS
+        // rebinding" services (e.g. "127.0.0.1.sslip.io", "127-0-0-1.nip.io") let anyone
+        // register a public domain that resolves to a private/loopback address, which would
+        // let an attacker-controlled page pass this check if we trusted DNS resolution alone.
+        if (!uri.Host.EndsWith(".local", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         // The browser sets the Origin header to the page's own host, so resolving it here
         // reflects the real network location of the calling page, not an attacker-supplied
         // value. Every resolved address must be private/loopback — if any address is public,

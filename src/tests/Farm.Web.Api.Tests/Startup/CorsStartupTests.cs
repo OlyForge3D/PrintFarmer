@@ -71,11 +71,11 @@ public class CorsStartupTests
     }
 
     [Fact]
-    public void UnresolvableHostnameOrigin_IsRejected_WhenLocalNetworkEnabled()
+    public void UnresolvableLocalHostnameOrigin_IsRejected_WhenLocalNetworkEnabled()
     {
-        // A hostname that cannot be resolved must fail closed rather than being allowed.
+        // A ".local" hostname that cannot be resolved must fail closed rather than being allowed.
         Assert.False(CorsStartup.IsOriginAllowed(
-            "http://this-host-does-not-exist.invalid:3000",
+            "http://this-host-does-not-exist.local:3000",
             ConfiguredOrigins,
             allowLocalNetwork: true));
     }
@@ -83,7 +83,21 @@ public class CorsStartupTests
     [Fact]
     public void PublicHostnameOrigin_IsRejected_WhenLocalNetworkEnabled()
     {
-        // example.com resolves to a public IP, so it must never be treated as local-network.
+        // example.com is a public, non-".local" hostname, so it must never be treated as
+        // local-network — this is rejected outright without attempting DNS resolution.
         Assert.False(CorsStartup.IsOriginAllowed("https://example.com", ConfiguredOrigins, allowLocalNetwork: true));
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1.sslip.io:3000")]
+    [InlineData("http://127-0-0-1.nip.io:3000")]
+    public void DnsRebindingStyleHostname_IsRejected_EvenWhenLocalNetworkEnabled(string origin)
+    {
+        // Public "DNS rebinding" wildcard services let anyone register an ordinary internet
+        // domain that resolves to a private/loopback address. Trusting DNS resolution for
+        // arbitrary hostnames would let an attacker-controlled page pass this check, so only
+        // the reserved ".local" mDNS TLD (RFC 6762, not delegable in public DNS) is resolved —
+        // these non-".local" hostnames must be rejected without ever attempting resolution.
+        Assert.False(CorsStartup.IsOriginAllowed(origin, ConfiguredOrigins, allowLocalNetwork: true));
     }
 }
