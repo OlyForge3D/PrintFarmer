@@ -52,6 +52,18 @@ public interface IQueueResourceAuthorizationService
         IReadOnlyCollection<Guid> jobIds,
         PrinterGroupAccessLevel minimumAccess,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Filters a candidate set of printer IDs down to the ones the principal may access at the
+    /// given <see cref="PrinterGroupAccessLevel"/>, applying the same PrinterGroup rules as
+    /// <see cref="CanAccessPrinterAsync"/> in a single batched query. Used to scope collection
+    /// reads (printer list, summary, camera-urls) so restricted printers are not enumerable.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> FilterAccessiblePrinterIdsAsync(
+        ClaimsPrincipal principal,
+        IReadOnlyCollection<Guid> printerIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -293,6 +305,73 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         return allowed.Contains(jobId);
     }
 
+    public async Task<IReadOnlySet<Guid>> FilterAccessiblePrinterIdsAsync(
+        ClaimsPrincipal principal,
+        IReadOnlyCollection<Guid> printerIds,
+        PrinterGroupAccessLevel minimumAccess,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        if (printerIds.Count == 0)
+        {
+            return new HashSet<Guid>();
+        }
+
+        Guid[] distinctPrinterIds = printerIds.Distinct().ToArray();
+        if (PrintFarmerPermissions.IsFarmAdmin(principal))
+        {
+            return distinctPrinterIds.ToHashSet();
+        }
+
+        if (!PrintFarmerPermissions.TryGetUserId(principal, out Guid userId))
+        {
+            return new HashSet<Guid>();
+        }
+
+        List<PrinterGroupScope> scopes = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => distinctPrinterIds.Contains(printer.Id))
+            .Select(printer => new PrinterGroupScope(printer.Id, printer.PrinterGroupId))
+            .ToListAsync(ct);
+        Guid[] groupIds = scopes
+            .Where(scope => scope.PrinterGroupId.HasValue)
+            .Select(scope => scope.PrinterGroupId!.Value)
+            .Distinct()
+            .ToArray();
+        List<PrinterGroupAccess> rules = groupIds.Length == 0
+            ? []
+            : await _db.PrinterGroupAccesses
+                .AsNoTracking()
+                .Where(rule => groupIds.Contains(rule.PrinterGroupId))
+                .ToListAsync(ct);
+        HashSet<Guid> userRoles = (await _db.UserRoles
+                .AsNoTracking()
+                .Where(role => role.UserId == userId && role.IsActive)
+                .Select(role => role.RoleId)
+                .ToListAsync(ct))
+            .ToHashSet();
+        Dictionary<Guid, List<PrinterGroupAccess>> rulesByGroup = rules
+            .GroupBy(rule => rule.PrinterGroupId)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        var allowed = new HashSet<Guid>();
+        foreach (PrinterGroupScope scope in scopes)
+        {
+            bool groupAllowed = !scope.PrinterGroupId.HasValue ||
+                !rulesByGroup.TryGetValue(scope.PrinterGroupId.Value, out List<PrinterGroupAccess>? groupRules) ||
+                groupRules.Count == 0 ||
+                groupRules.Any(rule =>
+                    userRoles.Contains(rule.RoleId) &&
+                    rule.AccessLevel >= minimumAccess);
+            if (groupAllowed)
+            {
+                _ = allowed.Add(scope.PrinterId);
+            }
+        }
+
+        return allowed;
+    }
+
     private async Task<bool> CanUserAccessPrinterAsync(
         Guid userId,
         Guid printerId,
@@ -353,4 +432,6 @@ public sealed class QueueResourceAuthorizationService(AppDbContext db)
         Guid? CalibrationProjectId,
         Guid? PrinterGroupId,
         Guid? GcodeGroupId);
+
+    private sealed record PrinterGroupScope(Guid PrinterId, Guid? PrinterGroupId);
 }
