@@ -16,7 +16,7 @@ function fixture(verdict = 'APPROVE') {
   const actor = 'jpapiez';
   const state = verdict === 'APPROVE' ? 'success' : 'failure';
   const description = verdict === 'APPROVE'
-    ? `APPROVE @ ${shortSha} by bishop+hicks+vasquez`
+    ? `REVIEWED (self-attested) @ ${shortSha} by bishop+hicks+vasquez`
     : `REQUEST_CHANGES @ ${shortSha} by vasquez`;
   const pull = {
     number: 1116,
@@ -53,7 +53,7 @@ function fixture(verdict = 'APPROVE') {
     repository: { full_name: 'OlyForge3D/PrintFarmer' },
     actor: { login: actor },
     triggering_actor: { login: actor },
-    display_title: 'Squad verdict gate for PR #1116',
+    display_title: 'Squad review record for PR #1116',
     status: 'completed',
     conclusion: 'success',
     run_started_at: '2026-08-07T03:00:00Z',
@@ -65,7 +65,7 @@ function fixture(verdict = 'APPROVE') {
 test('accepts a trusted approval for the exact current head', () => {
   const evidence = fixture();
   const verdict = verifySquadVerdict(evidence);
-  assert.equal(verdict.classification, 'APPROVED');
+  assert.equal(verdict.classification, 'REVIEWED');
   assert.equal(verdict.reviewedHeadSha, reviewedHeadSha);
   assert.equal(verdict.actor, 'bishop+hicks+vasquez');
 });
@@ -76,7 +76,7 @@ test('accepts the agent-verdict events the gate actually runs on', () => {
   ]) {
     const evidence = fixture();
     evidence.run.event = event;
-    assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED', event);
+    assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED', event);
   }
 });
 
@@ -92,7 +92,7 @@ test('accepts a verdict recorded by the PR author account', () => {
   // separation is enforced at squad-identity level inside the gate itself.
   const evidence = fixture();
   evidence.pull.user.login = 'jpapiez';
-  assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED');
+  assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
 });
 
 test('binds the list-statuses API shape to the requested head', () => {
@@ -101,7 +101,7 @@ test('binds the list-statuses API shape to the requested head', () => {
   delete apiStatus.sha;
   const status = bindStatusToHead(apiStatus, reviewedHeadSha);
   const verdict = verifySquadVerdict({ ...evidence, status });
-  assert.equal(verdict.classification, 'APPROVED');
+  assert.equal(verdict.classification, 'REVIEWED');
 });
 
 test('rejects a status whose explicit SHA disagrees with the requested head', () => {
@@ -124,7 +124,7 @@ test('supersedes an approval when rebase or force-push moves the head', () => {
   evidence.pull.head.sha = movedHeadSha;
   const verdict = verifySquadVerdict(evidence);
   assert.equal(verdict.classification, 'SUPERSEDED');
-  assert.equal(verdict.verdict, 'APPROVE');
+  assert.equal(verdict.verdict, 'REVIEWED');
 });
 
 test('supersedes a rejection when rebase or force-push moves the head', () => {
@@ -135,9 +135,11 @@ test('supersedes a rejection when rebase or force-push moves the head', () => {
   assert.equal(verdict.verdict, 'REQUEST_CHANGES');
 });
 
-for (const verdictName of ['APPROVE', 'REQUEST_CHANGES']) {
-  test(`selector supersedes stale ${verdictName} evidence from an expected head`, () => {
-    const evidence = fixture(verdictName);
+for (const [fixtureKind, expected] of [
+  ['APPROVE', 'REVIEWED'], ['REQUEST_CHANGES', 'REQUEST_CHANGES'],
+]) {
+  test(`selector supersedes stale ${expected} evidence from an expected head`, () => {
+    const evidence = fixture(fixtureKind);
     evidence.pull.head.sha = movedHeadSha;
     const verdict = selectSquadVerdict({
       pull: evidence.pull,
@@ -146,9 +148,22 @@ for (const verdictName of ['APPROVE', 'REQUEST_CHANGES']) {
       loadRun: () => evidence.run,
     });
     assert.equal(verdict.classification, 'SUPERSEDED');
-    assert.equal(verdict.verdict, verdictName);
+    assert.equal(verdict.verdict, expected);
   });
 }
+
+test('an owner authorisation is classified apart from a self-attested record', () => {
+  // REVIEWED must never be reported as though an independent party approved.
+  const evidence = fixture();
+  evidence.status.description = `APPROVE (owner) @ ${shortSha} by jpapiez`;
+  const verdict = verifySquadVerdict(evidence);
+  assert.equal(verdict.classification, 'APPROVED');
+  assert.equal(verdict.actor, 'jpapiez');
+
+  const selfAttested = verifySquadVerdict(fixture());
+  assert.equal(selfAttested.classification, 'REVIEWED');
+  assert.match(selfAttested.reason, /self-attested.*not independent review/);
+});
 
 test('rejects a status not created by GitHub Actions', () => {
   const evidence = fixture();
@@ -173,18 +188,29 @@ test('accepts a pull_request_target run sitting on a non-default base ref', () =
   evidence.pull.base.ref = 'main';
   evidence.run.event = 'pull_request_target';
   evidence.run.head_branch = 'main';
-  assert.equal(verifySquadVerdict(evidence).classification, 'APPROVED');
+  assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
 });
 
-test('rejects a success status whose description is not a gate approval', () => {
+test('rejects a success status whose description is not a recognised record', () => {
   const evidence = fixture();
   evidence.status.description = 'looks fine to me';
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
 });
 
-test('rejects an approval description pinned to a different short SHA', () => {
+test('rejects a record description pinned to a different short SHA', () => {
+  for (const description of [
+    `REVIEWED (self-attested) @ ${movedHeadSha.slice(0, 12)} by bishop`,
+    `APPROVE (owner) @ ${movedHeadSha.slice(0, 12)} by jpapiez`,
+  ]) {
+    const evidence = fixture();
+    evidence.status.description = description;
+    assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+  }
+});
+
+test('a bare APPROVE description is not accepted as an owner authorisation', () => {
   const evidence = fixture();
-  evidence.status.description = `APPROVE @ ${movedHeadSha.slice(0, 12)} by bishop`;
+  evidence.status.description = `APPROVE @ ${shortSha} by bishop+hicks+vasquez`;
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
 });
 
@@ -193,7 +219,7 @@ test('a gate block is missing evidence, not a reviewer rejection', () => {
   // "no squad evidence", which permits the administrator fallback. Conflating
   // the two would suppress that fallback for PRs nobody has reviewed yet.
   for (const detail of [
-    `no verdict found for ${shortSha}`,
+    `no review recorded for ${shortSha}`,
     'have 1/3, missing hicks+vasquez',
     'reviewer parker is the PR author',
     `have 0/3 (stale at bishop@${movedHeadSha.slice(0, 12)})`,
@@ -203,7 +229,7 @@ test('a gate block is missing evidence, not a reviewer rejection', () => {
     evidence.status.description = `BLOCKED @ ${shortSha}: ${detail}`;
     const verdict = verifySquadVerdict(evidence);
     assert.equal(verdict.classification, 'MISSING', detail);
-    assert.match(verdict.reason, /without a reviewer verdict/);
+    assert.match(verdict.reason, /no review recorded/);
   }
 });
 
@@ -213,7 +239,7 @@ test('author-authored lookalike comments cannot satisfy the verifier', () => {
     pull: evidence.pull,
     comments: [{
       user: { login: 'pr-author' },
-      body: `APPROVE @ ${shortSha} by bishop+hicks+vasquez`,
+      body: `REVIEWED (self-attested) @ ${shortSha} by bishop+hicks+vasquez`,
     }],
   });
   assert.equal(verdict.classification, 'MISSING');

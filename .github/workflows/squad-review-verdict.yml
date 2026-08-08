@@ -1,15 +1,46 @@
-name: Record squad review verdict
+name: Record squad review (self-attested)
 
-# Squad pre-PR review gate.
+# Squad pre-PR review RECORD.
 #
-# WHY THIS SHAPE: the previous version of this workflow required a *non-author
+# ⚠️ READ THIS BEFORE TRUSTING THE `squad/pre-pr-verdict` STATUS.
+#
+# THIS IS NOT INDEPENDENT REVIEW. IT PROVIDES NO SEPARATION OF DUTIES.
+#
+# Every squad agent — Bishop, Hicks, Vasquez, and every author agent — runs
+# under the repository owner's authority and posts through the owner's token.
+# A "reviewer agent approving an author agent" is therefore the owner approving
+# the owner's own work. The reviewer-is-not-the-author rule below is a QUALITY
+# HEURISTIC (a second agent with fresh context catches more than the author
+# re-reading its own output), not an independence guarantee. A green
+# `squad/pre-pr-verdict` means "a reviewer agent examined this exact commit and
+# recorded its findings", self-attested. It does NOT mean "a second party
+# approved this". Do not read it as sign-off, authorisation, or an audit
+# control that satisfies four-eyes.
+#
+# WHY IT IS SHAPED THIS WAY: the previous version required a *non-author
 # repository administrator* to dispatch it by hand. This repository has exactly
 # one administrator, who authors effectively every PR, so that guard could never
-# be satisfied — the workflow's entire run history was failures (issue #1310).
-# The gate now accepts SHA-bound verdicts recorded by the actors that actually
-# exist: squad review agents, posting PR comments.
+# be satisfied — its entire run history was failures (issue #1310). Parker's
+# analysis on that issue established that every fix preserving genuine
+# separation of duties requires a second human, a machine identity controlled by
+# someone other than the owner, or a real independent CI adjudicator — none of
+# which exist here. The owner has accepted self-attested agent review for
+# single-maintainer operation (issue #1310, option 3). Nothing here launders the
+# owner's identity through a bot hop to fake independence; the gate states what
+# it is instead.
 #
-# HOW TO RECORD A VERDICT — post a PR comment containing these three lines:
+# WHAT THIS RECORD GENUINELY GIVES YOU, even though review is self-attested:
+#   * SHA BINDING — a record is valid only for the exact head SHA it names. Push
+#     again and it goes stale and the gate fails. This really does prevent
+#     review-then-push-more, and it is the strongest control here.
+#   * PRESENCE — the gate fails when no review happened at all, which catches
+#     the real failure mode of a PR merging with zero examination.
+#   * AUDIT TRAIL — which reviewer agent ran, which SHA it examined, what it
+#     concluded.
+#   * LEGIBLE FAILURE — the status names the exact failing condition so a
+#     blocked session acts instead of parking indefinitely.
+#
+# HOW TO RECORD A REVIEW — post a PR comment containing these three lines:
 #
 #     <!-- squad-verdict -->
 #     Squad-Reviewer: bishop
@@ -17,43 +48,44 @@ name: Record squad review verdict
 #     Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 #
 #   * `Squad-Reviewer` is a squad identity, validated against the repository's
-#     `squad:{member}` labels. It must not be the squad member who authored the
+#     `squad:{member}` labels. It should not be the squad member who authored the
 #     PR (resolved from `Squad-Author:` in the PR body, then the `squad:` label
-#     on the linked issue, then the head branch name).
-#   * `Squad-Verdict` is APPROVE or REQUEST_CHANGES.
+#     on the linked issue, then the head branch name). Again: quality heuristic,
+#     not independence.
+#   * `Squad-Verdict` is APPROVE (the reviewer agent found nothing blocking) or
+#     REQUEST_CHANGES (it did). It is that agent's recorded conclusion, not an
+#     authorisation.
 #   * `Squad-Head-SHA` must equal the PR's live head SHA at evaluation time. A
-#     verdict recorded against an older SHA is stale and does not count, and can
-#     never displace a reviewer's verdict on the current head. This is the
-#     load-bearing control: it makes review-then-push-more detectable.
+#     record against an older SHA is stale, does not count, and can never
+#     displace a reviewer's record on the current head.
 #   * The `<!-- squad-verdict -->` marker is REQUIRED. Fenced code blocks and
 #     quoted (`>`) lines are stripped before parsing, so prose that merely
-#     illustrates or quotes the format is not a binding verdict. Each field must
+#     illustrates or quotes the format is not a binding record. Each field must
 #     appear exactly once in the remaining text.
 #   * The commenting account must hold real repository write access. GitHub's
 #     `author_association` is not a permission level — it reports MEMBER for any
 #     organisation member and COLLABORATOR for read-only collaborators — so
-#     permission is confirmed through the collaborator permission API.
-#
-# TRUST BOUNDARY: every squad agent posts through the repository owner's token,
-# so an account that can record a verdict is by construction an account that
-# already has write access and could merge directly. Reviewer separation is a
-# process control at squad-identity level, not an authentication boundary. This
-# is the owner's explicit decision (issue #1310); the controls that carry real
-# weight are SHA binding and the write-access requirement.
+#     permission is confirmed through the collaborator permission API. This is an
+#     integrity control (keep drive-by comments out), not an independence claim:
+#     any write-capable account can record the whole panel, and could equally
+#     merge directly.
 #
 # REVIEWER COUNT follows .github/copilot-instructions.md § "Documentation-Only
-# Changes: One Reviewer": documentation-only PRs need one verdict, everything
+# Changes: One Reviewer": documentation-only PRs need one record, everything
 # else needs the bishop/hicks/vasquez panel.
 #
-# HUMAN OVERRIDE: a repository administrator satisfies the gate unconditionally,
+# OWNER OVERRIDE: a repository administrator satisfies the gate unconditionally,
 # either by approving through GitHub's native review UI at the current head, or
-# by posting a verdict comment whose `Squad-Reviewer` is their own GitHub login.
+# by posting a record whose `Squad-Reviewer` is their own GitHub login. The owner
+# is never locked out of their own repository.
 #
 # The job itself always succeeds; the gate result is the `squad/pre-pr-verdict`
 # commit status. Keeping the run conclusion at `success` is what lets
-# scripts/ci/verify-squad-verdict.mjs treat the run as a provenance record.
+# scripts/ci/verify-squad-verdict.mjs treat the run as a provenance record —
+# provenance meaning "this status really was written by this workflow", not
+# "someone independent approved this".
 
-run-name: "Squad verdict gate for PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}"
+run-name: "Squad review record for PR #${{ github.event.pull_request.number || github.event.issue.number || inputs.pr_number }}"
 
 on:
   pull_request_target:
@@ -83,7 +115,7 @@ concurrency:
 
 jobs:
   record:
-    name: Record SHA-pinned verdict
+    name: Record SHA-pinned review
     # issue_comment also fires for plain issues; only PR conversations qualify.
     if: >-
       github.event_name != 'issue_comment'

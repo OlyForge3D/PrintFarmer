@@ -70,31 +70,39 @@ node scripts/ci/verify-squad-verdict.mjs \
   --json
 ```
 
+⚠️ **`REVIEWED` is self-attested, not independent review.** Every squad agent
+runs under the repository owner's authority, so a reviewer agent's record is the
+owner attesting to the owner's own work. It provides no separation of duties.
+Merge on it if the owner's policy says so, but never report it as independent
+approval. Only `APPROVED` reflects an administrator authorising directly.
+
 When Ralph already has a recorded reviewed SHA and the PR head may have moved,
-add `--expected-head <recorded-sha>`. This distinguishes a superseded approval
+add `--expected-head <recorded-sha>`. This distinguishes a superseded record
 or rejection from a PR that never had squad evidence.
 
-- `APPROVED` is valid merge evidence only for the PR's exact current head.
+- `REVIEWED` and `APPROVED` are valid merge evidence only for the PR's exact
+  current head.
 - `CHANGES_REQUESTED` routes the findings back to the original author.
-- `SUPERSEDED`, `MISSING`, or `INVALID` is not approval and does not preserve
-  an old rejection. Require fresh panel verdict comments naming the new head,
+- `SUPERSEDED`, `MISSING`, or `INVALID` is not a review record and does not
+  preserve an old rejection. Require fresh panel records naming the new head,
   or an administrator override.
 - A current administrator GitHub approval remains valid merge evidence.
-- Never infer approval from a free-text PR comment. Only the canonical
+- Never infer a review from a free-text PR comment. Only the canonical
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
   `squad/pre-pr-verdict` status. The status is the evidence; the comment is not.
 - If the gate reports a `BLOCKED` status, its description names the exact
-  failing condition (no verdict, stale SHA, reviewer-is-author, or insufficient
-  count). That is missing evidence, not a rejection: act on the condition —
-  do not park the PR, and do not route it back to the author as feedback.
+  failing condition (no review recorded, stale SHA, reviewer-is-author, or
+  insufficient count). That is missing evidence, not a rejection: act on the
+  condition — do not park the PR, and do not route it back to the author as
+  feedback.
 - Merge an approved PR with
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
-- Exit codes are `0` for `APPROVED`, `2` for `CHANGES_REQUESTED`, `3` for
-  missing, invalid, or superseded evidence, and `1` for verifier/tool failure.
-  Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3` means
-  squad evidence is unavailable and permits only a verified current
+- Exit codes are `0` for `REVIEWED`/`APPROVED`, `2` for `CHANGES_REQUESTED`,
+  `3` for missing, invalid, or superseded evidence, and `1` for verifier/tool
+  failure. Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3`
+  means squad evidence is unavailable and permits only a verified current
   administrator GitHub approval as fallback.
 
 **Step 3 — Act on highest-priority item:**

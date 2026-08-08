@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 
+// Verifies the provenance of the `squad/pre-pr-verdict` commit status.
+//
+// ⚠️ "Verified" here means the status really was written by the trusted
+// workflow for the exact commit it names. It does NOT mean an independent party
+// approved the change. A `REVIEWED` classification is a SELF-ATTESTED record
+// that reviewer agents examined the commit: every squad agent runs under the
+// repository owner's authority, so there is no separation of duties. Only
+// `APPROVED` reflects a repository administrator authorising directly. See
+// .github/copilot-instructions.md § "Repository verdict evidence".
+
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -7,7 +17,7 @@ export const verdictContext = 'squad/pre-pr-verdict';
 export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
 
 const trustedStatusCreator = 'github-actions[bot]';
-const displayTitlePattern = /^Squad verdict gate for PR #([1-9]\d*)$/;
+const displayTitlePattern = /^Squad review record for PR #([1-9]\d*)$/;
 
 // The gate runs only from events whose workflow definition comes from the
 // default branch. A pull_request (head-ref) trigger would let a PR rewrite the
@@ -54,20 +64,30 @@ function parseDisplayTitle(displayTitle) {
   return { prNumber: Number.parseInt(match[1], 10) };
 }
 
-// The gate encodes its outcome in the status state and description:
-//   success  `APPROVE @ <sha12> by <reviewers>`        -> a real approval
-//   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>` -> a real rejection
-//   failure  `BLOCKED @ <sha12>: <reason>`             -> no usable evidence
-// The third form covers "no verdict yet", "have 1/3", stale-only evidence and
-// reviewer-is-author. Those are absent evidence, not a reviewer decision, and
-// must not be reported as CHANGES_REQUESTED — that would suppress the
-// administrator fallback path.
+// The record encodes its outcome in the status state and description:
+//   success  `REVIEWED (self-attested) @ <sha12> by <agents>` -> agents reviewed
+//   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
+//   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>`        -> findings raised
+//   failure  `BLOCKED @ <sha12>: <reason>`                    -> nothing recorded
+//
+// REVIEWED and APPROVE are kept distinct on purpose. Only the owner path is a
+// real authorisation by a distinct principal; REVIEWED is a self-attested record
+// that reviewer agents examined the commit, and must never be reported as though
+// an independent party approved it.
 function parseStatusDescription(status, statusSha) {
   const description = status.description ?? '';
   const shortSha = statusSha.slice(0, 12);
   if (status.state === 'success') {
-    const match = new RegExp(`^APPROVE @ ${shortSha} by (\\S.*)$`).exec(description);
-    return match ? { verdict: 'APPROVE', reviewers: match[1] } : undefined;
+    const reviewed = new RegExp(
+      `^REVIEWED \\(self-attested\\) @ ${shortSha} by (\\S.*)$`,
+    ).exec(description);
+    if (reviewed) {
+      return { verdict: 'REVIEWED', reviewers: reviewed[1] };
+    }
+    const owner = new RegExp(
+      `^APPROVE \\(owner\\) @ ${shortSha} by (\\S.*)$`,
+    ).exec(description);
+    return owner ? { verdict: 'APPROVE', reviewers: owner[1] } : undefined;
   }
   if (status.state === 'failure') {
     const rejected =
@@ -147,11 +167,11 @@ export function verifySquadVerdict({ pull, status, run }) {
     return result('INVALID', 'The status does not match the trusted workflow verdict.');
   }
 
-  // A gate block is the absence of usable evidence, not a reviewer decision.
+  // A block is the absence of any recorded review, not a reviewer decision.
   if (outcome.verdict === 'BLOCKED') {
     return result(
       'MISSING',
-      `The gate blocked ${statusSha} without a reviewer verdict: ${outcome.detail}`,
+      `The gate blocked ${statusSha} with no review recorded: ${outcome.detail}`,
       { reviewedHeadSha: statusSha },
     );
   }
@@ -164,10 +184,19 @@ export function verifySquadVerdict({ pull, status, run }) {
     );
   }
 
-  const classification = outcome.verdict === 'APPROVE'
-    ? 'APPROVED'
-    : 'CHANGES_REQUESTED';
-  return result(classification, 'Verified SHA-pinned squad verdict.', {
+  // REVIEWED is a self-attested agent record; APPROVED is an owner
+  // authorisation. Both permit merge under this repository's single-maintainer
+  // policy, but they are reported separately so nothing downstream can present
+  // a self-attested record as independent approval.
+  const classification = outcome.verdict === 'REVIEWED'
+    ? 'REVIEWED'
+    : outcome.verdict === 'APPROVE'
+      ? 'APPROVED'
+      : 'CHANGES_REQUESTED';
+  const reason = classification === 'REVIEWED'
+    ? 'Verified SHA-pinned self-attested squad review record (not independent review).'
+    : 'Verified SHA-pinned squad record.';
+  return result(classification, reason, {
     verdict: outcome.verdict,
     reviewedHeadSha: statusSha,
     actor: outcome.reviewers,
@@ -276,7 +305,7 @@ async function main() {
     process.stdout.write(`${verdict.classification}: ${verdict.reason}\n`);
   }
 
-  if (verdict.classification === 'APPROVED') {
+  if (verdict.classification === 'APPROVED' || verdict.classification === 'REVIEWED') {
     return;
   }
   // Exit 2 is a current rejection; exit 3 means no usable squad evidence.

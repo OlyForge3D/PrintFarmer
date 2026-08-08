@@ -21,7 +21,7 @@ tags or dispatches a beta automatically.
 | Required React follow-ups (#716–#722) | All closed | Confirm no reopen |
 | [#723](https://github.com/OlyForge3D/PrintFarmer/issues/723) QA beta qualification (Kane) | Open, in progress in a parallel session | **Must be closed with no open P0/P1 before trigger** |
 | [#724](https://github.com/OlyForge3D/PrintFarmer/issues/724) this issue | In progress | Must be closed |
-| Bishop/Hicks/Vasquez unanimous approval on every release-bound PR | Required per PR | Re-verify per `squad/pre-pr-verdict` status, not by memory |
+| Bishop/Hicks/Vasquez unanimous approval on every release-bound PR | Required per PR | Re-verify per `squad/pre-pr-verdict` status, not by memory. This is a self-attested agent review record, not independent approval — see `.github/copilot-instructions.md` |
 | Jeff's explicit release-execution request | Not yet given | **Hard stop until given** |
 
 ## 2. APNs / native push configuration
@@ -132,7 +132,7 @@ Record pass/fail here before proceeding:
   ```bash
   node scripts/ci/verify-squad-verdict.mjs --repo OlyForge3D/PrintFarmer --pr <number> --json
   ```
-  No `SUPERSEDED` or missing verdicts on the exact head SHA being released.
+  No `SUPERSEDED` or missing records on the exact head SHA being released.
 
 ## 6. Trigger procedure (only after every section above is checked)
 

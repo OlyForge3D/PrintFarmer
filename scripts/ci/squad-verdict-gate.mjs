@@ -1,10 +1,23 @@
-// Pure evaluation logic for the squad pre-PR review gate.
+// Pure evaluation logic for the squad pre-PR review record.
+//
+// ⚠️ THIS IS NOT INDEPENDENT REVIEW AND PROVIDES NO SEPARATION OF DUTIES.
+// Every squad agent runs under the repository owner's authority and posts
+// through the owner's token, so a reviewer agent "approving" an author agent is
+// the owner approving the owner's own work. The reviewer-is-not-the-author rule
+// implemented below is a QUALITY HEURISTIC — a second agent with fresh context
+// catches more than the author re-reading its own output — and is deliberately
+// NOT presented as an independence or four-eyes control. The owner accepted
+// self-attested agent review for single-maintainer operation (issue #1310).
+//
+// What the record genuinely provides: SHA binding (a record is valid only for
+// the exact commit it names), presence (the gate fails when nothing reviewed the
+// change at all), an audit trail, and legible failure reasons.
 //
 // The workflow (.github/workflows/squad-review-verdict.yml) collects live data
 // from the GitHub API and delegates every decision to this module so the rules
 // are unit-testable. Nothing here performs I/O.
 //
-// Canonical verdict comment format (see the workflow header for the full spec):
+// Canonical record comment format (see the workflow header for the full spec):
 //
 //   <!-- squad-verdict -->
 //   Squad-Reviewer: bishop
@@ -13,7 +26,10 @@
 
 export const verdictContext = 'squad/pre-pr-verdict';
 
-/** Squad members that form the standard three-way adversarial review panel. */
+/**
+ * Squad members that form the standard review panel. Three agents reviewing
+ * instead of one is a quality measure, not three independent parties.
+ */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 
 /** Comment authors we accept a verdict from at all. */
@@ -357,7 +373,7 @@ export function evaluateGate({
       passed: true,
       override: 'github-review',
       description: truncate(
-        `APPROVE @ ${shortSha(head)} by ${adminApproval.login}`,
+        `APPROVE (owner) @ ${shortSha(head)} by ${adminApproval.login}`,
       ),
       reason: `administrator ${adminApproval.login} approved the current head on GitHub`,
       notes,
@@ -369,9 +385,10 @@ export function evaluateGate({
 
   const { current, stale } = collectVerdicts(comments, head);
 
-  // 2. Human owner override via verdict comment: an administrator who names
-  //    their own GitHub login as the reviewer is speaking as the owner, not as
-  //    an agent, and their verdict is decisive.
+  // 2. Owner override via record comment: an administrator who names their own
+  //    GitHub login as the reviewer is speaking as the owner rather than as an
+  //    agent. This is the one path that is a real authorisation rather than a
+  //    self-attested agent record, so it is labelled `(owner)`.
   for (const record of current.values()) {
     if (record.isSelfDeclaredAdmin) {
       const passed = record.verdict === 'APPROVE';
@@ -381,7 +398,7 @@ export function evaluateGate({
         override: 'owner-comment',
         description: truncate(
           passed
-            ? `APPROVE @ ${shortSha(head)} by ${record.commenter}`
+            ? `APPROVE (owner) @ ${shortSha(head)} by ${record.commenter}`
             : `REQUEST_CHANGES @ ${shortSha(head)} by ${record.commenter}`,
         ),
         reason: `repository administrator ${record.commenter} recorded ${record.verdict}`,
@@ -405,12 +422,18 @@ export function evaluateGate({
     );
   } else {
     notes.push(
-      'PR author squad identity could not be resolved; reviewer-is-author is ' +
-      'enforced only against the roster.',
+      'PR author squad identity could not be resolved; the reviewer-is-not-the-' +
+      'author quality heuristic is applied only against the roster.',
     );
   }
+  notes.push(
+    'Self-attested: every agent here runs under the owner\'s authority, so this ' +
+    'record is not independent review and provides no separation of duties.',
+  );
 
-  // 3. Reviewer eligibility.
+  // 3. Reviewer eligibility. Excluding the author agent is a quality heuristic
+  //    (fresh context catches more than self-re-reading), not an independence
+  //    guarantee — the author agent and the reviewer agent share one principal.
   const eligible = new Map();
   for (const [member, record] of current) {
     if (!roster.has(member)) {
@@ -480,7 +503,7 @@ export function evaluateGate({
       ? ` (stale at ${stale.map((r) => `${r.reviewer}@${shortSha(r.headSha)}`).join(', ')})`
       : '';
     const detail = approvals.length === 0 && stale.length === 0
-      ? `no verdict found for ${shortSha(head)}`
+      ? `no review recorded for ${shortSha(head)}`
       : `have ${approvals.length}/${requiredCount}` +
         (missingPanel.length > 0 ? `, missing ${missingPanel.join('+')}` : '') +
         staleNote;
@@ -489,7 +512,7 @@ export function evaluateGate({
       passed: false,
       description: truncate(`BLOCKED @ ${shortSha(head)}: ${detail}`),
       reason: stale.length > 0 && approvals.length === 0
-        ? `every verdict is stale: ${stale
+        ? `every recorded review is stale: ${stale
           .map((r) => `${r.reviewer} reviewed ${r.headSha}, head is ${head}`)
           .join('; ')}`
         : detail,
@@ -500,11 +523,19 @@ export function evaluateGate({
     };
   }
 
+  // Deliberately NOT "APPROVE": this is a record that reviewer agents examined
+  // this exact commit, self-attested under the owner's authority. Only the owner
+  // override path emits an `APPROVE (owner)` status, because only that path is a
+  // real authorisation by a distinct principal.
   return {
     state: 'success',
     passed: true,
-    description: truncate(`APPROVE @ ${shortSha(head)} by ${approvals.join('+')}`),
-    reason: `${approvals.length} SHA-bound approval(s) on the current head`,
+    description: truncate(
+      `REVIEWED (self-attested) @ ${shortSha(head)} by ${approvals.join('+')}`,
+    ),
+    reason:
+      `${approvals.length} SHA-bound self-attested review record(s) on the ` +
+      'current head',
     notes,
     requiredMembers,
     approvals,

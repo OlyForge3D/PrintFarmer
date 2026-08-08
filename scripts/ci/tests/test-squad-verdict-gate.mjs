@@ -174,7 +174,14 @@ test('accepts a full panel approval at the current head', () => {
     ],
   });
   assert.equal(result.state, 'success');
-  assert.equal(result.description, `APPROVE @ ${headSha.slice(0, 12)} by bishop+hicks+vasquez`);
+  assert.equal(
+    result.description,
+    `REVIEWED (self-attested) @ ${headSha.slice(0, 12)} by bishop+hicks+vasquez`,
+  );
+  assert.ok(
+    result.notes.some((note) => note.includes('not independent review')),
+    'the record must state that it is not independent review',
+  );
 });
 
 test('rejects verdicts pinned to a stale SHA', () => {
@@ -187,7 +194,7 @@ test('rejects verdicts pinned to a stale SHA', () => {
   });
   assert.equal(result.state, 'failure');
   assert.equal(result.stale.length, 3);
-  assert.match(result.reason, /every verdict is stale/);
+  assert.match(result.reason, /every recorded review is stale/);
   assert.match(result.description, /^BLOCKED @ /);
 });
 
@@ -388,6 +395,10 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /types: \[created, edited, deleted\]/);
   assert.match(
     workflow,
-    /run-name: "Squad verdict gate for PR #\$\{\{ github\.event\.pull_request\.number/,
+    /run-name: "Squad review record for PR #\$\{\{ github\.event\.pull_request\.number/,
   );
+  // The gate must not present itself as independent review or four-eyes.
+  assert.match(workflow, /THIS IS NOT INDEPENDENT REVIEW/);
+  assert.match(workflow, /NO SEPARATION OF DUTIES/);
+  assert.match(workflow, /QUALITY\s*#?\s*HEURISTIC/i);
 });
