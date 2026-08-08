@@ -20,6 +20,7 @@ class NfcHubService {
   private connection: HubConnection | null = null;
   private connected = false;
   private connecting = false;
+  private lifecycleGeneration = 0;
 
   private tagReadCallbacks: NfcTagReadCallback[] = [];
   private tagUnknownCallbacks: NfcTagUnknownCallback[] = [];
@@ -30,6 +31,7 @@ class NfcHubService {
       this.buildConnection();
     }
     const conn = this.connection!;
+    const generation = this.lifecycleGeneration;
     if (conn.state === HubConnectionState.Connected) return;
     if (conn.state === HubConnectionState.Connecting) return;
     if (conn.state !== HubConnectionState.Disconnected) return;
@@ -37,12 +39,12 @@ class NfcHubService {
     this.connecting = true;
     try {
       await conn.start();
-      this.setConnected(true);
+      if (generation === this.lifecycleGeneration) this.setConnected(true);
     } catch (err) {
       console.error('[nfcHub] connect failed:', err);
-      this.setConnected(false);
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
     } finally {
-      this.connecting = false;
+      if (generation === this.lifecycleGeneration) this.connecting = false;
     }
   }
 
@@ -56,9 +58,11 @@ class NfcHubService {
    * receiving farm-private NFC broadcasts on an already-established connection.
    */
   async stop(): Promise<void> {
+    this.lifecycleGeneration++;
     const conn = this.connection;
     this.connection = null;
     this.connecting = false;
+    this.setConnected(false);
     if (conn) {
       try {
         await conn.stop();
@@ -66,7 +70,6 @@ class NfcHubService {
         console.error('[nfcHub] error stopping connection:', e);
       }
     }
-    this.setConnected(false);
   }
 
   onTagRead(callback: NfcTagReadCallback): () => void {
@@ -94,6 +97,7 @@ class NfcHubService {
   }
 
   private buildConnection(): void {
+    const generation = ++this.lifecycleGeneration;
     const url = getHubUrl('/hubs/nfc');
     this.connection = new HubConnectionBuilder()
       .withUrl(url, {
@@ -116,9 +120,15 @@ class NfcHubService {
       });
     });
 
-    this.connection.onclose(() => this.setConnected(false));
-    this.connection.onreconnecting(() => this.setConnected(false));
-    this.connection.onreconnected(() => this.setConnected(true));
+    this.connection.onclose(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
+    });
+    this.connection.onreconnecting(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(false);
+    });
+    this.connection.onreconnected(() => {
+      if (generation === this.lifecycleGeneration) this.setConnected(true);
+    });
   }
 
   private setConnected(value: boolean): void {
