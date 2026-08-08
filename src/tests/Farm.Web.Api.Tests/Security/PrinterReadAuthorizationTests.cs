@@ -107,8 +107,10 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         // These "success path" setups exist so that a matching-role caller (or a hypothetical
         // guard regression) is *distinguishable* from the authorization-shaped 404: if the
         // PrinterGroup gate on these mutating endpoints were removed, the mocked service would
-        // now report success (200/428, not the coincidental 404 an unconfigured mock produces),
-        // which is what proves the deny tests below are load-bearing rather than tautological.
+        // now report success (or, for SetToolheadSpoolAsync, the 428 If-Match precondition
+        // reached only once FindByIdAsync resolves a real printer) — never the coincidental 404
+        // an unconfigured mock produces — which is what proves the deny tests below are
+        // load-bearing rather than tautological.
         _printers
             .Setup(service => service.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .Returns((Guid id, CancellationToken _) => Task.FromResult<Printer?>(new Printer
@@ -124,6 +126,21 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
             .ReturnsAsync(true);
         _printers
             .Setup(service => service.DisableCameraAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        _printers
+            .Setup(service => service.UnloadFilamentAsync(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FilamentUnloadResult(true, "unloaded"));
+        _printers
+            .Setup(service => service.SetToolheadSpoolAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<int>(),
+                It.IsAny<int>(),
+                It.IsAny<Farm.Infrastructure.Services.Printers.FilamentSwapOverrideContext?>(),
+                It.IsAny<Farm.Infrastructure.Services.Printers.SpoolBindPolicy>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommandResult(true, null));
+        _printers
+            .Setup(service => service.DeleteHistoryJobAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
     }
 
