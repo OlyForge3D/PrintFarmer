@@ -625,7 +625,7 @@ test_explicit_env_overrides_persisted_worker_disable_on_redeploy() {
     sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
     rm -f docker-compose.yml docker-compose.override.yml
 
-    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --redeploy --dry-run 2>&1"
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --redeploy --dry-run 2>&1"
     local exit_code
     exit_code=$(get_output_exit_code)
     local output
@@ -656,7 +656,7 @@ test_explicit_env_overrides_persisted_worker_disable_on_regenerate() {
     write_base_config ".deploy-config"
     sed -i 's/^ENABLE_DISTRIBUTED_SLICING=.*/ENABLE_DISTRIBUTED_SLICING=true/' ".deploy-config"
 
-    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --regenerate-config 2>&1"
+    capture_output "cd '$TEST_TEMP_DIR' && ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --regenerate-config 2>&1"
     local exit_code
     exit_code=$(get_output_exit_code)
     local output

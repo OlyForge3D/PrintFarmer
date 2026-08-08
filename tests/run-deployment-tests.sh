@@ -431,6 +431,9 @@ run_full_tests() {
     log_subsection "Test: Deploy Docker"
     run_test_suite "deploy-docker tests" "$SCRIPT_DIR/test-deploy-docker.sh" || true
 
+    log_subsection "Test: Deployment Validator Result Handling"
+    run_test_suite "deployment validator result tests" "$SCRIPT_DIR/test-validate-deployment-scripts.sh" || true
+
     log_subsection "Test: TLS Certificate Cleanup"
     run_test_suite "TLS certificate cleanup tests" "$SCRIPT_DIR/test-tls-certificate-cleanup.sh" || true
 

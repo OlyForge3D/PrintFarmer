@@ -7,6 +7,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+VALIDATION_FAILURES=0
 
 # Colors
 GREEN='\033[0;32m'
@@ -22,26 +23,30 @@ TEMP_DIR=$(mktemp -d -t "printfarmer-validation-XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT
 echo "Using temp directory: $TEMP_DIR"
 
-# Function to check for success/failure
+# Record an explicit assertion result without aborting the remaining validations.
 check_result() {
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ PASS${NC}: $1"
-        return 0
+    local passed="$1"
+    local description="$2"
+
+    if [ "$passed" = true ]; then
+        echo -e "${GREEN}✅ PASS${NC}: $description"
     else
-        echo -e "${RED}❌ FAIL${NC}: $1"
-        return 1
+        echo -e "${RED}❌ FAIL${NC}: $description"
+        VALIDATION_FAILURES=$((VALIDATION_FAILURES + 1))
     fi
 }
 
-# Test 1: Architecture options are correct (no multistage)
+# Test 1: Help describes the current architecture contract
 echo
 echo "Test 1: Architecture options validation"
-help_output=$("$REPO_ROOT/scripts/deploy-docker.sh" --help 2>&1 || true)
-if echo "$help_output" | grep -q "monolithic|microservices" && ! echo "$help_output" | grep -q "multistage"; then
-    check_result "Architecture options show correct choices without multistage"
-else
-    check_result "Architecture options validation" || true
+architecture_help_valid=false
+if help_output=$("$REPO_ROOT/scripts/deploy-docker.sh" --help 2>&1); then
+    if echo "$help_output" | grep -q "containerized microservices architecture" \
+        && ! echo "$help_output" | grep -q -- "--architecture"; then
+        architecture_help_valid=true
+    fi
 fi
+check_result "$architecture_help_valid" "Help describes the standard microservices architecture without a removed --architecture option"
 
 # Test 2: Compose generator creates files with multistage dockerfile
 echo
@@ -52,15 +57,15 @@ mkdir -p "$TEST2_DIR"
 if "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$TEST2_DIR" >/dev/null 2>&1; then
     if [ -f "$TEST2_DIR/docker-compose.yml" ] && [ -f "$TEST2_DIR/Dockerfile.multistage" ]; then
         if grep -q "dockerfile: Dockerfile.multistage" "$TEST2_DIR/docker-compose.yml"; then
-            check_result "Compose generator creates multistage configuration"
+            check_result true "Compose generator creates multistage configuration"
         else
-            check_result "Compose file uses multistage dockerfile" || true
+            check_result false "Compose file uses multistage dockerfile"
         fi
     else
-        check_result "Required files created" || true
+        check_result false "Required files created"
     fi
 else
-    check_result "Compose generator execution" || true
+    check_result false "Compose generator execution"
 fi
 
 # Test 4: No Redis references in generated files
@@ -75,21 +80,21 @@ for template in "$REPO_ROOT/scripts/docker/compose-templates"/*.yml; do
 done
 
 if [ "$redis_found" = false ]; then
-    check_result "No Redis references in compose templates"
+    check_result true "No Redis references in compose templates"
 else
-    check_result "Redis references removed" || true
+    check_result false "Redis references removed"
 fi
 
 # Test 5: No PrusaSlicer references in deploy script
 echo
 echo "Test 5: PrusaSlicer references removed from deploy script"
-if ! grep -qi "prusa" "$REPO_ROOT/scripts/deploy-docker.sh" 2>/dev/null; then
-    check_result "No PrusaSlicer references in deploy script"
+if ! grep -qi "PrusaSlicer" "$REPO_ROOT/scripts/deploy-docker.sh" 2>/dev/null; then
+    check_result true "No PrusaSlicer references in deploy script"
 else
-    check_result "PrusaSlicer references removed" || true
+    check_result false "PrusaSlicer references removed"
 fi
 
-# Test 6: Monolithic dry-run generates expected config
+# Test 6: Monolithic compatibility dry-run remains free of shell errors
 echo
 echo "Test 6: Monolithic dry-run generates expected config"
 MONO_DIR="$TEMP_DIR/monolith-dryrun"
@@ -135,15 +140,11 @@ mono_output=$(timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" \
 mono_status=$?
 set -e
 
+mono_checks_pass=true
 if grep -q 'unbound variable' <<<"$mono_output"; then
     echo "$mono_output"
-    echo -e "${RED}❌ FAIL${NC}: Monolithic dry-run emitted an unbound-variable error"
-    exit 1
-fi
-
-if [ "$mono_status" -eq 0 ]; then
-    mono_checks_pass=true
-
+    mono_checks_pass=false
+elif [ "$mono_status" -eq 0 ]; then
     if [ ! -f ".env" ]; then
         mono_checks_pass=false
         echo -e "${YELLOW}⚠️  .env not generated${NC}"
@@ -151,21 +152,16 @@ if [ "$mono_status" -eq 0 ]; then
         mono_checks_pass=false
         echo -e "${YELLOW}⚠️  Monolithic database provider missing expected PostgreSQL value${NC}"
     fi
-
-    if [ "$mono_checks_pass" = true ]; then
-        check_result "Monolithic dry-run generates expected config"
-    else
-        check_result "Monolithic configuration validation" || true
-    fi
 else
     echo "$mono_output"
-    check_result "Monolithic dry-run execution" || true
+    mono_checks_pass=false
 fi
+check_result "$mono_checks_pass" "Monolithic dry-run generates expected config without shell errors"
 popd >/dev/null
 
-# Test 7: Microservices dry-run generates expected config
+# Test 7: Standard deployment dry-run generates expected config
 echo
-echo "Test 7: Microservices dry-run generates expected config"
+echo "Test 7: Standard deployment dry-run generates expected config"
 MS_DIR="$TEMP_DIR/microservices-dryrun"
 rm -rf "$MS_DIR" 2>/dev/null || true
 mkdir -p "$MS_DIR/src/Web/ReactApp"
@@ -181,6 +177,7 @@ DB_PASSWORD=postgres
 INCLUDE_POSTGRES=yes
 CONNECTION_STRING=Host=database;Database=printfarmer;Username=postgres;Password=postgres
 NETWORK_MODE=bridge
+INCLUDE_SQLSERVER=no
 ALLOW_LOCAL_NETWORK=true
 NETWORK_RANGES=192.168.0.0/16
 ALLOWED_NETWORK_RANGES=192.168.0.0/16
@@ -188,17 +185,18 @@ ENABLE_DISCOVERY=yes
 HTTP_PORT=8080
 HTTPS_PORT=0
 API_PORT=5245
+SERVER_HOST=localhost
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INCLUDE_REGISTRY=false
+INCLUDE_DISCOVERY=false
 ENABLE_SWAGGER=true
 ENABLE_DETAILED_LOGGING=true
 ENABLE_DISTRIBUTED_SLICING=no
 ENABLE_ORCA_WORKER=no
 ORCA_WORKER_COUNT=0
 ENABLE_SPOOLMAN=no
-INCLUDE_MONITORING=no
-INCLUDE_TELEMETRY=no
-INCLUDE_SECURITY=no
-INCLUDE_REGISTRY=no
-INCLUDE_DISCOVERY=no
 EOF
 
 set +e
@@ -211,15 +209,11 @@ host_output=$(OSTYPE=linux-gnu timeout 60 "$REPO_ROOT/scripts/deploy-docker.sh" 
 host_status=$?
 set -e
 
+host_checks_pass=true
 if grep -q 'unbound variable' <<<"$host_output"; then
     echo "$host_output"
-    echo -e "${RED}❌ FAIL${NC}: Microservices dry-run emitted an unbound-variable error"
-    exit 1
-fi
-
-if [ "$host_status" -eq 0 ]; then
-    host_checks_pass=true
-
+    host_checks_pass=false
+elif [ "$host_status" -eq 0 ]; then
     if [ ! -f ".env" ]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  .env not generated${NC}"
@@ -233,16 +227,11 @@ if [ "$host_status" -eq 0 ]; then
         host_checks_pass=false
         echo -e "${YELLOW}⚠️  React production .env not generated at $react_env_path${NC}"
     fi
-
-    if [ "$host_checks_pass" = true ]; then
-        check_result "Microservices dry-run generates expected config"
-    else
-        check_result "Microservices configuration validation" || true
-    fi
 else
     echo "$host_output"
-    check_result "Microservices dry-run execution" || true
+    host_checks_pass=false
 fi
+check_result "$host_checks_pass" "Standard deployment dry-run generates expected config without shell errors"
 popd >/dev/null
 
 # Test 8: Generated compose files contain no Redis services
@@ -252,7 +241,7 @@ MS_COMPOSE_DIR="$TEMP_DIR/ms-compose"
 rm -rf "$MS_COMPOSE_DIR" 2>/dev/null || true
 mkdir -p "$MS_COMPOSE_DIR"
 if ! "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$MS_COMPOSE_DIR" >/dev/null 2>&1; then
-    check_result "Microservices compose generation" || true
+    check_result false "Microservices compose generation"
 else
     redis_check_pass=true
     for compose_path in "$TEST2_DIR/docker-compose.yml" "$MS_COMPOSE_DIR/docker-compose.yml"; do
@@ -262,9 +251,9 @@ else
         fi
     done
     if [ "$redis_check_pass" = true ]; then
-        check_result "Generated compose files contain no Redis services"
+        check_result true "Generated compose files contain no Redis services"
     else
-        check_result "No Redis services in generated files" || true
+        check_result false "No Redis services in generated files"
     fi
 fi
 
@@ -284,10 +273,10 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
         prometheus_line=$(grep -n 'printfarmer-prometheus' "$STACK_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
         networks_line=$(grep -n '^networks:' "$STACK_DIR/docker-compose.yml" 2>/dev/null | head -1 | cut -d: -f1 | tr -d ' ' || echo 0)
         if [ "$prometheus_count" -eq 1 ] && [ "$jaeger_count" -eq 1 ] && [ "$prometheus_line" -gt 0 ] && [ "$networks_line" -gt 0 ] && [ "$prometheus_line" -lt "$networks_line" ]; then
-            check_result "Telemetry and monitoring stack merge cleanly"
+            check_result true "Telemetry and monitoring stack merge cleanly"
             if command -v docker >/dev/null 2>&1; then
                 if ! (cd "$STACK_DIR" && docker compose -f docker-compose.yml config --quiet >/dev/null 2>&1); then
-                    check_result "docker compose config validation" || true
+                    check_result false "docker compose config validation"
                 fi
             fi
         else
@@ -296,16 +285,14 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
             if [ "$prometheus_line" -ge "$networks_line" ]; then
                 echo -e "${YELLOW}⚠️  Prometheus service appears after networks section (line $prometheus_line vs $networks_line)${NC}"
             fi
-            false
-            check_result "Telemetry and monitoring stack merge cleanly" || true
+            check_result false "Telemetry and monitoring stack merge cleanly"
         fi
     else
         echo -e "${YELLOW}⚠️  docker-compose.yml not generated for telemetry test${NC}"
-        false
-        check_result "Telemetry and monitoring stack merge cleanly" || true
+        check_result false "Telemetry and monitoring stack merge cleanly"
     fi
 else
-    check_result "Compose generator execution for telemetry+monitoring" || true
+    check_result false "Compose generator execution for telemetry+monitoring"
 fi
 
 # Cleanup
@@ -316,6 +303,11 @@ trap - EXIT
 
 echo
 echo "=============================================="
+if [ "$VALIDATION_FAILURES" -gt 0 ]; then
+    echo -e "${RED}❌ Validation failed with $VALIDATION_FAILURES failed assertion(s).${NC}"
+    exit 1
+fi
+
 echo "✅ Validation completed!"
 echo
 echo "Key improvements verified:"
@@ -323,5 +315,5 @@ echo "• Multi-stage builds integrated into all architectures"
 echo "• Redis services and references completely removed"
 echo "• PrusaSlicer references completely removed"
 echo "• Deployment pipeline generates valid configurations"
-echo "• Architecture options correctly show monolithic|microservices"
-echo "• Dry-run covers monolithic and microservices defaults"
+echo "• Help documents the standard microservices architecture"
+echo "• Dry-run covers the standard PostgreSQL deployment defaults"
