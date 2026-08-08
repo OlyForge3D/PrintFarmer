@@ -43,7 +43,8 @@ public sealed class DatabaseMigrationTests
             "20260730231403_InitialV2",
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
-            "20260808054302_AddNfcDeviceApproval");
+            "20260808054302_AddNfcDeviceApproval",
+            "20260808162833_AddPowerReadingCompositeIndex");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -305,7 +306,8 @@ public sealed class DatabaseMigrationTests
             "20260730231403_InitialV2",
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
-            "20260808054302_AddNfcDeviceApproval");
+            "20260808054302_AddNfcDeviceApproval",
+            "20260808162833_AddPowerReadingCompositeIndex");
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
 
@@ -653,6 +655,7 @@ public sealed class DatabaseMigrationTests
                 "20260806230920_CanonicalizePrintJobPriority",
                 "20260807023649_UsePortableRevisionConcurrency",
                 "20260808052051_AddNfcDeviceApproval",
+                "20260808162502_AddPowerReadingCompositeIndex",
             ]
             :
             [
@@ -660,6 +663,7 @@ public sealed class DatabaseMigrationTests
                 "20260806230929_CanonicalizePrintJobPriority",
                 "20260807023652_UsePortableRevisionConcurrency",
                 "20260808052059_AddNfcDeviceApproval",
+                "20260808162518_AddPowerReadingCompositeIndex",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");
