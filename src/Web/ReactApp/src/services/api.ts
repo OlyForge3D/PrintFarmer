@@ -2327,6 +2327,18 @@ export class ApiClient {
     return response.data;
   }
 
+  async getUnifiedFiles(
+    request: import("@/types/api").UnifiedFilesQueryRequest,
+    signal?: AbortSignal
+  ): Promise<import("@/types/api").UnifiedFilesQueryResponse> {
+    const response = await this.client.post<import("@/types/api").UnifiedFilesQueryResponse>(
+      "/3d-models/files/query",
+      request,
+      { signal }
+    );
+    return response.data;
+  }
+
   async getPrintablesUserCollections(
     username: string,
     options?: { cursor?: string; limit?: number }
