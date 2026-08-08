@@ -37,10 +37,14 @@ public interface ISliceJobRepository
     /// <param name="workerHeartbeatCutoffUtc">
     /// The oldest heartbeat that qualifies a worker as live.
     /// </param>
+    /// <param name="timingHistoryCutoffUtc">
+    /// The oldest completion timestamp included in processing-time history.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate>> GetQueueMetricAggregatesAsync(
         DateTime nowUtc,
         DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc,
         CancellationToken ct = default);
 
     /// <summary>Gets active jobs assigned to a specific worker.</summary>
@@ -198,14 +202,14 @@ public interface ISliceJobRepository
 public sealed class SlicerQueueMetricAggregate
 {
     /// <summary>
-    /// Gets the number of live, enabled workers that advertise the engine and can accept work.
+    /// Gets the number of live, enabled workers linked to a registered service for the engine.
     /// </summary>
     public int ActiveWorkers { get; init; }
 
     /// <summary>
     /// Gets the total configured slots across active workers.
     /// </summary>
-    public int DispatchCapacity { get; init; }
+    public long DispatchCapacity { get; init; }
 
     /// <summary>
     /// Gets the number of processing jobs with an authoritative active worker lease.

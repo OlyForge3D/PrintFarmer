@@ -133,6 +133,11 @@ public class Worker
 /// </summary>
 public static class WorkerStatus
 {
+    /// <summary>
+    /// Maximum age of a heartbeat before a worker is excluded from live dispatch reads.
+    /// </summary>
+    public const int OnlineFreshnessSeconds = 60;
+
     public const string Offline = "Offline";
     public const string Online = "Online";
     public const string Busy = "Busy";

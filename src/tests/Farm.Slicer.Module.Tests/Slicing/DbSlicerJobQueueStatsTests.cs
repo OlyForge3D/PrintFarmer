@@ -4,12 +4,10 @@ using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Models;
 using Farm.Slicer.Module.Services;
-using Farm.Slicer.Module.Services.Configuration;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
-using Microsoft.Extensions.Options;
 
 namespace Farm.Slicer.Module.Tests.Slicing;
 
@@ -53,30 +51,51 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task GetAllQueueStatsAsync_WorkerStates_CountsOnlyFreshEnabledDispatchableCapabilities()
+    public async Task GetAllQueueStatsAsync_WorkerStates_CountsOnlyFreshEnabledRegisteredServices()
     {
         await using SlicerDbContext context = await CreateEmptyContextAsync();
-        context.Workers.AddRange(
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Online, totalSlots: 2),
-            CreateWorker(
-                """{"capabilities":["ORCASLICER","prusaslicer"]}""",
-                WorkerStatus.Busy,
-                totalSlots: 3),
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Draining, totalSlots: 4),
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Offline, totalSlots: 5),
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Error, totalSlots: 6),
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Online, totalSlots: 7, isDisabled: true),
-            CreateWorker(
-                """["orcaslicer"]""",
-                WorkerStatus.Online,
-                totalSlots: 8,
-                lastHeartbeat: Now.UtcDateTime.AddMinutes(-31)),
-            CreateWorker(
-                """["orcaslicer"]""",
-                WorkerStatus.Online,
-                totalSlots: 9,
-                hasHeartbeat: false),
-            CreateWorker("""["cura"]""", WorkerStatus.Online, totalSlots: 0));
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Online, totalSlots: 2);
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Busy, totalSlots: 3);
+        _ = AddWorker(context, SlicerEngineType.PrusaSlicer, WorkerStatus.Busy, totalSlots: 1);
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Draining, totalSlots: 4);
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Offline, totalSlots: 5);
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Error, totalSlots: 6);
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: 7,
+            isDisabled: true);
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: 8,
+            lastHeartbeat: Now.UtcDateTime.AddSeconds(-61));
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: 9,
+            hasHeartbeat: false);
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: 10,
+            serviceLastSeen: Now.UtcDateTime.AddSeconds(-61));
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: 11,
+            serviceStatus: WorkerStatus.Offline);
+        _ = AddWorker(
+            context,
+            SlicerEngineType.Cura,
+            WorkerStatus.Online,
+            totalSlots: 0,
+            capabilitiesJson: """{"engine":"orcaslicer","capabilities":[]}""");
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         DbSlicerJobQueue queue = CreateQueue(context);
@@ -94,13 +113,17 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     public async Task GetAllQueueStatsAsync_LeaseAndTimingEdges_UsesAuthoritativeWorkAndValidSamples()
     {
         await using SlicerDbContext context = await CreateEmptyContextAsync();
-        Worker liveWorker = CreateWorker("""["orcaslicer"]""", WorkerStatus.Online, totalSlots: 2);
-        Worker staleWorker = CreateWorker(
-            """["orcaslicer"]""",
+        Worker liveWorker = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
             WorkerStatus.Online,
+            totalSlots: 2);
+        Worker staleWorker = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Busy,
             totalSlots: 10,
-            lastHeartbeat: Now.UtcDateTime.AddHours(-1));
-        context.Workers.AddRange(liveWorker, staleWorker);
+            lastHeartbeat: Now.UtcDateTime.AddSeconds(-61));
         context.SliceJobs.AddRange(
             CreateCanonicalJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
             CreateCanonicalJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
@@ -109,11 +132,15 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
             CreateProcessingJob(liveWorker.Id, Now.UtcDateTime.AddSeconds(-1)),
             CreateProcessingJob(staleWorker.Id, Now.UtcDateTime.AddMinutes(5)),
             CreateProcessingJob(liveWorker.Id, Now.UtcDateTime.AddMinutes(5), includeLeaseToken: false),
-            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 10),
-            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 20),
+            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 10.25),
+            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 19.75),
             CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: null),
             CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 30, includeCompletion: false),
-            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: -5));
+            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: -5),
+            CreateCompletedJob(
+                SlicerEngineType.OrcaSlicer,
+                durationSeconds: 100,
+                startedAt: Now.UtcDateTime.AddDays(-31)));
         await context.SaveChangesAsync();
         context.ChangeTracker.Clear();
         DbSlicerJobQueue queue = CreateQueue(context);
@@ -123,7 +150,7 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
 
         stats.QueuedJobs.Should().Be(3);
         stats.ProcessingJobs.Should().Be(4);
-        stats.CompletedJobs.Should().Be(5);
+        stats.CompletedJobs.Should().Be(6);
         stats.ActiveWorkers.Should().Be(1);
         stats.AverageProcessingTimeSeconds.Should().Be(15);
         stats.EstimatedWaitTime.Should().Be(TimeSpan.FromSeconds(30));
@@ -134,10 +161,9 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     public async Task GetAllQueueStatsAsync_NoCapacityHistoryOrWork_ReturnsDocumentedSentinels()
     {
         await using SlicerDbContext context = await CreateEmptyContextAsync();
-        context.Workers.AddRange(
-            CreateWorker("""["orcaslicer"]""", WorkerStatus.Online, totalSlots: 1),
-            CreateWorker("""["prusaslicer"]""", WorkerStatus.Online, totalSlots: 1),
-            CreateWorker("""["superslicer"]""", WorkerStatus.Online, totalSlots: 0));
+        _ = AddWorker(context, SlicerEngineType.OrcaSlicer, WorkerStatus.Online, totalSlots: 1);
+        _ = AddWorker(context, SlicerEngineType.PrusaSlicer, WorkerStatus.Online, totalSlots: 1);
+        _ = AddWorker(context, SlicerEngineType.SuperSlicer, WorkerStatus.Online, totalSlots: 0);
         context.SliceJobs.AddRange(
             CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 5),
             CreateCanonicalJob(SliceJobStatus.Queued, SlicerEngineType.PrusaSlicer),
@@ -161,6 +187,34 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         stats[SlicerEngineType.Cura].ActiveWorkers.Should().Be(0);
         stats[SlicerEngineType.Cura].AverageProcessingTimeSeconds.Should().Be(9);
         stats[SlicerEngineType.Cura].EstimatedWaitTime.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task GetAllQueueStatsAsync_CapacityAboveIntMaximum_DoesNotOverflow()
+    {
+        await using SlicerDbContext context = await CreateEmptyContextAsync();
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Online,
+            totalSlots: int.MaxValue);
+        _ = AddWorker(
+            context,
+            SlicerEngineType.OrcaSlicer,
+            WorkerStatus.Busy,
+            totalSlots: int.MaxValue);
+        context.SliceJobs.AddRange(
+            CreateCanonicalJob(SliceJobStatus.Queued, SlicerEngineType.OrcaSlicer),
+            CreateCompletedJob(SlicerEngineType.OrcaSlicer, durationSeconds: 2));
+        await context.SaveChangesAsync();
+        context.ChangeTracker.Clear();
+        DbSlicerJobQueue queue = CreateQueue(context);
+
+        SlicerQueueStats stats =
+            (await queue.GetAllQueueStatsAsync())[SlicerEngineType.OrcaSlicer];
+
+        stats.ActiveWorkers.Should().Be(2);
+        stats.EstimatedWaitTime.Should().Be(TimeSpan.FromSeconds(2));
     }
 
     [Fact]
@@ -204,21 +258,29 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     public void QueueMetricQueries_RelationalProviders_TranslateToGroupedServerSql(string provider)
     {
         using SlicerDbContext context = CreateProviderContext(provider);
-        DateTime cutoff = Now.UtcDateTime.AddMinutes(-30);
+        DateTime workerCutoff = Now.UtcDateTime.AddSeconds(-WorkerStatus.OnlineFreshnessSeconds);
+        DateTime timingCutoff = Now.UtcDateTime.AddDays(-30);
 
         string workerSql = EfSliceJobRepository
-            .BuildQueueWorkerMetricQuery(context, cutoff)
+            .BuildQueueWorkerMetricQuery(context, workerCutoff)
             .ToQueryString();
         string jobSql = EfSliceJobRepository
-            .BuildQueueJobMetricQuery(context, Now.UtcDateTime, cutoff)
+            .BuildQueueJobMetricQuery(context, Now.UtcDateTime, workerCutoff, timingCutoff)
             .ToQueryString();
 
         workerSql.Should().ContainEquivalentOf("GROUP BY");
         workerSql.Should().ContainEquivalentOf("COUNT");
         workerSql.Should().ContainEquivalentOf("SUM");
+        workerSql.Should().ContainEquivalentOf("SlicerServices");
+        workerSql.Should().NotContainEquivalentOf("CapabilitiesJson");
         jobSql.Should().ContainEquivalentOf("LEFT JOIN");
         jobSql.Should().ContainEquivalentOf("GROUP BY");
         jobSql.Should().ContainEquivalentOf("AVG");
+        if (provider == "sqlserver")
+        {
+            jobSql.Should().ContainEquivalentOf("DATEDIFF(second");
+            jobSql.Should().ContainEquivalentOf("DATEPART(millisecond");
+        }
     }
 
     [Fact]
@@ -251,10 +313,6 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     {
         return new DbSlicerJobQueue(
             new EfSliceJobRepository(context),
-            staleWorkerOptions: Options.Create(new StaleWorkerCleanupSettings
-            {
-                StaleAfterMinutes = 30,
-            }),
             timeProvider: new FixedTimeProvider(Now));
     }
 
@@ -315,19 +373,24 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
         return new SlicerDbContext(builder.Options);
     }
 
-    private static Worker CreateWorker(
-        string capabilitiesJson,
+    private static Worker AddWorker(
+        SlicerDbContext context,
+        SlicerEngineType engine,
         string status,
         int totalSlots,
         bool isDisabled = false,
         DateTime? lastHeartbeat = null,
-        bool hasHeartbeat = true)
+        bool hasHeartbeat = true,
+        DateTime? serviceLastSeen = null,
+        string? serviceStatus = null,
+        string capabilitiesJson = "[]")
     {
         DateTime timestamp = Now.UtcDateTime;
-        return new Worker
+        Guid serviceId = Guid.NewGuid();
+        var worker = new Worker
         {
             Id = Guid.NewGuid(),
-            ServiceId = Guid.NewGuid().ToString(),
+            ServiceId = serviceId.ToString(),
             Name = "Queue metric worker",
             EndpointUrl = "http://worker.invalid",
             CapabilitiesJson = capabilitiesJson,
@@ -340,6 +403,26 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
             UpdatedAt = timestamp,
             IsDisabled = isDisabled,
         };
+        var service = new SlicerService
+        {
+            Id = serviceId,
+            Name = "Queue metric service",
+            SlicerType = engine switch
+            {
+                SlicerEngineType.OrcaSlicer => (int)SlicerType.OrcaSlicer,
+                SlicerEngineType.PrusaSlicer => (int)SlicerType.PrusaSlicer,
+                SlicerEngineType.SuperSlicer => (int)SlicerType.SuperSlicer,
+                SlicerEngineType.Cura => (int)SlicerType.Cura,
+                _ => throw new ArgumentOutOfRangeException(nameof(engine), engine, "Unknown engine."),
+            },
+            Status = serviceStatus ?? status,
+            LastSeen = serviceLastSeen ?? timestamp,
+            CreatedAt = timestamp,
+            UpdatedAt = timestamp,
+        };
+        context.Workers.Add(worker);
+        context.SlicerServices.Add(service);
+        return worker;
     }
 
     private static SliceJob CreateProcessingJob(
@@ -359,13 +442,14 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
 
     private static SliceJob CreateCompletedJob(
         SlicerEngineType engine,
-        int? durationSeconds,
-        bool includeCompletion = true)
+        double? durationSeconds,
+        bool includeCompletion = true,
+        DateTime? startedAt = null)
     {
         SliceJob job = CreateCanonicalJob(SliceJobStatus.Completed, engine);
         if (durationSeconds.HasValue)
         {
-            job.StartedAt = Now.UtcDateTime.AddMinutes(-10);
+            job.StartedAt = startedAt ?? Now.UtcDateTime.AddMinutes(-10);
             job.CompletedAt = includeCompletion
                 ? job.StartedAt.Value.AddSeconds(durationSeconds.Value)
                 : null;

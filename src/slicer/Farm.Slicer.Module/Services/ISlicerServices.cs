@@ -239,13 +239,14 @@ public class SlicerQueueStats
     public long FailedJobs { get; set; }
 
     /// <summary>
-    /// Gets or sets live, enabled, non-draining workers that advertise this engine.
+    /// Gets or sets live, enabled, non-draining workers registered for this engine.
     /// </summary>
     public int ActiveWorkers { get; set; }
 
     /// <summary>
     /// Gets or sets the arithmetic mean duration of completed jobs with valid start and completion
-    /// timestamps, rounded to seconds. The value is zero when no valid timing history exists.
+    /// timestamps in the recent history window, rounded to milliseconds. The value is zero when no
+    /// valid timing history exists.
     /// </summary>
     public double AverageProcessingTimeSeconds { get; set; }
 

@@ -45,13 +45,14 @@ The admin UI controls the global `JitterPercent` used by the worker. If the DB v
 Queue statistics are calculated separately for each slicer engine. Legacy jobs
 without an exact canonical engine name are reported as OrcaSlicer jobs.
 
-- `activeWorkers` counts registered workers that advertise the engine, are
-  enabled, have a heartbeat inside the configured
-  `StaleWorkerCleanup:StaleAfterMinutes` window, and are `Online` or `Busy`.
+- `activeWorkers` counts workers that are linked to a registered slicer service
+  for the engine, are enabled, have both worker and service heartbeats inside the
+  60-second operational freshness window, and are `Online` or `Busy`.
   Draining, offline, errored, disabled, missing-heartbeat, and stale workers are
   excluded.
 - `averageProcessingTimeSeconds` is the arithmetic mean duration of completed
-  jobs with both `startedAt` and `completedAt`, rounded to seconds.
+  jobs from the last 30 days with both `startedAt` and `completedAt`, rounded
+  to milliseconds.
   Missing or reversed timestamps and non-completed jobs are excluded. The value
   is `0` when no valid history exists.
 - `estimatedWaitTime` estimates the completion time of queued jobs plus jobs
@@ -61,6 +62,9 @@ without an exact canonical engine name are reported as OrcaSlicer jobs.
 - `estimatedWaitTime` is `null` when the engine has no dispatch capacity or no
   valid timing history. It is zero when capacity and history exist but there is
   no queued or actively leased work.
+- `processingJobs` is the raw persisted status count. It can exceed the active
+  leased workload used by `estimatedWaitTime` when processing rows have
+  expired, incomplete, orphaned, or stale-worker leases.
 
 All engine and status counts remain SQL-side aggregates. Worker capacity,
 active leases, and timing history are also aggregated in a fixed number of

@@ -14,17 +14,13 @@ namespace Farm.Slicer.Module.Services;
 public class DbSlicerJobQueue(
     ISliceJobRepository repo,
     IOptions<JobDispatchRetrySettings>? retryOptions = null,
-    IOptions<StaleWorkerCleanupSettings>? staleWorkerOptions = null,
     TimeProvider? timeProvider = null) : ISlicerJobQueue
 {
+    private const int TimingHistoryDays = 30;
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
     private readonly int _maxClaimRetries = Math.Max(
         0,
         retryOptions?.Value.MaxAttempts ?? new JobDispatchRetrySettings().MaxAttempts);
-
-    private readonly int _staleWorkerAfterMinutes = Math.Max(
-        0,
-        staleWorkerOptions?.Value.StaleAfterMinutes ?? new StaleWorkerCleanupSettings().StaleAfterMinutes);
 
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
@@ -134,11 +130,14 @@ public class DbSlicerJobQueue(
         IReadOnlyDictionary<(SlicerEngineType Engine, string Status), int> counts =
             await _repo.GetQueueCountsAsync(cancellationToken);
         DateTime lastUpdated = _timeProvider.GetUtcNow().UtcDateTime;
-        DateTime workerHeartbeatCutoffUtc = lastUpdated.AddMinutes(-_staleWorkerAfterMinutes);
+        DateTime workerHeartbeatCutoffUtc =
+            lastUpdated.AddSeconds(-WorkerStatus.OnlineFreshnessSeconds);
+        DateTime timingHistoryCutoffUtc = lastUpdated.AddDays(-TimingHistoryDays);
         IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate> metrics =
             await _repo.GetQueueMetricAggregatesAsync(
                 lastUpdated,
                 workerHeartbeatCutoffUtc,
+                timingHistoryCutoffUtc,
                 cancellationToken);
 
         return Enum.GetValues<SlicerEngineType>().ToDictionary(
@@ -147,13 +146,14 @@ public class DbSlicerJobQueue(
             {
                 long GetCount(string status) =>
                     counts.TryGetValue((engine, status), out int count) ? count : 0;
-                SlicerQueueMetricAggregate metric = metrics[engine];
+                _ = metrics.TryGetValue(engine, out SlicerQueueMetricAggregate? metric);
+                metric ??= new SlicerQueueMetricAggregate();
                 long queuedJobs = GetCount(SliceJobStatus.Queued);
                 double averageProcessingTimeSeconds = metric.TimingSampleCount == 0
                     ? 0
                     : Math.Round(
                         metric.AverageProcessingTimeSeconds,
-                        0,
+                        3,
                         MidpointRounding.AwayFromZero);
 
                 return new SlicerQueueStats

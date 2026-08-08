@@ -29,6 +29,7 @@ public class StubSliceJobRepository : ISliceJobRepository
     public Task<IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate>> GetQueueMetricAggregatesAsync(
         DateTime nowUtc,
         DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc,
         CancellationToken ct = default)
     {
         IReadOnlyDictionary<SlicerEngineType, SlicerQueueMetricAggregate> metrics =

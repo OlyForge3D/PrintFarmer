@@ -106,6 +106,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         GetQueueMetricAggregatesAsync(
             DateTime nowUtc,
             DateTime workerHeartbeatCutoffUtc,
+            DateTime timingHistoryCutoffUtc,
             CancellationToken ct = default)
     {
         List<QueueWorkerMetricRow> workerMetrics = await BuildQueueWorkerMetricQuery(
@@ -115,7 +116,8 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         List<QueueJobMetricRow> jobMetrics = await BuildQueueJobMetricQuery(
                 _db,
                 nowUtc,
-                workerHeartbeatCutoffUtc)
+                workerHeartbeatCutoffUtc,
+                timingHistoryCutoffUtc)
             .ToListAsync(ct);
 
         Dictionary<SlicerEngineType, QueueWorkerMetricRow> workersByEngine =
@@ -146,32 +148,43 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        return BuildQueueWorkerMetricQuery(
-                db,
-                SlicerEngineType.OrcaSlicer,
-                SlicerEngineNames.ToCapabilityTag(SlicerEngineType.OrcaSlicer),
-                workerHeartbeatCutoffUtc)
-            .Concat(BuildQueueWorkerMetricQuery(
-                db,
-                SlicerEngineType.PrusaSlicer,
-                SlicerEngineNames.ToCapabilityTag(SlicerEngineType.PrusaSlicer),
-                workerHeartbeatCutoffUtc))
-            .Concat(BuildQueueWorkerMetricQuery(
-                db,
-                SlicerEngineType.SuperSlicer,
-                SlicerEngineNames.ToCapabilityTag(SlicerEngineType.SuperSlicer),
-                workerHeartbeatCutoffUtc))
-            .Concat(BuildQueueWorkerMetricQuery(
-                db,
-                SlicerEngineType.Cura,
-                SlicerEngineNames.ToCapabilityTag(SlicerEngineType.Cura),
-                workerHeartbeatCutoffUtc));
+        return
+            from worker in db.Workers.AsNoTracking()
+            join service in db.SlicerServices.AsNoTracking()
+                on worker.ServiceId.ToLower() equals service.Id.ToString().ToLower()
+            where
+                !worker.IsDisabled &&
+                worker.LastHeartbeat >= workerHeartbeatCutoffUtc &&
+                service.LastSeen >= workerHeartbeatCutoffUtc &&
+                (worker.Status == WorkerStatus.Online || worker.Status == WorkerStatus.Busy) &&
+                (service.Status == WorkerStatus.Online || service.Status == WorkerStatus.Busy) &&
+                (service.SlicerType == (int)SlicerType.OrcaSlicer ||
+                 service.SlicerType == (int)SlicerType.PrusaSlicer ||
+                 service.SlicerType == (int)SlicerType.SuperSlicer ||
+                 service.SlicerType == (int)SlicerType.Cura)
+            group worker by
+                service.SlicerType == (int)SlicerType.PrusaSlicer
+                    ? SlicerEngineType.PrusaSlicer
+                    : service.SlicerType == (int)SlicerType.SuperSlicer
+                        ? SlicerEngineType.SuperSlicer
+                        : service.SlicerType == (int)SlicerType.Cura
+                            ? SlicerEngineType.Cura
+                            : SlicerEngineType.OrcaSlicer
+            into engineGroup
+            select new QueueWorkerMetricRow
+            {
+                Engine = engineGroup.Key,
+                ActiveWorkers = engineGroup.Count(),
+                DispatchCapacity = engineGroup.Sum(
+                    worker => (long)(worker.TotalSlots > 0 ? worker.TotalSlots : 0)),
+            };
     }
 
     internal static IQueryable<QueueJobMetricRow> BuildQueueJobMetricQuery(
         SlicerDbContext db,
         DateTime nowUtc,
-        DateTime workerHeartbeatCutoffUtc)
+        DateTime workerHeartbeatCutoffUtc,
+        DateTime timingHistoryCutoffUtc)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -185,6 +198,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                 (job.Status == SliceJobStatus.Completed &&
                  job.StartedAt != null &&
                  job.CompletedAt != null &&
+                 job.CompletedAt >= timingHistoryCutoffUtc &&
                  job.CompletedAt >= job.StartedAt) ||
                 job.Status == SliceJobStatus.Processing
             select new QueueJobMetricSourceRow
@@ -235,9 +249,10 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                     TimingSampleCount = group.Count(row => row.Status == SliceJobStatus.Completed),
                     AverageProcessingTimeSeconds = group
                         .Where(row => row.Status == SliceJobStatus.Completed)
-                        .Average(row => (double?)EF.Functions.DateDiffSecond(
-                            row.StartedAt,
-                            row.CompletedAt)) ?? 0,
+                        .Average(row =>
+                            (double?)EF.Functions.DateDiffSecond(row.StartedAt, row.CompletedAt) +
+                            ((row.CompletedAt!.Value.Millisecond -
+                              row.StartedAt!.Value.Millisecond) / 1000.0)) ?? 0,
                 }),
             "Microsoft.EntityFrameworkCore.Sqlite" => source
                 .GroupBy(row => row.Engine)
@@ -291,29 +306,6 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         };
     }
 
-    private static IQueryable<QueueWorkerMetricRow> BuildQueueWorkerMetricQuery(
-        SlicerDbContext db,
-        SlicerEngineType engine,
-        string capability,
-        DateTime workerHeartbeatCutoffUtc)
-    {
-        string capabilityPattern = $"%\"{capability}\"%";
-        return db.Workers
-            .AsNoTracking()
-            .Where(worker =>
-                !worker.IsDisabled &&
-                worker.LastHeartbeat >= workerHeartbeatCutoffUtc &&
-                (worker.Status == WorkerStatus.Online || worker.Status == WorkerStatus.Busy) &&
-                EF.Functions.Like(worker.CapabilitiesJson.ToLower(), capabilityPattern))
-            .GroupBy(_ => 1)
-            .Select(group => new QueueWorkerMetricRow
-            {
-                Engine = engine,
-                ActiveWorkers = group.Count(),
-                DispatchCapacity = group.Sum(worker => worker.TotalSlots > 0 ? worker.TotalSlots : 0),
-            });
-    }
-
     private static string GetOrdinalEngineNameCollation(SlicerDbContext db)
     {
         return db.Database.ProviderName switch
@@ -335,7 +327,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 
         public int ActiveWorkers { get; init; }
 
-        public int DispatchCapacity { get; init; }
+        public long DispatchCapacity { get; init; }
     }
 
     internal sealed class QueueJobMetricRow
