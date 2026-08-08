@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Sockets;
 
 namespace Farm.Infrastructure.Network;
 
@@ -86,5 +87,107 @@ public static class NetworkRangeHelper
             byte[] bytes = BitConverter.GetBytes(ip).Reverse().ToArray();
             yield return new IPAddress(bytes).ToString();
         }
+    }
+
+    /// <summary>
+    /// Checks whether <paramref name="ip"/> falls within <paramref name="range"/>, which may be
+    /// CIDR notation (e.g. "192.168.1.0/24"), an IP range (e.g. "192.168.1.1-192.168.1.254"),
+    /// or a single IP address. Used to evaluate operator-configured allowlists such as
+    /// ALLOWED_NETWORK_RANGES without expanding the whole range into memory.
+    /// </summary>
+    public static bool IsIpInRange(IPAddress ip, string range)
+    {
+        ArgumentNullException.ThrowIfNull(ip);
+
+        if (string.IsNullOrWhiteSpace(range))
+        {
+            return false;
+        }
+
+        string trimmed = range.Trim();
+
+        try
+        {
+            if (trimmed.Contains('/'))
+            {
+                string[] parts = trimmed.Split('/');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0], out IPAddress? network) && int.TryParse(parts[1], out int prefixLength))
+                {
+                    return IsIpInCidr(ip, network, prefixLength);
+                }
+
+                return false;
+            }
+
+            if (trimmed.Contains('-'))
+            {
+                string[] parts = trimmed.Split('-');
+                if (parts.Length == 2 && IPAddress.TryParse(parts[0].Trim(), out IPAddress? startIp) && IPAddress.TryParse(parts[1].Trim(), out IPAddress? endIp))
+                {
+                    return IsIpInIpRange(ip, startIp, endIp);
+                }
+
+                return false;
+            }
+
+            return IPAddress.TryParse(trimmed, out IPAddress? single) && ip.Equals(single);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsIpInCidr(IPAddress ip, IPAddress network, int prefixLength)
+    {
+        if (ip.AddressFamily != network.AddressFamily)
+        {
+            return false;
+        }
+
+        byte[] ipBytes = ip.GetAddressBytes();
+        byte[] networkBytes = network.GetAddressBytes();
+        if (ipBytes.Length != networkBytes.Length || prefixLength < 0 || prefixLength > ipBytes.Length * 8)
+        {
+            return false;
+        }
+
+        int fullBytes = prefixLength / 8;
+        int remainingBits = prefixLength % 8;
+
+        for (int i = 0; i < fullBytes; i++)
+        {
+            if (ipBytes[i] != networkBytes[i])
+            {
+                return false;
+            }
+        }
+
+        if (remainingBits > 0)
+        {
+            byte mask = (byte)(0xFF << (8 - remainingBits));
+            if ((ipBytes[fullBytes] & mask) != (networkBytes[fullBytes] & mask))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool IsIpInIpRange(IPAddress ip, IPAddress startIp, IPAddress endIp)
+    {
+        if (ip.AddressFamily != AddressFamily.InterNetwork
+            || startIp.AddressFamily != AddressFamily.InterNetwork
+            || endIp.AddressFamily != AddressFamily.InterNetwork)
+        {
+            return false;
+        }
+
+        uint ipValue = BitConverter.ToUInt32(ip.GetAddressBytes().Reverse().ToArray(), 0);
+        uint startValue = BitConverter.ToUInt32(startIp.GetAddressBytes().Reverse().ToArray(), 0);
+        uint endValue = BitConverter.ToUInt32(endIp.GetAddressBytes().Reverse().ToArray(), 0);
+
+        return ipValue >= startValue && ipValue <= endValue;
     }
 }
