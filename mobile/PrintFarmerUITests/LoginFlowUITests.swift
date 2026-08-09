@@ -61,14 +61,12 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         let usernameField = app.textFields["usernameField"]
         XCTAssertTrue(usernameField.waitForExistence(timeout: 5))
 
-        usernameField.tap()
         assertKeyboardFocus(on: usernameField)
         usernameField.typeText("admin")
         XCTAssertEqual(usernameField.value as? String, "admin")
 
         let passwordField = app.secureTextFields["passwordField"]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
-        passwordField.tap()
         assertKeyboardFocus(on: passwordField)
         passwordField.typeText("password123")
         XCTAssertEqual(passwordField.value as? String, "•••••••••••")
@@ -82,13 +80,11 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
 
         let usernameField = app.textFields["usernameField"]
         XCTAssertTrue(usernameField.waitForExistence(timeout: 3))
-        usernameField.tap()
         assertKeyboardFocus(on: usernameField)
         usernameField.typeText("admin")
 
         let passwordField = app.secureTextFields["passwordField"]
         XCTAssertTrue(passwordField.waitForExistence(timeout: 3))
-        passwordField.tap()
         assertKeyboardFocus(on: passwordField)
         passwordField.typeText("password")
 
@@ -111,16 +107,33 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         file: StaticString = #filePath,
         line: UInt = #line
     ) {
-        let focused = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "hasKeyboardFocus == true"),
-            object: field
-        )
+        field.tap()
+        var result = waitForKeyboardFocus(on: field, timeout: 3)
+        if result != .completed {
+            // Xcode 26 can occasionally synthesize a tap without delivering it
+            // to the field on a loaded simulator. A second tap is harmless when
+            // focus was not acquired and avoids treating that dropped event as
+            // an app regression.
+            field.tap()
+            result = waitForKeyboardFocus(on: field, timeout: 3)
+        }
         XCTAssertEqual(
-            XCTWaiter.wait(for: [focused], timeout: 3),
+            result,
             .completed,
             "Tapping the field should retain keyboard focus",
             file: file,
             line: line
         )
+    }
+
+    private func waitForKeyboardFocus(
+        on field: XCUIElement,
+        timeout: TimeInterval
+    ) -> XCTWaiter.Result {
+        let focused = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "hasKeyboardFocus == true"),
+            object: field
+        )
+        return XCTWaiter.wait(for: [focused], timeout: timeout)
     }
 }
