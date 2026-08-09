@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
@@ -419,7 +420,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
 
 #pragma warning disable CA2254 // Intentional wrapper — callers pass constant templates
     private void LogSdcp(LogLevel level, string message, Exception? exception = null)
-        => _logger.Log(level, exception, message);
+        => _logger.Log(level, exception, LogSanitizer.Sanitize(message));
 #pragma warning restore CA2254
 
     private static readonly JsonSerializerOptions JsonOptions = new()

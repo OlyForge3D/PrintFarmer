@@ -4,6 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -381,7 +382,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Failed to start print of {FileName} on {BaseUrl}", fileName, baseUrl);
+            _logger?.LogError(ex, "Failed to start print of {FileName} on {BaseUrl}", LogSanitizer.Sanitize(fileName), LogSanitizer.Sanitize(baseUrl));
             return false;
         }
     }
