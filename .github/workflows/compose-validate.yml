@@ -63,6 +63,17 @@ jobs:
         # generated at runtime (never committed) and is discarded when the job finishes.
         run: echo "Jwt__Key=$(openssl rand -base64 32)" >> $GITHUB_ENV
 
+      - name: Provide throwaway admin credentials for optional overlays
+        # The pgAdmin, monitoring (Grafana), and security (Vault) overlays require an explicit
+        # credential (${VAR:?...}) so they fail closed instead of booting with a shipped default
+        # (issue #1295). CI only renders/validates the template here — it never runs the
+        # containers — so freshly generated, per-run throwaway values are sufficient. They are
+        # generated at runtime (never committed) and are discarded when the job finishes.
+        run: |
+          echo "AUTO_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> $GITHUB_ENV
+          echo "GRAFANA_ADMIN_PASSWORD=$(openssl rand -base64 24)" >> $GITHUB_ENV
+          echo "VAULT_DEV_ROOT_TOKEN=$(openssl rand -base64 24)" >> $GITHUB_ENV
+
       - name: Show Docker Compose version
         run: docker compose version
 
