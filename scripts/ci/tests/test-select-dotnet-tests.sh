@@ -729,8 +729,8 @@ case_merge_base_diverged_pr_base_sha_mobile_only() {
     fi
 
     local z_file changed_output
-    z_file="$(mktemp)"
-    changed_output="$(mktemp)"
+    z_file="$repo/.changed.z"
+    changed_output="$repo/.changed-output"
 
     EVENT_NAME="pull_request" \
       PR_BASE_SHA="$drifted_base" \
@@ -837,8 +837,8 @@ case_compute_change_set_push_force_push_diffs_before_after_directly() {
     fi
 
     local z_file changed_output
-    z_file="$(mktemp)"
-    changed_output="$(mktemp)"
+    z_file="$repo/.changed.z"
+    changed_output="$repo/.changed-output"
 
     EVENT_NAME="push" \
       BEFORE_SHA="$before_sha" \
