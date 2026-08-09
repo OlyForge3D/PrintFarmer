@@ -24,10 +24,12 @@ flowchart LR
   D --> E[dotnet-test matrix]
   D --> F[migration-drift]
   B --> G[ci-tools]
+  B -->|any dotnet input| I[dependency-compliance]
   C --> H[summary]
   E --> H
   F --> H
   G --> H
+  I --> H
 ```
 
 Every PR triggers `select` and `ci-tools`. The selector classifies changed
@@ -37,15 +39,37 @@ docs-only PR.
 
 ## Jobs
 
-| Job              | Runs when                                                    | Notes                                                                 |
-| ---------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
-| `select`         | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
-| `ci-tools`       | always                                                       | Runs `bash -n` + selector + hook tests; gates changes to selector.    |
-| `frontend`       | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`. |
-| `dotnet-build`   | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
-| `migration-drift`| App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
-| `dotnet-test`    | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
-| `summary`        | always (`if: always()`)                                      | Aggregates gates; hard-fails on required check regression.            |
+| Job                     | Runs when                                                    | Notes                                                                 |
+| ----------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------- |
+| `select`                | always                                                       | Classifies changed paths; emits `want_*`, `matrix`, `mig_matrix`.     |
+| `ci-tools`              | always                                                       | Runs `bash -n` + selector + hook tests + `node --test` compliance/squad-tooling suites; no .NET restore. |
+| `dependency-compliance` | any .NET input changed OR full-safe (same as `want_dotnet_build`) | `dotnet restore` + `node scripts/compliance/validate-compliance.mjs` — dependency-license/provenance inventory. See #1395. |
+| `frontend`              | React inputs changed OR full-safe                            | `npm ci`, lint, build, `npm run test:coverage` in `src/Web/ReactApp/`. |
+| `dotnet-build`          | any .NET input changed OR full-safe                          | `dotnet restore && dotnet build` on the whole solution.               |
+| `migration-drift`       | App or Slicer schema-relevant inputs changed OR full-safe    | `has-pending-model-changes` per provider (App×Pg/SqlServer, Slicer×Pg/SqlServer). |
+| `dotnet-test`           | .NET test-relevant inputs changed OR full-safe               | **Matrix** — one leg per affected test project.                       |
+| `summary`               | always (`if: always()`)                                      | Aggregates gates; hard-fails on required check regression.            |
+
+### `dependency-compliance` gating (#1395)
+
+`ci-tools` used to unconditionally run a full `dotnet restore` +
+`validate-compliance.mjs` on every event — including mobile-only and
+docs-only PRs — solely to keep dependency-license/provenance validation
+fail-closed. That restore is real network/CPU cost with nothing to validate
+when no `.NET`-relevant bucket changed, since the dependency graph cannot
+change without a `.csproj`/`Directory.Packages.props`/`NuGet.Config`/`*.sln`
+edit or a source change under `src/**`.
+
+`dependency-compliance` now runs the restore-then-validate pair in its own
+job gated by the exact same `want_dotnet_build` output the `dotnet-build`
+job uses, so mobile-only/docs-only PRs skip it entirely. Coverage does not
+regress: `want_dotnet_build` is forced `true` (full-safe) on every trusted
+push to `main`/`development`, on `workflow_dispatch`, and on any
+`shared_config` bucket change (`Directory.Packages.props`, `NuGet.Config`,
+any `*.sln`, `Directory.Build.*`) — see "Full-safe (`full_matrix=1`)
+triggers" above — so dependency/license drift is still caught fail-closed
+on the branches that matter. `ci-tools` itself stays restore-free and fast
+on every PR.
 
 ## Selection logic (selector script)
 
@@ -88,7 +112,9 @@ classify.
 | `unclassified`: every other repository path | | | | | |
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
-`docs`, `mobile`, and `unclassified`.
+`docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on
+`want_dotnet_build` (see the ✓ column above) and therefore does NOT run for
+`docs`, `mobile`, or `tools`-only buckets.
 
 ### Full-safe (`full_matrix=1`) triggers
 
@@ -233,6 +259,11 @@ given tree.
 - `ci-tools` failed → the selector or hook tests regressed. Reproduce with
   `bash scripts/ci/tests/test-select-dotnet-tests.sh` and
   `bash .githooks/tests/test-pre-push.sh` locally.
+- `dependency-compliance` failed → a NuGet package license/provenance check
+  regressed, or the solution failed to restore. Reproduce with
+  `cd src && dotnet restore ./farm-web.sln && cd .. && node scripts/compliance/validate-compliance.mjs`.
+  If it unexpectedly ran (or was skipped) for a given PR, check
+  `want_dotnet_build` in the `select` job summary — it mirrors `dotnet-build`.
 - `dotnet-test` matrix leg failed → per-project `TestResults/*.trx` is uploaded
   as `dotnet-test-results-<project>` artifact. Download and inspect. The
   workflow also asserts that the TRX reports non-zero executed tests, so an

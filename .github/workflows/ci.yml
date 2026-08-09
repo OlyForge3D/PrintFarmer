@@ -97,6 +97,9 @@ jobs:
   # ci-tools — always runs. Exercises the selector and pre-push hook test
   # suites plus shellcheck on the CI/hook scripts. Any failure here blocks the
   # summary because the selector's own correctness gates every scoped run.
+  # Deliberately kept free of any .NET restore (see `dependency-compliance`
+  # below, #1395) so this job stays fast and cheap on every PR, including
+  # mobile-only/docs-only changes.
   # ---------------------------------------------------------------------------
   ci-tools:
     name: CI tooling tests
@@ -161,12 +164,35 @@ jobs:
       - name: Test squad triage routing
         run: node --test scripts/ci/tests/test-squad-routing.mjs
 
-      # Full dependency-license validation requires restored NuGet assets
-      # (project.assets.json under src/**/obj/). Without a restore the
-      # validator emits NUGET_ASSETS_MISSING. `ci-tools` ALWAYS runs, so
-      # the restore-then-validate pair here keeps dependency validation
-      # fail-closed on every event — not gated behind the selector's
-      # `want_dotnet_build` decision.
+  # ---------------------------------------------------------------------------
+  # dependency-compliance — full dependency-license/provenance validation.
+  # Requires restored NuGet assets (project.assets.json under src/**/obj/);
+  # without a restore the validator emits NUGET_ASSETS_MISSING. Gated behind
+  # the SAME `want_dotnet_build` decision the `dotnet-build`/`dotnet-test`
+  # jobs use (see #1395): the dependency graph cannot have changed unless a
+  # bucket that feeds `want_dotnet_build` changed, so a mobile-only or
+  # docs-only PR provably has nothing new to validate. Coverage does not
+  # regress — `want_dotnet_build` is forced `true` (full-safe) on every
+  # trusted push to `main`/`development` (see select-dotnet-tests.sh
+  # `emit_full_safe "full-safe: trusted push to $base"`), on
+  # `workflow_dispatch`, and on any change to `Directory.Packages.props`/
+  # `NuGet.Config`/`*.csproj`/`*.sln` (the `shared_config` bucket), so drift
+  # in the dependency graph is always caught fail-closed.
+  # ---------------------------------------------------------------------------
+  dependency-compliance:
+    name: Dependency license & provenance validation
+    needs: [select, ci-tools]
+    if: ${{ needs.select.outputs.want_dotnet_build == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
@@ -603,7 +629,7 @@ jobs:
   # ---------------------------------------------------------------------------
   summary:
     name: CI summary
-    needs: [select, ci-tools, frontend, dotnet-build, migration-drift, dotnet-test, dotnet-test-providers]
+    needs: [select, ci-tools, dependency-compliance, frontend, dotnet-build, migration-drift, dotnet-test, dotnet-test-providers]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -611,6 +637,7 @@ jobs:
         env:
           SELECT_RESULT: ${{ needs.select.result }}
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
+          DEPENDENCY_COMPLIANCE_RESULT: ${{ needs.dependency-compliance.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
@@ -631,6 +658,7 @@ jobs:
             printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
             printf -- '- select: `%s`\n' "$SELECT_RESULT"
             printf -- '- ci-tools: `%s`\n' "$CI_TOOLS_RESULT"
+            printf -- '- dependency-compliance: `%s` (wanted=`%s`)\n' "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- frontend: `%s` (wanted=`%s`)\n' "$FRONTEND_RESULT" "$WANT_FRONTEND"
             printf -- '- dotnet-build: `%s` (wanted=`%s`)\n' "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
             printf -- '- migration-drift: `%s` (wanted=`%s`)\n' "$MIG_RESULT" "$WANT_MIG_DRIFT"
@@ -642,6 +670,7 @@ jobs:
         env:
           SELECT_RESULT: ${{ needs.select.result }}
           CI_TOOLS_RESULT: ${{ needs.ci-tools.result }}
+          DEPENDENCY_COMPLIANCE_RESULT: ${{ needs.dependency-compliance.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           DOTNET_BUILD_RESULT: ${{ needs.dotnet-build.result }}
           MIG_RESULT: ${{ needs.migration-drift.result }}
@@ -678,6 +707,7 @@ jobs:
               fi
             fi
           }
+          check_conditional dependency-compliance "$DEPENDENCY_COMPLIANCE_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional frontend "$FRONTEND_RESULT" "$WANT_FRONTEND"
           check_conditional dotnet-build "$DOTNET_BUILD_RESULT" "$WANT_DOTNET_BUILD"
           check_conditional migration-drift "$MIG_RESULT" "$WANT_MIG_DRIFT"
