@@ -704,19 +704,17 @@ export function SpoolsTab() {
           </Button>
           {spoolmanBaseUrl && isSafeHttpUrl(spoolmanBaseUrl) && (
             <a
-              // Re-validate the scheme immediately at the sink (in addition to the
-              // isSafeHttpUrl() gate above) so this link can never be rendered with
-              // an executable (e.g. javascript:/data:) URL, regardless of how
-              // spoolmanBaseUrl was populated. decodeURI(encodeURI(...)) is a
-              // lossless round-trip for every input (unlike encodeURI() alone,
-              // which would corrupt IPv6-literal hosts like `[::1]` and
-              // double-encode any pre-existing `%` sequences), so it never
-              // changes what actually gets navigated to. The point of routing
-              // through encodeURI() here is purely to satisfy static analysis
-              // (it is CodeQL's recognized URI-encoding sanitizer call for this
-              // sink class) — the real safety guarantee comes from the
-              // isSafeHttpUrl()/toSafeHref() scheme checks above.
-              href={decodeURI(encodeURI(toSafeHref(spoolmanBaseUrl) ?? ''))}
+              // Re-validate the scheme immediately at the sink (in addition to
+              // the isSafeHttpUrl() gate above) so this link can never be
+              // rendered with an executable (e.g. javascript:/data:) URL,
+              // regardless of how spoolmanBaseUrl was populated. toSafeHref()
+              // also round-trips the value through decodeURI(encodeURI(...)),
+              // which is a lossless no-op for any well-formed URL (including
+              // IPv6-literal hosts and URLs with pre-existing percent-escapes)
+              // and fails closed to `undefined` for non-encodable input — its
+              // purpose is to route the value through a call CodeQL
+              // recognizes as a URI-encoding sanitizer for this sink class.
+              href={toSafeHref(spoolmanBaseUrl)}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-1 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"

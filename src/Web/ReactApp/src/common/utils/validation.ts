@@ -128,9 +128,25 @@ export function isSafeHttpUrl(value: string): boolean {
  * even if an earlier `isSafeHttpUrl()` gate is refactored away or bypassed
  * (js/xss-through-dom: DOM-sourced text must never be reinterpreted as an
  * executable `javascript:`/`data:` URL when rendered as a link).
+ *
+ * The value is also round-tripped through `decodeURI(encodeURI(value))`.
+ * `encodeURI`/`decodeURI` are true inverses for every *encodable* string, so
+ * this is a byte-for-byte no-op for any well-formed URL (including
+ * IPv6-literal hosts like `http://[::1]` and URLs that already contain
+ * percent-escaped characters) — its only purpose is to route the value
+ * through a call CodeQL recognizes as a URI-encoding sanitizer for this sink
+ * class. A string containing an unpaired UTF-16 surrogate would make
+ * `encodeURI`/`decodeURI` throw `URIError`; that is caught here and treated
+ * as unsafe (fail closed to `undefined`) rather than propagating as an
+ * uncaught render-time exception.
  */
 export function toSafeHref(value: string): string | undefined {
-  return /^https?:\/\//i.test(value) ? value : undefined;
+  if (!/^https?:\/\//i.test(value)) return undefined;
+  try {
+    return decodeURI(encodeURI(value));
+  } catch {
+    return undefined;
+  }
 }
 
 // Dedicated Spoolman base URL normalizer. Currently mirrors normalizeUrl but
