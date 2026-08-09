@@ -1024,7 +1024,7 @@ public abstract class HttpJobPollerService(
 
         try
         {
-            string marker = Path.Combine(directory, RecoveryMarkerFileName);
+            string marker = Path.Join(directory, RecoveryMarkerFileName);
             string payload = JsonSerializer.Serialize(new
             {
                 jobId,
@@ -1212,15 +1212,15 @@ public abstract class HttpJobPollerService(
                     IEnumerable<string> candidates = Directory.EnumerateDirectories(jobDirectory)
                         .Where(directory =>
                             Guid.TryParse(Path.GetFileName(directory), out _)
-                            || File.Exists(Path.Combine(directory, RecoveryMarkerFileName)));
-                    if (File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)))
+                            || File.Exists(Path.Join(directory, RecoveryMarkerFileName)));
+                    if (File.Exists(Path.Join(jobDirectory, RecoveryMarkerFileName)))
                     {
                         candidates = candidates.Append(jobDirectory);
                     }
 
                     foreach (string candidate in candidates)
                     {
-                        string markerPath = Path.Combine(candidate, RecoveryMarkerFileName);
+                        string markerPath = Path.Join(candidate, RecoveryMarkerFileName);
                         DateTime lastWriteUtc = File.Exists(markerPath)
                             ? File.GetLastWriteTimeUtc(markerPath)
                             : Directory.GetLastWriteTimeUtc(candidate);

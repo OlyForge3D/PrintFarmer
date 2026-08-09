@@ -445,7 +445,7 @@ public class GcodeFilesService(
         // Generate GUID upfront for both file and thumbnail
         Guid fileId = Guid.NewGuid();
         string guidFileName = $"{fileId}{ext}";
-        string destinationPath = Path.Combine(targetDirFullPath, guidFileName);
+        string destinationPath = Path.Join(targetDirFullPath, guidFileName);
         string fullTarget = Path.GetFullPath(destinationPath);
 
         if (!fullTarget.StartsWith(targetDirFullPath, StringComparison.Ordinal))
@@ -641,7 +641,7 @@ public class GcodeFilesService(
 
             // Move uploaded file to GUID-based name before saving to DB
             string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
-            string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+            string finalFilePath = Path.Join(storageDir, $"{fileId}{fileExtension}");
 
             if (filePath != finalFilePath && File.Exists(filePath))
             {
@@ -653,7 +653,7 @@ public class GcodeFilesService(
             // Rename thumbnail to match file ID with _thumb.png suffix
             if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
             {
-                string finalThumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+                string finalThumbnailPath = Path.Join(storageDir, $"{fileId}_thumb.png");
                 if (thumbnailPath != finalThumbnailPath)
                 {
                     File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
@@ -703,8 +703,8 @@ public class GcodeFilesService(
             _storagePathService.GetGcodeStorageDirectory());
         _ = Directory.CreateDirectory(targetDirectory);
 
-        string stagingPath = Path.Combine(targetDirectory, $"{request.FileId}-{Guid.NewGuid():N}.ingest");
-        string finalPath = Path.Combine(targetDirectory, $"{request.FileId}{extension}");
+        string stagingPath = Path.Join(targetDirectory, $"{request.FileId}-{Guid.NewGuid():N}.ingest");
+        string finalPath = Path.Join(targetDirectory, $"{request.FileId}{extension}");
         string computedHash;
         long copiedBytes;
         try
@@ -751,7 +751,7 @@ public class GcodeFilesService(
         string? thumbnailPath = await ExtractThumbnailAsync(finalPath, ct);
         if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
         {
-            string finalThumbnailPath = Path.Combine(targetDirectory, $"{request.FileId}_thumb.png");
+            string finalThumbnailPath = Path.Join(targetDirectory, $"{request.FileId}_thumb.png");
             if (!string.Equals(thumbnailPath, finalThumbnailPath, StringComparison.Ordinal))
             {
                 File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
@@ -1119,7 +1119,7 @@ public class GcodeFilesService(
         {
             try
             {
-                string fullPath = Path.Combine(file.FilePath, file.FileName);
+                string fullPath = Path.Join(file.FilePath, file.FileName);
 
                 if (File.Exists(fullPath))
                 {
@@ -1137,7 +1137,7 @@ public class GcodeFilesService(
                 // Delete associated thumbnail if it exists
                 if (!string.IsNullOrEmpty(file.ThumbnailFileName))
                 {
-                    string thumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+                    string thumbnailPath = Path.Join(file.FilePath, file.ThumbnailFileName);
                     _logger.LogInformation("[DeleteFilesAsync] Checking for thumbnail: {ThumbnailPath}", thumbnailPath);
                     if (TryDeleteFile(thumbnailPath, "thumbnail"))
                     {
@@ -1190,7 +1190,7 @@ public class GcodeFilesService(
 
         // Return path by combining FilePath (directory) with FileName (GUID filename)
         // FilePath is the storage directory, FileName is the GUID-based filename
-        return Path.Combine(file.FilePath, file.FileName);
+        return Path.Join(file.FilePath, file.FileName);
     }
 
     public async Task<(string FilePath, string OriginalFileName)?> GetFilePathAndNameAsync(Guid id, CancellationToken ct)
@@ -1202,7 +1202,7 @@ public class GcodeFilesService(
         }
 
         // Return path AND original filename for download scenarios
-        string filePath = Path.Combine(file.FilePath, file.FileName);
+        string filePath = Path.Join(file.FilePath, file.FileName);
         return (filePath, file.Name);
     }
 
@@ -1217,7 +1217,7 @@ public class GcodeFilesService(
 
         // Combine the file directory with the thumbnail filename
         string fileDirectory = Path.GetDirectoryName(file.FilePath) ?? string.Empty;
-        return Path.Combine(fileDirectory, file.ThumbnailFileName);
+        return Path.Join(fileDirectory, file.ThumbnailFileName);
     }
 
     /// <summary>
@@ -1408,8 +1408,8 @@ public class GcodeFilesService(
             .Where(s => s != "." && s != "..")
             .ToArray();
 
-        string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-        string candidate = Path.GetFullPath(Path.Combine(storageRoot, safeRel));
+        string safeRel = segments.Length == 0 ? string.Empty : Path.Join(segments);
+        string candidate = Path.GetFullPath(Path.Join(storageRoot, safeRel));
 
         // Security check: ensure path doesn't escape the storage root
         if (!candidate.StartsWith(storageRoot, StringComparison.Ordinal))
@@ -1520,7 +1520,7 @@ public class GcodeFilesService(
 
         // Rename file to GUID-based name (file was already saved with GUID name in UploadFileAsync)
         string storageDir = Path.GetDirectoryName(filePath) ?? _storagePathService.GetGcodeStorageDirectory();
-        string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+        string finalFilePath = Path.Join(storageDir, $"{fileId}{fileExtension}");
 
         if (filePath != finalFilePath && File.Exists(filePath))
         {
@@ -1531,7 +1531,7 @@ public class GcodeFilesService(
         // Rename thumbnail to match file ID with _thumb.png suffix (uses same GUID as gcode file)
         if (!string.IsNullOrEmpty(thumbnailPath) && File.Exists(thumbnailPath))
         {
-            string finalThumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+            string finalThumbnailPath = Path.Join(storageDir, $"{fileId}_thumb.png");
             if (thumbnailPath != finalThumbnailPath)
             {
                 File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
@@ -1883,12 +1883,12 @@ public class GcodeFilesService(
         }
 
         // Delete physical
-        string fullFilePath = Path.Combine(file.FilePath, file.FileName);
+        string fullFilePath = Path.Join(file.FilePath, file.FileName);
         TryDeleteFile(fullFilePath, $"gcode file {id}");
 
         if (!string.IsNullOrEmpty(file.ThumbnailFileName))
         {
-            string fullThumbnailPath = Path.Combine(file.FilePath, file.ThumbnailFileName);
+            string fullThumbnailPath = Path.Join(file.FilePath, file.ThumbnailFileName);
             TryDeleteFile(fullThumbnailPath, $"thumbnail for gcode {id}");
         }
 
@@ -1930,7 +1930,7 @@ public class GcodeFilesService(
             return null;
         }
 
-        string fullPath = Path.Combine(file.FilePath, file.FileName);
+        string fullPath = Path.Join(file.FilePath, file.FileName);
         return !System.IO.File.Exists(fullPath) ? null : await System.IO.File.ReadAllBytesAsync(fullPath, ct);
     }
 
@@ -2074,7 +2074,7 @@ public class GcodeFilesService(
         _ = Directory.CreateDirectory(storageDir);
 
         string fileExtension = Path.GetExtension(originalFileName);
-        string finalFilePath = Path.Combine(storageDir, $"{fileId}{fileExtension}");
+        string finalFilePath = Path.Join(storageDir, $"{fileId}{fileExtension}");
 
         try
         {
@@ -2232,7 +2232,7 @@ public class GcodeFilesService(
 
             // Save thumbnail
             byte[] thumbnailData = await response.Content.ReadAsByteArrayAsync(ct);
-            string thumbnailPath = Path.Combine(storageDir, $"{fileId}_thumb.png");
+            string thumbnailPath = Path.Join(storageDir, $"{fileId}_thumb.png");
             await System.IO.File.WriteAllBytesAsync(thumbnailPath, thumbnailData, ct);
 
             return thumbnailPath;

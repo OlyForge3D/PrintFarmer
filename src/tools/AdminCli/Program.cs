@@ -429,9 +429,9 @@ internal static class Program
         string[] subdirs = Directory.GetDirectories(profilesPath);
         foreach (string subdir in subdirs)
         {
-            if (Directory.Exists(Path.Combine(subdir, "machine")) ||
-                Directory.Exists(Path.Combine(subdir, "filament")) ||
-                Directory.Exists(Path.Combine(subdir, "process")))
+            if (Directory.Exists(Path.Join(subdir, "machine")) ||
+                Directory.Exists(Path.Join(subdir, "filament")) ||
+                Directory.Exists(Path.Join(subdir, "process")))
             {
                 return "orcaslicer";
             }
@@ -1060,7 +1060,7 @@ internal static class Program
 
     private sealed record DiscoveryConfig(string Range = "", string Interface = "", int Timeout = 200, int Concurrent = 10, string Format = "json", bool NoApproval = false);
 
-    private static string GetConfigPath() => Path.Combine(
+    private static string GetConfigPath() => Path.Join(
         System.Environment.GetFolderPath(System.Environment.SpecialFolder.UserProfile),
         ".admincli",
         "discovery-config.json");

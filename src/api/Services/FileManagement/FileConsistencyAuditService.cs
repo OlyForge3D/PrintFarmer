@@ -226,7 +226,7 @@ public class FileConsistencyAuditService(
                 // Check thumbnail if exists
                 if (!string.IsNullOrEmpty(model.ThumbnailFileName))
                 {
-                    string fullThumbnailPath = Path.Combine(model.FilePath, model.ThumbnailFileName);
+                    string fullThumbnailPath = Path.Join(model.FilePath, model.ThumbnailFileName);
                     if (!fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath))
                     {
                         _logger.LogWarning("Model {ModelId}: Thumbnail unsafe path - {FullThumbnailPath}", model.Id, fullThumbnailPath);

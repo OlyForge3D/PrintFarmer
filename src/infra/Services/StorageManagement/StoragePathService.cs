@@ -43,7 +43,7 @@ public class StoragePathService(
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "gcode-library");
+        string defaultPath = Path.Join(_pathProvider.GetContentRootPath(), "gcode-library");
         _logger.LogInformation("Using default gcode storage path: {StoragePath}", defaultPath);
         return defaultPath;
     }
@@ -74,7 +74,7 @@ public class StoragePathService(
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "uploads");
+        string defaultPath = Path.Join(_pathProvider.GetContentRootPath(), "uploads");
         _logger.LogInformation("Using default model upload path: {StoragePath}", defaultPath);
         return defaultPath;
     }
@@ -98,7 +98,7 @@ public class StoragePathService(
         }
 
         // Default: local development path
-        string defaultPath = Path.Combine(_pathProvider.GetContentRootPath(), "profiles");
+        string defaultPath = Path.Join(_pathProvider.GetContentRootPath(), "profiles");
         _logger.LogInformation("Using default slicer profiles path: {StoragePath}", defaultPath);
         return defaultPath;
     }
@@ -120,7 +120,7 @@ public class StoragePathService(
         }
 
         // Default: local development path
-        return Path.Combine(_pathProvider.GetContentRootPath(), "snapshots");
+        return Path.Join(_pathProvider.GetContentRootPath(), "snapshots");
     }
 
     public async Task EnsureDirectoriesExistAsync()

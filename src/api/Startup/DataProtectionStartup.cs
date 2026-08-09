@@ -27,8 +27,8 @@ public static class DataProtectionStartup
             var userProfileDirectoryPath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
             keysDirectoryPath = string.IsNullOrWhiteSpace(userProfileDirectoryPath)
-                ? Path.Combine(contentRootPath, "data-protection-keys")
-                : Path.Combine(userProfileDirectoryPath, ".aspnet", "DataProtection-Keys");
+                ? Path.Join(contentRootPath, "data-protection-keys")
+                : Path.Join(userProfileDirectoryPath, ".aspnet", "DataProtection-Keys");
         }
 
         Directory.CreateDirectory(keysDirectoryPath);

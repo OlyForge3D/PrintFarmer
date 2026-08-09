@@ -28,8 +28,8 @@ public sealed class FileManagementService : IFileManagementService
             .Where(s => s != "." && s != "..")
             .ToArray();
 
-        string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-        string candidate = Path.GetFullPath(Path.Combine(storageRoot, safeRel));
+        string safeRel = segments.Length == 0 ? string.Empty : Path.Join(segments);
+        string candidate = Path.GetFullPath(Path.Join(storageRoot, safeRel));
 
         // Security check: ensure path doesn't escape the storage root
         if (!candidate.StartsWith(storageRoot, StringComparison.Ordinal))
@@ -60,7 +60,7 @@ public sealed class FileManagementService : IFileManagementService
 
     public string ResolveUniqueFileName(string targetDirectory, string proposedName)
     {
-        string fullPath = Path.GetFullPath(Path.Combine(targetDirectory, proposedName));
+        string fullPath = Path.GetFullPath(Path.Join(targetDirectory, proposedName));
 
         if (!System.IO.File.Exists(fullPath))
         {
@@ -76,7 +76,7 @@ public sealed class FileManagementService : IFileManagementService
         do
         {
             candidate = $"{baseName} ({counter++}){ext}";
-            fullPath = Path.GetFullPath(Path.Combine(targetDirectory, candidate));
+            fullPath = Path.GetFullPath(Path.Join(targetDirectory, candidate));
         }
         while (System.IO.File.Exists(fullPath));
 

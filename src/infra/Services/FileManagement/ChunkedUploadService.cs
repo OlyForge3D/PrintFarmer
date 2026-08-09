@@ -105,7 +105,7 @@ public sealed class ChunkedUploadService(
 
         // Create upload session
         string uploadId = Guid.NewGuid().ToString("N");
-        string tempFilePath = Path.Combine(targetDirectory, uniqueName + "." + uploadId + ".part");
+        string tempFilePath = Path.Join(targetDirectory, uniqueName + "." + uploadId + ".part");
         string metaFilePath = tempFilePath + ".meta.json";
 
         // Create empty temp file
@@ -271,7 +271,7 @@ public sealed class ChunkedUploadService(
                 state.FinalHash,
                 state.Paused,
                 state.ThumbnailPath,
-                completed ? Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
+                completed ? Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
         }
         catch
         {
@@ -312,7 +312,7 @@ public sealed class ChunkedUploadService(
                 state.FinalHash,
                 state.Paused,
                 state.ThumbnailPath,
-                isCompleted ? Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
+                isCompleted ? Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName) : null);
         }
 
         // Try to rehydrate from metadata file
@@ -334,7 +334,7 @@ public sealed class ChunkedUploadService(
                     rehydrated.FinalHash,
                     rehydrated.Paused,
                     rehydrated.ThumbnailPath,
-                    isCompleted ? Path.Combine(rehydrated.TargetDirectoryFullPath, rehydrated.FinalSafeName) : null);
+                    isCompleted ? Path.Join(rehydrated.TargetDirectoryFullPath, rehydrated.FinalSafeName) : null);
             }
         }
         catch (Exception ex)
@@ -402,7 +402,7 @@ public sealed class ChunkedUploadService(
                 state.FinalHash,
                 false,
                 state.ThumbnailPath,
-                Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName));
+                Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName));
         }
 
         state.Paused = true;
@@ -459,7 +459,7 @@ public sealed class ChunkedUploadService(
                 state.FinalHash,
                 false,
                 state.ThumbnailPath,
-                Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName));
+                Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName));
         }
 
         state.Paused = false;
@@ -531,7 +531,7 @@ public sealed class ChunkedUploadService(
     /// </remarks>
     private async Task<string?> FinalizeUploadAsync(InternalUploadState state)
     {
-        string finalPath = Path.Combine(state.TargetDirectoryFullPath, state.FinalSafeName);
+        string finalPath = Path.Join(state.TargetDirectoryFullPath, state.FinalSafeName);
         string? thumbnailPath = null;
 
         // Check for collision again (rare but possible)
@@ -541,7 +541,7 @@ public sealed class ChunkedUploadService(
                 state.TargetDirectoryFullPath,
                 state.FinalSafeName);
             state.FinalSafeName = uniqueName;
-            finalPath = Path.Combine(state.TargetDirectoryFullPath, uniqueName);
+            finalPath = Path.Join(state.TargetDirectoryFullPath, uniqueName);
         }
 
         // Validate hash if provided

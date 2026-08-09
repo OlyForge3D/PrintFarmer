@@ -488,7 +488,7 @@ public class SystemInfoService(
 
             if (!Path.IsPathRooted(dataSource))
             {
-                dataSource = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, dataSource));
+                dataSource = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, dataSource));
             }
 
             return File.Exists(dataSource) ? new FileInfo(dataSource).Length : 0;

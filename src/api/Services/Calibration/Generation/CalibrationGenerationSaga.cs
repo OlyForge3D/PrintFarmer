@@ -1016,7 +1016,7 @@ public sealed class CalibrationGenerationSaga(
         // the same owner and content never share bytes, so one failed attempt can only delete its
         // own deterministic staging file.
         string storedFileName = $"{stagingIdentity}.stl";
-        string storedPath = Path.Combine(root, storedFileName);
+        string storedPath = Path.Join(root, storedFileName);
         bool persisted = false;
         bool preserveStagedBytes = false;
         try

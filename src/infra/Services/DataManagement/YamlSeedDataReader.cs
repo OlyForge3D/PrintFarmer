@@ -19,7 +19,7 @@ public class YamlSeedDataReader : IYamlSeedDataReader
     public YamlSeedDataReader(ILogger<YamlSeedDataReader> logger, IConfiguration configuration)
     {
         _logger = logger;
-        _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "Data", "seed");
+        _seedDataPath = configuration["SeedData:Path"] ?? Path.Join(AppContext.BaseDirectory, "Data", "seed");
 
         // Configure YamlDotNet deserializer
         _yamlDeserializer = new DeserializerBuilder()
@@ -32,61 +32,61 @@ public class YamlSeedDataReader : IYamlSeedDataReader
 
     public async Task<List<ManufacturerSeedDto>> ReadManufacturersAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "manufacturers.yaml");
+        string filePath = Path.Join(_seedDataPath, "manufacturers.yaml");
         return await ReadYamlFileAsync<List<ManufacturerSeedDto>>(filePath, "manufacturers");
     }
 
     public async Task<List<PrinterModelSeedDto>> ReadPrinterModelsAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "printer-models.yaml");
+        string filePath = Path.Join(_seedDataPath, "printer-models.yaml");
         return await ReadYamlFileAsync<List<PrinterModelSeedDto>>(filePath, "printer models");
     }
 
     public async Task<List<FilamentTypeSeedDto>> ReadFilamentTypesAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "filament-types.yaml");
+        string filePath = Path.Join(_seedDataPath, "filament-types.yaml");
         return await ReadYamlFileAsync<List<FilamentTypeSeedDto>>(filePath, "filament types");
     }
 
     public async Task<List<HotendModelSeedDto>> ReadHotendsAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "components", "hotends.yaml");
+        string filePath = Path.Join(_seedDataPath, "components", "hotends.yaml");
         return await ReadYamlFileAsync<List<HotendModelSeedDto>>(filePath, "hotends");
     }
 
     public async Task<List<ExtruderModelSeedDto>> ReadExtrudersAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "components", "extruders.yaml");
+        string filePath = Path.Join(_seedDataPath, "components", "extruders.yaml");
         return await ReadYamlFileAsync<List<ExtruderModelSeedDto>>(filePath, "extruders");
     }
 
     public async Task<List<ToolheadModelSeedDto>> ReadToolheadsAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "components", "toolheads.yaml");
+        string filePath = Path.Join(_seedDataPath, "components", "toolheads.yaml");
         return await ReadYamlFileAsync<List<ToolheadModelSeedDto>>(filePath, "toolheads");
     }
 
     public async Task<List<NozzleModelSeedDto>> ReadNozzlesAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "components", "nozzles.yaml");
+        string filePath = Path.Join(_seedDataPath, "components", "nozzles.yaml");
         return await ReadYamlFileAsync<List<NozzleModelSeedDto>>(filePath, "nozzles");
     }
 
     public async Task<List<MaintenanceTaskSeedDto>> ReadMaintenanceTasksAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "maintenance-tasks.yaml");
+        string filePath = Path.Join(_seedDataPath, "maintenance-tasks.yaml");
         return await ReadYamlFileAsync<List<MaintenanceTaskSeedDto>>(filePath, "maintenance tasks");
     }
 
     public async Task<List<MaintenanceComponentSeedDto>> ReadMaintenanceComponentsAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "maintenance-components.yaml");
+        string filePath = Path.Join(_seedDataPath, "maintenance-components.yaml");
         return await ReadYamlFileAsync<List<MaintenanceComponentSeedDto>>(filePath, "maintenance components");
     }
 
     public async Task<List<MaintenancePlanSeedDto>> ReadMaintenancePlansAsync()
     {
-        string filePath = Path.Combine(_seedDataPath, "maintenance-plans.yaml");
+        string filePath = Path.Join(_seedDataPath, "maintenance-plans.yaml");
         return await ReadYamlFileAsync<List<MaintenancePlanSeedDto>>(filePath, "maintenance plans");
     }
 

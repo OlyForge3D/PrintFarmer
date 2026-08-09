@@ -23,7 +23,7 @@ internal sealed class DefaultSlicerTempPathProvider : ISlicerTempPathProvider
             ? configured!
             : !string.IsNullOrWhiteSpace(env)
                 ? env!
-                : Path.Combine(Directory.GetCurrentDirectory(), "temp");
+                : Path.Join(Directory.GetCurrentDirectory(), "temp");
 
         try
         {
@@ -53,6 +53,6 @@ internal sealed class DefaultSlicerTempPathProvider : ISlicerTempPathProvider
             extension = "." + extension;
         }
 
-        return Path.Combine(_tempRoot, $"{Guid.NewGuid()}{extension}");
+        return Path.Join(_tempRoot, $"{Guid.NewGuid()}{extension}");
     }
 }

@@ -835,7 +835,7 @@ public class GcodeHarvestService(
                 // Generate unique filename using pure GUID (consistent with 3D model file storage)
                 string extension = Path.GetExtension(discoveredFile.FileName);
                 string fileName = $"{Guid.NewGuid()}{extension}";
-                string filePath = Path.Combine(storageDir, fileName);
+                string filePath = Path.Join(storageDir, fileName);
 
                 // Download file from printer
                 if (operation.Printer == null)

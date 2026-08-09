@@ -19,7 +19,7 @@ public class ProfileCacheDb : IDisposable
     public ProfileCacheDb(ILogger logger, string? dbPath = null)
     {
         _logger = logger;
-        _dbPath = dbPath ?? Path.Combine(Path.GetTempPath(), "orcaslicer-profiles.db");
+        _dbPath = dbPath ?? Path.Join(Path.GetTempPath(), "orcaslicer-profiles.db");
     }
 
     /// <summary>

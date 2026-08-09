@@ -429,7 +429,7 @@ public class SlicerWorkerConfiguration
 
     // Temp directory is now expected to be injected / set explicitly via WithTempDirectory or composition root.
     // Default falls back to current working directory /temp to avoid system global temp (macOS TCC prompts).
-    public string TempDirectory { get; set; } = Path.Combine(Directory.GetCurrentDirectory(), "temp");
+    public string TempDirectory { get; set; } = Path.Join(Directory.GetCurrentDirectory(), "temp");
 
     public long MaxFileSizeBytes { get; set; } = 100_000_000; // 100MB
 

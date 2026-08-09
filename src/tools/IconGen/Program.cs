@@ -20,9 +20,9 @@ if (repoRoot is null)
 string?[] candidateSvgs = new[]
 {
     args.Length > 1 && !string.IsNullOrWhiteSpace(args[1]) ? args[1] : null,
-    Path.Combine(repoRoot, "src", "Web", "ReactApp", "public", "printfarmer-logo.svg"),
-    Path.Combine(repoRoot, "Client", "wwwroot", "favicon.svg"),
-    Path.Combine(repoRoot, "archived", "blazor-client", "client", "wwwroot", "favicon.svg")
+    Path.Join(repoRoot, "src", "Web", "ReactApp", "public", "printfarmer-logo.svg"),
+    Path.Join(repoRoot, "Client", "wwwroot", "favicon.svg"),
+    Path.Join(repoRoot, "archived", "blazor-client", "client", "wwwroot", "favicon.svg")
 };
 
 string? svgPath = candidateSvgs
@@ -38,7 +38,7 @@ if (svgPath is null)
 
 string outDir = args.Length > 2 && !string.IsNullOrWhiteSpace(args[2])
     ? Path.GetFullPath(args[2])
-    : Path.Combine(repoRoot, "src", "Web", "ReactApp", "public", "icons");
+    : Path.Join(repoRoot, "src", "Web", "ReactApp", "public", "icons");
 
 Directory.CreateDirectory(outDir);
 
@@ -94,7 +94,7 @@ foreach ((int size, string? name) in sizes)
 
     using SKImage image = SKImage.FromBitmap(bitmap);
     using SKData data = image.Encode(SKEncodedImageFormat.Png, 100);
-    string outPath = Path.Combine(outDir, name);
+    string outPath = Path.Join(outDir, name);
     using FileStream fs = File.Open(outPath, FileMode.Create, FileAccess.Write);
     data.SaveTo(fs);
     Console.WriteLine($"Wrote {outPath}");
@@ -103,17 +103,17 @@ foreach ((int size, string? name) in sizes)
 // Convenience copies for common favicon names in public root
 try
 {
-    string publicRoot = Path.Combine(repoRoot, "src", "Web", "ReactApp", "public");
-    string favicon32 = Path.Combine(outDir, "favicon-32x32.png");
-    string favicon16 = Path.Combine(outDir, "favicon-16x16.png");
+    string publicRoot = Path.Join(repoRoot, "src", "Web", "ReactApp", "public");
+    string favicon32 = Path.Join(outDir, "favicon-32x32.png");
+    string favicon16 = Path.Join(outDir, "favicon-16x16.png");
     if (File.Exists(favicon32))
     {
-        File.Copy(favicon32, Path.Combine(publicRoot, "favicon.png"), overwrite: true);
+        File.Copy(favicon32, Path.Join(publicRoot, "favicon.png"), overwrite: true);
     }
 
     if (File.Exists(favicon16))
     {
-        File.Copy(favicon16, Path.Combine(publicRoot, "favicon-16x16.png"), overwrite: true);
+        File.Copy(favicon16, Path.Join(publicRoot, "favicon-16x16.png"), overwrite: true);
     }
 }
 catch (Exception ex)
@@ -128,7 +128,7 @@ static string? FindRepoRoot()
     DirectoryInfo? dir = new DirectoryInfo(AppContext.BaseDirectory);
     while (dir != null)
     {
-        string solution = Path.Combine(dir.FullName, "farm-web.sln");
+        string solution = Path.Join(dir.FullName, "farm-web.sln");
         if (File.Exists(solution))
         {
             return dir.FullName;

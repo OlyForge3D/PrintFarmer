@@ -291,7 +291,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         try
         {
             DateTime cutoffTime = DateTime.UtcNow.Subtract(maxAge);
-            string tempDirectory = Path.Combine(_basePath, "temp");
+            string tempDirectory = Path.Join(_basePath, "temp");
 
             if (!_fileSystem.DirectoryExists(tempDirectory))
             {
@@ -364,7 +364,7 @@ public class LocalSlicerFileStorage : ISlicerFileStorage
         string normalizedKey = key
             .Replace('/', Path.DirectorySeparatorChar)
             .Replace('\\', Path.DirectorySeparatorChar);
-        return EnsureWithinBasePath(Path.Combine(_basePath, normalizedKey));
+        return EnsureWithinBasePath(Path.Join(_basePath, normalizedKey));
     }
 
     private string GetFilePathFromKeyOrUrl(string keyOrUrl)

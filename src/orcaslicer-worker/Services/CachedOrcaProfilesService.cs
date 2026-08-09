@@ -44,7 +44,7 @@ public sealed class CachedOrcaProfilesService : ISlicerProfilesService, IAsyncDi
         _profilesPath = profilesPath ?? envPath ?? "/opt/orcaslicer/resources/profiles";
 
         // Use a persistent path for the database
-        string actualDbPath = dbPath ?? Path.Combine(
+        string actualDbPath = dbPath ?? Path.Join(
             Environment.GetEnvironmentVariable("PROFILE_CACHE_PATH") ?? "/app/cache",
             "orcaslicer-profiles.db");
 

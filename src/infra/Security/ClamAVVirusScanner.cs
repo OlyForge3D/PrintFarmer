@@ -110,7 +110,7 @@ public class ClamAVVirusScanner : IVirusScanner
                 string[] paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? Array.Empty<string>();
                 foreach (string p in paths)
                 {
-                    string candidate = Path.Combine(p, name + (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".exe" : string.Empty));
+                    string candidate = Path.Join(p, name + (RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? ".exe" : string.Empty));
                     if (File.Exists(candidate))
                     {
                         return candidate;

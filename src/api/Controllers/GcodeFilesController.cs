@@ -85,7 +85,7 @@ public class GcodeFilesController(
             string parentVirtual = Path.GetDirectoryName(path) ?? "/";
             string fileName = Path.GetFileName(path);
             (string _, string? parentFull, string _) = ResolveAndValidatePath(parentVirtual);
-            string fullPath = Path.GetFullPath(Path.Combine(parentFull, fileName));
+            string fullPath = Path.GetFullPath(Path.Join(parentFull, fileName));
             if (!fullPath.StartsWith(parentFull, StringComparison.Ordinal))
             {
                 return NotFound();
@@ -899,8 +899,8 @@ public class GcodeFilesController(
         string[] segments = vPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
             .Where(s => s != "." && s != "..")
             .ToArray();
-        string safeRel = segments.Length == 0 ? string.Empty : Path.Combine(segments);
-        string candidate = Path.GetFullPath(Path.Combine(root, safeRel));
+        string safeRel = segments.Length == 0 ? string.Empty : Path.Join(segments);
+        string candidate = Path.GetFullPath(Path.Join(root, safeRel));
         if (!candidate.StartsWith(root, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Path escapes library root");

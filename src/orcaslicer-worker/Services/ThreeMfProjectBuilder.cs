@@ -40,7 +40,7 @@ internal static class ThreeMfProjectBuilder
             throw new ArgumentException("At least one model is required.", nameof(models));
         }
 
-        string outputPath = Path.Combine(outputDirectory, "project.3mf");
+        string outputPath = Path.Join(outputDirectory, "project.3mf");
 
         var meshes = new List<MeshData>(models.Count);
         foreach (ModelEntry model in models)

@@ -16,7 +16,7 @@ internal static class ArtifactStorageFileSystem
     {
         string root = Path.IsPathFullyQualified(configuredRoot)
             ? configuredRoot
-            : Path.Combine(contentRootPath, configuredRoot);
+            : Path.Join(contentRootPath, configuredRoot);
         string fullRoot = Path.GetFullPath(root);
         var rootDirectory = new DirectoryInfo(fullRoot);
         if (rootDirectory.Exists && IsReparsePoint(rootDirectory))
@@ -41,7 +41,7 @@ internal static class ArtifactStorageFileSystem
     }
 
     internal static string GetStagingDirectory(string rootPath) =>
-        Path.Combine(rootPath, StagingDirectoryName);
+        Path.Join(rootPath, StagingDirectoryName);
 
     internal static string GetPublishedLeasePath(
         string rootPath,
@@ -50,7 +50,7 @@ internal static class ArtifactStorageFileSystem
         string leaseFileName =
             artifactId.ToString("N", CultureInfo.InvariantCulture) +
             LeaseFileExtension;
-        return Path.Combine(
+        return Path.Join(
             rootPath,
             leaseFileName);
     }
@@ -58,7 +58,7 @@ internal static class ArtifactStorageFileSystem
     internal static string GetStagingLeasePath(
         string rootPath,
         Guid artifactId) =>
-        Path.Combine(
+        Path.Join(
             GetStagingDirectory(rootPath),
             Path.GetFileName(GetPublishedLeasePath(rootPath, artifactId)));
 
@@ -649,7 +649,7 @@ internal static class ArtifactStorageFileSystem
         {
             normalizedRoot = Path.GetFullPath(rootPath);
             candidate = Path.GetFullPath(
-                Path.Combine(
+                Path.Join(
                     normalizedRoot,
                     relativePath.Replace('/', Path.DirectorySeparatorChar)));
         }
@@ -1294,10 +1294,10 @@ internal sealed class ArtifactWriteLease : IDisposable
             throw new IOException(
                 "The artifact staging directory has no parent directory.");
         string identity = artifactId.ToString("N", CultureInfo.InvariantCulture);
-        string stagingPath = Path.Combine(
+        string stagingPath = Path.Join(
             stagingDirectory,
             identity + ArtifactStorageFileSystem.StagingFileExtension);
-        string leasePath = Path.Combine(
+        string leasePath = Path.Join(
             stagingDirectory,
             identity + ArtifactStorageFileSystem.LeaseFileExtension);
         FileStream leaseStream =

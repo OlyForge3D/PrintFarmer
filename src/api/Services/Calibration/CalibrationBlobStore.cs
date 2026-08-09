@@ -15,7 +15,7 @@ public sealed class CalibrationBlobStorageOptions
     public const string SectionName = "Calibration:BlobStorage";
 
     /// <summary>Private root. It must not be exposed through a static-file route.</summary>
-    public string RootPath { get; init; } = Path.Combine(AppContext.BaseDirectory, "calibration-blobs");
+    public string RootPath { get; init; } = Path.Join(AppContext.BaseDirectory, "calibration-blobs");
 
     /// <summary>Maximum accepted source upload size.</summary>
     public long MaxBytes { get; init; } = 10 * 1024 * 1024;
@@ -496,7 +496,7 @@ public sealed class CalibrationBlobStore(
         string normalized = opaqueStorageKey
             .Replace('/', Path.DirectorySeparatorChar)
             .Replace('\\', Path.DirectorySeparatorChar);
-        string fullPath = Path.GetFullPath(Path.Combine(_rootPath, normalized));
+        string fullPath = Path.GetFullPath(Path.Join(_rootPath, normalized));
         string relativePath = Path.GetRelativePath(_rootPath, fullPath);
         if (relativePath == ".." ||
             relativePath.StartsWith($"..{Path.DirectorySeparatorChar}", _pathComparison) ||

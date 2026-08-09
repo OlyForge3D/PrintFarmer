@@ -93,7 +93,7 @@ public class CameraSnapshotsController(
         }
 
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
-        string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
+        string fullPath = Path.Join(snapshotRoot, snapshot.FilePath);
 
         // Prevent path traversal: canonicalize and verify containment.
         // TrimEndingDirectorySeparator avoids double-separator when config path has a trailing slash.
@@ -130,7 +130,7 @@ public class CameraSnapshotsController(
 
         // Delete file from disk
         string snapshotRoot = _storagePathService.GetSnapshotStorageDirectory();
-        string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
+        string fullPath = Path.Join(snapshotRoot, snapshot.FilePath);
 
         // Prevent path traversal: canonicalize and verify containment.
         // TrimEndingDirectorySeparator avoids double-separator when config path has a trailing slash.
