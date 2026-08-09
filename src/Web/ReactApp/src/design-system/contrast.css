@@ -1,11 +1,8 @@
 /*
- * High-contrast cascade mechanism (issue #1297).
+ * High-contrast cascade mechanism (issue #1297) and per-theme token values
+ * (issue #1298, `light`/`dark`/`matrix`).
  *
- * This file is PLUMBING ONLY. It does not declare per-theme high-contrast
- * token values — those are scoped to #1298/#1299, which land once #1103's
- * status-family on-colour tokens are available (see decision issue #1296).
- *
- * The mechanism, per #1296:
+ * The mechanism, per decision issue #1296:
  *   - `ThemeContext` sets `[data-contrast="high"]` (or `"normal"`) on
  *     `documentElement`, driven by `prefersHighContrast` (OS
  *     `prefers-contrast: more` signal) plus a manual override.
@@ -21,13 +18,82 @@
  *     `[data-theme="x"][data-contrast="high"]` override would lose to the
  *     base `[data-theme="x"]` declaration despite having higher specificity.
  *
- * The canary declaration below is test-only plumbing, not a real
- * accessibility token. It exists purely so a regression test can prove,
- * via `getComputedStyle`, that a compound `[data-theme][data-contrast="high"]`
- * selector actually wins the cascade over the base theme selector. Real
- * per-theme high-contrast values will be added alongside this pattern in
- * #1298/#1299 — do not add them here.
+ * Why the per-theme values live here and NOT in `src/design-system/themes/`:
+ *   - `AdminThemeSafety.test.ts` and `themeRegistry.test.ts` enforce that every
+ *     file in `design-system/themes/` declares the exact same `--pf-*` token
+ *     set (theme parity). Sibling issue #1299 (blueprint/ratos/voron/farm/
+ *     forge) has not landed yet, so those theme files declare no high-contrast
+ *     overrides at all. Declaring overrides for only 3 of 8 themes inside
+ *     `themes/` would not add new token *names* (so parity would not break),
+ *     but `semanticSurfaceForegrounds.test.ts` parses each `themes/<id>.css`
+ *     file with a flat last-value-wins regex that does not understand
+ *     selector context — a second `--pf-accent-bg: ...` declaration later in
+ *     the same file would silently replace the base value that test reads,
+ *     e.g. breaking `button-primary-bg === accent-bg` identity checks. Keeping
+ *     high-contrast values in this separate, unlayered file (already excluded
+ *     from both scanners — see #1297) avoids that collision entirely.
+ *
+ * Token contract (13 tokens, per #1296) implemented below for `light`, `dark`,
+ * and `matrix`. Status-family tokens (success/warning/error/info) are
+ * out of scope until #1103 lands `--pf-on-success`/`--pf-on-warning`/
+ * `--pf-on-error`/`--pf-on-info`, per the decision issue.
+ *
+ * The canary declaration is test-only plumbing, not a real accessibility
+ * token. It exists purely so a regression test can prove, via
+ * `getComputedStyle`, that a compound `[data-theme][data-contrast="high"]`
+ * selector actually wins the cascade over the base theme selector.
  */
 [data-theme='dark'][data-contrast='high'] {
   --pf-contrast-mechanism-canary: cascade-mechanism-verified;
+}
+
+/* --- light: AA (and AAA where cheap) high-contrast overrides -------------- */
+[data-theme='light'][data-contrast='high'] {
+  --pf-bg-0:                  #ffffff;
+  --pf-panel:                 #ffffff;
+  --pf-text-primary:          #000000;
+  --pf-text-secondary:        #1a1a1a;
+  --pf-border:                #3f3f46;
+  --pf-border-strong:         #000000;
+  --pf-control-border-focus:  #0b3d91;
+  --pf-focus-ring:            #0b3d91;
+  --pf-accent:                #004d40;
+  --pf-accent-bg:             #004d40;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #ffffff;
+  --pf-control-text:          #000000;
+}
+
+/* --- dark: AA (and AAA where cheap) high-contrast overrides --------------- */
+[data-theme='dark'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #e5e7eb;
+  --pf-border:                #a3a3a3;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #7dd3fc;
+  --pf-focus-ring:            #7dd3fc;
+  --pf-accent:                #5eead4;
+  --pf-accent-bg:             #5eead4;
+  --pf-on-accent:             #000000;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
+}
+
+/* --- matrix: AA (and AAA where cheap) high-contrast overrides ------------- */
+[data-theme='matrix'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #00ff41;
+  --pf-text-secondary:        #7dffa0;
+  --pf-border:                #00b32d;
+  --pf-border-strong:         #00ff41;
+  --pf-control-border-focus:  #ffffff;
+  --pf-focus-ring:            #ffffff;
+  --pf-accent:                #00ff41;
+  --pf-accent-bg:             #00ff41;
+  --pf-on-accent:             #000000;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #00ff41;
 }
