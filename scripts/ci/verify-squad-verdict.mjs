@@ -19,15 +19,58 @@ export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
 const trustedStatusCreator = 'github-actions[bot]';
 const displayTitlePattern = /^Squad review record for PR #([1-9]\d*)$/;
 
-// The gate runs only from events whose workflow definition comes from the
-// default branch. A pull_request (head-ref) trigger would let a PR rewrite the
-// logic that judges it.
+// The gate runs only from these four event types. A pull_request (head-ref)
+// trigger would let a PR rewrite the logic that judges it, so it is
+// deliberately excluded.
 const trustedEvents = new Set([
   'pull_request_target',
   'issue_comment',
   'pull_request_review',
   'workflow_dispatch',
 ]);
+
+// These three buckets require materially different evidence, because GitHub
+// does NOT source the workflow *definition* the same way for all four
+// trusted events — see
+// https://docs.github.com/en/actions/concepts/workflows-and-actions/workflows
+// ("Each workflow run will use the version of the workflow that is present
+// in the associated commit SHA or Git ref of the event") and the per-event
+// GITHUB_SHA/GITHUB_REF table at
+// https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows
+//
+// - issue_comment / workflow_dispatch: GITHUB_SHA/REF are genuinely "last
+//   commit on default branch" / "default branch", so run.head_branch can be
+//   checked directly against it (default_branch_contains_run compares
+//   run.head_sha to the default branch).
+// - pull_request_target: GITHUB_SHA/REF are documented as "last commit on
+//   default branch" / "default branch" too — this is the specific platform
+//   guarantee that makes it the standard safe pattern for processing fork
+//   PRs (see GitHub Security Lab, "Preventing pwn requests"). Its
+//   run.head_branch/run.head_sha instead report the *reviewed PR's* own
+//   branch/commit, never the workflow's source, so trust here rests on the
+//   event type alone, plus the repository/run-attempt/actor checks below and
+//   the display_title PR-number match performed further down.
+// - pull_request_review: GITHUB_SHA/REF are documented as "last merge commit
+//   on the GITHUB_REF branch" / "PR merge branch refs/pull/N/merge" — the
+//   *same* values as plain pull_request. There is no platform guarantee that
+//   its workflow definition comes from the default branch: a PR could modify
+//   this workflow file on its own branch and have that version execute when
+//   a review is submitted on it. Event type alone is therefore NOT
+//   sufficient evidence for this event (unlike pull_request_target) — it
+//   additionally requires proof that the workflow file's content at the
+//   reviewed commit is byte-identical to the default branch's copy
+//   (run.workflow_definition_matches_default_branch, computed in main() via
+//   the Contents API). A PR that tampered with the workflow file fails this
+//   check regardless of what it did with the rest of its branch.
+//
+// run.pull_requests cannot substitute for any of this: GitHub computes it
+// dynamically from currently-open PRs on the matching branch, so it goes
+// empty as soon as the PR merges or its branch is deleted — exactly the case
+// this gate must still verify (Ralph checks squad evidence against
+// historical, often now-merged, heads).
+const defaultBranchAnchoredEvents = new Set(['issue_comment', 'workflow_dispatch']);
+const platformAnchoredEvents = new Set(['pull_request_target']);
+const contentVerifiedEvents = new Set(['pull_request_review']);
 
 function result(classification, reason, evidence = {}) {
   return { classification, reason, ...evidence };
@@ -136,7 +179,6 @@ export function verifySquadVerdict({ pull, status, run }) {
 
   const repository = pull.base?.repo?.full_name;
   const defaultBranch = pull.base?.repo?.default_branch;
-  const baseRef = pull.base?.ref;
   const currentHeadSha = pull.head?.sha?.toLowerCase();
   const statusSha = status.sha?.toLowerCase();
   if (!repository || !defaultBranch || !currentHeadSha || !statusSha) {
@@ -150,17 +192,25 @@ export function verifySquadVerdict({ pull, status, run }) {
   if (!runId || run?.id !== runId || run.html_url !== status.target_url) {
     return result('INVALID', 'The status does not target its verified workflow run.');
   }
+
+  // Proves the workflow definition genuinely ran from the default branch,
+  // using whichever evidence is meaningful for this event type — see the
+  // comments above defaultBranchAnchoredEvents / platformAnchoredEvents /
+  // contentVerifiedEvents. The PR-number binding comes from the display_title
+  // check further down, not from any field checked here.
+  const runSourceIsTrusted = defaultBranchAnchoredEvents.has(run.event)
+    ? run.head_branch === defaultBranch && run.default_branch_contains_run === true
+    : platformAnchoredEvents.has(run.event)
+      ? true
+      : contentVerifiedEvents.has(run.event) &&
+        run.workflow_definition_matches_default_branch === true;
+
   if (
     run.path !== verdictWorkflowPath ||
     !trustedEvents.has(run.event) ||
     run.run_attempt !== 1 ||
     run.triggering_actor?.login?.toLowerCase() !== run.actor?.login?.toLowerCase() ||
-    // The gate only ever runs from a protected ref: issue_comment and
-    // pull_request_review runs sit on the default branch, pull_request_target
-    // runs sit on the PR's base ref. A run on the PR head branch would mean the
-    // PR supplied the logic that judged it.
-    (run.head_branch !== defaultBranch && run.head_branch !== baseRef) ||
-    run.default_branch_contains_run !== true ||
+    !runSourceIsTrusted ||
     run.repository?.full_name !== repository ||
     run.status !== 'completed' ||
     run.conclusion !== 'success'
@@ -288,6 +338,31 @@ function ghApi(path) {
   return JSON.parse(output);
 }
 
+// Returns the git blob SHA of the gate workflow file at `ref`, or undefined
+// if it cannot be read there (e.g. deleted on that branch, or the ref itself
+// is gone). A missing file must never be treated as a match.
+function fetchWorkflowBlobSha(repository, ref) {
+  try {
+    const content = ghApi(
+      `/repos/${repository}/contents/${verdictWorkflowPath}?ref=${encodeURIComponent(ref)}`,
+    );
+    return content.sha;
+  } catch {
+    return undefined;
+  }
+}
+
+// Independent proof for pull_request_review runs (see contentVerifiedEvents
+// above): GitHub does not guarantee this event's workflow definition comes
+// from the default branch, so this compares the actual file content at the
+// reviewed commit against the default branch's copy. A PR that tampered with
+// the workflow file on its own branch fails this regardless of run.event.
+function workflowDefinitionMatchesDefaultBranch(repository, headSha, defaultBranch) {
+  const headBlobSha = fetchWorkflowBlobSha(repository, headSha);
+  const defaultBlobSha = fetchWorkflowBlobSha(repository, defaultBranch);
+  return Boolean(headBlobSha) && headBlobSha === defaultBlobSha;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pull = ghApi(`/repos/${args.repo}/pulls/${args.pr}`);
@@ -309,6 +384,14 @@ async function main() {
         ...run,
         default_branch_contains_run:
           comparison.status === 'ahead' || comparison.status === 'identical',
+        workflow_definition_matches_default_branch:
+          run.event === 'pull_request_review'
+            ? workflowDefinitionMatchesDefaultBranch(
+              args.repo,
+              run.head_sha,
+              pull.base.repo.default_branch,
+            )
+            : undefined,
       };
     },
   });
