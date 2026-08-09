@@ -746,6 +746,11 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.Property<string>("ModelTransformJson")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("NormalizedEngine")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.Property<Guid?>("OperationId")
                         .HasColumnType("uniqueidentifier");
 
@@ -855,6 +860,9 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                     b.HasIndex("UserId");
 
                     b.HasIndex("WorkerId");
+
+                    b.HasIndex("Status", "NormalizedEngine")
+                        .HasDatabaseName("IX_SliceJobs_Status_NormalizedEngine");
 
                     b.HasIndex("Status", "Priority", "QueuedAt");
 

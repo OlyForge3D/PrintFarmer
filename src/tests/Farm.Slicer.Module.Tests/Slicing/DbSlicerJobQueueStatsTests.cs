@@ -17,6 +17,36 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private readonly QueueQueryInterceptor _interceptor = new();
 
+    [Theory]
+    [InlineData("OrcaSlicer", SlicerEngineType.OrcaSlicer)]
+    [InlineData("PrusaSlicer", SlicerEngineType.PrusaSlicer)]
+    [InlineData("SuperSlicer", SlicerEngineType.SuperSlicer)]
+    [InlineData("Cura", SlicerEngineType.Cura)]
+    [InlineData(null, SlicerEngineType.OrcaSlicer)]
+    [InlineData("", SlicerEngineType.OrcaSlicer)]
+    [InlineData(" ", SlicerEngineType.OrcaSlicer)]
+    [InlineData("prusaslicer", SlicerEngineType.OrcaSlicer)]
+    [InlineData("PrusaSlicer ", SlicerEngineType.OrcaSlicer)]
+    [InlineData(" PrusaSlicer", SlicerEngineType.OrcaSlicer)]
+    [InlineData("Unknown", SlicerEngineType.OrcaSlicer)]
+    public async Task SaveChangesAsync_PersistsNormalizedEngine_MatchingResolvePersistedNameFallback(
+        string? engineName,
+        SlicerEngineType expectedNormalizedEngine)
+    {
+        await using SlicerDbContext context = await CreateEmptyContextAsync();
+        SliceJob job = CreateJob(SliceJobStatus.Queued, SlicerEngineType.PrusaSlicer, engineName);
+        _ = context.SliceJobs.Add(job);
+
+        _ = await context.SaveChangesAsync();
+
+        job.NormalizedEngine.Should().Be((int)expectedNormalizedEngine);
+        job.NormalizedEngine.Should().Be((int)SlicerEngineNames.ResolvePersistedName(engineName));
+
+        context.ChangeTracker.Clear();
+        SliceJob reloaded = await context.SliceJobs.SingleAsync(j => j.Id == job.Id);
+        reloaded.NormalizedEngine.Should().Be((int)expectedNormalizedEngine);
+    }
+
     [Fact]
     public async Task GetQueueStatsAsync_MixedEngines_ReturnsPerEngineCountsAndMapsLegacyRowsToOrca()
     {
@@ -235,12 +265,22 @@ public sealed class DbSlicerJobQueueStatsTests : IAsyncDisposable
             !command.Contains("JOIN", StringComparison.OrdinalIgnoreCase));
         countCommand.Contains("COUNT(", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
         countCommand.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
-        countCommand.Contains("COLLATE BINARY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+        countCommand.Contains("NormalizedEngine", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+
+        // The persisted NormalizedEngine column removes the need to re-derive the engine from
+        // SlicerEngineName (and its Collate expression) on every query — that's the whole point
+        // of the covering (NormalizedEngine, Status) index.
+        countCommand.Should().NotContain("COLLATE");
+        countCommand.Should().NotContain("SlicerEngineName");
 
         string metricCommand = _interceptor.SliceJobCommands.Single(command =>
             command.Contains("JOIN", StringComparison.OrdinalIgnoreCase));
         metricCommand.Contains("AVG(", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
         metricCommand.Contains("GROUP BY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+
+        // Unlike the count aggregate, the timing/worker metrics query is unchanged by this fix
+        // and still derives the engine from SlicerEngineName via a Collate expression.
+        metricCommand.Contains("COLLATE BINARY", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
 
         foreach (string command in _interceptor.Commands)
         {

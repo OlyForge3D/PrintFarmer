@@ -125,8 +125,11 @@ describe('OpenTelemetry deferred from first paint (#1238)', () => {
       'configured build must include live SDK code (registerInstrumentations/WebTracerProvider), not a tree-shaken stub',
     ).toBe(true);
 
-    // Still must not be modulepreloaded — it is loaded via an awaited
-    // dynamic import from main.tsx, not eagerly at entry.
+    // Even in a configured build, the SDK chunk must still not be eagerly
+    // modulepreloaded — it is only ever reached via the awaited dynamic
+    // import in main.tsx. #1364 tracked a Vite 8/rolldown regression where
+    // this eager preload briefly reappeared; it has since been resolved
+    // upstream of this test file, and this assertion locks the fix in.
     expect(
       bundle.indexHtml,
       'even a configured build must not eagerly modulepreload the OTel SDK chunk',

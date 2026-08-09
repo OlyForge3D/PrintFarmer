@@ -276,12 +276,17 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
             check_result true "Telemetry and monitoring stack merge cleanly"
             if command -v docker >/dev/null 2>&1; then
                 # docker compose config performs strict interpolation, and Jwt__Key is a
-                # required variable with no default since #1301. compose-generator.sh is
-                # invoked directly here (bypassing scripts/deploy-docker.sh, which is what
-                # normally supplies a real key via .env). Write a throwaway, test-only key
-                # confined to $STACK_DIR so strict interpolation can resolve without
-                # weakening the production requirement or touching any tracked file.
-                echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab" > "$STACK_DIR/.env"
+                # required variable with no default since #1301. This stack also includes
+                # the monitoring overlay, whose GRAFANA_ADMIN_PASSWORD is a required
+                # variable with no default since #1295. compose-generator.sh is invoked
+                # directly here (bypassing scripts/deploy-docker.sh, which is what normally
+                # supplies real values via .env). Write throwaway, test-only values confined
+                # to $STACK_DIR so strict interpolation can resolve without weakening the
+                # production requirement or touching any tracked file.
+                {
+                    echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab"
+                    echo "GRAFANA_ADMIN_PASSWORD=test-only-throwaway-password-for-ci-0123456789"
+                } > "$STACK_DIR/.env"
                 # Use an if/else to capture output+status so a failing `docker compose
                 # config` (a plain assignment from a failing command substitution) does
                 # not trigger `set -e` and abort the script before it can be reported.

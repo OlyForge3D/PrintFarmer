@@ -2157,8 +2157,8 @@ test_pgadmin_template_structure() {
     assert_contains "$template_content" "PGADMIN_DEFAULT_PASSWORD" "Should configure admin password"
     assert_contains "$template_content" "PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION" "Should configure cookie protection"
     
-    # Validate port binding
-    assert_contains "$template_content" "0.0.0.0:5050:80" "Should expose port 5050 to all interfaces"
+    # Validate port binding is loopback-only by default (fail-closed default; see issue #1295)
+    assert_contains "$template_content" "127.0.0.1:5050:80" "Should bind port 5050 to loopback by default"
     
     # Validate volume configuration (may use variable reference)
     assert_contains "$template_content" "/var/lib/pgadmin" "Should persist pgAdmin data"
