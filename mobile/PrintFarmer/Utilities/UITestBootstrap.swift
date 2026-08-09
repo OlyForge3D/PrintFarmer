@@ -256,6 +256,36 @@ enum UITestBootstrap {
         }
         let services = ServiceContainer.demo(farmSnapshotStore: injectedSnapshotStore)
 
+        // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
+        // is `false` in production so a freshly-provisioned server without any
+        // configured SKUs/mappings does not surface the harvest flow (see
+        // PR #1002). The demo bootstrap, by contrast, IS a fully-configured
+        // operator playground: `DemoPartsInventoryService` ships with seeded
+        // parts and bins, so the harvest flow is a real, reachable surface
+        // here. Explicitly enable the flag for the demo-shell modes that render
+        // the harvest UI (JobDetailView's "Harvest to Inventory" button, the
+        // ScanView shortcut, and the ShiftTasks harvest destination) so the
+        // production default flip does not silently strand those surfaces
+        // in the UI-test bundle.
+        //
+        // Scope is intentionally narrow: only modes where a UI test asserts
+        // the harvest flow. `.authenticatedAttentionDisabled` and
+        // `.authenticatedColdOfflineShell` install their own capabilities
+        // stubs below and stay at production defaults — their tests do not
+        // exercise harvest.
+        let harvestEnabledDemoModes: Set<UITestBootstrap.Mode> = {
+            var set: Set<UITestBootstrap.Mode> = [.authenticated]
+            #if DEBUG
+            set.insert(.authenticatedTaskActionRouting)
+            #endif
+            return set
+        }()
+        if harvestEnabledDemoModes.contains(mode) {
+            var enabled = ResolvedSystemCapabilities.defaults
+            enabled.printedPartsInventoryEnabled = true
+            services.capabilitiesService = StubSystemCapabilitiesService(resolved: enabled)
+        }
+
         // #727: `.authenticatedAttentionDisabled` swaps the demo
         // capabilities service for one whose resolved snapshot has
         // `attentionEnabled == false`. `AttentionView.task` then reads
