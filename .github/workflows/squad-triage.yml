@@ -90,7 +90,7 @@ jobs:
               }
               if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
                 const cells = line.split('|').map(c => c.trim()).filter(Boolean);
-                if (cells.length >= 2 && !isRosterExcluded(cells[0], ['scribe'])) {
+                if (cells.length >= 2 && !isRosterExcluded(cells[0], ['scribe', 'ralph'])) {
                   members.push({
                     name: cells[0],
                     role: cells[1]
