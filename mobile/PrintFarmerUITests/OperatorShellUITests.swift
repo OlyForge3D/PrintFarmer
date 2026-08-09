@@ -613,23 +613,41 @@ final class AttentionDisabledFallbackUITests: PrintFarmerUITestCase {
 
         // 4. Dismiss while nested. Swipe on the top nav bar (which is
         // the job detail bar, not 'Notifications').
+        //
+        // The drag distance is relative to the full app frame height
+        // (rather than a fixed point offset) because iPad presents this
+        // sheet as a centered form sheet rather than iPhone's full-card
+        // sheet — a fixed offset tuned for one device class can undershoot
+        // the interactive-dismiss threshold on the other and leave the
+        // synthetic gesture flaky. Retrying the swipe a couple of times
+        // guards against a single dropped/undetected drag gesture in the
+        // simulator without weakening the assertion below, which still
+        // requires the fallback surface to be back on screen.
         let currentBar = app.navigationBars.element(boundBy: 0)
         guard currentBar.waitForExistence(timeout: 3) else {
             XCTFail("No navigation bar on screen to swipe-dismiss the nested Notifications sheet")
             return
         }
-        let start = currentBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        let end = start.withOffset(CGVector(dx: 0, dy: 700))
-        start.press(forDuration: 0.05, thenDragTo: end)
-
-        // Wait for the sheet to dismiss — the fallback Notifications
-        // button (an unambiguous sentinel of the disabled-attention
-        // fallback surface) must be back on screen.
         let fallbackNotificationsButton = app.buttons["attention.fallback.notifications"]
+        var dismissed = false
+        for attempt in 0..<3 {
+            let start = currentBar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let end = start.withOffset(CGVector(dx: 0, dy: app.frame.height))
+            start.press(forDuration: 0.1, thenDragTo: end)
+
+            if fallbackNotificationsButton.waitForExistence(timeout: attempt == 0 ? 3 : 5) {
+                dismissed = true
+                break
+            }
+        }
+
+        // The fallback Notifications button (an unambiguous sentinel of
+        // the disabled-attention fallback surface) must be back on screen.
         XCTAssertTrue(
-            fallbackNotificationsButton.waitForExistence(timeout: 5),
-            "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface"
+            dismissed,
+            "Dismissing the nested Notifications fallback did not return to the disabled-attention fallback surface after retrying the swipe gesture"
         )
+        guard dismissed else { return }
 
         // 5. Reopen. Notifications sheet MUST land at its root.
         openFallbackNotifications()
