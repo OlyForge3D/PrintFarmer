@@ -28,7 +28,10 @@ const createMockMatchMedia = (matches: boolean) => vi.fn().mockImplementation((q
 
 // Test component to access theme context
 function TestComponent() {
-  const { theme, computedTheme, setTheme, toggleTheme, prefersReducedMotion, prefersHighContrast } = useTheme();
+  const {
+    theme, computedTheme, setTheme, toggleTheme, prefersReducedMotion, prefersHighContrast,
+    contrastPreference, setContrastPreference, highContrastActive,
+  } = useTheme();
   
   return (
     <div>
@@ -36,23 +39,30 @@ function TestComponent() {
       <div data-testid="computed-theme">{computedTheme}</div>
       <div data-testid="reduced-motion">{prefersReducedMotion ? 'true' : 'false'}</div>
       <div data-testid="high-contrast">{prefersHighContrast ? 'true' : 'false'}</div>
+      <div data-testid="contrast-preference">{contrastPreference}</div>
+      <div data-testid="high-contrast-active">{highContrastActive ? 'true' : 'false'}</div>
       <button data-testid="set-light" onClick={() => setTheme('light')}>Set Light</button>
       <button data-testid="set-dark" onClick={() => setTheme('dark')}>Set Dark</button>
       <button data-testid="set-system" onClick={() => setTheme('system')}>Set System</button>
       <button data-testid="toggle-theme" onClick={toggleTheme}>Toggle</button>
+      <button data-testid="set-contrast-high" onClick={() => setContrastPreference('high')}>Set High Contrast</button>
+      <button data-testid="set-contrast-normal" onClick={() => setContrastPreference('normal')}>Set Normal Contrast</button>
+      <button data-testid="set-contrast-system" onClick={() => setContrastPreference('system')}>Set System Contrast</button>
     </div>
   );
 }
 
 function TestHooks() {
   const computedTheme = useComputedTheme();
-  const { prefersReducedMotion, prefersHighContrast } = useAccessibilityPreferences();
+  const { prefersReducedMotion, prefersHighContrast, contrastPreference, highContrastActive } = useAccessibilityPreferences();
   
   return (
     <div>
       <div data-testid="hook-computed-theme">{computedTheme}</div>
       <div data-testid="hook-reduced-motion">{prefersReducedMotion ? 'true' : 'false'}</div>
       <div data-testid="hook-high-contrast">{prefersHighContrast ? 'true' : 'false'}</div>
+      <div data-testid="hook-contrast-preference">{contrastPreference}</div>
+      <div data-testid="hook-high-contrast-active">{highContrastActive ? 'true' : 'false'}</div>
     </div>
   );
 }
@@ -391,6 +401,202 @@ describe('ThemeContext', () => {
     });
   });
 
+  describe('high-contrast cascade wiring (#1297)', () => {
+    it('sets data-contrast="normal" explicitly with no OS signal and no override', () => {
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('system');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
+    });
+
+    it('sets data-contrast="high" when the OS signals prefers-contrast: more', () => {
+      const mockMatchMedia = vi.fn().mockImplementation((query) => {
+        const results: Record<string, boolean> = {
+          '(prefers-color-scheme: dark)': true,
+          '(prefers-reduced-motion: reduce)': false,
+          '(prefers-contrast: more)': true,
+        };
+        const matches = results[query] ?? false;
+        return {
+          matches,
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('true');
+    });
+
+    it('manual override forces data-contrast="high" even without the OS signal', async () => {
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-high').click();
+      });
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('high');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('true');
+      expect(localStorageMock.setItem).toHaveBeenCalledWith('pf-contrast', 'high');
+    });
+
+    it('manual override forces data-contrast="normal" even with the OS signal on', async () => {
+      const mockMatchMedia = vi.fn().mockImplementation((query) => {
+        const results: Record<string, boolean> = {
+          '(prefers-color-scheme: dark)': true,
+          '(prefers-reduced-motion: reduce)': false,
+          '(prefers-contrast: more)': true,
+        };
+        const matches = results[query] ?? false;
+        return {
+          matches,
+          media: query,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-normal').click();
+      });
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
+    });
+
+    it('"system" preference defers back to the OS signal', async () => {
+      renderWithThemeProvider(<TestComponent />);
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-high').click();
+      });
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-system').click();
+      });
+
+      // OS signal was mocked false in this test's default beforeEach setup.
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('system');
+    });
+
+    it('loads a persisted contrast preference from localStorage on mount', () => {
+      localStorageMock.getItem.mockImplementation((key: string) =>
+        key === 'pf-contrast' ? 'high' : null,
+      );
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('high');
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+    });
+
+    it('tracks a live prefers-contrast change while preference is "system"', async () => {
+      // Proves the actual subscription wiring, not just the initial-mount
+      // value: data-contrast must follow the live OS signal when no manual
+      // override is set, by firing the real matchMedia 'change' handler
+      // ThemeContext registers for '(prefers-contrast: more)'.
+      const contrastListeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mockMatchMedia = vi.fn().mockImplementation((query: string) => {
+        const mediaQueryList = {
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
+            if (query === '(prefers-contrast: more)' && event === 'change') {
+              contrastListeners.push(handler);
+            }
+          }),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+        return mediaQueryList;
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(contrastListeners.length).toBeGreaterThan(0);
+
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: true } as MediaQueryListEvent));
+      });
+
+      expect(screen.getByTestId('high-contrast')).toHaveTextContent('true');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('true');
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: false } as MediaQueryListEvent));
+      });
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
+    });
+
+    it('pins a manual override against a live OS prefers-contrast change', async () => {
+      // The manual override must not be knocked out by the OS signal firing
+      // in either direction while an explicit preference is set.
+      const contrastListeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mockMatchMedia = vi.fn().mockImplementation((query: string) => {
+        const mediaQueryList = {
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
+            if (query === '(prefers-contrast: more)' && event === 'change') {
+              contrastListeners.push(handler);
+            }
+          }),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+        return mediaQueryList;
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+
+      // Hard-assert the listener was actually registered before relying on
+      // firing it — otherwise an empty contrastListeners array would make
+      // this test pass vacuously even if the real subscription were broken.
+      expect(contrastListeners.length).toBeGreaterThan(0);
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-normal').click();
+      });
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+
+      // OS signal flips to "prefers more contrast" — the live event must
+      // still be processed (raw OS preference updates), but the override
+      // must win precedence over it for the applied data-contrast attribute
+      // and derived highContrastActive value.
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: true } as MediaQueryListEvent));
+      });
+      expect(screen.getByTestId('high-contrast')).toHaveTextContent('true');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('normal');
+    });
+  });
+
   describe('custom events', () => {
     it('dispatches theme change event', async () => {
       const eventListener = vi.fn();
@@ -460,6 +666,8 @@ describe('ThemeContext', () => {
       
       expect(screen.getByTestId('hook-reduced-motion')).toHaveTextContent('true');
       expect(screen.getByTestId('hook-high-contrast')).toHaveTextContent('true');
+      expect(screen.getByTestId('hook-contrast-preference')).toHaveTextContent('system');
+      expect(screen.getByTestId('hook-high-contrast-active')).toHaveTextContent('true');
     });
   });
 });

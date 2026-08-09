@@ -11,6 +11,11 @@
 @import './design-system/themes/voron.css';
 @import './design-system/themes/farm.css';
 @import './design-system/themes/forge.css';
+/* High-contrast cascade mechanism (#1297). Must stay unlayered, alongside the
+   theme imports above: layer order beats specificity, so wrapping this in
+   layer(...) would make [data-contrast="high"] overrides lose to the base
+   theme declarations regardless of selector strength. See contrast.css. */
+@import './design-system/contrast.css';
 /* Must remain unlayered and last: print values override every selectable theme. */
 @import './styles/print.css';
 

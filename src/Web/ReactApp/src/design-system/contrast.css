@@ -1,0 +1,33 @@
+/*
+ * High-contrast cascade mechanism (issue #1297).
+ *
+ * This file is PLUMBING ONLY. It does not declare per-theme high-contrast
+ * token values — those are scoped to #1298/#1299, which land once #1103's
+ * status-family on-colour tokens are available (see decision issue #1296).
+ *
+ * The mechanism, per #1296:
+ *   - `ThemeContext` sets `[data-contrast="high"]` (or `"normal"`) on
+ *     `documentElement`, driven by `prefersHighContrast` (OS
+ *     `prefers-contrast: more` signal) plus a manual override.
+ *   - Any override declared here MUST be unlayered, exactly like
+ *     `src/design-system/themes/*.css`. CSS `@layer` order is resolved
+ *     BEFORE specificity: an unlayered rule always beats a layered rule for
+ *     the same property, regardless of selector strength. `src/index.css`
+ *     imports `src/styles/theme.css` into `layer(base)` while the
+ *     design-system theme files are imported unlayered specifically so the
+ *     unlayered declarations win. This file must be imported the same way —
+ *     see the import comment in `src/index.css`. Wrapping this file (or its
+ *     import) in `@layer(...)` reintroduces the exact bug #1297 fixes: a
+ *     `[data-theme="x"][data-contrast="high"]` override would lose to the
+ *     base `[data-theme="x"]` declaration despite having higher specificity.
+ *
+ * The canary declaration below is test-only plumbing, not a real
+ * accessibility token. It exists purely so a regression test can prove,
+ * via `getComputedStyle`, that a compound `[data-theme][data-contrast="high"]`
+ * selector actually wins the cascade over the base theme selector. Real
+ * per-theme high-contrast values will be added alongside this pattern in
+ * #1298/#1299 — do not add them here.
+ */
+[data-theme='dark'][data-contrast='high'] {
+  --pf-contrast-mechanism-canary: cascade-mechanism-verified;
+}

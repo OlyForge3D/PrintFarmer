@@ -211,6 +211,109 @@ describe('theme registry', () => {
     }
   });
 
+  it('imports the high-contrast mechanism file unlayered (#1297)', () => {
+    // src/design-system/contrast.css must be imported the same way as the
+    // design-system themes: unlayered. Wrapping it in layer(...) would make
+    // [data-theme][data-contrast="high"] overrides lose to the base
+    // [data-theme] declaration regardless of specificity — the exact bug
+    // this issue fixes.
+    //
+    // Comments are stripped first and matching is anchored to actual
+    // `@import` statements, not just any line mentioning the path — a
+    // commented-out unlayered import followed by a real layered one would
+    // otherwise slip past a naive "first matching line" check.
+    const indexCss = read('src/index.css');
+    const code = indexCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const importStatements = [...code.matchAll(/@import\s+[^;]*design-system\/contrast\.css[^;]*;/g)].map(
+      (m) => m[0],
+    );
+    expect(importStatements, 'contrast.css is imported exactly once').toHaveLength(1);
+    expect(importStatements[0], 'contrast.css must not be imported into a layer').not.toMatch(/layer\(/);
+  });
+
+  it('keeps the high-contrast mechanism file itself unlayered (#1297)', () => {
+    const contrastCss = read('src/design-system/contrast.css');
+    // Strip comments first: the file's own documentation discusses @layer by
+    // name, which would otherwise false-positive this check.
+    const code = contrastCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(code, 'contrast.css must not declare an @layer block').not.toMatch(/@layer\b/);
+  });
+
+  it('wins the cascade for a high-contrast override via getComputedStyle (#1297)', () => {
+    // Proves the actual shipped mechanism file, injected verbatim, resolves a
+    // [data-theme="dark"][data-contrast="high"] override correctly against an
+    // unlayered base declaration — mirroring how src/design-system/themes/*.css
+    // declares real tokens. This is the regression test the issue calls for.
+    const contrastCss = read('src/design-system/contrast.css');
+
+    const base = document.createElement('style');
+    base.textContent = `
+      [data-theme='dark'] {
+        --pf-contrast-mechanism-canary: base-value;
+      }
+    `;
+    const override = document.createElement('style');
+    override.textContent = contrastCss;
+
+    document.head.appendChild(base);
+    document.head.appendChild(override);
+
+    try {
+      document.documentElement.setAttribute('data-theme', 'dark');
+
+      document.documentElement.setAttribute('data-contrast', 'normal');
+      expect(
+        getComputedStyle(document.documentElement).getPropertyValue('--pf-contrast-mechanism-canary').trim(),
+      ).toBe('base-value');
+
+      document.documentElement.setAttribute('data-contrast', 'high');
+      expect(
+        getComputedStyle(document.documentElement).getPropertyValue('--pf-contrast-mechanism-canary').trim(),
+      ).toBe('cascade-mechanism-verified');
+    } finally {
+      document.head.removeChild(base);
+      document.head.removeChild(override);
+      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.removeAttribute('data-contrast');
+    }
+  });
+
+  it('would regress if the mechanism file were wrapped in a layer (#1297)', () => {
+    // Documents WHY the static "must not contain @layer" check above matters:
+    // reproduces the historical bug pattern by wrapping the real contrast.css
+    // content in an explicit @layer, showing the override would silently lose
+    // to an unlayered base declaration despite higher specificity.
+    const contrastCss = read('src/design-system/contrast.css');
+
+    const base = document.createElement('style');
+    base.textContent = `
+      [data-theme='dark'] {
+        --pf-contrast-mechanism-canary: base-value;
+      }
+    `;
+    const layeredOverride = document.createElement('style');
+    layeredOverride.textContent = `@layer regressed {\n${contrastCss}\n}`;
+
+    document.head.appendChild(base);
+    document.head.appendChild(layeredOverride);
+
+    try {
+      document.documentElement.setAttribute('data-theme', 'dark');
+      document.documentElement.setAttribute('data-contrast', 'high');
+
+      // The layered, higher-specificity override loses to the unlayered base
+      // rule — this is the bug, not the fix.
+      expect(
+        getComputedStyle(document.documentElement).getPropertyValue('--pf-contrast-mechanism-canary').trim(),
+      ).toBe('base-value');
+    } finally {
+      document.head.removeChild(base);
+      document.head.removeChild(layeredOverride);
+      document.documentElement.removeAttribute('data-theme');
+      document.documentElement.removeAttribute('data-contrast');
+    }
+  });
+
   it('rejects theme selectors outside a fully print-scoped stylesheet', () => {
     for (const selector of [
       '[data-theme]',
