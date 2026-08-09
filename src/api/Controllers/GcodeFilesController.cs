@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.FileManagement;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Quota;
@@ -118,7 +119,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Failed to hash file {Path}: {Message}", path, ex.Message);
+            logger.LogError("Failed to hash file {Path}: {Message}", LogSanitizer.Sanitize(path), ex.Message);
             return Problem("Failed to compute hash", statusCode: 500);
         }
     }
@@ -162,7 +163,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Error listing G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", path, ex.GetType().Name, ex.Message, ex.StackTrace);
+            logger.LogError("Error listing G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", LogSanitizer.Sanitize(path), ex.GetType().Name, ex.Message, ex.StackTrace);
             return Problem($"Failed to retrieve files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
@@ -213,7 +214,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Error querying G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", path, ex.GetType().Name, ex.Message, ex.StackTrace);
+            logger.LogError("Error querying G-code files (path={Path}): {Name} - {Message}\n{StackTrace}", LogSanitizer.Sanitize(path), ex.GetType().Name, ex.Message, ex.StackTrace);
             return Problem($"Failed to query files: {ex.GetType().Name} - {ex.Message}", statusCode: 500);
         }
     }
@@ -290,7 +291,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Chunk init failure for {ReqFileName}: {Message}", req.FileName, ex.Message);
+            logger.LogError("Chunk init failure for {ReqFileName}: {Message}", LogSanitizer.Sanitize(req.FileName), ex.Message);
             return Problem("Failed to initialize chunked upload", statusCode: 500);
         }
     }
@@ -350,12 +351,12 @@ public class GcodeFilesController(
                     if (gcodeFile != null)
                     {
                         gcodeFileId = gcodeFile.Id;
-                        logger.LogInformation("Finalized chunked upload {UploadId} to database with GcodeFile ID {FileId}", uploadId, gcodeFileId);
+                        logger.LogInformation("Finalized chunked upload {UploadId} to database with GcodeFile ID {FileId}", LogSanitizer.Sanitize(uploadId), gcodeFileId);
                     }
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Failed to finalize chunked upload {UploadId} to database, but file is on disk", uploadId);
+                    logger.LogError(ex, "Failed to finalize chunked upload {UploadId} to database, but file is on disk", LogSanitizer.Sanitize(uploadId));
 
                     // Continue anyway - file is on disk, just not indexed in database
                 }
@@ -402,7 +403,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Chunk upload failure {UploadId}: {Message}", uploadId, ex.Message);
+            logger.LogError("Chunk upload failure {UploadId}: {Message}", LogSanitizer.Sanitize(uploadId), ex.Message);
             return Problem("Failed to append chunk", statusCode: 500);
         }
     }
@@ -446,7 +447,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug("Chunk resume failed {UploadId}: {Message}", uploadId, ex.Message);
+            logger.LogDebug("Chunk resume failed {UploadId}: {Message}", LogSanitizer.Sanitize(uploadId), ex.Message);
             return NotFound();
         }
     }
@@ -538,7 +539,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogDebug("Failed to cancel upload {UploadId}: {Message}", uploadId, ex.Message);
+            logger.LogDebug("Failed to cancel upload {UploadId}: {Message}", LogSanitizer.Sanitize(uploadId), ex.Message);
 
             // Still return success - we tried our best to clean up
         }
@@ -633,7 +634,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Error downloading G-code file {Path}: {Message}", path, ex.Message);
+            logger.LogError("Error downloading G-code file {Path}: {Message}", LogSanitizer.Sanitize(path), ex.Message);
             return Problem("Failed to download file", statusCode: 500);
         }
     }
@@ -798,7 +799,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("Error uploading G-code file (path={Path}): {Message}", path, ex.Message);
+            logger.LogError("Error uploading G-code file (path={Path}): {Message}", LogSanitizer.Sanitize(path), ex.Message);
             return Problem("Failed to upload file", statusCode: 500);
         }
     }
@@ -837,11 +838,11 @@ public class GcodeFilesController(
                 return BadRequest(new FolderOperationResultDto { Success = false, Message = "Folder path cannot be empty. Please provide a folder name." });
             }
 
-            logger.LogDebug("[CreateFolder] Input: '{RequestPath}' -> path='{Path}', name='{Name}'", request.Path, path, name);
+            logger.LogDebug("[CreateFolder] Input: '{RequestPath}' -> path='{Path}', name='{Name}'", LogSanitizer.Sanitize(request.Path), LogSanitizer.Sanitize(path), LogSanitizer.Sanitize(name));
 
             GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
 
-            logger.LogInformation("[CreateFolder] Successfully created virtual folder: '{RequestPath}'", request.Path);
+            logger.LogInformation("[CreateFolder] Successfully created virtual folder: '{RequestPath}'", LogSanitizer.Sanitize(request.Path));
             return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto { Success = true, Message = "Folder created successfully" });
         }
         catch (ArgumentException ex)
@@ -856,7 +857,7 @@ public class GcodeFilesController(
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("already exists"))
         {
-            logger.LogInformation("[CreateFolder] Folder already exists at: {RequestPath}", request.Path);
+            logger.LogInformation("[CreateFolder] Folder already exists at: {RequestPath}", LogSanitizer.Sanitize(request.Path));
             return Conflict(new FolderOperationResultDto { Success = false, Message = ex.Message });
         }
         catch (InvalidOperationException ex)
@@ -866,7 +867,7 @@ public class GcodeFilesController(
         }
         catch (Exception ex)
         {
-            logger.LogError("[CreateFolder] Unexpected error (path={Path}, name={Name}): {Name1}: {Message}\n{StackTrace}", path, name, ex.GetType().Name, ex.Message, ex.StackTrace);
+            logger.LogError("[CreateFolder] Unexpected error (path={Path}, name={Name}): {Name1}: {Message}\n{StackTrace}", LogSanitizer.Sanitize(path), LogSanitizer.Sanitize(name), ex.GetType().Name, ex.Message, ex.StackTrace);
             return StatusCode(StatusCodes.Status500InternalServerError, new FolderOperationResultDto { Success = false, Message = $"Failed to create folder: {ex.GetType().Name}" });
         }
     }
@@ -979,7 +980,7 @@ public class GcodeFilesController(
             // Use the directory ID (virtual path) exactly as provided by the frontend
             // Frontend is responsible for constructing valid directory IDs
             string targetDirectoryPath = request.TargetDirectoryId;
-            logger.LogDebug("[MoveFiles] Moving {Count} G-code file(s) to virtual directory: '{TargetDirectoryPath}'", request.ModelIds.Count, targetDirectoryPath);
+            logger.LogDebug("[MoveFiles] Moving {Count} G-code file(s) to virtual directory: '{TargetDirectoryPath}'", request.ModelIds.Count, LogSanitizer.Sanitize(targetDirectoryPath));
 
             int movedCount = 0;
             int failedCount = 0;
@@ -997,7 +998,7 @@ public class GcodeFilesController(
 
                     if (!Guid.TryParse(fileIdStr, out Guid fileId))
                     {
-                        logger.LogWarning("[MoveFiles] Invalid file ID format: '{FileIdStr}'. Expected GUID from GcodeFileId field, not Path.", fileIdStr);
+                        logger.LogWarning("[MoveFiles] Invalid file ID format: '{FileIdStr}'. Expected GUID from GcodeFileId field, not Path.", LogSanitizer.Sanitize(fileIdStr));
                         failedFiles.Add((fileIdStr, "Invalid file ID format - use GcodeFileId, not Path"));
                         failedCount++;
                         continue;
@@ -1020,25 +1021,25 @@ public class GcodeFilesController(
                 }
                 catch (ArgumentException ex)
                 {
-                    logger.LogWarning("[MoveFiles] Invalid argument for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
+                    logger.LogWarning("[MoveFiles] Invalid argument for file {FileIdStr}: {Message}", LogSanitizer.Sanitize(fileIdStr), ex.Message);
                     failedFiles.Add((fileIdStr, $"Invalid argument: {ex.Message}"));
                     failedCount++;
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    logger.LogWarning("[MoveFiles] Access denied for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
+                    logger.LogWarning("[MoveFiles] Access denied for file {FileIdStr}: {Message}", LogSanitizer.Sanitize(fileIdStr), ex.Message);
                     failedFiles.Add((fileIdStr, "Access denied"));
                     failedCount++;
                 }
                 catch (IOException ex)
                 {
-                    logger.LogWarning("[MoveFiles] IO error for file {FileIdStr}: {Message}", fileIdStr, ex.Message);
+                    logger.LogWarning("[MoveFiles] IO error for file {FileIdStr}: {Message}", LogSanitizer.Sanitize(fileIdStr), ex.Message);
                     failedFiles.Add((fileIdStr, $"IO error: {ex.Message}"));
                     failedCount++;
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning("[MoveFiles] Unexpected error for file {FileIdStr}: {Name}: {Message}", fileIdStr, ex.GetType().Name, ex.Message);
+                    logger.LogWarning("[MoveFiles] Unexpected error for file {FileIdStr}: {Name}: {Message}", LogSanitizer.Sanitize(fileIdStr), ex.GetType().Name, ex.Message);
                     failedFiles.Add((fileIdStr, $"{ex.GetType().Name}: {ex.Message}"));
                     failedCount++;
                 }
