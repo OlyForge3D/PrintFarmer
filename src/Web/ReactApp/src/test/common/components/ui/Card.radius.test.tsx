@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
 import { Card } from '@/common/components/ui/Card';
-
-const radiusClasses = (element: Element): string[] =>
-  Array.from(element.classList).filter((name) => /^(?:\S+:)*!?rounded(?:-|$)/.test(name));
+import { radiusClasses } from './radiusTestUtils';
 
 describe('Card radius contract', () => {
   it('defaults to exactly one 8px radius class', () => {

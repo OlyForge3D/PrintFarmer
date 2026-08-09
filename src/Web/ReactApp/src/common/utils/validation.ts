@@ -103,6 +103,23 @@ export function normalizeUrl(url: string): string {
   return url.trim().replace(/\/$/, '');
 }
 
+/**
+ * Whether a string is a safe absolute http/https URL suitable for use as a
+ * link `href`. Rejects `javascript:`, `data:`, and any other scheme, so a
+ * value that ultimately originates from user-entered/persisted settings
+ * (rather than a compile-time constant) can never be reinterpreted as
+ * executable script when rendered as a link.
+ */
+export function isSafeHttpUrl(value: string): boolean {
+  if (!value) return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 // Dedicated Spoolman base URL normalizer. Currently mirrors normalizeUrl but
 // kept separate so future Spoolman-specific rules (e.g. default scheme) can
 // be added in one place without touching generic URL handling.

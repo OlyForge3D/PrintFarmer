@@ -3,6 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-function-type */
 
 import { trace } from '@opentelemetry/api';
+import { generateUUID } from '@/utils/uuid';
 
 export interface LogEntry {
   level: 'debug' | 'info' | 'warn' | 'error';
@@ -46,7 +47,12 @@ class UnifiedLoggingService implements IUnifiedLoggingService {
   }
 
   private generateSessionId(): string {
-    return `frontend-session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    // Use a cryptographically strong UUID rather than Math.random() — this ID
+    // is purely a log/trace correlation identifier (attached to telemetry
+    // spans and log entries for grouping), never used for authentication or
+    // any other security decision, but there is no reason to use a weak PRNG
+    // when a secure generator is free and already shared across the app.
+    return `frontend-session-${Date.now()}-${generateUUID()}`;
   }
 
   setUserId(userId: string): void {

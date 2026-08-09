@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { render } from '@testing-library/react';
 import { Badge } from '@/common/components/ui/Badge';
+import { radiusClasses } from './radiusTestUtils';
 
 /**
  * Radius contract for the shared Badge primitive.
@@ -16,8 +17,6 @@ import { Badge } from '@/common/components/ui/Badge';
  * jsdom cannot tell us which rule wins, but it can tell us that only one radius
  * class is present, which removes the ambiguity at the source.
  */
-const radiusClasses = (el: Element): string[] =>
-  Array.from(el.classList).filter(name => /^(?:\S+:)*!?rounded(?:-|$)/.test(name));
 
 describe('Badge radius contract', () => {
   it('defaults a status badge to the 2px status-pill radius', () => {

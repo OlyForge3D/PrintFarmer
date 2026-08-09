@@ -328,3 +328,35 @@ describe('SpoolsTab — legacy array backward compatibility', () => {
     expect(mockGetSpools).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('SpoolsTab — "Open Spoolman" link scheme safety (js/xss-through-dom)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    Object.assign(filterState, {
+      search: '', material: '', vendor: '', color: '', location: '',
+      showEmpty: false, pageSize: 50, sortField: 'id', sortDir: 'asc', page: 0,
+    });
+    mockGetSpools.mockResolvedValue({ items: [], totalCount: 0 });
+  });
+
+  it('renders the link when the persisted base URL is a plain http(s) address', async () => {
+    localStorage.setItem('spoolman-base-url', 'http://localhost:7912');
+    render(<SpoolsTab />);
+
+    const link = await screen.findByRole('link', { name: /open spoolman/i });
+    expect(link).toHaveAttribute('href', 'http://localhost:7912');
+  });
+
+  it('does not render the link when the persisted base URL has an unsafe scheme', async () => {
+    // A settings/localStorage value is not a compile-time constant, so a
+    // non-http(s) scheme here must never reach the anchor's `href` — that is
+    // exactly the js/xss-through-dom sink this test guards against. The
+    // value below is an inert placeholder, not a working payload.
+    localStorage.setItem('spoolman-base-url', 'javascript:void(0)');
+    render(<SpoolsTab />);
+
+    await waitFor(() => expect(mockGetSpools).toHaveBeenCalled());
+    expect(screen.queryByRole('link', { name: /open spoolman/i })).not.toBeInTheDocument();
+  });
+});
