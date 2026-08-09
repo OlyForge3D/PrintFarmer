@@ -505,6 +505,86 @@ describe('ThemeContext', () => {
       expect(screen.getByTestId('contrast-preference')).toHaveTextContent('high');
       expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
     });
+
+    it('tracks a live prefers-contrast change while preference is "system"', async () => {
+      // Proves the actual subscription wiring, not just the initial-mount
+      // value: data-contrast must follow the live OS signal when no manual
+      // override is set, by firing the real matchMedia 'change' handler
+      // ThemeContext registers for '(prefers-contrast: more)'.
+      const contrastListeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mockMatchMedia = vi.fn().mockImplementation((query: string) => {
+        const mediaQueryList = {
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
+            if (query === '(prefers-contrast: more)' && event === 'change') {
+              contrastListeners.push(handler);
+            }
+          }),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+        return mediaQueryList;
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(contrastListeners.length).toBeGreaterThan(0);
+
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: true } as MediaQueryListEvent));
+      });
+
+      expect(screen.getByTestId('high-contrast')).toHaveTextContent('true');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('true');
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('high');
+
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: false } as MediaQueryListEvent));
+      });
+
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
+    });
+
+    it('pins a manual override against a live OS prefers-contrast change', async () => {
+      // The manual override must not be knocked out by the OS signal firing
+      // in either direction while an explicit preference is set.
+      const contrastListeners: Array<(e: MediaQueryListEvent) => void> = [];
+      const mockMatchMedia = vi.fn().mockImplementation((query: string) => {
+        const mediaQueryList = {
+          matches: false,
+          media: query,
+          onchange: null,
+          addEventListener: vi.fn((event: string, handler: (e: MediaQueryListEvent) => void) => {
+            if (query === '(prefers-contrast: more)' && event === 'change') {
+              contrastListeners.push(handler);
+            }
+          }),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(),
+        };
+        return mediaQueryList;
+      });
+      window.matchMedia = mockMatchMedia;
+
+      renderWithThemeProvider(<TestComponent />);
+
+      await act(async () => {
+        screen.getByTestId('set-contrast-normal').click();
+      });
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+
+      // OS signal flips to "prefers more contrast" — override must hold.
+      await act(async () => {
+        contrastListeners.forEach((handler) => handler({ matches: true } as MediaQueryListEvent));
+      });
+      expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
+      expect(screen.getByTestId('contrast-preference')).toHaveTextContent('normal');
+    });
   });
 
   describe('custom events', () => {

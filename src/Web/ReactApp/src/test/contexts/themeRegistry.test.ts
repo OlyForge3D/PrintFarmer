@@ -217,12 +217,18 @@ describe('theme registry', () => {
     // [data-theme][data-contrast="high"] overrides lose to the base
     // [data-theme] declaration regardless of specificity — the exact bug
     // this issue fixes.
+    //
+    // Comments are stripped first and matching is anchored to actual
+    // `@import` statements, not just any line mentioning the path — a
+    // commented-out unlayered import followed by a real layered one would
+    // otherwise slip past a naive "first matching line" check.
     const indexCss = read('src/index.css');
-    const importLine = indexCss
-      .split('\n')
-      .find((line) => line.includes("design-system/contrast.css"));
-    expect(importLine, 'contrast.css is never imported').toBeTruthy();
-    expect(importLine, 'contrast.css must not be imported into a layer').not.toMatch(/layer\(/);
+    const code = indexCss.replace(/\/\*[\s\S]*?\*\//g, '');
+    const importStatements = [...code.matchAll(/@import\s+[^;]*design-system\/contrast\.css[^;]*;/g)].map(
+      (m) => m[0],
+    );
+    expect(importStatements, 'contrast.css is imported exactly once').toHaveLength(1);
+    expect(importStatements[0], 'contrast.css must not be imported into a layer').not.toMatch(/layer\(/);
   });
 
   it('keeps the high-contrast mechanism file itself unlayered (#1297)', () => {
