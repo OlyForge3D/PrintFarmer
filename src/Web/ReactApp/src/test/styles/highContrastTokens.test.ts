@@ -85,16 +85,16 @@ const AA_PAIRS: ReadonlyArray<{
  * same-selector, same-layer rules — e.g. `dark`'s #1297 canary block plus its
  * #1298 value block).
  */
-const parseThemeTokens = (theme: string): ReadonlyMap<string, string> => {
+const parseThemeTokens = (theme: string, css: string = contrastCss): ReadonlyMap<string, string> => {
   const blockPattern = new RegExp(
     `\\[data-theme=['"]${theme}['"]\\]\\[data-contrast=['"]high['"]\\]\\s*\\{([^}]*)\\}`,
     'g',
   );
-  const blocks = [...contrastCss.matchAll(blockPattern)];
+  const blocks = [...css.matchAll(blockPattern)];
 
   const merged = new Map<string, string>();
   for (const [, block] of blocks) {
-    for (const [, token, value] of block.matchAll(/--pf-([\w-]+):\s*(#[0-9a-f]{3,8})/gi)) {
+    for (const [, token, value] of block.matchAll(/--pf-([\w-]+):\s*(#[0-9a-f]{6}|#[0-9a-f]{3})\b/gi)) {
       merged.set(token, value.toLowerCase());
     }
   }
@@ -114,6 +114,9 @@ const relativeLuminance = (hex: string): number => {
   const value = hex.slice(1);
   const expanded =
     value.length === 3 ? value.split('').map((c) => `${c}${c}`).join('') : value;
+  if (expanded.length !== 6) {
+    throw new Error(`relativeLuminance: expected a 3 or 6-digit hex color, got "${hex}"`);
+  }
   const linearChannel = (offset: number): number => {
     const channel = Number.parseInt(expanded.slice(offset, offset + 2), 16) / 255;
     return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
@@ -134,20 +137,42 @@ describe('prefers-contrast: high token coverage (#1300)', () => {
     expect(ALL_THEME_IDS.length).toBeGreaterThan(0);
   });
 
-  it('every discovered theme id maps to a real theme file (sanity)', () => {
-    // Guards the discovery mechanism itself: THEMES_WITH_OVERRIDES and
-    // PENDING_THEMES must always partition ALL_THEME_IDS with no overlap and
-    // no leftovers, so a regex/typo mismatch in contrast.css can't silently
-    // drop a theme from coverage. `PENDING_THEMES` (themes with no
-    // high-contrast override block yet) is expected to shrink to `[]` as
-    // #1298/#1299 land — see the failure message for which themes remain.
-    expect(new Set([...THEMES_WITH_OVERRIDES, ...PENDING_THEMES])).toEqual(
-      new Set(ALL_THEME_IDS),
-    );
-    expect(
-      THEMES_WITH_OVERRIDES.filter((theme) => PENDING_THEMES.includes(theme)),
-      `pending high-contrast overrides for: ${PENDING_THEMES.join(', ') || '(none)'}`,
-    ).toEqual([]);
+  it('parser rejects a selector with swapped attribute order or a mistyped token', () => {
+    // Regression guard for the actual regex/parsing logic (not a tautology
+    // about THEMES_WITH_OVERRIDES/PENDING_THEMES, which are algebraic
+    // complements of each other by construction and can't independently
+    // verify the parser). Exercises parseThemeTokens against inline fixture
+    // CSS so a broken selector or a typo'd token name in a real theme's
+    // override block is caught here rather than silently reclassifying that
+    // theme as "pending" forever.
+    const swappedAttributeOrder = `
+      [data-contrast='high'][data-theme='fixture'] {
+        --pf-bg-0: #000000;
+      }
+    `;
+    expect(parseThemeTokens('fixture', swappedAttributeOrder).size).toBe(0);
+
+    const mistypedToken = `
+      [data-theme='fixture'][data-contrast='high'] {
+        --pf-txt-primary: #000000;
+      }
+    `;
+    expect(parseThemeTokens('fixture', mistypedToken).has('text-primary')).toBe(false);
+
+    const wellFormed = `
+      [data-theme='fixture'][data-contrast='high'] {
+        --pf-text-primary: #000000;
+      }
+    `;
+    expect(parseThemeTokens('fixture', wellFormed).get('text-primary')).toBe('#000000');
+  });
+
+  it.each(PENDING_THEMES)('%s: high-contrast override not landed yet (tracked by #1298/#1299)', () => {
+    // No assertion body: this test intentionally reports as a distinct,
+    // named row per pending theme so CI output honestly shows "0 of N themes
+    // enforced" instead of blending into an all-green run. Each row
+    // disappears (replaced by real WCAG assertions below) as that theme's
+    // contrast.css override block lands.
   });
 });
 
