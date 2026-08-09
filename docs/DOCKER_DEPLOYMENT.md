@@ -1074,6 +1074,34 @@ Trigger flows (password reset / email confirmation) and observe structured log o
 
 See the generated `env.mailjet.example` file at repo root for a ready-to-copy reference.
 
+## Web Push (VAPID) Configuration
+
+Browser push notifications are delivered using the Web Push protocol, authenticated with a
+VAPID key pair. Keys are read from configuration via the `WebPush` section (bound to
+`VapidOptions`):
+
+```
+WebPush__VapidPublicKey=<base64url-encoded public key>
+WebPush__VapidPrivateKey=<base64url-encoded private key>
+WebPush__VapidSubject=mailto:admin@yourdomain.com
+```
+
+Generate a key pair with any standard web-push VAPID key generator (for example
+`npx web-push generate-vapid-keys`), then set the two keys above per environment. Never commit
+real key values — use Docker secrets or orchestrator secret injection, the same as the
+Mailjet credentials above.
+
+* `VapidSubject` must be a `mailto:` address or an `https://` URL identifying the sender, per
+  the VAPID spec.
+* If either `VapidPublicKey` or `VapidPrivateKey` is unset, push delivery is skipped (logged,
+  not an error) and `GET /api/notifications/push-subscription/vapid-key` returns an empty
+  public key, which the frontend treats as "push notifications are not configured".
+
+**Legacy compatibility:** deployments that already set the flat environment variables
+`VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` (without the `WebPush__` prefix)
+continue to work — these are used as a fallback for any `WebPush__*` value left blank.
+Prefer the `WebPush__*` form for new deployments.
+
 ## Raspberry Pi / ARM64 Deployment
 
 PrintFarmer supports deployment on ARM64 platforms including Raspberry Pi 4 and Pi 5.

@@ -36,14 +36,24 @@ public sealed class MailjetEmailService : IEmailService
 
         string auth = Convert.ToBase64String(Encoding.UTF8.GetBytes(_options.Mailjet.ApiKey + ":" + _options.Mailjet.ApiSecret));
 
+        string fromEmail = _options.FromAddress ?? _options.Mailjet.FromEmail ?? "noreply@printfarmer.local";
+        string fromName = _options.FromName ?? _options.Mailjet.FromName ?? "PrintFarmer";
+        bool sandbox = _options.Mailjet.Sandbox;
+
+        if (sandbox)
+        {
+            _logger.LogInformation("Sending email to {MessageTo} in Mailjet sandbox mode (not actually delivered)", message.To);
+        }
+
         // Build payload per Mailjet v3.1 API
         var payload = new
         {
+            SandboxMode = sandbox,
             Messages = new[]
             {
                 new
                 {
-                    From = new { Email = _options.Mailjet.FromEmail ?? "noreply@printfarmer.local", Name = _options.Mailjet.FromName ?? "PrintFarmer" },
+                    From = new { Email = fromEmail, Name = fromName },
                     To = new[] { new { Email = message.To } },
                     Subject = message.Subject,
                     TextPart = message.PlainBody,
