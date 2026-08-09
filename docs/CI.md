@@ -113,8 +113,11 @@ classify.
 
 `ci-tools` is unconditional and therefore runs for every bucket, including
 `docs`, `mobile`, and `unclassified`. `dependency-compliance` is gated on
-`want_dotnet_build` (see the ✓ column above) and therefore does NOT run for
-`docs`, `mobile`, or `tools`-only buckets.
+`want_dotnet_build` (see the ".NET build" ✓ column above) and therefore
+runs for the same buckets as `dotnet-build` — it does NOT run for `docs`-
+or `mobile`-only buckets, but DOES run for a `tools`-only bucket, since
+`src/tools/**` sets `.NET build` to ✓ (a tools-only change still needs the
+restored `project.assets.json` the validator reads).
 
 ### Full-safe (`full_matrix=1`) triggers
 
