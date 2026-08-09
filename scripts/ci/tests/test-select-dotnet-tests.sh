@@ -656,6 +656,113 @@ case_mobile_change_no_dotnet() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
 
+# -----------------------------------------------------------------------------
+# Regression (#1397): github.event.pull_request.base.sha drifts ahead of the
+# PR's actual fork point whenever the base branch advances while the PR is
+# open (e.g. other PRs merging into `development`). The `Compute change set`
+# step must diff against `git merge-base base_sha head_sha`, not `base_sha`
+# directly, or those unrelated base-branch commits get folded into the PR's
+# own changed-file set — spuriously widening the selector's decision (e.g.
+# forcing the full .NET/migration-drift/CodeQL matrix on a mobile-only PR
+# just because an unrelated commit touching scripts/ci/** landed on
+# `development` in the meantime).
+#
+# This builds a real scratch git repo reproducing the exact scenario:
+#   1. A fork-point commit on `development`.
+#   2. A PR branch forked from it, adding only a mobile/** file.
+#   3. Further commits on `development` — AFTER the fork — that touch
+#      `scripts/ci/**` (an `ci_selector` path). These simulate unrelated
+#      work landing on the base branch while the PR is open, and are what
+#      `github.event.pull_request.base.sha` would resolve to.
+#   4. scripts/ci/compute-change-set.sh is invoked exactly as the workflow
+#      invokes it, with PR_BASE_SHA set to the DRIFTED development tip
+#      (not the fork point) and PR_HEAD_SHA set to the PR branch head.
+#   5. The resulting changed-file set is fed into select-dotnet-tests.sh.
+#
+# Asserts the changed-file set contains only the PR's own mobile/** file
+# (not the unrelated scripts/ci/** file), and that the selector therefore
+# reports want_dotnet_build=false, want_dotnet_test=false,
+# want_mig_drift=false, full_matrix=false — exactly the outcome PR #1393
+# should have gotten had this fix been in place.
+case_merge_base_diverged_pr_base_sha_mobile_only() {
+  local out="$1"
+  local repo
+  repo="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$repo'" RETURN
+
+  (
+    set -e
+    cd "$repo"
+    git init -q -b development
+    git config user.email "test@example.com"
+    git config user.name "Test"
+
+    printf 'root\n' > README.md
+    git add README.md
+    git commit -q -m "fork point"
+    local fork_point
+    fork_point="$(git rev-parse HEAD)"
+
+    # PR branch forked here, touching only a mobile/** file.
+    git checkout -q -b pr-branch
+    mkdir -p mobile/PrintFarmer
+    printf 'struct View {}\n' > mobile/PrintFarmer/View.swift
+    git add mobile/PrintFarmer/View.swift
+    git commit -q -m "mobile-only PR change"
+    local pr_head
+    pr_head="$(git rev-parse HEAD)"
+
+    # Unrelated commits land on development AFTER the fork, while the PR is
+    # open — this is what makes github.event.pull_request.base.sha drift.
+    git checkout -q development
+    mkdir -p scripts/ci
+    printf '#!/usr/bin/env bash\necho unrelated\n' > scripts/ci/unrelated-tool.sh
+    git add scripts/ci/unrelated-tool.sh
+    git commit -q -m "unrelated ci_selector change landing on development"
+    local drifted_base
+    drifted_base="$(git rev-parse HEAD)"
+
+    if [[ "$drifted_base" == "$fork_point" ]]; then
+      echo "setup error: development did not advance past fork point" >&2
+      exit 1
+    fi
+
+    local z_file changed_output
+    z_file="$(mktemp)"
+    changed_output="$(mktemp)"
+
+    EVENT_NAME="pull_request" \
+      PR_BASE_SHA="$drifted_base" \
+      PR_HEAD_SHA="$pr_head" \
+      OUT_FILE="$z_file" \
+      GITHUB_OUTPUT="$changed_output" \
+      bash "$REPO_ROOT/scripts/ci/compute-change-set.sh"
+
+    local changed_files
+    changed_files="$(tr '\0' '\n' < "$z_file")"
+
+    if [[ "$changed_files" == *"scripts/ci/unrelated-tool.sh"* ]]; then
+      echo "FAIL: unrelated development commit leaked into PR diff (merge-base fix not applied)" >&2
+      exit 1
+    fi
+    if [[ "$changed_files" != *"mobile/PrintFarmer/View.swift"* ]]; then
+      echo "FAIL: PR's own mobile file missing from diff" >&2
+      exit 1
+    fi
+
+    EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+      CHANGED_FILES_FROM_Z="$z_file" CHANGED_FILES="" \
+      GITHUB_OUTPUT="$out" \
+      bash "$SELECTOR"
+  ) || return 1
+
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+}
+
 case_push_to_development_full_safe() {
   local out="$1"
   CHANGED_FILES="README.md"
@@ -681,6 +788,80 @@ case_push_to_main_full_safe() {
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
+# Regression guard (#1397): the merge-base fix must be scoped to `pull_request`
+# events only. The `push` event path's `before`/`after` are already a real
+# ancestry pair on the trusted branch's own history (or, on a force-push, two
+# states of the same ref that git diff can compare directly regardless of
+# ancestry) — it must never be routed through `git merge-base`. This builds a
+# scratch repo simulating a force-push on `development` where `before` is NOT
+# an ancestor of `after` (the classic force-push edge case), and asserts
+# compute-change-set.sh still diffs `before` directly against `after` and
+# reports the force-pushed commit's own file, with no merge-base indirection.
+case_compute_change_set_push_force_push_diffs_before_after_directly() {
+  local repo
+  repo="$(mktemp -d)"
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$repo'" RETURN
+
+  (
+    set -e
+    cd "$repo"
+    git init -q -b development
+    git config user.email "test@example.com"
+    git config user.name "Test"
+
+    printf 'root\n' > README.md
+    git add README.md
+    git commit -q -m "initial"
+
+    printf 'before state\n' >> README.md
+    git add README.md
+    git commit -q -m "before commit"
+    local before_sha
+    before_sha="$(git rev-parse HEAD)"
+
+    # Force-push edge case: reset to the initial commit and commit different
+    # content, so `before_sha` is NOT an ancestor of the new tip (`after_sha`).
+    git reset -q --hard HEAD~1
+    printf 'force-pushed content\n' > force-pushed.txt
+    git add force-pushed.txt
+    git commit -q -m "force-pushed commit"
+    local after_sha
+    after_sha="$(git rev-parse HEAD)"
+
+    if git merge-base --is-ancestor "$before_sha" "$after_sha" 2>/dev/null; then
+      echo "setup error: before_sha must not be an ancestor of after_sha for this test" >&2
+      exit 1
+    fi
+
+    local z_file changed_output
+    z_file="$(mktemp)"
+    changed_output="$(mktemp)"
+
+    EVENT_NAME="push" \
+      BEFORE_SHA="$before_sha" \
+      AFTER_SHA="$after_sha" \
+      OUT_FILE="$z_file" \
+      GITHUB_OUTPUT="$changed_output" \
+      bash "$REPO_ROOT/scripts/ci/compute-change-set.sh"
+
+    local force_safe
+    force_safe="$(get_output "$changed_output" force_full_safe)"
+    if [[ -n "$force_safe" ]]; then
+      echo "FAIL: push event diff failed (force_full_safe=$force_safe) — merge-base must not apply to push events" >&2
+      exit 1
+    fi
+
+    local changed_files
+    changed_files="$(tr '\0' '\n' < "$z_file")"
+    if [[ "$changed_files" != *"force-pushed.txt"* ]]; then
+      echo "FAIL: push event diff did not report the force-pushed file: $changed_files" >&2
+      exit 1
+    fi
+  ) || return 1
+  return 0
 }
 
 case_workflow_trusted_pushes_unfiltered() {
@@ -2093,8 +2274,10 @@ TESTS=(
   case_ci_script_change
   case_tools_only_build_no_tests
   case_mobile_change_no_dotnet
+  case_merge_base_diverged_pr_base_sha_mobile_only
   case_push_to_development_full_safe
   case_push_to_main_full_safe
+  case_compute_change_set_push_force_push_diffs_before_after_directly
   case_workflow_trusted_pushes_unfiltered
   case_workflow_dispatch_full_safe
   case_force_full_safe_from_caller
