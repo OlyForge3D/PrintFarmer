@@ -15,6 +15,47 @@ try {
   gitHash = execSync('git rev-parse --short HEAD').toString().trim();
 } catch { /* ignore: git not available (e.g. Docker build) — keep injected VITE_GIT_SHA */ }
 
+// Chunk-splitting policy (see full rationale in the `manualChunks` comment below):
+//   package name -> manual chunk name. Rolldown (Vite 8's bundler) requires
+//   `manualChunks` to be a function rather than the object form Rollup accepted,
+//   so this lookup table is resolved to a chunk name per-module via `getPackageName`.
+const manualChunkPackages: Record<string, string> = {
+  'react-router': 'routing',
+  // Keep only framework-agnostic Three modules here. Fiber and Drei
+  // follow the lazy 3D consumers so their React dependencies cannot
+  // turn this shared core into an eager app-shell chunk.
+  three: 'three',
+  'three-stdlib': 'three',
+  recharts: 'vendor-charts',
+  '@microsoft/signalr': 'vendor-signalr',
+  '@opentelemetry/api': 'vendor-otel-api',
+  '@opentelemetry/semantic-conventions': 'vendor-otel',
+  '@opentelemetry/exporter-trace-otlp-http': 'vendor-otel',
+  '@opentelemetry/auto-instrumentations-web': 'vendor-otel',
+  '@opentelemetry/instrumentation-fetch': 'vendor-otel',
+  '@opentelemetry/sdk-trace-web': 'vendor-otel',
+  '@opentelemetry/resources': 'vendor-otel',
+  '@opentelemetry/instrumentation-user-interaction': 'vendor-otel',
+  '@opentelemetry/instrumentation-xml-http-request': 'vendor-otel',
+  '@tanstack/react-query': 'vendor-tanstack',
+  '@mdi/js': 'vendor-icons',
+  'lucide-react': 'vendor-icons',
+  '@heroicons/react': 'vendor-icons',
+  'date-fns': 'vendor-datetime',
+};
+
+// Resolve the npm package name (including scope) that a module id was
+// imported from, e.g. `.../node_modules/@mdi/js/index.js` -> `@mdi/js`.
+function getPackageName(id: string): string | undefined {
+  const match = id.match(/node_modules\/((?:@[^/]+\/)?[^/]+)\//);
+  return match?.[1];
+}
+
+function manualChunks(id: string): string | undefined {
+  const pkg = getPackageName(id);
+  return pkg ? manualChunkPackages[pkg] : undefined;
+}
+
 // Emit dist/version.json at build time so the deployed frontend commit is queryable
 // (served by nginx at /version.json), mirroring the backend /api/system/version endpoints.
 function emitVersionJson() {
@@ -96,6 +137,19 @@ export default defineConfig({
     sourcemap: true,
     outDir: 'dist',
     chunkSizeWarningLimit: 1200,
+    modulePreload: {
+      // Rolldown (Vite 8's bundler) eagerly injects a <link rel="modulepreload">
+      // into index.html for the heavy OTel SDK chunk whenever main.tsx's dynamic
+      // `import('./telemetry/config')` is statically known to always execute
+      // (i.e. VITE_OTEL_EXPORTER_OTLP_ENDPOINT is set at build time). That
+      // defeats the deferred-load contract in main.tsx (see #1238): telemetry
+      // must load via a runtime dynamic import awaited after first paint, never
+      // block it via an eager <head> preload. Filter it out of the `html`
+      // preload list specifically; the runtime `js` preload (used by the
+      // dynamic import itself, right before it resolves) is left untouched.
+      resolveDependencies: (_filename, deps, { hostType }) =>
+        hostType === 'html' ? deps.filter((dep) => !/vendor-otel-(?!api)/i.test(dep)) : deps,
+    },
     rollupOptions: {
       onwarn(warning, defaultHandler) {
         // Suppress upstream annotation warnings from @microsoft/signalr which are safe
@@ -108,7 +162,8 @@ export default defineConfig({
       // External modules expect to be provided by the runtime environment
       // In a browser SPA, we need all dependencies bundled
       output: {
-        // Chunk-splitting policy:
+        // Chunk-splitting policy (full per-package rationale lives in
+        // `manualChunkPackages` above):
         //   1. Keep the routing chunk small and independent so the router
         //      shell can render before the rest of the app is parsed.
         //   2. Keep three.js core shared while allowing Drei to follow its
@@ -119,62 +174,7 @@ export default defineConfig({
         //   4. NEVER raise `chunkSizeWarningLimit`. If a new heavy library
         //      is added, add it here (or lazy-load its consumers) instead
         //      of silencing the warning.
-        manualChunks: {
-          routing: ['react-router'],
-          // Keep only framework-agnostic Three modules here. Fiber and Drei
-          // follow the lazy 3D consumers so their React dependencies cannot
-          // turn this shared core into an eager app-shell chunk.
-          three: ['three', 'three-stdlib'],
-          // Charting library — used across analytics/statistics/maintenance
-          // dashboards; ~400 kB minified. Splitting keeps it out of the
-          // main entry chunk (loaded only when a chart-using route mounts).
-          'vendor-charts': ['recharts'],
-          // Real-time transport. Isolated so the initial bundle does not
-          // pay for the SignalR client until a hub is actually contacted.
-          'vendor-signalr': ['@microsoft/signalr'],
-          // File/archive utilities intentionally follow their lazy consumers.
-          // Combining PDF, HTML capture, ZIP, and 3MF parsing in one manual
-          // chunk makes every interaction pay for all of them and can pull
-          // Vite's preload helper into that otherwise optional chunk.
-          // `@opentelemetry/api` gets its OWN chunk, separate from the
-          // heavy SDK below. unifiedLogging.ts imports it eagerly (it's
-          // just the no-op-by-default tracer interface, used from the main
-          // app entry regardless of whether telemetry is configured). If it
-          // were grouped into `vendor-otel`, Rollup would merge that whole
-          // manual-chunk group into one file and have the eager entry
-          // statically import from it — dragging the (otherwise lazy) SDK
-          // chunk back onto the critical path. Keeping it isolated ensures
-          // only this tiny API shim loads eagerly.
-          'vendor-otel-api': ['@opentelemetry/api'],
-          // OpenTelemetry web SDK — instrumentation stack used by the
-          // telemetry provider. main.tsx only dynamically imports
-          // telemetry/config.ts when VITE_OTEL_EXPORTER_OTLP_ENDPOINT is
-          // set, so this chunk is excluded from the critical path (and from
-          // index.html's modulepreload list) in the default, unconfigured
-          // build.
-          'vendor-otel': [
-            '@opentelemetry/semantic-conventions',
-            '@opentelemetry/exporter-trace-otlp-http',
-            '@opentelemetry/auto-instrumentations-web',
-            '@opentelemetry/instrumentation-fetch',
-            '@opentelemetry/sdk-trace-web',
-            '@opentelemetry/resources',
-            '@opentelemetry/instrumentation-user-interaction',
-            '@opentelemetry/instrumentation-xml-http-request',
-          ],
-          // React Query — used by nearly every page. Splitting it out
-          // shrinks per-route chunks. react-query-devtools is left in the
-          // main entry chunk because bundling it with react-query creates
-          // a circular chunk cycle via recharts. react-virtual is used
-          // only transitively (via drei), so it does not need its own
-          // chunk.
-          'vendor-tanstack': ['@tanstack/react-query'],
-          // Icon libraries: pulled from many pages. Grouping icons keeps
-          // the tree-shakeable icon sets off the main entry.
-          'vendor-icons': ['@mdi/js', 'lucide-react', '@heroicons/react/24/outline', '@heroicons/react/24/solid'],
-          // Date utilities — pulled in from many pages.
-          'vendor-datetime': ['date-fns'],
-        },
+        manualChunks,
       }
     }
   },
