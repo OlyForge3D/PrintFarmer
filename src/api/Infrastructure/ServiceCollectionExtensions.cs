@@ -480,7 +480,12 @@ public static class ServiceCollectionExtensions
             EmailOptions opts = sp.GetRequiredService<EmailOptions>();
             IEmailTemplateRenderer renderer = sp.GetRequiredService<IEmailTemplateRenderer>();
             IHttpClientFactory httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-            return opts.Mailjet?.ApiKey != null
+
+            bool useMailjet = opts.Enabled
+                && string.Equals(opts.Provider, "mailjet", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(opts.Mailjet?.ApiKey);
+
+            return useMailjet
                 ? new MailjetEmailService(loggerFactory.CreateLogger<MailjetEmailService>(), opts, renderer, httpClientFactory)
                 : new ConsoleEmailService(loggerFactory.CreateLogger<ConsoleEmailService>());
         });

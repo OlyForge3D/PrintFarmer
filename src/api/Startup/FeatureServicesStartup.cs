@@ -53,6 +53,25 @@ public static class FeatureServicesStartup
 
         // Notification Module (job event notifications broadcast to all users)
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.INotificationRepository, Farm.Infrastructure.Repositories.Notifications.EfNotificationRepository>();
+        services.AddSingleton(sp =>
+        {
+            var opts = new Farm.Infrastructure.Services.Notifications.VapidOptions();
+            configuration.GetSection("WebPush").Bind(opts);
+
+            // Backward compatibility: fall back to the legacy flat environment
+            // variables used before the "WebPush" configuration section existed.
+            opts.VapidPublicKey = string.IsNullOrWhiteSpace(opts.VapidPublicKey)
+                ? Environment.GetEnvironmentVariable("VAPID_PUBLIC_KEY")
+                : opts.VapidPublicKey;
+            opts.VapidPrivateKey = string.IsNullOrWhiteSpace(opts.VapidPrivateKey)
+                ? Environment.GetEnvironmentVariable("VAPID_PRIVATE_KEY")
+                : opts.VapidPrivateKey;
+            opts.VapidSubject = string.IsNullOrWhiteSpace(opts.VapidSubject)
+                ? Environment.GetEnvironmentVariable("VAPID_SUBJECT")
+                : opts.VapidSubject;
+
+            return opts;
+        });
         services.AddSingleton<Farm.Infrastructure.Services.Notifications.IWebPushNotificationSender, Farm.Infrastructure.Services.Notifications.WebPushNotificationSender>();
         services.AddSingleton<Farm.Infrastructure.Services.Notifications.ITelegramNotificationSender, Farm.Infrastructure.Services.Notifications.TelegramNotificationSender>();
         services.AddScoped<Farm.Infrastructure.Services.Notifications.INotificationChannel, Farm.Infrastructure.Services.Notifications.TelegramNotificationChannel>();

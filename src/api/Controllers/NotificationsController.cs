@@ -26,7 +26,7 @@ namespace Farm.Web.Api.Controllers;
 [Route("api/notifications")]
 [Produces("application/json")]
 [Authorize]
-public class NotificationsController(INotificationService notificationService) : ControllerBase
+public class NotificationsController(INotificationService notificationService, VapidOptions vapidOptions) : ControllerBase
 {
     /// <summary>
     /// Cached JSON options used by <see cref="GetPreferencesCapabilities"/>
@@ -295,14 +295,7 @@ public class NotificationsController(INotificationService notificationService) :
     [ProducesResponseType(typeof(VapidKeyResponse), StatusCodes.Status200OK)]
     public ActionResult<VapidKeyResponse> GetVapidKey()
     {
-        // TODO: Move to configuration once VAPID keys are generated for deployment
-        string? publicKey = Environment.GetEnvironmentVariable("VAPID_PUBLIC_KEY");
-        if (string.IsNullOrEmpty(publicKey))
-        {
-            return Ok(new VapidKeyResponse { PublicKey = string.Empty });
-        }
-
-        return Ok(new VapidKeyResponse { PublicKey = publicKey });
+        return Ok(new VapidKeyResponse { PublicKey = vapidOptions.VapidPublicKey ?? string.Empty });
     }
 
     /// <summary>

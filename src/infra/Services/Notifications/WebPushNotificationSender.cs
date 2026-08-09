@@ -15,30 +15,28 @@ public sealed class WebPushNotificationSender : IWebPushNotificationSender, IDis
 {
     private static readonly TimeSpan SendTimeout = TimeSpan.FromSeconds(5);
     private readonly ILogger<WebPushNotificationSender> _logger;
+    private readonly VapidOptions _vapidOptions;
     private readonly WebPushClient _client;
 
-    public WebPushNotificationSender(ILogger<WebPushNotificationSender> logger)
+    public WebPushNotificationSender(ILogger<WebPushNotificationSender> logger, VapidOptions vapidOptions)
     {
         _logger = logger;
+        _vapidOptions = vapidOptions;
         _client = new WebPushClient();
     }
 
     public async Task<WebPushDispatchResult> SendAsync(DomainPushSubscription subscription, string payload, CancellationToken cancellationToken = default)
     {
-        string? publicKey = Environment.GetEnvironmentVariable("VAPID_PUBLIC_KEY");
-        string? privateKey = Environment.GetEnvironmentVariable("VAPID_PRIVATE_KEY");
-        string? subject = Environment.GetEnvironmentVariable("VAPID_SUBJECT");
-
-        if (string.IsNullOrWhiteSpace(publicKey) || string.IsNullOrWhiteSpace(privateKey))
+        if (!_vapidOptions.IsConfigured)
         {
             _logger.LogWarning("Skipping web push delivery because VAPID keys are not configured");
             return new WebPushDispatchResult(Success: false, SubscriptionExpired: false, Error: "VAPID keys are not configured");
         }
 
         VapidDetails vapidDetails = new(
-            subject: string.IsNullOrWhiteSpace(subject) ? "mailto:noreply@printfarmer.local" : subject,
-            publicKey: publicKey,
-            privateKey: privateKey);
+            subject: string.IsNullOrWhiteSpace(_vapidOptions.VapidSubject) ? "mailto:noreply@printfarmer.local" : _vapidOptions.VapidSubject,
+            publicKey: _vapidOptions.VapidPublicKey,
+            privateKey: _vapidOptions.VapidPrivateKey);
 
         try
         {

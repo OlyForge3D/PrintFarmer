@@ -970,7 +970,7 @@ public sealed class NotificationPreferencesContractTests
                 .Instance,
             dbContext: dbContext);
 
-        return new NotificationsController(service)
+        return new NotificationsController(service, new Farm.Infrastructure.Services.Notifications.VapidOptions())
         {
             ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
             {
@@ -1029,7 +1029,7 @@ public sealed class NotificationPreferencesContractTests
                 .Instance,
             dbContext: dbContext);
 
-        var controller = new NotificationsController(service);
+        var controller = new NotificationsController(service, new Farm.Infrastructure.Services.Notifications.VapidOptions());
         controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext
         {
             HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext
