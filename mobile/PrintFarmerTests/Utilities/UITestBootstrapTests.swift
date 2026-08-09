@@ -313,6 +313,44 @@ final class UITestBootstrapTests: XCTestCase {
         )
     }
 
+    func test_makeBundle_authenticated_enablesPrintedPartsInventory() throws {
+        // #1353: `ResolvedSystemCapabilities.defaults.printedPartsInventoryEnabled`
+        // is `false` in production so a fresh server without SKUs/mappings
+        // does not surface the harvest flow. The demo bootstrap IS a fully-
+        // configured operator playground, so the harvest surfaces (JobDetail
+        // "Harvest to Inventory", Scan shortcut, ShiftTasks harvest destination)
+        // MUST be reachable in the default authenticated mode. Regressing this
+        // silently strands every `HarvestUITests` test.
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(mode: .authenticated, defaults: defaults)
+
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved.printedPartsInventoryEnabled,
+            "Default authenticated demo mode must enable printedPartsInventoryEnabled so the harvest flow is reachable"
+        )
+    }
+
+    #if DEBUG
+    func test_makeBundle_taskActionRouting_enablesPrintedPartsInventory() throws {
+        // #1353: `TaskActionRoute.compute` sets `harvestEnabled` from
+        // `printedPartsInventoryEnabled` and fails with `featureDisabled` for
+        // a shift-task harvest row when the flag is off. The task-action
+        // routing bootstrap MUST enable printed-parts inventory so
+        // `TaskActionRoutingUITests.testHarvestRowRoutesToExactStableHarvestDestination`
+        // routes to the harvest destination instead of hitting the disabled path.
+        let defaults = try makeEphemeralDefaults()
+        let bundle = UITestBootstrap.makeBundle(
+            mode: .authenticatedTaskActionRouting,
+            defaults: defaults
+        )
+
+        XCTAssertTrue(
+            bundle.services.capabilitiesService.resolved.printedPartsInventoryEnabled,
+            "Task-action routing mode must enable printedPartsInventoryEnabled so the harvest task row can route to its destination"
+        )
+    }
+    #endif
+
     // MARK: - Bundle wiring
 
     func test_makeBundle_seedsActiveServer() throws {
