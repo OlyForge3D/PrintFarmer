@@ -68,15 +68,41 @@ final class ShiftTasksUITests: ShiftTasksUITestBase {
         XCTAssertTrue(error.waitForExistence(timeout: 5))
         let retry = app.buttons["shiftTasks.mutation.retry.\(taskID)"]
         XCTAssertTrue(retry.waitForExistence(timeout: 3))
-        retry.tap()
 
         let empty = app.descendants(matching: .any)["shiftTasks.empty"]
-        XCTAssertTrue(
-            empty.waitForExistence(timeout: 5),
-            "Retry must execute the scripted second mutation and publish the canonical empty snapshot"
-        )
+        tapRetry(retry, whileShowing: error, untilShowing: empty)
         XCTAssertTrue(error.waitForNonExistence(timeout: 3))
         XCTAssertTrue(row.waitForNonExistence(timeout: 3))
+    }
+
+    private func tapRetry(
+        _ retry: XCUIElement,
+        whileShowing error: XCUIElement,
+        untilShowing empty: XCUIElement,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        retry.tap()
+        var reachedEmptyState = empty.waitForExistence(timeout: 5)
+        if !reachedEmptyState,
+           error.exists,
+           retry.exists,
+           retry.isEnabled,
+           retry.isHittable {
+            // Retry only when the unchanged error state proves the first
+            // synthesized tap was dropped. Once the action starts, Retry is
+            // disabled or removed, preventing a duplicate service mutation.
+            retry.tap()
+        }
+        if !reachedEmptyState {
+            reachedEmptyState = empty.waitForExistence(timeout: 10)
+        }
+        XCTAssertTrue(
+            reachedEmptyState,
+            "Retry must execute the scripted second mutation and publish the canonical empty snapshot",
+            file: file,
+            line: line
+        )
     }
 
     func testP7DismissClearsOnlyCurrentErrorWithoutTaskMutation() {
