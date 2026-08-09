@@ -1,6 +1,7 @@
 /*
  * High-contrast cascade mechanism (issue #1297) and per-theme token values
- * (issue #1298, `light`/`dark`/`matrix`).
+ * (issue #1298, `light`/`dark`/`matrix`; issue #1299, `blueprint`/`ratos`/
+ * `voron`/`farm`/`forge`).
  *
  * The mechanism, per decision issue #1296:
  *   - `ThemeContext` sets `[data-contrast="high"]` (or `"normal"`) on
@@ -21,20 +22,19 @@
  * Why the per-theme values live here and NOT in `src/design-system/themes/`:
  *   - `AdminThemeSafety.test.ts` and `themeRegistry.test.ts` enforce that every
  *     file in `design-system/themes/` declares the exact same `--pf-*` token
- *     set (theme parity). Sibling issue #1299 (blueprint/ratos/voron/farm/
- *     forge) has not landed yet, so those theme files declare no high-contrast
- *     overrides at all. Declaring overrides for only 3 of 8 themes inside
- *     `themes/` would not add new token *names* (so parity would not break),
- *     but `semanticSurfaceForegrounds.test.ts` parses each `themes/<id>.css`
- *     file with a flat last-value-wins regex that does not understand
- *     selector context — a second `--pf-accent-bg: ...` declaration later in
- *     the same file would silently replace the base value that test reads,
- *     e.g. breaking `button-primary-bg === accent-bg` identity checks. Keeping
- *     high-contrast values in this separate, unlayered file (already excluded
- *     from both scanners — see #1297) avoids that collision entirely.
+ *     set (theme parity). `semanticSurfaceForegrounds.test.ts` parses each
+ *     `themes/<id>.css` file with a flat last-value-wins regex that does not
+ *     understand selector context — a second `--pf-accent-bg: ...`
+ *     declaration later in the same file would silently replace the base
+ *     value that test reads, e.g. breaking `button-primary-bg === accent-bg`
+ *     identity checks. Keeping high-contrast values in this separate,
+ *     unlayered file (already excluded from both scanners — see #1297)
+ *     avoids that collision entirely.
  *
- * Token contract (13 tokens, per #1296) implemented below for `light`, `dark`,
- * and `matrix`. Status-family tokens (success/warning/error/info) are
+ * Token contract (13 tokens, per #1296) implemented below for all eight
+ * themes: `light`/`dark`/`matrix` (issue #1298) and `blueprint`/`ratos`/
+ * `voron`/`farm`/`forge` (issue #1299). Status-family tokens
+ * (success/warning/error/info) are
  * out of scope until #1103 lands `--pf-on-success`/`--pf-on-warning`/
  * `--pf-on-error`/`--pf-on-info`, per the decision issue.
  *
@@ -81,6 +81,23 @@
   --pf-control-text:          #ffffff;
 }
 
+/* --- blueprint: AA (and AAA where cheap) high-contrast overrides ---------- */
+[data-theme='blueprint'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #cfe8ff;
+  --pf-border:                #6f9dc9;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #ffd400;
+  --pf-focus-ring:            #ffd400;
+  --pf-accent:                #7dd3fc;
+  --pf-accent-bg:             #075985;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
+}
+
 /* --- matrix: AA (and AAA where cheap) high-contrast overrides ------------- */
 [data-theme='matrix'][data-contrast='high'] {
   --pf-bg-0:                  #000000;
@@ -96,4 +113,72 @@
   --pf-on-accent:             #000000;
   --pf-control-bg:            #000000;
   --pf-control-text:          #00ff41;
+}
+
+/* --- ratos: AA (and AAA where cheap) high-contrast overrides -------------- */
+[data-theme='ratos'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #c3ffce;
+  --pf-border:                #6bcf85;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #7dffa0;
+  --pf-focus-ring:            #7dffa0;
+  --pf-accent:                #7dffa0;
+  --pf-accent-bg:             #0f5c2b;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
+}
+
+/* --- voron: AA (and AAA where cheap) high-contrast overrides -------------- */
+[data-theme='voron'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #f4f4f5;
+  --pf-border:                #a8a8ad;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #ff6b6b;
+  --pf-focus-ring:            #ff6b6b;
+  --pf-accent:                #ff6b6b;
+  --pf-accent-bg:             #8f1d1d;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
+}
+
+/* --- farm: AA (and AAA where cheap) high-contrast overrides --------------- */
+[data-theme='farm'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #ffe8c2;
+  --pf-border:                #d1a374;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #ffb454;
+  --pf-focus-ring:            #ffb454;
+  --pf-accent:                #ffb454;
+  --pf-accent-bg:             #7a3a09;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
+}
+
+/* --- forge: AA (and AAA where cheap) high-contrast overrides -------------- */
+[data-theme='forge'][data-contrast='high'] {
+  --pf-bg-0:                  #000000;
+  --pf-panel:                 #000000;
+  --pf-text-primary:          #ffffff;
+  --pf-text-secondary:        #ffe0bf;
+  --pf-border:                #d19a6a;
+  --pf-border-strong:         #ffffff;
+  --pf-control-border-focus:  #ffab5e;
+  --pf-focus-ring:            #ffab5e;
+  --pf-accent:                #ffab5e;
+  --pf-accent-bg:             #7a3d0f;
+  --pf-on-accent:             #ffffff;
+  --pf-control-bg:            #000000;
+  --pf-control-text:          #ffffff;
 }
