@@ -87,6 +87,12 @@ test('accepts the agent-verdict events the gate actually runs on', () => {
       evidence.run.head_branch = 'dev/jpapiez/some-feature';
       evidence.run.default_branch_contains_run = false;
     }
+    // pull_request_review additionally requires independent proof that the
+    // workflow file content matches the default branch, since GitHub does
+    // not guarantee its workflow definition is sourced from there.
+    if (event === 'pull_request_review') {
+      evidence.run.workflow_definition_matches_default_branch = true;
+    }
     assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED', event);
   }
 });
@@ -196,19 +202,29 @@ test('rejects a run whose workflow definition came off the default branch', () =
 
 // Regression tests for issue #1388: GitHub reports the *reviewed PR's* own
 // head branch (never the default branch or base ref) in run.head_branch for
-// both of these event types, even though their workflow definition is always
-// sourced from the default branch by platform guarantee. run.pull_requests is
+// both of these event types. pull_request_target's workflow definition is
+// still sourced from the default branch by platform guarantee, so event type
+// alone is sufficient evidence for it. pull_request_review carries no such
+// guarantee (its GITHUB_SHA/REF are the PR's own merge branch, identical to
+// plain pull_request), so it additionally requires proof that the workflow
+// file content at the reviewed commit matches the default branch's copy —
+// see workflow_definition_matches_default_branch. run.pull_requests is
 // deliberately NOT used as evidence: GitHub computes it dynamically from
 // currently-open PRs on the matching branch, so it goes empty as soon as the
 // PR merges or its branch is deleted — exactly the case this gate must still
 // verify (Ralph checks squad evidence against historical, often now-merged,
 // heads).
 for (const event of ['pull_request_target', 'pull_request_review']) {
+  const contentVerified = event === 'pull_request_review';
+
   test(`accepts a ${event} run whose head_branch is the PR's own branch`, () => {
     const evidence = fixture();
     evidence.run.event = event;
     evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
     evidence.run.default_branch_contains_run = false;
+    if (contentVerified) {
+      evidence.run.workflow_definition_matches_default_branch = true;
+    }
     assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
   });
 
@@ -218,6 +234,9 @@ for (const event of ['pull_request_target', 'pull_request_review']) {
     evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
     evidence.run.default_branch_contains_run = false;
     evidence.run.pull_requests = [];
+    if (contentVerified) {
+      evidence.run.workflow_definition_matches_default_branch = true;
+    }
     assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
   });
 
@@ -226,9 +245,35 @@ for (const event of ['pull_request_target', 'pull_request_review']) {
     evidence.run.event = event;
     evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
     evidence.run.display_title = 'Squad review record for PR #9999';
+    if (contentVerified) {
+      evidence.run.workflow_definition_matches_default_branch = true;
+    }
     assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
   });
 }
+
+// Security regression tests: a pull_request_review run must NOT be trusted
+// on event type alone, because GitHub does not guarantee this event's
+// workflow definition is sourced from the default branch (unlike
+// pull_request_target). A PR author who edits the gate workflow on their own
+// branch and gets a review submitted on that PR must not have the resulting
+// run accepted as trusted evidence.
+test('rejects a pull_request_review run whose workflow file does not match the default branch', () => {
+  const evidence = fixture();
+  evidence.run.event = 'pull_request_review';
+  evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
+  evidence.run.workflow_definition_matches_default_branch = false;
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
+
+test('rejects a pull_request_review run when the workflow content match is unproven', () => {
+  const evidence = fixture();
+  evidence.run.event = 'pull_request_review';
+  evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
+  // workflow_definition_matches_default_branch left undefined: simulates a
+  // Contents API lookup failure, which must fail closed, not open.
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+});
 
 test('rejects a success status whose description is not a recognised record', () => {
   const evidence = fixture();
