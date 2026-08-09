@@ -44,6 +44,38 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
     }
 
     /// <inheritdoc/>
+    public async Task<int> AddRangeAsync(IEnumerable<FilamentProfile> profiles, CancellationToken ct = default)
+    {
+        List<FilamentProfile> profileList = profiles as List<FilamentProfile> ?? profiles.ToList();
+        if (profileList.Count == 0)
+        {
+            return 0;
+        }
+
+        _db.FilamentProfiles.AddRange(profileList);
+        _ = await _db.SaveChangesAsync(ct);
+        return profileList.Count;
+    }
+
+    /// <inheritdoc/>
+    public async Task<HashSet<string>> GetExistingSystemHashesAsync(IEnumerable<string> hashes, SlicerType engine, CancellationToken ct = default)
+    {
+        List<string> hashList = hashes as List<string> ?? hashes.ToList();
+        if (hashList.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        List<string> existing = await _db.FilamentProfiles
+            .AsNoTracking()
+            .Where(p => p.Hash != null && hashList.Contains(p.Hash) && p.IsSystem && p.SlicerType == engine)
+            .Select(p => p.Hash!)
+            .ToListAsync(ct);
+
+        return new HashSet<string>(existing);
+    }
+
+    /// <inheritdoc/>
     public async Task UpdateAsync(FilamentProfile profile, CancellationToken ct = default)
     {
         _ = _db.FilamentProfiles.Update(profile);

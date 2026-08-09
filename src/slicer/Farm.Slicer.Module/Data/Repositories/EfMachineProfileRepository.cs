@@ -44,6 +44,38 @@ public class EfMachineProfileRepository(SlicerDbContext db) : IMachineProfileRep
     }
 
     /// <inheritdoc/>
+    public async Task<int> AddRangeAsync(IEnumerable<MachineProfile> profiles, CancellationToken ct = default)
+    {
+        List<MachineProfile> profileList = profiles as List<MachineProfile> ?? profiles.ToList();
+        if (profileList.Count == 0)
+        {
+            return 0;
+        }
+
+        _db.MachineProfiles.AddRange(profileList);
+        _ = await _db.SaveChangesAsync(ct);
+        return profileList.Count;
+    }
+
+    /// <inheritdoc/>
+    public async Task<HashSet<string>> GetExistingSystemHashesAsync(IEnumerable<string> hashes, SlicerType engine, CancellationToken ct = default)
+    {
+        List<string> hashList = hashes as List<string> ?? hashes.ToList();
+        if (hashList.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        List<string> existing = await _db.MachineProfiles
+            .AsNoTracking()
+            .Where(p => p.Hash != null && hashList.Contains(p.Hash) && p.IsSystem && p.SlicerType == engine)
+            .Select(p => p.Hash!)
+            .ToListAsync(ct);
+
+        return new HashSet<string>(existing);
+    }
+
+    /// <inheritdoc/>
     public async Task UpdateAsync(MachineProfile profile, CancellationToken ct = default)
     {
         _ = _db.MachineProfiles.Update(profile);
