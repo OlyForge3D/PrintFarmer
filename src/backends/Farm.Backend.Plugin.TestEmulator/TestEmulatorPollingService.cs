@@ -30,7 +30,9 @@ public sealed class TestEmulatorPollingService(
     /// <summary>
     /// The last "printerupdated" payload actually broadcast per printer, used to suppress
     /// byte-identical re-broadcasts. Cleared implicitly on backend restart (new service instance),
-    /// so the first message for a printer is never suppressed.
+    /// so the first message for a printer is never suppressed. Stale entries for printers no
+    /// longer registered with <see cref="TestEmulatorStateManager"/> are pruned every poll cycle
+    /// via <see cref="PruneStaleBroadcastCache"/> to avoid unbounded growth.
     /// </summary>
     private readonly ConcurrentDictionary<Guid, PrinterStatusUpdate> _lastBroadcastUpdates = new();
 
@@ -86,10 +88,13 @@ public sealed class TestEmulatorPollingService(
             {
                 try
                 {
-                    foreach (Guid printerId in stateManager.GetAllPrinterIds())
+                    IReadOnlyCollection<Guid> activePrinterIds = stateManager.GetAllPrinterIds();
+                    foreach (Guid printerId in activePrinterIds)
                     {
                         await TickPrinterAsync(printerId, ct);
                     }
+
+                    PruneStaleBroadcastCache(activePrinterIds);
 
                     await Task.Delay(PollingInterval, ct);
                 }
@@ -107,6 +112,28 @@ public sealed class TestEmulatorPollingService(
         catch (OperationCanceledException)
         {
             logger.LogInformation("TestEmulatorPollingService main loop cancelled");
+        }
+    }
+
+    /// <summary>
+    /// Removes broadcast-cache entries for printers that are no longer registered with the
+    /// state manager (e.g. removed/churned emulator printers), preventing unbounded growth
+    /// of <see cref="_lastBroadcastUpdates"/> over the process lifetime.
+    /// </summary>
+    private void PruneStaleBroadcastCache(IReadOnlyCollection<Guid> activePrinterIds)
+    {
+        if (_lastBroadcastUpdates.IsEmpty)
+        {
+            return;
+        }
+
+        var activeSet = activePrinterIds as HashSet<Guid> ?? [.. activePrinterIds];
+        foreach (Guid cachedPrinterId in _lastBroadcastUpdates.Keys)
+        {
+            if (!activeSet.Contains(cachedPrinterId))
+            {
+                _lastBroadcastUpdates.TryRemove(cachedPrinterId, out _);
+            }
         }
     }
 
