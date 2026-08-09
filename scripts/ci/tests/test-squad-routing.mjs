@@ -259,7 +259,7 @@ test('live workflows inject counts and clean up prior owner labels', () => {
     triageWorkflow,
     /canonicalOwnerLabels\(issueBeforeAssignment\.labels\)/,
   );
-  assert.match(triageWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
+  assert.match(triageWorkflow, /isRosterExcluded\(cells\[0\], \['scribe', 'ralph'\]\)/);
 
   const heartbeatWorkflow = readFileSync(
     path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-heartbeat.yml'),
@@ -287,7 +287,141 @@ test('live workflows inject counts and clean up prior owner labels', () => {
     path.join(here, '..', '..', '..', '.github', 'workflows', 'sync-squad-labels.yml'),
     'utf8',
   );
-  assert.match(labelSyncWorkflow, /isRosterExcluded\(cells\[0\], \['scribe'\]\)/);
+  assert.match(labelSyncWorkflow, /isRosterExcluded\(cells\[0\], \['scribe', 'ralph'\]\)/);
+});
+
+/**
+ * Extract and execute the literal roster-parsing loop embedded in an
+ * `actions/github-script` block, so the test exercises the exact inline code
+ * that runs in CI — not just a regex match on the workflow source, and not a
+ * reimplementation that could silently drift from what the workflow actually
+ * does. This is what would have caught squad-triage.yml / sync-squad-labels.yml
+ * falling behind squad-issue-assign.yml's `['scribe', 'ralph']` exclusion list
+ * (issue #1275's "three copies of the same roster-parsing loop diverging").
+ */
+function runEmbeddedRosterLoop(workflowSource, endMarker, teamMdContent) {
+  const normalized = workflowSource.replace(/\r\n/g, '\n');
+  const start = normalized.indexOf('const members = [];');
+  const end = normalized.indexOf(endMarker, start);
+  assert.ok(
+    start > -1 && end > start,
+    'could not locate the roster-parsing loop boundaries in the workflow source',
+  );
+  const loopCode = normalized.slice(start, end);
+  const run = new Function('lines', 'isRosterExcluded', `${loopCode}\nreturn members;`);
+  return run(teamMdContent.split('\n'), isRosterExcluded);
+}
+
+/**
+ * Independently parse every row of the `## Members` table, with no
+ * exclusion applied. This is deliberately a second, separate implementation
+ * from the workflow loops and from `ralph.parseRoster` — it exists only to
+ * give the completeness assertions below something to compare against that
+ * cannot itself hide a truncation bug shared with the code under test.
+ */
+function parseAllMemberRows(teamMdContent) {
+  const rows = [];
+  let inMembersTable = false;
+  for (const line of teamMdContent.replace(/\r\n/g, '\n').split('\n')) {
+    if (/^##\s+(Members|Team Roster)/i.test(line)) {
+      inMembersTable = true;
+      continue;
+    }
+    if (inMembersTable && line.startsWith('## ')) {
+      break;
+    }
+    if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
+      const cells = line.split('|').map((c) => c.trim()).filter(Boolean);
+      if (cells.length >= 2) {
+        rows.push({ name: cells[0], role: cells[1] });
+      }
+    }
+  }
+  return rows;
+}
+
+test('squad-triage.yml roster loop excludes Scribe and Ralph from the real roster', () => {
+  const triageWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'squad-triage.yml'),
+    'utf8',
+  );
+  const teamMd = readFileSync(
+    path.join(here, '..', '..', '..', '.squad', 'team.md'),
+    'utf8',
+  );
+  const parsed = runEmbeddedRosterLoop(
+    triageWorkflow,
+    "\n\n            const routingFile = '.squad/routing.md';",
+    teamMd,
+  );
+
+  assert.ok(parsed.length > 0, 'roster loop must parse at least one member');
+  assert.equal(
+    parsed.some((m) => slugify(m.name) === 'scribe'),
+    false,
+    'squad-triage.yml roster loop must exclude Scribe',
+  );
+  assert.equal(
+    parsed.some((m) => slugify(m.name) === 'ralph'),
+    false,
+    'squad-triage.yml roster loop must exclude Ralph',
+  );
+
+  // Completeness: the loop must parse *exactly* the dispatchable roster rows
+  // — no more, no less. A premature `break`, a mis-set table boundary, or a
+  // truncated loop body could all still satisfy the exclusion checks above
+  // by accident (e.g. by stopping after the first row); comparing the full
+  // name set against an independently parsed roster catches that.
+  const expectedNames = new Set(
+    parseAllMemberRows(teamMd)
+      .filter((row) => !isRosterExcluded(row.name, ['scribe', 'ralph']))
+      .map((row) => row.name),
+  );
+  assert.deepEqual(
+    new Set(parsed.map((m) => m.name)),
+    expectedNames,
+    'squad-triage.yml roster loop must parse exactly the dispatchable roster rows',
+  );
+});
+
+test('sync-squad-labels.yml roster loop excludes Scribe and Ralph from the real roster', () => {
+  const labelSyncWorkflow = readFileSync(
+    path.join(here, '..', '..', '..', '.github', 'workflows', 'sync-squad-labels.yml'),
+    'utf8',
+  );
+  const teamMd = readFileSync(
+    path.join(here, '..', '..', '..', '.squad', 'team.md'),
+    'utf8',
+  );
+  const parsed = runEmbeddedRosterLoop(
+    labelSyncWorkflow,
+    '\n\n            core.info(',
+    teamMd,
+  );
+
+  assert.ok(parsed.length > 0, 'roster loop must parse at least one member');
+  assert.equal(
+    parsed.some((m) => slugify(m.name) === 'scribe'),
+    false,
+    'sync-squad-labels.yml roster loop must exclude Scribe',
+  );
+  assert.equal(
+    parsed.some((m) => slugify(m.name) === 'ralph'),
+    false,
+    'sync-squad-labels.yml roster loop must exclude Ralph',
+  );
+
+  // Completeness — see the matching comment in the squad-triage.yml test above.
+  const expectedNames = new Set(
+    parseAllMemberRows(teamMd)
+      .filter((row) => !isRosterExcluded(row.name, ['scribe', 'ralph']))
+      .map((row) => row.name),
+  );
+  assert.deepEqual(
+    new Set(parsed.map((m) => m.name)),
+    expectedNames,
+    'sync-squad-labels.yml roster loop must parse exactly the dispatchable roster rows',
+  );
 });
 
 test('squad-issue-assign.yml refuses excluded labels but keeps retired ones falling through', () => {
@@ -885,8 +1019,20 @@ test('Ralph parses the real roster without Scribe or Ralph', () => {
   const labels = roster.map((m) => m.label);
   assert.equal(labels.includes('squad:scribe'), false, 'Scribe must be excluded');
   assert.equal(labels.includes('squad:ralph'), false, 'Ralph must be excluded');
-  assert.equal(labels.includes('squad:lambert'), true);
-  assert.equal(labels.includes('squad:dallas'), true);
+
+  // Completeness: guard against a truncated or premature parse that would
+  // still satisfy the exclusion checks above by accident (e.g. stopping
+  // after the first row). Compare against an independently parsed roster.
+  const expectedNames = new Set(
+    parseAllMemberRows(teamMd)
+      .filter((row) => !isRosterExcluded(row.name, ['scribe', 'ralph']))
+      .map((row) => row.name),
+  );
+  assert.deepEqual(
+    new Set(roster.map((m) => m.name)),
+    expectedNames,
+    'ralph.parseRoster must parse exactly the dispatchable roster rows',
+  );
 
   // Every generated label must round-trip: the label a member is given
   // resolves back to that same member, which is what squad-issue-assign.yml
