@@ -123,8 +123,13 @@ final class ScanStationUITests: PrintFarmerUITestCase {
         XCTAssertTrue(printerRow.label.contains("Prusa MK4 #1"))
         printerRow.tap()
 
-        XCTAssertFalse(app.navigationBars["Printer Lookup"].exists,
-                       "Selecting a printer should dismiss the lookup list")
+        // The lookup sheet dismisses with an animated transition, so the
+        // navigation bar can still be present in the accessibility tree for
+        // a moment after the tap. Wait for it to actually disappear rather
+        // than sampling `.exists` synchronously (which flaked under CI
+        // simulator lag — see issue #1367).
+        XCTAssertTrue(app.navigationBars["Printer Lookup"].waitForNonExistence(timeout: 5),
+                      "Selecting a printer should dismiss the lookup list")
         let destination = app.staticTexts["printer.detail.destination.\(printerID)"]
         XCTAssertTrue(destination.waitForExistence(timeout: 8),
                       "Selecting a printer should navigate to that printer's detail view")
