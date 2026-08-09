@@ -8,6 +8,11 @@ export { SELECTABLE_THEMES, RETIRED_THEME_MAP, isSelectableTheme, normalizeTheme
 export type { Theme, SelectableTheme } from '@/design-system/themes/registry';
 import type { Theme } from '@/design-system/themes/registry';
 
+/** Manual override for the OS `prefers-contrast: more` signal. `'system'`
+ * defers to `prefersHighContrast`; `'high'`/`'normal'` force the mechanism
+ * on or off regardless of the OS signal. */
+export type ContrastPreference = 'system' | 'high' | 'normal';
+
 interface ThemeContextType {
   theme: Theme;
   computedTheme: Exclude<Theme, 'system'>;
@@ -18,12 +23,22 @@ interface ThemeContextType {
   isSystem: boolean;
   prefersReducedMotion: boolean;
   prefersHighContrast: boolean;
+  contrastPreference: ContrastPreference;
+  setContrastPreference: (preference: ContrastPreference) => void;
+  /** Resolved on/off state actually applied to the DOM: the manual override
+   * when set, otherwise the raw OS `prefersHighContrast` signal. */
+  highContrastActive: boolean;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 const THEME_STORAGE_KEY = 'pf-theme';
 const LEGACY_STORAGE_KEY = 'printfarmer-theme';
+const CONTRAST_STORAGE_KEY = 'pf-contrast';
+
+function normalizeContrastPreference(value: string | null): ContrastPreference {
+  return value === 'high' || value === 'normal' ? value : 'system';
+}
 
 export function ThemeProvider({ 
   children, 
@@ -59,6 +74,11 @@ export function ThemeProvider({
   const computedTheme: Exclude<Theme, 'system'> = theme === 'system' 
     ? (systemPrefersDark ? 'dark' : 'light')
     : (theme as Exclude<Theme, 'system'>);
+
+  const [contrastPreference, setContrastPreferenceState] = useState<ContrastPreference>(() => {
+    if (typeof window === 'undefined') return 'system';
+    return normalizeContrastPreference(localStorage.getItem(CONTRAST_STORAGE_KEY));
+  });
 
   const [accessibility, setAccessibility] = useState(() => {
     // Initialize accessibility preferences from matchMedia on first render
@@ -109,12 +129,24 @@ export function ThemeProvider({
     };
   }, []);
 
+  // Resolved on/off state: manual override wins when set, otherwise defer to
+  // the raw OS `prefers-contrast: more` signal.
+  const highContrastActive = contrastPreference === 'system'
+    ? accessibility.prefersHighContrast
+    : contrastPreference === 'high';
+
   // Apply theme to DOM and save to localStorage
   useEffect(() => {
     // Every theme is explicit. There is no "default with no attribute" case —
     // index.html sets data-theme before first paint, so a bare :root selector
     // would never match anyway.
     document.documentElement.setAttribute('data-theme', computedTheme);
+
+    // Always explicit for the same reason as data-theme above: this drives
+    // the [data-theme][data-contrast="high"] cascade override (see
+    // design-system/contrast.css), so a missing attribute must never be
+    // mistaken for "high contrast off" by a descendant selector.
+    document.documentElement.setAttribute('data-contrast', highContrastActive ? 'high' : 'normal');
 
     // Apply CSS variables for accessibility
     if (accessibility.prefersReducedMotion) {
@@ -125,12 +157,13 @@ export function ThemeProvider({
 
     // Save theme choice to localStorage
     localStorage.setItem(storageKey, theme);
+    localStorage.setItem(CONTRAST_STORAGE_KEY, contrastPreference);
 
     // Dispatch custom event for theme change
     window.dispatchEvent(new CustomEvent('themeChange', {
-      detail: { theme, computedTheme, ...accessibility }
+      detail: { theme, computedTheme, highContrastActive, ...accessibility }
     }));
-  }, [theme, computedTheme, accessibility, storageKey]);
+  }, [theme, computedTheme, accessibility, storageKey, contrastPreference, highContrastActive]);
 
   const setTheme = useCallback((newTheme: Theme) => {
     setThemeState(newTheme);
@@ -145,6 +178,10 @@ export function ThemeProvider({
     });
   }, []);
 
+  const setContrastPreference = useCallback((preference: ContrastPreference) => {
+    setContrastPreferenceState(preference);
+  }, []);
+
   const value: ThemeContextType = {
     theme,
     computedTheme,
@@ -155,6 +192,9 @@ export function ThemeProvider({
     isSystem: theme === 'system',
     prefersReducedMotion: accessibility.prefersReducedMotion,
     prefersHighContrast: accessibility.prefersHighContrast,
+    contrastPreference,
+    setContrastPreference,
+    highContrastActive,
   };
 
   return (
@@ -195,6 +235,18 @@ export function useComputedTheme() {
 }
 
 export function useAccessibilityPreferences() {
-  const { prefersReducedMotion, prefersHighContrast } = useTheme();
-  return { prefersReducedMotion, prefersHighContrast };
+  const {
+    prefersReducedMotion,
+    prefersHighContrast,
+    contrastPreference,
+    setContrastPreference,
+    highContrastActive,
+  } = useTheme();
+  return {
+    prefersReducedMotion,
+    prefersHighContrast,
+    contrastPreference,
+    setContrastPreference,
+    highContrastActive,
+  };
 }
