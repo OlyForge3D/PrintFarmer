@@ -6,6 +6,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Contracts.Setup;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Microsoft.Extensions.Logging;
@@ -156,7 +157,7 @@ public class SetupService(
         // Add user with admin role (repository handles SaveChanges)
         await _usersRepository.AddUserWithRoleAsync(adminUser, adminRole.Id, ct);
 
-        _logger.LogInformation("Initial admin user created: {AdminUserUsername} ({AdminUserEmail})", adminUser.Username, adminUser.Email);
+        _logger.LogInformation("Initial admin user created: {AdminUserUsername} ({AdminUserEmail})", adminUser.Username, SensitiveDataMasking.MaskEmail(adminUser.Email));
 
         // Generate JWT token for immediate login
         string token = await _authService.GenerateJwtTokenAsync(adminUser);
