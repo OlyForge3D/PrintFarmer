@@ -1,0 +1,115 @@
+name: Squad Blocked Label Sync
+
+on:
+  issues:
+    types: [closed, reopened]
+
+# Serialize runs repo-wide so two near-simultaneous blocker close/reopen
+# events can't read stale label state and race each other's label
+# add/remove or duplicate a comment. Never cancel a queued run — each one
+# reflects real dependency-graph state that must still be reconciled.
+concurrency:
+  group: squad-blocked-label-sync
+  cancel-in-progress: false
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  sync-blocked-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Recompute status:blocked from dependency graph
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const BLOCKED_LABEL = 'status:blocked';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue = context.payload.issue;
+            const action = context.payload.action; // 'closed' or 'reopened'
+
+            const hasLabel = (issueObj) =>
+              (issueObj.labels || []).some(
+                (l) => (typeof l === 'string' ? l : l.name) === BLOCKED_LABEL
+              );
+
+            // Issues that `issue` blocks (its dependents). Paginated —
+            // these are list endpoints with a default page size of 30.
+            const dependents = await github.paginate(
+              'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking',
+              { owner, repo, issue_number: issue.number, per_page: 100 }
+            );
+
+            if (dependents.length === 0) {
+              core.info(`#${issue.number} blocks nothing — no-op.`);
+              return;
+            }
+
+            for (const dependent of dependents) {
+              const dependentNumber = dependent.number;
+
+              if (action === 'closed') {
+                const blockers = await github.paginate(
+                  'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+                  { owner, repo, issue_number: dependentNumber, per_page: 100 }
+                );
+
+                // Vacuously true when the list is empty — deliberately not a
+                // length check, since GitHub may either drop closed blockers
+                // from this list or keep them with state: closed.
+                const allBlockersClosed = blockers.every((b) => b.state === 'closed');
+
+                if (!allBlockersClosed) {
+                  core.info(
+                    `#${dependentNumber} still has open blockers — leaving ${BLOCKED_LABEL} in place.`
+                  );
+                  continue;
+                }
+
+                if (!hasLabel(dependent)) {
+                  core.info(`#${dependentNumber} has no ${BLOCKED_LABEL} label — no-op.`);
+                  continue;
+                }
+
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: dependentNumber,
+                  name: BLOCKED_LABEL,
+                });
+
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: dependentNumber,
+                  body: `✅ All blockers closed — \`${BLOCKED_LABEL}\` removed. Ready to start.`,
+                });
+
+                core.info(`Removed ${BLOCKED_LABEL} from #${dependentNumber}.`);
+              } else if (action === 'reopened') {
+                if (hasLabel(dependent)) {
+                  core.info(`#${dependentNumber} already carries ${BLOCKED_LABEL} — no-op.`);
+                  continue;
+                }
+
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: dependentNumber,
+                  labels: [BLOCKED_LABEL],
+                });
+
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: dependentNumber,
+                  body: `🚧 Blocker #${issue.number} reopened — \`${BLOCKED_LABEL}\` re-applied.`,
+                });
+
+                core.info(`Re-applied ${BLOCKED_LABEL} to #${dependentNumber}.`);
+              } else {
+                core.setFailed(`Unexpected action: ${action}`);
+              }
+            }
