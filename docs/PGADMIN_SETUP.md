@@ -28,12 +28,18 @@ Or in non-interactive mode:
 ./scripts/deploy-docker.sh --enable-pgadmin --non-interactive
 ```
 
-### Default Credentials
+### Credentials
 
-- **Email**: `admin@printfarmer.local`
-- **Password**: `adminpass`
+- **Email**: `admin@printfarmer.local` by default (override via `AUTO_ADMIN_EMAIL`)
+- **Password**: generated automatically by `deploy-docker.sh` and written to your `.env`
+  file as `AUTO_ADMIN_PASSWORD` when not explicitly provided (see
+  `--auto-admin-password`). The compose template requires `AUTO_ADMIN_PASSWORD` to be
+  set and will refuse to start rather than fall back to a known default (see issue
+  #1295) — this is not a value you should hard-code or reuse across deployments.
 
-**Security Note**: These are default credentials for development. Change them in production by modifying the `PGADMIN_DEFAULT_EMAIL` and `PGADMIN_DEFAULT_PASSWORD` environment variables in `.env` file before deployment.
+**Security Note**: Treat `AUTO_ADMIN_PASSWORD` as a secret. Change it by setting
+`AUTO_ADMIN_PASSWORD` in your `.env` file before deployment; do not commit it to
+source control.
 
 ### Access pgAdmin
 
@@ -43,11 +49,10 @@ After deployment, access pgAdmin at:
 http://localhost:5050/pgadmin
 ```
 
-Or from a remote machine:
-
-```
-http://<your-server-ip>:5050/pgadmin
-```
+pgAdmin binds to `127.0.0.1:5050` by default so it is reachable only from the host
+running the container. To allow remote access deliberately, override the port binding
+in your compose override (e.g. bind `0.0.0.0:5050:80`) — this is an explicit,
+opt-in change, not the shipped default.
 
 ## How It Works
 
@@ -92,8 +97,8 @@ PrintFarmer automatically generates a pre-configured `servers.json` file (in `.v
 
 1. **Login to pgAdmin**
    - Open: `http://localhost:5050/pgadmin`
-   - Email: `admin@printfarmer.local`
-   - Password: `adminpass`
+   - Email: `admin@printfarmer.local` (or your configured `AUTO_ADMIN_EMAIL`)
+   - Password: the value of `AUTO_ADMIN_PASSWORD` from your `.env` file
 
 2. **Navigate to Import**
    - In the top menu: **Tools** → **Import/Export** → **Import Servers**

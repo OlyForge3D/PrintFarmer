@@ -836,6 +836,7 @@ if [[ -n "$EXISTING_ENV" ]]; then
     _existing_tag=$(grep "^IMAGE_TAG=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_spoolman=$(grep "^PFARM__Spoolman__BaseUrl=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_worker_key="$(read_slicer_shared_key "$EXISTING_ENV")"
+    _existing_grafana_pw=$(grep "^GRAFANA_ADMIN_PASSWORD=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
 
     # Apply preserved values (CLI flags override where explicitly set)
     if [[ -n "$_existing_jwt" ]]; then
@@ -869,6 +870,9 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_worker_key" ]]; then
         WORKER_SHARED_API_KEY_PRESERVED="$_existing_worker_key"
     fi
+    if [[ -n "$_existing_grafana_pw" ]]; then
+        GRAFANA_ADMIN_PASSWORD_PRESERVED="$_existing_grafana_pw"
+    fi
 
     dimtext "Preserved: JWT key, DB credentials, connection string"
     if [[ -n "$_existing_worker_key" ]]; then dimtext "Preserved: slicer worker key"; fi
@@ -879,6 +883,12 @@ fi
 # ─── Generate secrets ───────────────────────────────────────────────────────
 JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
 WORKER_SHARED_API_KEY="${WORKER_SHARED_API_KEY:-${WORKER_SHARED_API_KEY_PRESERVED:-$(generate_secret 64)}}"
+# Grafana ships no safe default (see issue #1295); generate one whenever the
+# "full" profile (which includes the monitoring stack) is selected so the
+# compose file never has to fall back to a well-known admin/admin password.
+if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+    GRAFANA_ADMIN_PASSWORD="${GRAFANA_ADMIN_PASSWORD:-${GRAFANA_ADMIN_PASSWORD_PRESERVED:-$(generate_secret 24)}}"
+fi
 
 # ─── Detect LAN IP ──────────────────────────────────────────────────────────
 detect_lan_ip() {
@@ -984,6 +994,15 @@ ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
+fi
+
+# Append monitoring credentials when the "full" profile enables Grafana
+if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+    cat >> "$ENV_TEMP_FILE" <<MONITORINGEOF
+
+# Monitoring (Grafana admin credentials — no default; see issue #1295)
+GRAFANA_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD}
+MONITORINGEOF
 fi
 
 # Append ARM platform overrides if running on ARM
@@ -1299,7 +1318,7 @@ else
     container_name: printfarmer-grafana
     restart: unless-stopped
     environment:
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set to enable the monitoring stack}
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_AUTH_PROXY_ENABLED: "true"
       GF_AUTH_PROXY_HEADER_NAME: X-WEBAUTH-USER
