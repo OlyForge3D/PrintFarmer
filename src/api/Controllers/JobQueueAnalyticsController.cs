@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
@@ -146,7 +147,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving printer queue for {PrinterId}", printerId);
+            _logger.LogError(ex, "Error retrieving printer queue for {PrinterId}", LogSanitizer.Sanitize(printerId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve printer queue", details = ex.Message });
         }
     }
@@ -380,7 +381,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating job priority for {JobId}", jobId);
+            _logger.LogError(ex, "Error updating job priority for {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update priority" });
         }
     }
@@ -435,7 +436,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error pausing job {JobId}", jobId);
+            _logger.LogError(ex, "Error pausing job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to pause job" });
         }
     }
@@ -490,7 +491,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resuming job {JobId}", jobId);
+            _logger.LogError(ex, "Error resuming job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to resume job" });
         }
     }
@@ -545,7 +546,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error cancelling job {JobId}", jobId);
+            _logger.LogError(ex, "Error cancelling job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to cancel job" });
         }
     }
@@ -600,7 +601,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error rerunning job {JobId}", jobId);
+            _logger.LogError(ex, "Error rerunning job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to rerun job" });
         }
     }
@@ -698,7 +699,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving job details for {JobId}", jobId);
+            _logger.LogError(ex, "Error retrieving job details for {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve job details" });
         }
     }
@@ -751,7 +752,7 @@ public class JobQueueAnalyticsController(
                 return NotFound(new { error = $"Job '{jobId}' not found" });
             }
 
-            _logger.LogInformation("Job {JobId} details updated", jobId);
+            _logger.LogInformation("Job {JobId} details updated", LogSanitizer.Sanitize(jobId));
             return Ok(updatedJob);
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
@@ -762,17 +763,17 @@ public class JobQueueAnalyticsController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning(ex, "Invalid update request for job {JobId}", jobId);
+            _logger.LogWarning(ex, "Invalid update request for job {JobId}", LogSanitizer.Sanitize(jobId));
             return BadRequest(new { error = ex.Message });
         }
         catch (ValidationException ex)
         {
-            _logger.LogWarning(ex, "Deadline policy validation failed for job {JobId}", jobId);
+            _logger.LogWarning(ex, "Deadline policy validation failed for job {JobId}", LogSanitizer.Sanitize(jobId));
             return BadRequest(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating job details for {JobId}", jobId);
+            _logger.LogError(ex, "Error updating job details for {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update job details" });
         }
     }
@@ -829,7 +830,7 @@ public class JobQueueAnalyticsController(
                 return NotFound(new { error = $"Job '{jobId}' not found" });
             }
 
-            _logger.LogInformation("Notes updated for job {JobId}", jobId);
+            _logger.LogInformation("Notes updated for job {JobId}", LogSanitizer.Sanitize(jobId));
             return NoContent();
         }
         catch (Exception ex) when (ex is QueuePreconditionRequiredException or
@@ -840,7 +841,7 @@ public class JobQueueAnalyticsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating notes for job {JobId}", jobId);
+            _logger.LogError(ex, "Error updating notes for job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to update notes" });
         }
     }
@@ -997,17 +998,17 @@ public class JobQueueAnalyticsController(
 
             JobStateHistoryDto history = await _printJobManagementService.GetJobStateHistoryAsync(jobId, cancellationToken);
 
-            _logger.LogInformation("Retrieved state history for job {JobId}", jobId);
+            _logger.LogInformation("Retrieved state history for job {JobId}", LogSanitizer.Sanitize(jobId));
             return Ok(history);
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning(ex, "Invalid job ID: {JobId}", jobId);
+            _logger.LogWarning(ex, "Invalid job ID: {JobId}", LogSanitizer.Sanitize(jobId));
             return NotFound(new { error = ex.Message });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving state history for job {JobId}", jobId);
+            _logger.LogError(ex, "Error retrieving state history for job {JobId}", LogSanitizer.Sanitize(jobId));
             return StatusCode(StatusCodes.Status500InternalServerError, new { error = "Failed to retrieve state history" });
         }
     }

@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
@@ -63,7 +64,7 @@ public class CatalogService(
 
         if (existing.Id != Guid.Empty)
         {
-            _logger.LogInformation("Manufacturer '{Normalized}' already exists with ID {ExistingId}, returning existing manufacturer", normalized, existing.Id);
+            _logger.LogInformation("Manufacturer '{Normalized}' already exists with ID {ExistingId}, returning existing manufacturer", LogSanitizer.Sanitize(normalized), existing.Id);
             return new ManufacturerDto(existing.Id, existing.Name, existing.Url, existing.Description);
         }
 
@@ -74,17 +75,17 @@ public class CatalogService(
         try
         {
             await _repo.SaveChangesAsync(ct);
-            _logger.LogInformation("Created new manufacturer '{Normalized}' with ID {MfgId}", normalized, mfg.Id);
+            _logger.LogInformation("Created new manufacturer '{Normalized}' with ID {MfgId}", LogSanitizer.Sanitize(normalized), mfg.Id);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
             // Race condition: another thread created the manufacturer between our check and insert
             // Fetch the existing manufacturer and return it
-            _logger.LogInformation("Race condition detected for manufacturer '{Normalized}', fetching existing", normalized);
+            _logger.LogInformation("Race condition detected for manufacturer '{Normalized}', fetching existing", LogSanitizer.Sanitize(normalized));
             (Guid Id, string Name, string? Url, string? Description) found = (await _repo.GetManufacturersAsync(ct)).FirstOrDefault(m => m.Name == normalized);
             if (found.Id != Guid.Empty)
             {
-                _logger.LogInformation("Found existing manufacturer '{Normalized}' with ID {FoundId} after race condition", normalized, found.Id);
+                _logger.LogInformation("Found existing manufacturer '{Normalized}' with ID {FoundId} after race condition", LogSanitizer.Sanitize(normalized), found.Id);
                 return new ManufacturerDto(found.Id, found.Name, found.Url, found.Description);
             }
 
@@ -152,7 +153,7 @@ public class CatalogService(
 
         if (existing is not null)
         {
-            _logger.LogInformation("Model '{NormalizedName}' already exists for manufacturer {ManufacturerId}, returning existing model", normalizedName, manufacturerId);
+            _logger.LogInformation("Model '{NormalizedName}' already exists for manufacturer {ManufacturerId}, returning existing model", LogSanitizer.Sanitize(normalizedName), manufacturerId);
             return existing;
         }
 
@@ -180,17 +181,17 @@ public class CatalogService(
         try
         {
             await _repo.SaveChangesAsync(ct);
-            _logger.LogInformation("Created new model '{NormalizedName}' with ID {ModelId} for manufacturer {ManufacturerId}", normalizedName, model.Id, manufacturerId);
+            _logger.LogInformation("Created new model '{NormalizedName}' with ID {ModelId} for manufacturer {ManufacturerId}", LogSanitizer.Sanitize(normalizedName), model.Id, manufacturerId);
         }
         catch (DbUpdateException ex) when (IsUniqueConstraint(ex))
         {
             // Race condition: another thread created the model between our check and insert
             // Fetch the existing model and return it
-            _logger.LogInformation("Race condition detected for model '{NormalizedName}', fetching existing", normalizedName);
+            _logger.LogInformation("Race condition detected for model '{NormalizedName}', fetching existing", LogSanitizer.Sanitize(normalizedName));
             PrinterModelDto? existingNowDto = (await _repo.GetModelsCachedAsync(manufacturerId, ct)).FirstOrDefault(m => m.Name == normalizedName);
             if (existingNowDto is not null)
             {
-                _logger.LogInformation("Found existing model '{NormalizedName}' with ID {ExistingNowDtoId} after race condition", normalizedName, existingNowDto.Id);
+                _logger.LogInformation("Found existing model '{NormalizedName}' with ID {ExistingNowDtoId} after race condition", LogSanitizer.Sanitize(normalizedName), existingNowDto.Id);
                 return existingNowDto;
             }
 
@@ -640,7 +641,7 @@ public class CatalogService(
         };
 
         await _repo.AddHotendModelAsync(model, ct);
-        _logger.LogInformation("Created hotend model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Created hotend model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         // Fetch with manufacturer info
         Domain.HotendModelDefinition? created = await _repo.GetHotendModelByIdAsync(model.Id, ct);
@@ -700,7 +701,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation("Updated hotend model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Updated hotend model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetHotendModelByIdAsync(id, ct);
@@ -746,7 +747,7 @@ public class CatalogService(
         };
 
         await _repo.AddExtruderModelAsync(model, ct);
-        _logger.LogInformation("Created extruder model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Created extruder model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         Domain.ExtruderModelDefinition? created = await _repo.GetExtruderModelByIdAsync(model.Id, ct);
         return new ExtruderModelDto(
@@ -800,7 +801,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation("Updated extruder model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Updated extruder model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetExtruderModelByIdAsync(id, ct);
@@ -844,7 +845,7 @@ public class CatalogService(
         };
 
         await _repo.AddToolheadModelAsync(model, ct);
-        _logger.LogInformation("Created toolhead model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Created toolhead model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         Domain.ToolheadModelDefinition? created = await _repo.GetToolheadModelByIdAsync(model.Id, ct);
         return new ToolheadModelDto(
@@ -887,7 +888,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation("Updated toolhead model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Updated toolhead model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetToolheadModelByIdAsync(id, ct);
@@ -934,7 +935,7 @@ public class CatalogService(
         };
 
         await _repo.AddNozzleModelAsync(model, ct);
-        _logger.LogInformation("Created nozzle model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Created nozzle model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         Domain.NozzleModelDefinition? created = await _repo.GetNozzleModelByIdAsync(model.Id, ct);
         return new NozzleModelDto(
@@ -998,7 +999,7 @@ public class CatalogService(
         }
 
         await _repo.SaveChangesAsync(ct);
-        _logger.LogInformation("Updated nozzle model '{ModelName}' with ID {ModelId}", model.Name, model.Id);
+        _logger.LogInformation("Updated nozzle model '{ModelName}' with ID {ModelId}", LogSanitizer.Sanitize(model.Name), model.Id);
 
         // Re-fetch to get updated manufacturer navigation property
         model = await _repo.GetNozzleModelByIdAsync(id, ct);

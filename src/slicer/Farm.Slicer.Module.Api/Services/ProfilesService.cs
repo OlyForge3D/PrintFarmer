@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Catalog;
@@ -120,7 +121,7 @@ public class ProfilesService(
     /// <exception cref="ArgumentException">Thrown if rawJson is missing or slicerType is invalid</exception>
     public async Task<(ProcessProfileExtendedDto Dto, bool Created)> ImportProfileAsync(ImportProcessProfileDto req, CancellationToken ct)
     {
-        _logger.LogInformation("[ImportProfileAsync] Starting profile import with name: {ReqName}, slicerType: {ReqSlicerType}, allowSystemOverride: {ReqAllowSystemOverride}", req.Name, req.SlicerType, req.AllowSystemOverride);
+        _logger.LogInformation("[ImportProfileAsync] Starting profile import with name: {ReqName}, slicerType: {ReqSlicerType}, allowSystemOverride: {ReqAllowSystemOverride}", LogSanitizer.Sanitize(req.Name), LogSanitizer.Sanitize(req.SlicerType), req.AllowSystemOverride);
 
         ArgumentNullException.ThrowIfNull(req);
         if (string.IsNullOrWhiteSpace(req.RawJson))
@@ -131,7 +132,7 @@ public class ProfilesService(
 
         if (string.IsNullOrWhiteSpace(req.SlicerType) || !Enum.TryParse(req.SlicerType, true, out SlicerType slicerType))
         {
-            _logger.LogError("[ImportProfileAsync] Failed: Invalid slicerType '{ReqSlicerType}'", req.SlicerType);
+            _logger.LogError("[ImportProfileAsync] Failed: Invalid slicerType '{ReqSlicerType}'", LogSanitizer.Sanitize(req.SlicerType));
             throw new ArgumentException("Invalid slicerType", nameof(req));
         }
 
@@ -194,17 +195,17 @@ public class ProfilesService(
             UpdatedAt = DateTime.UtcNow
         };
 
-        _logger.LogDebug("[ImportProfileAsync] Attempting to persist profile: {ImportedName} (ID: {ImportedId})", imported.Name, imported.Id);
+        _logger.LogDebug("[ImportProfileAsync] Attempting to persist profile: {ImportedName} (ID: {ImportedId})", LogSanitizer.Sanitize(imported.Name), imported.Id);
         ProcessProfile saved = await _processProfileRepo.AddOrUpdateFromImportAsync(imported, allowSystemOverride: req.AllowSystemOverride, ct);
         bool created = saved.Id == imported.Id;
 
         if (created)
         {
-            _logger.LogInformation("[ImportProfileAsync] New profile created successfully: {SavedName} (ID: {SavedId})", saved.Name, saved.Id);
+            _logger.LogInformation("[ImportProfileAsync] New profile created successfully: {SavedName} (ID: {SavedId})", LogSanitizer.Sanitize(saved.Name), saved.Id);
         }
         else
         {
-            _logger.LogInformation("[ImportProfileAsync] Existing profile updated: {SavedName} (ID: {SavedId})", saved.Name, saved.Id);
+            _logger.LogInformation("[ImportProfileAsync] Existing profile updated: {SavedName} (ID: {SavedId})", LogSanitizer.Sanitize(saved.Name), saved.Id);
         }
 
         Dictionary<string, object?> metadata = new(StringComparer.OrdinalIgnoreCase);
@@ -2021,7 +2022,7 @@ public class ProfilesService(
         }
 
         string url = $"{workerUrl}/api/profiles/machine/{Uri.EscapeDataString(manufacturer)}/{Uri.EscapeDataString(model)}";
-        _logger.LogInformation("Fetching machine profiles from worker: {Url}", url);
+        _logger.LogInformation("Fetching machine profiles from worker: {Url}", LogSanitizer.Sanitize(url));
 
         HttpResponseMessage response = await httpClient.GetAsync(url, ct);
         if (!response.IsSuccessStatusCode)
@@ -2660,7 +2661,7 @@ public class ProfilesService(
     /// <exception cref="ArgumentNullException">Thrown if request is null</exception>
     public async Task<ProcessProfileResponseDto> CreateProfileAsync(CreateProcessProfileDto req, CancellationToken ct)
     {
-        _logger.LogInformation("[CreateProfileAsync] Creating new profile: {ReqName}, slicerType: {ReqSlicerType}, quality: {ReqQuality}", req.Name, req.SlicerType, req.Quality);
+        _logger.LogInformation("[CreateProfileAsync] Creating new profile: {ReqName}, slicerType: {ReqSlicerType}, quality: {ReqQuality}", LogSanitizer.Sanitize(req.Name), LogSanitizer.Sanitize(req.SlicerType), LogSanitizer.Sanitize(req.Quality));
         ArgumentNullException.ThrowIfNull(req);
 
         (SlicerType slicerType, ProfileQuality quality) = ValidateAndParseEnums(req.SlicerType, req.Quality);
@@ -2685,7 +2686,7 @@ public class ProfilesService(
 
         await _repo.AddAsync(profile, ct);
 
-        _logger.LogInformation("Profile created: {ProfileId} - {ProfileName} ({ProfileSlicerType})", profile.Id, profile.Name, profile.SlicerType);
+        _logger.LogInformation("Profile created: {ProfileId} - {ProfileName} ({ProfileSlicerType})", profile.Id, LogSanitizer.Sanitize(profile.Name), profile.SlicerType);
 
         return ToResponseDto(profile);
     }
@@ -2989,7 +2990,7 @@ public class ProfilesService(
                 // that could mismatch the executing binary.
                 _logger.LogWarning(
                     "No fresh online OrcaSlicer worker (v{Version}) found in slicer registry",
-                    trimmedVersion);
+                    LogSanitizer.Sanitize(trimmedVersion));
                 return null;
             }
 
@@ -3110,7 +3111,7 @@ public class ProfilesService(
         };
 
         await _processProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
+        _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {
@@ -3155,7 +3156,7 @@ public class ProfilesService(
         };
 
         await _filamentProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
+        _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {
@@ -3197,7 +3198,7 @@ public class ProfilesService(
         };
 
         await _machineProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, newName, userId);
+        _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {
@@ -3268,7 +3269,7 @@ public class ProfilesService(
         };
 
         await _processProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
+        _logger.LogInformation("Uploaded process profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.PrinterModelId?.ToString()));
 
         return new CustomProfileDto
         {
@@ -3321,7 +3322,7 @@ public class ProfilesService(
         };
 
         await _filamentProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", name, userId, profile.CompatiblePrinters ?? "<none>");
+        _logger.LogInformation("Uploaded filament profile '{Name}' for user {UserId} (CompatiblePrinters={CompatiblePrinters})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.CompatiblePrinters ?? "<none>"));
 
         // Filament profiles do not carry a PrinterModelId column; they are matched to
         // printers via CompatiblePrinters strings instead. Always emit null PrinterModelId.
@@ -3376,7 +3377,7 @@ public class ProfilesService(
         };
 
         await _machineProfileRepo.AddAsync(profile, ct);
-        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", name, userId, profile.PrinterModelId);
+        _logger.LogInformation("Uploaded machine profile '{Name}' for user {UserId} (PrinterModelId={PrinterModelId})", LogSanitizer.Sanitize(name), userId, LogSanitizer.Sanitize(profile.PrinterModelId?.ToString()));
 
         return new CustomProfileDto
         {
@@ -3520,7 +3521,7 @@ public class ProfilesService(
 
         profile.UpdatedAt = DateTime.UtcNow;
         await _processProfileRepo.UpdateAsync(profile, ct);
-        _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", profile.Name, userId);
+        _logger.LogInformation("Updated process profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         return new CustomProfileDto
         {
@@ -3571,7 +3572,7 @@ public class ProfilesService(
 
         profile.UpdatedAt = DateTime.UtcNow;
         await _filamentProfileRepo.UpdateAsync(profile, ct);
-        _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", profile.Name, userId);
+        _logger.LogInformation("Updated filament profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         // Filament profiles do not have a PrinterModelId column; ignore any printer-model
         // fields on the request and always emit null in the response.
@@ -3624,7 +3625,7 @@ public class ProfilesService(
 
         profile.UpdatedAt = DateTime.UtcNow;
         await _machineProfileRepo.UpdateAsync(profile, ct);
-        _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", profile.Name, userId);
+        _logger.LogInformation("Updated machine profile '{ProfileName}' for user {UserId}", LogSanitizer.Sanitize(profile.Name), userId);
 
         return new CustomProfileDto
         {

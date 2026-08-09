@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Telemetry;
+﻿using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Telemetry;
 using Farm.OrcaSlicer.Worker.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Worker.Core;
@@ -37,7 +38,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
     {
         try
         {
-            _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy{ManufacturerFilter}", string.IsNullOrEmpty(manufacturer) ? string.Empty : $" for manufacturer '{manufacturer}'");
+            _logger.LogInformation("Fetching all OrcaSlicer profiles organized by manufacturer and model hierarchy{ManufacturerFilter}", LogSanitizer.Sanitize(string.IsNullOrEmpty(manufacturer) ? string.Empty : $" for manufacturer '{manufacturer}'"));
 
             // Load machine model profiles (base templates from machine_model_list)
             IList<MachineModelProfileDto> machineModelProfiles = await _profileService.ListAvailableMachineModelProfilesAsync(ct);
@@ -274,7 +275,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching profiles for manufacturer '{Manufacturer}': {Message}", manufacturer, ex.Message);
+            _logger.LogError("Error fetching profiles for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch manufacturer profiles", message = ex.Message });
         }
     }
@@ -291,7 +292,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
     {
         try
         {
-            _logger.LogInformation("Fetching printer models for manufacturer '{Manufacturer}'", manufacturer);
+            _logger.LogInformation("Fetching printer models for manufacturer '{Manufacturer}'", LogSanitizer.Sanitize(manufacturer));
 
             List<string> models;
             if (_cachedService != null)
@@ -311,12 +312,12 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     .ToList()!;
             }
 
-            _logger.LogInformation("Returning {ModelsCount} models for manufacturer '{Manufacturer}'", models.Count, manufacturer);
+            _logger.LogInformation("Returning {ModelsCount} models for manufacturer '{Manufacturer}'", models.Count, LogSanitizer.Sanitize(manufacturer));
             return Ok(models);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching models for manufacturer '{Manufacturer}': {Message}", manufacturer, ex.Message);
+            _logger.LogError("Error fetching models for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch printer models", message = ex.Message });
         }
     }
@@ -339,7 +340,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
             // Normalize underscores to spaces (URL encoding)
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
 
-            _logger.LogInformation("Fetching machine profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching machine profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             List<MachineProfileDto> result;
             if (_cachedService != null)
@@ -354,12 +355,12 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     .ToList();
             }
 
-            _logger.LogInformation("Returning {Count} machine profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} machine profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for '{PrinterModel}': {Message}", printerModel, ex.Message);
+            _logger.LogError("Error fetching machine profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
         }
     }
@@ -384,7 +385,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
             string normalizedModel = Uri.UnescapeDataString(model).Replace("_", " ", StringComparison.Ordinal);
             string normalizedMfg = Uri.UnescapeDataString(manufacturer);
 
-            _logger.LogInformation("Fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}'", normalizedMfg, normalizedModel);
+            _logger.LogInformation("Fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}'", LogSanitizer.Sanitize(normalizedMfg), LogSanitizer.Sanitize(normalizedModel));
 
             IList<MachineProfileDto> allProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
 
@@ -396,12 +397,12 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                      (p.Name ?? string.Empty).StartsWith(normalizedModel, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} machine profiles for manufacturer='{Manufacturer}', model='{Model}'", result.Count, normalizedMfg, normalizedModel);
+            _logger.LogInformation("Returning {Count} machine profiles for manufacturer='{Manufacturer}', model='{Model}'", result.Count, LogSanitizer.Sanitize(normalizedMfg), LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}': {Message}", manufacturer, model, ex.Message);
+            _logger.LogError("Error fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}': {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(model), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
         }
     }
@@ -421,7 +422,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching process profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching process profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -458,12 +459,12 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} process profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} process profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching process profiles for '{PrinterModel}': {Message}", printerModel, ex.Message);
+            _logger.LogError("Error fetching process profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch process profiles", message = ex.Message });
         }
     }
@@ -483,7 +484,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching filament profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching filament profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -523,12 +524,12 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} filament profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} filament profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching filament profiles for '{PrinterModel}': {Message}", printerModel, ex.Message);
+            _logger.LogError("Error fetching filament profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch filament profiles", message = ex.Message });
         }
     }
@@ -549,7 +550,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching all profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching all profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -597,13 +598,13 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
 
             _logger.LogInformation(
                 "Returning profiles for '{NormalizedModel}': {MachineCount} machines, {ProcessCount} processes, {FilamentCount} filaments",
-                normalizedModel, machineProfiles.Count, compatibleProcesses.Count, compatibleFilaments.Count);
+                LogSanitizer.Sanitize(normalizedModel), machineProfiles.Count, compatibleProcesses.Count, compatibleFilaments.Count);
 
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching all profiles for '{PrinterModel}': {Message}", printerModel, ex.Message);
+            _logger.LogError("Error fetching all profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
             return StatusCode(500, new { error = "Failed to fetch profiles", message = ex.Message });
         }
     }
@@ -677,7 +678,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                             p.CompatiblePrinters.Any(cp => machineNames.Contains(cp)))
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} process profiles for machines: {StringJoin}", result.Count, string.Join(", ", request.MachineNames));
+            _logger.LogInformation("Returning {Count} process profiles for machines: {StringJoin}", result.Count, LogSanitizer.Sanitize(string.Join(", ", request.MachineNames)));
             return Ok(result);
         }
         catch (Exception ex)
@@ -724,7 +725,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} filament profiles for machines: {StringJoin}", result.Count, string.Join(", ", request.MachineNames));
+            _logger.LogInformation("Returning {Count} filament profiles for machines: {StringJoin}", result.Count, LogSanitizer.Sanitize(string.Join(", ", request.MachineNames)));
             return Ok(result);
         }
         catch (Exception ex)

@@ -16,6 +16,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
@@ -1229,14 +1230,14 @@ public class PrintersController(
                 _logger.LogInformation(
                     "Imported {Imported} slicer profiles for {ModelName}",
                     imported,
-                    modelName);
+                    LogSanitizer.Sanitize(modelName));
             }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 "Failed to import profiles for {ModelName}: {Message}",
-                modelName,
+                LogSanitizer.Sanitize(modelName),
                 ex.Message);
         }
 
@@ -1798,7 +1799,7 @@ public class PrintersController(
 
                     _logger.LogInformation(
                         "[PRINTERS] No pooled Obico server available for printer {PrinterName}; using global Obico Failure Detection settings fallback",
-                        p.Name);
+                        LogSanitizer.Sanitize(p.Name));
                 }
             }
             else
@@ -2497,7 +2498,7 @@ public class PrintersController(
             _logger.LogWarning(
                 exception,
                 "Physical operation {Operation} has an unknown outcome on printer {PrinterId}",
-                operation,
+                LogSanitizer.Sanitize(operation),
                 printerId);
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
@@ -3616,7 +3617,7 @@ public class PrintersController(
                 spoolId,
                 id,
                 toolheadIndex,
-                overrideAudit.Reason);
+                LogSanitizer.Sanitize(overrideAudit.Reason));
             _telemetryService.RecordPrinterOperation("set_toolhead_spool_override", id.ToString(), true);
         }
 
@@ -4535,7 +4536,7 @@ public class PrintersController(
         }
         catch (KeyNotFoundException)
         {
-            _logger.LogInformation("History job {JobId} not found for printer {Id}", jobId, id);
+            _logger.LogInformation("History job {JobId} not found for printer {Id}", LogSanitizer.Sanitize(jobId), id);
             return NotFound($"History job {jobId} not found");
         }
         catch (NotSupportedException ex)
@@ -4550,22 +4551,22 @@ public class PrintersController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
+            _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (SocketException ex)
         {
-            _logger.LogError(ex, "Socket error retrieving history job {JobId} for printer {Id}", jobId, id);
+            _logger.LogError(ex, "Socket error retrieving history job {JobId} for printer {Id}", LogSanitizer.Sanitize(jobId), id);
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (TimeoutException ex)
         {
-            _logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {Id}", jobId, id);
+            _logger.LogWarning(ex, "Timeout retrieving history job {JobId} for printer {Id}", LogSanitizer.Sanitize(jobId), id);
             return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning("Timeout retrieving history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
+            _logger.LogWarning("Timeout retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
             return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
     }
@@ -4626,7 +4627,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to delete history job {JobId} for printer {Id}: {Message}", jobId, id, ex.Message);
+            _logger.LogError("Failed to delete history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
     }
@@ -5017,7 +5018,7 @@ public class PrintersController(
             _logger.LogInformation(
                 "Audited farm-admin discovery result bypass by user {UserId} for session {SessionId}",
                 userId,
-                sessionId);
+                LogSanitizer.Sanitize(sessionId));
         }
 
         CreatePrinterFromDiscoveryDto dto = CreatePrinterFromDiscoveryDto.FromDiscovered(
@@ -5080,12 +5081,12 @@ public class PrintersController(
             _logger.LogInformation(
                 "Audited farm-admin discovery session bypass by user {UserId} for session {SessionId}",
                 userId,
-                sessionId);
+                LogSanitizer.Sanitize(sessionId));
         }
 
         try
         {
-            _logger.LogInformation("[DISCOVERY] Cancelling discovery stream {SessionId}", sessionId);
+            _logger.LogInformation("[DISCOVERY] Cancelling discovery stream {SessionId}", LogSanitizer.Sanitize(sessionId));
 
             DiscoveryCancelResponse result = await _discoveryProxyService.CancelDiscoveryStreamAsync(sessionId, ct);
 
@@ -5093,7 +5094,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[DISCOVERY] Failed to cancel discovery stream {SessionId}", sessionId);
+            _logger.LogError(ex, "[DISCOVERY] Failed to cancel discovery stream {SessionId}", LogSanitizer.Sanitize(sessionId));
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Failed to cancel discovery",

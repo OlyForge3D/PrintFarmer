@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
 using Farm.Web.Api.Services.Workers;
@@ -132,28 +133,28 @@ public class UnifiedSettingsController(
                 string key = kvp.Key;
                 object value = kvp.Value;
                 currentKey = key;
-                _logger.LogDebug("Settings POST: Processing section key '{Key}'", key);
+                _logger.LogDebug("Settings POST: Processing section key '{Key}'", LogSanitizer.Sanitize(key));
 
                 // Skip settings types that manage their own secret fields.
                 if (_settingsBlocklist.Contains(key))
                 {
-                    _logger.LogWarning("Settings POST: Skipping blocked section '{Key}' — use the dedicated admin endpoint", key);
+                    _logger.LogWarning("Settings POST: Skipping blocked section '{Key}' — use the dedicated admin endpoint", LogSanitizer.Sanitize(key));
                     continue;
                 }
 
                 if (!keyToType.TryGetValue(key, out Type? settingsType))
                 {
-                    _logger.LogWarning("Settings POST: Unknown section key '{Key}'", key);
+                    _logger.LogWarning("Settings POST: Unknown section key '{Key}'", LogSanitizer.Sanitize(key));
                     continue;
                 }
 
                 if (value is System.Text.Json.JsonElement jsonElement)
                 {
-                    _logger.LogDebug("Settings POST: Deserializing section '{Key}' with type {Type}", key, settingsType);
+                    _logger.LogDebug("Settings POST: Deserializing section '{Key}' with type {Type}", LogSanitizer.Sanitize(key), settingsType);
                     try
                     {
                         object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
-                        _logger.LogDebug("Settings POST: Deserialized section '{Key}' successfully", key);
+                        _logger.LogDebug("Settings POST: Deserialized section '{Key}' successfully", LogSanitizer.Sanitize(key));
                         if (typedSettings != null)
                         {
                             // Verify the type implements IAppSetting (required for Save<T>)
@@ -166,15 +167,15 @@ public class UnifiedSettingsController(
                             // If the settings class implements IValidatableSetting, run validation and log errors
                             if (typedSettings is IValidatableSetting validatable)
                             {
-                                _logger.LogDebug("Settings POST: Validating section '{Key}'", key);
+                                _logger.LogDebug("Settings POST: Validating section '{Key}'", LogSanitizer.Sanitize(key));
                                 try
                                 {
                                     validatable.Validate();
-                                    _logger.LogDebug("Settings POST: Validation succeeded for section '{Key}'", key);
+                                    _logger.LogDebug("Settings POST: Validation succeeded for section '{Key}'", LogSanitizer.Sanitize(key));
                                 }
                                 catch (ValidationException vex)
                                 {
-                                    _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", key, vex.Message);
+                                    _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(key), vex.Message);
                                     return BuildValidationErrorResponse(vex, key);
                                 }
                             }
@@ -185,9 +186,9 @@ public class UnifiedSettingsController(
                                 try
                                 {
                                     System.Reflection.MethodInfo genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
-                                    _logger.LogDebug("Settings POST: Invoking Save for section '{Key}'", key);
+                                    _logger.LogDebug("Settings POST: Invoking Save for section '{Key}'", LogSanitizer.Sanitize(key));
                                     _ = genericSaveMethod.Invoke(_modularSettingsService, new object[] { typedSettings });
-                                    _logger.LogDebug("Settings POST: Save completed for section '{Key}'", key);
+                                    _logger.LogDebug("Settings POST: Save completed for section '{Key}'", LogSanitizer.Sanitize(key));
 
                                     // #709 item 5: coverage thresholds changed.
                                     if (string.Equals(key, SpoolCoverageSettings.SectionName, StringComparison.OrdinalIgnoreCase))
@@ -199,25 +200,25 @@ public class UnifiedSettingsController(
                                 {
                                     // Unwrap the actual exception from reflection invoke
                                     Exception actualException = tie.InnerException ?? tie;
-                                    _logger.LogError(actualException, "Settings POST: Save failed for section '{Key}'", key);
+                                    _logger.LogError(actualException, "Settings POST: Save failed for section '{Key}'", LogSanitizer.Sanitize(key));
                                     throw actualException;
                                 }
                             }
                         }
                         else
                         {
-                            _logger.LogWarning("Settings POST: Deserialization returned null for section '{Key}'", key);
+                            _logger.LogWarning("Settings POST: Deserialization returned null for section '{Key}'", LogSanitizer.Sanitize(key));
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError(ex, "Settings POST: Deserialization/validation failed for section '{Key}'", key);
+                        _logger.LogError(ex, "Settings POST: Deserialization/validation failed for section '{Key}'", LogSanitizer.Sanitize(key));
                         throw;
                     }
                 }
                 else
                 {
-                    _logger.LogWarning("Settings POST: Value for section '{Key}' is not a JsonElement", key);
+                    _logger.LogWarning("Settings POST: Value for section '{Key}' is not a JsonElement", LogSanitizer.Sanitize(key));
                 }
             }
 
@@ -405,7 +406,7 @@ public class UnifiedSettingsController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to process heartbeat for key '{KeyName}'", keyName);
+            _logger.LogError(ex, "Failed to process heartbeat for key '{KeyName}'", LogSanitizer.Sanitize(keyName));
             return StatusCode(500, new { message = $"Failed to process heartbeat: {ex.Message}" });
         }
     }
@@ -444,7 +445,7 @@ public class UnifiedSettingsController(
         }
         catch (ValidationException vex)
         {
-            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", keyName, vex.Message);
+            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(keyName), vex.Message);
             return BuildValidationErrorResponse(vex, keyName);
         }
         catch (Exception ex)
@@ -498,9 +499,9 @@ public class UnifiedSettingsController(
                 // translates it into the shared structured 400 response.
                 if (typedSettings is IValidatableSetting validatable)
                 {
-                    _logger.LogDebug("Settings POST (per-key): Validating section '{Key}'", keyName);
+                    _logger.LogDebug("Settings POST (per-key): Validating section '{Key}'", LogSanitizer.Sanitize(keyName));
                     validatable.Validate();
-                    _logger.LogDebug("Settings POST (per-key): Validation succeeded for section '{Key}'", keyName);
+                    _logger.LogDebug("Settings POST (per-key): Validation succeeded for section '{Key}'", LogSanitizer.Sanitize(keyName));
                 }
 
                 // Save using the modular service

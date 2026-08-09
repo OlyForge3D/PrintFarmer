@@ -20,6 +20,7 @@ using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
@@ -464,7 +465,7 @@ public class PrintersService(
                 _logger.LogWarning(
                     "[History] Backend detail returned null for printer {PrinterId}, job {JobId}; treating as unavailable",
                     printerId,
-                    jobId);
+                    LogSanitizer.Sanitize(jobId));
                 return HistoryJobProbeResult.Unavailable();
             }
 
@@ -1803,11 +1804,11 @@ public class PrintersService(
             if (existingMfg != null)
             {
                 manufacturerId = existingMfg.Id;
-                _logger.LogInformation("[Import] Found existing manufacturer '{Name}' with ID {ManufacturerId}", name, manufacturerId);
+                _logger.LogInformation("[Import] Found existing manufacturer '{Name}' with ID {ManufacturerId}", LogSanitizer.Sanitize(name), manufacturerId);
             }
             else
             {
-                _logger.LogInformation("[Import] Manufacturer '{Name}' not found - will use Unknown manufacturer", name);
+                _logger.LogInformation("[Import] Manufacturer '{Name}' not found - will use Unknown manufacturer", LogSanitizer.Sanitize(name));
 
                 // Fall through to default catalog logic below
             }
@@ -1824,11 +1825,11 @@ public class PrintersService(
             if (existingModel != null)
             {
                 modelId = existingModel.Id;
-                _logger.LogInformation("[Import] Found existing model '{Mname}' with ID {ModelId}", mname, modelId);
+                _logger.LogInformation("[Import] Found existing model '{Mname}' with ID {ModelId}", LogSanitizer.Sanitize(mname), modelId);
             }
             else
             {
-                _logger.LogInformation("[Import] Model '{Mname}' not found - will use Unknown model", mname);
+                _logger.LogInformation("[Import] Model '{Mname}' not found - will use Unknown model", LogSanitizer.Sanitize(mname));
 
                 // Fall through to default catalog logic below
             }
@@ -2023,7 +2024,7 @@ public class PrintersService(
             }
             else
             {
-                _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", dto.LocationName, p.Name);
+                _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", LogSanitizer.Sanitize(dto.LocationName), p.Name);
             }
         }
 
@@ -2076,14 +2077,14 @@ public class PrintersService(
     {
         if (printer.ModelId == Guid.Empty)
         {
-            _logger.LogDebug("[ApplyModelTemplate] Printer {PrinterName} has no model assigned - skipping template application", printer.Name);
+            _logger.LogDebug("[ApplyModelTemplate] Printer {PrinterName} has no model assigned - skipping template application", LogSanitizer.Sanitize(printer.Name));
             return false;
         }
 
         PrinterModelDto? modelTemplate = await _catalogService.GetModelByIdAsync(printer.ModelId, ct);
         if (modelTemplate == null)
         {
-            _logger.LogWarning("[ApplyModelTemplate] PrinterModel {PrinterModelId} not found for printer {PrinterName}", printer.ModelId, printer.Name);
+            _logger.LogWarning("[ApplyModelTemplate] PrinterModel {PrinterModelId} not found for printer {PrinterName}", printer.ModelId, LogSanitizer.Sanitize(printer.Name));
             return false;
         }
 
@@ -2188,11 +2189,11 @@ public class PrintersService(
         if (updated)
         {
             EnsureServiceState(printer).LastCapabilityUpdate = DateTime.UtcNow;
-            _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, printer.Name);
+            _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, LogSanitizer.Sanitize(printer.Name));
         }
         else
         {
-            _logger.LogDebug("[ApplyModelTemplate] Printer '{PrinterName}' already has all values set - synced without changes", printer.Name);
+            _logger.LogDebug("[ApplyModelTemplate] Printer '{PrinterName}' already has all values set - synced without changes", LogSanitizer.Sanitize(printer.Name));
         }
 
         return updated;
@@ -2956,7 +2957,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to send G-code '{Gcode}' to printer {Id}", gcode, id);
+            _logger.LogWarning(ex, "Failed to send G-code '{Gcode}' to printer {Id}", LogSanitizer.Sanitize(gcode), id);
             return false;
         }
     }
@@ -3999,7 +4000,7 @@ public class PrintersService(
                     "SyncMmuToolheadsOnEntityAsync: Removed {MembershipCount} fallback membership(s) and {GroupCount} under-populated group(s) for printer {PName} ({Id})",
                     removedMemberships,
                     removedGroups,
-                    printer.Name,
+                    LogSanitizer.Sanitize(printer.Name),
                     printer.Id);
             }
 
@@ -4007,7 +4008,7 @@ public class PrintersService(
             {
                 _logger.LogInformation(
                     "SyncMmuToolheadsOnEntityAsync: Removed {GateCount} MMU gate(s) from printer {PName} ({Id})",
-                    gatesToRemove.Count, printer.Name, printer.Id);
+                    gatesToRemove.Count, LogSanitizer.Sanitize(printer.Name), printer.Id);
             }
         }
 
@@ -4062,7 +4063,7 @@ public class PrintersService(
 
         _logger.LogInformation(
             "CreateMmuVirtualToolheads: Auto-creating {GateCount} MMU gates for printer {PName} ({Id})",
-            mmuGateCount, printer.Name, printer.Id);
+            mmuGateCount, LogSanitizer.Sanitize(printer.Name), printer.Id);
 
         var gates = new List<Toolhead>();
 
@@ -4088,7 +4089,7 @@ public class PrintersService(
 
         _logger.LogInformation(
             "CreateMmuVirtualToolheads: Created {GateCount} MMU gates for printer {PName} ({Id})",
-            gates.Count, printer.Name, printer.Id);
+            gates.Count, LogSanitizer.Sanitize(printer.Name), printer.Id);
 
         return gates;
     }
@@ -4126,7 +4127,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to start print from file {Filename} on printer {Id}", filename, id);
+            _logger.LogWarning(ex, "Failed to start print from file {Filename} on printer {Id}", LogSanitizer.Sanitize(filename), id);
             return false;
         }
     }
@@ -4374,7 +4375,7 @@ public class PrintersService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to download file {Filename} from printer {Id}", filename, id);
+            _logger.LogWarning(ex, "Failed to download file {Filename} from printer {Id}", LogSanitizer.Sanitize(filename), id);
             return null;
         }
     }
@@ -5287,7 +5288,7 @@ public class PrintersService(
                     existing.Id, _db, _storagePathService, _logger, ct);
 
                 _unitOfWork.Cameras.Remove(existing);
-                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, printer.Name);
+                _logger.LogInformation("[BuddyCamera] Removed Buddy camera {CameraId} for printer {PrinterName}", existing.Id, LogSanitizer.Sanitize(printer.Name));
             }
 
             return;
@@ -5314,7 +5315,7 @@ public class PrintersService(
                     existing.SnapshotUrl = snapshotUrl;
                 }
 
-                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, rtspUrl);
+                _logger.LogInformation("[BuddyCamera] Updated Buddy camera {CameraId} stream URL to {RtspUrl}", existing.Id, LogSanitizer.Sanitize(rtspUrl));
             }
         }
         else
@@ -5343,7 +5344,7 @@ public class PrintersService(
             }
 
             _unitOfWork.Cameras.Add(camera);
-            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, printer.Name, rtspUrl);
+            _logger.LogInformation("[BuddyCamera] Created Buddy camera {CameraId} for printer {PrinterName} at {RtspUrl}", camera.Id, LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(rtspUrl));
         }
     }
 

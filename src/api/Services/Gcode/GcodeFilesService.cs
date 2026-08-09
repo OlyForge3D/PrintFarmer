@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.UnitOfWork;
@@ -931,7 +932,7 @@ public class GcodeFilesService(
 
         // Track the folder in the database (virtual organization, not physical directories)
         FolderNode folder = await _folderService.GetOrCreateFolderAsync(folderPath, "gcode", ct);
-        _logger.LogInformation("[MakeDirectory] Created virtual folder in database: {FolderPath}", folderPath);
+        _logger.LogInformation("[MakeDirectory] Created virtual folder in database: {FolderPath}", LogSanitizer.Sanitize(folderPath));
 
         GcodeFileEntryDto dto = new(
             Path: folderPath,
@@ -975,7 +976,7 @@ public class GcodeFilesService(
             // Save changes to database
             await _gcodeRepo.SaveChangesAsync(ct);
 
-            _logger.LogInformation("[MoveToFolder] Moved file {GcodeFileFileName} to folder {TargetFolderPath}", gcodeFile.FileName, targetFolderPath);
+            _logger.LogInformation("[MoveToFolder] Moved file {GcodeFileFileName} to folder {TargetFolderPath}", gcodeFile.FileName, LogSanitizer.Sanitize(targetFolderPath));
             return true;
         }
         catch (Exception ex)
@@ -1333,7 +1334,7 @@ public class GcodeFilesService(
         catch (Exception ex)
         {
             string context = string.IsNullOrEmpty(logContext) ? "file" : logContext;
-            _logger.LogWarning(ex, "Failed to delete {Context}: {FilePath}", context, filePath);
+            _logger.LogWarning(ex, "Failed to delete {Context}: {FilePath}", context, LogSanitizer.Sanitize(filePath));
             return false;
         }
     }
@@ -1444,7 +1445,7 @@ public class GcodeFilesService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to extract metadata from gcode file {FilePath}", filePath);
+            _logger.LogWarning(ex, "Failed to extract metadata from gcode file {FilePath}", LogSanitizer.Sanitize(filePath));
             return null;
         }
     }
@@ -1469,7 +1470,7 @@ public class GcodeFilesService(
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Failed to extract thumbnail from gcode file {FilePath}", filePath);
+            _logger.LogWarning(ex, "Failed to extract thumbnail from gcode file {FilePath}", LogSanitizer.Sanitize(filePath));
             return null;
         }
     }
@@ -1495,7 +1496,7 @@ public class GcodeFilesService(
         CancellationToken ct,
         string? precomputedHash = null)
     {
-        _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {OriginalFileName} at {FilePath} with fileId {FileId}", originalFileName, filePath, fileId);
+        _logger.LogInformation("CreateGcodeFileRecordAsync: Starting for {OriginalFileName} at {FilePath} with fileId {FileId}", originalFileName, LogSanitizer.Sanitize(filePath), fileId);
 
         // Use pre-computed hash if provided, otherwise compute it
         string fileHash;
@@ -1525,7 +1526,7 @@ public class GcodeFilesService(
         if (filePath != finalFilePath && File.Exists(filePath))
         {
             File.Move(filePath, finalFilePath, overwrite: true);
-            _logger.LogInformation("Renamed file from {SourcePath} to {FinalPath}", filePath, finalFilePath);
+            _logger.LogInformation("Renamed file from {SourcePath} to {FinalPath}", LogSanitizer.Sanitize(filePath), LogSanitizer.Sanitize(finalFilePath));
         }
 
         // Rename thumbnail to match file ID with _thumb.png suffix (uses same GUID as gcode file)
@@ -1536,7 +1537,7 @@ public class GcodeFilesService(
             {
                 File.Move(thumbnailPath, finalThumbnailPath, overwrite: true);
                 thumbnailPath = finalThumbnailPath;
-                _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", thumbnailPath, finalThumbnailPath);
+                _logger.LogInformation("Moved thumbnail from {SourcePath} to {FinalPath}", LogSanitizer.Sanitize(thumbnailPath), LogSanitizer.Sanitize(finalThumbnailPath));
             }
         }
 
@@ -2067,7 +2068,7 @@ public class GcodeFilesService(
         fileId ??= Guid.NewGuid();
         virtualDirectory = NormalizeVirtualPath(virtualDirectory ?? "/");
 
-        _logger.LogInformation("ProcessAndStoreGcodeFileAsync: Starting for {OriginalFileName} (folderId={FolderId})", originalFileName, folderId);
+        _logger.LogInformation("ProcessAndStoreGcodeFileAsync: Starting for {OriginalFileName} (folderId={FolderId})", LogSanitizer.Sanitize(originalFileName), folderId);
 
         // Step 1: Store file to disk
         string storageDir = _storagePathService.GetGcodeStorageDirectory();
@@ -2079,11 +2080,11 @@ public class GcodeFilesService(
         try
         {
             await System.IO.File.WriteAllBytesAsync(finalFilePath, fileContent, ct);
-            _logger.LogInformation("[GcodeProcessing] File stored at {FinalFilePath} ({FileContentLength} bytes)", finalFilePath, fileContent.Length);
+            _logger.LogInformation("[GcodeProcessing] File stored at {FinalFilePath} ({FileContentLength} bytes)", LogSanitizer.Sanitize(finalFilePath), fileContent.Length);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[GcodeProcessing] Failed to store file to disk: {OriginalFileName}", originalFileName);
+            _logger.LogError(ex, "[GcodeProcessing] Failed to store file to disk: {OriginalFileName}", LogSanitizer.Sanitize(originalFileName));
             throw new FileStorageException(originalFileName, $"Failed to write file to disk: {ex.Message}", ex);
         }
 
@@ -2102,7 +2103,7 @@ public class GcodeFilesService(
         GcodeFile? existingFile = await _gcodeRepo.FindByHashAsync(fileHash, ct);
         if (existingFile != null && existingFile.Id != fileId)
         {
-            _logger.LogWarning("[GcodeProcessing] Duplicate file detected: {OriginalFileName} matches existing file {ExistingFileId}", originalFileName, existingFile.Id);
+            _logger.LogWarning("[GcodeProcessing] Duplicate file detected: {OriginalFileName} matches existing file {ExistingFileId}", LogSanitizer.Sanitize(originalFileName), existingFile.Id);
 
             // Clean up the file we just wrote
             TryDeleteFile(finalFilePath, "duplicate file cleanup");
@@ -2115,13 +2116,13 @@ public class GcodeFilesService(
         try
         {
             string gcodeText = Encoding.UTF8.GetString(fileContent);
-            _logger.LogDebug("[GcodeProcessing] Extracting metadata from {OriginalFileName} ({GcodeTextLength} chars)", originalFileName, gcodeText.Length);
+            _logger.LogDebug("[GcodeProcessing] Extracting metadata from {OriginalFileName} ({GcodeTextLength} chars)", LogSanitizer.Sanitize(originalFileName), gcodeText.Length);
             metadata = await _metadataExtractor.ExtractMetadataAsync(gcodeText);
             _logger.LogInformation("[GcodeProcessing] Metadata extracted: printer={MetadataPrinterModel}, material={MetadataMaterial}, time={MetadataEstimatedPrintTimeMinutes}m", metadata?.PrinterModel, metadata?.Material, metadata?.EstimatedPrintTimeMinutes);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[GcodeProcessing] Failed to extract metadata from {OriginalFileName}: {Name}: {Message}", originalFileName, ex.GetType().Name, ex.Message);
+            _logger.LogWarning(ex, "[GcodeProcessing] Failed to extract metadata from {OriginalFileName}: {Name}: {Message}", LogSanitizer.Sanitize(originalFileName), ex.GetType().Name, ex.Message);
 
             // Continue without metadata - it's not fatal
         }
@@ -2151,12 +2152,12 @@ public class GcodeFilesService(
             }
             else
             {
-                _logger.LogDebug("[GcodeProcessing] No thumbnail available for {OriginalFileName}", originalFileName);
+                _logger.LogDebug("[GcodeProcessing] No thumbnail available for {OriginalFileName}", LogSanitizer.Sanitize(originalFileName));
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[GcodeProcessing] Error processing thumbnail for {OriginalFileName}: {Name}: {Message}", originalFileName, ex.GetType().Name, ex.Message);
+            _logger.LogWarning(ex, "[GcodeProcessing] Error processing thumbnail for {OriginalFileName}: {Name}: {Message}", LogSanitizer.Sanitize(originalFileName), ex.GetType().Name, ex.Message);
 
             // Continue without thumbnail - it's not fatal
         }
@@ -2189,7 +2190,7 @@ public class GcodeFilesService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[GcodeProcessing] Failed to persist GcodeFile to database: {OriginalFileName}", originalFileName);
+            _logger.LogError(ex, "[GcodeProcessing] Failed to persist GcodeFile to database: {OriginalFileName}", LogSanitizer.Sanitize(originalFileName));
 
             // Clean up the stored file since database save failed
             TryDeleteFile(finalFilePath, "cleanup after database error");

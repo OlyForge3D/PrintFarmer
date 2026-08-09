@@ -6,6 +6,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Cameras;
@@ -302,7 +303,7 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error retrieving all queued jobs with filters: Status={FilterStatus}, Model={FilterModel}, Material={FilterMaterial}",
-                filterStatus, filterModel, filterMaterial);
+                LogSanitizer.Sanitize(filterStatus), LogSanitizer.Sanitize(filterModel), LogSanitizer.Sanitize(filterMaterial));
             throw;
         }
     }
@@ -322,7 +323,7 @@ public class PrintJobManagementService(
         {
             if (!Guid.TryParse(printerId, out Guid printerIdGuid))
             {
-                _logger.LogWarning("Invalid printer ID format: {PrinterId}", printerId);
+                _logger.LogWarning("Invalid printer ID format: {PrinterId}", LogSanitizer.Sanitize(printerId));
                 return [];
             }
 
@@ -331,7 +332,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving printer queue for printer {PrinterId}", printerId);
+            _logger.LogError(ex, "Error retrieving printer queue for printer {PrinterId}", LogSanitizer.Sanitize(printerId));
             throw;
         }
     }
@@ -946,13 +947,13 @@ public class PrintJobManagementService(
             }
 
             _ = await _repository.UpdateAsync(job, cancellationToken);
-            _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", jobId, newPriority, userId);
+            _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", LogSanitizer.Sanitize(jobId), newPriority, userId);
 
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating priority for print job {JobId}", jobId);
+            _logger.LogError(ex, "Error updating priority for print job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -1016,14 +1017,14 @@ public class PrintJobManagementService(
             await transaction.CommitAsync(cancellationToken);
             _logger.LogInformation(
                 "Durable pause command queued for job {JobId} by user {UserId}",
-                jobId,
+                LogSanitizer.Sanitize(jobId),
                 userId);
 
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error pausing print job {JobId}", jobId);
+            _logger.LogError(ex, "Error pausing print job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -1087,14 +1088,14 @@ public class PrintJobManagementService(
             await transaction.CommitAsync(cancellationToken);
             _logger.LogInformation(
                 "Durable resume command queued for job {JobId} by user {UserId}",
-                jobId,
+                LogSanitizer.Sanitize(jobId),
                 userId);
 
             return MapToQueuedPrintJobDto(job);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resuming print job {JobId}", jobId);
+            _logger.LogError(ex, "Error resuming print job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -2266,7 +2267,7 @@ public class PrintJobManagementService(
                     cancellationToken).ConfigureAwait(false);
             }
 
-            _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", jobId, userId);
+            _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", LogSanitizer.Sanitize(jobId), userId);
 
             // Send notification
             await SendJobFailureNotificationAsync(job, "Job cancelled by user", cancellationToken);
@@ -2275,7 +2276,7 @@ public class PrintJobManagementService(
                                          not QueuePreconditionRequiredException and
                                          not QueueSemanticConflictException)
         {
-            _logger.LogError(ex, "Error cancelling print job {JobId}", jobId);
+            _logger.LogError(ex, "Error cancelling print job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -2602,7 +2603,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error rerunning job {JobId}", jobId);
+            _logger.LogError(ex, "Error rerunning job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -4624,7 +4625,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving job details for {JobId}", jobId);
+            _logger.LogError(ex, "Error retrieving job details for {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -4752,7 +4753,7 @@ public class PrintJobManagementService(
             // than free-form tags. See .squad/decisions/inbox/ for competitive analysis.
             if (updates.Tags != null)
             {
-                _logger.LogDebug("Tags update requested but deferred in favor of Projects for job {JobId}", jobId);
+                _logger.LogDebug("Tags update requested but deferred in favor of Projects for job {JobId}", LogSanitizer.Sanitize(jobId));
             }
 
             if (updates.Copies.HasValue)
@@ -4782,7 +4783,7 @@ public class PrintJobManagementService(
 
             _logger.LogInformation(
                 "Job {JobId} details updated: Name={Name}, Priority={Priority}, Notes={NotesLength}",
-                jobId, job.Name, job.Priority, job.Notes?.Length ?? 0);
+                LogSanitizer.Sanitize(jobId), LogSanitizer.Sanitize(job.Name), job.Priority, job.Notes?.Length ?? 0);
 
             if (_coverageBroadcaster is not null
                 && (priorCopies != job.Copies
@@ -4808,7 +4809,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating job details for {JobId}", jobId);
+            _logger.LogError(ex, "Error updating job details for {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -4871,12 +4872,12 @@ public class PrintJobManagementService(
             job.UpdatedAt = DateTime.UtcNow;
             await _repository.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Notes updated for job {JobId}", jobId);
+            _logger.LogInformation("Notes updated for job {JobId}", LogSanitizer.Sanitize(jobId));
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating notes for job {JobId}", jobId);
+            _logger.LogError(ex, "Error updating notes for job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
@@ -5023,7 +5024,7 @@ public class PrintJobManagementService(
 
             _logger.LogInformation(
                 "Retrieved state history for job {JobId} with {Count} transitions",
-                jobId, transitions.Count);
+                LogSanitizer.Sanitize(jobId), transitions.Count);
 
             return new JobStateHistoryDto
             {
@@ -5041,7 +5042,7 @@ public class PrintJobManagementService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error getting state history for job {JobId}", jobId);
+            _logger.LogError(ex, "Error getting state history for job {JobId}", LogSanitizer.Sanitize(jobId));
             throw;
         }
     }
