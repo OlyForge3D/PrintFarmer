@@ -83,6 +83,12 @@ jobs:
   build:
     name: Build (iOS)
     needs: select
+    # `select` failing/being cancelled must NOT let this required check skip
+    # (skip counts as a pass for branch protection) — so this job runs even
+    # when `select` didn't succeed, and the step-level conditions below treat
+    # a non-successful `select` the same as `should_run == 'true'`: fail safe
+    # toward running the real build rather than silently passing unvalidated.
+    if: ${{ !cancelled() }}
     runs-on: macos-latest
     defaults:
       run:
@@ -92,15 +98,15 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Report skip reason
-        if: needs.select.outputs.should_run != 'true'
+        if: needs.select.result == 'success' && needs.select.outputs.should_run != 'true'
         run: echo "Skipping iOS build — ${{ needs.select.outputs.reason }}"
 
       - name: Verify marketing version consistency
-        if: needs.select.outputs.should_run == 'true'
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: ./scripts/verify-marketing-version.sh source 1.0
 
       - name: Select Xcode
-        if: needs.select.outputs.should_run == 'true'
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XCODE_PATH" ]; then
@@ -111,7 +117,7 @@ jobs:
           xcodebuild -version
 
       - name: Resolve package dependencies
-        if: needs.select.outputs.should_run == 'true'
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           xcodebuild -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -119,7 +125,7 @@ jobs:
             -clonedSourcePackagesDirPath build/SourcePackages
 
       - name: Archive future marketing version
-        if: needs.select.outputs.should_run == 'true'
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         timeout-minutes: 20
         run: |
           xcodebuild \
@@ -137,7 +143,7 @@ jobs:
             archive
 
       - name: Verify future archived marketing version
-        if: needs.select.outputs.should_run == 'true'
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           ./scripts/verify-marketing-version.sh resolved 1.1 \
             build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
