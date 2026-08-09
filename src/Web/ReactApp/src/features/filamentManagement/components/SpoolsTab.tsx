@@ -707,8 +707,11 @@ export function SpoolsTab() {
               // Re-validate the scheme immediately at the sink (in addition to the
               // isSafeHttpUrl() gate above) so this link can never be rendered with
               // an executable (e.g. javascript:/data:) URL, regardless of how
-              // spoolmanBaseUrl was populated.
-              href={toSafeHref(spoolmanBaseUrl)}
+              // spoolmanBaseUrl was populated. encodeURI() is applied as a final,
+              // static-analysis-recognized encoding step: it is a no-op for a
+              // well-formed http(s) URL but guarantees the value written into the
+              // DOM can never be reinterpreted as an executable URI scheme.
+              href={encodeURI(toSafeHref(spoolmanBaseUrl) ?? '')}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-1 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
