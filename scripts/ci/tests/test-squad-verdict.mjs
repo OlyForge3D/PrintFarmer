@@ -235,6 +235,27 @@ test('a gate block is missing evidence, not a reviewer rejection', () => {
   assert.match(verdict.reason, /fork PR needs a repository administrator/);
 });
 
+test('escapes SHA characters before building a dynamic RegExp', () => {
+  // The short SHA is interpolated into a dynamic RegExp. If it were not
+  // escaped, characters such as '.' would act as wildcards, and a
+  // description naming an unrelated 12-character prefix would incorrectly
+  // satisfy the pattern.
+  const craftedSha = `a${'.'.repeat(11)}${'b'.repeat(28)}`;
+  const shortSha = craftedSha.slice(0, 12);
+  const evidence = fixture();
+  evidence.pull.head.sha = craftedSha;
+  evidence.status.sha = craftedSha;
+
+  const unrelatedPrefix = `a${'x'.repeat(11)}`;
+  evidence.status.description =
+    `REVIEWED (self-attested) @ ${unrelatedPrefix} by bishop+hicks+vasquez`;
+  assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+
+  evidence.status.description =
+    `REVIEWED (self-attested) @ ${shortSha} by bishop+hicks+vasquez`;
+  assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
+});
+
 test('every description evaluateGate can emit round-trips through the verifier', () => {
   // Derived from the gate, never hand-written: a hand-written fixture proves
   // only that the verifier parses the string someone imagined, not the string

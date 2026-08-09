@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createNpmLicenseInventory,
   createNugetLicenseInventory,
+  decodeXml,
   enrichSbomDocument,
   scanPublicationFiles,
   findNugetAssetsFiles,
@@ -609,6 +610,24 @@ test('scanPublicationFiles permits variable credential templates', async () => {
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test('scanPublicationFiles reports a missing file without a pre-check race', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-missing-'));
+  try {
+    const errors = await scanPublicationFiles(root, ['does-not-exist.txt'], ['secret']);
+    assert.ok(hasCode(errors, 'PUBLICATION_FILE_MISSING'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('decodeXml decodes each entity exactly once, without double-unescaping', () => {
+  // "&amp;lt;" is the double-encoded form of the literal text "&lt;" and must
+  // decode to exactly that, not further to "<". Decoding entities
+  // sequentially with separate passes would double-unescape this value.
+  assert.equal(decodeXml('&amp;lt;value&amp;gt;'), '&lt;value&gt;');
+  assert.equal(decodeXml('MIT &amp; Apache-2.0'), 'MIT & Apache-2.0');
 });
 
 test('scanSourceArchive rejects secrets in the exact archived contents', async () => {

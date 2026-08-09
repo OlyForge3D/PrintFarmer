@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { checkMarkdown } from '../check-markdown.mjs';
+import { checkMarkdown, githubSlug } from '../check-markdown.mjs';
 
 async function withFixture(files, verify) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-doc-health-'));
@@ -124,4 +124,23 @@ test('accepts skipped schemes in reference definitions and validates local defin
     );
     assert.deepEqual(result.issues, []);
   });
+});
+
+test('githubSlug never leaves tag-delimiter characters in its output, even for nested/malformed markup', () => {
+  const nestedHeadings = [
+    'Alpha <a<b<c>d>e> Beta',
+    '<outer<inner>tail>',
+    'Mixed <<b>> markup',
+  ];
+  for (const heading of nestedHeadings) {
+    const slug = githubSlug(heading);
+    assert.doesNotMatch(slug, /[<>]/, `slug for ${JSON.stringify(heading)} kept a tag delimiter: ${slug}`);
+  }
+});
+
+test('githubSlug decodes each XML entity exactly once, without double-unescaping', () => {
+  // A heading containing the literal text "&lt;" encoded as "&amp;lt;" must
+  // decode to the literal text "&lt;", not further to "<". Decoding entities
+  // sequentially instead of in one pass would double-unescape this value.
+  assert.equal(githubSlug('&amp;lt;value&amp;gt;'), 'ltvaluegt');
 });

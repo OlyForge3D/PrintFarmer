@@ -96,13 +96,22 @@ export async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
 
-function decodeXml(value) {
+const xmlEntityDecodeMap = {
+  '&amp;': '&',
+  '&apos;': "'",
+  '&gt;': '>',
+  '&lt;': '<',
+  '&quot;': '"',
+};
+
+// Decodes all XML entities in a single pass so a decoded `&amp;` (which
+// produces a literal `&`) is never re-scanned and mistaken for the start of
+// another entity (e.g. `&amp;lt;` must decode to the literal text `&lt;`,
+// not further to `<`). Decoding sequentially with separate replaceAll calls
+// double-unescapes such values.
+export function decodeXml(value) {
   return value
-    .replaceAll('&amp;', '&')
-    .replaceAll('&apos;', "'")
-    .replaceAll('&gt;', '>')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&quot;', '"')
+    .replace(/&amp;|&apos;|&gt;|&lt;|&quot;/g, (entity) => xmlEntityDecodeMap[entity])
     .trim();
 }
 
@@ -1071,11 +1080,21 @@ export async function validateProvenanceManifest(repoRoot, manifest) {
     }
 
     const absolutePath = path.join(repoRoot, filePath);
-    if ((await stat(absolutePath)).size > 2_000_000) {
+    // Read the file directly and size-check the loaded content instead of
+    // stat-then-read: a separate pre-check stat() call races against this
+    // read if the file changes or disappears between the two operations.
+    let content;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
+    if (Buffer.byteLength(content, 'utf8') > 2_000_000) {
       continue;
     }
-
-    const content = await readFile(absolutePath, 'utf8');
     const markerMatch = content.match(/PrintFarmer-Provenance-ID:\s*([a-z0-9.-]+)/i);
     if (markerMatch && !entryIds.has(markerMatch[1])) {
       errors.push(createError(
@@ -1870,17 +1889,35 @@ export async function scanPublicationFiles(
   for (const relativePath of relativePaths) {
     const absolutePath = path.resolve(repoRoot, relativePath);
     const relativeToRoot = normalizeRelativePath(path.relative(repoRoot, absolutePath));
-    if (!isSafeRepositoryPath(relativeToRoot) || !(await pathExists(absolutePath))) {
+    if (!isSafeRepositoryPath(relativeToRoot)) {
       errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
       continue;
     }
 
-    if ((await stat(absolutePath)).size > 20_000_000) {
+    // Read the file directly instead of pathExists()-then-stat()-then-read:
+    // separate check-then-use fs calls race against concurrent changes or
+    // deletion of the file between the check and the use. Catching ENOENT
+    // from the actual read/stat call is atomic with respect to that file.
+    let fileStat;
+    try {
+      fileStat = await stat(absolutePath);
+    } catch {
+      errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
+      continue;
+    }
+
+    if (fileStat.size > 20_000_000) {
       errors.push(createError('PUBLICATION_FILE_SIZE', relativePath, 'publication scan only accepts files up to 20 MB'));
       continue;
     }
 
-    const content = await readFile(absolutePath, 'utf8');
+    let content;
+    try {
+      content = await readFile(absolutePath, 'utf8');
+    } catch {
+      errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
+      continue;
+    }
     scannedPaths.push(relativeToRoot);
     for (const pattern of patterns) {
       pattern.expression.lastIndex = 0;

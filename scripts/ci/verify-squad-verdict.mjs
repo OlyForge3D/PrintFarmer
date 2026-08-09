@@ -40,10 +40,18 @@ export function bindStatusToHead(status, headSha) {
   return { ...status, sha: headSha };
 }
 
+// Escapes regex metacharacters in a string so it can be safely interpolated
+// into a `new RegExp(...)` pattern as a literal match, rather than as regex
+// syntax. Required for any value built from a command-line argument or other
+// external input before it is used to construct a dynamic RegExp.
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function parseRunTarget(targetUrl, repository) {
   try {
     const url = new URL(targetUrl);
-    const escapedRepository = repository.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedRepository = escapeRegExp(repository);
     const match = url.pathname.match(
       new RegExp(`^/${escapedRepository}/actions/runs/([1-9]\\d*)/?$`, 'i'),
     );
@@ -76,7 +84,10 @@ function parseDisplayTitle(displayTitle) {
 // an independent party approved it.
 function parseStatusDescription(status, statusSha) {
   const description = status.description ?? '';
-  const shortSha = statusSha.slice(0, 12);
+  // `statusSha` may originate from the `--expected-head` command-line argument,
+  // so it must be escaped before use in a dynamic RegExp even though it is
+  // separately validated as a 40-character hex SHA.
+  const shortSha = escapeRegExp(statusSha.slice(0, 12));
   if (status.state === 'success') {
     const reviewed = new RegExp(
       `^REVIEWED \\(self-attested\\) @ ${shortSha} by (\\S.*)$`,
