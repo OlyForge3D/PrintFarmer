@@ -27,6 +27,7 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.Property(j => j.SlicerEngine).IsRequired();
         _ = builder.Property(j => j.SlicerEngineVersion).HasMaxLength(32);
         _ = builder.Property(j => j.SlicerEngineName).HasMaxLength(32);
+        _ = builder.Property(j => j.NormalizedEngine).IsRequired().HasDefaultValue(0);
         _ = builder.Property(j => j.ModelSha256).HasMaxLength(64);
         _ = builder.Property(j => j.SlicerProfileJson).HasColumnType("TEXT");
         _ = builder.Property(j => j.SlicerProfileId);
@@ -63,6 +64,16 @@ public class SliceJobConfiguration : IEntityTypeConfiguration<SliceJob>
         _ = builder.HasIndex(j => j.Status);
         _ = builder.HasIndex(j => j.QueuedAt);
         _ = builder.HasIndex(j => new { j.Status, j.Priority, j.QueuedAt }); // Queue processing
+
+        // Covering index for queue-stat aggregation
+        // (EfSliceJobRepository.GetQueueCountsAsync): the query filters WHERE Status IN (four
+        // values) and GROUPs BY (NormalizedEngine, Status), with no filter on NormalizedEngine.
+        // Status leads so the four reported statuses can be seeked directly (skipping
+        // Cancelled rows on this append-only, never-pruned table), with NormalizedEngine as the
+        // covering second column so per-engine/per-status counts come from the index alone.
+        _ = builder.HasIndex(j => new { j.Status, j.NormalizedEngine })
+            .HasDatabaseName("IX_SliceJobs_Status_NormalizedEngine");
+
         _ = builder.HasIndex(j => j.WorkerId);
         _ = builder.HasIndex(j => j.SlicerProfileId);
         _ = builder.HasIndex(j => j.Model3DId);

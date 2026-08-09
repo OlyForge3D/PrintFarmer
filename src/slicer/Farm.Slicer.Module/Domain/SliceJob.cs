@@ -63,6 +63,19 @@ public class SliceJob
     [MaxLength(32)]
     public string? SlicerEngineName { get; set; }
 
+    /// <summary>
+    /// Persisted normalized engine discriminator (mirrors <see cref="Models.SlicerEngineType"/>),
+    /// backing the covering (NormalizedEngine, Status) index used by queue-stat aggregation.
+    /// </summary>
+    /// <remarks>
+    /// Callers must not set this directly. <see cref="Data.SlicerDbContext"/> recomputes it on
+    /// every insert/update from <see cref="SlicerEngineName"/> via
+    /// <see cref="Models.SlicerEngineNames.ResolvePersistedName(string?)"/>, so it always applies
+    /// the same legacy fallback rule (missing/malformed engine name resolves to OrcaSlicer) and
+    /// can never drift out of sync with the source column.
+    /// </remarks>
+    public int NormalizedEngine { get; set; }
+
     /// <summary>Stored model identity the worker must resolve bytes through (no caller URL dereference).</summary>
     public Guid? Model3DId { get; set; }
 
