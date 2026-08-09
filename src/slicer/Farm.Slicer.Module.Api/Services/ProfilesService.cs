@@ -20,6 +20,7 @@ using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Slicer.Module.Api.Services;
@@ -86,6 +87,12 @@ public class ProfilesService(
     private readonly ISlicersService _slicersService = slicersService ?? throw new ArgumentNullException(nameof(slicersService));
     private readonly IProfileParsingService _parsingService = parsingService ?? throw new ArgumentNullException(nameof(parsingService));
     private readonly IPrinterModelAliasService _aliasService = aliasService ?? throw new ArgumentNullException(nameof(aliasService));
+
+    /// <summary>Shared options for case-insensitive JSON deserialization of worker responses.</summary>
+    private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>Shared options for compact, case-insensitive JSON (re)serialization used for hashing/storage.</summary>
+    private static readonly JsonSerializerOptions CaseInsensitiveCompactJsonOptions = new() { PropertyNameCaseInsensitive = true, WriteIndented = false };
 
     /// <summary>
     /// Imports a process profile from raw slicer configuration JSON with deduplication and validation.
@@ -823,7 +830,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
 
         return (allProfiles, orcaVersion, workerUrl);
     }
@@ -840,7 +847,7 @@ public class ProfilesService(
         bool checkDuplicates,
         CancellationToken ct)
     {
-        string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+        string profileJson = JsonSerializer.Serialize(machineProfile, CaseInsensitiveCompactJsonOptions);
         (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
         if (checkDuplicates)
@@ -898,7 +905,7 @@ public class ProfilesService(
         bool checkDuplicates,
         CancellationToken ct)
     {
-        string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+        string profileJson = JsonSerializer.Serialize(filamentProfile, CaseInsensitiveCompactJsonOptions);
         (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
         if (checkDuplicates)
@@ -948,7 +955,7 @@ public class ProfilesService(
         bool checkDuplicates,
         CancellationToken ct)
     {
-        string profileJson = JsonSerializer.Serialize(processProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+        string profileJson = JsonSerializer.Serialize(processProfile, CaseInsensitiveCompactJsonOptions);
         string profileHash = ComputeSha256Hash(profileJson);
 
         if (checkDuplicates)
@@ -986,6 +993,97 @@ public class ProfilesService(
 
         await _processProfileRepo.AddAsync(systemProfile, ct);
         return true; // Imported
+    }
+
+    /// <summary>
+    /// Stages a batch of profile DTOs into entities and commits them in a single
+    /// <c>SaveChangesAsync</c> call instead of one per profile, while preserving today's
+    /// per-profile error isolation.
+    /// </summary>
+    /// <remarks>
+    /// Staging (parse/hash/build) failures for individual DTOs only exclude that profile from
+    /// the batch (counted as skipped) and never abort the rest. If the batched
+    /// <paramref name="addRangeAsync"/> commit itself fails (e.g. a duplicate-hash unique
+    /// constraint violation that the pre-check missed), the batch falls back to inserting each
+    /// staged entity individually via <paramref name="addSingleAsync"/>, so one bad row in a
+    /// batch never drops the other already-valid rows in that same batch.
+    /// </remarks>
+    private static async Task<(List<TEntity> Added, int Skipped)> StageAndCommitBatchAsync<TDto, TEntity>(
+        IEnumerable<TDto> dtos,
+        Func<TDto, (string Hash, TEntity Entity)> buildEntity,
+        bool checkDuplicates,
+        Func<IEnumerable<string>, CancellationToken, Task<HashSet<string>>> getExistingHashesAsync,
+        Func<IEnumerable<TEntity>, CancellationToken, Task<int>> addRangeAsync,
+        Func<TEntity, CancellationToken, Task> addSingleAsync,
+        CancellationToken ct)
+    {
+        List<(string Hash, TEntity Entity)> candidates = new();
+        int skipped = 0;
+
+        foreach (TDto dto in dtos)
+        {
+            try
+            {
+                candidates.Add(buildEntity(dto));
+            }
+            catch
+            {
+                skipped++;
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return (new List<TEntity>(), skipped);
+        }
+
+        HashSet<string> existingHashes = checkDuplicates
+            ? await getExistingHashesAsync(candidates.Select(c => c.Hash), ct)
+            : new HashSet<string>();
+
+        HashSet<string> stagedHashes = new(StringComparer.Ordinal);
+        List<TEntity> staged = new();
+        foreach ((string hash, TEntity entity) in candidates)
+        {
+            if (existingHashes.Contains(hash) || !stagedHashes.Add(hash))
+            {
+                skipped++;
+                continue;
+            }
+
+            staged.Add(entity);
+        }
+
+        if (staged.Count == 0)
+        {
+            return (staged, skipped);
+        }
+
+        try
+        {
+            _ = await addRangeAsync(staged, ct);
+            return (staged, skipped);
+        }
+        catch (DbUpdateException)
+        {
+            // A batch-level commit failure (e.g. a same-hash collision the pre-check missed)
+            // must not drop the other valid profiles in this batch: retry per-row.
+            List<TEntity> actuallyAdded = new();
+            foreach (TEntity entity in staged)
+            {
+                try
+                {
+                    await addSingleAsync(entity, ct);
+                    actuallyAdded.Add(entity);
+                }
+                catch
+                {
+                    skipped++;
+                }
+            }
+
+            return (actuallyAdded, skipped);
+        }
     }
 
     #endregion
@@ -1284,7 +1382,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
         if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
         {
             return new { imported = 0, skipped = 0, message = "No profiles available from worker or invalid hierarchy structure" };
@@ -1325,19 +1423,12 @@ public class ProfilesService(
 
                 if (modelProfiles.MachineProfiles != null)
                 {
-                    foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
-                    {
-                        try
+                    (List<MachineProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.MachineProfiles,
+                        machineProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(machineProfile, CaseInsensitiveCompactJsonOptions);
                             (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
-
-                            MachineProfile? existingProfile = await _machineProfileRepo.GetByHashAsync(profileHash, ct);
-                            if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                            {
-                                skipped++;
-                                continue;
-                            }
 
                             MachineProfile systemProfile = new MachineProfile
                             {
@@ -1358,31 +1449,26 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _machineProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
-                        }
-                        catch
-                        {
-                            skipped++;
-                        }
-                    }
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: true,
+                        (hashes, hCt) => _machineProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _machineProfileRepo.AddRangeAsync,
+                        _machineProfileRepo.AddAsync,
+                        ct);
+
+                    imported += added.Count;
+                    skipped += batchSkipped;
                 }
 
                 if (modelProfiles.FilamentProfiles != null)
                 {
-                    foreach (FilamentProfileDto filamentProfile in modelProfiles.FilamentProfiles)
-                    {
-                        try
+                    (List<FilamentProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.FilamentProfiles,
+                        filamentProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(filamentProfile, CaseInsensitiveCompactJsonOptions);
                             (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
-
-                            FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
-                            if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                            {
-                                skipped++;
-                                continue;
-                            }
 
                             FilamentProfile systemProfile = new FilamentProfile
                             {
@@ -1407,31 +1493,26 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _filamentProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
-                        }
-                        catch
-                        {
-                            skipped++;
-                        }
-                    }
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: true,
+                        (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _filamentProfileRepo.AddRangeAsync,
+                        _filamentProfileRepo.AddAsync,
+                        ct);
+
+                    imported += added.Count;
+                    skipped += batchSkipped;
                 }
 
                 if (modelProfiles.ProcessProfiles != null)
                 {
-                    foreach (ProcessProfileDto processProfile in modelProfiles.ProcessProfiles)
-                    {
-                        try
+                    (List<ProcessProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.ProcessProfiles,
+                        processProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(processProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(processProfile, CaseInsensitiveCompactJsonOptions);
                             string profileHash = ComputeSha256Hash(profileJson);
-
-                            ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
-                            if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                            {
-                                skipped++;
-                                continue;
-                            }
 
                             ProcessProfile systemProfile = new ProcessProfile
                             {
@@ -1456,14 +1537,16 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _processProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
-                        }
-                        catch
-                        {
-                            skipped++;
-                        }
-                    }
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: true,
+                        (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _processProfileRepo.AddRangeAsync,
+                        _processProfileRepo.AddAsync,
+                        ct);
+
+                    imported += added.Count;
+                    skipped += batchSkipped;
                 }
             }
         }
@@ -1526,7 +1609,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
         if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
         {
             return new { imported = 0, deleted = deletedCount, message = "No profiles available from worker or invalid hierarchy structure", orcaslicerVersion = orcaVersion };
@@ -1573,11 +1656,11 @@ public class ProfilesService(
 
                 if (modelProfiles.MachineProfiles != null)
                 {
-                    foreach (MachineProfileDto machineProfile in modelProfiles.MachineProfiles)
-                    {
-                        try
+                    (List<MachineProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.MachineProfiles,
+                        machineProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(machineProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(machineProfile, CaseInsensitiveCompactJsonOptions);
                             (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
 
                             MachineProfile systemProfile = new MachineProfile
@@ -1598,39 +1681,38 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _machineProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: false,
+                        (hashes, hCt) => _machineProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _machineProfileRepo.AddRangeAsync,
+                        _machineProfileRepo.AddAsync,
+                        ct);
 
-                            // Emit progress event
-                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
-                            {
-                                profileName = machineProfile.Name ?? "Unknown",
-                                profileType = "Machine",
-                                count = imported
-                            }, cancellationToken: ct);
-                        }
-                        catch
+                    foreach (MachineProfile addedProfile in added)
+                    {
+                        imported++;
+
+                        // Emit progress event
+                        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                         {
-                            skipped++;
-                        }
+                            profileName = addedProfile.Name ?? "Unknown",
+                            profileType = "Machine",
+                            count = imported
+                        }, cancellationToken: ct);
                     }
+
+                    skipped += batchSkipped;
                 }
 
                 if (modelProfiles.FilamentProfiles != null)
                 {
-                    foreach (FilamentProfileDto filamentProfile in modelProfiles.FilamentProfiles)
-                    {
-                        try
+                    (List<FilamentProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.FilamentProfiles,
+                        filamentProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(filamentProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(filamentProfile, CaseInsensitiveCompactJsonOptions);
                             (string sanitizedRaw, string settingsJson, string profileHash) = _parsingService.ParseAndPrepare(profileJson);
-
-                            FilamentProfile? existingProfile = await _filamentProfileRepo.GetByHashAsync(profileHash, ct);
-                            if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                            {
-                                skipped++;
-                                continue;
-                            }
 
                             FilamentProfile systemProfile = new FilamentProfile
                             {
@@ -1654,39 +1736,38 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _filamentProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: true,
+                        (hashes, hCt) => _filamentProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _filamentProfileRepo.AddRangeAsync,
+                        _filamentProfileRepo.AddAsync,
+                        ct);
 
-                            // Emit progress event
-                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
-                            {
-                                profileName = filamentProfile.Name ?? filamentProfile.Material ?? "Unknown",
-                                profileType = "Filament",
-                                count = imported
-                            }, cancellationToken: ct);
-                        }
-                        catch
+                    foreach (FilamentProfile addedProfile in added)
+                    {
+                        imported++;
+
+                        // Emit progress event
+                        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                         {
-                            skipped++;
-                        }
+                            profileName = addedProfile.Name ?? addedProfile.Material ?? "Unknown",
+                            profileType = "Filament",
+                            count = imported
+                        }, cancellationToken: ct);
                     }
+
+                    skipped += batchSkipped;
                 }
 
                 if (modelProfiles.ProcessProfiles != null)
                 {
-                    foreach (ProcessProfileDto processProfile in modelProfiles.ProcessProfiles)
-                    {
-                        try
+                    (List<ProcessProfile> added, int batchSkipped) = await StageAndCommitBatchAsync(
+                        modelProfiles.ProcessProfiles,
+                        processProfile =>
                         {
-                            string profileJson = JsonSerializer.Serialize(processProfile, new JsonSerializerOptions { PropertyNameCaseInsensitive = true, WriteIndented = false });
+                            string profileJson = JsonSerializer.Serialize(processProfile, CaseInsensitiveCompactJsonOptions);
                             string profileHash = ComputeSha256Hash(profileJson);
-
-                            ProcessProfile? existingProfile = await _processProfileRepo.GetByHashAsync(profileHash, ct);
-                            if (existingProfile != null && existingProfile.IsSystem && existingProfile.SlicerType == SlicerType.OrcaSlicer)
-                            {
-                                skipped++;
-                                continue;
-                            }
 
                             ProcessProfile systemProfile = new ProcessProfile
                             {
@@ -1711,22 +1792,28 @@ public class ProfilesService(
                                 UpdatedAt = DateTime.UtcNow
                             };
 
-                            await _processProfileRepo.AddAsync(systemProfile, ct);
-                            imported++;
+                            return (profileHash, systemProfile);
+                        },
+                        checkDuplicates: true,
+                        (hashes, hCt) => _processProfileRepo.GetExistingSystemHashesAsync(hashes, SlicerType.OrcaSlicer, hCt),
+                        _processProfileRepo.AddRangeAsync,
+                        _processProfileRepo.AddAsync,
+                        ct);
 
-                            // Emit progress event
-                            await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
-                            {
-                                profileName = processProfile.Name ?? $"{processProfile.Quality} ({processProfile.LayerHeight}mm)",
-                                profileType = "Process",
-                                count = imported
-                            }, cancellationToken: ct);
-                        }
-                        catch
+                    foreach (ProcessProfile addedProfile in added)
+                    {
+                        imported++;
+
+                        // Emit progress event
+                        await _slicerHubContext.Clients.Group(Farm.Infrastructure.Security.AuthorizedHubGroups.Administrators).SendAsync("profileimported", new
                         {
-                            skipped++;
-                        }
+                            profileName = string.IsNullOrEmpty(addedProfile.Name) ? $"{addedProfile.Quality} ({addedProfile.LayerHeight}mm)" : addedProfile.Name,
+                            profileType = "Process",
+                            count = imported
+                        }, cancellationToken: ct);
                     }
+
+                    skipped += batchSkipped;
                 }
             }
         }
@@ -1821,7 +1908,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        AllProfilesResponseDto? allProfiles = JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
         return allProfiles?.ProcessProfiles?.SelectMany(kvp => kvp.Value).ToList() ?? new List<ProcessProfileDto>();
     }
 
@@ -1847,7 +1934,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        return JsonSerializer.Deserialize<AllProfilesResponseDto>(json, CaseInsensitiveJsonOptions);
     }
 
     /// <inheritdoc />
@@ -1944,7 +2031,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, CaseInsensitiveJsonOptions);
         return profiles ?? new List<MachineProfileDto>();
     }
 
@@ -1975,7 +2062,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        List<MachineProfileDto>? profiles = JsonSerializer.Deserialize<List<MachineProfileDto>>(json, CaseInsensitiveJsonOptions);
         return profiles ?? new List<MachineProfileDto>();
     }
 
@@ -2045,7 +2132,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        List<ProcessProfileDto>? profiles = JsonSerializer.Deserialize<List<ProcessProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        List<ProcessProfileDto>? profiles = JsonSerializer.Deserialize<List<ProcessProfileDto>>(json, CaseInsensitiveJsonOptions);
         return profiles ?? new List<ProcessProfileDto>();
     }
 
@@ -2079,7 +2166,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, CaseInsensitiveJsonOptions);
         return profiles ?? new List<FilamentProfileDto>();
     }
 
@@ -2107,7 +2194,7 @@ public class ProfilesService(
         }
 
         string json = await response.Content.ReadAsStringAsync(ct);
-        List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        List<FilamentProfileDto>? profiles = JsonSerializer.Deserialize<List<FilamentProfileDto>>(json, CaseInsensitiveJsonOptions);
         return profiles ?? new List<FilamentProfileDto>();
     }
 

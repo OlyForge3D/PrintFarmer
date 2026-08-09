@@ -44,6 +44,54 @@ public class EfFilamentProfileRepository(SlicerDbContext db) : IFilamentProfileR
     }
 
     /// <inheritdoc/>
+    public async Task<int> AddRangeAsync(IEnumerable<FilamentProfile> profiles, CancellationToken ct = default)
+    {
+        List<FilamentProfile> profileList = profiles as List<FilamentProfile> ?? profiles.ToList();
+        if (profileList.Count == 0)
+        {
+            return 0;
+        }
+
+        _db.FilamentProfiles.AddRange(profileList);
+        try
+        {
+            _ = await _db.SaveChangesAsync(ct);
+            return profileList.Count;
+        }
+        catch (DbUpdateException)
+        {
+            // A failed SaveChangesAsync does not roll back the change tracker: the whole
+            // batch would remain tracked as Added, causing any per-row fallback retry to
+            // resubmit the entire (still-poisoned) batch instead of isolating the bad row.
+            // Detach so the caller can safely retry entities one at a time.
+            foreach (FilamentProfile profile in profileList)
+            {
+                _db.Entry(profile).State = EntityState.Detached;
+            }
+
+            throw;
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<HashSet<string>> GetExistingSystemHashesAsync(IEnumerable<string> hashes, SlicerType engine, CancellationToken ct = default)
+    {
+        List<string> hashList = hashes as List<string> ?? hashes.ToList();
+        if (hashList.Count == 0)
+        {
+            return new HashSet<string>();
+        }
+
+        List<string> existing = await _db.FilamentProfiles
+            .AsNoTracking()
+            .Where(p => p.Hash != null && hashList.Contains(p.Hash) && p.IsSystem && p.SlicerType == engine)
+            .Select(p => p.Hash!)
+            .ToListAsync(ct);
+
+        return new HashSet<string>(existing);
+    }
+
+    /// <inheritdoc/>
     public async Task UpdateAsync(FilamentProfile profile, CancellationToken ct = default)
     {
         _ = _db.FilamentProfiles.Update(profile);
