@@ -56,9 +56,13 @@ docs-only PR.
 `validate-compliance.mjs` on every event — including mobile-only and
 docs-only PRs — solely to keep dependency-license/provenance validation
 fail-closed. That restore is real network/CPU cost with nothing to validate
-when no `.NET`-relevant bucket changed, since the dependency graph cannot
-change without a `.csproj`/`Directory.Packages.props`/`NuGet.Config`/`*.sln`
-edit or a source change under `src/**`.
+when no `.NET`-relevant bucket changed: the restore only ever covers
+`farm-web.sln`'s project graph, and any edit to a `.csproj` already
+referenced by that graph lands in a `src/**` bucket (`api`, `infra`,
+`backends`, `slicer`, `tools`, etc.) that already forces
+`want_dotnet_build=true`; adding a new project to the graph requires
+editing `farm-web.sln` itself, which is `shared_config` and always forces
+full-safe.
 
 `dependency-compliance` now runs the restore-then-validate pair in its own
 job gated by the exact same `want_dotnet_build` output the `dotnet-build`

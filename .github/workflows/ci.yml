@@ -175,9 +175,15 @@ jobs:
   # regress — `want_dotnet_build` is forced `true` (full-safe) on every
   # trusted push to `main`/`development` (see select-dotnet-tests.sh
   # `emit_full_safe "full-safe: trusted push to $base"`), on
-  # `workflow_dispatch`, and on any change to `Directory.Packages.props`/
-  # `NuGet.Config`/`*.csproj`/`*.sln` (the `shared_config` bucket), so drift
-  # in the dependency graph is always caught fail-closed.
+  # `workflow_dispatch`, and on any change to `Directory.Packages.props`,
+  # `NuGet.Config`, or any `*.sln` (the `shared_config` bucket). Any edit to
+  # an EXISTING `.csproj` that `farm-web.sln` actually references also lives
+  # under a `src/**` bucket (api/infra/backends/slicer/tools/etc.) that
+  # already sets `want_dotnet_build=true` on its own — the restore this job
+  # runs only ever covers `farm-web.sln`'s project graph, so a project file
+  # outside that graph was never covered by validation before this change
+  # either (adding one to the solution requires editing `farm-web.sln`
+  # itself, which is `shared_config` and always triggers full-safe).
   # ---------------------------------------------------------------------------
   dependency-compliance:
     name: Dependency license & provenance validation
