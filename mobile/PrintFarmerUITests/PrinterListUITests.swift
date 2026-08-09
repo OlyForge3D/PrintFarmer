@@ -57,7 +57,10 @@ final class PrinterListUITests: PrintFarmerUITestCase {
         )
 
         let destination = app.staticTexts["printer.detail.destination.\(printerID)"]
-        XCTAssertTrue(destination.exists)
+        // Wait rather than a synchronous exists check — on iPad the
+        // NavigationSplitView detail column can take longer to fully mount
+        // this nested destination text than the parent ScrollView container.
+        XCTAssertTrue(destination.waitForExistence(timeout: 5))
         XCTAssertEqual(destination.label, "Prusa MK4 #1, printer detail")
     }
 
