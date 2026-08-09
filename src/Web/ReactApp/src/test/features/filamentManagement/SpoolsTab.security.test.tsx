@@ -156,4 +156,19 @@ describe('SpoolsTab — Spoolman link scheme validation', () => {
     const link = await screen.findByRole('link', { name: /open spoolman/i });
     expect(link).toHaveAttribute('href', 'https://spoolman.local:7912');
   });
+
+  it('preserves an IPv6-literal base URL unmangled (decodeURI(encodeURI(...)) round-trip)', async () => {
+    // Regression guard: encodeURI() alone would percent-encode the `[`/`]`
+    // brackets required by an IPv6-literal host, breaking navigation for a
+    // self-hosted Spoolman instance on a bracketed-literal address. The sink
+    // wraps encodeURI() in decodeURI() specifically so the rendered href is
+    // byte-for-byte identical to the validated input.
+    mockGetSpoolmanConfig.mockResolvedValue({ baseUrl: 'http://[::1]:7912' });
+    render(<SpoolsTab />);
+
+    await waitFor(() => expect(mockGetSpoolmanConfig).toHaveBeenCalled());
+
+    const link = await screen.findByRole('link', { name: /open spoolman/i });
+    expect(link).toHaveAttribute('href', 'http://[::1]:7912');
+  });
 });
