@@ -1,0 +1,18 @@
+name: "PrintFarmer CodeQL Config"
+
+# Queries moved here from the workflow's `with: queries:` input because
+# github/codeql-action/init@v4 does not reliably combine an inline `queries`
+# input with a `config-file` input — keeping the query suite here avoids
+# losing it.
+queries:
+  - uses: security-and-quality
+
+paths-ignore:
+  # src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs is vendored,
+  # auto-generated third-party code from the 3MF Consortium, produced by the
+  # Automatic Component Toolkit (ACT) version 1.8.0-alpha. It is not
+  # first-party code and must not be hand-edited. This single file accounts
+  # for ~1,315 of ~4,933 open CodeQL alerts in this repository. Do not add
+  # other paths here for noise reasons — this exclusion is scoped narrowly
+  # to this one generated file.
+  - src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs
