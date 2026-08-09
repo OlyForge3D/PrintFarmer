@@ -2,6 +2,7 @@
 using System.Text;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
@@ -328,7 +329,7 @@ public class AuthenticationService(
             RateLimitResult rateLimit = await _rateLimitService.CheckEmailConfirmationLimitAsync(user.Email);
             if (!rateLimit.IsAllowed)
             {
-                _logger.LogWarning("Email confirmation rate limit exceeded for {UserEmail}", user.Email);
+                _logger.LogWarning("Email confirmation rate limit exceeded for {UserEmail}", SensitiveDataMasking.MaskEmail(user.Email));
                 return false;
             }
 
@@ -360,7 +361,7 @@ public class AuthenticationService(
                 _logger.LogWarning(exSend, "Email confirmation send failed - falling back to log only");
             }
 
-            _logger.LogInformation("Email confirmation sent to {UserEmail}. EmailSent={EmailSent}", user.Email, emailSent);
+            _logger.LogInformation("Email confirmation sent to {UserEmail}. EmailSent={EmailSent}", SensitiveDataMasking.MaskEmail(user.Email), emailSent);
 
             return true;
         }
