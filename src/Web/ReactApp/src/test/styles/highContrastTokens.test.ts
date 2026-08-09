@@ -167,6 +167,36 @@ describe('prefers-contrast: high token coverage (#1300)', () => {
     expect(parseThemeTokens('fixture', wellFormed).get('text-primary')).toBe('#000000');
   });
 
+  it('parser excludes malformed-length hex values instead of letting them through as NaN', () => {
+    // Regression guard for the NaN-swallowing bug: a 4/5/7/8-digit hex value
+    // (e.g. alpha-shorthand `#1a2b`) must NOT be captured as a token value.
+    // If it were, `relativeLuminance` would either throw (now) or previously
+    // produced NaN, and `NaN < minRatio` is `false` — silently passing a
+    // garbage contrast ratio instead of failing loudly. Excluding malformed
+    // hex at the parse step means it instead surfaces as a "missing token"
+    // failure in the AA-pairing test, which is the intended fail-loud path.
+    const fourDigitAlphaHex = `
+      [data-theme='fixture'][data-contrast='high'] {
+        --pf-text-primary: #1a2b;
+      }
+    `;
+    expect(parseThemeTokens('fixture', fourDigitAlphaHex).has('text-primary')).toBe(false);
+
+    const eightDigitAlphaHex = `
+      [data-theme='fixture'][data-contrast='high'] {
+        --pf-text-primary: #ff0000ff;
+      }
+    `;
+    expect(parseThemeTokens('fixture', eightDigitAlphaHex).has('text-primary')).toBe(false);
+
+    // relativeLuminance itself must also reject malformed input directly,
+    // as a defense-in-depth backstop independent of the parser regex.
+    expect(() => relativeLuminance('#1a2b')).toThrow();
+    expect(() => relativeLuminance('#ff0000ff')).toThrow();
+    expect(() => relativeLuminance('#000000')).not.toThrow();
+    expect(() => relativeLuminance('#fff')).not.toThrow();
+  });
+
   it.each(PENDING_THEMES)('%s: high-contrast override not landed yet (tracked by #1298/#1299)', () => {
     // No assertion body: this test intentionally reports as a distinct,
     // named row per pending theme so CI output honestly shows "0 of N themes
