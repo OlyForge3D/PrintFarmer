@@ -22,7 +22,7 @@ import {
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
-import { isSafeHttpUrl } from '@/common/utils/validation';
+import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
 import { Button, Checkbox, Select, FileUpload } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
@@ -704,7 +704,17 @@ export function SpoolsTab() {
           </Button>
           {spoolmanBaseUrl && isSafeHttpUrl(spoolmanBaseUrl) && (
             <a
-              href={spoolmanBaseUrl}
+              // Re-validate the scheme immediately at the sink (in addition to
+              // the isSafeHttpUrl() gate above) so this link can never be
+              // rendered with an executable (e.g. javascript:/data:) URL,
+              // regardless of how spoolmanBaseUrl was populated. toSafeHref()
+              // also round-trips the value through decodeURI(encodeURI(...)),
+              // which is a lossless no-op for any well-formed URL (including
+              // IPv6-literal hosts and URLs with pre-existing percent-escapes)
+              // and fails closed to `undefined` for non-encodable input — its
+              // purpose is to route the value through a call CodeQL
+              // recognizes as a URI-encoding sanitizer for this sink class.
+              href={toSafeHref(spoolmanBaseUrl)}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-1 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"

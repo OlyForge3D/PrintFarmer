@@ -7,6 +7,7 @@ import {
   normalizeUrl,
   normalizeSpoolmanBaseUrl,
   isSafeHttpUrl,
+  toSafeHref,
 } from '../validation';
 
 describe('validation utils', () => {
@@ -147,6 +148,50 @@ describe('validation utils', () => {
     it('rejects malformed or empty input', () => {
       expect(isSafeHttpUrl('')).toBe(false);
       expect(isSafeHttpUrl('not a url')).toBe(false);
+    });
+  });
+
+  describe('toSafeHref', () => {
+    // Regression for js/xss-through-dom: this is the sink-level guard used
+    // directly at the `href={...}` assignment in SpoolsTab.tsx. Unlike
+    // isSafeHttpUrl() (a boolean gate evaluated earlier in the component),
+    // this is exercised here independent of any surrounding component logic.
+    it('returns the value unchanged for absolute http/https URLs', () => {
+      expect(toSafeHref('http://spoolman.local:7912')).toBe('http://spoolman.local:7912');
+      expect(toSafeHref('https://spoolman.example.com')).toBe('https://spoolman.example.com');
+    });
+
+    it('returns undefined for non-http(s) schemes', () => {
+      // Inert placeholder bodies, not real payloads.
+      expect(toSafeHref('javascript:void(0)')).toBeUndefined();
+      expect(toSafeHref('data:text/plain,placeholder')).toBeUndefined();
+      expect(toSafeHref('file:///etc/passwd')).toBeUndefined();
+      expect(toSafeHref('vbscript:msgbox(1)')).toBeUndefined();
+    });
+
+    it('returns undefined for protocol-relative or scheme-less input', () => {
+      expect(toSafeHref('//evil.example.com')).toBeUndefined();
+      expect(toSafeHref('evil.example.com')).toBeUndefined();
+    });
+
+    it('returns undefined for malformed or empty input', () => {
+      expect(toSafeHref('')).toBeUndefined();
+      expect(toSafeHref('not a url')).toBeUndefined();
+    });
+
+    it('preserves IPv6-literal hosts and pre-encoded characters unmangled', () => {
+      // encodeURI() alone would corrupt these (percent-encode `[`/`]`, or
+      // double-encode an existing `%`); the decodeURI(encodeURI(...))
+      // round-trip inside toSafeHref() must return them byte-for-byte.
+      expect(toSafeHref('http://[::1]:7912')).toBe('http://[::1]:7912');
+      expect(toSafeHref('http://host/%20already-encoded')).toBe('http://host/%20already-encoded');
+    });
+
+    it('fails closed (returns undefined) for a value containing an unpaired UTF-16 surrogate', () => {
+      // encodeURI()/decodeURI() throw URIError on unencodable input; this
+      // must be caught and treated as unsafe rather than propagating as an
+      // uncaught exception at the render-time sink.
+      expect(toSafeHref('http://host/\uD800')).toBeUndefined();
     });
   });
 });
