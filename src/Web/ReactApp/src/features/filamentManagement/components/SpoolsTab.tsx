@@ -704,7 +704,11 @@ export function SpoolsTab() {
           </Button>
           {spoolmanBaseUrl && isSafeHttpUrl(spoolmanBaseUrl) && (
             <a
-              href={spoolmanBaseUrl}
+              // Re-validate the scheme immediately at the sink (in addition to the
+              // isSafeHttpUrl() gate above) so this link can never be rendered with
+              // an executable (e.g. javascript:/data:) URL, regardless of how
+              // spoolmanBaseUrl was populated.
+              href={/^https?:\/\//i.test(spoolmanBaseUrl) ? spoolmanBaseUrl : undefined}
               target="_blank"
               rel="noopener noreferrer"
               className="px-3 py-2 bg-pf-bg-0 border border-pf-border rounded-sm text-pf-text-primary hover:bg-pf-bg-2 active:bg-pf-bg-1 flex items-center gap-1 transition-colors duration-150 focus:outline-hidden focus:ring-1 focus:ring-pf-accent"
