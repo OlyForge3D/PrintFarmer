@@ -4,6 +4,14 @@ on:
   issues:
     types: [closed, reopened]
 
+# Serialize runs repo-wide so two near-simultaneous blocker close/reopen
+# events can't read stale label state and race each other's label
+# add/remove or duplicate a comment. Never cancel a queued run — each one
+# reflects real dependency-graph state that must still be reconciled.
+concurrency:
+  group: squad-blocked-label-sync
+  cancel-in-progress: false
+
 permissions:
   issues: write
   contents: read
@@ -27,10 +35,11 @@ jobs:
                 (l) => (typeof l === 'string' ? l : l.name) === BLOCKED_LABEL
               );
 
-            // Issues that `issue` blocks (its dependents).
-            const { data: dependents } = await github.request(
+            // Issues that `issue` blocks (its dependents). Paginated —
+            // these are list endpoints with a default page size of 30.
+            const dependents = await github.paginate(
               'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking',
-              { owner, repo, issue_number: issue.number }
+              { owner, repo, issue_number: issue.number, per_page: 100 }
             );
 
             if (dependents.length === 0) {
@@ -42,9 +51,9 @@ jobs:
               const dependentNumber = dependent.number;
 
               if (action === 'closed') {
-                const { data: blockers } = await github.request(
+                const blockers = await github.paginate(
                   'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
-                  { owner, repo, issue_number: dependentNumber }
+                  { owner, repo, issue_number: dependentNumber, per_page: 100 }
                 );
 
                 // Vacuously true when the list is empty — deliberately not a
