@@ -80,6 +80,13 @@ test('accepts the agent-verdict events the gate actually runs on', () => {
   ]) {
     const evidence = fixture();
     evidence.run.event = event;
+    // pull_request_target and pull_request_review runs report the reviewed
+    // PR's own head branch here, never the default branch — this must not
+    // affect the outcome (regression test for issue #1388).
+    if (event === 'pull_request_target' || event === 'pull_request_review') {
+      evidence.run.head_branch = 'dev/jpapiez/some-feature';
+      evidence.run.default_branch_contains_run = false;
+    }
     assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED', event);
   }
 });
@@ -187,13 +194,41 @@ test('rejects a run whose workflow definition came off the default branch', () =
   assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
 });
 
-test('accepts a pull_request_target run sitting on a non-default base ref', () => {
-  const evidence = fixture();
-  evidence.pull.base.ref = 'main';
-  evidence.run.event = 'pull_request_target';
-  evidence.run.head_branch = 'main';
-  assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
-});
+// Regression tests for issue #1388: GitHub reports the *reviewed PR's* own
+// head branch (never the default branch or base ref) in run.head_branch for
+// both of these event types, even though their workflow definition is always
+// sourced from the default branch by platform guarantee. run.pull_requests is
+// deliberately NOT used as evidence: GitHub computes it dynamically from
+// currently-open PRs on the matching branch, so it goes empty as soon as the
+// PR merges or its branch is deleted — exactly the case this gate must still
+// verify (Ralph checks squad evidence against historical, often now-merged,
+// heads).
+for (const event of ['pull_request_target', 'pull_request_review']) {
+  test(`accepts a ${event} run whose head_branch is the PR's own branch`, () => {
+    const evidence = fixture();
+    evidence.run.event = event;
+    evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
+    evidence.run.default_branch_contains_run = false;
+    assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
+  });
+
+  test(`accepts a ${event} run even after its PR has merged (pull_requests empty)`, () => {
+    const evidence = fixture();
+    evidence.run.event = event;
+    evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
+    evidence.run.default_branch_contains_run = false;
+    evidence.run.pull_requests = [];
+    assert.equal(verifySquadVerdict(evidence).classification, 'REVIEWED');
+  });
+
+  test(`rejects a ${event} run whose display title names a different PR`, () => {
+    const evidence = fixture();
+    evidence.run.event = event;
+    evidence.run.head_branch = 'dev/jpapiez/codeql-sensitive-info-triage';
+    evidence.run.display_title = 'Squad review record for PR #9999';
+    assert.equal(verifySquadVerdict(evidence).classification, 'INVALID');
+  });
+}
 
 test('rejects a success status whose description is not a recognised record', () => {
   const evidence = fixture();

@@ -19,15 +19,34 @@ export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
 const trustedStatusCreator = 'github-actions[bot]';
 const displayTitlePattern = /^Squad review record for PR #([1-9]\d*)$/;
 
-// The gate runs only from events whose workflow definition comes from the
-// default branch. A pull_request (head-ref) trigger would let a PR rewrite the
-// logic that judges it.
+// The gate runs only from events whose workflow definition GitHub always
+// sources from the repository's default branch. A pull_request (head-ref)
+// trigger would let a PR rewrite the logic that judges it; pull_request_target
+// and pull_request_review are exempt from that risk by platform guarantee —
+// GitHub always executes their workflow file from the base repository's
+// default branch, never a fork or the PR's own head — regardless of what
+// run.head_branch/run.head_sha report for the *reviewed* PR. See
+// https://docs.github.com/actions/reference/workflows-and-actions/events-that-trigger-workflows
 const trustedEvents = new Set([
   'pull_request_target',
   'issue_comment',
   'pull_request_review',
   'workflow_dispatch',
 ]);
+
+// issue_comment and workflow_dispatch runs genuinely execute on the default
+// branch, so their own head_branch/head_sha can be checked directly against
+// it (default_branch_contains_run compares run.head_sha to the default
+// branch). pull_request_target and pull_request_review runs instead carry the
+// *reviewed PR's* head branch/commit in these fields — never the workflow's
+// source — so their trust rests entirely on the platform guarantee for these
+// event types, plus the repository/run-attempt/actor checks below and the
+// display_title PR-number match performed further down. (run.pull_requests
+// cannot substitute here: GitHub computes it dynamically from currently-open
+// PRs on the matching branch, so it goes empty as soon as the PR merges or
+// its branch is deleted — exactly the case this gate must still verify.)
+const defaultBranchAnchoredEvents = new Set(['issue_comment', 'workflow_dispatch']);
+const prAssociatedTrustedEvents = new Set(['pull_request_target', 'pull_request_review']);
 
 function result(classification, reason, evidence = {}) {
   return { classification, reason, ...evidence };
@@ -136,7 +155,6 @@ export function verifySquadVerdict({ pull, status, run }) {
 
   const repository = pull.base?.repo?.full_name;
   const defaultBranch = pull.base?.repo?.default_branch;
-  const baseRef = pull.base?.ref;
   const currentHeadSha = pull.head?.sha?.toLowerCase();
   const statusSha = status.sha?.toLowerCase();
   if (!repository || !defaultBranch || !currentHeadSha || !statusSha) {
@@ -150,17 +168,22 @@ export function verifySquadVerdict({ pull, status, run }) {
   if (!runId || run?.id !== runId || run.html_url !== status.target_url) {
     return result('INVALID', 'The status does not target its verified workflow run.');
   }
+
+  // Proves the workflow definition genuinely ran from the default branch,
+  // using whichever evidence is meaningful for this event type — see the
+  // comments above defaultBranchAnchoredEvents / prAssociatedTrustedEvents.
+  // The PR-number binding for prAssociatedTrustedEvents comes from the
+  // display_title check further down, not from any field checked here.
+  const runSourceIsTrusted = defaultBranchAnchoredEvents.has(run.event)
+    ? run.head_branch === defaultBranch && run.default_branch_contains_run === true
+    : prAssociatedTrustedEvents.has(run.event);
+
   if (
     run.path !== verdictWorkflowPath ||
     !trustedEvents.has(run.event) ||
     run.run_attempt !== 1 ||
     run.triggering_actor?.login?.toLowerCase() !== run.actor?.login?.toLowerCase() ||
-    // The gate only ever runs from a protected ref: issue_comment and
-    // pull_request_review runs sit on the default branch, pull_request_target
-    // runs sit on the PR's base ref. A run on the PR head branch would mean the
-    // PR supplied the logic that judged it.
-    (run.head_branch !== defaultBranch && run.head_branch !== baseRef) ||
-    run.default_branch_contains_run !== true ||
+    !runSourceIsTrusted ||
     run.repository?.full_name !== repository ||
     run.status !== 'completed' ||
     run.conclusion !== 'success'
