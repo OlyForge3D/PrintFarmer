@@ -53,8 +53,24 @@ public class EfMachineProfileRepository(SlicerDbContext db) : IMachineProfileRep
         }
 
         _db.MachineProfiles.AddRange(profileList);
-        _ = await _db.SaveChangesAsync(ct);
-        return profileList.Count;
+        try
+        {
+            _ = await _db.SaveChangesAsync(ct);
+            return profileList.Count;
+        }
+        catch (DbUpdateException)
+        {
+            // A failed SaveChangesAsync does not roll back the change tracker: the whole
+            // batch would remain tracked as Added, causing any per-row fallback retry to
+            // resubmit the entire (still-poisoned) batch instead of isolating the bad row.
+            // Detach so the caller can safely retry entities one at a time.
+            foreach (MachineProfile profile in profileList)
+            {
+                _db.Entry(profile).State = EntityState.Detached;
+            }
+
+            throw;
+        }
     }
 
     /// <inheritdoc/>
