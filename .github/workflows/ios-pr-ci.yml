@@ -3,11 +3,12 @@ name: iOS PR CI
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    paths:
-      - 'mobile/**'
-      - '.github/workflows/ios-pr-ci.yml'
-      - 'scripts/ci/resolve-ios-simulator.sh'
-      - 'scripts/ci/test-resolve-ios-simulator.sh'
+    # No `paths:` filter — every PR must produce the required "Build (iOS)"
+    # status (see #1365: a path-filtered trigger meant non-mobile PRs never
+    # got a "Build (iOS)" check at all, leaving branch protection permanently
+    # BLOCKED). The `select` job below decides whether the Xcode toolchain
+    # actually needs to run; PRs that don't touch iOS-relevant paths still see
+    # "Build (iOS)" turn green quickly instead of never posting.
 
 concurrency:
   group: ios-pr-${{ github.head_ref || github.ref }}
@@ -22,8 +23,72 @@ env:
   IOS_SIMULATOR_RUNTIME_PREFERENCE: iOS 26.4,iOS 26.5
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # select — always runs on a cheap ubuntu runner and decides whether the
+  # expensive macOS jobs below have real work to do. This mirrors the
+  # selector pattern in ci.yml: the trigger has no path filter so the
+  # required check always posts, and downstream jobs use the selector output
+  # to skip work cheaply instead of never running.
+  # ---------------------------------------------------------------------------
+  select:
+    name: Select iOS build
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.selector.outputs.should_run }}
+      reason: ${{ steps.selector.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Determine whether iOS-relevant paths changed
+        id: selector
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -uo pipefail
+          should_run=true
+          reason="non-pull_request event — running full iOS build"
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            if [[ -n "$PR_BASE_SHA" && -n "$PR_HEAD_SHA" ]]; then
+              changed=$(git diff --no-renames --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" 2>/dev/null)
+              rc=$?
+              if (( rc != 0 )); then
+                should_run=true
+                reason="diff failed — running full iOS build to be safe"
+              elif [[ -z "$changed" ]]; then
+                should_run=false
+                reason="no changed files detected"
+              elif echo "$changed" | grep -Eq '^(mobile/|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$)'; then
+                should_run=true
+                reason="iOS-relevant paths changed"
+              else
+                should_run=false
+                reason="no iOS-relevant paths changed"
+              fi
+            else
+              should_run=true
+              reason="missing base/head SHA — running full iOS build to be safe"
+            fi
+          fi
+          {
+            echo "should_run=$should_run"
+            echo "reason=$reason"
+          } >> "$GITHUB_OUTPUT"
+          echo "iOS build selector: should_run=$should_run reason=$reason"
+
   build:
     name: Build (iOS)
+    needs: select
+    # `select` failing/being cancelled must NOT let this required check skip
+    # (skip counts as a pass for branch protection) — so this job runs even
+    # when `select` didn't succeed, and the step-level conditions below treat
+    # a non-successful `select` the same as `should_run == 'true'`: fail safe
+    # toward running the real build rather than silently passing unvalidated.
+    if: ${{ !cancelled() }}
     runs-on: macos-latest
     defaults:
       run:
@@ -32,10 +97,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Report skip reason
+        if: needs.select.result == 'success' && needs.select.outputs.should_run != 'true'
+        run: echo "Skipping iOS build — ${{ needs.select.outputs.reason }}"
+
       - name: Verify marketing version consistency
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: ./scripts/verify-marketing-version.sh source 1.0
 
       - name: Select Xcode
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           XCODE_PATH=$(ls -d /Applications/Xcode_16*.app /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
           if [ -z "$XCODE_PATH" ]; then
@@ -46,6 +117,7 @@ jobs:
           xcodebuild -version
 
       - name: Resolve package dependencies
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           xcodebuild -project PrintFarmer.xcodeproj \
             -scheme PrintFarmer \
@@ -53,6 +125,7 @@ jobs:
             -clonedSourcePackagesDirPath build/SourcePackages
 
       - name: Archive future marketing version
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         timeout-minutes: 20
         run: |
           xcodebuild \
@@ -70,6 +143,7 @@ jobs:
             archive
 
       - name: Verify future archived marketing version
+        if: needs.select.result != 'success' || needs.select.outputs.should_run == 'true'
         run: |
           ./scripts/verify-marketing-version.sh resolved 1.1 \
             build/MarketingVersion.xcarchive/Products/Applications/PrintFarmer.app/Info.plist
@@ -77,7 +151,8 @@ jobs:
   test:
     name: Unit Tests (iOS)
     runs-on: macos-latest
-    needs: build
+    needs: [select, build]
+    if: needs.select.outputs.should_run == 'true'
     defaults:
       run:
         working-directory: mobile
@@ -149,6 +224,8 @@ jobs:
   attention-xcui:
     name: Attention XCUI (${{ matrix.family }}, accessibility XXXL)
     runs-on: macos-latest
+    needs: select
+    if: needs.select.outputs.should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -229,6 +306,8 @@ jobs:
   xcui-suites:
     name: XCUI (${{ matrix.family }}, ${{ matrix.suite }})
     runs-on: macos-latest
+    needs: select
+    if: needs.select.outputs.should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
