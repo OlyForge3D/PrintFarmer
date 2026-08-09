@@ -340,7 +340,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
             // Normalize underscores to spaces (URL encoding)
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
 
-            _logger.LogInformation("Fetching machine profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching machine profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             List<MachineProfileDto> result;
             if (_cachedService != null)
@@ -355,7 +355,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     .ToList();
             }
 
-            _logger.LogInformation("Returning {Count} machine profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} machine profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
@@ -385,7 +385,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
             string normalizedModel = Uri.UnescapeDataString(model).Replace("_", " ", StringComparison.Ordinal);
             string normalizedMfg = Uri.UnescapeDataString(manufacturer);
 
-            _logger.LogInformation("Fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}'", LogSanitizer.Sanitize(normalizedMfg), normalizedModel);
+            _logger.LogInformation("Fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}'", LogSanitizer.Sanitize(normalizedMfg), LogSanitizer.Sanitize(normalizedModel));
 
             IList<MachineProfileDto> allProfiles = await _profileService.ListAvailableMachineProfilesAsync(ct);
 
@@ -397,7 +397,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                      (p.Name ?? string.Empty).StartsWith(normalizedModel, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} machine profiles for manufacturer='{Manufacturer}', model='{Model}'", result.Count, LogSanitizer.Sanitize(normalizedMfg), normalizedModel);
+            _logger.LogInformation("Returning {Count} machine profiles for manufacturer='{Manufacturer}', model='{Model}'", result.Count, LogSanitizer.Sanitize(normalizedMfg), LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
@@ -422,7 +422,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching process profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching process profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -459,7 +459,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     p.CompatiblePrinters == null || p.CompatiblePrinters.Count == 0)
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} process profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} process profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
@@ -484,7 +484,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching filament profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching filament profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -524,7 +524,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
                     f.CompatiblePrinters == null || f.CompatiblePrinters.Count == 0)
                 .ToList();
 
-            _logger.LogInformation("Returning {Count} filament profiles for '{NormalizedModel}'", result.Count, normalizedModel);
+            _logger.LogInformation("Returning {Count} filament profiles for '{NormalizedModel}'", result.Count, LogSanitizer.Sanitize(normalizedModel));
             return Ok(result);
         }
         catch (Exception ex)
@@ -550,7 +550,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         try
         {
             string normalizedModel = printerModel.Replace("_", " ", StringComparison.Ordinal);
-            _logger.LogInformation("Fetching all profiles for printer_model='{NormalizedModel}'", normalizedModel);
+            _logger.LogInformation("Fetching all profiles for printer_model='{NormalizedModel}'", LogSanitizer.Sanitize(normalizedModel));
 
             // Get machine profiles matching the printer_model
             List<MachineProfileDto> machineProfiles;
@@ -598,7 +598,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
 
             _logger.LogInformation(
                 "Returning profiles for '{NormalizedModel}': {MachineCount} machines, {ProcessCount} processes, {FilamentCount} filaments",
-                normalizedModel, machineProfiles.Count, compatibleProcesses.Count, compatibleFilaments.Count);
+                LogSanitizer.Sanitize(normalizedModel), machineProfiles.Count, compatibleProcesses.Count, compatibleFilaments.Count);
 
             return Ok(result);
         }
