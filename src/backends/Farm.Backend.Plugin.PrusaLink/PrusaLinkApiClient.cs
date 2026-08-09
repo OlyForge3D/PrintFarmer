@@ -7,6 +7,7 @@ using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.PrusaLink;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
 
@@ -883,7 +884,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             _logger.LogDebug(
                 ex,
                 "PrusaLink history probe failed for job {JobId}",
-                jobId);
+                LogSanitizer.Sanitize(jobId));
             throw;
         }
     }

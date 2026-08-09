@@ -3,6 +3,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
@@ -46,7 +47,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogDebug("FlashForge connection test failed for {BaseUrl}: {Message}", baseUrl, ex.Message);
+            _logger.LogDebug("FlashForge connection test failed for {BaseUrl}: {Message}", LogSanitizer.Sanitize(baseUrl), ex.Message);
             return false;
         }
     }
@@ -288,7 +289,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
 
             if (response.Contains("ok", StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogInformation("FlashForge: Started print {RemotePath}", remotePath);
+                _logger.LogInformation("FlashForge: Started print {RemotePath}", LogSanitizer.Sanitize(remotePath));
                 return true;
             }
 
@@ -315,7 +316,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
                 // Status check failure is non-fatal; fall through and log the original rejection.
             }
 
-            _logger.LogWarning("FlashForge start print rejected for {RemotePath}: {Response}", remotePath, response);
+            _logger.LogWarning("FlashForge start print rejected for {RemotePath}: {Response}", LogSanitizer.Sanitize(remotePath), LogSanitizer.Sanitize(response));
             return false;
         }
         catch (PrinterBackendBusyException)
@@ -324,7 +325,7 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         }
         catch (Exception ex) when (ex is SocketException or TimeoutException or OperationCanceledException)
         {
-            _logger.LogWarning(ex, "FlashForge start print failed for {BaseUrl}/{FileName}", baseUrl, fileName);
+            _logger.LogWarning(ex, "FlashForge start print failed for {BaseUrl}/{FileName}", LogSanitizer.Sanitize(baseUrl), LogSanitizer.Sanitize(fileName));
             return false;
         }
     }

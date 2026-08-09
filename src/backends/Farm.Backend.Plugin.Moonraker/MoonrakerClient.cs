@@ -9,6 +9,7 @@ using System.Text.RegularExpressions;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
@@ -2008,7 +2009,7 @@ public class MoonrakerClient(
     /// </remarks>
     public async Task<byte[]?> DownloadFileAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
-        _logger.LogInformation("[Moonraker] DownloadFileAsync starting: filename='{Filename}', baseUrl='{BaseUrl}'", filename, baseUrl);
+        _logger.LogInformation("[Moonraker] DownloadFileAsync starting: filename='{Filename}', baseUrl='{BaseUrl}'", LogSanitizer.Sanitize(filename), LogSanitizer.Sanitize(baseUrl));
 
         try
         {
@@ -2037,26 +2038,26 @@ public class MoonrakerClient(
 
             if (content == null || content.Length == 0)
             {
-                _logger.LogWarning("[Moonraker] Download returned empty content for file '{Filename}'. StatusCode={RespStatusCode}, ContentLength={ContentLength}, ContentType={ContentType}", filename, resp.StatusCode, resp.Content.Headers.ContentLength, resp.Content.Headers.ContentType);
+                _logger.LogWarning("[Moonraker] Download returned empty content for file '{Filename}'. StatusCode={RespStatusCode}, ContentLength={ContentLength}, ContentType={ContentType}", LogSanitizer.Sanitize(filename), resp.StatusCode, resp.Content.Headers.ContentLength, resp.Content.Headers.ContentType);
                 return null;
             }
 
-            _logger.LogInformation("[Moonraker] Successfully downloaded file '{Filename}': {ContentLength} bytes", filename, content.Length);
+            _logger.LogInformation("[Moonraker] Successfully downloaded file '{Filename}': {ContentLength} bytes", LogSanitizer.Sanitize(filename), content.Length);
             return content;
         }
         catch (OperationCanceledException ex)
         {
-            _logger.LogWarning(ex, "[Moonraker] Download timeout for file '{Filename}' after 30 seconds", filename);
+            _logger.LogWarning(ex, "[Moonraker] Download timeout for file '{Filename}' after 30 seconds", LogSanitizer.Sanitize(filename));
             return null;
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "[Moonraker] HTTP error downloading file '{Filename}': {Message}", filename, ex.Message);
+            _logger.LogWarning(ex, "[Moonraker] HTTP error downloading file '{Filename}': {Message}", LogSanitizer.Sanitize(filename), ex.Message);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[Moonraker] Unexpected error downloading file '{Filename}': {Name}: {Message}", filename, ex.GetType().Name, ex.Message);
+            _logger.LogError(ex, "[Moonraker] Unexpected error downloading file '{Filename}': {Name}: {Message}", LogSanitizer.Sanitize(filename), ex.GetType().Name, ex.Message);
             return null;
         }
     }
@@ -2398,7 +2399,7 @@ public class MoonrakerClient(
         Uri uri = new(
             baseUri,
             $"server/history/list?{string.Join("&", queryParams)}");
-        _logger.LogInformation("[Moonraker] Fetching history from {Uri}", uri);
+        _logger.LogInformation("[Moonraker] Fetching history from {Uri}", LogSanitizer.Sanitize(uri.ToString()));
         using HttpResponseMessage response = await _http.GetAsync(uri, cts.Token);
         if (!response.IsSuccessStatusCode)
         {
@@ -2585,7 +2586,7 @@ public class MoonrakerClient(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
+            _logger.LogDebug(ex, "Failed to get history job {JobId} from {BaseUrl}: {Message}", LogSanitizer.Sanitize(jobId), LogSanitizer.Sanitize(baseUrl), ex.Message);
             throw;
         }
     }
@@ -2610,7 +2611,7 @@ public class MoonrakerClient(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Failed to delete history job {JobId} from {BaseUrl}: {Message}", jobId, baseUrl, ex.Message);
+            _logger.LogDebug(ex, "Failed to delete history job {JobId} from {BaseUrl}: {Message}", LogSanitizer.Sanitize(jobId), LogSanitizer.Sanitize(baseUrl), ex.Message);
             return false;
         }
     }
