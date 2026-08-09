@@ -7,6 +7,7 @@ import {
   normalizeUrl,
   normalizeSpoolmanBaseUrl,
   isSafeHttpUrl,
+  toSafeHref,
 } from '../validation';
 
 describe('validation utils', () => {
@@ -147,6 +148,35 @@ describe('validation utils', () => {
     it('rejects malformed or empty input', () => {
       expect(isSafeHttpUrl('')).toBe(false);
       expect(isSafeHttpUrl('not a url')).toBe(false);
+    });
+  });
+
+  describe('toSafeHref', () => {
+    // Regression for js/xss-through-dom: this is the sink-level guard used
+    // directly at the `href={...}` assignment in SpoolsTab.tsx. Unlike
+    // isSafeHttpUrl() (a boolean gate evaluated earlier in the component),
+    // this is exercised here independent of any surrounding component logic.
+    it('returns the value unchanged for absolute http/https URLs', () => {
+      expect(toSafeHref('http://spoolman.local:7912')).toBe('http://spoolman.local:7912');
+      expect(toSafeHref('https://spoolman.example.com')).toBe('https://spoolman.example.com');
+    });
+
+    it('returns undefined for non-http(s) schemes', () => {
+      // Inert placeholder bodies, not real payloads.
+      expect(toSafeHref('javascript:void(0)')).toBeUndefined();
+      expect(toSafeHref('data:text/plain,placeholder')).toBeUndefined();
+      expect(toSafeHref('file:///etc/passwd')).toBeUndefined();
+      expect(toSafeHref('vbscript:msgbox(1)')).toBeUndefined();
+    });
+
+    it('returns undefined for protocol-relative or scheme-less input', () => {
+      expect(toSafeHref('//evil.example.com')).toBeUndefined();
+      expect(toSafeHref('evil.example.com')).toBeUndefined();
+    });
+
+    it('returns undefined for malformed or empty input', () => {
+      expect(toSafeHref('')).toBeUndefined();
+      expect(toSafeHref('not a url')).toBeUndefined();
     });
   });
 });

@@ -120,6 +120,19 @@ export function isSafeHttpUrl(value: string): boolean {
   }
 }
 
+/**
+ * Returns `value` if it is safe to use directly as an anchor `href`
+ * (`http(s)` scheme only), or `undefined` otherwise. This performs its own
+ * independent scheme check on the raw string — deliberately not just
+ * delegating to `isSafeHttpUrl()` — so callers get a sink-level guarantee
+ * even if an earlier `isSafeHttpUrl()` gate is refactored away or bypassed
+ * (js/xss-through-dom: DOM-sourced text must never be reinterpreted as an
+ * executable `javascript:`/`data:` URL when rendered as a link).
+ */
+export function toSafeHref(value: string): string | undefined {
+  return /^https?:\/\//i.test(value) ? value : undefined;
+}
+
 // Dedicated Spoolman base URL normalizer. Currently mirrors normalizeUrl but
 // kept separate so future Spoolman-specific rules (e.g. default scheme) can
 // be added in one place without touching generic URL handling.

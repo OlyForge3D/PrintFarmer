@@ -72,5 +72,26 @@ describe('generateUUID', () => {
         getRandomValuesSpy.mockRestore();
       }
     });
+
+    it('throws (never falls back to Math.random) when no CSPRNG is available at all', () => {
+      const originalRandomUUIDDescriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');
+      const originalGetRandomValuesDescriptor = Object.getOwnPropertyDescriptor(crypto, 'getRandomValues');
+      Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true, writable: true });
+      Object.defineProperty(crypto, 'getRandomValues', { value: undefined, configurable: true, writable: true });
+      const randomSpy = vi.spyOn(Math, 'random');
+
+      try {
+        expect(() => generateUUID()).toThrow(/no cryptographically secure random source available/i);
+        expect(randomSpy).not.toHaveBeenCalled();
+      } finally {
+        if (originalRandomUUIDDescriptor) {
+          Object.defineProperty(crypto, 'randomUUID', originalRandomUUIDDescriptor);
+        }
+        if (originalGetRandomValuesDescriptor) {
+          Object.defineProperty(crypto, 'getRandomValues', originalGetRandomValuesDescriptor);
+        }
+        randomSpy.mockRestore();
+      }
+    });
   });
 });
