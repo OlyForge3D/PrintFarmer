@@ -573,15 +573,25 @@ describe('ThemeContext', () => {
 
       renderWithThemeProvider(<TestComponent />);
 
+      // Hard-assert the listener was actually registered before relying on
+      // firing it — otherwise an empty contrastListeners array would make
+      // this test pass vacuously even if the real subscription were broken.
+      expect(contrastListeners.length).toBeGreaterThan(0);
+
       await act(async () => {
         screen.getByTestId('set-contrast-normal').click();
       });
       expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
 
-      // OS signal flips to "prefers more contrast" — override must hold.
+      // OS signal flips to "prefers more contrast" — the live event must
+      // still be processed (raw OS preference updates), but the override
+      // must win precedence over it for the applied data-contrast attribute
+      // and derived highContrastActive value.
       await act(async () => {
         contrastListeners.forEach((handler) => handler({ matches: true } as MediaQueryListEvent));
       });
+      expect(screen.getByTestId('high-contrast')).toHaveTextContent('true');
+      expect(screen.getByTestId('high-contrast-active')).toHaveTextContent('false');
       expect(document.documentElement.getAttribute('data-contrast')).toBe('normal');
       expect(screen.getByTestId('contrast-preference')).toHaveTextContent('normal');
     });
