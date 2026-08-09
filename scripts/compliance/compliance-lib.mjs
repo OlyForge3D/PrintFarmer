@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, readFile, readdir, stat } from 'node:fs/promises';
+import { access, open, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const skippedDirectories = new Set([
@@ -96,13 +96,22 @@ export async function readJson(filePath) {
   return JSON.parse(await readFile(filePath, 'utf8'));
 }
 
-function decodeXml(value) {
+const xmlEntityDecodeMap = {
+  '&amp;': '&',
+  '&apos;': "'",
+  '&gt;': '>',
+  '&lt;': '<',
+  '&quot;': '"',
+};
+
+// Decodes all XML entities in a single pass so a decoded `&amp;` (which
+// produces a literal `&`) is never re-scanned and mistaken for the start of
+// another entity (e.g. `&amp;lt;` must decode to the literal text `&lt;`,
+// not further to `<`). Decoding sequentially with separate replaceAll calls
+// double-unescapes such values.
+export function decodeXml(value) {
   return value
-    .replaceAll('&amp;', '&')
-    .replaceAll('&apos;', "'")
-    .replaceAll('&gt;', '>')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&quot;', '"')
+    .replace(/&amp;|&apos;|&gt;|&lt;|&quot;/g, (entity) => xmlEntityDecodeMap[entity])
     .trim();
 }
 
@@ -1071,11 +1080,33 @@ export async function validateProvenanceManifest(repoRoot, manifest) {
     }
 
     const absolutePath = path.join(repoRoot, filePath);
-    if ((await stat(absolutePath)).size > 2_000_000) {
-      continue;
+    // Opens the file once and checks size / reads content from that same
+    // file handle (fstat + read on one fd), instead of a path-based stat()
+    // followed by a separate path-based readFile(). A path re-lookup between
+    // two calls is a genuine TOCTOU window (the path can be swapped for a
+    // different inode); operating on one open descriptor for both the size
+    // check and the read closes that window because both operations
+    // observe the same underlying file no matter what happens to the path
+    // afterward.
+    let handle;
+    try {
+      handle = await open(absolutePath, 'r');
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
     }
-
-    const content = await readFile(absolutePath, 'utf8');
+    let content;
+    try {
+      const fileStat = await handle.stat();
+      if (fileStat.size > 2_000_000) {
+        continue;
+      }
+      content = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
     const markerMatch = content.match(/PrintFarmer-Provenance-ID:\s*([a-z0-9.-]+)/i);
     if (markerMatch && !entryIds.has(markerMatch[1])) {
       errors.push(createError(
@@ -1870,17 +1901,35 @@ export async function scanPublicationFiles(
   for (const relativePath of relativePaths) {
     const absolutePath = path.resolve(repoRoot, relativePath);
     const relativeToRoot = normalizeRelativePath(path.relative(repoRoot, absolutePath));
-    if (!isSafeRepositoryPath(relativeToRoot) || !(await pathExists(absolutePath))) {
+    if (!isSafeRepositoryPath(relativeToRoot)) {
       errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
       continue;
     }
 
-    if ((await stat(absolutePath)).size > 20_000_000) {
-      errors.push(createError('PUBLICATION_FILE_SIZE', relativePath, 'publication scan only accepts files up to 20 MB'));
+    // Opens the file once and checks size / reads content from that same
+    // file handle (fstat + read on one fd), instead of a path-based stat()
+    // followed by a separate path-based readFile(). Operating on one open
+    // descriptor for both the size check and the read closes the TOCTOU
+    // window entirely, because both operations observe the same underlying
+    // file regardless of what happens to the path afterward.
+    let handle;
+    try {
+      handle = await open(absolutePath, 'r');
+    } catch {
+      errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
       continue;
     }
-
-    const content = await readFile(absolutePath, 'utf8');
+    let content;
+    try {
+      const fileStat = await handle.stat();
+      if (fileStat.size > 20_000_000) {
+        errors.push(createError('PUBLICATION_FILE_SIZE', relativePath, 'publication scan only accepts files up to 20 MB'));
+        continue;
+      }
+      content = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
     scannedPaths.push(relativeToRoot);
     for (const pattern of patterns) {
       pattern.expression.lastIndex = 0;

@@ -5,6 +5,7 @@ import {
   mkdtemp,
   mkdir,
   rm,
+  truncate,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   createNpmLicenseInventory,
   createNugetLicenseInventory,
+  decodeXml,
   enrichSbomDocument,
   scanPublicationFiles,
   findNugetAssetsFiles,
@@ -609,6 +611,41 @@ test('scanPublicationFiles permits variable credential templates', async () => {
   } finally {
     await rm(root, { force: true, recursive: true });
   }
+});
+
+test('scanPublicationFiles reports a missing file without a pre-check race', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-missing-'));
+  try {
+    const errors = await scanPublicationFiles(root, ['does-not-exist.txt'], ['secret']);
+    assert.ok(hasCode(errors, 'PUBLICATION_FILE_MISSING'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('scanPublicationFiles rejects a file over the size limit without buffering it into memory', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-oversized-'));
+  try {
+    const oversizedPath = path.join(root, 'oversized.txt');
+    // Sparse file: report a size over the 20 MB limit without actually
+    // writing 20+ MB of data, so the test stays fast. This exercises the
+    // fd-based size check (fstat on the open handle) rejecting the file
+    // before any read is attempted on it.
+    await writeFile(oversizedPath, Buffer.alloc(1));
+    await truncate(oversizedPath, 21_000_000);
+    const errors = await scanPublicationFiles(root, ['oversized.txt'], ['secret']);
+    assert.ok(hasCode(errors, 'PUBLICATION_FILE_SIZE'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('decodeXml decodes each entity exactly once, without double-unescaping', () => {
+  // "&amp;lt;" is the double-encoded form of the literal text "&lt;" and must
+  // decode to exactly that, not further to "<". Decoding entities
+  // sequentially with separate passes would double-unescape this value.
+  assert.equal(decodeXml('&amp;lt;value&amp;gt;'), '&lt;value&gt;');
+  assert.equal(decodeXml('MIT &amp; Apache-2.0'), 'MIT & Apache-2.0');
 });
 
 test('scanSourceArchive rejects secrets in the exact archived contents', async () => {

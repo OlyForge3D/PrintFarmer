@@ -182,14 +182,35 @@ function scanMarkdown(source, sourcePath) {
   };
 }
 
+const xmlEntityDecodeMap = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+};
+
+// Strips HTML/XML-like tags in a loop until the output reaches a fixed
+// point (no further match), rather than a single `.replace()` pass.
+// Guarantees the tag-stripping step itself has no residual matches,
+// independent of any other sanitization performed downstream.
+function stripHtmlTags(value) {
+  let previous;
+  let current = value;
+  do {
+    previous = current;
+    current = current.replace(/<[^>]*>/g, '');
+  } while (current !== previous);
+  return current;
+}
+
 function githubSlug(heading) {
-  return heading
-    .replace(/<[^>]*>/g, '')
+  return stripHtmlTags(heading)
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
+    // Decode entities in a single pass so a decoded `&amp;` is never
+    // re-scanned as the start of another entity (e.g. `&amp;lt;` decodes to
+    // the literal text `&lt;`, not further to `<`). Sequential replace calls
+    // would double-unescape such values.
+    .replace(/&amp;|&lt;|&gt;/gi, (entity) => xmlEntityDecodeMap[entity.toLowerCase()])
     .replace(/[`*_~]/g, '')
     .trim()
     .toLowerCase()
@@ -455,4 +476,5 @@ export {
   extractInlineDestinations,
   githubSlug,
   scanMarkdown,
+  stripHtmlTags,
 };

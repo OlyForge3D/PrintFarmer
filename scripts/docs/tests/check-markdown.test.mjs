@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { checkMarkdown } from '../check-markdown.mjs';
+import { checkMarkdown, githubSlug, stripHtmlTags } from '../check-markdown.mjs';
 
 async function withFixture(files, verify) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-doc-health-'));
@@ -124,4 +124,26 @@ test('accepts skipped schemes in reference definitions and validates local defin
     );
     assert.deepEqual(result.issues, []);
   });
+});
+
+test('stripHtmlTags reaches a fixed point with no residual tag-like matches', () => {
+  const nestedInputs = [
+    '<a<b<c>d>e>',
+    'before<a<b>c>after',
+    '<<script>alert(1)</script>>',
+  ];
+  for (const input of nestedInputs) {
+    const stripped = stripHtmlTags(input);
+    assert.doesNotMatch(stripped, /<[^>]*>/, `residual tag survived for ${JSON.stringify(input)}: ${stripped}`);
+    // Applying it again must be a no-op: this is the fixed-point guarantee
+    // the loop provides over a single `.replace()` pass.
+    assert.equal(stripHtmlTags(stripped), stripped);
+  }
+});
+
+test('githubSlug decodes each XML entity exactly once, without double-unescaping', () => {
+  // A heading containing the literal text "&lt;" encoded as "&amp;lt;" must
+  // decode to the literal text "&lt;", not further to "<". Decoding entities
+  // sequentially instead of in one pass would double-unescape this value.
+  assert.equal(githubSlug('&amp;lt;value&amp;gt;'), 'ltvaluegt');
 });
