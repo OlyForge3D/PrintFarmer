@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.RateLimiting;
@@ -139,7 +140,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
                 DateTime oldestInHour = attemptList.Where(a => (now - a).TotalHours < 1).Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(1) - (now - oldestInHour);
 
-                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (hourly)", operation, normalizedKey);
+                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (hourly)", operation, SensitiveDataMasking.MaskIfEmail(normalizedKey));
 
                 return Task.FromResult(new RateLimitResult(
                     false,
@@ -153,7 +154,7 @@ public class InMemoryRateLimitService(RateLimitOptions options, ILogger<InMemory
                 DateTime oldestInDay = attemptList.Min();
                 TimeSpan retryAfter = TimeSpan.FromHours(24) - (now - oldestInDay);
 
-                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (daily)", operation, normalizedKey);
+                _logger.LogWarning("{Operation} rate limit exceeded for {NormalizedKey} (daily)", operation, SensitiveDataMasking.MaskIfEmail(normalizedKey));
 
                 return Task.FromResult(new RateLimitResult(
                     false,

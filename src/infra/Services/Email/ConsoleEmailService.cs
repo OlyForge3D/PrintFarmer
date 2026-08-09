@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Farm.Infrastructure.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Email;
 
@@ -9,7 +10,7 @@ public sealed class ConsoleEmailService(ILogger<ConsoleEmailService> logger) : I
     public Task<EmailDispatchResult> SendAsync(EmailMessage message, CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "[EMAIL:CONSOLE] To={MessageTo} Subject={MessageSubject}", message.To, message.Subject);
+            "[EMAIL:CONSOLE] To={MessageTo} Subject={MessageSubject}", SensitiveDataMasking.MaskEmail(message.To), message.Subject);
 
 #pragma warning disable CA1303 // Console logging strings don't require localization
         Console.WriteLine("[EMAIL:CONSOLE]");

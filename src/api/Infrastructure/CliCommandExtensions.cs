@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -132,7 +133,7 @@ public static class CliCommandExtensions
             foreach (User u in users)
             {
                 string roles = string.Join(',', u.UserRoles.Where(r => r.IsActive).Select(r => r.Role.Name));
-                logger.LogInformation(" - {UUsername} <{UEmail}> Roles=[{Roles}] Active={UIsActive}", u.Username, u.Email, roles, u.IsActive);
+                logger.LogInformation(" - {UUsername} <{UEmail}> Roles=[{Roles}] Active={UIsActive}", u.Username, SensitiveDataMasking.MaskEmail(u.Email), roles, u.IsActive);
             }
         }
         else

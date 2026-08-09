@@ -2,6 +2,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Email;
@@ -28,7 +29,7 @@ public sealed class MailjetEmailService : IEmailService
         if (string.IsNullOrWhiteSpace(_options.Mailjet?.ApiKey) || string.IsNullOrWhiteSpace(_options.Mailjet?.ApiSecret))
         {
             _logger.LogWarning("Mailjet API keys missing. Email logged only.");
-            _logger.LogInformation("[EMAIL:FALLBACK] To={MessageTo} Subject={MessageSubject}", message.To, message.Subject);
+            _logger.LogInformation("[EMAIL:FALLBACK] To={MessageTo} Subject={MessageSubject}", SensitiveDataMasking.MaskEmail(message.To), message.Subject);
             return new EmailDispatchResult(Success: true, ProviderMessage: "Missing API keys - logged only");
         }
 
@@ -42,7 +43,7 @@ public sealed class MailjetEmailService : IEmailService
 
         if (sandbox)
         {
-            _logger.LogInformation("Sending email to {MessageTo} in Mailjet sandbox mode (not actually delivered)", message.To);
+            _logger.LogInformation("Sending email to {MessageTo} in Mailjet sandbox mode (not actually delivered)", SensitiveDataMasking.MaskEmail(message.To));
         }
 
         // Build payload per Mailjet v3.1 API
@@ -77,7 +78,7 @@ public sealed class MailjetEmailService : IEmailService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("Email sent successfully to {MessageTo}", message.To);
+                _logger.LogInformation("Email sent successfully to {MessageTo}", SensitiveDataMasking.MaskEmail(message.To));
                 return new EmailDispatchResult(Success: true, ProviderMessage: "Email sent");
             }
             else
@@ -89,7 +90,7 @@ public sealed class MailjetEmailService : IEmailService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send email to {MessageTo}: {Message}", message.To, ex.Message);
+            _logger.LogError(ex, "Failed to send email to {MessageTo}: {Message}", SensitiveDataMasking.MaskEmail(message.To), ex.Message);
             return new EmailDispatchResult(Success: false, Error: $"Exception: {ex.Message}");
         }
     }
