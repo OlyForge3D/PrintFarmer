@@ -19,12 +19,12 @@ Related:
 ```mermaid
 flowchart LR
   A[PR opened] --> B[select job]
-  B -->|paths-only frontend| C[frontend job]
-  B -->|any dotnet input| D[dotnet-build full sln]
+  B -->|frontend inputs or full-safe| C[frontend job]
+  B -->|dotnet inputs or full-safe| D[dotnet-build full sln]
   D --> E[dotnet-test matrix]
   D --> F[migration-drift]
   B --> G[ci-tools]
-  B -->|any dotnet input| I[dependency-compliance]
+  B -->|dotnet inputs or full-safe| I[dependency-compliance]
   C --> H[summary]
   E --> H
   F --> H
