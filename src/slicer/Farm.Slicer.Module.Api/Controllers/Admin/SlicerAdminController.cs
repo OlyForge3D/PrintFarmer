@@ -35,6 +35,7 @@ public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
     /// <param name="request">The dry run request.</param>
     /// <returns>Validation result with rendered output and any issues.</returns>
     [HttpPost("dry-run")]
+    [Authorize(Roles = "farm_admin")]
     public IActionResult DryRun([FromBody] DryRunRequest request)
     {
         var result = new DryRunResult

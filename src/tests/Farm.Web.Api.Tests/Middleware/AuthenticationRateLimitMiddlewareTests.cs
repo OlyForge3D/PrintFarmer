@@ -217,14 +217,20 @@ public class AuthenticationRateLimitMiddlewareTests
     }
 
     [Fact]
-    public async Task GetOnAuthEndpoint_BypassesRateLimiter()
+    public async Task GetOnAuthEndpoint_StillCountsAgainstRateLimiter()
     {
+        // Regression test: the limiter must key on the request PATH only. Previously a
+        // "method != POST" fast-path let a caller skip the limiter entirely just by
+        // sending a non-POST verb (attacker-controlled bypass), even though the value
+        // driving that skip - Request.Method - is fully attacker-controlled. Any verb
+        // hitting a rate-limited auth path must still be checked/recorded.
         DefaultHttpContext ctx = new();
         ctx.Request.Method = HttpMethods.Get;
         ctx.Request.Path = LoginPath;
         ctx.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.2");
+        ctx.Response.Body = new MemoryStream();
 
-        Mock<IRateLimitService> service = new(MockBehavior.Strict);
+        Mock<IRateLimitService> service = CreateAllowingService();
         bool nextInvoked = false;
         AuthenticationRateLimitMiddleware middleware = CreateMiddleware(_ =>
         {
@@ -235,7 +241,37 @@ public class AuthenticationRateLimitMiddlewareTests
         await middleware.InvokeAsync(ctx, service.Object);
 
         Assert.True(nextInvoked);
-        service.VerifyNoOtherCalls();
+        service.Verify(s => s.CheckLoginLimitAsync("203.0.113.2", It.IsAny<CancellationToken>()), Times.Once);
+        service.Verify(s => s.RecordLoginAttemptAsync("203.0.113.2", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task NonPostVerbRotation_CannotBypassRateLimit()
+    {
+        // An attacker who rotates HTTP verbs (GET, PUT, DELETE, ...) on the same login
+        // path must still hit the same limiter bucket as POST attempts - the verb must
+        // never be a way to dodge CheckLoginLimitAsync/RecordLoginAttemptAsync.
+        Mock<IRateLimitService> service = new(MockBehavior.Strict);
+        _ = service.Setup(s => s.CheckLoginLimitAsync("203.0.113.3", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new RateLimitResult(IsAllowed: true, RemainingAttempts: 10));
+        _ = service.Setup(s => s.RecordLoginAttemptAsync("203.0.113.3", It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        AuthenticationRateLimitMiddleware middleware = CreateMiddleware(_ => Task.CompletedTask);
+
+        foreach (string verb in new[] { HttpMethods.Get, HttpMethods.Put, HttpMethods.Delete, HttpMethods.Post })
+        {
+            DefaultHttpContext ctx = new();
+            ctx.Request.Method = verb;
+            ctx.Request.Path = LoginPath;
+            ctx.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.3");
+            ctx.Response.Body = new MemoryStream();
+
+            await middleware.InvokeAsync(ctx, service.Object);
+        }
+
+        service.Verify(s => s.CheckLoginLimitAsync("203.0.113.3", It.IsAny<CancellationToken>()), Times.Exactly(4));
+        service.Verify(s => s.RecordLoginAttemptAsync("203.0.113.3", It.IsAny<CancellationToken>()), Times.Exactly(4));
     }
 
     [Fact]
