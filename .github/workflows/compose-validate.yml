@@ -90,7 +90,10 @@ jobs:
         run: |
           set -euo pipefail
           echo "Validating: $OUT_DIR/docker-compose.yml"
-          docker compose -f "$OUT_DIR/docker-compose.yml" config
+          # --quiet suppresses the fully-interpolated compose output (which would
+          # otherwise print the throwaway admin credentials into CI logs) while still
+          # performing full interpolation/validation and failing on error.
+          docker compose -f "$OUT_DIR/docker-compose.yml" config --quiet
 
       - name: Dump generator logs (on failure)
         if: failure()
