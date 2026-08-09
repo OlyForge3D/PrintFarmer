@@ -51,38 +51,8 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           BEFORE_SHA: ${{ github.event.before }}
           AFTER_SHA: ${{ github.sha }}
-        run: |
-          set -uo pipefail
-          out="$RUNNER_TEMP/changed.z"
-          : > "$out"
-          case "$EVENT_NAME" in
-            pull_request)
-              base_sha="$PR_BASE_SHA"
-              head_sha="$PR_HEAD_SHA"
-              ;;
-            push)
-              base_sha="$BEFORE_SHA"
-              head_sha="$AFTER_SHA"
-              ;;
-            *)
-              base_sha=""
-              head_sha=""
-              ;;
-          esac
-          rc=0
-          if [[ -n "$base_sha" && -n "$head_sha" && "$base_sha" != "0000000000000000000000000000000000000000" ]]; then
-            if ! git -c core.quotePath=false diff -z --no-renames --name-only "$base_sha" "$head_sha" > "$out" 2>/dev/null; then
-              rc=1
-            fi
-          fi
-          {
-            echo "changed_file=$out"
-            if (( rc != 0 )); then
-              echo "force_full_safe=diff-failed"
-            else
-              echo "force_full_safe="
-            fi
-          } >> "$GITHUB_OUTPUT"
+          OUT_FILE: ${{ runner.temp }}/changed.z
+        run: bash scripts/ci/compute-change-set.sh
 
       - name: Run selector
         id: selector
