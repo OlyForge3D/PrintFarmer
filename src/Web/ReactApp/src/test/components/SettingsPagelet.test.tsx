@@ -172,7 +172,7 @@ describe('SettingsPagelet — required fields lead (#1012)', () => {
 
   function renderedLabels(container: HTMLElement): string[] {
     return Array.from(container.querySelectorAll('label')).map((l) =>
-      (l.textContent ?? '').replace('*', '').trim(),
+      (l.textContent ?? '').replaceAll('*', '').trim(),
     );
   }
 

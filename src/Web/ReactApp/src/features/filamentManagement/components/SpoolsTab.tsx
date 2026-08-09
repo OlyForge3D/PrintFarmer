@@ -22,6 +22,7 @@ import {
   DeleteIcon,
 } from '@/common/components/icons/MdiIcons';
 import { classifyColor, getRepresentativeHex } from '@/common/utils/colorFamilies';
+import { isSafeHttpUrl } from '@/common/utils/validation';
 import { Button, Checkbox, Select, FileUpload } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ColorFamilySelect } from '@/features/filamentManagement/components/ColorFamilySelect';
@@ -701,7 +702,7 @@ export function SpoolsTab() {
           >
             <RefreshIcon className="h-4 w-4" />
           </Button>
-          {spoolmanBaseUrl && (
+          {spoolmanBaseUrl && isSafeHttpUrl(spoolmanBaseUrl) && (
             <a
               href={spoolmanBaseUrl}
               target="_blank"

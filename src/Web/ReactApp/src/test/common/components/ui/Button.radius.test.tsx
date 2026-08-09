@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { Button } from '@/common/components/ui/Button';
-
-const radiusClasses = (element: Element): string[] =>
-  Array.from(element.classList).filter((name) => /^(?:\S+:)*!?rounded(?:-|$)/.test(name));
+import { radiusClasses } from './radiusTestUtils';
 
 describe('Button radius contract', () => {
   it('defaults to exactly one 2px radius class', () => {

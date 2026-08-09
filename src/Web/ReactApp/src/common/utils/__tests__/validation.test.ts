@@ -6,6 +6,7 @@ import {
   suggestCorrectNetworkAddress,
   normalizeUrl,
   normalizeSpoolmanBaseUrl,
+  isSafeHttpUrl,
 } from '../validation';
 
 describe('validation utils', () => {
@@ -124,6 +125,28 @@ describe('validation utils', () => {
     it('should handle empty strings', () => {
       expect(normalizeSpoolmanBaseUrl('')).toBe('');
       expect(normalizeSpoolmanBaseUrl('  ')).toBe('');
+    });
+  });
+
+  describe('isSafeHttpUrl', () => {
+    it('accepts absolute http/https URLs', () => {
+      expect(isSafeHttpUrl('http://spoolman.local:7912')).toBe(true);
+      expect(isSafeHttpUrl('https://spoolman.example.com')).toBe(true);
+    });
+
+    it('rejects non-http(s) schemes', () => {
+      // Regression for js/xss-through-dom: a persisted/settings-derived value
+      // used as an anchor `href` must never resolve to a scheme other than
+      // http/https, or clicking the link could execute script instead of
+      // navigating. These use inert placeholder bodies, not real payloads.
+      expect(isSafeHttpUrl('javascript:void(0)')).toBe(false);
+      expect(isSafeHttpUrl('data:text/plain,placeholder')).toBe(false);
+      expect(isSafeHttpUrl('file:///etc/passwd')).toBe(false);
+    });
+
+    it('rejects malformed or empty input', () => {
+      expect(isSafeHttpUrl('')).toBe(false);
+      expect(isSafeHttpUrl('not a url')).toBe(false);
     });
   });
 });
