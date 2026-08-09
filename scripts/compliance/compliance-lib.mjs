@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, readFile, readdir, stat } from 'node:fs/promises';
+import { access, open, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 const skippedDirectories = new Set([
@@ -1080,33 +1080,32 @@ export async function validateProvenanceManifest(repoRoot, manifest) {
     }
 
     const absolutePath = path.join(repoRoot, filePath);
-    // stat() first so we never buffer a >2MB file into memory just to
-    // discard it. This narrows (rather than eliminates) the pre-existing
-    // stat-then-read race: catching ENOENT from each call directly, instead
-    // of relying on a separate pathExists() pre-check, means a file deleted
-    // between the two calls is handled here rather than racing an unrelated
-    // check.
-    let fileStat;
+    // Opens the file once and checks size / reads content from that same
+    // file handle (fstat + read on one fd), instead of a path-based stat()
+    // followed by a separate path-based readFile(). A path re-lookup between
+    // two calls is a genuine TOCTOU window (the path can be swapped for a
+    // different inode); operating on one open descriptor for both the size
+    // check and the read closes that window because both operations
+    // observe the same underlying file no matter what happens to the path
+    // afterward.
+    let handle;
     try {
-      fileStat = await stat(absolutePath);
+      handle = await open(absolutePath, 'r');
     } catch (error) {
       if (error.code === 'ENOENT') {
         continue;
       }
       throw error;
     }
-    if (fileStat.size > 2_000_000) {
-      continue;
-    }
-
     let content;
     try {
-      content = await readFile(absolutePath, 'utf8');
-    } catch (error) {
-      if (error.code === 'ENOENT') {
+      const fileStat = await handle.stat();
+      if (fileStat.size > 2_000_000) {
         continue;
       }
-      throw error;
+      content = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
     }
     const markerMatch = content.match(/PrintFarmer-Provenance-ID:\s*([a-z0-9.-]+)/i);
     if (markerMatch && !entryIds.has(markerMatch[1])) {
@@ -1907,33 +1906,29 @@ export async function scanPublicationFiles(
       continue;
     }
 
-    // Removes the pathExists()-then-stat()-then-read pre-check pattern:
-    // each fs call below handles its own ENOENT directly rather than
-    // trusting an earlier existence check, so a file deleted between calls
-    // is caught here instead of racing an unrelated check. This narrows but
-    // does not fully close the window between this size check and the read
-    // below — a file swapped for an oversized one in that gap is still read
-    // in full. That residual risk is accepted for this trust boundary
-    // (repository-controlled publication paths, not arbitrary uploads).
-    let fileStat;
+    // Opens the file once and checks size / reads content from that same
+    // file handle (fstat + read on one fd), instead of a path-based stat()
+    // followed by a separate path-based readFile(). Operating on one open
+    // descriptor for both the size check and the read closes the TOCTOU
+    // window entirely, because both operations observe the same underlying
+    // file regardless of what happens to the path afterward.
+    let handle;
     try {
-      fileStat = await stat(absolutePath);
+      handle = await open(absolutePath, 'r');
     } catch {
       errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
       continue;
     }
-
-    if (fileStat.size > 20_000_000) {
-      errors.push(createError('PUBLICATION_FILE_SIZE', relativePath, 'publication scan only accepts files up to 20 MB'));
-      continue;
-    }
-
     let content;
     try {
-      content = await readFile(absolutePath, 'utf8');
-    } catch {
-      errors.push(createError('PUBLICATION_FILE_MISSING', relativePath, 'publication file is missing or outside the repository'));
-      continue;
+      const fileStat = await handle.stat();
+      if (fileStat.size > 20_000_000) {
+        errors.push(createError('PUBLICATION_FILE_SIZE', relativePath, 'publication scan only accepts files up to 20 MB'));
+        continue;
+      }
+      content = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
     }
     scannedPaths.push(relativeToRoot);
     for (const pattern of patterns) {

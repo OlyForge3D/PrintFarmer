@@ -5,6 +5,7 @@ import {
   mkdtemp,
   mkdir,
   rm,
+  truncate,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -617,6 +618,23 @@ test('scanPublicationFiles reports a missing file without a pre-check race', asy
   try {
     const errors = await scanPublicationFiles(root, ['does-not-exist.txt'], ['secret']);
     assert.ok(hasCode(errors, 'PUBLICATION_FILE_MISSING'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('scanPublicationFiles rejects a file over the size limit without buffering it into memory', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publication-oversized-'));
+  try {
+    const oversizedPath = path.join(root, 'oversized.txt');
+    // Sparse file: report a size over the 20 MB limit without actually
+    // writing 20+ MB of data, so the test stays fast. This exercises the
+    // fd-based size check (fstat on the open handle) rejecting the file
+    // before any read is attempted on it.
+    await writeFile(oversizedPath, Buffer.alloc(1));
+    await truncate(oversizedPath, 21_000_000);
+    const errors = await scanPublicationFiles(root, ['oversized.txt'], ['secret']);
+    assert.ok(hasCode(errors, 'PUBLICATION_FILE_SIZE'));
   } finally {
     await rm(root, { force: true, recursive: true });
   }
