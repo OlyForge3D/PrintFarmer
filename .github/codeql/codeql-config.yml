@@ -7,12 +7,12 @@ name: "PrintFarmer CodeQL Config"
 queries:
   - uses: security-and-quality
 
-paths-ignore:
-  # src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs is vendored,
-  # auto-generated third-party code from the 3MF Consortium, produced by the
-  # Automatic Component Toolkit (ACT) version 1.8.0-alpha. It is not
-  # first-party code and must not be hand-edited. This single file accounts
-  # for ~1,315 of ~4,933 open CodeQL alerts in this repository. Do not add
-  # other paths here for noise reasons — this exclusion is scoped narrowly
-  # to this one generated file.
-  - src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs
+# NOTE: paths-ignore only applies to interpreted languages (JS/TS, Python,
+# Ruby). For compiled languages like C#, CodeQL analyzes whatever the build
+# compiles and path filters here have no effect — verified empirically after
+# a prior attempt to exclude the vendored, auto-generated
+# src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs (3MF Consortium /
+# Automatic Component Toolkit output) via paths-ignore had zero effect on its
+# alert count. Alerts for that file are instead dismissed individually via the
+# code-scanning API as won't-fix, each with a comment citing its vendored/
+# generated provenance.
