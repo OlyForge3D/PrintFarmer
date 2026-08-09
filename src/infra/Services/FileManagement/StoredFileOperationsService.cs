@@ -18,7 +18,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
     public string GetFullFilePath(StoredFile file)
     {
         ArgumentNullException.ThrowIfNull(file);
-        return Path.Combine(file.FilePath, file.FileName);
+        return Path.Join(file.FilePath, file.FileName);
     }
 
     /// <summary>
@@ -40,7 +40,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        return string.IsNullOrEmpty(file.ThumbnailFileName) ? null : Path.Combine(file.FilePath, file.ThumbnailFileName);
+        return string.IsNullOrEmpty(file.ThumbnailFileName) ? null : Path.Join(file.FilePath, file.ThumbnailFileName);
     }
 
     /// <summary>
@@ -159,7 +159,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
         }
 
         // Combine relative path with storage root (guaranteed to be absolute)
-        return Path.Combine(storageRoot, normalizedPath);
+        return Path.Join(storageRoot, normalizedPath);
     }
 
     /// <summary>

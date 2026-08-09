@@ -58,7 +58,7 @@ public class CatalogUpdateService : ICatalogUpdateService
         _seedService = seedService;
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-        _seedDataPath = configuration["SeedData:Path"] ?? Path.Combine(AppContext.BaseDirectory, "Data", "seed");
+        _seedDataPath = configuration["SeedData:Path"] ?? Path.Join(AppContext.BaseDirectory, "Data", "seed");
         _gitHubBaseUrl = configuration["CatalogUpdate:GitHubBaseUrl"] ?? DefaultGitHubBaseUrl;
         _yamlDeserializer = new DeserializerBuilder()
             .WithNamingConvention(CamelCaseNamingConvention.Instance)
@@ -261,7 +261,7 @@ public class CatalogUpdateService : ICatalogUpdateService
 
     private async Task<CatalogManifest?> ReadLocalManifestAsync()
     {
-        string manifestPath = Path.Combine(_seedDataPath, ManifestFileName);
+        string manifestPath = Path.Join(_seedDataPath, ManifestFileName);
         if (!File.Exists(manifestPath))
         {
             _logger.LogWarning("[CatalogUpdate] Local manifest not found at {Path}", manifestPath);
@@ -322,7 +322,7 @@ public class CatalogUpdateService : ICatalogUpdateService
             response.EnsureSuccessStatusCode();
 
             string content = await response.Content.ReadAsStringAsync(ct);
-            string localPath = Path.Combine(_seedDataPath, relativePath);
+            string localPath = Path.Join(_seedDataPath, relativePath);
 
             // Ensure directory exists
             string? directory = Path.GetDirectoryName(localPath);
@@ -343,7 +343,7 @@ public class CatalogUpdateService : ICatalogUpdateService
 
     private async Task<string> ComputeLocalManifestHashAsync()
     {
-        string manifestPath = Path.Combine(_seedDataPath, ManifestFileName);
+        string manifestPath = Path.Join(_seedDataPath, ManifestFileName);
         if (!File.Exists(manifestPath))
         {
             return string.Empty;

@@ -275,7 +275,7 @@ public static class FeatureServicesStartup
                     if (string.IsNullOrWhiteSpace(shared) || !Directory.Exists(shared))
                     {
                         // Fallback: look for a local wwwroot under content root (publish scenario)
-                        string fallback = Path.Combine(environment.ContentRootPath, "wwwroot");
+                        string fallback = Path.Join(environment.ContentRootPath, "wwwroot");
                         if (Directory.Exists(fallback))
                         {
                             shared = fallback;

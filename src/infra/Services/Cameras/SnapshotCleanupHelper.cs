@@ -54,7 +54,7 @@ public static class SnapshotCleanupHelper
         int filesDeleted = 0;
         foreach (CameraSnapshot snapshot in snapshots)
         {
-            string fullPath = Path.Combine(snapshotRoot, snapshot.FilePath);
+            string fullPath = Path.Join(snapshotRoot, snapshot.FilePath);
             string canonicalFull = Path.GetFullPath(fullPath);
 
             bool isContained =

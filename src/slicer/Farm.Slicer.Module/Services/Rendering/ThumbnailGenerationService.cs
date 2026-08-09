@@ -34,7 +34,7 @@ public class ThumbnailGenerationService : IThumbnailGenerationService
 
         // Thumbnails storage path
         _thumbnailsBasePath = configuration["ThumbnailGeneration:ThumbnailsPath"]
-            ?? Path.Combine(Directory.GetCurrentDirectory(), "thumbnails");
+            ?? Path.Join(Directory.GetCurrentDirectory(), "thumbnails");
 
         // Ensure thumbnails directory exists
         if (!Directory.Exists(_thumbnailsBasePath))

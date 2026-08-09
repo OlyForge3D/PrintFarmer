@@ -61,7 +61,7 @@ public sealed class StoredGcodeIntegrityVerifier(
         string root = Path.GetFullPath(_storagePaths.GetGcodeStorageDirectory());
         string relativeDirectory = (file.FilePath ?? string.Empty)
             .TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string fullPath = Path.GetFullPath(Path.Combine(root, relativeDirectory, file.FileName));
+        string fullPath = Path.GetFullPath(Path.Join(root, relativeDirectory, file.FileName));
         string rootedPrefix = root.EndsWith(Path.DirectorySeparatorChar)
             ? root
             : $"{root}{Path.DirectorySeparatorChar}";

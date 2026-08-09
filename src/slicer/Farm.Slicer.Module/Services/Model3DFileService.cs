@@ -275,7 +275,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
 
         // Return absolute path using the configured storage directory
-        return Path.Combine(_modelsPath, model.FileName);
+        return Path.Join(_modelsPath, model.FileName);
     }
 
     /// <summary>
@@ -288,7 +288,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
     {
         // Use unfiltered query for file operations - thumbnails should be accessible regardless of validation status
         Model3D? model = await _model3dFiles.GetByIdUnfilteredAsync(id, ct);
-        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Combine(_modelsPath, model.ThumbnailFileName));
+        return model == null ? null : (string.IsNullOrEmpty(model.ThumbnailFileName) ? null : Path.Join(_modelsPath, model.ThumbnailFileName));
     }
 
     /// <summary>
@@ -313,7 +313,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         try
         {
             // Construct full physical path: all models are stored in _modelsPath regardless of virtual path
-            string fullModelPath = Path.Combine(_modelsPath, model.FileName);
+            string fullModelPath = Path.Join(_modelsPath, model.FileName);
             if (_fileManagementService.IsSafePath(fullModelPath, _modelsPath) && System.IO.File.Exists(fullModelPath))
             {
                 System.IO.File.Delete(fullModelPath);
@@ -323,7 +323,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             string? thumbnailFileName = model.ThumbnailFileName;
             if (thumbnailFileName != null)
             {
-                string fullThumbnailPath = Path.Combine(_modelsPath, thumbnailFileName);
+                string fullThumbnailPath = Path.Join(_modelsPath, thumbnailFileName);
                 if (_fileManagementService.IsSafePath(fullThumbnailPath, _modelsPath) && System.IO.File.Exists(fullThumbnailPath))
                 {
                     System.IO.File.Delete(fullThumbnailPath);
@@ -443,12 +443,12 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         string thumbnailBaseName = _fileOperations.GenerateThumbnailFileName(modelId, ".png");
         string thumbnailFileName = $"{Path.GetFileNameWithoutExtension(thumbnailBaseName)}_{Guid.NewGuid():N}.png";
-        string thumbnailFinalPath = Path.Combine(_modelsPath, thumbnailFileName);
+        string thumbnailFinalPath = Path.Join(_modelsPath, thumbnailFileName);
         string thumbnailTempPath = $"{thumbnailFinalPath}.tmp";
         string? previousThumbnailFileName = model.ThumbnailFileName;
         string? previousThumbnailPath = previousThumbnailFileName is null
             ? null
-            : Path.Combine(_modelsPath, previousThumbnailFileName);
+            : Path.Join(_modelsPath, previousThumbnailFileName);
         DateTime previousUpdatedAt = model.UpdatedAt;
 
         if (!_fileManagementService.IsSafePath(thumbnailFinalPath, _modelsPath)
@@ -521,7 +521,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         Guid modelId = Guid.NewGuid();
         string fileName = $"{modelId}{fileExtension}";
-        string finalFilePath = Path.Combine(_modelsPath, fileName);
+        string finalFilePath = Path.Join(_modelsPath, fileName);
         if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
         {
             throw new InvalidOperationException("Unsafe file path generated");
@@ -531,7 +531,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         // Use temp file pattern for safety: write to temp, then move to final location
         string tempFileName = $"{modelId}.tmp{fileExtension}";
-        string tempFilePath = Path.Combine(_modelsPath, tempFileName);
+        string tempFilePath = Path.Join(_modelsPath, tempFileName);
         if (!_fileManagementService.IsSafePath(tempFilePath, _modelsPath))
         {
             throw new InvalidOperationException("Unsafe temporary file path generated");
@@ -562,8 +562,8 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             if (thumbnailFile is not null)
             {
                 thumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, ".png");
-                thumbnailFinalPath = Path.Combine(_modelsPath, thumbnailFileName);
-                thumbnailTempPath = Path.Combine(_modelsPath, $"{modelId}_thumb.{Guid.NewGuid():N}.tmp");
+                thumbnailFinalPath = Path.Join(_modelsPath, thumbnailFileName);
+                thumbnailTempPath = Path.Join(_modelsPath, $"{modelId}_thumb.{Guid.NewGuid():N}.tmp");
                 if (!_fileManagementService.IsSafePath(thumbnailFinalPath, _modelsPath)
                     || !_fileManagementService.IsSafePath(thumbnailTempPath, _modelsPath))
                 {
@@ -753,7 +753,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 {
                     _logger.LogDebug("Starting thumbnail generation for {ModelId}", modelId);
                     string generatedThumbnailFileName = _fileOperations.GenerateThumbnailFileName(modelId, _thumbnailService.ThumbnailFileExtension);
-                    string thumbnailPath = Path.Combine(_modelsPath, generatedThumbnailFileName);
+                    string thumbnailPath = Path.Join(_modelsPath, generatedThumbnailFileName);
                     thumbnailFinalPath = thumbnailPath;
 
                     if (_fileManagementService.IsSafePath(thumbnailPath, _modelsPath))
@@ -1074,7 +1074,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
 
         string storageRoot = GetFullPathForDownload(_storagePathService.GetModelUploadDirectory(), nameof(path));
-        string requestedPath = GetFullPathForDownload(Path.Combine(storageRoot, path), nameof(path));
+        string requestedPath = GetFullPathForDownload(Path.Join(storageRoot, path), nameof(path));
         if (!IsWithinStorageRoot(storageRoot, requestedPath))
         {
             _logger.LogWarning("[Download] Path traversal attempt blocked");
@@ -1162,7 +1162,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
             for (int index = 0; index < segments.Length; index++)
             {
-                currentPath = Path.Combine(currentPath, segments[index]);
+                currentPath = Path.Join(currentPath, segments[index]);
                 FileSystemInfo entry = Directory.Exists(currentPath)
                     ? new DirectoryInfo(currentPath)
                     : new FileInfo(currentPath);
@@ -1196,7 +1196,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 if (index + 1 < segments.Length)
                 {
                     targetPath = Path.GetFullPath(
-                        Path.Combine(targetPath, Path.Combine(segments[(index + 1)..])));
+                        Path.Join(targetPath, Path.Join(segments[(index + 1)..])));
                 }
 
                 pendingPath = targetPath;
@@ -1371,7 +1371,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         Guid modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string finalFilePath = Path.Combine(_modelsPath, fileName);
+        string finalFilePath = Path.Join(_modelsPath, fileName);
 
         if (!_fileManagementService.IsSafePath(finalFilePath, _modelsPath))
         {
@@ -1381,7 +1381,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         _logger.LogInformation("Geometry upload started: {ModelId} ({FileSize} bytes)", modelId, geometryFile.Length);
 
         // Write file to a temp path, then move to final location
-        string tempFilePath = Path.Combine(_modelsPath, $"{modelId}.tmp.stl");
+        string tempFilePath = Path.Join(_modelsPath, $"{modelId}.tmp.stl");
         try
         {
             using (Stream dest = _fileSystem.OpenWrite(tempFilePath))

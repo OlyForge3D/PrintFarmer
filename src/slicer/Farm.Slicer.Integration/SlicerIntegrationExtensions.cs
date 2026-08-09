@@ -122,7 +122,7 @@ public static class SlicerIntegrationExtensions
         if (!string.IsNullOrWhiteSpace(pluginsPath) && !Path.IsPathRooted(pluginsPath))
         {
             pluginsPath = Path.GetFullPath(
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
+                Path.Join(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
         }
 
         if (string.IsNullOrWhiteSpace(pluginsPath) || !Directory.Exists(pluginsPath))

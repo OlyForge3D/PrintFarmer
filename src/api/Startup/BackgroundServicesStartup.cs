@@ -56,8 +56,8 @@ public static class BackgroundServicesStartup
             IServiceScopeFactory scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
             ILoggerFactory loggerFactory = sp.GetRequiredService<ILoggerFactory>();
             IConfiguration config = sp.GetRequiredService<IConfiguration>();
-            string modelStoragePath = config["ModelStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "models");
-            string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Combine(Directory.GetCurrentDirectory(), "gcode-library");
+            string modelStoragePath = config["ModelStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "models");
+            string gcodeStoragePath = config["GcodeStorage:Path"] ?? Path.Join(Directory.GetCurrentDirectory(), "gcode-library");
             return new Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService(
                 scopeFactory,
                 loggerFactory.CreateLogger<Farm.Infrastructure.Services.FileManagement.FileConsistencyAuditService>(),

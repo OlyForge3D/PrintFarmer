@@ -217,7 +217,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             throw new ArgumentException("A claim token is required.", nameof(claimToken));
         }
 
-        string attemptWorkDirectory = Path.Combine(
+        string attemptWorkDirectory = Path.Join(
             workingDirectory,
             jobId.ToString(),
             claimToken.ToString());
@@ -337,7 +337,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         string fullWorkDirectory = Path.GetFullPath(workDir);
-        string destinationPath = Path.GetFullPath(Path.Combine(fullWorkDirectory, sanitizedFileName));
+        string destinationPath = Path.GetFullPath(Path.Join(fullWorkDirectory, sanitizedFileName));
         string? destinationDirectory = Path.GetDirectoryName(destinationPath);
         StringComparison pathComparison =
             OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
@@ -584,9 +584,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         VerifyDigest("process", profiles.ProcessJson, profiles.ProcessSha256);
         VerifyDigest("filament", profiles.FilamentJson, profiles.FilamentSha256);
 
-        string machineJsonPath = Path.Combine(workDir, "machine.json");
-        string processJsonPath = Path.Combine(workDir, "process.json");
-        string filamentJsonPath = Path.Combine(workDir, "filament.json");
+        string machineJsonPath = Path.Join(workDir, "machine.json");
+        string processJsonPath = Path.Join(workDir, "process.json");
+        string filamentJsonPath = Path.Join(workDir, "filament.json");
 
         // Written verbatim: OrcaSlicer consumes its own profile schema, so re-serializing a CLR DTO
         // shape here would produce files the slicer cannot load.
@@ -640,8 +640,8 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 "The claimed job's named profile selection did not resolve machine, process and filament settings.");
         }
 
-        string machineJsonPath = Path.Combine(workDir, "machine.json");
-        string processJsonPath = Path.Combine(workDir, "process.json");
+        string machineJsonPath = Path.Join(workDir, "machine.json");
+        string processJsonPath = Path.Join(workDir, "process.json");
 
         // Write the profiles directly as JSON - they should already contain complete settings from the database
         // OrcaSlicer expects flat key-value JSON (native settings), not our DTO wrapper.
@@ -666,7 +666,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             var filamentPaths = new List<string>();
             for (int i = 0; i < profile.ExtruderFilamentProfiles.Count; i++)
             {
-                string path = Path.Combine(workDir, $"filament_{i}.json");
+                string path = Path.Join(workDir, $"filament_{i}.json");
                 string json = SettingsDictToNativeJson(profile.ExtruderFilamentProfiles[i].Settings);
                 await File.WriteAllTextAsync(path, json, cancellationToken);
                 filamentPaths.Add(path);
@@ -677,7 +677,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
         else
         {
-            string filamentJsonPath = Path.Combine(workDir, "filament.json");
+            string filamentJsonPath = Path.Join(workDir, "filament.json");
             Dictionary<string, object> filamentSettings =
                 profile.ExtruderFilamentProfiles is { Count: 1 }
                     ? profile.ExtruderFilamentProfiles[0].Settings
@@ -700,10 +700,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
     private async Task<string> RunOrcaSlicerAsync(List<string> modelPaths, string workDir, DistributedSlicingJob job, CancellationToken cancellationToken)
     {
-        string gcodeOutputDir = Path.Combine(workDir, "output");
+        string gcodeOutputDir = Path.Join(workDir, "output");
         _ = Directory.CreateDirectory(gcodeOutputDir);
 
-        string gcodeFilePath = Path.Combine(gcodeOutputDir, Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode");
+        string gcodeFilePath = Path.Join(gcodeOutputDir, Path.GetFileNameWithoutExtension(job.ModelFileName) + ".gcode");
         if (!File.Exists(_orcaSlicerBinaryPath))
         {
             throw new InvalidOperationException($"OrcaSlicer binary not found at {_orcaSlicerBinaryPath}");
@@ -804,7 +804,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         }
 
         // Create a named pipe for real-time progress from OrcaSlicer
-        string pipePath = Path.Combine(workDir, "progress.pipe");
+        string pipePath = Path.Join(workDir, "progress.pipe");
         bool pipeCreated = TryCreateNamedPipe(pipePath);
         string pipeFlag = pipeCreated ? $" --pipe \"{pipePath}\"" : string.Empty;
 
@@ -883,14 +883,14 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         if (!File.Exists(gcodeFilePath))
         {
             string expectedPlateName = job.PlateIndex.HasValue ? $"plate_{job.PlateIndex.Value + 1}.gcode" : "plate_1.gcode";
-            string platePath = Path.Combine(gcodeOutputDir, expectedPlateName);
+            string platePath = Path.Join(gcodeOutputDir, expectedPlateName);
             if (File.Exists(platePath))
             {
                 gcodeFilePath = platePath;
             }
             else
             {
-                string plate1Path = Path.Combine(gcodeOutputDir, "plate_1.gcode");
+                string plate1Path = Path.Join(gcodeOutputDir, "plate_1.gcode");
                 if (File.Exists(plate1Path))
                 {
                     gcodeFilePath = plate1Path;
@@ -958,7 +958,7 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
         string printTime = FormatPrintTime(metadata.PrintTimeSeconds);
 
         string newName = SanitizeFileName($"{modelName}_{printerModel}_{material}_{printTime}.gcode");
-        string newPath = Path.Combine(Path.GetDirectoryName(gcodeFilePath)!, newName);
+        string newPath = Path.Join(Path.GetDirectoryName(gcodeFilePath)!, newName);
 
         if (string.Equals(gcodeFilePath, newPath, StringComparison.Ordinal))
         {

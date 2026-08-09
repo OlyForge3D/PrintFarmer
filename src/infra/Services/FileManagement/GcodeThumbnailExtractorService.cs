@@ -75,7 +75,7 @@ public class GcodeThumbnailExtractorService(
             // Save thumbnail with temporary GUID name - will be renamed by FinalizeChunkedUploadAsync
             // to match the GCODE file ID with _thumb.png suffix
             string thumbnailFileName = $"{Guid.NewGuid()}_thumb.png";
-            string thumbnailPath = Path.Combine(thumbnailDir, thumbnailFileName);
+            string thumbnailPath = Path.Join(thumbnailDir, thumbnailFileName);
 
             await File.WriteAllBytesAsync(thumbnailPath, extractedMetadata.ThumbnailData, ct);
             _logger.LogInformation("Extracted and saved thumbnail to {ThumbnailPath}", thumbnailPath);

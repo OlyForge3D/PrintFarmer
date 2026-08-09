@@ -1318,7 +1318,7 @@ public class PrintJobManagementService(
 
             // Resolve the full local file path: StorageRoot + VirtualPath + FileName
             string gcodeStorageRoot = _storagePathService.GetGcodeStorageDirectory();
-            string localFilePath = Path.Combine(gcodeStorageRoot, job.GcodeFile.FilePath.TrimStart('/'), job.GcodeFile.FileName);
+            string localFilePath = Path.Join(gcodeStorageRoot, job.GcodeFile.FilePath.TrimStart('/'), job.GcodeFile.FileName);
 
             _logger.LogInformation(
                 "Dispatching print job {JobId} to printer {PrinterId}: uploading {OriginalName}",
@@ -1888,7 +1888,7 @@ public class PrintJobManagementService(
         string printerFileName = dispatchAttempt.BackendFileName
             ?? throw new InvalidOperationException("Dispatch claim did not persist a backend file identity.");
         string gcodeStorageRoot = _storagePathService.GetGcodeStorageDirectory();
-        string localFilePath = Path.Combine(
+        string localFilePath = Path.Join(
             gcodeStorageRoot,
             job.GcodeFile.FilePath.TrimStart('/'),
             job.GcodeFile.FileName);

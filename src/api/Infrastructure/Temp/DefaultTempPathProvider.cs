@@ -19,7 +19,7 @@ public sealed class DefaultTempPathProvider : ITempPathProvider
             ? configured!
             : !string.IsNullOrWhiteSpace(env)
                 ? env!
-                : Path.Combine(Directory.GetCurrentDirectory(), "temp");
+                : Path.Join(Directory.GetCurrentDirectory(), "temp");
 
         try
         {

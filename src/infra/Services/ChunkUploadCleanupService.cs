@@ -39,7 +39,7 @@ public class ChunkUploadCleanupService(ILogger<ChunkUploadCleanupService> logger
             return;
         }
 
-        string libraryRoot = Path.Combine(root, "gcode-library");
+        string libraryRoot = Path.Join(root, "gcode-library");
         if (!Directory.Exists(libraryRoot))
         {
             return;

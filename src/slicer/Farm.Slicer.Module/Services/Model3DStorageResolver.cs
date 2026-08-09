@@ -203,7 +203,7 @@ public sealed class Model3DStorageResolver(
         // storage root and was reported as having no readable bytes.
         // Only the file component of the stored name is honoured, and the final path must remain
         // inside the configured model root even if stored metadata was tampered with.
-        string candidate = Path.GetFullPath(Path.Combine(root, Path.GetFileName(model.FileName)));
+        string candidate = Path.GetFullPath(Path.Join(root, Path.GetFileName(model.FileName)));
         string rootWithSeparator = root.EndsWith(Path.DirectorySeparatorChar)
             ? root
             : root + Path.DirectorySeparatorChar;

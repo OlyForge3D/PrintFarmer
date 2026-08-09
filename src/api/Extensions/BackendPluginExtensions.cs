@@ -80,7 +80,7 @@ public static class BackendPluginExtensions
                 if (!Path.IsPathRooted(pluginsPath))
                 {
                     pluginsPath = Path.GetFullPath(
-                        Path.Combine(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
+                        Path.Join(AppDomain.CurrentDomain.BaseDirectory, pluginsPath));
                 }
 
                 LoadPluginDllsFromDirectory(pluginsPath);

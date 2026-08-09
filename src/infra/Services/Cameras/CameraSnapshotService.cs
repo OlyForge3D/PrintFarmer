@@ -119,8 +119,8 @@ public class CameraSnapshotService : ICameraSnapshotService
         string printerDir = printerId.ToString();
         string jobDir = printJobId?.ToString() ?? "no-job";
         string fileName = $"{timestamp}_{eventType}_{camera.Id:N}.jpg";
-        string relativePath = Path.Combine(printerDir, jobDir, fileName);
-        string fullPath = Path.Combine(snapshotRoot, relativePath);
+        string relativePath = Path.Join(printerDir, jobDir, fileName);
+        string fullPath = Path.Join(snapshotRoot, relativePath);
 
         // Ensure directory exists
         string? directory = Path.GetDirectoryName(fullPath);

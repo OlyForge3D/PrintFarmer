@@ -152,7 +152,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             {
                                 try
                                 {
-                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                    string profilePath = Path.Join(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
                                         _logger.LogWarning("Machine model profile referenced in bundle not found: {ProfilePath}", profilePath);
@@ -264,7 +264,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                             {
                                 try
                                 {
-                                    string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                    string profilePath = Path.Join(_orcaProfilesPath, folderName, entry.SubPath);
                                     if (!File.Exists(profilePath))
                                     {
                                         _logger.LogWarning("Machine profile referenced in bundle not found: {ProfilePath}", profilePath);
@@ -373,7 +373,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                string profilePath = Path.Join(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning("Filament profile referenced in bundle not found: {ProfilePath}", profilePath);
@@ -501,7 +501,7 @@ public class OrcaProfilesService : ISlicerProfilesService
                         {
                             try
                             {
-                                string profilePath = Path.Combine(_orcaProfilesPath, folderName, entry.SubPath);
+                                string profilePath = Path.Join(_orcaProfilesPath, folderName, entry.SubPath);
                                 if (!File.Exists(profilePath))
                                 {
                                     _logger.LogWarning("Process profile referenced in bundle not found: {ProfilePath}", profilePath);
@@ -1002,7 +1002,7 @@ public class OrcaProfilesService : ISlicerProfilesService
         }
 
         // Build the lookup from the manifest file
-        string manifestPath = Path.Combine(_orcaProfilesPath, $"{manufacturerName}.json");
+        string manifestPath = Path.Join(_orcaProfilesPath, $"{manufacturerName}.json");
         if (!File.Exists(manifestPath))
         {
             _logger.LogDebug("Manifest file not found: {ManifestPath}", manifestPath);
@@ -1045,7 +1045,7 @@ public class OrcaProfilesService : ISlicerProfilesService
             if (!string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(entry.SubPath))
             {
                 // sub_path is relative to the manufacturer directory
-                string fullPath = Path.Combine(manufacturerDir, entry.SubPath);
+                string fullPath = Path.Join(manufacturerDir, entry.SubPath);
                 lookup[entry.Name] = fullPath;
             }
         }
