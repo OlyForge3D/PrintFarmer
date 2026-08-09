@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -20,7 +21,8 @@ public class Go2RtcServiceTests
 {
     private static Go2RtcService CreateService(
         Go2RtcSettings? settings,
-        HttpMessageHandler? httpHandler = null)
+        HttpMessageHandler? httpHandler = null,
+        Mock<ILogger<Go2RtcService>>? loggerMock = null)
     {
         var settingsService = new Mock<ISettingsService>(MockBehavior.Strict);
         settingsService.Setup(s => s.Get<Go2RtcSettings>()).Returns(settings!);
@@ -32,9 +34,35 @@ public class Go2RtcServiceTests
                    .Returns(new HttpClient(httpHandler));
         }
 
-        var logger = new Mock<ILogger<Go2RtcService>>(MockBehavior.Loose);
+        var logger = loggerMock ?? new Mock<ILogger<Go2RtcService>>(MockBehavior.Loose);
 
         return new Go2RtcService(settingsService.Object, factory.Object, logger.Object);
+    }
+
+    /// <summary>
+    /// Captures every message logged through <paramref name="loggerMock"/> by formatting the
+    /// log state the same way the default console/logging providers would.
+    /// </summary>
+    private static List<string> CaptureLoggedMessages(Mock<ILogger<Go2RtcService>> loggerMock)
+    {
+        var messages = new List<string>();
+        loggerMock
+            .Setup(l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+            .Callback(new InvocationAction(invocation =>
+            {
+                object state = invocation.Arguments[2];
+                var formatter = invocation.Arguments[4];
+                string message = (string)formatter.GetType()
+                    .GetMethod("Invoke")!
+                    .Invoke(formatter, new[] { state, invocation.Arguments[3] })!;
+                messages.Add(message);
+            }));
+        return messages;
     }
 
     #region IsEnabled
@@ -232,6 +260,25 @@ public class Go2RtcServiceTests
         Func<Task> act = () => service.RemoveStreamAsync(Guid.NewGuid(), CancellationToken.None);
 
         await act.Should().NotThrowAsync();
+    }
+
+    [Fact]
+    public async Task AddStreamAsync_RedactsCredentialsFromRtspUrlBeforeLogging()
+    {
+        var cameraId = Guid.NewGuid();
+        var handler = CreateSuccessHandler();
+        var loggerMock = new Mock<ILogger<Go2RtcService>>(MockBehavior.Loose);
+        List<string> loggedMessages = CaptureLoggedMessages(loggerMock);
+        var service = CreateService(
+            new Go2RtcSettings { Enabled = true, BaseUrl = "http://go2rtc:1984" },
+            handler,
+            loggerMock);
+
+        await service.AddStreamAsync(cameraId, "rtsp://admin:hunter2@cam.local:554/stream", CancellationToken.None);
+
+        loggedMessages.Should().NotBeEmpty();
+        loggedMessages.Should().NotContain(m => m.Contains("admin:hunter2"));
+        loggedMessages.Should().Contain(m => m.Contains("cam.local"));
     }
 
     #endregion

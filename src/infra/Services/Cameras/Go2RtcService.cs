@@ -84,13 +84,13 @@ public class Go2RtcService : IGo2RtcService
             string snapshotUrl = $"{baseUrl}/api/frame.jpeg?src={streamName}";
             _logger.LogInformation(
                 "[go2rtc] Registered stream {StreamName} → {RtspUrl}, snapshot: {SnapshotUrl}",
-                streamName, rtspUrl, snapshotUrl);
+                streamName, RedactUserInfo(rtspUrl), snapshotUrl);
 
             return snapshotUrl;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[go2rtc] Failed to add stream {StreamName} for {RtspUrl}", streamName, rtspUrl);
+            _logger.LogWarning(ex, "[go2rtc] Failed to add stream {StreamName} for {RtspUrl}", streamName, RedactUserInfo(rtspUrl));
             return null;
         }
     }
@@ -118,5 +118,20 @@ public class Go2RtcService : IGo2RtcService
         {
             _logger.LogWarning(ex, "[go2rtc] Failed to remove stream {StreamName}", streamName);
         }
+    }
+
+    /// <summary>
+    /// Strips any embedded userinfo (e.g. "user:pass@") from an RTSP URL before it is written to logs,
+    /// since RTSP URLs may carry camera credentials.
+    /// </summary>
+    private static string RedactUserInfo(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed) && !string.IsNullOrEmpty(parsed.UserInfo))
+        {
+            UriBuilder builder = new(parsed) { UserName = string.Empty, Password = string.Empty };
+            return builder.Uri.ToString();
+        }
+
+        return url;
     }
 }

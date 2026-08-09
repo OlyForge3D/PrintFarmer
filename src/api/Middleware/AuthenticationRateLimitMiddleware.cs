@@ -43,16 +43,13 @@ public class AuthenticationRateLimitMiddleware(RequestDelegate next, ILogger<Aut
         }
 
         string path = context.Request.Path.Value?.ToLowerInvariant() ?? string.Empty;
-        string method = context.Request.Method.ToUpperInvariant();
 
-        // Only apply rate limiting to POST requests on auth endpoints
-        if (method != "POST")
-        {
-            await _next(context);
-            return;
-        }
-
-        // Check if this is a login, register, or Desktop API-key exchange endpoint
+        // Path (not HTTP method) decides whether this request is subject to the
+        // limiter. The underlying [HttpPost] actions only ever execute for POST
+        // requests, but the limiter itself must not be skippable by sending a
+        // different verb: the caller fully controls Request.Method, so gating the
+        // sensitive rate-limit check on it would let an attacker bypass the limit
+        // simply by varying the verb on each attempt.
         bool isLogin = path.EndsWith("/api/auth/login");
         bool isRegister = path.EndsWith("/api/auth/register");
         bool isApiKeyExchange = path.EndsWith("/api/auth/api-key/exchange");
