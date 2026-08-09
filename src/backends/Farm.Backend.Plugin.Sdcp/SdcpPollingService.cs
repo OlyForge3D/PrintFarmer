@@ -65,6 +65,13 @@ public sealed class SdcpPollingService(
         public DateTime LastPollTime { get; set; }
 
         public int ConsecutiveFailures { get; set; }
+
+        /// <summary>
+        /// The last "printerupdated" payload actually broadcast for this printer, used to suppress
+        /// byte-identical re-broadcasts. Null until the first broadcast (including after a backend
+        /// restart, since this state is in-memory only), so the first message is never suppressed.
+        /// </summary>
+        public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -306,9 +313,14 @@ public sealed class SdcpPollingService(
                         SpoolInfo: null,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.Group(
-                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-                        .SendAsync("printerupdated", signalRUpdate, ct);
+                    if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
+                    {
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", signalRUpdate, ct);
+                        state.LastBroadcastUpdate = signalRUpdate;
+                    }
+
                     await _coverageBroadcaster
                         .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
                         .ConfigureAwait(false);
@@ -382,6 +394,7 @@ public sealed class SdcpPollingService(
                         await _hub.Clients.Group(
                                 Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
                             .SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                        state.LastBroadcastUpdate = offlineSignalRUpdate;
                     }
                 }
 

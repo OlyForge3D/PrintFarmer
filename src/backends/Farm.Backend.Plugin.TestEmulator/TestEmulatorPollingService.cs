@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure;
+﻿using System.Collections.Concurrent;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Mutations;
@@ -25,6 +26,14 @@ public sealed class TestEmulatorPollingService(
     private static readonly TimeSpan CompleteDwellTime = TimeSpan.FromSeconds(5);
 
     private readonly CancellationTokenSource _cts = new();
+
+    /// <summary>
+    /// The last "printerupdated" payload actually broadcast per printer, used to suppress
+    /// byte-identical re-broadcasts. Cleared implicitly on backend restart (new service instance),
+    /// so the first message for a printer is never suppressed.
+    /// </summary>
+    private readonly ConcurrentDictionary<Guid, PrinterStatusUpdate> _lastBroadcastUpdates = new();
+
     private Task? _mainLoop;
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -177,8 +186,13 @@ public sealed class TestEmulatorPollingService(
             SpoolInfo: null,
             FileName: PrinterStatusDto.ExtractFileName(jobName));
 
-        await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
-            .SendAsync("printerupdated", signalRUpdate, ct);
+        PrinterStatusUpdate? lastBroadcast = _lastBroadcastUpdates.GetValueOrDefault(printerId);
+        if (PrinterStatusBroadcastGate.ShouldBroadcast(lastBroadcast, signalRUpdate))
+        {
+            await hub.Clients.Group(AuthorizedHubGroups.Printer(printerId))
+                .SendAsync("printerupdated", signalRUpdate, ct);
+            _lastBroadcastUpdates[printerId] = signalRUpdate;
+        }
     }
 
     /// <summary>
