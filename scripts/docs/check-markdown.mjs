@@ -188,10 +188,10 @@ const xmlEntityDecodeMap = {
   '&gt;': '>',
 };
 
-// Strips HTML/XML-like tags in a loop until no more matches remain. A single
-// replacement pass can leave a "tag" behind when tags are nested or
-// overlapping (e.g. an inner `<script>` exposed by removing an outer tag),
-// which a single-pass sanitizer would miss.
+// Strips HTML/XML-like tags in a loop until the output reaches a fixed
+// point (no further match), rather than a single `.replace()` pass.
+// Guarantees the tag-stripping step itself has no residual matches,
+// independent of any other sanitization performed downstream.
 function stripHtmlTags(value) {
   let previous;
   let current = value;

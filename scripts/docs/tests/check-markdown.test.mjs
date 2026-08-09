@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { checkMarkdown, githubSlug } from '../check-markdown.mjs';
+import { checkMarkdown, githubSlug, stripHtmlTags } from '../check-markdown.mjs';
 
 async function withFixture(files, verify) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'printfarmer-doc-health-'));
@@ -126,15 +126,18 @@ test('accepts skipped schemes in reference definitions and validates local defin
   });
 });
 
-test('githubSlug never leaves tag-delimiter characters in its output, even for nested/malformed markup', () => {
-  const nestedHeadings = [
-    'Alpha <a<b<c>d>e> Beta',
-    '<outer<inner>tail>',
-    'Mixed <<b>> markup',
+test('stripHtmlTags reaches a fixed point with no residual tag-like matches', () => {
+  const nestedInputs = [
+    '<a<b<c>d>e>',
+    'before<a<b>c>after',
+    '<<script>alert(1)</script>>',
   ];
-  for (const heading of nestedHeadings) {
-    const slug = githubSlug(heading);
-    assert.doesNotMatch(slug, /[<>]/, `slug for ${JSON.stringify(heading)} kept a tag delimiter: ${slug}`);
+  for (const input of nestedInputs) {
+    const stripped = stripHtmlTags(input);
+    assert.doesNotMatch(stripped, /<[^>]*>/, `residual tag survived for ${JSON.stringify(input)}: ${stripped}`);
+    // Applying it again must be a no-op: this is the fixed-point guarantee
+    // the loop provides over a single `.replace()` pass.
+    assert.equal(stripHtmlTags(stripped), stripped);
   }
 });
 

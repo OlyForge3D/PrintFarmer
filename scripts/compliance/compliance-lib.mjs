@@ -1080,9 +1080,25 @@ export async function validateProvenanceManifest(repoRoot, manifest) {
     }
 
     const absolutePath = path.join(repoRoot, filePath);
-    // Read the file directly and size-check the loaded content instead of
-    // stat-then-read: a separate pre-check stat() call races against this
-    // read if the file changes or disappears between the two operations.
+    // stat() first so we never buffer a >2MB file into memory just to
+    // discard it. This narrows (rather than eliminates) the pre-existing
+    // stat-then-read race: catching ENOENT from each call directly, instead
+    // of relying on a separate pathExists() pre-check, means a file deleted
+    // between the two calls is handled here rather than racing an unrelated
+    // check.
+    let fileStat;
+    try {
+      fileStat = await stat(absolutePath);
+    } catch (error) {
+      if (error.code === 'ENOENT') {
+        continue;
+      }
+      throw error;
+    }
+    if (fileStat.size > 2_000_000) {
+      continue;
+    }
+
     let content;
     try {
       content = await readFile(absolutePath, 'utf8');
@@ -1091,9 +1107,6 @@ export async function validateProvenanceManifest(repoRoot, manifest) {
         continue;
       }
       throw error;
-    }
-    if (Buffer.byteLength(content, 'utf8') > 2_000_000) {
-      continue;
     }
     const markerMatch = content.match(/PrintFarmer-Provenance-ID:\s*([a-z0-9.-]+)/i);
     if (markerMatch && !entryIds.has(markerMatch[1])) {
@@ -1894,10 +1907,14 @@ export async function scanPublicationFiles(
       continue;
     }
 
-    // Read the file directly instead of pathExists()-then-stat()-then-read:
-    // separate check-then-use fs calls race against concurrent changes or
-    // deletion of the file between the check and the use. Catching ENOENT
-    // from the actual read/stat call is atomic with respect to that file.
+    // Removes the pathExists()-then-stat()-then-read pre-check pattern:
+    // each fs call below handles its own ENOENT directly rather than
+    // trusting an earlier existence check, so a file deleted between calls
+    // is caught here instead of racing an unrelated check. This narrows but
+    // does not fully close the window between this size check and the read
+    // below — a file swapped for an oversized one in that gap is still read
+    // in full. That residual risk is accepted for this trust boundary
+    // (repository-controlled publication paths, not arbitrary uploads).
     let fileStat;
     try {
       fileStat = await stat(absolutePath);
