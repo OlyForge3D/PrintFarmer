@@ -84,7 +84,8 @@ public sealed class RelayNativePushSender(
             DeepLink: envelope.DeepLink,
             Priority: envelope.Priority == NativePushPriority.Background ? 5 : 10,
             ExpiresAtUtc: envelope.ExpiresAtUtc,
-            ActionIds: envelope.ActionIds);
+            ActionIds: envelope.ActionIds,
+            OriginServerId: envelope.OriginServerId);
 
         HttpClient client = _httpClientFactory.CreateClient(HttpClientName);
         using var request = new HttpRequestMessage(HttpMethod.Post, relay.Endpoint);
@@ -190,5 +191,6 @@ public sealed class RelayNativePushSender(
         string DeepLink,
         int Priority,
         DateTime? ExpiresAtUtc,
-        IReadOnlyList<string> ActionIds);
+        IReadOnlyList<string> ActionIds,
+        Guid OriginServerId);
 }

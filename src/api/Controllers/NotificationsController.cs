@@ -11,6 +11,7 @@ using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.ServerIdentity;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -364,17 +365,19 @@ public class NotificationsController(INotificationService notificationService, V
     /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
     /// </summary>
     [HttpPost("device-tokens")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(DeviceTokenRegistrationResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RegisterDeviceTokenAsync(
         [FromBody] DeviceTokenRegistrationRequest request,
         [FromServices] IOperatorFeatureGate operatorFeatures,
         [FromServices] IDeviceTokenRepository deviceTokens,
+        [FromServices] IServerIdentityService serverIdentity,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operatorFeatures);
         ArgumentNullException.ThrowIfNull(deviceTokens);
+        ArgumentNullException.ThrowIfNull(serverIdentity);
 
         if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
@@ -396,6 +399,12 @@ public class NotificationsController(INotificationService notificationService, V
             return BadRequest(new { error = "Native-push registration values are not in canonical form." });
         }
 
+        // #1407: resolve the serverId the response contract requires *before* persisting
+        // the device-token registration. If this throws, the registration is not written
+        // and the client sees a failed request rather than a "successful" registration it
+        // cannot bind locally — the two must not be allowed to disagree.
+        Guid serverId = await serverIdentity.GetOrCreateServerIdAsync(cancellationToken).ConfigureAwait(false);
+
         _ = await deviceTokens.UpsertAsync(
             userId,
             request.InstallationId,
@@ -404,7 +413,8 @@ public class NotificationsController(INotificationService notificationService, V
             request.Environment,
             request.AppBundleId,
             cancellationToken);
-        return NoContent();
+
+        return Ok(new DeviceTokenRegistrationResponse { ServerId = serverId });
     }
 
     /// <summary>
@@ -1149,6 +1159,18 @@ public class DeviceTokenRegistrationRequest
         NativePushRegistrationContract.AppBundleIdPattern,
         ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
     public string? AppBundleId { get; set; }
+}
+
+/// <summary>
+/// Response model for a successful native-push device-token registration. Carries this
+/// server's canonical, persisted <c>serverId</c> so the mobile app can bind this APNs
+/// registration to its local <c>RegisteredServer</c> entry. See
+/// <c>docs/OPERATOR_NATIVE_PUSH.md</c> and issue #1407.
+/// </summary>
+public class DeviceTokenRegistrationResponse
+{
+    /// <summary>This server's stable, opaque identity (canonical UUID string).</summary>
+    public Guid ServerId { get; set; }
 }
 
 /// <summary>Request model for unregistering a native-push device token.</summary>

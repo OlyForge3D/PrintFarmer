@@ -20,6 +20,8 @@ namespace Farm.Web.Api.Tests.Services.Notifications.NativePush;
 /// </summary>
 public sealed class DirectApnsNativePushSenderTests
 {
+    private static readonly Guid SampleServerId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
     private static readonly NativePushEnvelope Sample = new(
         DeviceTokenId: Guid.NewGuid().ToString("D"),
         Token: "device-token-abc",
@@ -40,7 +42,8 @@ public sealed class DirectApnsNativePushSenderTests
         DeepLink: "printfarmer://attention/att-1",
         Priority: NativePushPriority.Alert,
         ExpiresAtUtc: null,
-        ActionIds: new[] { AttentionPushCategories.ActionPause });
+        ActionIds: new[] { AttentionPushCategories.ActionPause },
+        OriginServerId: SampleServerId);
 
     [Fact]
     public async Task SendAsync_MissingSettings_ReturnsNotConfigured()
@@ -182,7 +185,7 @@ public sealed class DirectApnsNativePushSenderTests
             captured.Headers.GetValues("apns-expiration").Should().Equal(
                 new DateTimeOffset(expiration).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"]}""";
+            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"],"originServerId":"{{SampleServerId:D}}"}""";
             capturedJson.Should().Be(expectedJson);
 
             captured.Headers.Authorization!.Scheme.Should().Be("bearer");

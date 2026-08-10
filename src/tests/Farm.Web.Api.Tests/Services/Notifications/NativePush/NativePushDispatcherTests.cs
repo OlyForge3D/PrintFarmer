@@ -10,6 +10,7 @@ using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.ServerIdentity;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -135,6 +136,154 @@ public sealed class NativePushDispatcherTests
         sender.Verify(
             s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ResolvesServerIdentity_PopulatesEnvelopeOriginServerId()
+    {
+        // Issue #1407: every outgoing envelope must carry the persisted, server-generated
+        // origin identity resolved from IServerIdentityService — never a fabricated or
+        // empty value.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        Guid expectedServerId = Guid.NewGuid();
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((env, _) => captured.Add(env))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        var serverIdentity = new Mock<IServerIdentityService>();
+        serverIdentity
+            .Setup(s => s.GetOrCreateServerIdAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(expectedServerId);
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            serverIdentity: serverIdentity.Object);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        captured.Should().ContainSingle();
+        captured[0].OriginServerId.Should().Be(expectedServerId);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ServerIdentityResolutionThrows_SkipsDeviceWithoutSending()
+    {
+        // Issue #1407 fail-closed requirement: if the origin server identity cannot be
+        // resolved, the dispatcher must isolate the failure to this device (log + skip)
+        // rather than sending an envelope with a missing/fabricated origin.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>(MockBehavior.Strict);
+
+        var serverIdentity = new Mock<IServerIdentityService>();
+        serverIdentity
+            .Setup(s => s.GetOrCreateServerIdAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("server identity unavailable"));
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            serverIdentity: serverIdentity.Object);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        sender.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ServerIdentityResolutionThrowsOnce_IsolatesFailureToSingleDevice()
+    {
+        // Issue #1407 fail-closed requirement, per-device isolation: a resolution failure
+        // for one device's send attempt must not prevent a sibling device (same user) from
+        // still receiving its push once identity resolution succeeds.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        Guid expectedServerId = Guid.NewGuid();
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId, deviceCount: 2);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        var serverIdentity = new Mock<IServerIdentityService>();
+        _ = serverIdentity
+            .SetupSequence(s => s.GetOrCreateServerIdAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("server identity unavailable"))
+            .ReturnsAsync(expectedServerId);
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            serverIdentity: serverIdentity.Object);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        // Exactly one of the two devices was sent to — the other was isolated by the
+        // resolution failure, not silently dropped as a whole-dispatch failure.
+        sender.Verify(
+            s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]
@@ -7813,7 +7962,8 @@ public sealed class NativePushDispatcherTests
         AppDbContext db,
         NativePushSettings? settings = null,
         TimeProvider? timeProvider = null,
-        NativePushMetrics? metrics = null)
+        NativePushMetrics? metrics = null,
+        IServerIdentityService? serverIdentity = null)
     {
         return BuildWithScope(
             sender.Object,
@@ -7823,7 +7973,8 @@ public sealed class NativePushDispatcherTests
             db,
             settings,
             timeProvider,
-            metrics);
+            metrics,
+            serverIdentity);
     }
 
     private static NativePushDispatcher BuildWithScope(
@@ -7834,7 +7985,8 @@ public sealed class NativePushDispatcherTests
         AppDbContext db,
         NativePushSettings? settings = null,
         TimeProvider? timeProvider = null,
-        NativePushMetrics? metrics = null)
+        NativePushMetrics? metrics = null,
+        IServerIdentityService? serverIdentity = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(gate);
@@ -7851,7 +8003,8 @@ public sealed class NativePushDispatcherTests
             monitor,
             metrics ?? new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance,
-            timeProvider);
+            timeProvider,
+            serverIdentity);
     }
 
     private static AppDbContext BuildDbContext()
@@ -7879,7 +8032,7 @@ public sealed class NativePushDispatcherTests
         return gate;
     }
 
-    private static Mock<IDeviceTokenRepository> BuildDeviceTokens(Guid userId)
+    private static Mock<IDeviceTokenRepository> BuildDeviceTokens(Guid userId, int deviceCount = 1)
     {
         var tokens = new Mock<IDeviceTokenRepository>();
         tokens
@@ -7887,19 +8040,16 @@ public sealed class NativePushDispatcherTests
             .ReturnsAsync(new List<Guid> { userId });
         tokens
             .Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DeviceToken>
+            .ReturnsAsync(Enumerable.Range(0, deviceCount).Select(i => new DeviceToken
             {
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = userId,
-                    InstallationId = "test-install",
-                    Token = "AA".PadRight(64, 'A'),
-                    Platform = "ios",
-                    Environment = "development",
-                    IsActive = true,
-                },
-            });
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                InstallationId = $"test-install-{i}",
+                Token = $"{i:D2}".PadRight(64, 'A'),
+                Platform = "ios",
+                Environment = "development",
+                IsActive = true,
+            }).ToList());
         return tokens;
     }
 
