@@ -1,14 +1,30 @@
 ﻿using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Moq;
 
 namespace Farm.Web.Api.Tests.TestInfrastructure;
 
 public static class TestHelpers
 {
+    /// <summary>
+    /// Build an <see cref="IEgressGuard"/> mock that allows every destination. Use for tests
+    /// that construct a controller depending on egress vetting but do not exercise the
+    /// vetting behavior itself.
+    /// </summary>
+    public static IEgressGuard PermissiveEgressGuard()
+    {
+        var mock = new Mock<IEgressGuard>();
+        mock.Setup(g => g.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, CancellationToken _) => EgressCheckResult.Allow(new Uri(url)));
+        return mock.Object;
+    }
+
     /// <summary>
     /// Return the seeded Unknown manufacturer and Unknown Model IDs if present.
     /// If not present, returns Guid.Empty for that item.
