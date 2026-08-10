@@ -1,8 +1,10 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.StorageManagement;
+using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,26 +22,25 @@ public class CameraSnapshotsController(
     AppDbContext db,
     IStoragePathService storagePathService,
     ILogger<CameraSnapshotsController> logger,
-    IQueueResourceAuthorizationService? queueResourceAuthorization = null) : ControllerBase
+    IQueueResourceAuthorizationService queueResourceAuthorization) : ControllerBase
 {
     private readonly AppDbContext _db = db;
     private readonly IStoragePathService _storagePathService = storagePathService;
     private readonly ILogger<CameraSnapshotsController> _logger = logger;
-    private readonly IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
+    private readonly IQueueResourceAuthorizationService _queueResourceAuthorization = queueResourceAuthorization;
 
     /// <summary>
-    /// Enforces the same PrinterGroup access rules as <see cref="Farm.Web.Api.Controllers.PrintersController"/>
-    /// on the printer that captured a snapshot, so a caller excluded from a printer's group cannot
-    /// enumerate or view its snapshots (mirrors issue #1421's fix for CamerasController).
+    /// Enforces the same PrinterGroup access rules as <see cref="PrintersController"/> so
+    /// snapshot reads and deletes cannot be reached by a caller outside the printer's group.
     /// </summary>
-    private async Task<bool> CanAccessSnapshotPrinterAsync(Guid printerId, PrinterGroupAccessLevel accessLevel, CancellationToken ct)
-    {
-        return _queueResourceAuthorization is not null &&
-            await _queueResourceAuthorization.CanAccessPrinterAsync(User, printerId, accessLevel, ct);
-    }
+    private Task<bool> CanAccessPrinterAsync(
+        Guid printerId,
+        PrinterGroupAccessLevel accessLevel,
+        CancellationToken ct) =>
+        _queueResourceAuthorization.CanAccessPrinterAsync(User, printerId, accessLevel, ct);
 
     /// <summary>
-    /// Lists snapshots for a specific print job.
+    /// Lists snapshots for a specific print job, scoped to printers the caller may view.
     /// </summary>
     [HttpGet("by-job/{printJobId:guid}")]
     public async Task<IActionResult> GetByPrintJobAsync(Guid printJobId, CancellationToken ct)
@@ -64,12 +65,17 @@ public class CameraSnapshotsController(
             return Ok(snapshots);
         }
 
+        // Snapshots carry PrinterId directly, so scope on that rather than resolving the
+        // job's assigned printer (which may differ from where the snapshot was captured).
         Guid[] printerIds = snapshots.Select(s => s.PrinterId).Distinct().ToArray();
-        IReadOnlySet<Guid> allowed = _queueResourceAuthorization is null
-            ? new HashSet<Guid>()
-            : await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(User, printerIds, PrinterGroupAccessLevel.View, ct);
+        IReadOnlySet<Guid> allowedPrinterIds = await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(
+            User,
+            printerIds,
+            PrinterGroupAccessLevel.View,
+            ct);
+        snapshots = snapshots.Where(s => allowedPrinterIds.Contains(s.PrinterId)).ToList();
 
-        return Ok(snapshots.Where(s => allowed.Contains(s.PrinterId)).ToList());
+        return Ok(snapshots);
     }
 
     /// <summary>
@@ -82,7 +88,7 @@ public class CameraSnapshotsController(
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
-        if (!await CanAccessSnapshotPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();
         }
@@ -121,7 +127,7 @@ public class CameraSnapshotsController(
             return NotFound();
         }
 
-        if (!await CanAccessSnapshotPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.View, ct))
+        if (!await CanAccessPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();
         }
@@ -151,9 +157,12 @@ public class CameraSnapshotsController(
     }
 
     /// <summary>
-    /// Deletes a snapshot and its file from disk.
+    /// Deletes a snapshot and its file from disk. This is irreversible and destroys print-event
+    /// evidence, so it requires a write-level permission and a write-level (Submit or higher)
+    /// PrinterGroup scope check, distinct from the View-level check used by the read endpoints.
     /// </summary>
     [HttpDelete("{snapshotId:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
     public async Task<IActionResult> DeleteAsync(Guid snapshotId, CancellationToken ct)
     {
         CameraSnapshot? snapshot = await _db.CameraSnapshots.FindAsync([snapshotId], ct);
@@ -162,7 +171,7 @@ public class CameraSnapshotsController(
             return NotFound();
         }
 
-        if (!await CanAccessSnapshotPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.Manage, ct))
+        if (!await CanAccessPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.Submit, ct))
         {
             return NotFound();
         }
