@@ -9,6 +9,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.AutoDispatch;
@@ -1215,6 +1216,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),
+            egressGuard: Mock.Of<IEgressGuard>(),
             obicoServerAssignment: Mock.Of<
                 Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),
