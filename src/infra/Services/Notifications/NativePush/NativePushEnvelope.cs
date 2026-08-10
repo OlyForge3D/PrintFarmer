@@ -42,4 +42,5 @@ public sealed record NativePushEnvelope(
     string DeepLink,
     NativePushPriority Priority,
     DateTime? ExpiresAtUtc,
-    IReadOnlyList<string> ActionIds);
+    IReadOnlyList<string> ActionIds,
+    Guid OriginServerId);

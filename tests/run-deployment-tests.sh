@@ -448,6 +448,9 @@ run_full_tests() {
     
     log_subsection "Test: Configuration Persistence"
     run_test_suite "configuration persistence tests" "$SCRIPT_DIR/test-config-persistence.sh" || true
+
+    log_subsection "Test: Database Credential Migration"
+    run_test_suite "database credential migration tests" "$SCRIPT_DIR/test-db-credential-migration.sh" || true
     
     log_subsection "Test: Integration Tests"
     run_test_suite "integration tests" "$SCRIPT_DIR/test-integration.sh" || true
