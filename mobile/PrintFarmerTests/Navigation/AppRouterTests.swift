@@ -98,6 +98,16 @@ final class AppRouterTests: XCTestCase {
         XCTAssertFalse(router.printersPath.isEmpty)
     }
 
+    func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
+        let router = AppRouter()
+
+        router.navigate(to: .printerDetail(id: printerId))
+        router.invalidatePendingNavigation()
+        try? await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertTrue(router.printersPath.isEmpty)
+    }
+
     func testNotificationRoutingSurfacesInvalidDestination() {
         let router = AppRouter()
 

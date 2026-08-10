@@ -60,6 +60,9 @@ struct PFarmApp: App {
                         router.navigate(to: destination)
                     }
                 }
+                .onChange(of: serverRegistry.activeServerID) {
+                    router.invalidatePendingNavigation()
+                }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
                     router.routeNotification(

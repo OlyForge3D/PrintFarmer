@@ -16,12 +16,13 @@ complete the fresh pre-PR review and PR lifecycle.
       explicit legacy payload decoding.
 - [x] Add parser, router, notification-response, registration, and isolation tests.
 - [x] Run focused mobile validation and fix failures caused by this change.
-- [ ] Commit and push all intended changes.
+- [x] Commit and push all intended changes.
 - [ ] Obtain fresh Bishop/Hicks/Vasquez review at the resulting head.
 - [ ] Open and own the PR for #1405 with issue linkage.
 
 ## Validation
 
-- `xcodebuild test` focused on `DeepLinkHandlerTests`, `AppRouterTests`, and
-  `PushDegradationTests`: passed on iPhone 17 simulator.
+- `xcodebuild test` focused on `DeepLinkHandlerTests`, `AppRouterTests`,
+  `PushDegradationTests`, and `JobAttentionNotificationActionsTests`: passed on
+  iPhone 17 simulator.
 - `git diff --check`: passed.

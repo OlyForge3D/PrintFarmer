@@ -22,10 +22,22 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         super.setUp()
         printerService = MockPrinterService()
         attentionService = MockAttentionService()
+        PushNotificationManager.shared.configure(
+            notificationService: MockNotificationService()
+        )
         PushNotificationManager.shared.configureActionHandling(
             printerService: printerService,
             attentionService: attentionService
         )
+    }
+
+    override func tearDown() {
+        PushNotificationManager.shared.configure(
+            notificationService: MockNotificationService()
+        )
+        printerService = nil
+        attentionService = nil
+        super.tearDown()
     }
 
     // MARK: - Category / action registration
@@ -129,6 +141,37 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         await PushNotificationManager.shared.handleJobAttentionAction(
             .pauseJob,
             userInfo: ["printerId": "not-a-uuid"]
+        )
+
+        XCTAssertNil(printerService.pauseCalledWith)
+    }
+
+    func testMutatingActionRejectsNotificationFromDifferentServer() async throws {
+        let suiteName = "JobAttentionNotificationActionsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let registry = ServerRegistry(
+            userDefaults: defaults,
+            migrateLegacyServerURL: false
+        )
+        let server = try registry.add(
+            displayName: "Primary",
+            baseURL: URL(string: "https://primary.example")!
+        )
+        let expectedOrigin = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
+        try registry.associateOriginServerId(expectedOrigin, with: server.id)
+        PushNotificationManager.shared.configure(
+            notificationService: MockNotificationService(),
+            serverRegistry: registry,
+            serverID: server.id
+        )
+
+        await PushNotificationManager.shared.handleJobAttentionAction(
+            .pauseJob,
+            userInfo: [
+                "printerId": UUID().uuidString,
+                "originServerId": "00000000-0000-0000-0000-000000000011"
+            ]
         )
 
         XCTAssertNil(printerService.pauseCalledWith)

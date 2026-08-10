@@ -154,12 +154,16 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     func handleJobAttentionAction(_ action: JobAttentionAction, userInfo: [AnyHashable: Any]) async {
         switch action {
         case .pauseJob:
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
             await performPrinterCommand(named: "pause", userInfo: userInfo) { try await $0.pause(id: $1) }
         case .resumeJob:
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
             await performPrinterCommand(named: "resume", userInfo: userInfo) { try await $0.resume(id: $1) }
         case .cancelJob:
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
             await performPrinterCommand(named: "cancel", userInfo: userInfo) { try await $0.cancel(id: $1) }
         case .snooze:
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
             await performSnooze(userInfo: userInfo)
         case .openSwap:
             // Foreground action (#1321): behaves like the existing tap-to-open
@@ -172,6 +176,25 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
                 userInfo: userInfo
             )
         }
+    }
+
+    private func isNotificationOriginValid(
+        _ userInfo: [AnyHashable: Any],
+        requireOrigin: Bool
+    ) -> Bool {
+        guard let serverRegistry else { return !requireOrigin || userInfo["originServerId"] == nil }
+        guard let activeServer = serverRegistry.activeServer,
+              let expectedOrigin = activeServer.originServerId,
+              let originValue = userInfo["originServerId"] as? String,
+              let originServerId = UUID(uuidString: originValue) else {
+            logger.warning("Job-attention action ignored — notification origin is unavailable")
+            return false
+        }
+        guard originServerId == expectedOrigin else {
+            logger.warning("Job-attention action ignored — notification belongs to another server")
+            return false
+        }
+        return true
     }
 
     private func performPrinterCommand(

@@ -52,6 +52,7 @@ final class AppRouter {
     var pendingAttentionItemId: String?
     var pendingFilamentSwap: FilamentSwapDeepLink?
     var notificationRoutingError: String?
+    private var navigationEpoch = 0
 
     /// Monotonic token observed by legacy/operator sheet presenters to close
     /// any active sheet before a task-action destination is applied (#726).
@@ -62,12 +63,15 @@ final class AppRouter {
     var sheetDismissalNonce: Int = 0
 
     func navigate(to destination: DeepLinkDestination) {
+        navigationEpoch &+= 1
+        let capturedEpoch = navigationEpoch
         switch destination {
         case .printerDetail(let id):
             selectedTab = .farm
             printersPath = NavigationPath()
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
+                guard capturedEpoch == navigationEpoch else { return }
                 printersPath.append(AppDestination.printerDetail(id: id))
             }
         case .printerReady(let id):
@@ -76,6 +80,7 @@ final class AppRouter {
             pendingNFCReadyPrinterId = id
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
+                guard capturedEpoch == navigationEpoch else { return }
                 printersPath.append(AppDestination.printerDetail(id: id))
             }
         case .spoolDetail(let id):
@@ -96,9 +101,14 @@ final class AppRouter {
             )
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(50))
+                guard capturedEpoch == navigationEpoch else { return }
                 printersPath.append(AppDestination.printerDetail(id: printerId))
             }
         }
+    }
+
+    func invalidatePendingNavigation() {
+        navigationEpoch &+= 1
     }
 
     func routeNotification(
