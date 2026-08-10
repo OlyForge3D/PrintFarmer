@@ -144,6 +144,37 @@ describe('PageTemplate duplicate header guard', () => {
   });
 });
 
+describe('PageTemplate title responsiveness (#1415)', () => {
+  it('truncates the title by default, unchanged from before #1415', () => {
+    render(
+      <PageTemplate title="A very long page title that would overflow a narrow heading">
+        <p>content</p>
+      </PageTemplate>,
+    );
+
+    const h1 = screen.getByRole('heading', { level: 1 });
+    expect(h1.className).toContain('truncate');
+    expect(h1.className).not.toContain('whitespace-normal');
+  });
+
+  it('wraps instead of truncating when titleWrap is set, so the full title stays visible at 320px', () => {
+    const longTitle = 'Admin Control Center';
+    render(
+      <PageTemplate title={longTitle} titleWrap>
+        <p>content</p>
+      </PageTemplate>,
+    );
+
+    const h1 = screen.getByRole('heading', { level: 1, name: longTitle });
+    // The full title text is present in a single node — nothing is clipped
+    // off, regardless of the container's rendered width.
+    expect(h1.textContent).toBe(longTitle);
+    expect(h1.className).not.toContain('truncate');
+    expect(h1.className).toContain('whitespace-normal');
+    expect(h1.className).toContain('break-words');
+  });
+});
+
 describe('PageTemplate parent back link', () => {
   it('links back to the parent surface above the title', () => {
     render(
