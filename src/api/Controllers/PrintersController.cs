@@ -17,6 +17,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
@@ -65,6 +66,7 @@ public class PrintersController(
     Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService printerBackendCapabilitiesService,
     Farm.Infrastructure.Services.Printers.IBackendClientFactory backendClientFactory,
     IHttpClientFactory httpClientFactory,
+    IEgressGuard egressGuard,
     Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService obicoServerAssignment,
     ISettingsService settingsService,
     Farm.Infrastructure.Services.Printers.IPrinterSessionTimelineService printerSessionTimelineService,
@@ -90,6 +92,7 @@ public class PrintersController(
     private readonly IDiscoverySessionRegistry _discoverySessions = discoverySessions;
     private readonly Farm.Infrastructure.Services.Printers.IPrinterBackendCapabilitiesService _printerBackendCapabilitiesService = printerBackendCapabilitiesService;
     private readonly IHttpClientFactory _httpClientFactory = httpClientFactory;
+    private readonly IEgressGuard _egressGuard = egressGuard;
     private readonly Farm.Infrastructure.Services.IProfileImportService? _profileImportService = profileImportService;
     private readonly IPrinterVersionCache _printerVersionCache = printerVersionCache;
     private readonly Farm.Infrastructure.Services.Printers.IBackendClientFactory _backendClientFactory = backendClientFactory;
@@ -296,6 +299,7 @@ public class PrintersController(
     /// <returns>Connection test result with success status and optional message.</returns>
     /// <response code="200">Connection test completed (check success field for result).</response>
     /// <response code="400">Invalid request parameters.</response>
+    [Authorize(Roles = "farm_admin")]
     [HttpPost("test-connection")]
     [ProducesResponseType(typeof(TestConnectionResponse), 200)]
     [ProducesResponseType(400)]
@@ -310,6 +314,20 @@ public class PrintersController(
         if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
         {
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
+        }
+
+        EgressCheckResult egressCheck = await _egressGuard.CheckAsync(serverUri.ToString(), ct);
+        if (!egressCheck.IsAllowed)
+        {
+            _logger.LogWarning(
+                "Connection test denied by egress guard for host {Host}: {Reason}",
+                serverUri.Host,
+                egressCheck.DenyReason);
+            return BadRequest(new TestConnectionResponse
+            {
+                Success = false,
+                Message = "The requested server address is not allowed."
+            });
         }
 
         _logger.LogInformation("Testing printer connection with backend {RequestBackend}", request.Backend);
@@ -349,7 +367,7 @@ public class PrintersController(
         int? backendPort,
         CancellationToken ct)
     {
-        using HttpClient httpClient = _httpClientFactory.CreateClient();
+        using HttpClient httpClient = _httpClientFactory.CreateClient("VettedEgress");
         httpClient.Timeout = TimeSpan.FromSeconds(10);
 
         string? effectiveApiKey = apiKey ?? password;
@@ -371,6 +389,20 @@ public class PrintersController(
         if (backendPort.HasValue)
         {
             uriToTest = new UriBuilder(serverUrl) { Port = backendPort.Value }.Uri;
+
+            EgressCheckResult rewriteCheck = await _egressGuard.CheckAsync(uriToTest.ToString(), ct);
+            if (!rewriteCheck.IsAllowed)
+            {
+                _logger.LogWarning(
+                    "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
+                    uriToTest.Host,
+                    rewriteCheck.DenyReason);
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "The requested server address is not allowed."
+                };
+            }
         }
 
         try
@@ -405,6 +437,20 @@ public class PrintersController(
         if (backendPort.HasValue)
         {
             uriToTest = new UriBuilder(serverUrl) { Port = backendPort.Value }.Uri;
+
+            EgressCheckResult rewriteCheck = await _egressGuard.CheckAsync(uriToTest.ToString(), ct);
+            if (!rewriteCheck.IsAllowed)
+            {
+                _logger.LogWarning(
+                    "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
+                    uriToTest.Host,
+                    rewriteCheck.DenyReason);
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "The requested server address is not allowed."
+                };
+            }
         }
 
         try
@@ -433,9 +479,32 @@ public class PrintersController(
     /// <summary>
     /// Tests Moonraker connection by probing stock /printer/info and Snapmaker U1 /machine/system_info endpoints.
     /// </summary>
-    private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
+    private async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
         HttpClient httpClient, Uri serverUrl, int? backendPort, CancellationToken ct)
     {
+        if (backendPort.HasValue)
+        {
+            // MoonrakerOnboardingResolver dials the caller-supplied backendPort as its
+            // authoritative candidate before falling back to well-known ports. Re-vet the
+            // rewritten (same-host, different-port) URI so the guard checks the URI actually
+            // used to dial, consistent with the SDCP/FlashForge re-vet above.
+            Uri rewrittenUri = MoonrakerOnboardingResolver.BuildEndpointUri(
+                serverUrl, backendPort.Value, MoonrakerOnboardingResolver.PrinterInfoPath);
+            EgressCheckResult rewriteCheck = await _egressGuard.CheckAsync(rewrittenUri.ToString(), ct);
+            if (!rewriteCheck.IsAllowed)
+            {
+                _logger.LogWarning(
+                    "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
+                    rewrittenUri.Host,
+                    rewriteCheck.DenyReason);
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "The requested server address is not allowed."
+                };
+            }
+        }
+
         try
         {
             MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(httpClient, serverUrl, backendPort, ct);
@@ -487,8 +556,14 @@ public class PrintersController(
             Path = "/api/v1/status"
         };
 
-        // Create a new HttpClient with Digest auth handler for this test
-        using var digestHandler = new DigestAuthHandler(effectiveUsername, credentialSecret);
+        // Create a new HttpClient with Digest auth handler for this test. The inner
+        // HttpClientHandler disables auto-redirect so an attacker-controlled destination
+        // cannot use a redirect to launder a request into an egress-denied address after
+        // the destination has already been vetted.
+        using var digestHandler = new DigestAuthHandler(
+            new HttpClientHandler { AllowAutoRedirect = false },
+            effectiveUsername,
+            credentialSecret);
         using var digestClient = new HttpClient(digestHandler)
         {
             Timeout = TimeSpan.FromSeconds(10)
