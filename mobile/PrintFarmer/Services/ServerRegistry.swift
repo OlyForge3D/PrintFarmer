@@ -170,6 +170,9 @@ final class ServerRegistry {
         try rejectDuplicate(normalizedURLString: normalized, ignoring: server.id)
 
         var updated = server
+        if updated.normalizedURLString != normalized {
+            updated.originServerId = nil
+        }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)
         updated.baseURL = URL(string: normalized)!
         updated.normalizedURLString = normalized
@@ -265,6 +268,16 @@ final class ServerRegistry {
             throw ServerRegistryError.serverNotFound(id)
         }
         activeServerID = id
+        persist()
+    }
+
+    func associateOriginServerId(_ originServerId: UUID, with serverID: UUID) throws {
+        guard let index = servers.firstIndex(where: { $0.id == serverID }) else {
+            throw ServerRegistryError.serverNotFound(serverID)
+        }
+        guard servers[index].originServerId != originServerId else { return }
+        servers[index].originServerId = originServerId
+        servers[index].updatedAt = now()
         persist()
     }
 

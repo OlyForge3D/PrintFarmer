@@ -26,8 +26,9 @@ final class DemoNotificationService: NotificationServiceProtocol, @unchecked Sen
         // No-op in demo
     }
 
-    func registerDeviceToken(_ token: String, platform: String) async throws {
+    func registerDeviceToken(_ token: String, platform: String) async throws -> UUID {
         // No-op in demo
+        return UUID()
     }
 
     func unregisterDeviceToken(_ token: String) async throws {

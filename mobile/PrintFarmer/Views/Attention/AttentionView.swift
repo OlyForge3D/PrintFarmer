@@ -275,6 +275,7 @@ struct AttentionView: View {
     @State private var showingMaintenance = false
     @State private var showingNotifications = false
     @State private var pendingAction: AttentionPendingAction?
+    @State private var resolvingAttentionItemId: String?
     /// Locally observed feature-disabled flag. Populated from the shared
     /// operator feature gate (#725) via `SystemCapabilitiesService` and
     /// also flipped locally when `/api/attention` returns ProblemDetails
@@ -662,7 +663,8 @@ struct AttentionView: View {
 
     @ViewBuilder
     private var attentionList: some View {
-        List {
+        ScrollViewReader { proxy in
+            List {
             if let failure = feedViewModel.loadFailure, feedViewModel.snapshot != nil {
                 // Inline refresh-error banner shown when a snapshot is
                 // already visible. The list stays pull-to-refresh
@@ -701,10 +703,11 @@ struct AttentionView: View {
                                 retryMedia(itemID: item.id)
                             }
                         )
-                        .listRowInsets(
-                            EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
-                        )
-                        .listRowBackground(Color.clear)
+                            .id(item.id)
+                            .listRowInsets(
+                                EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+                            )
+                            .listRowBackground(Color.clear)
                     }
                 } header: {
                     Text(group.severity.accessibilityLabel)
@@ -726,9 +729,121 @@ struct AttentionView: View {
                       paginationFailure.cursor == feedViewModel.snapshot?.nextCursor {
                 paginationRetrySurface(paginationFailure)
             }
+            }
+            .listStyle(.insetGrouped)
+            .accessibilityIdentifier("attention.list")
+            .onAppear {
+                focusPendingAttentionItem(using: proxy)
+            }
+            .onChange(of: router.pendingAttentionItemId) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
+            .onChange(of: feedItemCount) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
+            .onChange(of: feedViewModel.isShowingStaleCache) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
         }
-        .listStyle(.insetGrouped)
-        .accessibilityIdentifier("attention.list")
+    }
+
+    private func focusPendingAttentionItem(using proxy: ScrollViewProxy) {
+        guard let itemId = router.pendingAttentionItemId else {
+            return
+        }
+        guard feedViewModel.phase != .idle,
+              !(feedViewModel.phase == .loading && feedViewModel.snapshot == nil) else {
+            return
+        }
+        guard !feedViewModel.isShowingStaleCache else {
+            return
+        }
+
+        if feedViewModel.groups.contains(where: { group in
+            group.items.contains(where: { $0.id == itemId })
+        }) {
+            guard router.pendingAttentionItemId == itemId,
+                  (resolvingAttentionItemId == nil || resolvingAttentionItemId == itemId) else {
+                return
+            }
+            withAnimation {
+                proxy.scrollTo(itemId, anchor: .center)
+            }
+            router.pendingAttentionItemId = nil
+            if resolvingAttentionItemId == itemId {
+                resolvingAttentionItemId = nil
+            }
+            return
+        }
+
+        if feedViewModel.isRefreshing || feedViewModel.isLoadingMore {
+            guard resolvingAttentionItemId != itemId else { return }
+            resolvingAttentionItemId = itemId
+            Task { @MainActor in
+                while router.pendingAttentionItemId == itemId,
+                      feedViewModel.isRefreshing || feedViewModel.isLoadingMore {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
+                }
+                if router.pendingAttentionItemId == itemId {
+                    focusPendingAttentionItem(using: proxy)
+                } else if router.pendingAttentionItemId != nil {
+                    focusPendingAttentionItem(using: proxy)
+                }
+            }
+            return
+        }
+
+        guard resolvingAttentionItemId != itemId else { return }
+        guard feedViewModel.canLoadMore else {
+            if feedViewModel.paginationFailure != nil {
+                return
+            }
+            router.notificationRoutingError = "This attention item is unavailable on the selected server."
+            router.pendingAttentionItemId = nil
+            return
+        }
+
+        resolvingAttentionItemId = itemId
+        Task { @MainActor in
+            while router.pendingAttentionItemId == itemId,
+                  feedViewModel.canLoadMore,
+                  await feedViewModel.loadMore() {
+                if feedViewModel.groups.contains(where: { group in
+                    group.items.contains(where: { $0.id == itemId })
+                }) {
+                    withAnimation {
+                        proxy.scrollTo(itemId, anchor: .center)
+                    }
+                    router.pendingAttentionItemId = nil
+                    resolvingAttentionItemId = nil
+                    return
+                }
+            }
+
+            guard router.pendingAttentionItemId == itemId else {
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
+                }
+                if router.pendingAttentionItemId != nil {
+                    focusPendingAttentionItem(using: proxy)
+                }
+                return
+            }
+            if feedViewModel.paginationFailure != nil {
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
+                }
+                return
+            }
+            if resolvingAttentionItemId == itemId {
+                resolvingAttentionItemId = nil
+            }
+            router.notificationRoutingError = "This attention item could not be loaded for the selected server."
+            router.pendingAttentionItemId = nil
+        }
     }
 
     /// Rendered in place of the auto-loading sentinel when `loadMore`

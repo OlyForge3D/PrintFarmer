@@ -5,6 +5,7 @@ final class MockNotificationService: NotificationServiceProtocol, @unchecked Sen
     var notificationsToReturn: [AppNotification] = []
     var unreadCountToReturn: Int = 0
     var errorToThrow: Error?
+    var originServerIdToReturn = UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
 
     // Call tracking
     var listCalledWithLimit: Int?
@@ -44,9 +45,10 @@ final class MockNotificationService: NotificationServiceProtocol, @unchecked Sen
     var registerDeviceTokenCalledWith: (token: String, platform: String)?
     var unregisterDeviceTokenCalledWith: String?
 
-    func registerDeviceToken(_ token: String, platform: String) async throws {
+    func registerDeviceToken(_ token: String, platform: String) async throws -> UUID {
         registerDeviceTokenCalledWith = (token, platform)
         if let error = errorToThrow { throw error }
+        return originServerIdToReturn
     }
 
     func unregisterDeviceToken(_ token: String) async throws {

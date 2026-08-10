@@ -20,6 +20,11 @@ final class PushDegradationTests: XCTestCase {
 
     // Canonical lowercase-hex APNs token (64 chars → 32 bytes, backend minimum).
     private static let sampleToken = String(repeating: "ab", count: 32)
+    private static let sampleOriginServerId = "00000000-0000-0000-0000-000000000099"
+
+    private static func registrationResponseJSON() -> String {
+        "{\"serverId\":\"\(sampleOriginServerId)\"}"
+    }
 
     private static func featureDisabledProblemJSON() -> String {
         """
@@ -37,7 +42,7 @@ final class PushDegradationTests: XCTestCase {
 
     func testRegisterPostsToPluralDeviceTokensRouteWithCanonicalBody() async throws {
         let mock = MockAPIClient()
-        mock.stubEmptySuccess()
+        mock.stubResponse(json: Self.registrationResponseJSON())
         let service = NotificationService(apiClient: mock.apiClient)
 
         try await service.registerDeviceToken(Self.sampleToken, platform: "ios")
@@ -82,7 +87,7 @@ final class PushDegradationTests: XCTestCase {
 
     func testUnregisterDeletesPluralRouteWithInstallationIdBody() async throws {
         let mock = MockAPIClient()
-        mock.stubEmptySuccess()
+        mock.stubResponse(json: Self.registrationResponseJSON())
         let service = NotificationService(apiClient: mock.apiClient)
 
         try await service.unregisterDeviceToken(Self.sampleToken)
@@ -116,7 +121,7 @@ final class PushDegradationTests: XCTestCase {
 
     func testRegisterStableInstallationIdIsReusedAcrossCalls() async throws {
         let mock = MockAPIClient()
-        mock.stubEmptySuccess()
+        mock.stubResponse(json: Self.registrationResponseJSON())
         let service = NotificationService(apiClient: mock.apiClient)
 
         try await service.registerDeviceToken(Self.sampleToken, platform: "ios")
@@ -130,6 +135,16 @@ final class PushDegradationTests: XCTestCase {
         }
         XCTAssertEqual(ids[0], ids[1],
                        "installationId must be stable so re-registration is idempotent per server.")
+    }
+
+    func testRegisterReturnsCanonicalServerId() async throws {
+        let mock = MockAPIClient()
+        mock.stubResponse(json: Self.registrationResponseJSON())
+        let service = NotificationService(apiClient: mock.apiClient)
+
+        let originServerId = try await service.registerDeviceToken(Self.sampleToken, platform: "ios")
+
+        XCTAssertEqual(originServerId.uuidString.lowercased(), Self.sampleOriginServerId)
     }
 
     // MARK: - Part B: PushNotificationManager degradation
@@ -149,6 +164,31 @@ final class PushDegradationTests: XCTestCase {
                       "Disabled push must flip the app into the local-only alerting signal.")
         XCTAssertEqual(stub.registerCount, 1,
                        "Exactly one attempt — no retry storm on a disabled backend.")
+    }
+
+    @MainActor
+    func testSuccessfulRegistrationPersistsOriginServerIdForActiveServer() async throws {
+        let suiteName = "PushDegradationTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let registry = ServerRegistry(
+            userDefaults: defaults,
+            migrateLegacyServerURL: false
+        )
+        let server = try registry.add(
+            displayName: "Primary",
+            baseURL: URL(string: "https://primary.example")!
+        )
+        let stub = MockNotificationService()
+
+        PushNotificationManager.shared.configure(
+            notificationService: stub,
+            serverRegistry: registry,
+            serverID: server.id
+        )
+        await PushNotificationManager.shared.registerTokenWithServer(Self.sampleToken)
+
+        XCTAssertEqual(registry.activeServer?.originServerId, stub.originServerIdToReturn)
     }
 
     @MainActor
@@ -277,12 +317,13 @@ private final class CountingNotificationService: NotificationServiceProtocol, @u
         set { state.withLock { $0.unregisterError = newValue } }
     }
 
-    func registerDeviceToken(_ token: String, platform: String) async throws {
+    func registerDeviceToken(_ token: String, platform: String) async throws -> UUID {
         let error = state.withLock { s -> Error? in
             s.registerCount += 1
             return s.registerError
         }
         if let error { throw error }
+        return UUID(uuidString: "00000000-0000-0000-0000-000000000099")!
     }
 
     func unregisterDeviceToken(_ token: String) async throws {

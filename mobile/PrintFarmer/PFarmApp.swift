@@ -60,16 +60,28 @@ struct PFarmApp: App {
                         router.navigate(to: destination)
                     }
                 }
+                .onChange(of: serverRegistry.activeServerID) {
+                    router.invalidatePendingNavigation()
+                }
+                .onChange(of: services.activeServerGeneration) {
+                    router.invalidatePendingNavigation()
+                }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    guard let userInfo = notification.userInfo,
-                          let urlString = userInfo["link"] as? String,
-                          let url = URL(string: urlString),
-                          let destination = DeepLinkHandler.parse(url: url) else { return }
-                    router.navigate(to: destination)
+                    let userInfo = PushNotificationManager.shared.consumePendingRemoteTap()
+                        ?? notification.userInfo
+                    if !DemoMode.shared.isActive {
+                        router.routeNotification(
+                            userInfo: userInfo ?? [:],
+                            activeOriginServerId: serverRegistry.activeServer?.originServerId
+                        )
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
-                    if let userInfo = notification.userInfo,
+                    let userInfo = PushNotificationManager.shared.consumePendingLocalTap()
+                        ?? notification.userInfo
+                    if !DemoMode.shared.isActive,
+                       let userInfo,
                        let printerIdString = userInfo["printerId"] as? String,
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(to: .printerReady(id: printerId))
@@ -80,17 +92,48 @@ struct PFarmApp: App {
                     }
                 }
                 #endif
+                .alert(
+                    "Couldn't Open Notification",
+                    isPresented: Binding(
+                        get: { router.notificationRoutingError != nil },
+                        set: { if !$0 { router.notificationRoutingError = nil } }
+                    )
+                ) {
+                    Button("OK") {
+                        router.notificationRoutingError = nil
+                    }
+                } message: {
+                    Text(router.notificationRoutingError ?? "")
+                }
                 .task {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
-                        PushNotificationManager.shared.configure(notificationService: services.notificationService)
+                        PushNotificationManager.shared.configure(
+                            notificationService: services.notificationService,
+                            serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
+                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID,
+                            allowsUnscopedRegistration: !DemoMode.shared.isActive
+                        )
                         // Issue #1321: wire the services job-attention lock-screen
                         // actions (Pause/Resume/Cancel/Snooze) execute against.
                         PushNotificationManager.shared.configureActionHandling(
                             printerService: services.printerService,
                             attentionService: services.attentionService
                         )
+                        let pendingRemoteTap = PushNotificationManager.shared.consumePendingRemoteTap()
+                        if !DemoMode.shared.isActive, let userInfo = pendingRemoteTap {
+                            router.routeNotification(
+                                userInfo: userInfo,
+                                activeOriginServerId: serverRegistry.activeServer?.originServerId
+                            )
+                        }
+                        let pendingLocalTap = PushNotificationManager.shared.consumePendingLocalTap()
+                        if !DemoMode.shared.isActive, let userInfo = pendingLocalTap,
+                           let printerIdString = userInfo["printerId"] as? String,
+                           let printerId = UUID(uuidString: printerIdString) {
+                            router.navigate(to: .printerReady(id: printerId))
+                        }
                         await PushNotificationManager.shared.refreshPermissionStatus()
                         if PushNotificationManager.shared.pushEnabled {
                             await PushNotificationManager.shared.requestPermissionAndRegister()

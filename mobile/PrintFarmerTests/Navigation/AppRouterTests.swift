@@ -18,6 +18,7 @@ final class AppRouterTests: XCTestCase {
 
     private let printerId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let spoolId = 42
+    private let originServerId = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
 
     // MARK: - Defaults
 
@@ -70,6 +71,74 @@ final class AppRouterTests: XCTestCase {
 
         XCTAssertEqual(router.selectedTab, .inventory)
         XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
+    }
+
+    func testAttentionDeepLinkSelectsAttentionAndPreservesItem() {
+        let router = AppRouter()
+
+        router.navigate(to: .attentionItem(id: "failure-123"))
+
+        XCTAssertEqual(router.selectedTab, .attention)
+        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
+    }
+
+    func testFilamentSwapDeepLinkSelectsFarmAndPreservesDestination() async {
+        let jobId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let router = AppRouter()
+
+        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 2, jobId: jobId))
+
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(
+            router.pendingFilamentSwap,
+            .init(printerId: printerId, toolheadIndex: 2, jobId: jobId)
+        )
+
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(router.printersPath.isEmpty)
+    }
+
+    func testPendingPrinterNavigationIsInvalidatedWhenServerChanges() async {
+        let router = AppRouter()
+
+        router.navigate(to: .printerDetail(id: printerId))
+        router.navigate(to: .attentionItem(id: "attention-1"))
+        router.navigate(to: .spoolDetail(id: 42))
+        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil))
+        router.invalidatePendingNavigation()
+        try? await Task.sleep(for: .milliseconds(120))
+
+        XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertNil(router.pendingFilamentSwap)
+    }
+
+    func testNotificationRoutingSurfacesInvalidDestination() {
+        let router = AppRouter()
+
+        router.routeNotification(userInfo: ["link": "printfarmer://attention"])
+
+        XCTAssertEqual(
+            router.notificationRoutingError,
+            "This notification's destination is invalid for the selected server."
+        )
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testNotificationRoutingSurfacesWrongServerOrigin() {
+        let router = AppRouter()
+
+        router.routeNotification(
+            userInfo: [
+                "originServerId": "00000000-0000-0000-0000-000000000011",
+                "deepLink": "printfarmer://printer/\(printerId.uuidString)"
+            ],
+            activeOriginServerId: originServerId
+        )
+
+        XCTAssertEqual(router.notificationRoutingError, "This notification belongs to a different server.")
+        XCTAssertEqual(router.selectedTab, .attention)
     }
 
     // MARK: - Reset to root

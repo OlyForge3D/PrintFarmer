@@ -51,6 +51,14 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
     /// Set after login to enable server-side token registration.
     private var notificationService: (any NotificationServiceProtocol)?
+    private var serverRegistry: ServerRegistry?
+    private var configuredServerID: UUID?
+    private var configurationEpoch = 0
+    private var allowsUnscopedRegistration = true
+    private var registrationTask: Task<Void, Never>?
+    private var registrationEpoch: UInt64 = 0
+    private var pendingRemoteTap: [AnyHashable: Any]?
+    private var pendingLocalTap: [AnyHashable: Any]?
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -69,8 +77,17 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
     // MARK: - Configuration
 
-    func configure(notificationService: any NotificationServiceProtocol) {
+    func configure(
+        notificationService: any NotificationServiceProtocol,
+        serverRegistry: ServerRegistry? = nil,
+        serverID: UUID? = nil,
+        allowsUnscopedRegistration: Bool = true
+    ) {
         self.notificationService = notificationService
+        self.serverRegistry = serverRegistry
+        self.configuredServerID = serverID
+        self.allowsUnscopedRegistration = allowsUnscopedRegistration
+        configurationEpoch &+= 1
         // #818: the disabled-push state is per-server. When the active server
         // changes (ServiceContainer reconfigures us with the new server's
         // service), clear the local-only signal so it is re-derived from the
@@ -146,18 +163,29 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     func handleJobAttentionAction(_ action: JobAttentionAction, userInfo: [AnyHashable: Any]) async {
         switch action {
         case .pauseJob:
-            await performPrinterCommand(named: "pause", userInfo: userInfo) { try await $0.pause(id: $1) }
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "pause", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.pause(id: $1) }
         case .resumeJob:
-            await performPrinterCommand(named: "resume", userInfo: userInfo) { try await $0.resume(id: $1) }
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "resume", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.resume(id: $1) }
         case .cancelJob:
-            await performPrinterCommand(named: "cancel", userInfo: userInfo) { try await $0.cancel(id: $1) }
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "cancel", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.cancel(id: $1) }
         case .snooze:
-            await performSnooze(userInfo: userInfo)
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
+            let actionEpoch = configurationEpoch
+            await performSnooze(userInfo: userInfo, expectedEpoch: actionEpoch)
         case .openSwap:
             // Foreground action (#1321): behaves like the existing tap-to-open
             // deep-link routing so it lands on the printer detail where the
             // guided filament swap lives — mirrors `didReceive response:`'s
             // default-tap branch below.
+            let actionEpoch = configurationEpoch
+            guard isNotificationOriginValid(userInfo, requireOrigin: true),
+                  configurationEpoch == actionEpoch else { return }
             NotificationCenter.default.post(
                 name: .pushNotificationTapped,
                 object: nil,
@@ -166,9 +194,39 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
+    private func isNotificationOriginValid(
+        _ userInfo: [AnyHashable: Any],
+        requireOrigin: Bool
+    ) -> Bool {
+        // Legacy origin-less payloads remain parseable for passive deep links,
+        // but mutating actions fail closed because they cannot prove ownership.
+        guard requireOrigin else { return true }
+        guard let serverRegistry else {
+            logger.warning("Job-attention action ignored — server context is unavailable")
+            return false
+        }
+        guard let activeServer = serverRegistry.activeServer,
+              let expectedOrigin = activeServer.originServerId,
+              let originValue = userInfo["originServerId"] as? String,
+              let originServerId = UUID(uuidString: originValue) else {
+            logger.warning("Job-attention action ignored — notification origin is unavailable")
+            return false
+        }
+        guard configuredServerID == activeServer.id else {
+            logger.warning("Job-attention action ignored — server services are still switching")
+            return false
+        }
+        guard originServerId == expectedOrigin else {
+            logger.warning("Job-attention action ignored — notification belongs to another server")
+            return false
+        }
+        return true
+    }
+
     private func performPrinterCommand(
         named actionName: String,
         userInfo: [AnyHashable: Any],
+        expectedEpoch: Int,
         _ operation: (any PrinterServiceProtocol, UUID) async throws -> CommandResult
     ) async {
         guard let printerService = jobAttentionPrinterService else {
@@ -180,6 +238,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.warning("Job-attention \(actionName) action ignored — missing/invalid printerId")
             return
         }
+        guard configurationEpoch == expectedEpoch else {
+            logger.warning("Job-attention \(actionName) action ignored — server changed before execution")
+            return
+        }
         do {
             _ = try await operation(printerService, printerId)
             logger.info("Job-attention \(actionName) action executed for printer \(printerId)")
@@ -188,13 +250,17 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
-    private func performSnooze(userInfo: [AnyHashable: Any]) async {
+    private func performSnooze(userInfo: [AnyHashable: Any], expectedEpoch: Int) async {
         guard let attentionService = jobAttentionAttentionService else {
             logger.warning("Job-attention snooze action ignored — no attention service configured")
             return
         }
         guard let itemId = userInfo["itemId"] as? String, !itemId.isEmpty else {
             logger.warning("Job-attention snooze action ignored — missing itemId")
+            return
+        }
+        guard configurationEpoch == expectedEpoch else {
+            logger.warning("Job-attention snooze action ignored — server changed before execution")
             return
         }
         do {
@@ -222,6 +288,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
                 permissionStatus = .authorized
                 registrationError = nil
                 logger.info("Notification permission granted")
+                UIApplication.shared.registerForRemoteNotifications()
             } else {
                 permissionStatus = .denied
                 logger.info("Notification permission denied by user")
@@ -255,10 +322,13 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         UserDefaults.standard.set(token, forKey: Self.deviceTokenKey)
         logger.info("APNs device token received: \(token.prefix(8))...")
 
-        Task { await registerTokenWithServer(token) }
+        startTokenRegistration(token)
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
+        registrationEpoch &+= 1
+        registrationTask?.cancel()
+        registrationTask = nil
         self.registrationError = error.localizedDescription
         self.deviceToken = nil
         UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
@@ -275,18 +345,63 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     /// server) is treated as a normal "push not configured" outcome — no
     /// user-visible error, no retry — and flips the app into local-only alerting
     /// mode. A successful registration clears that signal (clean re-enable path).
-    func registerTokenWithServer(_ token: String) async {
+    func registerTokenWithServer(
+        _ token: String,
+        expectedRegistrationEpoch: UInt64? = nil
+    ) async {
+        if let expectedRegistrationEpoch,
+           expectedRegistrationEpoch != registrationEpoch {
+            return
+        }
         guard let service = notificationService else {
             logger.warning("No notification service configured — device token not sent to server")
             return
         }
 
+        if let serverRegistry {
+            guard let configuredServerID,
+                  serverRegistry.activeServerID == configuredServerID else {
+                logger.warning("Device token registration ignored — no active server context")
+                return
+            }
+        } else {
+            guard allowsUnscopedRegistration else {
+                logger.warning("Device token registration ignored — no active server context")
+                return
+            }
+        }
+        let initiatingServerID = configuredServerID
+        let initiatingConfigurationEpoch = configurationEpoch
         do {
-            try await service.registerDeviceToken(token, platform: "ios")
+            let originServerId = try await service.registerDeviceToken(token, platform: "ios")
+            if let expectedRegistrationEpoch,
+               expectedRegistrationEpoch != registrationEpoch {
+                return
+            }
+            guard deviceToken == nil || deviceToken == token else { return }
+            if let serverRegistry,
+               let initiatingServerID,
+               configurationEpoch == initiatingConfigurationEpoch,
+               configuredServerID == initiatingServerID,
+               serverRegistry.activeServerID == initiatingServerID {
+                try serverRegistry.associateOriginServerId(originServerId, with: initiatingServerID)
+            }
+            guard configurationEpoch == initiatingConfigurationEpoch,
+                  configuredServerID == initiatingServerID,
+                  serverRegistry?.activeServerID == initiatingServerID else {
+                return
+            }
             localOnlyAlerting = false
             registrationError = nil
             logger.info("Device token registered with server")
         } catch NetworkError.featureDisabled {
+            guard configurationEpoch == initiatingConfigurationEpoch,
+                  expectedRegistrationEpoch == nil || expectedRegistrationEpoch == registrationEpoch,
+                  (deviceToken == nil || deviceToken == token),
+                  configuredServerID == initiatingServerID,
+                  serverRegistry?.activeServerID == initiatingServerID else {
+                return
+            }
             // Expected on the push-disabled beta default. Benign, not an error.
             localOnlyAlerting = true
             registrationError = nil
@@ -296,9 +411,52 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
+    func startTokenRegistration(_ token: String) {
+        registrationTask?.cancel()
+        registrationEpoch &+= 1
+        let expectedRegistrationEpoch = registrationEpoch
+        registrationTask = Task { [weak self] in
+            await self?.registerTokenWithServer(
+                token,
+                expectedRegistrationEpoch: expectedRegistrationEpoch
+            )
+        }
+    }
+
+    @MainActor
+    func consumePendingRemoteTap() -> [AnyHashable: Any]? {
+            defer { pendingRemoteTap = nil }
+            return pendingRemoteTap
+        }
+
+    @MainActor
+    func consumePendingLocalTap() -> [AnyHashable: Any]? {
+            defer { pendingLocalTap = nil }
+            return pendingLocalTap
+        }
+
+    @MainActor
+    private func enqueueRemoteTap(_ userInfo: [AnyHashable: Any]) {
+            pendingRemoteTap = userInfo
+            NotificationCenter.default.post(name: .pushNotificationTapped, object: nil, userInfo: userInfo)
+        }
+
+    @MainActor
+    private func enqueueLocalTap(_ userInfo: [AnyHashable: Any]) {
+            pendingLocalTap = userInfo
+            NotificationCenter.default.post(name: .localNotificationTapped, object: nil, userInfo: userInfo)
+    }
+
     /// Unregister the device token from the server (e.g., on logout).
-    func unregisterFromServer() async {
-        guard let token = deviceToken, let service = notificationService else { return }
+    @discardableResult
+    func unregisterFromServer(clearLocalToken: Bool = true) async -> Bool {
+        registrationTask?.cancel()
+        await registrationTask?.value
+        registrationTask = nil
+        guard let token = deviceToken else { return true }
+        guard let service = notificationService else { return false }
+        let unregisterEpoch = configurationEpoch
+        var succeeded = true
 
         do {
             try await service.unregisterDeviceToken(token)
@@ -308,11 +466,17 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             // a no-op unregister is expected. Not an error.
             logger.info("Native push disabled on this server; skipping token unregistration (nothing to remove)")
         } catch {
+            succeeded = false
             logger.error("Failed to unregister device token: \(error.localizedDescription)")
         }
 
-        UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
-        self.deviceToken = nil
+        if succeeded && clearLocalToken,
+           configurationEpoch == unregisterEpoch,
+           deviceToken == token {
+            UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
+            self.deviceToken = nil
+        }
+        return succeeded
     }
 }
 
@@ -346,6 +510,10 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let category = response.notification.request.content.categoryIdentifier
         let actionIdentifier = response.actionIdentifier
+        if actionIdentifier == UNNotificationDismissActionIdentifier {
+            completionHandler()
+            return
+        }
 
         // Issue #1321: a job-attention action button (Pause/Resume/Cancel/
         // Snooze/Open Swap) was tapped rather than the notification body
@@ -366,18 +534,20 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
             let identifier = response.notification.request.identifier
             // Identifier format: "pending-ready-{UUID}"
             let printerId = identifier.replacingOccurrences(of: "pending-ready-", with: "")
-            NotificationCenter.default.post(
-                name: .localNotificationTapped,
-                object: nil,
-                userInfo: ["tab": "printers", "printerId": printerId]
-            )
+            Task { @MainActor in
+                PushNotificationManager.shared.enqueueLocalTap(
+                    ["tab": "printers", "printerId": printerId]
+                )
+                completionHandler()
+            }
+            return
         } else {
             // Remote push notification — deep-link handling
-            NotificationCenter.default.post(
-                name: .pushNotificationTapped,
-                object: nil,
-                userInfo: userInfo
-            )
+            Task { @MainActor in
+                PushNotificationManager.shared.enqueueRemoteTap(userInfo)
+                completionHandler()
+            }
+            return
         }
 
         completionHandler()

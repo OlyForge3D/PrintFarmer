@@ -298,6 +298,13 @@ final class AuthViewModel {
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.revokeFarmSnapshot()
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
+        #if canImport(UIKit)
+        guard await PushNotificationManager.shared.unregisterFromServer() else {
+            errorMessage = "Could not disconnect notifications from this server. Try again when online."
+            isLoading = false
+            return
+        }
+        #endif
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false
@@ -320,7 +327,10 @@ final class AuthViewModel {
 
     func loginAsDemo() async {
         services.invalidateOfflineWriteReplayAuthority()
-        await services.switchToDemo()
+        guard await services.switchToDemo() else {
+            errorMessage = "Could not enter demo mode while disconnecting notifications."
+            return
+        }
         DemoMode.shared.activate()
         currentUser = DemoData.demoUser
         isAuthenticated = true

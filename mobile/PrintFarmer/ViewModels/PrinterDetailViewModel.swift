@@ -167,7 +167,27 @@ final class PrinterDetailViewModel {
             invalidateCanonicalLoad()
             invalidateSnapshotLifecycle()
         }
+
         self.printerService = printerService
+    }
+
+    func bindToolheadSpool(_ spool: SpoolmanSpool, at toolheadIndex: Int) async {
+        guard let printerService else {
+            actionError = "Printer service not available."
+            return
+        }
+
+        do {
+            _ = try await printerService.bindToolheadSpool(
+                printerId: printerId,
+                toolheadIndex: toolheadIndex,
+                request: ToolheadSpoolBindRequest(spoolId: spool.id),
+                idempotencyKey: UUID().uuidString
+            )
+            await loadPrinter()
+        } catch {
+            actionError = error.localizedDescription
+        }
     }
 
     /// Injects the job and maintenance services used by the F7 operator
