@@ -87,7 +87,7 @@ public class AssetsControllerTests
         ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(null!, modelId);
 
         // Assert
-        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
     [Fact]
@@ -101,7 +101,7 @@ public class AssetsControllerTests
         ActionResult<PrinterAssetDto> result = await _controller.GetPrinterAssetAsync(manufacturerId, modelId);
 
         // Assert
-        BadRequestObjectResult badRequestResult = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
     }
 
     [Fact]

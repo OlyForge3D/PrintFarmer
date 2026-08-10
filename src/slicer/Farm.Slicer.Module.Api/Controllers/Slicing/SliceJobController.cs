@@ -536,7 +536,7 @@ public partial class SliceJobController(
             return await GetLeaseFenceFailureAsync(id, ct);
         }
 
-        job = activeJob;
+        _ = activeJob;
         var artifactIds = new List<Guid> { request.PrimaryArtifactId };
         if (request.AdditionalArtifactIds is { Length: > 0 })
         {

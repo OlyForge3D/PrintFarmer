@@ -184,7 +184,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
 
         // Act - Failed login with wrong password
         LoginRequest loginRequest = new LoginRequest { UsernameOrEmail = "auditfailuser", Password = "WrongPassword123!" };
-        HttpResponseMessage loginResponse = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
+        _ = await _client.PostAsJsonAsync("/api/auth/login", new { UsernameOrEmail = loginRequest.UsernameOrEmail, Password = loginRequest.Password });
 
         // Assert - Check audit log for failed login
         using IServiceScope verifyScope = _factory.Services.CreateScope();
@@ -217,7 +217,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
             LastName = "Register"
         };
 
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/register", new
+        _ = await _client.PostAsJsonAsync("/api/auth/register", new
         {
             Username = registerRequest.Username,
             Email = registerRequest.Email,
@@ -331,7 +331,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
         {
             Email = email
         };
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
+        _ = await _client.PostAsJsonAsync("/api/auth/forgot-password", forgotPasswordRequest);
 
         // Assert - Check audit log
         using IServiceScope scope = _factory.Services.CreateScope();
@@ -388,7 +388,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
 
         using IServiceScope scope = _factory.Services.CreateScope();
         AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        IPasswordHashingService passwordHashingService = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+        _ = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
 
         User user = await context.Users.FirstAsync(u => u.Username == username);
         user.IsActive = true;
@@ -416,7 +416,7 @@ public class AuthAuditIntegrationTests : IAsyncLifetime
             ConfirmPassword = "NewPassword123!"
         };
 
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
+        _ = await _client.PostAsJsonAsync("/api/auth/reset-password", resetPasswordRequest);
 
         // Assert - Check audit log
         using IServiceScope verifyScope = _factory.Services.CreateScope();

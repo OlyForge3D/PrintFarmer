@@ -830,7 +830,7 @@ public class FilamentCoverageServiceTests
     [Fact]
     public async Task FleetEndpoint_BatchesSpoolAndJobQueries_ForManyPrinters()
     {
-        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, Mock<IPrintersService> printers) =
+        (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, Mock<IPrintersService> _) =
             BuildService(liveProgress: 0.0);
 
         const int printerCount = 12;
@@ -861,8 +861,8 @@ public class FilamentCoverageServiceTests
         (FilamentCoverageService svc, AppDbContext db, Mock<ISpoolmanService> spool, Mock<IPrintersService> printers) =
             BuildService();
 
-        Printer p1 = SeedPrinter(db, "idle1", T(0, spoolId: 1, primary: true));
-        Printer p2 = SeedPrinter(db, "idle2", T(0, spoolId: 2, primary: true));
+        _ = SeedPrinter(db, "idle1", T(0, spoolId: 1, primary: true));
+        _ = SeedPrinter(db, "idle2", T(0, spoolId: 2, primary: true));
         spool.Setup(s => s.GetSpoolByIdAsync(It.IsAny<int>(), It.IsAny<CancellationToken>()))
              .ReturnsAsync((int id, CancellationToken _) => Spool(id, 100));
         _ = await db.SaveChangesAsync();

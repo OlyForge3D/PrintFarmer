@@ -1283,7 +1283,7 @@ public abstract class BasePreviewRenderer
                 }
 
                 // Choose a front-facing entry if possible (more likely to be visible surface)
-                (Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2) entry = list.Count == 2
+                (Vector3 FaceNormal, bool FrontFacing, Vector2 S0, Vector2 S1, Vector2 S2, float D0, float D1, float D2) _ = list.Count == 2
                     ? (list[0].FrontFacing ? list[0] : list[1])
                     : list[0];
 

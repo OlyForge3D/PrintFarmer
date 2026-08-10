@@ -1216,7 +1216,7 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
             printerBackendCapabilitiesService: Mock.Of<IPrinterBackendCapabilitiesService>(),
             backendClientFactory: Mock.Of<IBackendClientFactory>(),
             httpClientFactory: Mock.Of<IHttpClientFactory>(),
-            egressGuard: Mock.Of<IEgressGuard>(),
+            egressGuard: Farm.Web.Api.Tests.TestInfrastructure.TestHelpers.PermissiveEgressGuard(),
             obicoServerAssignment: Mock.Of<
                 Farm.Infrastructure.Services.FailureDetection.IObicoServerAssignmentService>(),
             settingsService: Mock.Of<Farm.Infrastructure.Settings.ISettingsService>(),

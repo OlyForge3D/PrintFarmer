@@ -786,8 +786,9 @@ public static class ServiceCollectionExtensions
         });
 
         // Vetted egress HTTP client: outbound calls to user-influenced destinations
-        // (Obico connectivity probes, camera proxying) must not auto-follow redirects,
-        // since a redirect to an internal address would otherwise bypass egress vetting.
+        // (Obico connectivity probes, camera proxying, printer connection tests) must not
+        // auto-follow redirects, since a redirect to an internal address would otherwise
+        // bypass egress vetting.
         _ = services.AddHttpClient("VettedEgress")
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
             {

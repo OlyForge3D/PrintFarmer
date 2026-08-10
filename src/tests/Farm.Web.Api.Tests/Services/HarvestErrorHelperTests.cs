@@ -197,9 +197,6 @@ public class HarvestErrorHelperTests
         // Get user message
         string userMessage = HarvestErrorHelper.GetUserFriendlyMessage(category, ex.Message);
 
-        // Check if retryable
-        bool retryable = HarvestErrorHelper.IsRetryableError(category);
-
         // Verify flow completes without errors
         details.Should().NotBeNullOrWhiteSpace();
         userMessage.Should().NotBeNullOrWhiteSpace();

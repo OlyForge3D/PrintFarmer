@@ -425,7 +425,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
 
         Model3D model = await CreateTestModelAsync("to-delete.stl");
         Guid modelId = model.Id;
@@ -829,7 +829,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // Arrange
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IModel3DFileService service = scope.ServiceProvider.GetRequiredService<IModel3DFileService>();
-        IConfiguration config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        _ = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
         Model3DUploadResultDto uploadResult = await service.UploadModelAsync(
             CreateMockFormFile("path-test.stl"),

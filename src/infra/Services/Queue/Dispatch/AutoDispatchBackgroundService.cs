@@ -594,8 +594,7 @@ public sealed class AutoDispatchBackgroundService(
                 plan.PrinterId,
                 maxConcurrentDispatches);
             Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched;
-            using (DispatchCapacityLease capacityLease =
-                await concurrencyCoordinator.AcquireCapacityAsync(
+            using (await concurrencyCoordinator.AcquireCapacityAsync(
                     maxConcurrentDispatches,
                     ct))
             {

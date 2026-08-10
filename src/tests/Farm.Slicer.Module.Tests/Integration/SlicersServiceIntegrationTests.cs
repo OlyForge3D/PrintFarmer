@@ -573,7 +573,7 @@ public class SlicersServiceIntegrationTests : IAsyncLifetime
         };
 
         // Act 1: Register
-        (Guid id, string? apiKey) = await slicersService.RegisterAsync(dto, CancellationToken.None);
+        (Guid id, string? _) = await slicersService.RegisterAsync(dto, CancellationToken.None);
 
         // Assert 1
         SlicerService? registered = await slicersService.GetAsync(id, CancellationToken.None);

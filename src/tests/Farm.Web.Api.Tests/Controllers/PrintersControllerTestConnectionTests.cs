@@ -49,10 +49,11 @@ public class PrintersControllerTestConnectionTests
 
         ActionResult<TestConnectionResponse> result = await controller.TestConnectionAsync(request, CancellationToken.None);
 
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
-        TestConnectionResponse response = Assert.IsType<TestConnectionResponse>(okResult.Value);
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        TestConnectionResponse response = Assert.IsType<TestConnectionResponse>(badRequest.Value);
         response.Success.Should().BeFalse();
-        response.Message.Should().Contain("loopback");
+        response.Message.Should().Be("The requested server address is not allowed.");
+        response.Message.Should().NotContain("loopback", "the specific deny reason must not be echoed to the caller");
 
         // Strict mock with no CreateClient setup: any attempt to build an HttpClient (i.e. any
         // attempt to actually connect to the backend) would throw, proving the guard short-circuited.

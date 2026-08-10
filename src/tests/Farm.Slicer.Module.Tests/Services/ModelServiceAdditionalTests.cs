@@ -177,7 +177,7 @@ public class ModelServiceAdditionalTests : IDisposable
         _ = mockFileManagement.Setup(s => s.IsSafePath(It.IsAny<string>(), It.IsAny<string>())).Returns(true);
 
         // Wrap the repository in a UnitOfWork mock
-        Mock<IUnitOfWork> mockUoW = new Mock<IUnitOfWork>(MockBehavior.Loose);
+        _ = new Mock<IUnitOfWork>(MockBehavior.Loose);
 
         // Mock IStoragePathService (like GcodeFilesService does)
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);

@@ -185,7 +185,6 @@ public class JobCostCalculationTests : IAsyncLifetime
             printTime: TimeSpan.FromHours(2)); // 2 hours
 
         // Mock Spoolman service to return filament data
-        var spoolmanService = scope.ServiceProvider.GetRequiredService<ISpoolmanService>();
         // Note: In real scenario, spoolman would need mocking. For this integration test,
         // we'll skip material cost since Spoolman isn't available
 

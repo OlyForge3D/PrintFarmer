@@ -797,7 +797,6 @@ public class PrintablesImportServiceTests : IDisposable
 
     private static PrintablesImportController BuildController(Mock<IPrintablesImportService> mockSvc)
     {
-        Mock<ILogger<PrintablesImportController>> logger = new();
         Mock<IPrintablesOAuthService> oauthSvc = new();
         return BuildController(mockSvc, oauthSvc);
     }

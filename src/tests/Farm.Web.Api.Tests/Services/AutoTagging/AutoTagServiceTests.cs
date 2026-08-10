@@ -177,7 +177,7 @@ public class AutoTagServiceTests
     [Fact]
     public void RgbToHsl_Black_ReturnsZeroLightness()
     {
-        (double h, double s, double l) = AutoTagService.RgbToHsl(0, 0, 0);
+        (double _, double _, double l) = AutoTagService.RgbToHsl(0, 0, 0);
 
         l.Should().BeApproximately(0, 0.01);
     }
@@ -185,7 +185,7 @@ public class AutoTagServiceTests
     [Fact]
     public void RgbToHsl_White_ReturnsFullLightness()
     {
-        (double h, double s, double l) = AutoTagService.RgbToHsl(255, 255, 255);
+        (double _, double _, double l) = AutoTagService.RgbToHsl(255, 255, 255);
 
         l.Should().BeApproximately(1.0, 0.01);
     }
@@ -203,7 +203,7 @@ public class AutoTagServiceTests
     [Fact]
     public void RgbToHsl_PureGreen_Returns120Hue()
     {
-        (double h, double s, double l) = AutoTagService.RgbToHsl(0, 255, 0);
+        (double h, double _, double _) = AutoTagService.RgbToHsl(0, 255, 0);
 
         h.Should().BeApproximately(120, 1);
     }
@@ -211,7 +211,7 @@ public class AutoTagServiceTests
     [Fact]
     public void RgbToHsl_PureBlue_Returns240Hue()
     {
-        (double h, double s, double l) = AutoTagService.RgbToHsl(0, 0, 255);
+        (double h, double _, double _) = AutoTagService.RgbToHsl(0, 0, 255);
 
         h.Should().BeApproximately(240, 1);
     }

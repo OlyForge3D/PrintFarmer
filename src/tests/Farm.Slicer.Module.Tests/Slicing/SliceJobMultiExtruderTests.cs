@@ -79,7 +79,7 @@ public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifeti
 
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", request);
         _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
-        SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        _ = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
         WorkerSliceJobResponse status = await ClaimJobAsync();
 
@@ -105,7 +105,7 @@ public class SliceJobMultiExtruderTests(ITestOutputHelper output) : IAsyncLifeti
 
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", request);
         _ = submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
-        SubmitSliceJobResponse? submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        _ = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
         WorkerSliceJobResponse status = await ClaimJobAsync();
 

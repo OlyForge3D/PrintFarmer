@@ -25,7 +25,7 @@ public class SliceJobCompletionIntegrationTests(CustomWebApplicationFactory fact
     public async Task SliceJob_Service_Completion_Flow_Succeeds()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
 

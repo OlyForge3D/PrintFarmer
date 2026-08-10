@@ -27,7 +27,7 @@ public class SliceJobCompletionLogTests(CustomWebApplicationFactory factory) : I
     public async Task Completion_Does_Not_Persist_Untrusted_Inline_Worker_Logs()
     {
         using IServiceScope scope = _factory.Services.GetRequiredService<IServiceScopeFactory>().CreateScope();
-        SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+        _ = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         ISliceJobRepository jobRepo = scope.ServiceProvider.GetRequiredService<ISliceJobRepository>();
         IArtifactsService artifactsService = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
         // Manually construct controller (controllers aren't added to root service provider in this test host)

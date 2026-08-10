@@ -282,8 +282,8 @@ public class LoadBalancingTests : IAsyncLifetime
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
         Guid folderId = await EnsureRootFolderAsync(db);
-        Guid printer1 = await SeedPrinterAsync(db, 1);
-        Guid printer2 = await SeedPrinterAsync(db, 2);
+        _ = await SeedPrinterAsync(db, 1);
+        _ = await SeedPrinterAsync(db, 2);
 
         Guid jobId1 = await SeedQueuedJobAsync(db, folderId, 1);
         Guid jobId2 = await SeedQueuedJobAsync(db, folderId, 2);
