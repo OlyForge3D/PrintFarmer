@@ -169,13 +169,20 @@ export function PageTemplate({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
                 <div className={`flex gap-2 min-w-0 ${titleWrap ? 'items-start' : 'items-center'}`}>
-                  {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
+                  {Icon && (
+                    <Icon
+                      className={`h-6 w-6 shrink-0 ${titleWrap ? 'mt-1' : ''}`}
+                      aria-hidden="true"
+                    />
+                  )}
                   <h1
                     className={`min-w-0 text-2xl font-bold text-pf-text-primary ${titleWrap ? 'whitespace-normal break-words' : 'truncate'}`}
                   >
                     {title}
                   </h1>
-                  {titleActions && <div className="shrink-0">{titleActions}</div>}
+                  {titleActions && (
+                    <div className={`shrink-0 ${titleWrap ? 'mt-1' : ''}`}>{titleActions}</div>
+                  )}
                 </div>
                 {subtitle && (
                   <p className="text-pf-text-secondary mt-1">
