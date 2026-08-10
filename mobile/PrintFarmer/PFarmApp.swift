@@ -68,15 +68,20 @@ struct PFarmApp: App {
                 }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
+                    let userInfo = PushNotificationManager.shared.consumePendingRemoteTap()
+                        ?? notification.userInfo
                     if !DemoMode.shared.isActive {
                         router.routeNotification(
-                            userInfo: notification.userInfo ?? [:],
+                            userInfo: userInfo ?? [:],
                             activeOriginServerId: serverRegistry.activeServer?.originServerId
                         )
                     }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
-                    if let userInfo = notification.userInfo,
+                    let userInfo = PushNotificationManager.shared.consumePendingLocalTap()
+                        ?? notification.userInfo
+                    if !DemoMode.shared.isActive,
+                       let userInfo,
                        let printerIdString = userInfo["printerId"] as? String,
                        let printerId = UUID(uuidString: printerIdString) {
                         router.navigate(to: .printerReady(id: printerId))
@@ -116,13 +121,15 @@ struct PFarmApp: App {
                             printerService: services.printerService,
                             attentionService: services.attentionService
                         )
-                        if let userInfo = PushNotificationManager.shared.consumePendingRemoteTap() {
+                        let pendingRemoteTap = PushNotificationManager.shared.consumePendingRemoteTap()
+                        if !DemoMode.shared.isActive, let userInfo = pendingRemoteTap {
                             router.routeNotification(
                                 userInfo: userInfo,
                                 activeOriginServerId: serverRegistry.activeServer?.originServerId
                             )
                         }
-                        if let userInfo = PushNotificationManager.shared.consumePendingLocalTap(),
+                        let pendingLocalTap = PushNotificationManager.shared.consumePendingLocalTap()
+                        if !DemoMode.shared.isActive, let userInfo = pendingLocalTap,
                            let printerIdString = userInfo["printerId"] as? String,
                            let printerId = UUID(uuidString: printerIdString) {
                             router.navigate(to: .printerReady(id: printerId))
