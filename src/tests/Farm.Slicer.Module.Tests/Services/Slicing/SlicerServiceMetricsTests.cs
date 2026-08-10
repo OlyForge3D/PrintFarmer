@@ -533,10 +533,9 @@ public class SlicerServiceMetricsTests : IDisposable
     public void Dispose_WithoutExplicitCall_InvokesGarbageCollection()
     {
         // Arrange
-        var metrics = new SlicerServiceMetrics();
+        _ = new SlicerServiceMetrics();
 
         // Act - let it go out of scope
-        metrics = null;
         GC.Collect();
         GC.WaitForPendingFinalizers();
 

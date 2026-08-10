@@ -294,7 +294,7 @@ public class CalibrationSequenceAllocationTests : IAsyncDisposable
         // Create 3 sequential calibration jobs (different idempotency keys = different jobs).
         for (int i = 1; i <= 3; i++)
         {
-            (JobQueueService sut, AppDbContext db) = CreateSut(_connectionString);
+            (JobQueueService _, AppDbContext db) = CreateSut(_connectionString);
             await using (db)
             {
                 var dataService = Mock.Of<IQueueDataService>(

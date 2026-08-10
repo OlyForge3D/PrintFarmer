@@ -6612,7 +6612,7 @@ public sealed class NativePushDispatcherTests
         int providerCallsRetry = 0;
         var sender = new DelegateTransportSender(async (envelope, transportStart, cancellationToken) =>
         {
-            int idx = Interlocked.Increment(ref senderCalls);
+            Interlocked.Increment(ref senderCalls);
             if (envelope.ChangeKind == AttentionChangeKind.Created)
             {
                 s1PreparationDone.TrySetResult();

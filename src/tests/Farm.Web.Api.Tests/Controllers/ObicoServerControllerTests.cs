@@ -348,7 +348,7 @@ public class ObicoServerControllerTests
 
         ActionResult<ObicoServerDto> result = await controller.UpdateServerAsync(server.Id, dto, CancellationToken.None);
 
-        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        _ = Assert.IsType<BadRequestObjectResult>(result.Result);
         callCount.Should().Be(0, "no outbound HTTP call should be made once the egress guard denies the destination");
 
         ObicoServer persisted = await dbContext.ObicoServers.SingleAsync(s => s.Id == server.Id);

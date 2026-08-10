@@ -222,8 +222,8 @@ public class ProfileSampleDataTests
         // Arrange
         string prusaDir = Path.Join(SampleProfilesPath, "Prusa");
         string machineDir = Path.Join(prusaDir, "machine");
-        string filamentDir = Path.Join(prusaDir, "filament");
-        string processDir = Path.Join(prusaDir, "process");
+        _ = Path.Join(prusaDir, "filament");
+        _ = Path.Join(prusaDir, "process");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 

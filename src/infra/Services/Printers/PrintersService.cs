@@ -1856,7 +1856,6 @@ public class PrintersService(
         // Use ServerUrl directly - it should already be in http://host format
         string inputUrl = dto.ServerUrl;
         string resolvedBase = inputUrl;
-        string? resolvedIp = null;
         try
         {
             Uri uri = new(inputUrl);
@@ -1869,12 +1868,7 @@ public class PrintersService(
                 {
                     UriBuilder ub = new(uri) { Host = firstIp.ToString() };
                     resolvedBase = ub.Uri.ToString().TrimEnd('/');
-                    resolvedIp = firstIp.ToString();
                 }
-            }
-            else
-            {
-                resolvedIp = uri.Host;
             }
         }
         catch

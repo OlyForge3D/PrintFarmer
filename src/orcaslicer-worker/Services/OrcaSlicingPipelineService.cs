@@ -794,7 +794,6 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
                 _logger.LogWarning(
                     "Job {JobId}: 3MF project workflow skipped — not all inputs are STL files. Falling back to CLI flags.",
                     job.Id);
-                useThreeMfProject = false;
             }
 
             effectiveModelPaths = modelPaths;

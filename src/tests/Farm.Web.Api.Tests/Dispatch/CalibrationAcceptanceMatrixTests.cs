@@ -1162,7 +1162,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G7_RemoveJob_WithActiveAck_InvalidatesAck()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, Guid gcodeId) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
+        (Guid printerId, Guid jobId, Guid _) = await SeedFullCalibrationJobAsync(seedCtx, setAck: true);
 
         // Verify ack is set before removal.
         PrinterDispatchState ds = await seedCtx.PrinterDispatchStates.SingleAsync(s => s.PrinterId == printerId);
@@ -1204,7 +1204,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     public async Task G8_PriorityUpdate_InvalidValue_ThrowsValidationException()
     {
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
+        (Guid _, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
 
         await using AppDbContext editCtx = CreateContext();
         PrintJob? job = await editCtx.PrintJobs

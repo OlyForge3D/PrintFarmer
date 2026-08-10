@@ -367,7 +367,7 @@ public class PrintJobManagementService(
     {
         try
         {
-            (int queued, int printing, int paused, int completed, int failed) = await _repository.GetQueueStatsAsync(cancellationToken);
+            (int queued, int printing, int paused, int _, int _) = await _repository.GetQueueStatsAsync(cancellationToken);
             double avgWait = await _repository.GetAverageWaitTimeMinutesAsync(printerModelId: null, lookbackDays: 30, ct: cancellationToken);
             QueuePlanningSettings settings = GetQueuePlanningSettings();
             List<PrintJob> activeJobs = await _repository.GetFilteredJobsAsync(

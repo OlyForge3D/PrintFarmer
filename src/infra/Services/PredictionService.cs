@@ -88,7 +88,7 @@ public class PredictionService(IPrintJobStatisticsRepository repository, IQueueR
             .Average(s => s.ActualDurationMs!.Value);
 
         var estimatedDuration = TimeSpan.FromMilliseconds(avgDurationMs);
-        double variance = CalculateVariance(similarJobs, avgDurationMs);
+        _ = CalculateVariance(similarJobs, avgDurationMs);
         ConfidenceLevel confidence = CalculateConfidenceLevel(similarJobs.Count);
         double variancePercent = GetVariancePercent(confidence);
 

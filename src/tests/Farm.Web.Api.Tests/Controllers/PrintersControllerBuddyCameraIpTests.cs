@@ -362,7 +362,6 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
     {
         // Arrange: printer with a pre-existing PrusaLink camera that has IsEnabled = false
         Guid printerId = await SeedPrinterAsync();
-        Guid existingCameraId;
 
         await using (AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope())
         {
@@ -383,7 +382,6 @@ public class PrintersControllerBuddyCameraIpTests : IAsyncLifetime
             printer!.BuddyCameraIp = "10.0.0.1";
             await seedDb.SaveChangesAsync();
 
-            existingCameraId = staleCamera.Id;
         }
 
         // Act: set a new BuddyCameraIp

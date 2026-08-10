@@ -44,7 +44,6 @@ public class FeatureFlagService : IFeatureFlagService
     public Dictionary<string, bool> GetAllFlags()
     {
         var flags = new Dictionary<string, bool>();
-        var featureFlagsSection = _configuration.GetSection("FeatureFlags");
 
         // Define all known feature flags
         var knownFlags = new[]

@@ -503,7 +503,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     public async Task ConfirmEmailAsync_WithAlreadyConfirmedEmail_StaysConfirmed()
     {
         // Arrange - User created with emailConfirmed: true by default
-        User user = await CreateTestUserAsync("email-already-confirmed", "emailalreadyconfirmed@test.com", emailConfirmed: true);
+        _ = await CreateTestUserAsync("email-already-confirmed", "emailalreadyconfirmed@test.com", emailConfirmed: true);
         using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 

@@ -101,7 +101,7 @@ public class ThumbnailGenerationServiceTests
         try
         {
             // Act
-            var service = new ThumbnailGenerationService(_loggerMock.Object, _configurationMock.Object);
+            _ = new ThumbnailGenerationService(_loggerMock.Object, _configurationMock.Object);
 
             // Assert
             Assert.True(Directory.Exists(testDir));

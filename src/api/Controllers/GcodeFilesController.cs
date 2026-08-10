@@ -840,7 +840,7 @@ public class GcodeFilesController(
 
             logger.LogDebug("[CreateFolder] Input: '{RequestPath}' -> path='{Path}', name='{Name}'", LogSanitizer.Sanitize(request.Path), LogSanitizer.Sanitize(path), LogSanitizer.Sanitize(name));
 
-            GcodeFileEntryDto dto = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
+            _ = await gcodeFilesService.MakeDirectoryAsync(path, name, ct);
 
             logger.LogInformation("[CreateFolder] Successfully created virtual folder: '{RequestPath}'", LogSanitizer.Sanitize(request.Path));
             return StatusCode(StatusCodes.Status201Created, new FolderOperationResultDto { Success = true, Message = "Folder created successfully" });

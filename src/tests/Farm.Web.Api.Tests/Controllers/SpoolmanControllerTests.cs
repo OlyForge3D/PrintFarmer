@@ -133,7 +133,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.TestAsync(null, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
@@ -146,7 +146,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.TestAsync(request, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.TestAsync(request, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
@@ -217,7 +217,7 @@ public class SpoolmanControllerTests
         ActionResult<SpoolmanConfigDto?> result = _controller.GetConfig();
 
         // Assert
-        ActionResult<SpoolmanConfigDto> okResult = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
+        _ = Assert.IsType<ActionResult<SpoolmanConfigDto>>(result);
     }
 
     [Fact]
@@ -318,7 +318,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.HealthAsync(CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
@@ -342,7 +342,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.HealthAsync(CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     [Fact]
@@ -529,7 +529,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.ScanNetworkAsync(CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     private void SetupFleetBroadcast()
@@ -581,7 +581,7 @@ public class SpoolmanControllerTests
         IActionResult result = await _controller.ScanNetworkAsync(CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result);
+        _ = Assert.IsType<OkObjectResult>(result);
     }
 
     // -------------------------------------------------------------------------

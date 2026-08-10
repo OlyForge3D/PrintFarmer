@@ -2905,10 +2905,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         Fixture fixture = await SeedCalibrationAsync(context, withAck: false);
         PrintJob job = await context.PrintJobs.SingleAsync(
             candidate => candidate.Id == fixture.JobId);
-        Printer printer = await context.Printers.SingleAsync(
-            candidate => candidate.Id == fixture.PrinterId);
-        PrinterDispatchState state = await context.PrinterDispatchStates.SingleAsync(
-            candidate => candidate.PrinterId == fixture.PrinterId);
+        Printer printer;
+        PrinterDispatchState state;
         job.BlockedReasonCode = JobBlockedReasonCode.ContentHashMismatch;
         job.BlockedReasonJson = """{"errorCode":"content_hash_mismatch"}""";
         await context.SaveChangesAsync();

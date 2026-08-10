@@ -273,7 +273,7 @@ public class GcodeHarvestService(
         await using AsyncServiceScope scope = _serviceScopeFactory.CreateAsyncScope();
         IUnitOfWork scopedUnitOfWork = scope.ServiceProvider.GetRequiredService<IUnitOfWork>();
         IHarvestRepository scopedHarvestRepo = scopedUnitOfWork.HarvestOperations;
-        IBackendClientFactory scopedBackendFactory = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
+        _ = scope.ServiceProvider.GetRequiredService<IBackendClientFactory>();
         IBackendCapabilityFactory scopedCapabilityFactory = scope.ServiceProvider.GetRequiredService<IBackendCapabilityFactory>();
 
         // Use _logger instead of scoped logger for background tasks to ensure logs are flushed
@@ -1184,7 +1184,7 @@ public class GcodeHarvestService(
         }, ct);
 
         // Extract essential printer data BEFORE background task
-        Guid printerId = printer.Id;
+        _ = printer.Id;
         string printerName = printer.Name;
         string printerBackendUrl = printer.BackendUrl;  // Use calculated BackendUrl with port
         PrinterCredential? printerCredential = printer.Credential;

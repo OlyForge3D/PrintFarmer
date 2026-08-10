@@ -248,9 +248,9 @@ internal static class Program
             int machineCount = 0;
             int filamentCount = 0;
             int processCount = 0;
-            List<MachineProfileDto> machines = [];
-            List<FilamentProfileDto> filaments = [];
-            List<ProcessProfileDto> processes = [];
+            List<MachineProfileDto> machines;
+            List<FilamentProfileDto> filaments;
+            List<ProcessProfileDto> processes;
 
             if (slicerType == "orcaslicer")
             {

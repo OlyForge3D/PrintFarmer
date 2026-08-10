@@ -599,7 +599,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         {
             ArrayBufferWriter<byte> writer = new();
 
-            long startedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            _ = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             LogSdcp(LogLevel.Debug, "SDCP WS receive started");
 
             while (true)
@@ -631,7 +631,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
                 if (result.EndOfMessage)
                 {
                     string text = Encoding.UTF8.GetString(writer.WrittenSpan);
-                    long endedAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+                    _ = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                     LogSdcp(LogLevel.Debug, "SDCP WS receive completed");
                     return text;
                 }
@@ -802,7 +802,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "TestConnection", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 SdcpMessage<object> statusRequest = new(
                     string.Empty,
@@ -881,7 +881,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetStatus", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 // Send status request
                 SdcpMessage<object> statusRequest = new(
@@ -941,7 +941,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetJob", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 // Send status request to get print info
                 SdcpMessage<object> statusRequest = new(
@@ -1006,7 +1006,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetCompositeStatus", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 // Send status request
                 SdcpMessage<object> statusRequest = new(
@@ -1410,7 +1410,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetFileList", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 // Send file list request — Url specifies the storage path to list
                 SdcpMessage<object> fileListRequest = new(
@@ -1507,7 +1507,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "SendCommand", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 SdcpMessage<T> command = new(
                     string.Empty,
@@ -2387,7 +2387,7 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
             var (ws, wsUri) = await ConnectWebSocketAsync(baseUrl, operation: "GetAttributes", correlationId: requestId, cts.Token);
             using (ws)
             {
-                string wsUrl = wsUri.ToString();
+                _ = wsUri.ToString();
 
                 // Send Cmd 1 (Request for attribute message) per SDCP V3.0.0 spec.
                 // The printer responds with an ack on sdcp/response topic, then publishes

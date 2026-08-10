@@ -121,7 +121,7 @@ public class PrintersControllerLocationAuthorizationTests : IAsyncLifetime
     [Fact]
     public async Task UnassignPrinterFromLocationAsync_Admin_Returns200()
     {
-        (Guid printerId, Guid locationId) = await SeedPrinterAndLocationAsync(assignLocation: true);
+        (Guid printerId, Guid _) = await SeedPrinterAndLocationAsync(assignLocation: true);
 
         HttpResponseMessage response = await _adminClient.DeleteAsync($"/api/printers/{printerId}/location");
 

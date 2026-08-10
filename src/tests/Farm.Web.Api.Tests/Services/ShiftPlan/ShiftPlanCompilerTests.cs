@@ -1088,7 +1088,7 @@ public class ShiftPlanCompilerTests
         ShiftPlanCompiler compiler = BuildCompiler(clock,
             AuthoritySource("clean", UserTaskSourceKind.FailureIncident, originWatermark: 10,
                 specs: [Spec(keyA)]));
-        ShiftPlanCompileResult result = await compiler.CompileAsync(state);
+        _ = await compiler.CompileAsync(state);
 
         Assert.True(state.IsBootstrapped(UserTaskSourceKind.FailureIncident));
         // Bootstrap drops the DROPPABLE bootstrap-exclusion evidence for the clean kind...

@@ -249,7 +249,7 @@ public class OrcaSlicerProfilesProviderTests
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
         // Load all profiles to initialize
-        IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
+        _ = await provider.ListOfficialProfilesAsync();
 
         // Verify process profiles exist in sample data
         string processDir = Path.Join(sampleProfilesPath, "Prusa", "process");

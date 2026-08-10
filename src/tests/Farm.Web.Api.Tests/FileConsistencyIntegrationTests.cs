@@ -81,9 +81,9 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
     public async Task GetHealthSummary_WithHealthyFiles_ReturnsCorrectStats()
     {
         // Arrange
-        Model3D model1 = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
-        Model3D model2 = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
-        GcodeFile gcode1 = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
+        _ = CreateAndPersistModel3D("test-model-1.stl", FileHealthStatus.Healthy);
+        _ = CreateAndPersistModel3D("test-model-2.stl", FileHealthStatus.Healthy);
+        _ = CreateAndPersistGcodeFile("test-print.gcode", FileHealthStatus.Healthy);
         _ = await _slicerDbContext.SaveChangesAsync();
         _ = await _dbContext.SaveChangesAsync();
 

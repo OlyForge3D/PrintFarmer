@@ -408,7 +408,7 @@ public class LocationService : ILocationService
 
         try
         {
-            Location location = await FindByIdAsync(locationId, ct) ?? throw new KeyNotFoundException($"Location with ID {locationId} not found");
+            _ = await FindByIdAsync(locationId, ct) ?? throw new KeyNotFoundException($"Location with ID {locationId} not found");
 
             await UpdatePrinterCountAsync(locationId, ct);
 

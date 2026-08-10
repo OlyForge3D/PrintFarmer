@@ -281,7 +281,7 @@ public class GcodeFilesService(
                 continue;
             }
 
-            string childVirtual = CombineVirtual(virtualPathNormalized, file.FileName);
+            _ = CombineVirtual(virtualPathNormalized, file.FileName);
 
             string? thumbnailUrl = string.IsNullOrEmpty(file.ThumbnailFileName)
                 ? null
@@ -430,7 +430,7 @@ public class GcodeFilesService(
         }
 
         // Resolve path using IStoragePathService
-        (string storageRoot, string targetDirFullPath, string virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+        var (_, targetDirFullPath, virtualDir) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
 
         if (!Directory.Exists(targetDirFullPath))
         {
@@ -1169,7 +1169,7 @@ public class GcodeFilesService(
     public async Task<(byte[] Bytes, string FileName)?> DownloadAsync(string path, CancellationToken ct)
     {
         // Resolve path using IStoragePathService
-        (string storageRoot, string fullFilePath, _) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
+        var (_, fullFilePath, _) = ResolveVirtualPath(path, _storagePathService.GetGcodeStorageDirectory());
 
         if (!File.Exists(fullFilePath))
         {

@@ -49,7 +49,7 @@ public class OctoPrintClientTests
     [Fact]
     public async Task GetPrinterStateAsync_ParsesStateAndTemps()
     {
-        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? _) = CreateClient(req =>
         {
             _ = req.RequestUri!.AbsolutePath.Should().Be("/api/printer");
             return Json(new
@@ -75,7 +75,7 @@ public class OctoPrintClientTests
     [Fact]
     public async Task GetJobStatusAsync_ParsesJobName()
     {
-        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? _) = CreateClient(req =>
         {
             _ = req.RequestUri!.AbsolutePath.Should().Be("/api/job");
             return Json(new
@@ -93,7 +93,7 @@ public class OctoPrintClientTests
     [Fact]
     public async Task PluginDetection_ParsesPluginsList()
     {
-        (OctoPrintClient? client, _, List<HttpRequestMessage>? recorded) = CreateClient(req =>
+        (OctoPrintClient? client, _, List<HttpRequestMessage>? _) = CreateClient(req =>
         {
             _ = req.RequestUri!.AbsolutePath.Should().Be("/api/plugins");
             return Json(new
