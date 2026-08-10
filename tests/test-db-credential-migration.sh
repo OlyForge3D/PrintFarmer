@@ -424,6 +424,130 @@ test_migration_escapes_shell_metacharacters_in_password() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Scenario 7: save_deployment_config() unconditionally rewrites the entire
+# .deploy-config file (via heredoc, not append) and runs *after*
+# migrate_legacy_db_credentials() in every real deploy flow, so it must
+# independently escape every password-bearing field it persists --
+# POSTGRES_PASSWORD, DB_PASSWORD, SQLSERVER_PASSWORD, and AUTO_ADMIN_PASSWORD
+# -- or the migration fix above is a no-op for real deployments.
+# ---------------------------------------------------------------------------
+test_save_deployment_config_escapes_all_password_fields() {
+    start_test "save_deployment_config escapes all persisted password fields"
+
+    cd "$TEST_TEMP_DIR"
+    local marker_file="$TEST_TEMP_DIR/save-config-injection-marker"
+    rm -f "$marker_file"
+    local nasty_pw
+    nasty_pw="pw\$(touch $marker_file);injected'quote"
+
+    (
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        source "$DEPLOY_SCRIPT" >/dev/null 2>&1 || true
+
+        CONFIG_FILE="$TEST_TEMP_DIR/.deploy-config-save"
+        ARCHITECTURE=monolithic
+        COMPOSE_FILE=docker-compose.yml
+        DB_PROVIDER=postgres
+        INCLUDE_POSTGRES=yes
+        INCLUDE_SQLSERVER=no
+        POSTGRES_DB=printfarmer
+        POSTGRES_USER=postgres
+        POSTGRES_PASSWORD="$nasty_pw"
+        DB_PASSWORD="$nasty_pw"
+        CONNECTION_STRING=""
+        ENABLE_DISCOVERY=no
+        ALLOW_LOCAL_NETWORK=no
+        NETWORK_RANGES=""
+        HTTP_PORT=8080
+        HTTPS_PORT=0
+        SERVER_HOST=localhost
+        AUTO_ADMIN=true
+        AUTO_ADMIN_USERNAME=admin
+        AUTO_ADMIN_PASSWORD="$nasty_pw"
+        AUTO_ADMIN_EMAIL="admin@printfarmer.local"
+        OS=linux
+
+        save_deployment_config >/dev/null 2>&1
+
+        # Re-source the freshly-written file the same way a real redeploy does.
+        unset POSTGRES_PASSWORD DB_PASSWORD AUTO_ADMIN_PASSWORD
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+
+        if [[ "$POSTGRES_PASSWORD" == "$nasty_pw" && "$DB_PASSWORD" == "$nasty_pw" && "$AUTO_ADMIN_PASSWORD" == "$nasty_pw" ]]; then
+            echo "ROUNDTRIP_OK"
+        else
+            echo "ROUNDTRIP_MISMATCH"
+        fi
+    ) > "$TEST_TEMP_DIR/save-config-roundtrip-result.txt" 2>&1 || true
+    local failures_before=$TESTS_FAILED
+
+    assert_file_not_exists "$marker_file" "save_deployment_config must never let an embedded command substitution execute on re-source" || true
+    assert_contains "$(cat "$TEST_TEMP_DIR/save-config-roundtrip-result.txt")" "ROUNDTRIP_OK" "POSTGRES_PASSWORD, DB_PASSWORD, and AUTO_ADMIN_PASSWORD must all round-trip unchanged through save_deployment_config" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Scenario 8: ensure_database_passwords() repairs an empty POSTGRES_PASSWORD
+# by regenerating it and writing the new value back into .deploy-config (in
+# addition to .env). That write path escaped CONNECTION_STRING but left
+# POSTGRES_PASSWORD/DB_PASSWORD unescaped -- this locks in the fix.
+# ---------------------------------------------------------------------------
+test_ensure_database_passwords_escapes_config_file_writes() {
+    start_test "ensure_database_passwords escapes regenerated password written to .deploy-config"
+
+    cd "$TEST_TEMP_DIR"
+    local marker_file="$TEST_TEMP_DIR/ensure-passwords-injection-marker"
+    rm -f "$marker_file"
+    local nasty_pw
+    nasty_pw="pw\$(touch $marker_file);injected'quote"
+
+    (
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        source "$DEPLOY_SCRIPT" >/dev/null 2>&1 || true
+
+        CONFIG_FILE="$TEST_TEMP_DIR/.deploy-config-ensure"
+        ENV_FILE="$TEST_TEMP_DIR/.env-ensure"
+        DB_PROVIDER=postgres
+        POSTGRES_DB=printfarmer
+        POSTGRES_USER=postgres
+
+        # An empty POSTGRES_PASSWORD in .env forces the "repair" branch; the
+        # non-empty DB_PASSWORD becomes the regenerated value deterministically
+        # (avoiding a dependency on generate_random_password's output).
+        printf 'POSTGRES_PASSWORD=\n' > "$ENV_FILE"
+        printf 'DB_PROVIDER=postgres\n' > "$CONFIG_FILE"
+        DB_PASSWORD="$nasty_pw"
+        POSTGRES_PASSWORD=""
+
+        ensure_database_passwords >/dev/null 2>&1
+
+        unset POSTGRES_PASSWORD DB_PASSWORD
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+
+        if [[ "$POSTGRES_PASSWORD" == "$nasty_pw" && "$DB_PASSWORD" == "$nasty_pw" ]]; then
+            echo "ROUNDTRIP_OK"
+        else
+            echo "ROUNDTRIP_MISMATCH"
+        fi
+    ) > "$TEST_TEMP_DIR/ensure-passwords-roundtrip-result.txt" 2>&1 || true
+    local failures_before=$TESTS_FAILED
+
+    assert_file_not_exists "$marker_file" "ensure_database_passwords must never let an embedded command substitution execute on re-source of .deploy-config" || true
+    assert_contains "$(cat "$TEST_TEMP_DIR/ensure-passwords-roundtrip-result.txt")" "ROUNDTRIP_OK" "Regenerated POSTGRES_PASSWORD/DB_PASSWORD must round-trip unchanged through .deploy-config" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -434,6 +558,8 @@ run_all_tests() {
     test_redeploy_idempotent_no_credential_rotation
     test_sqlserver_provider_is_untouched_by_postgres_migration
     test_migration_escapes_shell_metacharacters_in_password
+    test_save_deployment_config_escapes_all_password_fields
+    test_ensure_database_passwords_escapes_config_file_writes
 
     teardown
 }

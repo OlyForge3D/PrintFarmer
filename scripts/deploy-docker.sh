@@ -692,10 +692,12 @@ ensure_database_passwords() {
             set_exported_env_var "CONNECTION_STRING" "$conn"
 
             if [ -f "$CONFIG_FILE" ]; then
-                update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-                update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$DB_PASSWORD"
-                local escaped_conn
+                local escaped_pg_pw escaped_db_pw escaped_conn
+                escaped_pg_pw=$(printf '%q' "$POSTGRES_PASSWORD")
+                escaped_db_pw=$(printf '%q' "$DB_PASSWORD")
                 escaped_conn=$(printf '%q' "$conn")
+                update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$escaped_pg_pw"
+                update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$escaped_db_pw"
                 update_kv_file "$CONFIG_FILE" "CONNECTION_STRING" "$escaped_conn"
             fi
 
@@ -3165,7 +3167,7 @@ EOF
 # This skips the setup wizard in the UI
 AUTO_ADMIN=${AUTO_ADMIN:-false}
 AUTO_ADMIN_USERNAME=${AUTO_ADMIN_USERNAME:-admin}
-AUTO_ADMIN_PASSWORD=${AUTO_ADMIN_PASSWORD:-}
+AUTO_ADMIN_PASSWORD=$(printf '%q' "${AUTO_ADMIN_PASSWORD:-}")
 AUTO_ADMIN_EMAIL=${AUTO_ADMIN_EMAIL:-admin@printfarmer.local}
 
 # Operating System (detected)
