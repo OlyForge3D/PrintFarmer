@@ -101,8 +101,8 @@ struct PFarmApp: App {
                     if !UITestBootstrap.isEnabled {
                         PushNotificationManager.shared.configure(
                             notificationService: services.notificationService,
-                            serverRegistry: serverRegistry,
-                            serverID: serverRegistry.activeServerID
+                            serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
+                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID
                         )
                         // Issue #1321: wire the services job-attention lock-screen
                         // actions (Pause/Resume/Cancel/Snooze) execute against.

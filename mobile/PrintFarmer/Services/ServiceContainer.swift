@@ -523,6 +523,14 @@ final class ServiceContainer: @unchecked Sendable {
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() async {
         let replayRevision = offlineWriteReplayAuthority.invalidate()
+        #if canImport(UIKit)
+        // Invalidate real-server notification actions before the first await.
+        PushNotificationManager.shared.configure(
+            notificationService: self.notificationService,
+            serverRegistry: nil,
+            serverID: nil
+        )
+        #endif
         // H1: record the demo desired target + advance the transition epoch
         // synchronously, so any suspended real switch is invalidated and the worker
         // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
