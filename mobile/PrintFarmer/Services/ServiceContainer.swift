@@ -857,7 +857,9 @@ final class ServiceContainer: @unchecked Sendable {
     private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
         offlineWriteReplayAuthority.invalidate()
         if activeServerID != nil {
-            await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false)
+            guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
+                return
+            }
         }
         // Capture immutable target + outgoing service/session BEFORE any await (H1).
         let outgoingSignalR = signalRService
@@ -963,6 +965,9 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard activeServerID != nil else { return }
+        guard await PushNotificationManager.shared.unregisterFromServer() else {
+            return
+        }
         let outgoingSignalR = signalRService
         let outgoingSession = farmSnapshotAuthority.currentSession()
         await outgoingSignalR.disconnect()

@@ -389,8 +389,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     }
 
     /// Unregister the device token from the server (e.g., on logout).
-    func unregisterFromServer(clearLocalToken: Bool = true) async {
-        guard let token = deviceToken, let service = notificationService else { return }
+    @discardableResult
+    func unregisterFromServer(clearLocalToken: Bool = true) async -> Bool {
+        guard let token = deviceToken, let service = notificationService else { return true }
+        var succeeded = true
 
         do {
             try await service.unregisterDeviceToken(token)
@@ -400,13 +402,15 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             // a no-op unregister is expected. Not an error.
             logger.info("Native push disabled on this server; skipping token unregistration (nothing to remove)")
         } catch {
+            succeeded = false
             logger.error("Failed to unregister device token: \(error.localizedDescription)")
         }
 
-        if clearLocalToken {
+        if succeeded && clearLocalToken {
             UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
             self.deviceToken = nil
         }
+        return succeeded
     }
 }
 
