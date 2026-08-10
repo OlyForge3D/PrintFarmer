@@ -260,6 +260,7 @@ export function AdminControlCenterPage() {
       icon={HomeIcon}
       actions={refreshButton}
       maxWidth="max-w-7xl"
+      titleWrap
     >
       <div className="flex flex-col gap-8">
         {/* ── Band 1: health ── */}

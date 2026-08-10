@@ -20,6 +20,15 @@ interface PageTemplateProps {
   icon?: React.ComponentType<{ className?: string }>;
   /** Optional control rendered inline to the right of the title */
   titleActions?: ReactNode;
+  /**
+   * Let the title wrap onto multiple lines instead of truncating with an
+   * ellipsis. Off by default so existing pages keep the single-line
+   * truncation they were built around; opt in for a title whose full text
+   * matters more than staying on one line (e.g. the Admin Control Center
+   * hub), so narrow viewports show the complete heading instead of clipping
+   * it (#1415).
+   */
+  titleWrap?: boolean;
   /** Optional action buttons or controls for the header */
   actions?: ReactNode;
   /**
@@ -100,6 +109,7 @@ export function PageTemplate({
   subtitle,
   icon: Icon,
   titleActions,
+  titleWrap = false,
   actions,
   parent,
   embedded = false,
@@ -158,9 +168,11 @@ export function PageTemplate({
             )}
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div className="min-w-0">
-                <div className="flex items-center gap-2 min-w-0">
+                <div className={`flex gap-2 min-w-0 ${titleWrap ? 'items-start' : 'items-center'}`}>
                   {Icon && <Icon className="h-6 w-6 shrink-0" aria-hidden="true" />}
-                  <h1 className="min-w-0 truncate text-2xl font-bold text-pf-text-primary">
+                  <h1
+                    className={`min-w-0 text-2xl font-bold text-pf-text-primary ${titleWrap ? 'whitespace-normal break-words' : 'truncate'}`}
+                  >
                     {title}
                   </h1>
                   {titleActions && <div className="shrink-0">{titleActions}</div>}
