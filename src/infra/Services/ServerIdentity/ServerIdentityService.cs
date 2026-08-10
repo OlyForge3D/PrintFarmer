@@ -115,10 +115,34 @@ public sealed class ServerIdentityService(IDbContextFactory<AppDbContext> dbCont
             AppSettingsEntity toRepair = await db.AppSettingsEntities
                 .FirstAsync(e => e.Key == SettingsKey, cancellationToken)
                 .ConfigureAwait(false);
+
+            if (TryParseServerId(toRepair.SettingsJson, out Guid repairedConcurrently))
+            {
+                // Another caller repaired this exact row between our first read and this
+                // tracked re-fetch — trust its value instead of blindly overwriting it.
+                return repairedConcurrently;
+            }
+
             toRepair.SettingsJson = json;
             toRepair.UpdatedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
-            return generated;
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+                return generated;
+            }
+            catch (DbUpdateException) when (attempt < UpsertMaxAttempts - 1)
+            {
+                // Another process/request repaired or replaced this row concurrently
+                // (RowVersion conflict) — detach and re-read on the next attempt rather
+                // than forcing our speculative value.
+                foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry in db.ChangeTracker.Entries())
+                {
+                    entry.State = EntityState.Detached;
+                }
+
+                continue;
+            }
         }
 
         throw new InvalidOperationException(

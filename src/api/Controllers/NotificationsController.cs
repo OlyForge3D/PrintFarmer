@@ -399,6 +399,12 @@ public class NotificationsController(INotificationService notificationService, V
             return BadRequest(new { error = "Native-push registration values are not in canonical form." });
         }
 
+        // #1407: resolve the serverId the response contract requires *before* persisting
+        // the device-token registration. If this throws, the registration is not written
+        // and the client sees a failed request rather than a "successful" registration it
+        // cannot bind locally — the two must not be allowed to disagree.
+        Guid serverId = await serverIdentity.GetOrCreateServerIdAsync(cancellationToken).ConfigureAwait(false);
+
         _ = await deviceTokens.UpsertAsync(
             userId,
             request.InstallationId,
@@ -408,11 +414,6 @@ public class NotificationsController(INotificationService notificationService, V
             request.AppBundleId,
             cancellationToken);
 
-        // #1407: the response now returns this server's canonical serverId so the
-        // mobile app can bind this APNs registration to its local RegisteredServer
-        // entry. Always the persisted, server-generated identity — never derived from
-        // the caller-supplied installationId/token.
-        Guid serverId = await serverIdentity.GetOrCreateServerIdAsync(cancellationToken).ConfigureAwait(false);
         return Ok(new DeviceTokenRegistrationResponse { ServerId = serverId });
     }
 

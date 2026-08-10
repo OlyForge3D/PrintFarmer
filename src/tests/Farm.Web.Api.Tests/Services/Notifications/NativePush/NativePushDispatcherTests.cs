@@ -234,6 +234,59 @@ public sealed class NativePushDispatcherTests
     }
 
     [Fact]
+    public async Task DispatchAsync_ServerIdentityResolutionThrowsOnce_IsolatesFailureToSingleDevice()
+    {
+        // Issue #1407 fail-closed requirement, per-device isolation: a resolution failure
+        // for one device's send attempt must not prevent a sibling device (same user) from
+        // still receiving its push once identity resolution succeeds.
+        var userId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        Guid expectedServerId = Guid.NewGuid();
+
+        await using AppDbContext db = BuildDbContext();
+        db.NotificationPreferences.Add(new NotificationPreferences
+        {
+            Id = Guid.NewGuid().ToString(),
+            UserId = userId,
+            EnablePushNotifications = true,
+            PushOnPrinterOffline = true,
+            AttentionPushCategoryPreferencesJson = null,
+        });
+        await db.SaveChangesAsync();
+
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        Mock<IDeviceTokenRepository> tokens = BuildDeviceTokens(userId, deviceCount: 2);
+        Mock<IAttentionService> attention = BuildAttention(userId, item.Id, item);
+
+        var sender = new Mock<INativePushSender>();
+        sender
+            .Setup(s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+
+        var serverIdentity = new Mock<IServerIdentityService>();
+        _ = serverIdentity
+            .SetupSequence(s => s.GetOrCreateServerIdAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("server identity unavailable"))
+            .ReturnsAsync(expectedServerId);
+
+        NativePushDispatcher sut = BuildWithScope(
+            sender,
+            gate.Object,
+            tokens.Object,
+            attention.Object,
+            db,
+            serverIdentity: serverIdentity.Object);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        // Exactly one of the two devices was sent to — the other was isolated by the
+        // resolution failure, not silently dropped as a whole-dispatch failure.
+        sender.Verify(
+            s => s.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task DispatchAsync_ResolvedAfterCreated_EmitsSilentBackgroundPush()
     {
         // Hicks post-merge #1: when a Resolved change arrives after the
@@ -7979,7 +8032,7 @@ public sealed class NativePushDispatcherTests
         return gate;
     }
 
-    private static Mock<IDeviceTokenRepository> BuildDeviceTokens(Guid userId)
+    private static Mock<IDeviceTokenRepository> BuildDeviceTokens(Guid userId, int deviceCount = 1)
     {
         var tokens = new Mock<IDeviceTokenRepository>();
         tokens
@@ -7987,19 +8040,16 @@ public sealed class NativePushDispatcherTests
             .ReturnsAsync(new List<Guid> { userId });
         tokens
             .Setup(r => r.GetActiveByUserAsync(userId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<DeviceToken>
+            .ReturnsAsync(Enumerable.Range(0, deviceCount).Select(i => new DeviceToken
             {
-                new()
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = userId,
-                    InstallationId = "test-install",
-                    Token = "AA".PadRight(64, 'A'),
-                    Platform = "ios",
-                    Environment = "development",
-                    IsActive = true,
-                },
-            });
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                InstallationId = $"test-install-{i}",
+                Token = $"{i:D2}".PadRight(64, 'A'),
+                Platform = "ios",
+                Environment = "development",
+                IsActive = true,
+            }).ToList());
         return tokens;
     }
 

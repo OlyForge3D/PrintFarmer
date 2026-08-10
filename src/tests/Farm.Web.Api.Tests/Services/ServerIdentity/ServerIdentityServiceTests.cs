@@ -96,6 +96,96 @@ public sealed class ServerIdentityServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetOrCreateServerIdAsync_TwoInstancesSameDatabase_RaceConvergesOnSingleValue()
+    {
+        // Unlike the same-instance race above (which never leaves the in-memory
+        // semaphore), this races two *separate* ServerIdentityService instances against
+        // the same underlying database, forcing one insert to lose the unique-index race
+        // and take the DbUpdateException -> detach -> re-read retry path.
+        ServerIdentityService instanceA = CreateService();
+        ServerIdentityService instanceB = CreateService();
+
+        Guid[] results = await Task.WhenAll(
+            instanceA.GetOrCreateServerIdAsync(),
+            instanceB.GetOrCreateServerIdAsync());
+
+        results.Distinct().Should().ContainSingle();
+        results[0].Should().NotBe(Guid.Empty);
+
+        using AppDbContext db = new(_options);
+        List<AppSettingsEntity> rows = await db.AppSettingsEntities
+            .Where(e => e.Key == ServerIdentityService.SettingsKey)
+            .ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].SettingsJson.Should().Contain(results[0].ToString());
+    }
+
+    [Fact]
+    public async Task GetOrCreateServerIdAsync_TwoInstancesRaceOnCorruptRow_ConvergeOnSingleRepairedValue()
+    {
+        // Both instances observe the same corrupt row and race to repair it. The fix for
+        // #1407's review feedback re-checks the row immediately before overwriting, so the
+        // loser must return the winner's repaired value instead of clobbering it with its
+        // own speculative Guid.
+        using (AppDbContext seed = new(_options))
+        {
+            seed.AppSettingsEntities.Add(new AppSettingsEntity
+            {
+                Key = ServerIdentityService.SettingsKey,
+                SettingsJson = "not valid json",
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await seed.SaveChangesAsync();
+        }
+
+        ServerIdentityService instanceA = CreateService();
+        ServerIdentityService instanceB = CreateService();
+
+        Guid[] results = await Task.WhenAll(
+            instanceA.GetOrCreateServerIdAsync(),
+            instanceB.GetOrCreateServerIdAsync());
+
+        results.Distinct().Should().ContainSingle();
+        results[0].Should().NotBe(Guid.Empty);
+
+        using AppDbContext db = new(_options);
+        List<AppSettingsEntity> rows = await db.AppSettingsEntities
+            .Where(e => e.Key == ServerIdentityService.SettingsKey)
+            .ToListAsync();
+        rows.Should().ContainSingle();
+        rows[0].SettingsJson.Should().Contain(results[0].ToString());
+    }
+
+    [Fact]
+    public async Task GetOrCreateServerIdAsync_EmptyGuidPersistedRow_RepairsInPlaceWithNewIdentity()
+    {
+        // A well-formed payload whose ServerId is Guid.Empty must be treated the same as
+        // corrupt/unparseable JSON: never trusted as a stable identity, always repaired.
+        using (AppDbContext seed = new(_options))
+        {
+            seed.AppSettingsEntities.Add(new AppSettingsEntity
+            {
+                Key = ServerIdentityService.SettingsKey,
+                SettingsJson = """{"ServerId":"00000000-0000-0000-0000-000000000000"}""",
+                UpdatedAt = DateTime.UtcNow,
+            });
+            _ = await seed.SaveChangesAsync();
+        }
+
+        ServerIdentityService sut = CreateService();
+
+        Guid repaired = await sut.GetOrCreateServerIdAsync();
+
+        repaired.Should().NotBe(Guid.Empty);
+
+        using AppDbContext db = new(_options);
+        AppSettingsEntity? row = await db.AppSettingsEntities
+            .FirstOrDefaultAsync(e => e.Key == ServerIdentityService.SettingsKey);
+        row.Should().NotBeNull();
+        row!.SettingsJson.Should().Contain(repaired.ToString());
+    }
+
+    [Fact]
     public async Task GetOrCreateServerIdAsync_TwoIsolatedDatabases_ProduceDistinctIdentities()
     {
         ServerIdentityService serviceA = CreateService();
