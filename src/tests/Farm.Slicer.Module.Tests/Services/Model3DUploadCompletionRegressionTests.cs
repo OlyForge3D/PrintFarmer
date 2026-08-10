@@ -29,11 +29,24 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// User-visible failure mode: Success toast appears too early while Close button remains blocked during thumbnail generation.
 /// Backend contract requirement: UploadModelAsync must not return until all post-processing is complete.
 /// </summary>
-public class Model3DUploadCompletionRegressionTests
+public class Model3DUploadCompletionRegressionTests : IDisposable
 {
-    private static IFormFile CreateFormFile(string name, string content, string fileName)
+    private readonly List<MemoryStream> _streamsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private IFormFile CreateFormFile(string name, string content, string fileName)
     {
         MemoryStream ms = new(Encoding.UTF8.GetBytes(content));
+        _streamsToDispose.Add(ms);
         return new FormFile(ms, 0, ms.Length, name, fileName);
     }
 

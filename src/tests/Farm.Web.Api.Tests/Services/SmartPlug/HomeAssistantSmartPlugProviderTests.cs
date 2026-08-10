@@ -25,11 +25,20 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
     // method (it's consumed later via the mocked IHttpClientFactory).
     private readonly List<HttpClient> _httpClientsToDispose = new();
 
+    // Mocked SendAsync setups return HttpResponseMessage instances that Moq hands back to the
+    // provider under test; track and dispose them here rather than leaking them.
+    private readonly List<HttpResponseMessage> _responsesToDispose = new();
+
     public void Dispose()
     {
         foreach (HttpClient client in _httpClientsToDispose)
         {
             client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
         }
 
         GC.SuppressFinalize(this);
@@ -152,12 +161,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -186,12 +197,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
         (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
 
         string json = """{"entity_id":"sensor.plug_power","state":"unavailable","attributes":{}}""";
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -228,12 +241,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
     public async Task TestConnectionAsync_WhenApiResponds_ReturnsTrue()
     {
         (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"message":"API running."}""", Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"message":"API running."}""", Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         bool result = await provider.TestConnectionAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -250,14 +265,16 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             CreateProvider(settingsBaseUrl: "http://ha.custom.local:8123");
 
         string json = """{"entity_id":"sensor.plug_power","state":"10.0","attributes":{}}""";
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync",
                 ItExpr.Is<HttpRequestMessage>(r => r.RequestUri!.Host == "ha.custom.local"),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync("sensor.plug_power", CancellationToken.None);
 
@@ -282,12 +299,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
         (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProviderWithPersistedToken(ValidToken);
 
         string json = """{"entity_id":"sensor.plug_power","state":"55.0","attributes":{}}""";
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://ha.local:8123|sensor.plug_power", CancellationToken.None);
@@ -351,9 +370,11 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
     public async Task GetCurrentReadingAsync_WhenHaReturns401_ReturnsNull()
     {
         (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        HttpResponseMessage response = new(HttpStatusCode.Unauthorized);
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -365,9 +386,11 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
     public async Task GetCurrentReadingAsync_WhenHaReturns404_ReturnsNull()
     {
         (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
+        HttpResponseMessage response = new(HttpStatusCode.NotFound);
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound));
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -407,12 +430,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -437,12 +462,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -469,12 +496,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);
@@ -499,12 +528,14 @@ public class HomeAssistantSmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(stateJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync(
             "http://homeassistant.local:8123|sensor.plug_power", CancellationToken.None);

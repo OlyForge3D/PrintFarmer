@@ -142,6 +142,7 @@ public class TelegramNotificationSenderTests
     private sealed class QueueHttpMessageHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
+        private readonly List<HttpResponseMessage> _dispatched = [];
 
         public List<CapturedRequest> Requests { get; } = [];
 
@@ -157,9 +158,28 @@ public class TelegramNotificationSenderTests
                 request.Content?.Headers.ContentType?.ToString() ?? string.Empty,
                 body));
 
-            return _responses.Count > 0
+            HttpResponseMessage response = _responses.Count > 0
                 ? _responses.Dequeue()
                 : new HttpResponseMessage(HttpStatusCode.OK);
+            _dispatched.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            // Only dispose responses already handed out via SendAsync. Anything still queued
+            // may be consumed by a later attempt against this same handler instance (the
+            // production sender wraps a new HttpClient per retry, each disposing the shared
+            // handler when its "using" scope ends), so disposing it early would break retries.
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _dispatched)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

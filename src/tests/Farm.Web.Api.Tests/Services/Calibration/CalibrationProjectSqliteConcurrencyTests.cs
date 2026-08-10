@@ -437,6 +437,8 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
         IdempotencyReadBarrierInterceptor barrier = new();
         await using AppDbContext firstContext = store.CreateContext(barrier);
         await using AppDbContext secondContext = store.CreateContext(barrier);
+        using var firstStream = new MemoryStream([1]);
+        using var secondStream = new MemoryStream([1]);
         Task<CalibrationApiResult<CalibrationPhotoDto>> first =
             CreateService(firstContext, store.PrinterId).UploadPhotoAsync(
                 attemptId,
@@ -446,7 +448,7 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
                 null,
                 "caption",
                 0,
-                new MemoryStream([1]),
+                firstStream,
                 actor,
                 CancellationToken.None);
         Task<CalibrationApiResult<CalibrationPhotoDto>> second =
@@ -458,7 +460,7 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
                 null,
                 "caption",
                 0,
-                new MemoryStream([1]),
+                secondStream,
                 actor,
                 CancellationToken.None);
 

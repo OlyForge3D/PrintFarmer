@@ -299,7 +299,7 @@ public class ThumbnailGenerationServiceTests
         // Arrange
         string modelPath = CreateDummyModelFile();
         string outputPath = Path.Join(_testThumbnailsDir, "output.png");
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
         cts.Cancel();
 
         try

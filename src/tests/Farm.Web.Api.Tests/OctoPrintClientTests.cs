@@ -105,7 +105,7 @@ public class OctoPrintClientTests
                 }
             });
         });
-        HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://octo/api/plugins");
+        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, "http://octo/api/plugins");
         request.Headers.Add("X-Api-Key", "key");
         // Use reflection to access internal HttpClient property
         PropertyInfo? httpClientProp = typeof(OctoPrintClient).GetProperty("HttpClient", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -113,7 +113,7 @@ public class OctoPrintClientTests
         object? httpClientObj = httpClientProp.GetValue(client);
         Assert.NotNull(httpClientObj);
         HttpClient httpClient = (HttpClient)httpClientObj!;
-        HttpResponseMessage response = await httpClient.SendAsync(request);
+        using HttpResponseMessage response = await httpClient.SendAsync(request);
         string pluginsJson = await response.Content.ReadAsStringAsync();
         JsonDocument doc = JsonDocument.Parse(pluginsJson);
         List<string?> keys = doc.RootElement.GetProperty("plugins").EnumerateArray().Select(p => p.GetProperty("key").GetString()).ToList();
@@ -477,9 +477,28 @@ public class OctoPrintClientTests
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
         : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(
+        private readonly List<HttpResponseMessage> _responses = [];
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            send(request, cancellationToken);
+            CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = await send(request, cancellationToken);
+            _responses.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
     }
 }

@@ -112,6 +112,7 @@ public class MailjetEmailServiceTests
     private sealed class QueueHttpMessageHandler(params HttpResponseMessage[] responses) : HttpMessageHandler
     {
         private readonly Queue<HttpResponseMessage> _responses = new(responses);
+        private readonly List<HttpResponseMessage> _dispatched = [];
 
         public List<CapturedRequest> Requests { get; } = [];
 
@@ -124,9 +125,24 @@ public class MailjetEmailServiceTests
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Requests.Add(new CapturedRequest(body));
 
-            return _responses.Count > 0
+            HttpResponseMessage response = _responses.Count > 0
                 ? _responses.Dequeue()
                 : new HttpResponseMessage(HttpStatusCode.OK);
+            _dispatched.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _dispatched)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

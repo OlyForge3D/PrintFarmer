@@ -60,7 +60,7 @@ Console.WriteLine($"Using SVG: {svgPath}");
 Console.WriteLine($"Output dir: {outDir}");
 
 using FileStream stream = File.OpenRead(svgPath);
-SKSvg svg = new SKSvg();
+using SKSvg svg = new SKSvg();
 svg.Load(stream);
 
 SKPicture? picture = svg.Picture;

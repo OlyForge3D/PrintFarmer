@@ -137,14 +137,14 @@ public sealed class FlashForgeClientStartPrintBusyTests
         // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
         for (int attempt = 0; attempt < 10; attempt++)
         {
-            var listener = new TcpListener(IPAddress.Loopback, 0);
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();
 
             try
             {
-                var verify = new TcpListener(IPAddress.Loopback, port);
+                using var verify = new TcpListener(IPAddress.Loopback, port);
                 verify.Start();
                 verify.Stop();
                 return port;
@@ -168,6 +168,8 @@ public sealed class FlashForgeClientStartPrintBusyTests
             try
             { listener.Stop(); }
             catch { /* already stopped */ }
+            finally
+            { listener.Dispose(); }
             await serverTask.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
     }

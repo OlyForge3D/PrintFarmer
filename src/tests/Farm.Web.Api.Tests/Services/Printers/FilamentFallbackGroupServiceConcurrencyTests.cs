@@ -26,6 +26,7 @@ namespace Farm.Web.Api.Tests.Services.Printers;
 public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetime
 {
     private readonly string _dataSource = $"Data Source=fbgroup_{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+    private readonly List<SqliteConnection> _connectionsToDispose = [];
     private SqliteConnection _keepAlive = null!;
 
     public async Task InitializeAsync()
@@ -42,11 +43,17 @@ public sealed class FilamentFallbackGroupServiceConcurrencyTests : IAsyncLifetim
     public async Task DisposeAsync()
     {
         await _keepAlive.DisposeAsync();
+
+        foreach (SqliteConnection connection in _connectionsToDispose)
+        {
+            await connection.DisposeAsync();
+        }
     }
 
     private AppDbContext CreateContext(IInterceptor? interceptor = null)
     {
         SqliteConnection conn = new(_dataSource);
+        _connectionsToDispose.Add(conn);
         DbContextOptionsBuilder<AppDbContext> builder = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(conn);
         if (interceptor is not null)

@@ -28,6 +28,8 @@ public class CameraSnapshotServiceTests : IDisposable
     private readonly Mock<IHttpClientFactory> _httpClientFactory;
     private readonly Mock<IStoragePathService> _storagePathService;
     private readonly string _snapshotRoot;
+    private readonly List<HttpClient> _httpClientsToDispose = new();
+    private readonly List<HttpResponseMessage> _responsesToDispose = new();
 
     public CameraSnapshotServiceTests()
     {
@@ -44,14 +46,29 @@ public class CameraSnapshotServiceTests : IDisposable
         _storagePathService.Setup(s => s.GetSnapshotStorageDirectory()).Returns(_snapshotRoot);
     }
 
-    public void Dispose() => _db.Dispose();
+    public void Dispose()
+    {
+        _db.Dispose();
+
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
+        }
+    }
 
     private CameraSnapshotService CreateService(HttpMessageHandler? handler = null)
     {
         if (handler is not null)
         {
+            HttpClient httpClient = new(handler);
+            _httpClientsToDispose.Add(httpClient);
             _httpClientFactory.Setup(f => f.CreateClient("CameraSnapshot"))
-                              .Returns(new HttpClient(handler));
+                              .Returns(httpClient);
         }
 
         return new CameraSnapshotService(
@@ -192,19 +209,23 @@ public class CameraSnapshotServiceTests : IDisposable
                    .ReturnsAsync([goodCamera, badCamera]);
 
         var handlerMock = new Mock<HttpMessageHandler>();
+        HttpResponseMessage jpegResponse = new(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes("JFIF"))
+        };
+        _responsesToDispose.Add(jpegResponse);
         handlerMock.Protected()
             .SetupSequence<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("JFIF"))
-            })
+            .ReturnsAsync(jpegResponse)
             .ThrowsAsync(new HttpRequestException("Connection refused"));
 
+        HttpClient httpClient = new(handlerMock.Object);
+        _httpClientsToDispose.Add(httpClient);
         _httpClientFactory.Setup(f => f.CreateClient("CameraSnapshot"))
-                          .Returns(new HttpClient(handlerMock.Object));
+                          .Returns(httpClient);
 
         var service = CreateService();
 
@@ -261,8 +282,10 @@ public class CameraSnapshotServiceTests : IDisposable
                 ItExpr.IsAny<CancellationToken>())
             .ThrowsAsync(new OperationCanceledException());
 
+        HttpClient httpClient = new(handlerMock.Object);
+        _httpClientsToDispose.Add(httpClient);
         _httpClientFactory.Setup(f => f.CreateClient("CameraSnapshot"))
-                          .Returns(new HttpClient(handlerMock.Object));
+                          .Returns(httpClient);
 
         var service = CreateService();
         using var cts = new CancellationTokenSource();
@@ -318,18 +341,20 @@ public class CameraSnapshotServiceTests : IDisposable
     // --- Future tests (require Lambert's SSRF fix) ---
     // The SSRF fix is already present in CaptureFromCameraAsync — the above two tests cover it.
 
-    private static HttpMessageHandler CreateJpegResponseHandler()
+    private HttpMessageHandler CreateJpegResponseHandler()
     {
         var handlerMock = new Mock<HttpMessageHandler>();
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(Encoding.UTF8.GetBytes("JFIF_fake_jpeg_content"))
+        };
+        _responsesToDispose.Add(response);
         handlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new ByteArrayContent(Encoding.UTF8.GetBytes("JFIF_fake_jpeg_content"))
-            });
+            .ReturnsAsync(response);
         return handlerMock.Object;
     }
 }

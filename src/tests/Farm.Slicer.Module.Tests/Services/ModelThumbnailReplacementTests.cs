@@ -19,8 +19,19 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Services;
 
-public class ModelThumbnailReplacementTests
+public class ModelThumbnailReplacementTests : IDisposable
 {
+    private readonly List<MemoryStream> _streamsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
     [Fact]
     public async Task ReplaceThumbnailAsync_WithMatchingOwner_AtomicallyReplacesThumbnailAndCleansArtifacts()
     {
@@ -107,9 +118,15 @@ public class ModelThumbnailReplacementTests
     public async Task ReplaceThumbnailAsync_WithInvalidThumbnail_PreservesThumbnailAndCleansArtifacts(bool oversized)
     {
         ReplacementFixture fixture = CreateFixture();
+        MemoryStream? oversizedStream = oversized ? new MemoryStream([0x89]) : null;
+        if (oversizedStream is not null)
+        {
+            _streamsToDispose.Add(oversizedStream);
+        }
+
         IFormFile thumbnail = oversized
             ? new FormFile(
-                new MemoryStream([0x89]),
+                oversizedStream!,
                 0,
                 (10 * 1024 * 1024) + 1,
                 "thumbnailFile",
@@ -293,9 +310,10 @@ public class ModelThumbnailReplacementTests
             originalThumbnailBytes);
     }
 
-    private static IFormFile CreateFormFile(byte[] bytes)
+    private IFormFile CreateFormFile(byte[] bytes)
     {
         MemoryStream stream = new(bytes);
+        _streamsToDispose.Add(stream);
         return new FormFile(stream, 0, stream.Length, "thumbnailFile", "thumbnail.png");
     }
 

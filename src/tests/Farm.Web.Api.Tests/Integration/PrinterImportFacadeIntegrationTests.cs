@@ -25,16 +25,23 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
 {
     private readonly CustomWebApplicationFactory _factory = factory;
     private readonly AppDbContext _dbContext = factory.Services.CreateAsyncScope().ServiceProvider.GetRequiredService<AppDbContext>();
+    private readonly List<MemoryStream> _streamsToDispose = [];
 
     public void Dispose()
     {
         _dbContext?.Dispose();
+
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
     }
 
     private IFormFile CreateCsvFormFile(string filename, string csvContent)
     {
         byte[] bytes = Encoding.UTF8.GetBytes(csvContent);
         var stream = new MemoryStream(bytes);
+        _streamsToDispose.Add(stream);
         return new FormFile(stream, 0, bytes.Length, "file", filename)
         {
             Headers = new HeaderDictionary(),
@@ -46,6 +53,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
     {
         byte[] bytes = Encoding.UTF8.GetBytes(jsonContent);
         var stream = new MemoryStream(bytes);
+        _streamsToDispose.Add(stream);
         return new FormFile(stream, 0, bytes.Length, "file", filename)
         {
             Headers = new HeaderDictionary(),
@@ -123,6 +131,7 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
         string content = "some content";
         byte[] bytes = Encoding.UTF8.GetBytes(content);
         var stream = new MemoryStream(bytes);
+        _streamsToDispose.Add(stream);
         var file = new FormFile(stream, 0, bytes.Length, "file", "printers.txt")
         {
             Headers = new HeaderDictionary(),

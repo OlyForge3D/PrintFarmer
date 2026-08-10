@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -22,11 +23,24 @@ using IStoredFileOperationsService = Farm.Infrastructure.Services.FileManagement
 
 namespace Farm.Slicer.Module.Tests.Services;
 
-public class ModelServiceAdditionalTests
+public class ModelServiceAdditionalTests : IDisposable
 {
-    private static IFormFile CreateFormFile(string name, string content, string fileName)
+    private readonly List<MemoryStream> _streamsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private IFormFile CreateFormFile(string name, string content, string fileName)
     {
         MemoryStream ms = new MemoryStream(Encoding.UTF8.GetBytes(content));
+        _streamsToDispose.Add(ms);
         return new FormFile(ms, 0, ms.Length, name, fileName);
     }
 
@@ -173,7 +187,9 @@ public class ModelServiceAdditionalTests
         Mock<IFolderManagementService> mockFolderService = CreateFolderServiceMock();
         Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
 
-        IFormFile empty = new FormFile(new MemoryStream(), 0, 0, "file", "empty.stl");
+        MemoryStream emptyStream = new();
+        _streamsToDispose.Add(emptyStream);
+        IFormFile empty = new FormFile(emptyStream, 0, 0, "file", "empty.stl");
 
         _ = Assert.Throws<ArgumentException>(() => service.ValidateModel(empty));
     }

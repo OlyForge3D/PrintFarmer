@@ -77,7 +77,7 @@ public abstract class BasePreviewRenderer
 
         List<Triangle> tris = BuildTriangleList(normalized, view, proj);
 
-        var img = new Image<Rgba32>(options.Width, options.Height);
+        using var img = new Image<Rgba32>(options.Width, options.Height);
 
         DrawBackground(img, options);
 
@@ -276,7 +276,7 @@ public abstract class BasePreviewRenderer
             return Load3MFMesh(inputPath);
         }
 
-        var ctx = new AssimpContext();
+        using var ctx = new AssimpContext();
 
         const PostProcessSteps postProcess =
             PostProcessSteps.Triangulate |
@@ -377,7 +377,7 @@ public abstract class BasePreviewRenderer
             // Fallback to Assimp if Lib3MF fails
             try
             {
-                var ctx = new AssimpContext();
+                using var ctx = new AssimpContext();
                 const PostProcessSteps postProcess = PostProcessSteps.Triangulate | PostProcessSteps.GenerateNormals | PostProcessSteps.JoinIdenticalVertices | PostProcessSteps.FlipUVs;
                 Scene scene = ctx.ImportFile(inputPath, postProcess);
 

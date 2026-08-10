@@ -388,7 +388,7 @@ public class MultiPrinterStatusCoordinatorTests
         var loggerMock = new Mock<ILogger<MultiPrinterStatusCoordinator>>();
         var coordinator = new MultiPrinterStatusCoordinator(loggerMock.Object);
         List<Printer> printers = CreateTestPrinters(1);
-        var cts = new CancellationTokenSource();
+        using var cts = new CancellationTokenSource();
 
         Func<Printer, CancellationToken, Task<string>> operation = async (p, ct) =>
         {

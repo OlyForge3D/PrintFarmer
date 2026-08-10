@@ -90,7 +90,7 @@ public class MonitoringControllerTests : IAsyncLifetime
         var cookieValue = setCookie.Split(';')[0]; // "pf_monitoring_session=<token>"
 
         // Use cookie on verify endpoint
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/monitoring/verify");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/monitoring/verify");
         request.Headers.Add("Cookie", cookieValue);
         var response = await _anonClient!.SendAsync(request);
 
@@ -102,7 +102,7 @@ public class MonitoringControllerTests : IAsyncLifetime
     [Fact]
     public async Task VerifySession_WithInvalidCookie_Returns401()
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, "/api/monitoring/verify");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/api/monitoring/verify");
         request.Headers.Add("Cookie", "pf_monitoring_session=invalid-token");
         var response = await _anonClient!.SendAsync(request);
 
