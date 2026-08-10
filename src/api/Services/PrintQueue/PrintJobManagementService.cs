@@ -947,7 +947,7 @@ public class PrintJobManagementService(
             }
 
             _ = await _repository.UpdateAsync(job, cancellationToken);
-            _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", LogSanitizer.Sanitize(jobId), newPriority, userId);
+            _logger.LogInformation("Print job {JobId} priority updated to {Priority} by user {UserId}", LogSanitizer.Sanitize(jobId), newPriority, LogSanitizer.Sanitize(userId));
 
             return MapToQueuedPrintJobDto(job);
         }
@@ -1018,7 +1018,7 @@ public class PrintJobManagementService(
             _logger.LogInformation(
                 "Durable pause command queued for job {JobId} by user {UserId}",
                 LogSanitizer.Sanitize(jobId),
-                userId);
+                LogSanitizer.Sanitize(userId));
 
             return MapToQueuedPrintJobDto(job);
         }
@@ -1089,7 +1089,7 @@ public class PrintJobManagementService(
             _logger.LogInformation(
                 "Durable resume command queued for job {JobId} by user {UserId}",
                 LogSanitizer.Sanitize(jobId),
-                userId);
+                LogSanitizer.Sanitize(userId));
 
             return MapToQueuedPrintJobDto(job);
         }
@@ -2267,7 +2267,7 @@ public class PrintJobManagementService(
                     cancellationToken).ConfigureAwait(false);
             }
 
-            _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", LogSanitizer.Sanitize(jobId), userId);
+            _logger.LogInformation("Print job {JobId} cancelled by user {UserId}", LogSanitizer.Sanitize(jobId), LogSanitizer.Sanitize(userId));
 
             // Send notification
             await SendJobFailureNotificationAsync(job, "Job cancelled by user", cancellationToken);

@@ -321,8 +321,8 @@ public class PrintersController(
         {
             _logger.LogWarning(
                 "Connection test denied by egress guard for host {Host}: {Reason}",
-                serverUri.Host,
-                egressCheck.DenyReason);
+                LogSanitizer.Sanitize(serverUri.Host),
+                LogSanitizer.Sanitize(egressCheck.DenyReason));
             return BadRequest(new TestConnectionResponse
             {
                 Success = false,
@@ -395,8 +395,8 @@ public class PrintersController(
             {
                 _logger.LogWarning(
                     "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
-                    uriToTest.Host,
-                    rewriteCheck.DenyReason);
+                    LogSanitizer.Sanitize(uriToTest.Host),
+                    LogSanitizer.Sanitize(rewriteCheck.DenyReason));
                 return new TestConnectionResponse
                 {
                     Success = false,
@@ -443,8 +443,8 @@ public class PrintersController(
             {
                 _logger.LogWarning(
                     "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
-                    uriToTest.Host,
-                    rewriteCheck.DenyReason);
+                    LogSanitizer.Sanitize(uriToTest.Host),
+                    LogSanitizer.Sanitize(rewriteCheck.DenyReason));
                 return new TestConnectionResponse
                 {
                     Success = false,
@@ -495,8 +495,8 @@ public class PrintersController(
             {
                 _logger.LogWarning(
                     "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
-                    rewrittenUri.Host,
-                    rewriteCheck.DenyReason);
+                    LogSanitizer.Sanitize(rewrittenUri.Host),
+                    LogSanitizer.Sanitize(rewriteCheck.DenyReason));
                 return new TestConnectionResponse
                 {
                     Success = false,
@@ -1313,7 +1313,7 @@ public class PrintersController(
             _logger.LogWarning(
                 "Failed to import profiles for {ModelName}: {Message}",
                 LogSanitizer.Sanitize(modelName),
-                ex.Message);
+                LogSanitizer.Sanitize(ex.Message));
         }
 
         return created;
@@ -3688,7 +3688,7 @@ public class PrintersController(
         {
             _logger.LogWarning(
                 "Toolhead spool override: user {User} loaded spool {SpoolId} on printer {PrinterId} toolhead T{ToolheadIndex} despite mismatch. Reason: {Reason}",
-                overrideAudit.UserName ?? overrideAudit.UserId ?? "(unknown)",
+                LogSanitizer.Sanitize(overrideAudit.UserName ?? overrideAudit.UserId ?? "(unknown)"),
                 spoolId,
                 id,
                 toolheadIndex,
@@ -4626,7 +4626,7 @@ public class PrintersController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
+            _logger.LogError("Network error retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status502BadGateway, "Unable to connect to printer");
         }
         catch (SocketException ex)
@@ -4641,7 +4641,7 @@ public class PrintersController(
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning("Timeout retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
+            _logger.LogWarning("Timeout retrieving history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
         }
     }
@@ -4668,7 +4668,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get history totals for printer {Id}: {Message}", id, ex.Message);
+            _logger.LogError("Failed to get history totals for printer {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return new HistoryTotals { JobTotals = new JobTotals() };
         }
     }
@@ -4702,7 +4702,7 @@ public class PrintersController(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to delete history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, ex.Message);
+            _logger.LogError("Failed to delete history job {JobId} for printer {Id}: {Message}", LogSanitizer.Sanitize(jobId), id, LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to delete history job");
         }
     }

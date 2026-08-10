@@ -175,7 +175,7 @@ public class UnifiedSettingsController(
                                 }
                                 catch (ValidationException vex)
                                 {
-                                    _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(key), vex.Message);
+                                    _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(key), LogSanitizer.Sanitize(vex.Message));
                                     return BuildValidationErrorResponse(vex, key);
                                 }
                             }
@@ -445,7 +445,7 @@ public class UnifiedSettingsController(
         }
         catch (ValidationException vex)
         {
-            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(keyName), vex.Message);
+            _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(keyName), LogSanitizer.Sanitize(vex.Message));
             return BuildValidationErrorResponse(vex, keyName);
         }
         catch (Exception ex)
