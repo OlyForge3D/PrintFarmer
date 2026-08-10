@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.StorageManagement;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
@@ -16,7 +17,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// entirely — so without its own <see cref="PrinterGroupAccess"/> check, it would remain a
 /// bypass of the exact protection <c>CamerasController</c>'s stream/snapshot proxy enforces.
 /// </summary>
-public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
+public sealed class CamerasSnapshotAuthorizationTests : IAsyncLifetime
 {
     private readonly CameraSnapshotFactory _factory = new();
 
@@ -102,6 +103,121 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetByPrintJob_MatchingRoleCaller_IsNotDeniedByGroupCheck()
+    {
+        (Guid printerId, Guid allowedRoleId) = await SeedRestrictedPrinterWithRoleAsync(PrinterGroupAccessLevel.View);
+        Guid printJobId = Guid.NewGuid();
+        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
+        {
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Set<PrintJob>().Add(new PrintJob { Id = printJobId, Name = "Matching-role job", Status = PrintJobStatus.Queued });
+            await db.SaveChangesAsync();
+        }
+
+        Guid snapshotId = await SeedSnapshotForPrinterAsync(printerId, printJobId);
+        using HttpClient client = CreateClientWithRole(allowedRoleId);
+
+        HttpResponseMessage response = await client.GetAsync($"/api/snapshots/by-job/{printJobId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(snapshotId.ToString());
+    }
+
+    [Fact]
+    public async Task GetByPrintJob_FarmAdmin_BypassesGroupCheck()
+    {
+        (_, Guid printJobId, Guid snapshotId) = await SeedRestrictedSnapshotAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/snapshots/by-job/{printJobId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(snapshotId.ToString());
+    }
+
+    [Fact]
+    public async Task GetImage_MatchingRoleCaller_IsNotDeniedByGroupCheck()
+    {
+        (Guid printerId, Guid allowedRoleId) = await SeedRestrictedPrinterWithRoleAsync(PrinterGroupAccessLevel.View);
+        Guid snapshotId = await SeedSnapshotForPrinterAsync(printerId, printJobId: null);
+        using HttpClient client = CreateClientWithRole(allowedRoleId);
+
+        HttpResponseMessage response = await client.GetAsync($"/api/snapshots/{snapshotId}/image");
+
+        // The authorization check must not deny; a 404 here would be from the (mocked-out) file
+        // not existing on disk, not from the group check, so accept anything except NotFound.
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task GetImage_FarmAdmin_BypassesGroupCheck()
+    {
+        (_, _, Guid snapshotId) = await SeedRestrictedSnapshotAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/snapshots/{snapshotId}/image");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Delete_MatchingManageRoleCaller_IsNotDeniedByGroupCheck()
+    {
+        // DeleteAsync requires PrinterGroupAccessLevel.Manage, not View, so this fixture must
+        // grant Manage explicitly -- a View-only role must still be denied (see next test).
+        (Guid printerId, Guid manageRoleId) = await SeedRestrictedPrinterWithRoleAsync(PrinterGroupAccessLevel.Manage);
+        Guid snapshotId = await SeedSnapshotForPrinterAsync(printerId, printJobId: null);
+        using HttpClient client = CreateClientWithRole(manageRoleId);
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/snapshots/{snapshotId}");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        bool stillExists = await db.CameraSnapshots.AnyAsync(s => s.Id == snapshotId);
+        stillExists.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Delete_ViewOnlyRoleCaller_IsDeniedByGroupCheck()
+    {
+        // A caller whose PrinterGroupAccess only grants View must not be able to delete: Delete
+        // requires Manage. This proves the access-level distinction (not just group membership)
+        // is enforced.
+        (Guid printerId, Guid viewOnlyRoleId) = await SeedRestrictedPrinterWithRoleAsync(PrinterGroupAccessLevel.View);
+        Guid snapshotId = await SeedSnapshotForPrinterAsync(printerId, printJobId: null);
+        using HttpClient client = CreateClientWithRole(viewOnlyRoleId);
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/snapshots/{snapshotId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        bool stillExists = await db.CameraSnapshots.AnyAsync(s => s.Id == snapshotId);
+        stillExists.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Delete_FarmAdmin_BypassesGroupCheck()
+    {
+        (_, _, Guid snapshotId) = await SeedRestrictedSnapshotAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.DeleteAsync($"/api/snapshots/{snapshotId}");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        bool stillExists = await db.CameraSnapshots.AnyAsync(s => s.Id == snapshotId);
+        stillExists.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task ZeroAclGroup_And_UngroupedPrinter_SnapshotsRemainVisible()
     {
         (Guid zeroAclPrinterId, Guid ungroupedPrinterId) = await SeedOpenByDefaultPrintersAsync();
@@ -137,8 +253,14 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        IStoragePathService storagePath = scope.ServiceProvider.GetRequiredService<IStoragePathService>();
         Guid cameraId = Guid.NewGuid();
         db.Cameras.Add(new Camera { Id = cameraId, Name = "snapshot camera", PrinterId = printerId, IsEnabled = true });
+
+        string relativePath = $"{printerId}/{Guid.NewGuid():N}/snapshot.jpg";
+        string fullPath = Path.Join(storagePath.GetSnapshotStorageDirectory(), relativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        await File.WriteAllBytesAsync(fullPath, [0xFF, 0xD8, 0xFF, 0xE0]); // JPEG magic bytes so GetImageAsync's File.Exists check succeeds
 
         var snapshot = new CameraSnapshot
         {
@@ -147,7 +269,7 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
             CameraId = cameraId,
             PrintJobId = printJobId,
             EventType = "PrintStarted",
-            FilePath = $"{printerId}/{Guid.NewGuid():N}/snapshot.jpg",
+            FilePath = relativePath,
             CapturedAt = DateTime.UtcNow,
             FileSizeBytes = 1024,
         };
@@ -156,7 +278,8 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
         return snapshot.Id;
     }
 
-    private async Task<(Guid PrinterId, Guid AllowedRoleId)> SeedRestrictedPrinterWithRoleAsync()
+    private async Task<(Guid PrinterId, Guid AllowedRoleId)> SeedRestrictedPrinterWithRoleAsync(
+        PrinterGroupAccessLevel accessLevel = PrinterGroupAccessLevel.View)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -195,7 +318,7 @@ public sealed class CameraSnapshotAuthorizationTests : IAsyncLifetime
                 Id = Guid.NewGuid(),
                 PrinterGroupId = group.Id,
                 RoleId = allowedRole.Id,
-                AccessLevel = PrinterGroupAccessLevel.View,
+                AccessLevel = accessLevel,
             },
             new PrinterDispatchState { PrinterId = printer.Id });
         await db.SaveChangesAsync();
