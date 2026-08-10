@@ -182,7 +182,7 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
         IQueryable<QueueJobMetricSourceRow> source =
             from job in db.SliceJobs.AsNoTracking()
             join worker in db.Workers.AsNoTracking()
-                on job.WorkerId equals (Guid?)worker.Id into workerGroup
+                on job.WorkerId equals worker.Id into workerGroup
             from worker in workerGroup.DefaultIfEmpty()
             where
                 (job.Status == SliceJobStatus.Completed &&

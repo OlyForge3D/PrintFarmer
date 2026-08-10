@@ -92,9 +92,9 @@ public class SlicersServiceWorkerSyncTests
         Mock<ICatalogService> mock = new Mock<ICatalogService>(MockBehavior.Loose);
         // Return empty lists for catalog service; tests don't depend on actual catalog data for profile seeding
         _ = mock.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(((IReadOnlyList<ManufacturerDto>)new List<ManufacturerDto>(), (string?)null));
+            .ReturnsAsync((new List<ManufacturerDto>(), null));
         _ = mock.Setup(c => c.GetModelsAsync(It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(((IReadOnlyList<PrinterModelDto>)new List<PrinterModelDto>(), (string?)null));
+            .ReturnsAsync((new List<PrinterModelDto>(), null));
         return mock;
     }
 

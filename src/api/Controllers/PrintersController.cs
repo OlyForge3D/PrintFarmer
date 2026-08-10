@@ -845,7 +845,7 @@ public class PrintersController(
         catch (OperationCanceledException)
         {
             _logger.LogWarning("[PrintJob] Timeout retrieving print job status for printer {Id}", id);
-            return Ok((object?)null); // Return null on timeout
+            return Ok(null); // Return null on timeout
         }
         catch (Exception ex)
         {

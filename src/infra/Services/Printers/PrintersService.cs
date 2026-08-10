@@ -5414,7 +5414,7 @@ public class PrintersService(
                         .OrderBy(c => c.SortOrder)
                         .ThenBy(c => c.CameraType == CameraType.General ? 0 : 1)
                         .FirstOrDefault();
-                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : ((string?)null, (string?)null);
+                    return best is not null ? (best.StreamUrl, best.SnapshotUrl) : (null, null);
                 });
     }
 }
