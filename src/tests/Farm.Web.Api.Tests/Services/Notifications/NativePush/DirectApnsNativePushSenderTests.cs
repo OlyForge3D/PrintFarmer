@@ -220,28 +220,21 @@ public sealed class DirectApnsNativePushSenderTests
         // Issue #1407: the direct-APNs wire payload must carry the same originServerId as
         // the envelope, camelCase, with no substitution or inference.
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using ECDsa keyDisposer = key;
         string? capturedJson = null;
-        DirectApnsNativePushSender sut = CreateSender(settings, request =>
+        using DirectApnsNativePushSender sut = CreateSender(settings, request =>
         {
             capturedJson = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
 
-        try
-        {
-            NativePushDispatchResult result = await sut.SendAsync(Sample);
+        NativePushDispatchResult result = await sut.SendAsync(Sample);
 
-            result.Success.Should().BeTrue();
-            capturedJson.Should().NotBeNull();
-            using JsonDocument payload = JsonDocument.Parse(capturedJson!);
-            payload.RootElement.GetProperty("originServerId").GetString()
-                .Should().Be(Sample.OriginServerId);
-        }
-        finally
-        {
-            key.Dispose();
-            sut.Dispose();
-        }
+        result.Success.Should().BeTrue();
+        capturedJson.Should().NotBeNull();
+        using JsonDocument payload = JsonDocument.Parse(capturedJson!);
+        payload.RootElement.GetProperty("originServerId").GetString()
+            .Should().Be(Sample.OriginServerId);
     }
 
     [Theory]
@@ -252,57 +245,43 @@ public sealed class DirectApnsNativePushSenderTests
     public async Task SendAsync_InvalidOriginServerId_ReturnsTerminalWithoutCallingApns(string invalidOriginServerId)
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using ECDsa keyDisposer = key;
         int requests = 0;
-        DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        using DirectApnsNativePushSender sut = CreateSender(settings, _ =>
         {
             Interlocked.Increment(ref requests);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
         NativePushEnvelope invalid = Sample with { OriginServerId = invalidOriginServerId };
 
-        try
-        {
-            NativePushDispatchResult result = await sut.SendAsync(invalid);
+        NativePushDispatchResult result = await sut.SendAsync(invalid);
 
-            result.Success.Should().BeFalse();
-            result.Reason.Should().Be("invalid_origin_server_id");
-            result.Reason.Should().NotContain("https://").And.NotContain("Bearer");
-            Volatile.Read(ref requests).Should().Be(0,
-                "an invalid origin server id must never be silently substituted or sent to APNs");
-        }
-        finally
-        {
-            key.Dispose();
-            sut.Dispose();
-        }
+        result.Success.Should().BeFalse();
+        result.Reason.Should().Be("invalid_origin_server_id");
+        result.Reason.Should().NotContain("https://").And.NotContain("Bearer");
+        Volatile.Read(ref requests).Should().Be(0,
+            "an invalid origin server id must never be silently substituted or sent to APNs");
     }
 
     [Fact]
     public async Task SendAsync_NullOriginServerId_ReturnsTerminalWithoutCallingApns()
     {
         (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        using ECDsa keyDisposer = key;
         int requests = 0;
-        DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        using DirectApnsNativePushSender sut = CreateSender(settings, _ =>
         {
             Interlocked.Increment(ref requests);
             return new HttpResponseMessage(HttpStatusCode.OK);
         });
         NativePushEnvelope missing = Sample with { OriginServerId = null! };
 
-        try
-        {
-            NativePushDispatchResult result = await sut.SendAsync(missing);
+        NativePushDispatchResult result = await sut.SendAsync(missing);
 
-            result.Success.Should().BeFalse();
-            result.Reason.Should().Be("invalid_origin_server_id");
-            Volatile.Read(ref requests).Should().Be(0,
-                "a missing origin server id must never be silently substituted or sent to APNs");
-        }
-        finally
-        {
-            key.Dispose();
-            sut.Dispose();
-        }
+        result.Success.Should().BeFalse();
+        result.Reason.Should().Be("invalid_origin_server_id");
+        Volatile.Read(ref requests).Should().Be(0,
+            "a missing origin server id must never be silently substituted or sent to APNs");
     }
 
     [Fact]
