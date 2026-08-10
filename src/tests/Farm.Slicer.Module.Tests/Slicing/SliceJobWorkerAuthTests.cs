@@ -102,7 +102,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         };
 
         // Act - attempt claim with wrong key
-        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
+        using HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(request)
         };
@@ -180,7 +180,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         };
 
         // Act - attempt progress update with wrong key
-        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/progress")
+        using HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/progress")
         {
             Content = JsonContent.Create(request)
         };
@@ -266,7 +266,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
         };
 
         // Act - attempt completion with wrong key
-        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
+        using HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
         {
             Content = JsonContent.Create(request)
         };
@@ -307,7 +307,7 @@ public class SliceJobWorkerAuthTests : IAsyncLifetime
 
         // Act - claim with valid key (uses authenticated client from InitializeAsync)
         // Note: _client already has Bearer token from CreateAuthenticatedClientAsync in InitializeAsync
-        HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
+        using HttpRequestMessage requestMessage = new HttpRequestMessage(HttpMethod.Post, "/api/slice/claim")
         {
             Content = JsonContent.Create(request)
         };

@@ -18,9 +18,22 @@ namespace Farm.Web.Api.Tests.Services.Notifications.NativePush;
 /// JWT is well-formed and signature-valid, and APNs response codes translate to the correct
 /// dispatch outcomes (invalidated / transient / terminal).
 /// </summary>
-public sealed class DirectApnsNativePushSenderTests
+public sealed class DirectApnsNativePushSenderTests : IDisposable
 {
     private static readonly Guid SampleServerId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
+    // HttpClients built in CreateSender/CreateSenderWithDeterministicHandler wrap fully
+    // stubbed handlers (no real socket) but are still IDisposable and must outlive the
+    // sender for the whole test method. Track and dispose them here instead of leaking.
+    private readonly List<HttpClient> _httpClientsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+    }
 
     private static readonly NativePushEnvelope Sample = new(
         DeviceTokenId: Guid.NewGuid().ToString("D"),
@@ -748,13 +761,15 @@ public sealed class DirectApnsNativePushSenderTests
         return (settings, key);
     }
 
-    private static DirectApnsNativePushSender CreateSender(
+    private DirectApnsNativePushSender CreateSender(
         NativePushSettings settings,
         Func<HttpRequestMessage, HttpResponseMessage> responder,
         ILogger<DirectApnsNativePushSender>? logger = null)
     {
         var handler = new StubHandler(responder);
-        var factory = new StubHttpClientFactory(new HttpClient(handler));
+        var client = new HttpClient(handler);
+        _httpClientsToDispose.Add(client);
+        var factory = new StubHttpClientFactory(client);
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
         return new DirectApnsNativePushSender(
             factory,
@@ -1120,12 +1135,14 @@ public sealed class DirectApnsNativePushSenderTests
             Content = new StringContent($"{{\"reason\":\"{apnsReason}\"}}"),
         };
 
-    private static DirectApnsNativePushSender CreateSenderWithDeterministicHandler(
+    private DirectApnsNativePushSender CreateSenderWithDeterministicHandler(
         NativePushSettings settings,
         DeterministicApnsHandler handler,
         TimeProvider timeProvider)
     {
-        var factory = new StubHttpClientFactory(new HttpClient(handler));
+        var client = new HttpClient(handler);
+        _httpClientsToDispose.Add(client);
+        var factory = new StubHttpClientFactory(client);
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
         return new DirectApnsNativePushSender(factory, monitor, NullLogger<DirectApnsNativePushSender>.Instance, timeProvider);
     }

@@ -90,8 +90,10 @@ public class ModelControllerTests
 
         Model3DFilesController controller = CreateController(mockService);
 
-        FormFile fakeFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
-        FormFile thumbnailFile = new FormFile(new MemoryStream(Encoding.UTF8.GetBytes("png")), 0, 3, "thumbnailFile", "thumbnail.png");
+        using MemoryStream fakeFileStream = new(Encoding.UTF8.GetBytes("x"));
+        FormFile fakeFile = new FormFile(fakeFileStream, 0, 1, "file", "model.stl");
+        using MemoryStream thumbnailFileStream = new(Encoding.UTF8.GetBytes("png"));
+        FormFile thumbnailFile = new FormFile(thumbnailFileStream, 0, 3, "thumbnailFile", "thumbnail.png");
         using CancellationTokenSource cancellation = new();
 
         Guid clientUploadId = Guid.NewGuid();
@@ -118,7 +120,8 @@ public class ModelControllerTests
     {
         Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
         Model3DFilesController controller = CreateController(mockService);
-        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+        using MemoryStream fakeFileStream = new(Encoding.UTF8.GetBytes("x"));
+        FormFile fakeFile = new(fakeFileStream, 0, 1, "file", "model.stl");
 
         IActionResult result = await controller.UploadModelAsync(
             fakeFile,
@@ -136,7 +139,8 @@ public class ModelControllerTests
         Mock<IModel3DFileService> mockService = new(MockBehavior.Strict);
         Model3DFilesController controller = CreateController(mockService);
         controller.ControllerContext.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity());
-        FormFile fakeFile = new(new MemoryStream(Encoding.UTF8.GetBytes("x")), 0, 1, "file", "model.stl");
+        using MemoryStream fakeFileStream = new(Encoding.UTF8.GetBytes("x"));
+        FormFile fakeFile = new(fakeFileStream, 0, 1, "file", "model.stl");
 
         IActionResult result = await controller.UploadModelAsync(
             fakeFile,
@@ -173,9 +177,10 @@ public class ModelControllerTests
             "Test"));
         controller.Request.Headers.IfMatch = "\"0102\"";
 
+        using MemoryStream thumbnailFileStream = new([1]);
         IActionResult result = await controller.ReplaceThumbnailAsync(
             modelId,
-            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            new FormFile(thumbnailFileStream, 0, 1, "thumbnailFile", "thumbnail.png"),
             CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
@@ -201,9 +206,10 @@ public class ModelControllerTests
             [new Claim(ClaimTypes.Role, "farm_admin")],
             "Test"));
 
+        using MemoryStream thumbnailFileStream = new([1]);
         IActionResult result = await controller.ReplaceThumbnailAsync(
             modelId,
-            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            new FormFile(thumbnailFileStream, 0, 1, "thumbnailFile", "thumbnail.png"),
             CancellationToken.None);
 
         _ = Assert.IsType<OkObjectResult>(result);
@@ -224,9 +230,10 @@ public class ModelControllerTests
             .ThrowsAsync(new UnauthorizedAccessException());
         Model3DFilesController controller = CreateController(mockService);
 
+        using MemoryStream thumbnailFileStream = new([1]);
         IActionResult result = await controller.ReplaceThumbnailAsync(
             modelId,
-            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            new FormFile(thumbnailFileStream, 0, 1, "thumbnailFile", "thumbnail.png"),
             CancellationToken.None);
 
         _ = Assert.IsType<ForbidResult>(result);
@@ -247,9 +254,10 @@ public class ModelControllerTests
             .ThrowsAsync(new DbUpdateConcurrencyException());
         Model3DFilesController controller = CreateController(mockService);
 
+        using MemoryStream thumbnailFileStream = new([1]);
         IActionResult result = await controller.ReplaceThumbnailAsync(
             modelId,
-            new FormFile(new MemoryStream([1]), 0, 1, "thumbnailFile", "thumbnail.png"),
+            new FormFile(thumbnailFileStream, 0, 1, "thumbnailFile", "thumbnail.png"),
             CancellationToken.None);
 
         ObjectResult conflict = Assert.IsType<ObjectResult>(result);

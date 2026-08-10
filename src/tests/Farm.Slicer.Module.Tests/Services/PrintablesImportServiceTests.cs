@@ -28,8 +28,20 @@ namespace Farm.Slicer.Module.Tests.Services;
 /// <summary>
 /// Unit tests for Printables import: URL parsing, GraphQL client (mocked), and controller outcomes.
 /// </summary>
-public class PrintablesImportServiceTests
+public class PrintablesImportServiceTests : IDisposable
 {
+    private readonly List<HttpResponseMessage> _responsesToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
     // ── URL parsing ───────────────────────────────────────────────────────────
 
     [Theory]
@@ -67,19 +79,21 @@ public class PrintablesImportServiceTests
 
     // ── GraphQL client (mocked HTTP handler) ─────────────────────────────────
 
-    private static HttpClient BuildMockedHttpClient(HttpStatusCode statusCode, string json)
+    private HttpClient BuildMockedHttpClient(HttpStatusCode statusCode, string json)
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
+        HttpResponseMessage response = new HttpResponseMessage(statusCode)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        _responsesToDispose.Add(response);
         _ = handler
             .Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(statusCode)
-            {
-                Content = new StringContent(json, Encoding.UTF8, "application/json"),
-            });
+            .ReturnsAsync(response);
 
         return new HttpClient(handler.Object);
     }
@@ -210,7 +224,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler), new PrintablesGraphQlOptions { CacheTtlSeconds = 300 });
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient, new PrintablesGraphQlOptions { CacheTtlSeconds = 300 });
 
         IReadOnlyList<PrintablesCollectionDto> first = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
         IReadOnlyList<PrintablesCollectionDto> second = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
@@ -328,7 +343,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
         IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("maker_jane", CancellationToken.None);
 
         _ = result.Should().HaveCount(1);
@@ -354,7 +370,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
         PrintablesUserProfileDto result = await client.ResolveUserProfileAsync("@maker_jane", CancellationToken.None);
 
         _ = result.Id.Should().Be("16");
@@ -390,7 +407,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
         IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("@JeffRho", CancellationToken.None);
 
         _ = result.Should().HaveCount(1);
@@ -427,7 +445,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
         IReadOnlyList<PrintablesCollectionDto> result = await client.GetUserCollectionsAsync("%40JeffRho", CancellationToken.None);
 
         _ = result.Should().HaveCount(1);
@@ -460,7 +479,8 @@ public class PrintablesImportServiceTests
             }
             """);
 
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
         PrintablesPagedResultDto<PrintablesModelCardDto> result = await client.GetUserModelsAsync("maker_jane", 25, null, "new_uploads", CancellationToken.None);
 
         _ = result.HasNextPage.Should().BeTrue();
@@ -492,7 +512,8 @@ public class PrintablesImportServiceTests
               }
             }
             """);
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
 
         _ = await client.GetUserModelsAsync(" maker_jane ", 250, "  CURSOR-1  ", "  downloads  ", CancellationToken.None);
 
@@ -518,7 +539,8 @@ public class PrintablesImportServiceTests
               }
             }
             """);
-        PrintablesGraphQLClient client = BuildClient(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        PrintablesGraphQLClient client = BuildClient(httpClient);
 
         _ = await client.GetCollectionModelsAsync(" 2695539 ", 24, null, null, null, CancellationToken.None);
 
@@ -548,8 +570,9 @@ public class PrintablesImportServiceTests
                 }
                 """);
 
+        using HttpClient httpClient = new HttpClient(handler);
         PrintablesGraphQLClient client = BuildClient(
-            new HttpClient(handler),
+            httpClient,
             new PrintablesGraphQlOptions { MaxAttempts = 3, RetryBaseDelayMs = 1, CacheTtlSeconds = 0 });
 
         PrintablesPrintProfileDto result = await client.GetPrintProfileAsync("42", CancellationToken.None);
@@ -1424,6 +1447,7 @@ public class PrintablesImportServiceTests
     private sealed class QueueingHttpMessageHandler(params string[] responses) : HttpMessageHandler
     {
         private readonly Queue<string> _responses = new(responses);
+        private readonly List<HttpResponseMessage> _sentResponses = [];
 
         public int PostCount { get; private set; }
 
@@ -1439,15 +1463,32 @@ public class PrintablesImportServiceTests
             }
 
             string json = _responses.Count > 0 ? _responses.Dequeue() : "{}";
-            return new HttpResponseMessage(HttpStatusCode.OK)
+            HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
+            _sentResponses.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _sentResponses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 
     private sealed class CountingHttpMessageHandler(string responseJson) : HttpMessageHandler
     {
+        private readonly List<HttpResponseMessage> _sentResponses = [];
+
         public int PostCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -1457,32 +1498,68 @@ public class PrintablesImportServiceTests
                 PostCount++;
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(responseJson, Encoding.UTF8, "application/json"),
-            });
+            };
+            _sentResponses.Add(response);
+            return Task.FromResult(response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _sentResponses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 
     private sealed class TransientThenSuccessHandler(int failCount, string successJson) : HttpMessageHandler
     {
+        private readonly List<HttpResponseMessage> _sentResponses = [];
+
         public int CallCount { get; private set; }
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             CallCount++;
+            HttpResponseMessage response;
             if (CallCount <= failCount)
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+                response = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
                 {
                     Content = new StringContent("{}", Encoding.UTF8, "application/json"),
-                });
+                };
+            }
+            else
+            {
+                response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(successJson, Encoding.UTF8, "application/json"),
+                };
             }
 
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            _sentResponses.Add(response);
+            return Task.FromResult(response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                Content = new StringContent(successJson, Encoding.UTF8, "application/json"),
-            });
+                foreach (HttpResponseMessage response in _sentResponses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

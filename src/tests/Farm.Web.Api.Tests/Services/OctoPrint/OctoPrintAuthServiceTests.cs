@@ -13,12 +13,25 @@ using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.OctoPrint;
 
-public class OctoPrintAuthServiceTests
+public class OctoPrintAuthServiceTests : IDisposable
 {
-    private static AppDbContext CreateInMemoryContext()
+    private readonly List<SqliteConnection> _connectionsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (SqliteConnection connection in _connectionsToDispose)
+        {
+            connection.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private AppDbContext CreateInMemoryContext()
     {
         var conn = new SqliteConnection("DataSource=:memory:");
         conn.Open();
+        _connectionsToDispose.Add(conn);
         DbContextOptions<AppDbContext> opts = new DbContextOptionsBuilder<AppDbContext>()
             .UseSqlite(conn)
             .Options;
@@ -84,7 +97,7 @@ public class OctoPrintAuthServiceTests
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         // create key
         string raw = "mygeneratedkey";
-        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw)));
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
         var ak = new ApiKey { KeyHash = hash, UserId = Guid.NewGuid(), Name = "test" };
         await repo.AddAsync(ak);
 
@@ -101,7 +114,7 @@ public class OctoPrintAuthServiceTests
         var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         string raw = "desktopscopedkey";
-        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw)));
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
         var ak = new ApiKey
         {
             KeyHash = hash,
@@ -127,7 +140,7 @@ public class OctoPrintAuthServiceTests
         var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
         string raw = "expiredkey";
-        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.Create().ComputeHash(System.Text.Encoding.UTF8.GetBytes(raw)));
+        string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
         var ak = new ApiKey
         {
             KeyHash = hash,

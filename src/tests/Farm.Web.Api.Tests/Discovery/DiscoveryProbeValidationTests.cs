@@ -22,7 +22,7 @@ public class DiscoveryProbeValidationTests
     public async Task PrusaLinkProbe_ScoresByFieldCount(string json, int expectedScore)
     {
         var probe = new TestablePrusaLinkProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -41,7 +41,7 @@ public class DiscoveryProbeValidationTests
     public async Task PrusaLinkProbe_RecognizesVariantFields(string json, int expectedScore)
     {
         var probe = new TestablePrusaLinkProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -57,7 +57,7 @@ public class DiscoveryProbeValidationTests
     public async Task PrusaLinkProbe_InvalidWhenMissingFields()
     {
         var probe = new TestablePrusaLinkProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("{}")
         };
@@ -74,7 +74,7 @@ public class DiscoveryProbeValidationTests
     {
         string json = "{ \"api\":\"1\", \"text\":\"Moonraker compat\" }";
         var probe = new TestableOctoPrintProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -91,7 +91,7 @@ public class DiscoveryProbeValidationTests
     {
         string json = "{ \"api\":\"1\", \"text\":\"OctoPrint server\" }";
         var probe = new TestableOctoPrintProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -110,7 +110,7 @@ public class DiscoveryProbeValidationTests
     public async Task OctoPrintProbe_VariableScoring(string json, int expectedScore)
     {
         var probe = new TestableOctoPrintProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -128,7 +128,7 @@ public class DiscoveryProbeValidationTests
     public async Task MoonrakerProbe_ScoresByKlipperFields(string json, int expectedScore)
     {
         var probe = new TestableMoonrakerProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -144,7 +144,7 @@ public class DiscoveryProbeValidationTests
     public async Task MoonrakerProbe_InvalidWhenMissingResult()
     {
         var probe = new TestableMoonrakerProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("{ }")
         };
@@ -492,7 +492,7 @@ public class DiscoveryProbeValidationTests
 
         foreach (INetworkDiscoveryProbe probe in probes)
         {
-            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            using var response = new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent("{ broken json")
             };
@@ -507,7 +507,7 @@ public class DiscoveryProbeValidationTests
     public async Task PrusaLinkProbe_InvalidWhenStatusNotOk()
     {
         var probe = new TestablePrusaLinkProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.NotFound)
+        using var response = new HttpResponseMessage(HttpStatusCode.NotFound)
         {
             Content = new StringContent("{ \"printer_model\":\"MK4\" }")
         };
@@ -523,7 +523,7 @@ public class DiscoveryProbeValidationTests
     public async Task OctoPrintProbe_InvalidWhenStatusNotOk()
     {
         var probe = new TestableOctoPrintProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        using var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
             Content = new StringContent("{ \"api\":\"1\" }")
         };
@@ -539,7 +539,7 @@ public class DiscoveryProbeValidationTests
     public async Task MoonrakerProbe_InvalidWhenStatusNotOk()
     {
         var probe = new TestableMoonrakerProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        using var response = new HttpResponseMessage(HttpStatusCode.Unauthorized)
         {
             Content = new StringContent("{ \"result\": { \"state_message\":\"ok\" } }")
         };
@@ -678,7 +678,7 @@ public class DiscoveryProbeValidationTests
     {
         // Empty content
         var emptyProbe = new TestablePrusaLinkProbe();
-        var emptyResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        using var emptyResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("")
         };
@@ -688,7 +688,7 @@ public class DiscoveryProbeValidationTests
 
         // Whitespace only
         var wsProbe = new TestableOctoPrintProbe();
-        var wsResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        using var wsResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent("   ")
         };
@@ -698,7 +698,7 @@ public class DiscoveryProbeValidationTests
 
         // Null content
         var nullProbe = new TestableMoonrakerProbe();
-        var nullResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        using var nullResponse = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = null!
         };
@@ -726,7 +726,7 @@ public class DiscoveryProbeValidationTests
     {
         string json = "{ \"result\": { \"state_message\":\"ok\", \"hostname\":\"my-printer\", \"klipper_path\":\"/path\" } }";
         var probe = new TestableMoonrakerProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -743,7 +743,7 @@ public class DiscoveryProbeValidationTests
     {
         string json = "{ \"result\": { \"state_message\":\"ok\", \"klipper_path\":\"/path\" } }";
         var probe = new TestableMoonrakerProbe();
-        var response = new HttpResponseMessage(HttpStatusCode.OK)
+        using var response = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent(json)
         };
@@ -797,7 +797,7 @@ public class DiscoveryProbeValidationTests
 
         private static int GetFreePort()
         {
-            var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();

@@ -66,7 +66,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto previewRequest = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(previewRequest),
             Encoding.UTF8,
             "application/json");
@@ -119,7 +119,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto previewRequest = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(previewRequest),
             Encoding.UTF8,
             "application/json");
@@ -154,7 +154,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
             IncludeMetadata = false
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(exportRequest),
             Encoding.UTF8,
             "application/json");
@@ -185,7 +185,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
             IncludeProcessProfiles = true
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(exportRequest),
             Encoding.UTF8,
             "application/json");
@@ -217,7 +217,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
             IncludeMetadata = false
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(exportRequest),
             Encoding.UTF8,
             "application/json");
@@ -246,7 +246,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
         string invalidJson = "{ printer: [{ invalid json }] }"; // Unquoted keys, malformed structure
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = invalidJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -275,7 +275,7 @@ public class OrcaBundleIntegrationTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");

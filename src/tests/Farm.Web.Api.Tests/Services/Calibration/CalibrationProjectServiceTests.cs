@@ -297,6 +297,7 @@ public sealed class CalibrationProjectServiceTests
             CancellationToken.None);
         Guid attemptId = await AddAttemptAsync(db, created.Value!.Id, actor.Subject);
 
+        using MemoryStream photoStream1 = new([1, 2, 3]);
         CalibrationApiResult<CalibrationPhotoDto> first = await service.UploadPhotoAsync(
             attemptId,
             " upload-1 ",
@@ -305,9 +306,10 @@ public sealed class CalibrationProjectServiceTests
             null,
             "caption",
             1,
-            new MemoryStream([1, 2, 3]),
+            photoStream1,
             actor,
             CancellationToken.None);
+        using MemoryStream photoStream2 = new([1, 2, 3]);
         CalibrationApiResult<CalibrationPhotoDto> replay = await service.UploadPhotoAsync(
             attemptId,
             "upload-1",
@@ -316,9 +318,10 @@ public sealed class CalibrationProjectServiceTests
             null,
             "caption",
             1,
-            new MemoryStream([1, 2, 3]),
+            photoStream2,
             actor,
             CancellationToken.None);
+        using MemoryStream photoStream3 = new([1, 2, 3]);
         CalibrationApiResult<CalibrationPhotoDto> mismatch = await service.UploadPhotoAsync(
             attemptId,
             "upload-1",
@@ -327,7 +330,7 @@ public sealed class CalibrationProjectServiceTests
             null,
             "different caption",
             1,
-            new MemoryStream([1, 2, 3]),
+            photoStream3,
             actor,
             CancellationToken.None);
 

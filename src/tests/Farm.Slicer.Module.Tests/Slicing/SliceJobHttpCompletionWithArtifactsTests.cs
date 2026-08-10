@@ -106,7 +106,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             LogText = "Slicing started\nProcessing layer 1/100\nProcessing layer 50/100\nSlicing completed successfully"
         };
 
-        HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
+        using HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
         {
             Content = JsonContent.Create(completeRequest)
         };
@@ -201,7 +201,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             PrimaryArtifactId = artifact!.Id
         };
 
-        HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
+        using HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
         {
             Content = JsonContent.Create(completeRequest)
         };
@@ -367,7 +367,7 @@ public class SliceJobHttpCompletionWithArtifactsTests : IAsyncLifetime
             LogText = logBuilder.ToString()
         };
 
-        HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
+        using HttpRequestMessage completeRequestMessage = new HttpRequestMessage(HttpMethod.Post, $"/api/slice/{job.Id}/complete")
         {
             Content = JsonContent.Create(completeRequest)
         };
