@@ -62,7 +62,7 @@ public sealed class RelayNativePushSender(
         {
             _logger.LogWarning(
                 "[NativePush/relay] Skipping send for attentionItemId={AttentionItemId} — relay endpoint or api key is not configured.",
-                envelope.AttentionItemId);
+                LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.NotConfigured();
         }
 
@@ -173,12 +173,12 @@ public sealed class RelayNativePushSender(
             _logger.LogWarning(
                 ex,
                 "[NativePush/relay] HTTP request timed out for attentionItemId={AttentionItemId}.",
-                envelope.AttentionItemId);
+                LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.Transient("timeout");
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "[NativePush/relay] Transient network failure sending envelope for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
+            _logger.LogWarning(ex, "[NativePush/relay] Transient network failure sending envelope for attentionItemId={AttentionItemId}.", LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.Transient("network");
         }
     }
