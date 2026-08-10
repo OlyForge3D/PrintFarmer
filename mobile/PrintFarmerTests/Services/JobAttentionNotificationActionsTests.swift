@@ -17,13 +17,30 @@ import UserNotifications
 final class JobAttentionNotificationActionsTests: XCTestCase {
     private var printerService: MockPrinterService!
     private var attentionService: MockAttentionService!
+    private let validOriginServerId = "00000000-0000-0000-0000-000000000010"
+    private var testDefaults: UserDefaults!
+    private var testRegistry: ServerRegistry!
+    private var testSuiteName: String!
 
     override func setUp() {
         super.setUp()
         printerService = MockPrinterService()
         attentionService = MockAttentionService()
+        testSuiteName = "JobAttentionNotificationActionsTests-\(UUID().uuidString)"
+        testDefaults = UserDefaults(suiteName: testSuiteName)
+        testRegistry = ServerRegistry(userDefaults: testDefaults, migrateLegacyServerURL: false)
+        let server = try! testRegistry.add(
+            displayName: "Primary",
+            baseURL: URL(string: "https://primary.example")!
+        )
+        try! testRegistry.associateOriginServerId(
+            UUID(uuidString: validOriginServerId)!,
+            with: server.id
+        )
         PushNotificationManager.shared.configure(
-            notificationService: MockNotificationService()
+            notificationService: MockNotificationService(),
+            serverRegistry: testRegistry,
+            serverID: server.id
         )
         PushNotificationManager.shared.configureActionHandling(
             printerService: printerService,
@@ -35,6 +52,10 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         PushNotificationManager.shared.configure(
             notificationService: MockNotificationService()
         )
+        testDefaults.removePersistentDomain(forName: testSuiteName)
+        testSuiteName = nil
+        testDefaults = nil
+        testRegistry = nil
         printerService = nil
         attentionService = nil
         super.tearDown()
@@ -105,7 +126,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         let printerId = UUID()
         await PushNotificationManager.shared.handleJobAttentionAction(
             .pauseJob,
-            userInfo: ["printerId": printerId.uuidString]
+            userInfo: ["printerId": printerId.uuidString, "originServerId": validOriginServerId]
         )
 
         XCTAssertEqual(printerService.pauseCalledWith, printerId)
@@ -115,7 +136,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         let printerId = UUID()
         await PushNotificationManager.shared.handleJobAttentionAction(
             .resumeJob,
-            userInfo: ["printerId": printerId.uuidString]
+            userInfo: ["printerId": printerId.uuidString, "originServerId": validOriginServerId]
         )
 
         XCTAssertEqual(printerService.resumeCalledWith, printerId)
@@ -125,7 +146,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         let printerId = UUID()
         await PushNotificationManager.shared.handleJobAttentionAction(
             .cancelJob,
-            userInfo: ["printerId": printerId.uuidString]
+            userInfo: ["printerId": printerId.uuidString, "originServerId": validOriginServerId]
         )
 
         XCTAssertEqual(printerService.cancelCalledWith, printerId)
@@ -183,7 +204,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
 
         await PushNotificationManager.shared.handleJobAttentionAction(
             .pauseJob,
-            userInfo: ["printerId": printerId.uuidString]
+            userInfo: ["printerId": printerId.uuidString, "originServerId": validOriginServerId]
         )
 
         XCTAssertEqual(printerService.pauseCalledWith, printerId,
@@ -196,7 +217,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         let before = Date()
         await PushNotificationManager.shared.handleJobAttentionAction(
             .snooze,
-            userInfo: ["itemId": "failure:abc-123"]
+            userInfo: ["itemId": "failure:abc-123", "originServerId": validOriginServerId]
         )
         let after = Date()
 
@@ -229,7 +250,10 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
 
     func testOpenSwapActionPostsPushNotificationTappedWithSameUserInfo() async {
         let printerId = UUID()
-        let userInfo: [AnyHashable: Any] = ["deepLink": "printfarmer://printer/\(printerId.uuidString)"]
+        let userInfo: [AnyHashable: Any] = [
+            "deepLink": "printfarmer://printer/\(printerId.uuidString)",
+            "originServerId": validOriginServerId
+        ]
 
         var receivedLink: String?
         let observer = NotificationCenter.default.addObserver(
@@ -260,7 +284,10 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         // Must not crash / throw — errors are logged, not surfaced.
         await PushNotificationManager.shared.handleJobAttentionAction(
             .pauseJob,
-            userInfo: ["printerId": UUID().uuidString]
+            userInfo: [
+                "printerId": UUID().uuidString,
+                "originServerId": validOriginServerId
+            ]
         )
     }
 }

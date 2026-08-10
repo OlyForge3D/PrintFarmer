@@ -170,6 +170,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             // deep-link routing so it lands on the printer detail where the
             // guided filament swap lives — mirrors `didReceive response:`'s
             // default-tap branch below.
+            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
             NotificationCenter.default.post(
                 name: .pushNotificationTapped,
                 object: nil,
@@ -182,7 +183,11 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         _ userInfo: [AnyHashable: Any],
         requireOrigin: Bool
     ) -> Bool {
-        guard let serverRegistry else { return !requireOrigin || userInfo["originServerId"] == nil }
+        guard requireOrigin else { return true }
+        guard let serverRegistry else {
+            logger.warning("Job-attention action ignored — server context is unavailable")
+            return false
+        }
         guard let activeServer = serverRegistry.activeServer,
               let expectedOrigin = activeServer.originServerId,
               let originValue = userInfo["originServerId"] as? String,
@@ -312,12 +317,14 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             return
         }
 
+        let initiatingServerID = configuredServerID
         do {
             let originServerId = try await service.registerDeviceToken(token, platform: "ios")
             if let serverRegistry,
-               let configuredServerID,
-               serverRegistry.activeServerID == configuredServerID {
-                try serverRegistry.associateOriginServerId(originServerId, with: configuredServerID)
+               let initiatingServerID,
+               configuredServerID == initiatingServerID,
+               serverRegistry.activeServerID == initiatingServerID {
+                try serverRegistry.associateOriginServerId(originServerId, with: initiatingServerID)
             }
             localOnlyAlerting = false
             registrationError = nil

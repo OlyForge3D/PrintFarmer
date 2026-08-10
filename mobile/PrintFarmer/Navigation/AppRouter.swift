@@ -109,6 +109,10 @@ final class AppRouter {
 
     func invalidatePendingNavigation() {
         navigationEpoch &+= 1
+        pendingNFCReadyPrinterId = nil
+        pendingSpoolHighlightId = nil
+        pendingAttentionItemId = nil
+        pendingFilamentSwap = nil
     }
 
     func routeNotification(

@@ -170,6 +170,9 @@ final class ServerRegistry {
         try rejectDuplicate(normalizedURLString: normalized, ignoring: server.id)
 
         var updated = server
+        if updated.normalizedURLString != normalized {
+            updated.originServerId = nil
+        }
         updated.displayName = normalizedDisplayName(updated.displayName, fallbackURL: updated.baseURL)
         updated.baseURL = URL(string: normalized)!
         updated.normalizedURLString = normalized

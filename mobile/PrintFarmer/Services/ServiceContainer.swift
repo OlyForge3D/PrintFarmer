@@ -607,6 +607,9 @@ final class ServiceContainer: @unchecked Sendable {
         // it; await the worker so callers observe the settled switch.
         requestTarget(.server(server))
         await activeServerSwitchTask?.value
+        if let token = PushNotificationManager.shared.deviceToken {
+            await PushNotificationManager.shared.registerTokenWithServer(token)
+        }
     }
 
     // MARK: - Farm snapshot lifecycle authority (issue #816)

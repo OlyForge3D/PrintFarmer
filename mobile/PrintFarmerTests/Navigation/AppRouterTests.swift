@@ -102,10 +102,16 @@ final class AppRouterTests: XCTestCase {
         let router = AppRouter()
 
         router.navigate(to: .printerDetail(id: printerId))
+        router.navigate(to: .attentionItem(id: "attention-1"))
+        router.navigate(to: .spoolDetail(id: 42))
+        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 1, jobId: nil))
         router.invalidatePendingNavigation()
         try? await Task.sleep(for: .milliseconds(120))
 
         XCTAssertTrue(router.printersPath.isEmpty)
+        XCTAssertNil(router.pendingAttentionItemId)
+        XCTAssertNil(router.pendingSpoolHighlightId)
+        XCTAssertNil(router.pendingFilamentSwap)
     }
 
     func testNotificationRoutingSurfacesInvalidDestination() {
