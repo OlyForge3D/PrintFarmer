@@ -242,7 +242,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> TestConnectionAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -260,7 +260,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<OctoPrintPrinterState?> GetPrinterStateAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/printer");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/printer");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -279,7 +279,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<OctoPrintJobStatus?> GetJobStatusAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/job");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -302,7 +302,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // OctoPrint API: Select and start print via /api/files/local/{filename}
         // This endpoint requires URL encoding of special characters in filename
         string encodedFileName = Uri.EscapeDataString(fileName);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{encodedFileName}");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{encodedFileName}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         var payload = new { command = "select", print = true };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -332,7 +332,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> CancelJobAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         var payload = new { command = "cancel" };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -352,7 +352,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> PauseJobAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         var payload = new { command = "pause", action = "pause" };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -372,7 +372,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> ResumeJobAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         var payload = new { command = "pause", action = "resume" };
         request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
@@ -402,7 +402,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         try
         {
-            HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
+            using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
             request.Headers.Add("X-Api-Key", credential?.ApiKey);
             HttpResponseMessage response = await SendWithRetryAsync(request);
 
@@ -459,7 +459,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         string normalizedUrl = NormalizeBaseUrl(printer.ServerUrl);
         try
         {
-            HttpRequestMessage pluginsRequest = new(HttpMethod.Get, $"{normalizedUrl}/api/plugins");
+            using HttpRequestMessage pluginsRequest = new(HttpMethod.Get, $"{normalizedUrl}/api/plugins");
             pluginsRequest.Headers.Add("X-Api-Key", credential?.ApiKey);
             HttpResponseMessage pluginsResponse = await SendWithRetryAsync(pluginsRequest, cancellationToken: ct);
             string pluginsJson = await pluginsResponse.Content.ReadAsStringAsync(ct);
@@ -807,7 +807,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -850,7 +850,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -905,7 +905,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
+        using HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/history/{Uri.EscapeDataString(jobId)}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -948,7 +948,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> SendGcodeAsync(string baseUrl, PrinterCredential? credential, string gcode)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/command");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/command");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Use JsonSerializer to properly escape special characters and newlines
@@ -976,7 +976,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> SendHomeAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         var homeCommand = new { command = "home", axes = new[] { "x", "y", "z" } };
@@ -1004,7 +1004,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         var homeCommand = new { command = "home", axes = new[] { "x", "y" } };
@@ -1032,7 +1032,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         var homeCommand = new { command = "home", axes = new[] { "z" } };
@@ -1061,7 +1061,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> SetBedTempAsync(string baseUrl, PrinterCredential? credential, double bedTemp)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/bed");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/bed");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         var bedCommand = new { command = "target", target = (int)bedTemp };
@@ -1101,7 +1101,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> SetHotendTempAsync(string baseUrl, PrinterCredential? credential, double hotendTemp, string tool = "tool0")
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/tool");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/tool");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         var toolCommand = new { command = "target", targets = new Dictionary<string, int> { { tool, (int)hotendTemp } } };
@@ -1165,7 +1165,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> JogAsync(string baseUrl, PrinterCredential? credential, double? x = null, double? y = null, double? z = null, double? speed = null)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Build jog command with only provided axes
@@ -1204,7 +1204,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> ConnectAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         request.Content = new StringContent("{\"command\":\"connect\"}", Encoding.UTF8, "application/json");
 
@@ -1229,7 +1229,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> DisconnectAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         request.Content = new StringContent("{\"command\":\"disconnect\"}", Encoding.UTF8, "application/json");
 
@@ -1254,7 +1254,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<string> GetConnectionStateAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/connection");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/connection");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1282,7 +1282,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
         // Ensure path doesn't start with slash (OctoPrint expects clean paths)
         string cleanPath = path.TrimStart('/');
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local/{cleanPath}");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local/{cleanPath}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1314,7 +1314,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         string cleanSource = source.TrimStart('/');
         string cleanDestination = destination.TrimStart('/');
 
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{cleanSource}");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/files/local/{cleanSource}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Build move command
@@ -1350,7 +1350,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // Clean path
         string cleanPath = filePath.TrimStart('/');
 
-        HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/files/local/{cleanPath}");
+        using HttpRequestMessage request = new(HttpMethod.Delete, $"{baseUrl}/api/files/local/{cleanPath}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1386,7 +1386,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             ? $"{baseUrl}/api/files/local"
             : $"{baseUrl}/api/files/local/{cleanPath}";
 
-        HttpRequestMessage request = new(HttpMethod.Post, endpoint);
+        using HttpRequestMessage request = new(HttpMethod.Post, endpoint);
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Build makedir command
@@ -1491,7 +1491,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<string> GetSettingsAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/settings");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/settings");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1517,7 +1517,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> UpdateSettingsAsync(string baseUrl, PrinterCredential? credential, string settingsJson)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/settings");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/settings");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         request.Content = new StringContent(settingsJson, Encoding.UTF8, "application/json");
 
@@ -1544,7 +1544,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> RestartServerAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/restart");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/restart");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
@@ -1570,7 +1570,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<string> GetSystemInfoAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/system");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/system");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1596,7 +1596,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> ExecuteSystemCommandAsync(string baseUrl, PrinterCredential? credential, string commandId)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/{commandId}");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/system/commands/core/{commandId}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
@@ -1624,7 +1624,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<string> GetVersionInfoAsync(string baseUrl, PrinterCredential? credential)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/version");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1653,7 +1653,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         // Clean up file path - remove leading/trailing slashes
         filePath = filePath?.TrimStart('/').TrimEnd('/') ?? string.Empty;
 
-        HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/downloads/files/local/{filePath}");
+        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/downloads/files/local/{filePath}");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         try
@@ -1689,7 +1689,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<bool> LoadFileAsync(string baseUrl, PrinterCredential? credential, string filePath)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
+        using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/job");
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
 
         // Create the select command
@@ -2097,7 +2097,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         baseUrl = NormalizeBaseUrl(baseUrl);
         try
         {
-            HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
+            using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/files/local?recursive=true");
             request.Headers.Add("X-Api-Key", credential?.ApiKey);
             HttpResponseMessage response = await SendWithRetryAsync(request);
 

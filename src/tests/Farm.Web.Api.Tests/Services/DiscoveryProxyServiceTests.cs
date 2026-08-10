@@ -34,7 +34,7 @@ public class DiscoveryProxyServiceTests
                 MaxConcurrentRequests = 5
             });
 
-        RecordingHandler handler = new RecordingHandler(request =>
+        using RecordingHandler handler = new RecordingHandler(request =>
         {
             HttpResponseMessage response = new HttpResponseMessage(HttpStatusCode.OK)
             {
@@ -44,7 +44,8 @@ public class DiscoveryProxyServiceTests
         });
 
         Mock<IHttpClientFactory> httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(httpClient);
 
         DiscoveryProxyService service = CreateService(
             httpClientFactory,
@@ -90,7 +91,8 @@ public class DiscoveryProxyServiceTests
         ThrowingHandler handler = new ThrowingHandler(new HttpRequestException("network down"));
 
         Mock<IHttpClientFactory> httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(httpClient);
 
         DiscoveryProxyService service = CreateService(httpClientFactory, hubContext, progressCache, settingsService);
 
@@ -111,10 +113,11 @@ public class DiscoveryProxyServiceTests
         Mock<ISettingsService> settingsService = new Mock<ISettingsService>();
         settingsService.Setup(s => s.Get<NetworkDiscoverySettings>()).Returns(new NetworkDiscoverySettings());
 
-        RecordingHandler handler = new RecordingHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)));
+        using RecordingHandler handler = new RecordingHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.BadRequest)));
 
         Mock<IHttpClientFactory> httpClientFactory = new Mock<IHttpClientFactory>();
-        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(new HttpClient(handler));
+        using HttpClient httpClient = new HttpClient(handler);
+        httpClientFactory.Setup(f => f.CreateClient("PrinterDiscovery")).Returns(httpClient);
 
         DiscoveryProxyService service = CreateService(httpClientFactory, hubContext, progressCache, settingsService);
 
@@ -173,12 +176,28 @@ public class DiscoveryProxyServiceTests
     private sealed class RecordingHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler) : HttpMessageHandler
     {
         private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler = handler;
+        private readonly List<HttpResponseMessage> _responses = [];
         public HttpRequestMessage? LastRequest { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequest = request;
-            return await _handler(request).ConfigureAwait(false);
+            HttpResponseMessage response = await _handler(request).ConfigureAwait(false);
+            _responses.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

@@ -10,14 +10,30 @@ namespace Farm.Web.Api.Tests.Services.SmartPlug;
 /// <summary>
 /// Unit tests for <see cref="ShellySmartPlugProvider"/> covering Gen 1 and Gen 2 device paths.
 /// </summary>
-public class ShellySmartPlugProviderTests
+public class ShellySmartPlugProviderTests : IDisposable
 {
-    private static (ShellySmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider()
+    // The HttpClient created here wraps a fully mocked handler (no real socket/unmanaged
+    // resource) but is still IDisposable and must outlive the provider for the whole test
+    // method. Track and dispose it here instead of leaking it.
+    private readonly List<HttpClient> _httpClientsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private (ShellySmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider()
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
-#pragma warning disable CA2000
-        HttpClient httpClient = new(handler.Object);
-#pragma warning restore CA2000
+        // disposeHandler: false — the handler is a strict Moq mock with no Dispose setup;
+        // letting HttpClient.Dispose() cascade into it would throw a MockException.
+        HttpClient httpClient = new(handler.Object, disposeHandler: false);
+        _httpClientsToDispose.Add(httpClient);
 
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);

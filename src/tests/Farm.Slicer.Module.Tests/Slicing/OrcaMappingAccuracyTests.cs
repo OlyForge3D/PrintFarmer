@@ -64,7 +64,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -110,7 +110,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -155,7 +155,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -192,7 +192,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -243,7 +243,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -303,7 +303,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -349,7 +349,7 @@ public class OrcaMappingAccuracyTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");

@@ -82,7 +82,7 @@ public class OrcaBundlePreviewTests : IAsyncLifetime
             BundleJson = bundleJson
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -125,7 +125,7 @@ public class OrcaBundlePreviewTests : IAsyncLifetime
             BundleJson = "{ \"invalid\": \"structure\" }" // Missing printer/filament/process sections
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -148,7 +148,7 @@ public class OrcaBundlePreviewTests : IAsyncLifetime
             BundleJson = ""
         };
 
-        StringContent content = new StringContent(
+        using StringContent content = new StringContent(
             JsonSerializer.Serialize(request),
             Encoding.UTF8,
             "application/json");
@@ -186,7 +186,7 @@ public class OrcaBundlePreviewTests : IAsyncLifetime
         """;
 
         ImportOrcaBundleDto request = new ImportOrcaBundleDto { BundleJson = bundleJson };
-        StringContent content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
+        using StringContent content = new StringContent(JsonSerializer.Serialize(request), Encoding.UTF8, "application/json");
 
         // Act
         HttpResponseMessage response = await client.PostAsync("/api/slicer/profiles/import/orca/preview", content);

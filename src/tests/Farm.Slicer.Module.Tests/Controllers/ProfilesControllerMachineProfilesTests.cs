@@ -30,7 +30,8 @@ public class ProfilesControllerMachineProfilesTests
 
         ProfilesController controller = CreateController(profilesService, catalogService);
 
-        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(new HttpClient(), modelId, CancellationToken.None);
+        using HttpClient httpClient = new();
+        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains(modelId.ToString(), Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
@@ -56,7 +57,8 @@ public class ProfilesControllerMachineProfilesTests
 
         ProfilesController controller = CreateController(profilesService, catalogService);
 
-        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(new HttpClient(), modelId, CancellationToken.None);
+        using HttpClient httpClient = new();
+        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         NotFoundObjectResult notFound = Assert.IsType<NotFoundObjectResult>(result);
         Assert.Contains("No OrcaSlicer alias configured", Assert.IsType<string>(notFound.Value), StringComparison.Ordinal);
@@ -88,7 +90,8 @@ public class ProfilesControllerMachineProfilesTests
 
         ProfilesController controller = CreateController(profilesService, catalogService);
 
-        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(new HttpClient(), modelId, CancellationToken.None);
+        using HttpClient httpClient = new();
+        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
         IReadOnlyList<MachineProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<MachineProfileDto>>(ok.Value);
@@ -117,7 +120,8 @@ public class ProfilesControllerMachineProfilesTests
 
         ProfilesController controller = CreateController(profilesService, catalogService);
 
-        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(new HttpClient(), modelId, CancellationToken.None);
+        using HttpClient httpClient = new();
+        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
         IReadOnlyList<MachineProfileDto> value = Assert.IsAssignableFrom<IReadOnlyList<MachineProfileDto>>(ok.Value);
@@ -145,7 +149,8 @@ public class ProfilesControllerMachineProfilesTests
 
         ProfilesController controller = CreateController(profilesService, catalogService);
 
-        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(new HttpClient(), modelId, CancellationToken.None);
+        using HttpClient httpClient = new();
+        IActionResult result = await controller.GetMachineProfilesForModelIdAsync(httpClient, modelId, CancellationToken.None);
 
         ObjectResult objectResult = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status503ServiceUnavailable, objectResult.StatusCode);

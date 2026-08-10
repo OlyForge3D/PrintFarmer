@@ -15,17 +15,34 @@ namespace Farm.Web.Api.Tests.Services.SmartPlug;
 /// Unit tests for <see cref="HomeAssistantSmartPlugProvider"/> covering token validation,
 /// entity state parsing, and connectivity checks.
 /// </summary>
-public class HomeAssistantSmartPlugProviderTests
+public class HomeAssistantSmartPlugProviderTests : IDisposable
 {
     private const string ValidToken = "test-ha-token-abc123";
 
-    private static (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider(
+    // HttpClients created for these Moq-backed tests wrap a fully mocked handler (no real
+    // socket/unmanaged resource), but are still IDisposable. Track and dispose them here
+    // instead of leaking them, since the created client must stay alive for the full test
+    // method (it's consumed later via the mocked IHttpClientFactory).
+    private readonly List<HttpClient> _httpClientsToDispose = new();
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider(
         string? token = ValidToken, string? settingsBaseUrl = null)
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
-#pragma warning disable CA2000
-        HttpClient httpClient = new(handler.Object);
-#pragma warning restore CA2000
+        // disposeHandler: false — the handler is a strict Moq mock with no Dispose setup;
+        // letting HttpClient.Dispose() cascade into it would throw a MockException.
+        HttpClient httpClient = new(handler.Object, disposeHandler: false);
+        _httpClientsToDispose.Add(httpClient);
 
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
@@ -71,13 +88,14 @@ public class HomeAssistantSmartPlugProviderTests
     /// <summary>
     /// Creates a provider that has no config token but has a persisted encrypted token via settings.
     /// </summary>
-    private static (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProviderWithPersistedToken(
+    private (HomeAssistantSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProviderWithPersistedToken(
         string plainToken)
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
-#pragma warning disable CA2000
-        HttpClient httpClient = new(handler.Object);
-#pragma warning restore CA2000
+        // disposeHandler: false — the handler is a strict Moq mock with no Dispose setup;
+        // letting HttpClient.Dispose() cascade into it would throw a MockException.
+        HttpClient httpClient = new(handler.Object, disposeHandler: false);
+        _httpClientsToDispose.Add(httpClient);
 
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
@@ -306,8 +324,11 @@ public class HomeAssistantSmartPlugProviderTests
         scopeFactory.Setup(f => f.CreateScope()).Returns(scope.Object);
 
 #pragma warning disable CA2000
-        HttpClient httpClient = new(new Mock<HttpMessageHandler>(MockBehavior.Strict).Object);
+        // disposeHandler: false — the handler is a strict Moq mock with no Dispose setup;
+        // letting HttpClient.Dispose() cascade into it would throw a MockException.
+        HttpClient httpClient = new(new Mock<HttpMessageHandler>(MockBehavior.Strict).Object, disposeHandler: false);
 #pragma warning restore CA2000
+        _httpClientsToDispose.Add(httpClient);
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
 
@@ -528,8 +549,11 @@ public class HomeAssistantSmartPlugProviderTests
         // Strict mock: any HTTP call throws, proving the provider is completely inert when disabled.
         Mock<HttpMessageHandler> strictHandler = new(MockBehavior.Strict);
 #pragma warning disable CA2000
-        HttpClient httpClient = new(strictHandler.Object);
+        // disposeHandler: false — the handler is a strict Moq mock with no Dispose setup;
+        // letting HttpClient.Dispose() cascade into it would throw a MockException.
+        HttpClient httpClient = new(strictHandler.Object, disposeHandler: false);
 #pragma warning restore CA2000
+        _httpClientsToDispose.Add(httpClient);
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
 
