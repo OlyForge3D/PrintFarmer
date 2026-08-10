@@ -753,7 +753,7 @@ struct AttentionView: View {
             group.items.contains(where: { $0.id == itemId })
         }) {
             guard router.pendingAttentionItemId == itemId,
-                  resolvingAttentionItemId == itemId else {
+                  (resolvingAttentionItemId == nil || resolvingAttentionItemId == itemId) else {
                 return
             }
             withAnimation {
