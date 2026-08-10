@@ -958,7 +958,7 @@ export function Layout() {
           inert={sidebarOpen || undefined}
           className="z-40 flex h-12 shrink-0 items-center justify-between border-b border-pf-border bg-pf-bg-1 px-3 lg:hidden"
         >
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               ref={mobileMenuButtonRef}
               type="button"
@@ -968,7 +968,7 @@ export function Layout() {
               title={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
               variant="subtle"
               size="sm"
-              className="h-9 w-9 justify-center px-0"
+              className="h-9 w-9 shrink-0 justify-center px-0"
               onClick={() => {
                 setSidebarOpen(prev => !prev);
                 setUserMenuOpen(false);
@@ -976,33 +976,47 @@ export function Layout() {
               iconCenter={<MenuIcon className="h-5 w-5" />}
             />
             <div className="flex min-w-0 items-center gap-2">
-              <PrintFarmerLogoIcon decorative className="h-7 w-7 text-pf-accent" />
+              <PrintFarmerLogoIcon decorative className="h-7 w-7 shrink-0 text-pf-accent" />
               <div className="min-w-0">
                 <div className="truncate text-lg font-bold text-pf-text-primary font-bebas uppercase">PrintFarmer</div>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {pendingAttentionCount > 0 && (
-              <Button
-                type="button"
-                variant="unstyled"
-                onClick={() => navigate('/printers?view=collapsed')}
-                className="relative flex h-9 w-9 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
-                title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
-                aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
-              >
-                <AlertIcon className="h-4 w-4" />
-                {/* Count badge: `h-4 min-w-4` is a circle at one digit and a
-                    pill at two, which is the intended shape at both. */}
-                <span data-pf-radius="full" className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
-                  {pendingAttentionCount}
-                </span>
-              </Button>
-            )}
+          {/* `shrink-0` here (not `min-w-0`) keeps this whole cluster's flex
+              box exactly as large as its rendered content, so the header's
+              flex layout never shrinks it below what its children actually
+              need — that mismatch was pushing the account button past the
+              viewport edge even though nothing here looked clipped. All
+              squeeze pressure lands on the truncating title on the left
+              instead. The attention/tasks badges are secondary — if space is
+              still tight after that they scroll away first (never invisibly
+              clipped, since this container isn't the ancestor's
+              `overflow-hidden`). The status, notification, and account
+              controls in `FloatingControlBar` always stay fully visible and
+              reachable, matching what issue #1417 calls out explicitly. */}
+          <div className="flex shrink-0 items-center gap-1">
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              {pendingAttentionCount > 0 && (
+                <Button
+                  type="button"
+                  variant="unstyled"
+                  onClick={() => navigate('/printers?view=collapsed')}
+                  className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-pf-warning transition-colors hover:bg-pf-bg-2 focus-visible:ring-2 focus-visible:ring-pf-accent"
+                  title={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention — click to view`}
+                  aria-label={`${pendingAttentionCount} printer${pendingAttentionCount !== 1 ? 's' : ''} need${pendingAttentionCount === 1 ? 's' : ''} attention`}
+                >
+                  <AlertIcon className="h-4 w-4" />
+                  {/* Count badge: `h-4 min-w-4` is a circle at one digit and a
+                      pill at two, which is the intended shape at both. */}
+                  <span data-pf-radius="full" className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-pf-warning px-1 text-[9px] font-bold leading-none text-black">
+                    {pendingAttentionCount}
+                  </span>
+                </Button>
+              )}
 
-            {isAuthenticated && <TasksBadge />}
+              {isAuthenticated && <TasksBadge />}
+            </div>
             <FloatingControlBar
               mobile
               isAuthenticated={isAuthenticated}
