@@ -495,3 +495,48 @@ locks this.
 - No React preferences UI changes. #716 will consume the shared enum + the
   `GET /api/notifications/attention-categories` endpoint.
 - Provisioning of live APNs / relay credentials is Parker's release/#724 scope.
+
+## 12. Origin server identity (`originServerId` / `serverId`, #1407)
+
+Every PrintFarmer server instance now has a stable, opaque `serverId` — a
+canonical lowercase UUID (`Guid.ToString("D")`) — used to identify which
+backend generated a given native-push payload or registration response.
+
+**Generation and persistence.** `IServerIdentityService` generates the value
+once via `Guid.NewGuid()` on first use and persists it in the existing generic
+`AppSettingsEntity` key-value table (key `"ServerIdentity"`, no new migration
+required). It survives restarts, config reloads, token rotation, and
+individual sends — it is never regenerated once durably recorded. Concurrent
+first-generation (e.g. two requests immediately after a fresh deploy) is
+resolved by an atomic insert-only write (`IAppSettingsRepository.TryInsertIfAbsentAsync`)
+that relies solely on the unique index on `AppSettingsEntity.Key`: the losing
+caller detects the conflict and re-reads the winner's committed row rather
+than risking an unconditional upsert overwriting it.
+
+**Registration/metadata response — breaking change.** `POST
+/api/notifications/device-tokens` now returns **`200 OK`** (previously `204
+No Content`) with a JSON body:
+
+```json
+{ "serverId": "3fae1c2e-9b8a-4b7a-9f0e-6a2b1c4d5e6f" }
+```
+
+`serverId` is the server's persisted identity — it is stable across repeated
+calls and process restarts. `installationId` remains the client's ownership
+key; token/environment/platform/appBundleId remain provider data. No
+caller-supplied origin value is ever accepted from the request body — the
+server always returns its own persisted identity, never a client-influenced
+value. `DELETE /api/notifications/device-tokens` (unregister) is **unchanged**
+and still returns `204 No Content`.
+
+**Native-push envelope and wire payloads.** `NativePushEnvelope` gained a
+required `OriginServerId` (canonical UUID), populated from
+`IServerIdentityService` once per dispatch. Both the direct APNs payload
+(`ApsWireRoot`) and the relay dispatch request add an additive, optional
+camelCase `originServerId` field carrying the same value — the `aps`
+dictionary shape itself is unchanged. Both senders validate the value is a
+canonical UUID before serializing; a missing or non-canonical origin causes
+the send to terminate (`invalid_origin_server_id`) rather than silently
+substituting or omitting it. Legacy backend payloads without the field, and
+older mobile clients that ignore the new key, remain fully compatible — this
+is purely additive on the wire.

@@ -22,12 +22,12 @@ public enum NativePushPriority
 /// this envelope is the single canonical shape kept in tests. See
 /// <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
 /// </summary>
-/// <param name="OriginServerId">
-/// Canonical UUID of the PrintFarmer server instance that generated this payload (issue
-/// #1407). Required for every newly generated envelope; senders validate this before
-/// serializing and refuse to send rather than substitute a different value when it is
-/// missing or non-canonical.
-/// </param>
+/// <remarks>
+/// <see cref="OriginServerId"/> carries the canonical UUID of the PrintFarmer server
+/// instance that generated this payload (issue #1407). It is required for every newly
+/// generated envelope; senders validate it before serializing and refuse to send rather
+/// than substitute a different value when it is missing or non-canonical.
+/// </remarks>
 public sealed record NativePushEnvelope(
     string DeviceTokenId,
     string Token,

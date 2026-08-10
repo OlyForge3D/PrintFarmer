@@ -34,7 +34,7 @@ public interface IServerIdentityService
 /// winner's committed row rather than overwriting it. The resolved value is then cached
 /// in-process so subsequent calls never hit the database again for the life of the process.
 /// </summary>
-public sealed class ServerIdentityService : IServerIdentityService
+public sealed class ServerIdentityService : IServerIdentityService, IDisposable
 {
     /// <summary>Key under which the server identity is stored in <see cref="AppSettingsEntity"/>.</summary>
     public const string SettingsKey = "ServerIdentity";
@@ -43,6 +43,7 @@ public sealed class ServerIdentityService : IServerIdentityService
     private readonly ILogger<ServerIdentityService> _logger;
     private readonly SemaphoreSlim _lock = new(1, 1);
     private string? _cachedServerId;
+    private bool _disposed;
 
     /// <summary>Constructs the service.</summary>
     public ServerIdentityService(IServiceScopeFactory scopeFactory, ILogger<ServerIdentityService> logger)
@@ -80,34 +81,48 @@ public sealed class ServerIdentityService : IServerIdentityService
             string newServerId = Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture);
             string json = JsonSerializer.Serialize(new ServerIdentityRecord(newServerId));
 
-            try
+            // Unconditional atomic insert-only attempt: no existence check precedes this
+            // write, so the unique index on AppSettingsEntity.Key is the sole arbiter of
+            // "who generated the identity first." This avoids the check-then-act race that
+            // SetAsync's internal read-then-upsert would otherwise introduce, where a second
+            // concurrent caller could observe "no row yet" and later silently overwrite the
+            // winner's already-committed identity via an update instead of an insert.
+            bool inserted = await settings.TryInsertIfAbsentAsync(SettingsKey, json, cancellationToken).ConfigureAwait(false);
+            if (inserted)
             {
-                await settings.SetAsync(SettingsKey, json, cancellationToken).ConfigureAwait(false);
-                await settings.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
                 _cachedServerId = newServerId;
                 return _cachedServerId;
             }
-            catch (DbUpdateException)
-            {
-                // Lost the race with another concurrent caller inserting the same key (the
-                // unique index on AppSettingsEntity.Key rejects the second insert). Re-read
-                // the now-committed row rather than retry the write — the identity must never
-                // be regenerated once any instance has durably recorded one.
-                AppSettingsEntity? afterRace = await settings.GetReadOnlyAsync(SettingsKey, cancellationToken).ConfigureAwait(false);
-                if (afterRace is not null && TryParseServerId(afterRace.SettingsJson, out string raceWinnerId))
-                {
-                    _cachedServerId = raceWinnerId;
-                    return _cachedServerId;
-                }
 
-                _logger.LogError("[ServerIdentity] Concurrent identity generation failed and no committed row could be re-read.");
-                throw;
+            // Lost the race with another concurrent caller inserting the same key. Re-read
+            // the now-committed row rather than retry the write — the identity must never be
+            // regenerated once any instance has durably recorded one.
+            AppSettingsEntity? afterRace = await settings.GetReadOnlyAsync(SettingsKey, cancellationToken).ConfigureAwait(false);
+            if (afterRace is not null && TryParseServerId(afterRace.SettingsJson, out string raceWinnerId))
+            {
+                _cachedServerId = raceWinnerId;
+                return _cachedServerId;
             }
+
+            _logger.LogError("[ServerIdentity] Concurrent identity generation failed and no committed row could be re-read.");
+            throw new InvalidOperationException("Server identity generation lost a concurrent race but no committed row could be re-read.");
         }
         finally
         {
             _ = _lock.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        _lock.Dispose();
     }
 
     private static bool TryParseServerId(string json, out string serverId)

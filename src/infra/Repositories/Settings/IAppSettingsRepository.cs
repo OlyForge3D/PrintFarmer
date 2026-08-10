@@ -56,6 +56,31 @@ public interface IAppSettingsRepository
     Task SetAsync(string key, string value, CancellationToken ct = default);
 
     /// <summary>
+    /// Attempts to atomically insert a brand-new setting row, relying solely on the unique
+    /// index on <see cref="AppSettingsEntity.Key"/> to arbitrate concurrent first-writers.
+    /// </summary>
+    /// <param name="key">The setting key</param>
+    /// <param name="value">The setting value</param>
+    /// <param name="ct">Cancellation token for async operation</param>
+    /// <returns>
+    /// <see langword="true"/> if this call's row was the one durably committed;
+    /// <see langword="false"/> if a concurrent caller committed a row for the same key first
+    /// (the unique-index violation is caught and swallowed rather than propagated).
+    /// </returns>
+    /// <remarks>
+    /// Unlike <see cref="SetAsync"/>, this method performs no existence check before writing:
+    /// it always attempts an unconditional insert and lets the database's unique constraint be
+    /// the single source of truth for "does this key already exist?" This avoids the
+    /// check-then-act race inherent in read-then-upsert, where two concurrent callers can each
+    /// observe "no row" and one can end up overwriting the other's already-committed value via
+    /// an unintended update rather than hitting a constraint violation. Callers that need
+    /// generate-once-ever semantics (e.g. a durable server identity) should use this method for
+    /// the initial write and re-read on a <see langword="false"/> result instead of calling
+    /// <see cref="SetAsync"/>.
+    /// </remarks>
+    Task<bool> TryInsertIfAbsentAsync(string key, string value, CancellationToken ct = default);
+
+    /// <summary>
     /// Deletes a setting by its key.
     /// </summary>
     /// <param name="key">The setting key to delete</param>
@@ -107,6 +132,32 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
                 UpdatedAt = DateTime.UtcNow
             };
             await _db.AppSettingsEntities.AddAsync(setting, ct);
+        }
+    }
+
+    public async Task<bool> TryInsertIfAbsentAsync(string key, string value, CancellationToken ct = default)
+    {
+        var setting = new AppSettingsEntity
+        {
+            Key = key,
+            SettingsJson = value,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        _ = await _db.AppSettingsEntities.AddAsync(setting, ct);
+
+        try
+        {
+            _ = await _db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent caller committed a row for this key first. Detach our losing
+            // entity so the context doesn't keep retrying the same failed insert on a later
+            // SaveChangesAsync call from this same scope.
+            _db.Entry(setting).State = EntityState.Detached;
+            return false;
         }
     }
 
