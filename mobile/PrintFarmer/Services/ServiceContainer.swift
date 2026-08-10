@@ -858,6 +858,7 @@ final class ServiceContainer: @unchecked Sendable {
         offlineWriteReplayAuthority.invalidate()
         if activeServerID != nil {
             guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
+                scheduleNotificationHandoffRetry(.server(server), epoch: epoch)
                 return
             }
         }
@@ -966,6 +967,7 @@ final class ServiceContainer: @unchecked Sendable {
         }
         guard activeServerID != nil else { return }
         guard await PushNotificationManager.shared.unregisterFromServer() else {
+            scheduleNotificationHandoffRetry(.none, epoch: epoch)
             return
         }
         let outgoingSignalR = signalRService
@@ -982,6 +984,18 @@ final class ServiceContainer: @unchecked Sendable {
         }
         activeServerGeneration = activeGeneration.advance()
         _ = rebuildRealServices(baseURL: APIClient.savedBaseURL() ?? AppConfig.baseURL, server: nil, accessToken: nil)
+    }
+
+    private func scheduleNotificationHandoffRetry(
+        _ target: DesiredTarget,
+        epoch: Int
+    ) {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard let self,
+                  self.transitionEpoch.isCurrent(epoch) else { return }
+            self.requestTarget(target)
+        }
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the

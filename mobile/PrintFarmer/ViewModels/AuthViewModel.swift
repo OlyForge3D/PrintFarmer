@@ -298,6 +298,7 @@ final class AuthViewModel {
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         await services.revokeFarmSnapshot()
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
+        _ = await PushNotificationManager.shared.unregisterFromServer()
         await services.authService.logout(operation: token)
         guard services.authOperationEpoch.isCurrent(token.value) else { return }
         isAuthenticated = false
