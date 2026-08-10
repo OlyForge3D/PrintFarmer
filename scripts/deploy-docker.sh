@@ -871,10 +871,17 @@ migrate_legacy_db_credentials() {
     set_exported_env_var "CONNECTION_STRING" "$CONNECTION_STRING"
 
     if [ "$needs_migration" = "true" ] && [ -f "$CONFIG_FILE" ]; then
-        local escaped_conn
+        # CONFIG_FILE is sourced as bash elsewhere, so every persisted value must
+        # be shell-quoted via printf '%q' to survive a password containing shell
+        # metacharacters (generate_random_password's fallback charset includes
+        # $, &, *, (, ) — an unescaped write here could corrupt or execute on the
+        # next `source "$CONFIG_FILE"`).
+        local escaped_pg_pw escaped_db_pw escaped_conn
+        escaped_pg_pw=$(printf '%q' "$POSTGRES_PASSWORD")
+        escaped_db_pw=$(printf '%q' "$DB_PASSWORD")
         escaped_conn=$(printf '%q' "$CONNECTION_STRING")
-        update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
-        update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$DB_PASSWORD"
+        update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$escaped_pg_pw"
+        update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$escaped_db_pw"
         update_kv_file "$CONFIG_FILE" "CONNECTION_STRING" "$escaped_conn"
         chmod 600 "$CONFIG_FILE" 2>/dev/null || true
         print_success "Rewrote $CONFIG_FILE with the canonical PostgreSQL credential."

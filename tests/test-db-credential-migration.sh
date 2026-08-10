@@ -361,6 +361,69 @@ test_sqlserver_provider_is_untouched_by_postgres_migration() {
     fi
 }
 
+# ---------------------------------------------------------------------------
+# Scenario 6: a password containing shell metacharacters must be persisted
+# safely to .deploy-config (which is later `source`d) without corrupting the
+# file or executing injected shell commands, and must round-trip unchanged.
+#
+# This is a focused unit test of migrate_legacy_db_credentials() itself
+# (sourced directly, not via the full deploy-docker.sh CLI), because
+# generate_env_file()/ensure_database_passwords() write the *.env* file with
+# the same unescaped pattern for unrelated, pre-existing reasons that are out
+# of scope for issue #1392 -- this scenario locks in the escaping fix for the
+# .deploy-config write path that migrate_legacy_db_credentials() owns.
+# ---------------------------------------------------------------------------
+test_migration_escapes_shell_metacharacters_in_password() {
+    start_test "migration safely escapes shell metacharacters in a rewritten password"
+
+    cd "$TEST_TEMP_DIR"
+    local marker_file="$TEST_TEMP_DIR/injection-marker"
+    rm -f "$marker_file"
+    # A password containing a command substitution, a semicolon, and a quote.
+    local nasty_pw
+    nasty_pw="pw\$(touch $marker_file);injected'quote"
+    local stale_pw="stale-safe-credential"
+
+    (
+        set -euo pipefail
+        # shellcheck disable=SC1090
+        source "$DEPLOY_SCRIPT" >/dev/null 2>&1 || true
+        DB_PROVIDER=postgres
+        POSTGRES_DB=printfarmer
+        POSTGRES_USER=postgres
+        CONFIG_FILE="$TEST_TEMP_DIR/.deploy-config"
+        ENV_FILE="$TEST_TEMP_DIR/.env-active"
+
+        printf 'DB_PROVIDER=postgres\nPOSTGRES_PASSWORD=%s\nDB_PASSWORD=%s\n' "$stale_pw" "$stale_pw" > "$CONFIG_FILE"
+        printf 'POSTGRES_PASSWORD=%s\n' "$nasty_pw" > "$ENV_FILE"
+
+        POSTGRES_PASSWORD="$stale_pw"
+        DB_PASSWORD="$stale_pw"
+        CONNECTION_STRING=""
+
+        migrate_legacy_db_credentials
+
+        # Re-source the rewritten .deploy-config the same way deploy-docker.sh
+        # does elsewhere, and confirm the password round-trips byte-for-byte.
+        unset POSTGRES_PASSWORD
+        # shellcheck disable=SC1090
+        source "$CONFIG_FILE"
+        if [[ "$POSTGRES_PASSWORD" != "$nasty_pw" ]]; then
+            echo "ROUNDTRIP_MISMATCH"
+        else
+            echo "ROUNDTRIP_OK"
+        fi
+    ) > "$TEST_TEMP_DIR/roundtrip-result.txt" 2>&1
+    local failures_before=$TESTS_FAILED
+
+    assert_file_not_exists "$marker_file" "Rewriting and re-sourcing .deploy-config must never execute an embedded command substitution" || true
+    assert_contains "$(cat "$TEST_TEMP_DIR/roundtrip-result.txt")" "ROUNDTRIP_OK" "Password must round-trip unchanged through the escaped .deploy-config" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     setup
@@ -370,6 +433,7 @@ run_all_tests() {
     test_missing_db_password_alias_is_synchronized
     test_redeploy_idempotent_no_credential_rotation
     test_sqlserver_provider_is_untouched_by_postgres_migration
+    test_migration_escapes_shell_metacharacters_in_password
 
     teardown
 }
