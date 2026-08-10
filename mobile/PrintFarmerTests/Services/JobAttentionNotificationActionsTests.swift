@@ -167,6 +167,15 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
         XCTAssertNil(printerService.pauseCalledWith)
     }
 
+    func testLegacyPauseActionWithoutOriginFailsClosed() async {
+        await PushNotificationManager.shared.handleJobAttentionAction(
+            .pauseJob,
+            userInfo: ["printerId": UUID().uuidString]
+        )
+
+        XCTAssertNil(printerService.pauseCalledWith)
+    }
+
     func testMutatingActionRejectsNotificationFromDifferentServer() async throws {
         let suiteName = "JobAttentionNotificationActionsTests-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))

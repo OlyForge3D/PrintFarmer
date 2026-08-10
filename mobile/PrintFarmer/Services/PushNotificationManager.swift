@@ -157,22 +157,28 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         switch action {
         case .pauseJob:
             guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
-            await performPrinterCommand(named: "pause", userInfo: userInfo) { try await $0.pause(id: $1) }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "pause", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.pause(id: $1) }
         case .resumeJob:
             guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
-            await performPrinterCommand(named: "resume", userInfo: userInfo) { try await $0.resume(id: $1) }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "resume", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.resume(id: $1) }
         case .cancelJob:
             guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
-            await performPrinterCommand(named: "cancel", userInfo: userInfo) { try await $0.cancel(id: $1) }
+            let actionEpoch = configurationEpoch
+            await performPrinterCommand(named: "cancel", userInfo: userInfo, expectedEpoch: actionEpoch) { try await $0.cancel(id: $1) }
         case .snooze:
             guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
-            await performSnooze(userInfo: userInfo)
+            let actionEpoch = configurationEpoch
+            await performSnooze(userInfo: userInfo, expectedEpoch: actionEpoch)
         case .openSwap:
             // Foreground action (#1321): behaves like the existing tap-to-open
             // deep-link routing so it lands on the printer detail where the
             // guided filament swap lives — mirrors `didReceive response:`'s
             // default-tap branch below.
-            guard isNotificationOriginValid(userInfo, requireOrigin: true) else { return }
+            let actionEpoch = configurationEpoch
+            guard isNotificationOriginValid(userInfo, requireOrigin: true),
+                  configurationEpoch == actionEpoch else { return }
             NotificationCenter.default.post(
                 name: .pushNotificationTapped,
                 object: nil,
@@ -185,6 +191,8 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         _ userInfo: [AnyHashable: Any],
         requireOrigin: Bool
     ) -> Bool {
+        // Legacy origin-less payloads remain parseable for passive deep links,
+        // but mutating actions fail closed because they cannot prove ownership.
         guard requireOrigin else { return true }
         guard let serverRegistry else {
             logger.warning("Job-attention action ignored — server context is unavailable")
@@ -211,6 +219,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private func performPrinterCommand(
         named actionName: String,
         userInfo: [AnyHashable: Any],
+        expectedEpoch: Int,
         _ operation: (any PrinterServiceProtocol, UUID) async throws -> CommandResult
     ) async {
         guard let printerService = jobAttentionPrinterService else {
@@ -222,6 +231,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.warning("Job-attention \(actionName) action ignored — missing/invalid printerId")
             return
         }
+        guard configurationEpoch == expectedEpoch else {
+            logger.warning("Job-attention \(actionName) action ignored — server changed before execution")
+            return
+        }
         do {
             _ = try await operation(printerService, printerId)
             logger.info("Job-attention \(actionName) action executed for printer \(printerId)")
@@ -230,13 +243,17 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
-    private func performSnooze(userInfo: [AnyHashable: Any]) async {
+    private func performSnooze(userInfo: [AnyHashable: Any], expectedEpoch: Int) async {
         guard let attentionService = jobAttentionAttentionService else {
             logger.warning("Job-attention snooze action ignored — no attention service configured")
             return
         }
         guard let itemId = userInfo["itemId"] as? String, !itemId.isEmpty else {
             logger.warning("Job-attention snooze action ignored — missing itemId")
+            return
+        }
+        guard configurationEpoch == expectedEpoch else {
+            logger.warning("Job-attention snooze action ignored — server changed before execution")
             return
         }
         do {

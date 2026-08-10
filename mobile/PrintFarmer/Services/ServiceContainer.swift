@@ -1027,6 +1027,11 @@ final class ServiceContainer: @unchecked Sendable {
             printerService: self.printerService,
             attentionService: self.attentionService
         )
+        if let token = PushNotificationManager.shared.deviceToken, server != nil {
+            Task {
+                await PushNotificationManager.shared.registerTokenWithServer(token)
+            }
+        }
         #endif
         return client
     }
