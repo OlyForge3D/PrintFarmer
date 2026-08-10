@@ -116,6 +116,17 @@ struct PFarmApp: App {
                             printerService: services.printerService,
                             attentionService: services.attentionService
                         )
+                        if let userInfo = PushNotificationManager.shared.consumePendingRemoteTap() {
+                            router.routeNotification(
+                                userInfo: userInfo,
+                                activeOriginServerId: serverRegistry.activeServer?.originServerId
+                            )
+                        }
+                        if let userInfo = PushNotificationManager.shared.consumePendingLocalTap(),
+                           let printerIdString = userInfo["printerId"] as? String,
+                           let printerId = UUID(uuidString: printerIdString) {
+                            router.navigate(to: .printerReady(id: printerId))
+                        }
                         await PushNotificationManager.shared.refreshPermissionStatus()
                         if PushNotificationManager.shared.pushEnabled {
                             await PushNotificationManager.shared.requestPermissionAndRegister()

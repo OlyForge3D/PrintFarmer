@@ -56,6 +56,8 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private var configurationEpoch = 0
     private var allowsUnscopedRegistration = true
     private var registrationTask: Task<Void, Never>?
+    private var pendingRemoteTap: [AnyHashable: Any]?
+    private var pendingLocalTap: [AnyHashable: Any]?
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -397,6 +399,30 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
     }
 
+    @MainActor
+    func consumePendingRemoteTap() -> [AnyHashable: Any]? {
+            defer { pendingRemoteTap = nil }
+            return pendingRemoteTap
+        }
+
+    @MainActor
+    func consumePendingLocalTap() -> [AnyHashable: Any]? {
+            defer { pendingLocalTap = nil }
+            return pendingLocalTap
+        }
+
+    @MainActor
+    private func enqueueRemoteTap(_ userInfo: [AnyHashable: Any]) {
+            pendingRemoteTap = userInfo
+            NotificationCenter.default.post(name: .pushNotificationTapped, object: nil, userInfo: userInfo)
+        }
+
+    @MainActor
+    private func enqueueLocalTap(_ userInfo: [AnyHashable: Any]) {
+            pendingLocalTap = userInfo
+            NotificationCenter.default.post(name: .localNotificationTapped, object: nil, userInfo: userInfo)
+    }
+
     /// Unregister the device token from the server (e.g., on logout).
     @discardableResult
     func unregisterFromServer(clearLocalToken: Bool = true) async -> Bool {
@@ -480,18 +506,20 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
             let identifier = response.notification.request.identifier
             // Identifier format: "pending-ready-{UUID}"
             let printerId = identifier.replacingOccurrences(of: "pending-ready-", with: "")
-            NotificationCenter.default.post(
-                name: .localNotificationTapped,
-                object: nil,
-                userInfo: ["tab": "printers", "printerId": printerId]
-            )
+            Task { @MainActor in
+                PushNotificationManager.shared.enqueueLocalTap(
+                    ["tab": "printers", "printerId": printerId]
+                )
+                completionHandler()
+            }
+            return
         } else {
             // Remote push notification — deep-link handling
-            NotificationCenter.default.post(
-                name: .pushNotificationTapped,
-                object: nil,
-                userInfo: userInfo
-            )
+            Task { @MainActor in
+                PushNotificationManager.shared.enqueueRemoteTap(userInfo)
+                completionHandler()
+            }
+            return
         }
 
         completionHandler()
