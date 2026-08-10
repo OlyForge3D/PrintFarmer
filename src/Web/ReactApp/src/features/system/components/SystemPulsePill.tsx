@@ -357,7 +357,14 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
         >
           <span className={clsx('flex items-center', compact ? 'gap-1.5' : 'gap-2')}>
             <span className={clsx('h-2.5 w-2.5 rounded-full', errorTone.dotClassName)} aria-hidden="true" />
-            <span className={compact ? 'sr-only' : undefined}>System</span>
+            {/* `compact` only ever selects the mobile (`lg:hidden`) header
+                instance, which itself renders across the full 0-1023px
+                range — that includes roomy tablet widths like 768px. Hiding
+                the label there is unnecessary and would be a visible
+                regression on wider screens, so the hide is driven by a CSS
+                breakpoint (`md:`, 768px) rather than the JS `compact` flag
+                alone: hidden below 768px, always shown at 768px and up. */}
+            <span className={compact ? 'sr-only md:not-sr-only' : undefined}>System</span>
           </span>
         </Button>
       </div>
@@ -395,7 +402,11 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
           <span aria-hidden="true" className="flex items-center text-current/80">
             <ActivityIcon className="h-3.5 w-3.5" />
           </span>
-          <span className={compact ? 'sr-only' : undefined}>System</span>
+          {/* See the error-branch comment above: the hide is CSS-driven
+              (`md:not-sr-only`) so the label reappears at 768px+ even
+              though `compact` is a static prop tied to the mobile header
+              instance, not to the actual rendered viewport width. */}
+          <span className={compact ? 'sr-only md:not-sr-only' : undefined}>System</span>
           <span className="sr-only">, {tone.label} health</span>
         </span>
       </Button>

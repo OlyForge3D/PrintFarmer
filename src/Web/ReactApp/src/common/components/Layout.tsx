@@ -1019,6 +1019,7 @@ export function Layout() {
             </div>
             <FloatingControlBar
               mobile
+              compact
               isAuthenticated={isAuthenticated}
               userName={user?.username}
               userMenuOpen={userMenuOpen}

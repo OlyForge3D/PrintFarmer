@@ -38,25 +38,30 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
       const header = page.locator('header:visible').first();
       await expect(header, `Header not visible at ${vp.name}`).toBeVisible();
 
+      // All three controls named in the issue's acceptance criteria must be
+      // visible and fully within the viewport — none of these are optional,
+      // so no assertion here is skipped based on a runtime visibility check.
+      const systemStatusButton = page.getByRole('button', { name: /system/i });
       const notificationButton = page.getByRole('button', { name: /notifications/i });
       const accountMenuButton = page.getByRole('button', { name: /account menu/i });
-      await expect(accountMenuButton, `Account menu button not visible at ${vp.name}`).toBeVisible();
 
-      for (const control of [notificationButton, accountMenuButton]) {
-        if (!(await control.isVisible().catch(() => false))) {
-          continue;
-        }
+      for (const [label, control] of [
+        ['System status', systemStatusButton],
+        ['Notification bell', notificationButton],
+        ['Account menu', accountMenuButton],
+      ] as const) {
+        await expect(control, `${label} control not visible at ${vp.name}`).toBeVisible();
 
         const box = await control.boundingBox();
-        expect(box, `Control has no bounding box at ${vp.name}`).not.toBeNull();
+        expect(box, `${label} control has no bounding box at ${vp.name}`).not.toBeNull();
         if (box) {
-          expect(box.x, `Control starts left of viewport at ${vp.name}`).toBeGreaterThanOrEqual(-1);
-          expect(box.x + box.width, `Control extends past viewport at ${vp.name}`).toBeLessThanOrEqual(vp.width + 1);
+          expect(box.x, `${label} control starts left of viewport at ${vp.name}`).toBeGreaterThanOrEqual(-1);
+          expect(box.x + box.width, `${label} control extends past viewport at ${vp.name}`).toBeLessThanOrEqual(vp.width + 1);
         }
       }
 
-      // The account menu must open and remain reachable (pointer/keyboard) —
-      // its dropdown panel is what previously extended past the viewport.
+      // The account menu must open and remain reachable by pointer — its
+      // dropdown panel is what previously extended past the viewport.
       await accountMenuButton.click();
       const menu = page.getByRole('menu', { name: /account menu/i });
       await expect(menu, `Account menu panel did not open at ${vp.name}`).toBeVisible();
@@ -69,6 +74,17 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
       }
 
       await page.keyboard.press('Escape');
+      await expect(menu, `Account menu panel did not close on Escape at ${vp.name}`).not.toBeVisible();
+
+      // Keyboard reachability: the account control must actually receive
+      // keyboard focus and be operable with Enter, not just clickable, per
+      // the "reachable by pointer, keyboard, and touch" acceptance criterion.
+      await accountMenuButton.focus();
+      await expect(accountMenuButton, `Account menu control did not receive keyboard focus at ${vp.name}`).toBeFocused();
+      await page.keyboard.press('Enter');
+      await expect(menu, `Account menu panel did not open via keyboard at ${vp.name}`).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(menu, `Account menu panel did not close via keyboard at ${vp.name}`).not.toBeVisible();
     });
   }
 
@@ -82,6 +98,7 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
     );
     expect(hasHorizontalScroll, 'Unexpected horizontal scroll at 768px').toBeFalsy();
 
+    const systemStatusButton = page.getByRole('button', { name: /system/i });
     const accountMenuButton = page.getByRole('button', { name: /account menu/i });
     await expect(accountMenuButton, 'Account menu button not visible at 768px').toBeVisible();
 
@@ -90,5 +107,11 @@ test.describe('Header narrow viewport clipping — Emulator', () => {
     if (box) {
       expect(box.x + box.width, 'Account menu button extends past viewport at 768px').toBeLessThanOrEqual(768 + 1);
     }
+
+    // The mobile "compact" mode (which visually hides the "System" text
+    // label) must not leak onto the wide desktop header — its label stays
+    // visible here, matching pre-#1417 desktop behavior exactly.
+    await expect(systemStatusButton, 'System status control not visible at 768px').toBeVisible();
+    await expect(systemStatusButton.getByText('System', { exact: true })).toBeVisible();
   });
 });

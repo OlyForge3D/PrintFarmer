@@ -140,4 +140,57 @@ describe('SystemPulsePill', () => {
 
     expect(screen.getByRole('button', { name: /system status degraded/i })).toBeDisabled();
   });
+
+  describe('compact prop (issue #1417 narrow viewport fix)', () => {
+    it('keeps the "System" label visually present by default (not compact)', () => {
+      render(<SystemPulsePill />);
+
+      const label = screen.getByText('System');
+      expect(label).not.toHaveClass('sr-only');
+    });
+
+    it('visually hides the "System" label below the md breakpoint when compact, without removing it from the accessible name', () => {
+      render(<SystemPulsePill compact />);
+
+      // The accessible name must still resolve — sr-only hides visually,
+      // it must not strip the label from the accessibility tree.
+      const trigger = screen.getByRole('button', { name: /system/i });
+      expect(trigger).toBeInTheDocument();
+
+      const label = screen.getByText('System');
+      expect(label).toHaveClass('sr-only');
+      // `md:not-sr-only` is the CSS breakpoint escape hatch that keeps the
+      // label visible at 768px+ even though `compact` itself is a static
+      // prop tied to the mobile header instance (see SystemPulsePill.tsx).
+      expect(label).toHaveClass('md:not-sr-only');
+    });
+
+    it('applies the same compact label treatment to the degraded/error state pill', () => {
+      useQueryMock.mockReturnValue({
+        data: undefined,
+        error: new Error('boom'),
+      } as ReturnType<typeof useQuery>);
+
+      render(<SystemPulsePill compact onClick={vi.fn()} />);
+
+      const trigger = screen.getByRole('button', { name: /system status degraded/i });
+      expect(trigger).toBeInTheDocument();
+
+      const label = screen.getByText('System');
+      expect(label).toHaveClass('sr-only');
+      expect(label).toHaveClass('md:not-sr-only');
+    });
+
+    it('keeps the degraded/error state label visible by default (not compact)', () => {
+      useQueryMock.mockReturnValue({
+        data: undefined,
+        error: new Error('boom'),
+      } as ReturnType<typeof useQuery>);
+
+      render(<SystemPulsePill onClick={vi.fn()} />);
+
+      const label = screen.getByText('System');
+      expect(label).not.toHaveClass('sr-only');
+    });
+  });
 });

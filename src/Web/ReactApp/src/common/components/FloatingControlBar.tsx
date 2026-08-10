@@ -33,6 +33,13 @@ const MENU_PANEL_CLASS_NAME = 'absolute right-0 top-full z-10 mt-3 w-64 max-w-[c
 
 interface FloatingControlBarProps {
   mobile?: boolean;
+  // Distinct from `mobile`: `mobile` selects the inline (vs. floating)
+  // layout, and is also `true` for the in-header desktop variant at `lg:flex`
+  // widths (see Layout.tsx). `compact` is the narrow-viewport signal that
+  // shrinks `SystemPulsePill` — callers must pass it explicitly rather than
+  // relying on `mobile`, or it leaks the compact styling onto wide desktop
+  // headers too (issue #1417 review feedback).
+  compact?: boolean;
   isAuthenticated: boolean;
   userName?: string | null;
   userMenuOpen: boolean;
@@ -47,6 +54,7 @@ interface FloatingControlBarProps {
 
 export function FloatingControlBar({
   mobile = false,
+  compact = false,
   isAuthenticated,
   userName,
   userMenuOpen,
@@ -77,7 +85,7 @@ export function FloatingControlBar({
 
   const bar = (
     <div className={mobile ? MOBILE_BAR_CLASS_NAME : FLOATING_BAR_CLASS_NAME}>
-      <SystemPulsePill onClick={onViewSystemStatus} compact={mobile} />
+      <SystemPulsePill onClick={onViewSystemStatus} compact={compact} />
       {isAuthenticated && <NotificationBell buttonClassName={ICON_BUTTON_CLASS_NAME} />}
 
       <div className="relative">
