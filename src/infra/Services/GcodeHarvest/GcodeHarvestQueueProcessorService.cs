@@ -106,7 +106,7 @@ public class GcodeHarvestQueueProcessorService(
                     logger.LogInformation("xxx_CHECKPOINT_5: About to invoke StartHarvestAsync");
                     logger.LogError("[DIAGNOSTIC] About to call StartHarvestAsync for queue item {QueueItemId}", queueItem.Id);
                     logger.LogInformation("xxx_CHECKPOINT_5b: After error log");
-                    object? result = (object?)await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
+                    object? result = await (dynamic)startMethod.Invoke(harvestService, new object[] { parameters, stoppingToken })!;
                     logger.LogError("[DIAGNOSTIC] StartHarvestAsync returned result = {ResultType}", result == null ? "NULL" : result.GetType().FullName);
 
                     // Extract result properties if available

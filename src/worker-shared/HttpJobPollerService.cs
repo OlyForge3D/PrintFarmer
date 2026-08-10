@@ -926,7 +926,7 @@ public abstract class HttpJobPollerService(
                         JsonValueKind.True => "1",
                         JsonValueKind.False => "0",
                         JsonValueKind.Number => prop.Value.GetRawText(),
-                        _ => (object)prop.Value.GetRawText()
+                        _ => prop.Value.GetRawText()
                     };
                     applied++;
                 }

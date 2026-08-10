@@ -323,7 +323,7 @@ public class JobDispatchService(
 
         _ = await partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
 
-        foreach (Guid affectedPrinterId in new[] { originalPrinterId, (Guid?)printerId }
+        foreach (Guid affectedPrinterId in new[] { originalPrinterId, printerId }
                      .Where(value => value.HasValue)
                      .Select(value => value!.Value)
                      .Distinct())

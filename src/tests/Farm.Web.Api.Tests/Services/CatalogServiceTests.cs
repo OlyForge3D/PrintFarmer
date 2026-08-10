@@ -20,7 +20,7 @@ public class CatalogServiceTests
     public async Task GetManufacturersAsync_DelegatesToCacheProvider()
     {
         Mock<ICatalogCacheProvider> mockCacheProvider = new Mock<ICatalogCacheProvider>();
-        (IReadOnlyList<ManufacturerDto>, string?) expected = (new List<ManufacturerDto> { new ManufacturerDto(Guid.NewGuid(), "Test") } as IReadOnlyList<ManufacturerDto>, "etag1");
+        (IReadOnlyList<ManufacturerDto>, string?) expected = (new List<ManufacturerDto> { new ManufacturerDto(Guid.NewGuid(), "Test") }, "etag1");
         _ = mockCacheProvider.Setup(c => c.GetManufacturersAsync(It.IsAny<CancellationToken>())).ReturnsAsync(expected);
 
         Mock<INormalizationEventLogger> normLogger = new Mock<INormalizationEventLogger>();
