@@ -523,6 +523,16 @@ final class ServiceContainer: @unchecked Sendable {
     /// Replaces all services with demo implementations at runtime.
     func switchToDemo() async {
         let replayRevision = offlineWriteReplayAuthority.invalidate()
+        if activeServerID != nil {
+            guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    guard let self else { return }
+                    await self.switchToDemo()
+                }
+                return
+            }
+        }
         #if canImport(UIKit)
         // Invalidate real-server notification actions before the first await.
         PushNotificationManager.shared.configure(

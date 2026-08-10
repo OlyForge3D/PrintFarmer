@@ -748,6 +748,10 @@ struct AttentionView: View {
         guard let itemId = router.pendingAttentionItemId else {
             return
         }
+        guard feedViewModel.phase != .idle,
+              !(feedViewModel.phase == .loading && feedViewModel.snapshot == nil) else {
+            return
+        }
 
         if feedViewModel.groups.contains(where: { group in
             group.items.contains(where: { $0.id == itemId })
