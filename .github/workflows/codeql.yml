@@ -18,20 +18,130 @@ permissions:
   contents: read
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # select — reuses ci.yml's changed-path classifier (scripts/ci/select-dotnet-tests.sh)
+  # for its full-safe fallback (shared build config, CI/workflow edits, unmapped
+  # src/ paths, trusted pushes, workflow_dispatch all force a full run), then
+  # additionally scans the raw changed-file list for C#/JS-TS extensions
+  # directly. A path-classification bucket (`want_dotnet_build`/`want_frontend`)
+  # is not a safe proxy for "does CodeQL need to scan this language": those
+  # flags only cover `src/**`/`src/Web/**` respectively, while trackable
+  # JS/TS/C# sources also live outside those trees (e.g. `scripts/compliance/*.mjs`,
+  # `tools/*.js`, root-level `*.ts` configs). The extension scan is therefore
+  # the authoritative signal for gating each CodeQL leg; the selector script
+  # only supplies the full-safe fallback. schedule has no diff to compute
+  # against so it is force-treated as full-safe explicitly (the shared script
+  # only natively special-cases workflow_dispatch/trusted pushes), keeping the
+  # weekly scan and manual runs at full-matrix coverage.
+  # ---------------------------------------------------------------------------
+  select:
+    name: Select affected languages
+    runs-on: ubuntu-latest
+    outputs:
+      codeql_matrix: ${{ steps.langs.outputs.codeql_matrix }}
+      reason: ${{ steps.selector.outputs.reason }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Compute change set
+        id: diff
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+          OUT_FILE: ${{ runner.temp }}/changed.z
+        run: bash scripts/ci/compute-change-set.sh
+
+      - name: Run selector
+        id: selector
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
+          CHANGED_FILES_FROM_Z: ${{ steps.diff.outputs.changed_file }}
+          # select-dotnet-tests.sh only special-cases workflow_dispatch/trusted
+          # pushes as full-safe; schedule has no diff to compute against, so
+          # force full-safe here to preserve unconditional weekly scans.
+          FORCE_FULL_SAFE: ${{ github.event_name == 'schedule' && 'schedule' || steps.diff.outputs.force_full_safe }}
+        run: bash scripts/ci/select-dotnet-tests.sh
+
+      - name: Detect touched languages
+        id: langs
+        env:
+          CHANGED_FILES_FROM_Z: ${{ steps.diff.outputs.changed_file }}
+          # full_matrix already folds in every full-safe reason (shared
+          # config, CI/workflow edits, unmapped src/ paths, trusted pushes,
+          # workflow_dispatch, forced schedule, diff-load failure).
+          FULL_MATRIX: ${{ steps.selector.outputs.full_matrix }}
+        run: |
+          set -uo pipefail
+          want_csharp="false"
+          want_js="false"
+          if [[ "$FULL_MATRIX" == "true" ]]; then
+            want_csharp="true"
+            want_js="true"
+          else
+            f="${CHANGED_FILES_FROM_Z:-}"
+            if [[ -n "$f" && -r "$f" ]]; then
+              while IFS= read -r -d '' p; do
+                [[ -z "$p" ]] && continue
+                case "$p" in
+                  *.cs|*.csproj|*.sln) want_csharp="true" ;;
+                esac
+                case "$p" in
+                  *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx) want_js="true" ;;
+                esac
+              done < "$f"
+            fi
+          fi
+
+          items=""
+          first=1
+          if [[ "$want_csharp" == "true" ]]; then
+            items+='{"language":"csharp","build-mode":"manual"}'
+            first=0
+          fi
+          if [[ "$want_js" == "true" ]]; then
+            if (( first == 0 )); then items+=","; fi
+            items+='{"language":"javascript-typescript","build-mode":"none"}'
+          fi
+          matrix_json='{"include":['"$items"']}'
+
+          {
+            echo "want_csharp=$want_csharp"
+            echo "want_js=$want_js"
+            echo "codeql_matrix=$matrix_json"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish selection to summary
+        env:
+          SELECTOR_REASON: ${{ steps.selector.outputs.reason }}
+          WANT_CSHARP: ${{ steps.langs.outputs.want_csharp }}
+          WANT_JS: ${{ steps.langs.outputs.want_js }}
+        run: |
+          {
+            echo "## CodeQL selection"
+            printf -- '- reason: `%s`\n' "$SELECTOR_REASON"
+            printf -- '- csharp leg: `%s`\n' "$WANT_CSHARP"
+            printf -- '- javascript-typescript leg: `%s`\n' "$WANT_JS"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   analyze:
     name: Analyze (${{ matrix.language }})
+    needs: [select]
+    if: needs.select.outputs.codeql_matrix != '{"include":[]}'
     runs-on: ubuntu-latest
     permissions:
       security-events: write
       contents: read
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - language: csharp
-            build-mode: manual
-          - language: javascript-typescript
-            build-mode: none
+      matrix: ${{ fromJson(needs.select.outputs.codeql_matrix) }}
 
     steps:
       - name: Checkout
