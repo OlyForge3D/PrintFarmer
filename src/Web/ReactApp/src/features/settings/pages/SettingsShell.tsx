@@ -662,7 +662,6 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       <PageTemplate
         title={pageTitle}
         subtitle={pageDescription}
-        padding="px-0"
         showHeader
         fill
         parent={isAdminRoute ? ADMIN_HUB_PARENT : undefined}
