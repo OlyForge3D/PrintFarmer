@@ -479,9 +479,32 @@ public class PrintersController(
     /// <summary>
     /// Tests Moonraker connection by probing stock /printer/info and Snapmaker U1 /machine/system_info endpoints.
     /// </summary>
-    private static async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
+    private async Task<TestConnectionResponse> TestMoonrakerConnectionAsync(
         HttpClient httpClient, Uri serverUrl, int? backendPort, CancellationToken ct)
     {
+        if (backendPort.HasValue)
+        {
+            // MoonrakerOnboardingResolver dials the caller-supplied backendPort as its
+            // authoritative candidate before falling back to well-known ports. Re-vet the
+            // rewritten (same-host, different-port) URI so the guard checks the URI actually
+            // used to dial, consistent with the SDCP/FlashForge re-vet above.
+            Uri rewrittenUri = MoonrakerOnboardingResolver.BuildEndpointUri(
+                serverUrl, backendPort.Value, MoonrakerOnboardingResolver.PrinterInfoPath);
+            EgressCheckResult rewriteCheck = await _egressGuard.CheckAsync(rewrittenUri.ToString(), ct);
+            if (!rewriteCheck.IsAllowed)
+            {
+                _logger.LogWarning(
+                    "Connection test denied by egress guard for rewritten host {Host}: {Reason}",
+                    rewrittenUri.Host,
+                    rewriteCheck.DenyReason);
+                return new TestConnectionResponse
+                {
+                    Success = false,
+                    Message = "The requested server address is not allowed."
+                };
+            }
+        }
+
         try
         {
             MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(httpClient, serverUrl, backendPort, ct);
