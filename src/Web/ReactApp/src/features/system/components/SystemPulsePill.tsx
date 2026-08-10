@@ -56,6 +56,13 @@ interface UsageMeterProps {
 interface SystemPulsePillProps {
   onClick?: () => void;
   className?: string;
+  /**
+   * Hides the "System" label text (kept for screen readers), leaving only the
+   * status dot and icon. Used in the mobile header where the status,
+   * notification, and account controls compete for very little width
+   * (issue #1417).
+   */
+  compact?: boolean;
 }
 
 function clampPercentage(value: number): number {
@@ -201,7 +208,7 @@ function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
   );
 }
 
-export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {}) {
+export function SystemPulsePill({ onClick, className, compact = false }: SystemPulsePillProps = {}) {
   const { hasRole } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -341,15 +348,23 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
           onClick={onClick}
           title={usesExternalAction ? 'View system status' : 'System status degraded — unable to reach health endpoint'}
           className={clsx(
-            'h-8 rounded-sm border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em]',
+            'h-8 rounded-sm border text-[11px] font-semibold uppercase tracking-[0.18em]',
+            compact ? 'px-2' : 'px-2.5',
             errorTone.buttonClassName,
             className,
           )}
           aria-label={usesExternalAction ? 'System status degraded, view system status' : 'System status degraded'}
         >
-          <span className="flex items-center gap-2">
+          <span className={clsx('flex items-center', compact ? 'gap-1.5' : 'gap-2')}>
             <span className={clsx('h-2.5 w-2.5 rounded-full', errorTone.dotClassName)} aria-hidden="true" />
-            <span>System</span>
+            {/* `compact` only ever selects the mobile (`lg:hidden`) header
+                instance, which itself renders across the full 0-1023px
+                range — that includes roomy tablet widths like 768px. Hiding
+                the label there is unnecessary and would be a visible
+                regression on wider screens, so the hide is driven by a CSS
+                breakpoint (`md:`, 768px) rather than the JS `compact` flag
+                alone: hidden below 768px, always shown at 768px and up. */}
+            <span className={compact ? 'sr-only md:not-sr-only' : undefined}>System</span>
           </span>
         </Button>
       </div>
@@ -376,17 +391,22 @@ export function SystemPulsePill({ onClick, className }: SystemPulsePillProps = {
         aria-controls={!usesExternalAction && isOpen ? dialogId : undefined}
         title={usesExternalAction ? `View system status — ${tone.label}` : `System pulse — ${tone.label}`}
         className={clsx(
-          'h-8 rounded-sm border px-2.5 text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
+          'h-8 rounded-sm border text-[11px] font-semibold uppercase tracking-[0.18em] transition-colors',
+          compact ? 'px-2' : 'px-2.5',
           tone.buttonClassName,
           className,
         )}
       >
-        <span className="flex items-center gap-2">
+        <span className={clsx('flex items-center', compact ? 'gap-1.5' : 'gap-2')}>
           <span className={clsx('h-2.5 w-2.5 rounded-full', tone.dotClassName)} aria-hidden="true" />
           <span aria-hidden="true" className="flex items-center text-current/80">
             <ActivityIcon className="h-3.5 w-3.5" />
           </span>
-          <span>System</span>
+          {/* See the error-branch comment above: the hide is CSS-driven
+              (`md:not-sr-only`) so the label reappears at 768px+ even
+              though `compact` is a static prop tied to the mobile header
+              instance, not to the actual rendered viewport width. */}
+          <span className={compact ? 'sr-only md:not-sr-only' : undefined}>System</span>
           <span className="sr-only">, {tone.label} health</span>
         </span>
       </Button>

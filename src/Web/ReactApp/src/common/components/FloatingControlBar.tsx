@@ -23,13 +23,23 @@ import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
 // linter could not.
 const DESKTOP_WRAPPER_CLASS_NAME = 'pointer-events-none fixed right-4 top-4 z-40 hidden lg:block';
 const FLOATING_BAR_CLASS_NAME = 'pointer-events-auto flex items-center gap-1.5 rounded-lg border border-pf-border/70 bg-pf-bg-1/72 p-2 shadow-[0_18px_48px_-26px_rgba(0,0,0,0.8)] ring-1 ring-black/10 backdrop-blur-sm';
-const MOBILE_BAR_CLASS_NAME = 'relative z-40 flex items-center gap-1.5';
+const MOBILE_BAR_CLASS_NAME = 'relative z-40 flex shrink-0 items-center gap-1';
 const ICON_BUTTON_CLASS_NAME = 'h-9 w-9 rounded-full p-0 text-pf-text-primary transition-colors hover:bg-pf-bg-2/80 focus-visible:ring-2 focus-visible:ring-pf-accent';
 const ACCOUNT_BUTTON_CLASS_NAME = 'h-9 rounded-sm px-2.5 text-pf-text-primary transition-colors hover:bg-pf-bg-2/80 focus-visible:ring-2 focus-visible:ring-pf-accent';
-const MENU_PANEL_CLASS_NAME = 'absolute right-0 top-full z-10 mt-3 w-64 overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-1/96 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-sm';
+// `max-w-[calc(100vw-1rem)]` keeps the panel inside the viewport even when the
+// account button itself sits close to a narrow screen's edge (issue #1417 —
+// the fixed `w-64` used to push 49px past the viewport at 390px wide).
+const MENU_PANEL_CLASS_NAME = 'absolute right-0 top-full z-10 mt-3 w-64 max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-pf-border/80 bg-pf-bg-1/96 shadow-[0_22px_60px_-28px_rgba(0,0,0,0.85)] backdrop-blur-sm';
 
 interface FloatingControlBarProps {
   mobile?: boolean;
+  // Distinct from `mobile`: `mobile` selects the inline (vs. floating)
+  // layout, and is also `true` for the in-header desktop variant at `lg:flex`
+  // widths (see Layout.tsx). `compact` is the narrow-viewport signal that
+  // shrinks `SystemPulsePill` — callers must pass it explicitly rather than
+  // relying on `mobile`, or it leaks the compact styling onto wide desktop
+  // headers too (issue #1417 review feedback).
+  compact?: boolean;
   isAuthenticated: boolean;
   userName?: string | null;
   userMenuOpen: boolean;
@@ -44,6 +54,7 @@ interface FloatingControlBarProps {
 
 export function FloatingControlBar({
   mobile = false,
+  compact = false,
   isAuthenticated,
   userName,
   userMenuOpen,
@@ -74,7 +85,7 @@ export function FloatingControlBar({
 
   const bar = (
     <div className={mobile ? MOBILE_BAR_CLASS_NAME : FLOATING_BAR_CLASS_NAME}>
-      <SystemPulsePill onClick={onViewSystemStatus} />
+      <SystemPulsePill onClick={onViewSystemStatus} compact={compact} />
       {isAuthenticated && <NotificationBell buttonClassName={ICON_BUTTON_CLASS_NAME} />}
 
       <div className="relative">
