@@ -571,6 +571,15 @@ final class ServiceContainer: @unchecked Sendable {
         self.activeServerID = nil
         self.activeServerGeneration = activeGeneration.advance()
         #if canImport(UIKit)
+        PushNotificationManager.shared.configure(
+            notificationService: self.notificationService,
+            serverRegistry: nil,
+            serverID: nil
+        )
+        PushNotificationManager.shared.configureActionHandling(
+            printerService: self.printerService,
+            attentionService: self.attentionService
+        )
         self.qrScannerService = nil
         self.barcodeScannerService = nil
         self.nfcService = nil
