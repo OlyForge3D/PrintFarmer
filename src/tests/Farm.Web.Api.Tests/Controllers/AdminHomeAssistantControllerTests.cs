@@ -14,18 +14,34 @@ namespace Farm.Web.Api.Tests.Controllers;
 /// Unit tests for <see cref="AdminHomeAssistantController"/> covering settings CRUD,
 /// connection test, and entity discovery endpoints.
 /// </summary>
-public class AdminHomeAssistantControllerTests
+public class AdminHomeAssistantControllerTests : IDisposable
 {
     private readonly Mock<ISettingsService> _settingsService = new();
     private readonly Mock<ISensitiveDataProtector> _dataProtector = new();
     private readonly Mock<IHttpClientFactory> _httpClientFactory = new();
     private readonly Mock<HttpMessageHandler> _httpHandler = new();
+    private readonly List<HttpClient> _httpClientsToDispose = [];
+    private readonly List<HttpResponseMessage> _responsesToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
 
     private AdminHomeAssistantController CreateController()
     {
-#pragma warning disable CA2000
         HttpClient client = new(_httpHandler.Object);
-#pragma warning restore CA2000
+        _httpClientsToDispose.Add(client);
         _httpClientFactory.Setup(f => f.CreateClient("SmartPlug")).Returns(client);
 
         return new AdminHomeAssistantController(
@@ -254,12 +270,15 @@ public class AdminHomeAssistantControllerTests
             ]
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(statesJson, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
+
         _httpHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(statesJson, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         AdminHomeAssistantController controller = CreateController();
 
@@ -312,9 +331,12 @@ public class AdminHomeAssistantControllerTests
             });
         _dataProtector.Setup(p => p.Unprotect("enc:tok")).Returns("mytoken");
 
+        HttpResponseMessage response = new(HttpStatusCode.Unauthorized);
+        _responsesToDispose.Add(response);
+
         _httpHandler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.Unauthorized));
+            .ReturnsAsync(response);
 
         AdminHomeAssistantController controller = CreateController();
 

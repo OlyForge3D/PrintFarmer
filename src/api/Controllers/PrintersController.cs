@@ -494,7 +494,7 @@ public class PrintersController(
             Timeout = TimeSpan.FromSeconds(10)
         };
 
-        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        using var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
 
         try
         {
@@ -550,7 +550,7 @@ public class PrintersController(
             Path = "/api/version"
         };
 
-        var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
+        using var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
         request.Headers.Add("X-Api-Key", apiKey);
 
         try

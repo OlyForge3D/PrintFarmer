@@ -20,8 +20,20 @@ using Xunit;
 
 namespace Farm.Slicer.Module.Tests.Services;
 
-public class ModelUploadStreamingTests
+public class ModelUploadStreamingTests : IDisposable
 {
+    private readonly List<MemoryStream> _streamsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
     [Fact]
     public async Task UploadModelAsync_WithClientPng_StreamsHashAndStoresThumbnailAtomically()
     {
@@ -76,7 +88,9 @@ public class ModelUploadStreamingTests
     public async Task UploadModelAsync_WithOversizedThumbnailBytes_RejectsAndCleansArtifacts()
     {
         const long oversizedLength = (10 * 1024 * 1024) + 1;
-        FormFile oversizedThumbnail = new(new MemoryStream([0x89]), 0, oversizedLength, "thumbnailFile", "thumbnail.png");
+        MemoryStream oversizedStream = new([0x89]);
+        _streamsToDispose.Add(oversizedStream);
+        FormFile oversizedThumbnail = new(oversizedStream, 0, oversizedLength, "thumbnailFile", "thumbnail.png");
         UploadFixture fixture = CreateFixture();
 
         ArgumentException exception = await Assert.ThrowsAsync<ArgumentException>(() => fixture.Service.UploadModelAsync(
@@ -436,12 +450,13 @@ public class ModelUploadStreamingTests
             () => addedModel);
     }
 
-    private static IFormFile CreateFormFile(string content, string fileName)
+    private IFormFile CreateFormFile(string content, string fileName)
         => CreateFormFile(Encoding.UTF8.GetBytes(content), fileName);
 
-    private static IFormFile CreateFormFile(byte[] content, string fileName)
+    private IFormFile CreateFormFile(byte[] content, string fileName)
     {
         MemoryStream stream = new(content);
+        _streamsToDispose.Add(stream);
         return new FormFile(stream, 0, stream.Length, "file", fileName);
     }
 

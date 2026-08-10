@@ -14,8 +14,20 @@ namespace Farm.Web.Api.Tests.Services.Notifications.NativePush;
 /// Verifies the relay sender's HTTP contract: bearer auth, JSON envelope shape, and the
 /// 2xx / 410 / 4xx / 5xx / network response translation matrix.
 /// </summary>
-public sealed class RelayNativePushSenderTests
+public sealed class RelayNativePushSenderTests : IDisposable
 {
+    private readonly List<HttpClient> _httpClientsToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
     private static readonly Guid SampleServerId = Guid.Parse("11111111-2222-3333-4444-555555555555");
 
     private static readonly NativePushEnvelope Sample = new(
@@ -274,13 +286,15 @@ public sealed class RelayNativePushSenderTests
         },
     };
 
-    private static RelayNativePushSender CreateSender(
+    private RelayNativePushSender CreateSender(
         NativePushSettings settings,
         out StubHttpClientFactory factory,
         Func<HttpRequestMessage, HttpResponseMessage>? responder = null)
     {
         var handler = new StubHandler(responder ?? (_ => new HttpResponseMessage(HttpStatusCode.OK)));
-        factory = new StubHttpClientFactory(new HttpClient(handler) { BaseAddress = null });
+        HttpClient httpClient = new HttpClient(handler) { BaseAddress = null };
+        _httpClientsToDispose.Add(httpClient);
+        factory = new StubHttpClientFactory(httpClient);
         IOptionsMonitor<NativePushSettings> monitor = new StaticOptionsMonitor(settings);
         return new RelayNativePushSender(factory, monitor, NullLogger<RelayNativePushSender>.Instance);
     }

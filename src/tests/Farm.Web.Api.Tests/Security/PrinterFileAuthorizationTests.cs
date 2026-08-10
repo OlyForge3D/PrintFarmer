@@ -46,13 +46,13 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime
             $"/api/printers/{printerId}/files");
         HttpResponseMessage download = await client.GetAsync(
             $"/api/printers/{printerId}/files/download?filename=secret.gcode");
-        HttpResponseMessage delete = await client.SendAsync(
-            new HttpRequestMessage(
-                HttpMethod.Delete,
-                $"/api/printers/{printerId}/files")
-            {
-                Content = JsonContent.Create(new { fileName = "secret.gcode" }),
-            });
+        using HttpRequestMessage deleteRequest = new(
+            HttpMethod.Delete,
+            $"/api/printers/{printerId}/files")
+        {
+            Content = JsonContent.Create(new { fileName = "secret.gcode" }),
+        };
+        HttpResponseMessage delete = await client.SendAsync(deleteRequest);
 
         list.StatusCode.Should().Be(HttpStatusCode.NotFound);
         download.StatusCode.Should().Be(HttpStatusCode.NotFound);
@@ -82,13 +82,13 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime
             .ReturnsAsync(true);
         using HttpClient client = CreateOperatorClient(actorId);
 
-        HttpResponseMessage response = await client.SendAsync(
-            new HttpRequestMessage(
-                HttpMethod.Delete,
-                $"/api/printers/{printerId}/files")
-            {
-                Content = JsonContent.Create(new { fileName = "reviewed.gcode" }),
-            });
+        using HttpRequestMessage deleteRequest = new(
+            HttpMethod.Delete,
+            $"/api/printers/{printerId}/files")
+        {
+            Content = JsonContent.Create(new { fileName = "reviewed.gcode" }),
+        };
+        HttpResponseMessage response = await client.SendAsync(deleteRequest);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         _printers.Verify(service => service.DeletePrinterFileAsync(
@@ -119,13 +119,13 @@ public sealed class PrinterFileAuthorizationTests : IAsyncLifetime
                 "secret=/private/path?token=do-not-return"));
         using HttpClient client = CreateOperatorClient(actorId);
 
-        HttpResponseMessage response = await client.SendAsync(
-            new HttpRequestMessage(
-                HttpMethod.Delete,
-                $"/api/printers/{printerId}/files")
-            {
-                Content = JsonContent.Create(new { fileName = "reviewed.gcode" }),
-            });
+        using HttpRequestMessage deleteRequest = new(
+            HttpMethod.Delete,
+            $"/api/printers/{printerId}/files")
+        {
+            Content = JsonContent.Create(new { fileName = "reviewed.gcode" }),
+        };
+        HttpResponseMessage response = await client.SendAsync(deleteRequest);
 
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         string body = await response.Content.ReadAsStringAsync();

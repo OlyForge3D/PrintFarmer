@@ -1237,14 +1237,14 @@ public sealed class SdcpClientParsingTests
         // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
         for (int attempt = 0; attempt < 10; attempt++)
         {
-            TcpListener listener = new(IPAddress.Loopback, 0);
+            using TcpListener listener = new(IPAddress.Loopback, 0);
             listener.Start();
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();
 
             try
             {
-                TcpListener verify = new(IPAddress.Loopback, port);
+                using TcpListener verify = new(IPAddress.Loopback, port);
                 verify.Start();
                 verify.Stop();
                 return port;
@@ -1263,10 +1263,29 @@ public sealed class SdcpClientParsingTests
     /// </summary>
     private sealed class SuccessfulHttpHandler : HttpMessageHandler
     {
+        private readonly List<HttpResponseMessage> _responses = [];
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+            CancellationToken cancellationToken)
+        {
+            HttpResponseMessage response = new(HttpStatusCode.OK);
+            _responses.Add(response);
+            return Task.FromResult(response);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class SdcpTestEnvironment(

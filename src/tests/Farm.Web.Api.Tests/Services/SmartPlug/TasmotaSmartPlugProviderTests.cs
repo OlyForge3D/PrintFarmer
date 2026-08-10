@@ -12,14 +12,33 @@ namespace Farm.Web.Api.Tests.Services.SmartPlug;
 /// <summary>
 /// Unit tests for <see cref="TasmotaSmartPlugProvider"/> using mocked HTTP handlers.
 /// </summary>
-public class TasmotaSmartPlugProviderTests
+public class TasmotaSmartPlugProviderTests : IDisposable
 {
-    private static (TasmotaSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider()
+    private readonly List<HttpClient> _httpClientsToDispose = [];
+    private readonly List<HttpResponseMessage> _responsesToDispose = [];
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private (TasmotaSmartPlugProvider provider, Mock<HttpMessageHandler> handler) CreateProvider()
     {
         Mock<HttpMessageHandler> handler = new(MockBehavior.Strict);
-#pragma warning disable CA2000
-        HttpClient httpClient = new(handler.Object);
-#pragma warning restore CA2000
+        // disposeHandler: false — the mocked handler has no Dispose(bool) setup, and under
+        // Strict mode disposing it via the HttpClient would throw a MockException.
+        HttpClient httpClient = new(handler.Object, disposeHandler: false);
+        _httpClientsToDispose.Add(httpClient);
 
         Mock<IHttpClientFactory> factory = new();
         factory.Setup(f => f.CreateClient("SmartPlug")).Returns(httpClient);
@@ -28,16 +47,19 @@ public class TasmotaSmartPlugProviderTests
         return (provider, handler);
     }
 
-    private static void SetupHandler(Mock<HttpMessageHandler> handler, HttpStatusCode status, string? json = null)
+    private void SetupHandler(Mock<HttpMessageHandler> handler, HttpStatusCode status, string? json = null)
     {
+        HttpResponseMessage response = new(status)
+        {
+            Content = json is not null
+                ? new StringContent(json, Encoding.UTF8, "application/json")
+                : new StringContent(string.Empty)
+        };
+        _responsesToDispose.Add(response);
+
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(status)
-            {
-                Content = json is not null
-                    ? new StringContent(json, Encoding.UTF8, "application/json")
-                    : new StringContent(string.Empty)
-            });
+            .ReturnsAsync(response);
     }
 
     [Fact]

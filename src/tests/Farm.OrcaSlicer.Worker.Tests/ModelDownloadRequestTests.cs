@@ -543,20 +543,37 @@ public sealed class ModelDownloadRequestTests : IDisposable
         Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> responder)
         : HttpMessageHandler
     {
+        private readonly List<HttpResponseMessage> _responses = [];
+
         public int RequestCount { get; private set; }
 
         public Uri? LastRequestUri { get; private set; }
 
         public List<Uri> RequestUris { get; } = [];
 
-        protected override Task<HttpResponseMessage> SendAsync(
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             RequestCount++;
             LastRequestUri = request.RequestUri;
             RequestUris.Add(request.RequestUri!);
-            return responder(request, cancellationToken);
+            HttpResponseMessage response = await responder(request, cancellationToken);
+            _responses.Add(response);
+            return response;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                foreach (HttpResponseMessage response in _responses)
+                {
+                    response.Dispose();
+                }
+            }
+
+            base.Dispose(disposing);
         }
     }
 

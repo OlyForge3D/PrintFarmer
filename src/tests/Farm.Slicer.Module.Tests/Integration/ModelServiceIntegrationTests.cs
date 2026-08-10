@@ -29,6 +29,7 @@ namespace Farm.Slicer.Module.Tests.Integration;
 public class ModelServiceIntegrationTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
+    private readonly List<MemoryStream> _streamsToDispose = [];
 
     public ModelServiceIntegrationTests()
     {
@@ -43,6 +44,13 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     public async Task DisposeAsync()
     {
         _factory?.Dispose();
+
+        foreach (MemoryStream stream in _streamsToDispose)
+        {
+            stream.Dispose();
+        }
+
+        await Task.CompletedTask;
     }
 
     /// <summary>
@@ -117,9 +125,12 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         string content = "mock stl content")
     {
         var memoryStream = new MemoryStream();
-        var writer = new StreamWriter(memoryStream);
-        writer.Write(content);
-        writer.Flush();
+        _streamsToDispose.Add(memoryStream);
+        using (var writer = new StreamWriter(memoryStream, System.Text.Encoding.UTF8, -1, leaveOpen: true))
+        {
+            writer.Write(content);
+            writer.Flush();
+        }
         memoryStream.Position = 0;
 
         var mock = new Mock<IFormFile>();

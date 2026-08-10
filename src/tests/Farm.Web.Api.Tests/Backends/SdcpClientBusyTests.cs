@@ -174,14 +174,14 @@ public sealed class SdcpClientBusyTests
         // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
         for (int attempt = 0; attempt < 10; attempt++)
         {
-            var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
             listener.Start();
             int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();
 
             try
             {
-                var verify = new System.Net.Sockets.TcpListener(IPAddress.Loopback, port);
+                using var verify = new System.Net.Sockets.TcpListener(IPAddress.Loopback, port);
                 verify.Start();
                 verify.Stop();
                 return port;

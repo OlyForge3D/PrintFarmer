@@ -16,12 +16,18 @@ public class ShellySmartPlugProviderTests : IDisposable
     // resource) but is still IDisposable and must outlive the provider for the whole test
     // method. Track and dispose it here instead of leaking it.
     private readonly List<HttpClient> _httpClientsToDispose = [];
+    private readonly List<HttpResponseMessage> _responsesToDispose = [];
 
     public void Dispose()
     {
         foreach (HttpClient client in _httpClientsToDispose)
         {
             client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
         }
 
         GC.SuppressFinalize(this);
@@ -63,12 +69,15 @@ public class ShellySmartPlugProviderTests : IDisposable
             }
             """;
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(gen2Json, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
+
         handler.Protected()
             .SetupSequence<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(gen2Json, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync("192.168.1.50", CancellationToken.None);
 
@@ -86,15 +95,20 @@ public class ShellySmartPlugProviderTests : IDisposable
 
         string gen1Json = """{"power":30.0,"is_valid":true,"total":5678}""";
 
+        HttpResponseMessage notFoundResponse = new(HttpStatusCode.NotFound);
+        HttpResponseMessage okResponse = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(gen1Json, Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(notFoundResponse);
+        _responsesToDispose.Add(okResponse);
+
         handler.Protected()
             .SetupSequence<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
             // Gen 2 endpoint returns 404
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.NotFound))
+            .ReturnsAsync(notFoundResponse)
             // Gen 1 endpoint returns data
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(gen1Json, Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(okResponse);
 
         PowerReading? reading = await provider.GetCurrentReadingAsync("192.168.1.50", CancellationToken.None);
 
@@ -124,12 +138,15 @@ public class ShellySmartPlugProviderTests : IDisposable
     {
         (ShellySmartPlugProvider provider, Mock<HttpMessageHandler> handler) = CreateProvider();
 
+        HttpResponseMessage response = new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"type":"SHPLG-S"}""", Encoding.UTF8, "application/json")
+        };
+        _responsesToDispose.Add(response);
+
         handler.Protected()
             .Setup<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(), ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent("""{"type":"SHPLG-S"}""", Encoding.UTF8, "application/json")
-            });
+            .ReturnsAsync(response);
 
         bool result = await provider.TestConnectionAsync("192.168.1.50", CancellationToken.None);
 

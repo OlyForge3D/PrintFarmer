@@ -17,9 +17,27 @@ namespace Farm.Web.Api.Tests.Services.Cameras;
 /// <summary>
 /// Unit tests for <see cref="Go2RtcService"/>.
 /// </summary>
-public class Go2RtcServiceTests
+public class Go2RtcServiceTests : IDisposable
 {
-    private static Go2RtcService CreateService(
+    private readonly List<HttpClient> _httpClientsToDispose = new();
+    private readonly List<HttpResponseMessage> _responsesToDispose = new();
+
+    public void Dispose()
+    {
+        foreach (HttpClient client in _httpClientsToDispose)
+        {
+            client.Dispose();
+        }
+
+        foreach (HttpResponseMessage response in _responsesToDispose)
+        {
+            response.Dispose();
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    private Go2RtcService CreateService(
         Go2RtcSettings? settings,
         HttpMessageHandler? httpHandler = null,
         Mock<ILogger<Go2RtcService>>? loggerMock = null)
@@ -30,8 +48,12 @@ public class Go2RtcServiceTests
         var factory = new Mock<IHttpClientFactory>(MockBehavior.Loose);
         if (httpHandler is not null)
         {
+            // disposeHandler: false — httpHandler may be a Strict-mode Moq mock with no
+            // Dispose(bool) setup; disposing it via the HttpClient would throw.
+            HttpClient httpClient = new(httpHandler, disposeHandler: false);
+            _httpClientsToDispose.Add(httpClient);
             factory.Setup(f => f.CreateClient(It.IsAny<string>()))
-                   .Returns(new HttpClient(httpHandler));
+                   .Returns(httpClient);
         }
 
         var logger = loggerMock ?? new Mock<ILogger<Go2RtcService>>(MockBehavior.Loose);
@@ -210,12 +232,14 @@ public class Go2RtcServiceTests
     {
         var cameraId = Guid.NewGuid();
         var handlerMock = new Mock<HttpMessageHandler>();
+        HttpResponseMessage response = new(HttpStatusCode.OK);
+        _responsesToDispose.Add(response);
         handlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+            .ReturnsAsync(response);
 
         var service = CreateService(
             new Go2RtcSettings { Enabled = true, BaseUrl = "http://go2rtc:1984" },
@@ -283,27 +307,31 @@ public class Go2RtcServiceTests
 
     #endregion
 
-    private static HttpMessageHandler CreateSuccessHandler()
+    private HttpMessageHandler CreateSuccessHandler()
     {
         var handlerMock = new Mock<HttpMessageHandler>();
+        HttpResponseMessage response = new(HttpStatusCode.OK);
+        _responsesToDispose.Add(response);
         handlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+            .ReturnsAsync(response);
         return handlerMock.Object;
     }
 
-    private static HttpMessageHandler CreateFailureHandler(HttpStatusCode statusCode)
+    private HttpMessageHandler CreateFailureHandler(HttpStatusCode statusCode)
     {
         var handlerMock = new Mock<HttpMessageHandler>();
+        HttpResponseMessage response = new(statusCode);
+        _responsesToDispose.Add(response);
         handlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",
                 ItExpr.IsAny<HttpRequestMessage>(),
                 ItExpr.IsAny<CancellationToken>())
-            .ReturnsAsync(new HttpResponseMessage(statusCode));
+            .ReturnsAsync(response);
         return handlerMock.Object;
     }
 }
