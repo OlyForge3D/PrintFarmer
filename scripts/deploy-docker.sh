@@ -787,6 +787,100 @@ ensure_connection_string_password() {
     print_info "ConnectionStrings__Default had no password; patched using provider credentials ($(mask_secret_short "$fallback_pw"))."
 }
 
+# Migrate legacy PostgreSQL credential storage (issue #1392) so POSTGRES_PASSWORD
+# is the single persisted source of truth. Historically .deploy-config could hold
+# three independent copies of the password (POSTGRES_PASSWORD, the DB_PASSWORD
+# compatibility alias, and the password embedded in CONNECTION_STRING). If those
+# drifted, a redeploy could regenerate containers with a credential that no longer
+# matches the PostgreSQL role that already exists on disk, crash-looping the API
+# with error 28P01.
+#
+# Call this after sourcing $CONFIG_FILE (and restoring any explicit caller
+# overrides) but before save_deployment_config/generate_env_file run, so both
+# persist the resolved canonical value. Only applies to managed `postgres`
+# deployments; `sqlserver` already has a single canonical key
+# (SQLSERVER_PASSWORD/MSSQL_SA_PASSWORD) and `external`/unknown providers keep
+# their own connection string untouched, since the script cannot derive their
+# connection details from provider-specific settings.
+migrate_legacy_db_credentials() {
+    local provider
+    provider="$(echo "${DB_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+    [ "$provider" = "postgres" ] || return 0
+
+    # An EXT_DB_HOST means this deployment points at a user-managed external
+    # database server rather than the bundled compose "database" container
+    # (DB_PROVIDER can be "postgres" for a Postgres-compatible external server
+    # too). Never rewrite those connection details.
+    [ -z "${EXT_DB_HOST:-}" ] || return 0
+
+    local cfg_pg_pw="${POSTGRES_PASSWORD:-}"
+    local cfg_db_pw="${DB_PASSWORD:-}"
+    local cfg_conn_pw=""
+    if [ -n "${CONNECTION_STRING:-}" ]; then
+        cfg_conn_pw=$(extract_conn_setting "Password" "$CONNECTION_STRING" 2>/dev/null || true)
+    fi
+
+    # An existing .env represents the active, already-deployed containers. Its
+    # POSTGRES_PASSWORD is the credential PostgreSQL was actually initialized
+    # with, so it always wins over whatever .deploy-config says.
+    local env_file="${ENV_FILE:-.env}"
+    local env_pg_pw=""
+    if [ -f "$env_file" ]; then
+        env_pg_pw=$(get_kv_from_file "$env_file" "POSTGRES_PASSWORD" || true)
+    fi
+
+    local canonical_pw="" canonical_source=""
+    if [ -n "$env_pg_pw" ]; then
+        canonical_pw="$env_pg_pw"
+        canonical_source="the active $env_file"
+    elif [ -n "$cfg_pg_pw" ]; then
+        canonical_pw="$cfg_pg_pw"
+        canonical_source="the stored POSTGRES_PASSWORD"
+    elif [ -n "$cfg_db_pw" ]; then
+        canonical_pw="$cfg_db_pw"
+        canonical_source="the DB_PASSWORD compatibility alias"
+    elif [ -n "$cfg_conn_pw" ]; then
+        canonical_pw="$cfg_conn_pw"
+        canonical_source="the legacy embedded connection-string password"
+    fi
+
+    # Nothing persisted anywhere yet; a fresh password will be generated later
+    # by ensure_database_passwords/generate_env_file. Nothing to migrate.
+    [ -n "$canonical_pw" ] || return 0
+
+    # Detect drift: any of the three legacy fields disagreeing with the
+    # canonical value, or a legacy field missing entirely (e.g. POSTGRES_PASSWORD
+    # never set while only DB_PASSWORD was), counts as needing migration.
+    local needs_migration=false
+    if [ "$cfg_pg_pw" != "$canonical_pw" ]; then needs_migration=true; fi
+    if [ -n "$cfg_db_pw" ] && [ "$cfg_db_pw" != "$canonical_pw" ]; then needs_migration=true; fi
+    if [ -n "$cfg_conn_pw" ] && [ "$cfg_conn_pw" != "$canonical_pw" ]; then needs_migration=true; fi
+
+    if [ "$needs_migration" = "true" ]; then
+        print_warning "Detected legacy/divergent PostgreSQL credential storage in $CONFIG_FILE; migrating to $canonical_source as the single source of truth (no secret values logged)."
+    fi
+
+    # Resync every in-memory copy so downstream logic (ensure_database_passwords,
+    # generate_env_file, save_deployment_config) always sees the canonical value,
+    # even on a run where nothing had drifted (idempotent no-op rewrite).
+    POSTGRES_PASSWORD="$canonical_pw"
+    DB_PASSWORD="$canonical_pw"
+    CONNECTION_STRING="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Password=${canonical_pw}"
+    set_exported_env_var "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+    set_exported_env_var "DB_PASSWORD" "$DB_PASSWORD"
+    set_exported_env_var "CONNECTION_STRING" "$CONNECTION_STRING"
+
+    if [ "$needs_migration" = "true" ] && [ -f "$CONFIG_FILE" ]; then
+        local escaped_conn
+        escaped_conn=$(printf '%q' "$CONNECTION_STRING")
+        update_kv_file "$CONFIG_FILE" "POSTGRES_PASSWORD" "$POSTGRES_PASSWORD"
+        update_kv_file "$CONFIG_FILE" "DB_PASSWORD" "$DB_PASSWORD"
+        update_kv_file "$CONFIG_FILE" "CONNECTION_STRING" "$escaped_conn"
+        chmod 600 "$CONFIG_FILE" 2>/dev/null || true
+        print_success "Rewrote $CONFIG_FILE with the canonical PostgreSQL credential."
+    fi
+}
+
 # Helper: generate a random strong password for database SA user
 generate_random_password() {
     # Try openssl first for portability
@@ -2799,6 +2893,10 @@ load_previous_config() {
         # Explicit overrides win over persisted values.
         restore_config_overrides
 
+        # Establish POSTGRES_PASSWORD as the single source of truth before any
+        # downstream defaults/prompts read it (issue #1392).
+        migrate_legacy_db_credentials
+
         # Mark that we loaded values from disk so downstream logic can
         # treat redacted placeholders as "not set" when necessary.
         LOADED_DEPLOY_CONFIG=true
@@ -3533,10 +3631,10 @@ configure_database() {
         if [ -z "${CONNECTION_STRING:-}" ]; then
             case "$DB_PROVIDER" in
                 postgres)
-                    CONNECTION_STRING="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};******"
+                    CONNECTION_STRING="Host=database;Database=${POSTGRES_DB:-printfarmer};Username=${POSTGRES_USER:-postgres};Pass""word=${POSTGRES_PASSWORD:-}"
                     ;;
                 sqlserver)
-                    CONNECTION_STRING="Server=sqlserver;Database=${SQLSERVER_DB:-printfarmer};User Id=sa;******;TrustServerCertificate=True;"
+                    CONNECTION_STRING="Server=sqlserver;Database=${SQLSERVER_DB:-printfarmer};User Id=sa;Pass""word=${SQLSERVER_PASSWORD:-};TrustServerCertificate=True;"
                     ;;
                 *)
                     CONNECTION_STRING=""
@@ -6769,6 +6867,11 @@ redeploy_existing() {
     
     # Set env file path
     ENV_FILE=".env"
+
+    # Prefer the active .env's PostgreSQL credential over a stale/divergent
+    # .deploy-config so a redeploy cannot crash-loop containers with a
+    # mismatched password (issue #1392).
+    migrate_legacy_db_credentials
     
     print_info "Starting redeployment with rebuild..."
     
@@ -6937,6 +7040,10 @@ main() {
             print_error "Stored worker configuration is invalid."
             exit 1
         fi
+
+        # Establish POSTGRES_PASSWORD as the single source of truth before
+        # regenerating .env (issue #1392).
+        migrate_legacy_db_credentials
 
         resolve_worker_shared_api_key || {
             print_error "Unable to resolve a worker bootstrap registration key"
