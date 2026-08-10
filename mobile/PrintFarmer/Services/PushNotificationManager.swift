@@ -342,17 +342,18 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.warning("No notification service configured — device token not sent to server")
             return
         }
-        guard allowsUnscopedRegistration || configuredServerID != nil else {
-            logger.warning("Device token registration ignored — no active server context")
-            return
-        }
-        if let configuredServerID {
-            guard serverRegistry?.activeServerID == configuredServerID else {
+        if let serverRegistry {
+            guard let configuredServerID,
+                  serverRegistry.activeServerID == configuredServerID else {
+                logger.warning("Device token registration ignored — no active server context")
+                return
+            }
+        } else {
+            guard allowsUnscopedRegistration else {
                 logger.warning("Device token registration ignored — no active server context")
                 return
             }
         }
-
         let initiatingServerID = configuredServerID
         let initiatingConfigurationEpoch = configurationEpoch
         do {
