@@ -420,9 +420,7 @@ final class ServiceContainer: @unchecked Sendable {
             attentionService: self.attentionService
         )
         if let token = PushNotificationManager.shared.deviceToken, activeServer != nil {
-            Task {
-                await PushNotificationManager.shared.registerTokenWithServer(token)
-            }
+            PushNotificationManager.shared.startTokenRegistration(token)
         }
         #endif
 
@@ -1068,9 +1066,7 @@ final class ServiceContainer: @unchecked Sendable {
             attentionService: self.attentionService
         )
         if let token = PushNotificationManager.shared.deviceToken, server != nil {
-            Task {
-                await PushNotificationManager.shared.registerTokenWithServer(token)
-            }
+            PushNotificationManager.shared.startTokenRegistration(token)
         }
         #endif
         return client

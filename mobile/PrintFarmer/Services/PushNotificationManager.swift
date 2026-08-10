@@ -318,10 +318,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         UserDefaults.standard.set(token, forKey: Self.deviceTokenKey)
         logger.info("APNs device token received: \(token.prefix(8))...")
 
-        registrationTask?.cancel()
-        registrationTask = Task { [weak self] in
-            await self?.registerTokenWithServer(token)
-        }
+        startTokenRegistration(token)
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
@@ -346,6 +343,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.warning("No notification service configured — device token not sent to server")
             return
         }
+
         if let serverRegistry {
             guard let configuredServerID,
                   serverRegistry.activeServerID == configuredServerID else {
@@ -389,6 +387,13 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.info("Native push disabled on this server; operating in local-only alerting mode (SignalR + local notifications)")
         } catch {
             logger.error("Failed to register device token with server: \(error.localizedDescription)")
+        }
+    }
+
+    func startTokenRegistration(_ token: String) {
+        registrationTask?.cancel()
+        registrationTask = Task { [weak self] in
+            await self?.registerTokenWithServer(token)
         }
     }
 
