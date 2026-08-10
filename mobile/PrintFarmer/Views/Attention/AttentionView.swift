@@ -752,6 +752,10 @@ struct AttentionView: View {
         if feedViewModel.groups.contains(where: { group in
             group.items.contains(where: { $0.id == itemId })
         }) {
+            guard router.pendingAttentionItemId == itemId,
+                  resolvingAttentionItemId == itemId else {
+                return
+            }
             withAnimation {
                 proxy.scrollTo(itemId, anchor: .center)
             }
