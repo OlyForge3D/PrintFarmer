@@ -397,7 +397,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     [Fact]
     public async Task Upsert_ConcurrentFirstCreate_RealUniqueViolationRetriesExactlyOnce()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"device-token-race-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
@@ -477,7 +477,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     [Fact]
     public async Task Upsert_ConcurrentCrossUserFirstClaim_NoIncumbent_ConvergesToOneActiveOwner()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"device-token-owner-race-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";
@@ -561,7 +561,7 @@ public sealed class EfDeviceTokenRepositoryTests : IDisposable
     [Fact]
     public async Task Upsert_ConcurrentRefresh_RetriesAndRotatesVersionForEachSuccessfulRegistration()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"device-token-refresh-race-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False;Default Timeout=5";

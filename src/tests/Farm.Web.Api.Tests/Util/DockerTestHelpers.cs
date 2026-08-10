@@ -11,7 +11,7 @@ public static class DockerTestHelpers
     public static string GetRepositoryRoot()
     {
         var directory = new DirectoryInfo(Directory.GetCurrentDirectory());
-        while (directory != null && !File.Exists(Path.Combine(directory.FullName, "global.json")))
+        while (directory != null && !File.Exists(Path.Join(directory.FullName, "global.json")))
         {
             directory = directory.Parent;
         }

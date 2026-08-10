@@ -23,7 +23,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
 
     public OrcaProfilesServiceInheritanceTests()
     {
-        _profilesRoot = Path.Combine(Path.GetTempPath(), "pfarm-orca-inheritance-" + Guid.NewGuid().ToString("N"));
+        _profilesRoot = Path.Join(Path.GetTempPath(), "pfarm-orca-inheritance-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_profilesRoot);
     }
 
@@ -610,14 +610,14 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
         (string name, string subPath)[]? filamentEntries = null,
         (string name, string subPath)[]? processEntries = null)
     {
-        string manufacturerDir = Path.Combine(_profilesRoot, manufacturer);
+        string manufacturerDir = Path.Join(_profilesRoot, manufacturer);
         Directory.CreateDirectory(manufacturerDir);
 
         string machineJson = FormatBundleEntries(machineEntries);
         string filamentJson = FormatBundleEntries(filamentEntries);
         string processJson = FormatBundleEntries(processEntries);
 
-        string bundlePath = Path.Combine(_profilesRoot, manufacturer + ".json");
+        string bundlePath = Path.Join(_profilesRoot, manufacturer + ".json");
         File.WriteAllText(bundlePath, $$"""
             {
               "name": "{{manufacturer}}",
@@ -647,7 +647,7 @@ public sealed class OrcaProfilesServiceInheritanceTests : IDisposable
     /// </summary>
     private void WriteProfile(string manufacturer, string subPath, string content)
     {
-        string profilePath = Path.Combine(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
+        string profilePath = Path.Join(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
         File.WriteAllText(profilePath, content);
     }

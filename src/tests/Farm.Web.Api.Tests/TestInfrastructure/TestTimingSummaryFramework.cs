@@ -57,7 +57,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
                 return;
             }
             string baseDir = AppContext.BaseDirectory;
-            string csvPath = Path.Combine(baseDir, "test-timings.csv");
+            string csvPath = Path.Join(baseDir, "test-timings.csv");
             if (!File.Exists(csvPath))
             {
                 _ = _sink.OnMessage(new DiagnosticMessage($"[TIMING-SUMMARY] No timing CSV found at {csvPath}; skipping."));
@@ -183,7 +183,7 @@ public sealed class TimingReportingTestFramework : XunitTestFramework
             {
                 summaryLines.Add(string.Create(CultureInfo.InvariantCulture, $"  P90 {cls.P90,7:F2} ms  Max {cls.Max,7:F2} ms  Count {cls.Count,3}  {Truncate(cls.Class, 90)}"));
             }
-            string summaryPath = Path.Combine(baseDir, "test-timings-summary.txt");
+            string summaryPath = Path.Join(baseDir, "test-timings-summary.txt");
             File.WriteAllLines(summaryPath, summaryLines);
             foreach (string l in summaryLines)
             {

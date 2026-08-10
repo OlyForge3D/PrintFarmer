@@ -500,7 +500,7 @@ public sealed class MaintenanceAlertResolutionServiceTests : IDisposable
     [Fact]
     public async Task ResolveWithLog_ConcurrentCalls_CreatesSingleCompletionLog()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             AppContext.BaseDirectory,
             $"maintenance-resolution-{Guid.NewGuid():N}.db");
         string connectionString =

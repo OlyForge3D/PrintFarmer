@@ -76,7 +76,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         FolderNode folder = await GetOrCreateModelFolderAsync(appContext);
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             Path.GetTempPath(),
             path ?? string.Empty,
             Guid.NewGuid() + "_" + originalFileName);
@@ -95,7 +95,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         {
             Id = Guid.NewGuid(),
             FileName = Path.GetFileName(filePath),  // Store just the filename (GUID-based)
-            FilePath = Path.GetDirectoryName(filePath) ?? Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "models")),  // Store directory path (matching GcodeFile pattern)
+            FilePath = Path.GetDirectoryName(filePath) ?? Path.GetFullPath(Path.Join(Directory.GetCurrentDirectory(), "models")),  // Store directory path (matching GcodeFile pattern)
             FileSizeBytes = 1024,
             FileHash = Guid.NewGuid().ToString(),
             FileFormat = ModelFileFormat.STL,
@@ -281,7 +281,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         // GetModelFilePathAsync returns a relative path that includes the filename
         result.Should().Contain(model.FileName);
         // The file should exist at the full path when combined with the base path
-        string fullPath = Path.Combine(model.FilePath, model.FileName);
+        string fullPath = Path.Join(model.FilePath, model.FileName);
         File.Exists(fullPath).Should().BeTrue();
     }
 
@@ -348,15 +348,15 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
 
         // Use the factory-configured storage path so the service finds our files
         string modelsPath = config["STORAGE_PATHS:UPLOADS"]
-            ?? Path.Combine(Path.GetTempPath(), "test-models-" + Guid.NewGuid());
+            ?? Path.Join(Path.GetTempPath(), "test-models-" + Guid.NewGuid());
         Directory.CreateDirectory(modelsPath);
 
         // Create a test model with IsValid = false and a thumbnail
         var invalidModelId = Guid.NewGuid();
         string fileName = $"{invalidModelId}.stl";
         string thumbnailFileName = $"{invalidModelId}_thumb.png";
-        string filePath = Path.Combine(modelsPath, fileName);
-        string thumbnailPath = Path.Combine(modelsPath, thumbnailFileName);
+        string filePath = Path.Join(modelsPath, fileName);
+        string thumbnailPath = Path.Join(modelsPath, thumbnailFileName);
 
         // Create the physical files
         await File.WriteAllTextAsync(filePath, "invalid STL content");
@@ -503,7 +503,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         Model3D? model = await repository.GetByIdAsync(result.Id, CancellationToken.None);
         model.Should().NotBeNull();
         model!.ThumbnailFileName.Should().Be($"{result.Id}_thumb.png");
-        File.Exists(Path.Combine(storagePathService.GetModelUploadDirectory(), model.ThumbnailFileName!)).Should().BeTrue();
+        File.Exists(Path.Join(storagePathService.GetModelUploadDirectory(), model.ThumbnailFileName!)).Should().BeTrue();
     }
 
     [Fact]
@@ -580,7 +580,7 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
         Model3D model = (await repository.GetByIdAsync(uploaded.Id, CancellationToken.None))!;
         replaced.ThumbnailUrl.Should().Be($"/api/3d-models/thumbnail/{uploaded.Id}");
         replaced.ETag.Should().NotBe(uploaded.ETag);
-        File.ReadAllBytes(Path.Combine(
+        File.ReadAllBytes(Path.Join(
                 storagePathService.GetModelUploadDirectory(),
                 model.ThumbnailFileName!))
             .Should().Equal(replacementBytes);

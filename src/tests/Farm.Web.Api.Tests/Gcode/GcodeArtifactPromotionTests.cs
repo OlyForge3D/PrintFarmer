@@ -1285,14 +1285,14 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         private PromotionHarness(string rootPath)
         {
             _rootPath = rootPath;
-            ArtifactRoot = Path.Combine(rootPath, "artifacts");
-            GcodeRoot = Path.Combine(rootPath, "gcode");
+            ArtifactRoot = Path.Join(rootPath, "artifacts");
+            GcodeRoot = Path.Join(rootPath, "gcode");
             _ = Directory.CreateDirectory(ArtifactRoot);
             _ = Directory.CreateDirectory(GcodeRoot);
             _coreConnectionString =
-                $"Data Source={Path.Combine(rootPath, "core.db")};Pooling=false;Default Timeout=30";
+                $"Data Source={Path.Join(rootPath, "core.db")};Pooling=false;Default Timeout=30";
             _slicerConnectionString =
-                $"Data Source={Path.Combine(rootPath, "slicer.db")};Pooling=false;Default Timeout=30";
+                $"Data Source={Path.Join(rootPath, "slicer.db")};Pooling=false;Default Timeout=30";
         }
 
         public string ArtifactRoot { get; }
@@ -1303,7 +1303,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
 
         public static async Task<PromotionHarness> CreateAsync()
         {
-            PromotionHarness harness = new(Path.Combine(
+            PromotionHarness harness = new(Path.Join(
                 Path.GetTempPath(),
                 $"pf-promotion-{Guid.NewGuid():N}"));
             await using (AppDbContext core = harness.CreateCoreContext())
@@ -1380,7 +1380,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 machineProfileSha256);
 
             string relativePath = $"{artifactId}.gcode";
-            await File.WriteAllBytesAsync(Path.Combine(ArtifactRoot, relativePath), bytes);
+            await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
 
             await using SlicerDbContext slicer = CreateSlicerContext();
             _ = slicer.SliceJobs.Add(new SliceJob
@@ -1518,7 +1518,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
                 FileName = "already-promoted.gcode",
                 FileHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"winner-{operationId}"))),
                 FileSizeBytes = 42,
-                FilePath = Path.Combine(GcodeRoot, "already-promoted.gcode"),
+                FilePath = Path.Join(GcodeRoot, "already-promoted.gcode"),
                 FolderId = _folderId,
                 UploadedAt = DateTime.UtcNow,
                 PromotionOperationId = operationId,
@@ -1528,10 +1528,10 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         }
 
         public void DeleteArtifactBytes(Guid artifactId) =>
-            File.Delete(Path.Combine(ArtifactRoot, $"{artifactId}.gcode"));
+            File.Delete(Path.Join(ArtifactRoot, $"{artifactId}.gcode"));
 
         public bool ArtifactBytesExist(Guid artifactId) =>
-            File.Exists(Path.Combine(ArtifactRoot, $"{artifactId}.gcode"));
+            File.Exists(Path.Join(ArtifactRoot, $"{artifactId}.gcode"));
 
         public async Task AgeArtifactAsync(Guid artifactId, TimeSpan age)
         {
@@ -1658,7 +1658,7 @@ public sealed class GcodeArtifactPromotionTests : IAsyncLifetime
         public async Task<byte[]> ReadPromotedBytesAsync(Guid fileId)
         {
             GcodeFile file = await GetGcodeFileAsync(fileId);
-            return await File.ReadAllBytesAsync(Path.Combine(GcodeRoot, file.FileName));
+            return await File.ReadAllBytesAsync(Path.Join(GcodeRoot, file.FileName));
         }
 
         public void Dispose()

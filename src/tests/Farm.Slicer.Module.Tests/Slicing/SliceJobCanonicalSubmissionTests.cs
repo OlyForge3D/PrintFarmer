@@ -434,7 +434,7 @@ public sealed class SliceJobCanonicalSubmissionTests : IAsyncLifetime
         string storedName = $"{Guid.NewGuid():N}.stl";
         string modelName = $"canonical-test-model-{Guid.NewGuid():N}";
         byte[] bytes = Encoding.UTF8.GetBytes($"solid {modelName}\nendsolid {modelName}\n");
-        await File.WriteAllBytesAsync(Path.Combine(root, storedName), bytes);
+        await File.WriteAllBytesAsync(Path.Join(root, storedName), bytes);
         string hash = Convert.ToHexString(SHA256.HashData(bytes));
 
         Model3D model = new()

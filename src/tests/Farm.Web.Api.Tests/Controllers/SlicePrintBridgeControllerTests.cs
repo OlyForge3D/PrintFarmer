@@ -91,7 +91,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
             HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
         };
 
-        _tempDir = Path.Combine(Path.GetTempPath(), $"slice_bridge_test_{Guid.NewGuid()}");
+        _tempDir = Path.Join(Path.GetTempPath(), $"slice_bridge_test_{Guid.NewGuid()}");
         Directory.CreateDirectory(_tempDir);
     }
 
@@ -316,7 +316,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
         // GetWithPathAsync returns a path that does not exist on disk
         _artifactsMock
             .Setup(a => a.GetWithPathAsync(gcode.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((gcode, Path.Combine(_tempDir, "nonexistent.gcode")));
+            .ReturnsAsync((gcode, Path.Join(_tempDir, "nonexistent.gcode")));
 
         var request = new SendToPrinterRequest { PrinterId = printerId };
 
@@ -528,7 +528,7 @@ public sealed class SlicePrintBridgeControllerTests : IDisposable
 
     private string CreateTempGcodeFile(string fileName)
     {
-        string path = Path.Combine(_tempDir, fileName);
+        string path = Path.Join(_tempDir, fileName);
         File.WriteAllText(path, "; G-code test file\nG28\nG1 X10 Y10 Z0.2 F1500\n");
         return path;
     }

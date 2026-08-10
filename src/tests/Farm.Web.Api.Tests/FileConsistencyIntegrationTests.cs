@@ -53,8 +53,8 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         _dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         _slicerDbContext = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
         // Setup test storage directories
-        _modelStoragePath = Path.Combine(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
-        _gcodeStoragePath = Path.Combine(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
+        _modelStoragePath = Path.Join(Path.GetTempPath(), "test_models_" + Guid.NewGuid());
+        _gcodeStoragePath = Path.Join(Path.GetTempPath(), "test_gcode_" + Guid.NewGuid());
         _ = Directory.CreateDirectory(_modelStoragePath);
         _ = Directory.CreateDirectory(_gcodeStoragePath);
     }
@@ -228,7 +228,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Arrange
         IServiceScope scope = _factory.Services.CreateScope();
         IFileIntegrityService integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-        string nonexistentPath = Path.Combine(_modelStoragePath, "nonexistent.stl");
+        string nonexistentPath = Path.Join(_modelStoragePath, "nonexistent.stl");
 
         // Act
         FileIntegrityCheckResult result = await integrityService.VerifyIntegrityAsync(
@@ -248,7 +248,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
         // Arrange
         IServiceScope scope = _factory.Services.CreateScope();
         IFileIntegrityService integrityService = scope.ServiceProvider.GetRequiredService<IFileIntegrityService>();
-        string testFilePath = Path.Combine(_modelStoragePath, "test.stl");
+        string testFilePath = Path.Join(_modelStoragePath, "test.stl");
         File.WriteAllText(testFilePath, "test content");
 
         // Act
@@ -311,7 +311,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             Name = fileName,
             FileName = fileName,
             FolderId = rootFolder.Id,
-            FilePath = Path.Combine(_modelStoragePath, fileName),
+            FilePath = Path.Join(_modelStoragePath, fileName),
             FileHash = Convert.ToHexString(Guid.NewGuid().ToByteArray()).ToLower(),
             FileSizeBytes = 2048,
             FileFormat = ModelFileFormat.STL,
@@ -344,7 +344,7 @@ public class FileConsistencyIntegrationTests : IAsyncLifetime
             _dbContext.SaveChanges();
         }
 
-        string filePath = Path.Combine(_gcodeStoragePath, fileName);
+        string filePath = Path.Join(_gcodeStoragePath, fileName);
         GcodeFile gcode = new GcodeFile
         {
             Id = Guid.NewGuid(),

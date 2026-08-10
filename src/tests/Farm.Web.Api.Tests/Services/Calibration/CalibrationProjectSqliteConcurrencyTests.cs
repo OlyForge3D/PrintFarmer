@@ -574,7 +574,7 @@ public sealed class CalibrationProjectSqliteConcurrencyTests
         public static async Task<SqliteCalibrationStore> CreateAsync()
         {
             SqliteCalibrationStore store = new(
-                Path.Combine(Path.GetTempPath(), $"calibration-concurrency-{Guid.NewGuid():N}.db"),
+                Path.Join(Path.GetTempPath(), $"calibration-concurrency-{Guid.NewGuid():N}.db"),
                 Guid.NewGuid());
             await using AppDbContext context = store.CreateContext();
             _ = await context.Database.EnsureCreatedAsync();

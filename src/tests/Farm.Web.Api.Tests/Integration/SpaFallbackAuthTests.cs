@@ -90,9 +90,9 @@ public class MappedEndpointAnonymousAccessTests : IAsyncLifetime
 
     private static string ResolveReactAppWebRoot()
     {
-        string path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../Web/ReactApp"));
+        string path = Path.GetFullPath(Path.Join(AppContext.BaseDirectory, "../../../../../Web/ReactApp"));
         Directory.Exists(path).Should().BeTrue("the test host needs an existing index.html to exercise MapFallbackToFile");
-        File.Exists(Path.Combine(path, "index.html")).Should().BeTrue("the SPA fallback serves index.html");
+        File.Exists(Path.Join(path, "index.html")).Should().BeTrue("the SPA fallback serves index.html");
         return path;
     }
 }

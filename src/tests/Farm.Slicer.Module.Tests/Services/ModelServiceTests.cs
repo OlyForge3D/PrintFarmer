@@ -50,9 +50,9 @@ public class ModelServiceTests
         mock.Setup(s => s.BuildModel3DThumbnailUrl(It.IsAny<Guid>()))
             .Returns<Guid>(modelId => $"/api/3d-models/thumbnail/{modelId}");
         mock.Setup(s => s.GetFullFilePath(It.IsAny<StoredFile>()))
-            .Returns<StoredFile>(f => Path.Combine(f.FilePath, f.FileName));
+            .Returns<StoredFile>(f => Path.Join(f.FilePath, f.FileName));
         mock.Setup(s => s.GetFullThumbnailPath(It.IsAny<StoredFile>()))
-            .Returns<StoredFile>(f => f.ThumbnailFileName != null ? Path.Combine(f.FilePath, f.ThumbnailFileName) : null);
+            .Returns<StoredFile>(f => f.ThumbnailFileName != null ? Path.Join(f.FilePath, f.ThumbnailFileName) : null);
         mock.Setup(s => s.GenerateThumbnailFileName(It.IsAny<Guid>(), It.IsAny<string>()))
             .Returns<Guid, string>((id, ext) => $"{id}_thumb{ext}");
         return mock;
@@ -83,7 +83,7 @@ public class ModelServiceTests
 
         // Mock IStoragePathService (like GcodeFilesService does)
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
-        string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+        string tempDir = Path.Join(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
         mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
         Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);
@@ -146,7 +146,7 @@ public class ModelServiceTests
 
         // Mock IStoragePathService (like GcodeFilesService does)
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
-        string tempDir = Path.Combine(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
+        string tempDir = Path.Join(Path.GetTempPath(), "pfarm-model-tests", Guid.NewGuid().ToString());
         mockStoragePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
 
         Model3DFileService service = new Model3DFileService(mockRepo.Object, new Mock<ITagRepository>().Object, mockLogger.Object, config, TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>()), mockFileManagement.Object, mockFolderService.Object, mockStoragePath.Object, CreateStoredFileOperationsServiceMock().Object);

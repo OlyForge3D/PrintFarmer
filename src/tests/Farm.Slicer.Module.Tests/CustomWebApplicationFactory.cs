@@ -42,9 +42,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         _keepAliveConnection.Open();
         _connectionString = _keepAliveConnection.ConnectionString;
 
-        string tempDir = Path.Combine(Path.GetTempPath(), $"slicer_test_{Guid.NewGuid()}");
-        _modelStoragePath = Path.Combine(tempDir, "models");
-        _gcodeStoragePath = Path.Combine(tempDir, "gcode");
+        string tempDir = Path.Join(Path.GetTempPath(), $"slicer_test_{Guid.NewGuid()}");
+        _modelStoragePath = Path.Join(tempDir, "models");
+        _gcodeStoragePath = Path.Join(tempDir, "gcode");
 
         Directory.CreateDirectory(_modelStoragePath);
         Directory.CreateDirectory(_gcodeStoragePath);

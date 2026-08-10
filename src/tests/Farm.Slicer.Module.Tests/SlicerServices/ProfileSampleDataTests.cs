@@ -22,9 +22,9 @@ public class ProfileSampleDataTests
         var currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (currentDir != null)
         {
-            if (File.Exists(Path.Combine(currentDir.FullName, "farm-web.sln")))
+            if (File.Exists(Path.Join(currentDir.FullName, "farm-web.sln")))
             {
-                string profilePath = Path.Combine(currentDir.FullName, "sample_profiles/orcaslicer");
+                string profilePath = Path.Join(currentDir.FullName, "sample_profiles/orcaslicer");
                 if (Directory.Exists(profilePath))
                 {
                     return profilePath;
@@ -39,7 +39,7 @@ public class ProfileSampleDataTests
         currentDir = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (currentDir != null && currentDir.Parent != null)
         {
-            string profilePath = Path.Combine(currentDir.Parent.FullName, "sample_profiles/orcaslicer");
+            string profilePath = Path.Join(currentDir.Parent.FullName, "sample_profiles/orcaslicer");
             if (Directory.Exists(profilePath))
             {
                 return profilePath;
@@ -73,8 +73,8 @@ public class ProfileSampleDataTests
     public void Manufacturer_HasMachineProfiles(string manufacturerName)
     {
         // Arrange
-        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        string machineDir = Path.Combine(manufacturerDir, "machine");
+        string manufacturerDir = Path.Join(SampleProfilesPath, manufacturerName);
+        string machineDir = Path.Join(manufacturerDir, "machine");
 
         // Act
         string[] machineFiles = Directory.GetFiles(machineDir, "*.json");
@@ -92,8 +92,8 @@ public class ProfileSampleDataTests
     public void MachineProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        string machineDir = Path.Combine(manufacturerDir, "machine");
+        string manufacturerDir = Path.Join(SampleProfilesPath, manufacturerName);
+        string machineDir = Path.Join(manufacturerDir, "machine");
         string[] machineFiles = Directory.GetFiles(machineDir, "*.json");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
@@ -121,8 +121,8 @@ public class ProfileSampleDataTests
     public void FilamentProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        string filamentDir = Path.Combine(manufacturerDir, "filament");
+        string manufacturerDir = Path.Join(SampleProfilesPath, manufacturerName);
+        string filamentDir = Path.Join(manufacturerDir, "filament");
 
         // Some manufacturers may not have filament profiles - skip them
         if (!Directory.Exists(filamentDir))
@@ -163,8 +163,8 @@ public class ProfileSampleDataTests
     public void ProcessProfile_CanBeParsed(string manufacturerName)
     {
         // Arrange
-        string manufacturerDir = Path.Combine(SampleProfilesPath, manufacturerName);
-        string processDir = Path.Combine(manufacturerDir, "process");
+        string manufacturerDir = Path.Join(SampleProfilesPath, manufacturerName);
+        string processDir = Path.Join(manufacturerDir, "process");
 
         // Some manufacturers may not have process profiles
         if (!Directory.Exists(processDir))
@@ -220,10 +220,10 @@ public class ProfileSampleDataTests
     public void PrusaSampleProfiles_ContainValidData()
     {
         // Arrange
-        string prusaDir = Path.Combine(SampleProfilesPath, "Prusa");
-        string machineDir = Path.Combine(prusaDir, "machine");
-        string filamentDir = Path.Combine(prusaDir, "filament");
-        string processDir = Path.Combine(prusaDir, "process");
+        string prusaDir = Path.Join(SampleProfilesPath, "Prusa");
+        string machineDir = Path.Join(prusaDir, "machine");
+        string filamentDir = Path.Join(prusaDir, "filament");
+        string processDir = Path.Join(prusaDir, "process");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
@@ -279,14 +279,14 @@ public class ProfileSampleDataTests
     public void FlashforgeSampleProfiles_HandleCasingInconsistency()
     {
         // Arrange - we know Flashforge has files with "FlashForge" vs "Flashforge" casing
-        string flashforgeDir = Path.Combine(SampleProfilesPath, "Flashforge");
+        string flashforgeDir = Path.Join(SampleProfilesPath, "Flashforge");
 
         if (!Directory.Exists(flashforgeDir))
         {
             return;  // Skip if Flashforge doesn't exist
         }
 
-        string filamentDir = Path.Combine(flashforgeDir, "filament");
+        string filamentDir = Path.Join(flashforgeDir, "filament");
         string[] filamentFiles = Directory.GetFiles(filamentDir, "*.json");
 
         var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };

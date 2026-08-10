@@ -66,8 +66,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
 
             // The pinned worker registers with this shared key over the production registration route.
             ["WorkerAuth:SharedKey"] = workerSharedKey,
-            ["STORAGE_PATHS:UPLOADS"] = Path.Combine(storageRoot, "models"),
-            ["STORAGE_PATHS:GCODE"] = Path.Combine(storageRoot, "gcode"),
+            ["STORAGE_PATHS:UPLOADS"] = Path.Join(storageRoot, "models"),
+            ["STORAGE_PATHS:GCODE"] = Path.Join(storageRoot, "gcode"),
 
             // Kestrel binds loopback only. The worker container shares the runner's network namespace,
             // so the same address resolves inside the container without exposing anything externally.
@@ -100,8 +100,8 @@ internal sealed class KestrelCalibrationApiHost : WebApplicationFactory<Program>
     public static KestrelCalibrationApiHost Start(string storageRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(storageRoot);
-        _ = Directory.CreateDirectory(Path.Combine(storageRoot, "models"));
-        _ = Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        _ = Directory.CreateDirectory(Path.Join(storageRoot, "models"));
+        _ = Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
 
         SqliteConnection keepAlive = new(
             $"Data Source=file:orca_smoke_{Guid.NewGuid():N}?mode=memory&cache=shared;Pooling=False");

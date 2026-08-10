@@ -332,9 +332,9 @@ public class ModelControllerTests
         Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
 
         // Create a temp file on disk so File.Exists returns true
-        string tempDir = Path.Combine(Path.GetTempPath(), $"model-test-{Guid.NewGuid()}");
+        string tempDir = Path.Join(Path.GetTempPath(), $"model-test-{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDir);
-        string filePath = Path.Combine(tempDir, "test-model.stl");
+        string filePath = Path.Join(tempDir, "test-model.stl");
         await File.WriteAllTextAsync(filePath, "test stl content");
 
         try
@@ -368,9 +368,9 @@ public class ModelControllerTests
         Mock<IModel3DFileService> mockService = new Mock<IModel3DFileService>(MockBehavior.Strict);
 
         // Create a temp file on disk so File.Exists returns true
-        string tempDir = Path.Combine(Path.GetTempPath(), $"thumb-test-{Guid.NewGuid()}");
+        string tempDir = Path.Join(Path.GetTempPath(), $"thumb-test-{Guid.NewGuid()}");
         Directory.CreateDirectory(tempDir);
-        string thumbPath = Path.Combine(tempDir, "test-thumb.png");
+        string thumbPath = Path.Join(tempDir, "test-thumb.png");
         await File.WriteAllTextAsync(thumbPath, "pngcontent");
 
         try

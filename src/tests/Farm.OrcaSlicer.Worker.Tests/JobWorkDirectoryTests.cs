@@ -8,7 +8,7 @@ namespace Farm.OrcaSlicer.Worker.Tests;
 public sealed class JobWorkDirectoryTests : IDisposable
 {
     private readonly string _workingDirectory =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-job-work-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-job-work-{Guid.NewGuid():N}");
 
     [Fact(DisplayName = "Overlapping claims use isolated work directories")]
     public void PrepareJobWorkDirectory_OverlappingClaims_DoNotDeleteOtherAttempt()
@@ -20,8 +20,8 @@ public sealed class JobWorkDirectoryTests : IDisposable
             _workingDirectory,
             jobId,
             firstClaimToken);
-        File.WriteAllText(Path.Combine(firstAttempt, ".printfarmer-recovery.json"), "{}");
-        File.WriteAllText(Path.Combine(firstAttempt, "stale.gcode"), "stale");
+        File.WriteAllText(Path.Join(firstAttempt, ".printfarmer-recovery.json"), "{}");
+        File.WriteAllText(Path.Join(firstAttempt, "stale.gcode"), "stale");
 
         string secondAttempt = OrcaSlicingPipelineService.PrepareJobWorkDirectory(
             _workingDirectory,
@@ -29,7 +29,7 @@ public sealed class JobWorkDirectoryTests : IDisposable
             secondClaimToken);
 
         _ = firstAttempt.Should().NotBe(secondAttempt);
-        _ = File.Exists(Path.Combine(firstAttempt, "stale.gcode")).Should().BeTrue();
+        _ = File.Exists(Path.Join(firstAttempt, "stale.gcode")).Should().BeTrue();
         _ = Directory.Exists(secondAttempt).Should().BeTrue();
         _ = Directory.EnumerateFileSystemEntries(secondAttempt).Should().BeEmpty();
     }
@@ -83,11 +83,11 @@ public sealed class JobWorkDirectoryTests : IDisposable
     public void CleanupRecoveryDirectories_LegacyParentWithActiveClaim_IsRetained()
     {
         Guid jobId = Guid.NewGuid();
-        string jobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
+        string jobDirectory = Path.Join(_workingDirectory, jobId.ToString());
         _ = Directory.CreateDirectory(jobDirectory);
-        string marker = Path.Combine(jobDirectory, ".printfarmer-recovery.json");
+        string marker = Path.Join(jobDirectory, ".printfarmer-recovery.json");
         File.WriteAllText(marker, "{}");
-        File.WriteAllBytes(Path.Combine(jobDirectory, "legacy.gcode"), new byte[32]);
+        File.WriteAllBytes(Path.Join(jobDirectory, "legacy.gcode"), new byte[32]);
         File.SetLastWriteTimeUtc(marker, DateTime.UtcNow.AddDays(-10));
 
         string activeAttempt = CreateAttempt(
@@ -115,17 +115,17 @@ public sealed class JobWorkDirectoryTests : IDisposable
 
     private string CreateAttempt(Guid jobId, string name, DateTime lastWriteUtc, int payloadSize, bool marker)
     {
-        string attempt = Path.Combine(_workingDirectory, jobId.ToString(), name);
+        string attempt = Path.Join(_workingDirectory, jobId.ToString(), name);
         _ = Directory.CreateDirectory(attempt);
         if (marker)
         {
-            File.WriteAllText(Path.Combine(attempt, ".printfarmer-recovery.json"), "{}");
+            File.WriteAllText(Path.Join(attempt, ".printfarmer-recovery.json"), "{}");
         }
-        File.WriteAllBytes(Path.Combine(attempt, "result.gcode"), new byte[payloadSize]);
+        File.WriteAllBytes(Path.Join(attempt, "result.gcode"), new byte[payloadSize]);
         File.SetLastWriteTimeUtc(
             marker
-                ? Path.Combine(attempt, ".printfarmer-recovery.json")
-                : Path.Combine(attempt, "result.gcode"),
+                ? Path.Join(attempt, ".printfarmer-recovery.json")
+                : Path.Join(attempt, "result.gcode"),
             lastWriteUtc);
         Directory.SetLastWriteTimeUtc(attempt, lastWriteUtc);
         return attempt;

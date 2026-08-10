@@ -66,7 +66,7 @@ public sealed class CalibrationPinnedWorkerSmokeTests(ITestOutputHelper output) 
     /// <inheritdoc/>
     public Task InitializeAsync()
     {
-        _workspace = Path.Combine(
+        _workspace = Path.Join(
             Path.GetTempPath(),
             $"pfarm-orca-smoke-{Guid.NewGuid():N}");
         _ = Directory.CreateDirectory(_workspace);

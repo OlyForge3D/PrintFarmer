@@ -216,7 +216,7 @@ public sealed class MutationWatermarkTests
     [Fact]
     public async Task SeparateReader_CannotObserveUncommittedCounterOrTask()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"mutation-watermark-visibility-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False";

@@ -332,7 +332,7 @@ public sealed class NotificationServicePreferenceRaceTests
 
         public static async Task<SqlitePreferenceRaceStore> CreateAsync(bool createPreferences)
         {
-            string databasePath = Path.Combine(
+            string databasePath = Path.Join(
                 Path.GetTempPath(),
                 $"preference-race-{Guid.NewGuid():N}.db");
             string connectionString =

@@ -200,7 +200,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
 
         SetupCompletedJobWithGcode(jobId, artifact);
 
-        string fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
+        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         try
@@ -250,7 +250,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
 
         SetupCompletedJobWithGcode(jobId, artifact);
 
-        string fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
+        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         try
@@ -311,7 +311,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
 
         SetupCompletedJobWithGcode(jobId, artifact);
 
-        string fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
+        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         try
@@ -437,7 +437,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
 
         SetupCompletedJobWithGcode(jobId, artifact);
 
-        string fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
+        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         try
@@ -515,7 +515,7 @@ public sealed class SlicePrintBridgeAddToQueueTests
         Artifact artifact = CreateArtifact(jobId, "gcode", "model.gcode");
         SetupCompletedJobWithGcode(jobId, artifact);
 
-        string fakePath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
+        string fakePath = System.IO.Path.Join(System.IO.Path.GetTempPath(), $"{Guid.NewGuid()}.gcode");
         System.IO.File.WriteAllText(fakePath, "; test gcode");
 
         _artifactsMock

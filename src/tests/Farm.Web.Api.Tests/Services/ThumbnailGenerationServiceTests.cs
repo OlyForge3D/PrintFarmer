@@ -26,7 +26,7 @@ public class ThumbnailGenerationServiceTests
     {
         _loggerMock = new Mock<ILogger<ThumbnailGenerationService>>();
         _configurationMock = new Mock<IConfiguration>();
-        _testThumbnailsDir = Path.Combine(Path.GetTempPath(), $"test-thumbnails-{Guid.NewGuid()}");
+        _testThumbnailsDir = Path.Join(Path.GetTempPath(), $"test-thumbnails-{Guid.NewGuid()}");
 
         _configurationMock
             .Setup(c => c["ThumbnailGeneration:ThumbnailsPath"])
@@ -93,7 +93,7 @@ public class ThumbnailGenerationServiceTests
     public void Constructor_CreatesThumbnailDirectory_IfNotExists()
     {
         // Arrange
-        string testDir = Path.Combine(Path.GetTempPath(), $"test-dir-{Guid.NewGuid()}");
+        string testDir = Path.Join(Path.GetTempPath(), $"test-dir-{Guid.NewGuid()}");
         _configurationMock
             .Setup(c => c["ThumbnailGeneration:ThumbnailsPath"])
             .Returns(testDir);
@@ -145,7 +145,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = "/nonexistent/path/model.stl";
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
 
         // Act
         bool result = await _service.GenerateThumbnailAsync(
@@ -164,8 +164,8 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = CreateDummyModelFile();
-        string outputDir = Path.Combine(_testThumbnailsDir, "nested", "output");
-        string outputPath = Path.Combine(outputDir, "output.png");
+        string outputDir = Path.Join(_testThumbnailsDir, "nested", "output");
+        string outputPath = Path.Join(outputDir, "output.png");
 
         try
         {
@@ -189,7 +189,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = CreateDummyModelFile();
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
         int width = 256;
         int height = 384;
 
@@ -217,7 +217,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = CreateDummyModelFile();
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
 
         try
         {
@@ -241,7 +241,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = "/invalid/path/model.stl";
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
 
         // Act
         bool result = await _service.GenerateThumbnailAsync(
@@ -261,8 +261,8 @@ public class ThumbnailGenerationServiceTests
         // Arrange
         string model1 = CreateDummyModelFile();
         string model2 = CreateDummyModelFile();
-        string output1 = Path.Combine(_testThumbnailsDir, "output1.png");
-        string output2 = Path.Combine(_testThumbnailsDir, "output2.png");
+        string output1 = Path.Join(_testThumbnailsDir, "output1.png");
+        string output2 = Path.Join(_testThumbnailsDir, "output2.png");
 
         try
         {
@@ -298,7 +298,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = CreateDummyModelFile();
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
         var cts = new CancellationTokenSource();
         cts.Cancel();
 
@@ -332,7 +332,7 @@ public class ThumbnailGenerationServiceTests
     {
         // Arrange
         string modelPath = CreateDummyModelFile();
-        string outputPath = Path.Combine(_testThumbnailsDir, "output.png");
+        string outputPath = Path.Join(_testThumbnailsDir, "output.png");
 
         try
         {
@@ -353,7 +353,7 @@ public class ThumbnailGenerationServiceTests
 
     private string CreateDummyModelFile()
     {
-        string filePath = Path.Combine(_testThumbnailsDir, $"test_{Guid.NewGuid()}.stl");
+        string filePath = Path.Join(_testThumbnailsDir, $"test_{Guid.NewGuid()}.stl");
         Directory.CreateDirectory(Path.GetDirectoryName(filePath)!);
 
         // Create a minimal valid STL file (ASCII format)

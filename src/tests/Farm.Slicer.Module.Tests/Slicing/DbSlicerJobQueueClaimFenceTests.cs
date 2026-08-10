@@ -12,7 +12,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 public sealed class DbSlicerJobQueueClaimFenceTests : IAsyncDisposable
 {
     private readonly string _databasePath =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-queue-fence-{Guid.NewGuid():N}.db");
+        Path.Join(Path.GetTempPath(), $"printfarmer-queue-fence-{Guid.NewGuid():N}.db");
 
     [Fact]
     public async Task EnqueueAsync_WithNamedProfileSelection_PreservesSlicerProfileJson()

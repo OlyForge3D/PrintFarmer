@@ -151,7 +151,7 @@ public class SystemInfoIntegrationTests : IAsyncLifetime
 
         string storageDirectory = storagePathService.GetGcodeStorageDirectory();
         Directory.CreateDirectory(storageDirectory);
-        string filePath = Path.Combine(storageDirectory, "system-info-sample.gcode");
+        string filePath = Path.Join(storageDirectory, "system-info-sample.gcode");
         await File.WriteAllTextAsync(filePath, "; generated for system info integration test", CancellationToken.None);
         long fileSizeBytes = new FileInfo(filePath).Length;
 

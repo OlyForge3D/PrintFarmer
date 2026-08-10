@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Artifacts;
 public sealed class ArtifactsServiceFailureCleanupTests : IDisposable
 {
     private readonly string _root =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-artifact-failure-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-artifact-failure-{Guid.NewGuid():N}");
 
     [Fact]
     public async Task UploadAsync_CopyCancellation_DeletesPartialFile()

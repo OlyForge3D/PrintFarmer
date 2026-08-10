@@ -90,7 +90,7 @@ public sealed class SlicerBinaryAttestationTests
     [Fact(DisplayName = "An empty attestation file leaves a real binary unverified")]
     public async Task ResolveFromFileAsync_WithEmptyAttestationFile_ReportsUnverified()
     {
-        string path = Path.Combine(
+        string path = Path.Join(
             Path.GetTempPath(),
             $"pf-attestation-{Guid.NewGuid():N}",
             "orcaslicer.sha256");
@@ -110,7 +110,7 @@ public sealed class SlicerBinaryAttestationTests
     [Fact(DisplayName = "An attestation file written by a verified build establishes the identity")]
     public async Task ResolveFromFileAsync_WithAttestedFile_ReportsPinnedIdentity()
     {
-        string path = Path.Combine(
+        string path = Path.Join(
             Path.GetTempPath(),
             $"pf-attestation-{Guid.NewGuid():N}",
             "orcaslicer.sha256");
@@ -131,7 +131,7 @@ public sealed class SlicerBinaryAttestationTests
     public async Task ResolveFromFileAsync_WithMissingFile_ReportsUnverified()
     {
         SlicerBinaryIdentity identity = await SlicerBinaryAttestation.ResolveFromFileAsync(
-            Path.Combine(Path.GetTempPath(), $"pf-missing-{Guid.NewGuid():N}", "orcaslicer.sha256"),
+            Path.Join(Path.GetTempPath(), $"pf-missing-{Guid.NewGuid():N}", "orcaslicer.sha256"),
             AttestedDigest,
             realBinaryInstalled: true,
             CancellationToken.None);

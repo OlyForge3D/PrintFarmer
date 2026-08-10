@@ -80,9 +80,9 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Join(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
-        string filePath = Path.Combine(modelsPath, fileName);
+        string filePath = Path.Join(modelsPath, fileName);
 
         string fileContent = "valid STL file content";
         await File.WriteAllTextAsync(filePath, fileContent);
@@ -132,7 +132,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     {
         string modelsPath = GetModelStoragePath();
         string fileName = $"viewer-{Guid.NewGuid():N}.stl";
-        string filePath = Path.Combine(modelsPath, fileName);
+        string filePath = Path.Join(modelsPath, fileName);
         const string fileContent = "authenticated viewer STL content";
         await File.WriteAllTextAsync(filePath, fileContent);
 
@@ -164,7 +164,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     {
         string modelsPath = GetModelStoragePath();
         string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
-        string outsidePath = Path.Combine(Path.GetDirectoryName(modelsPath)!, outsideFileName);
+        string outsidePath = Path.Join(Path.GetDirectoryName(modelsPath)!, outsideFileName);
         await File.WriteAllTextAsync(outsidePath, "outside");
 
         try
@@ -184,7 +184,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task DownloadForViewer_WithAbsolutePath_Returns400()
     {
         string modelsPath = GetModelStoragePath();
-        string outsidePath = Path.Combine(
+        string outsidePath = Path.Join(
             Path.GetDirectoryName(modelsPath)!,
             $"absolute-{Guid.NewGuid():N}.stl");
         await File.WriteAllTextAsync(outsidePath, "outside");
@@ -206,10 +206,10 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task DownloadForViewer_WithSymlinkOutsideStorageRoot_Returns403()
     {
         string modelsPath = GetModelStoragePath();
-        string outsidePath = Path.Combine(
+        string outsidePath = Path.Join(
             Path.GetDirectoryName(modelsPath)!,
             $"symlink-target-{Guid.NewGuid():N}.stl");
-        string linkPath = Path.Combine(modelsPath, $"symlink-{Guid.NewGuid():N}.stl");
+        string linkPath = Path.Join(modelsPath, $"symlink-{Guid.NewGuid():N}.stl");
         await File.WriteAllTextAsync(outsidePath, "outside");
         _ = File.CreateSymbolicLink(linkPath, outsidePath);
 
@@ -231,13 +231,13 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task DownloadForViewer_WithMultiHopRelativeDirectorySymlinks_Returns403()
     {
         string modelsPath = GetModelStoragePath();
-        string outsideDirectory = Path.Combine(
+        string outsideDirectory = Path.Join(
             Path.GetDirectoryName(modelsPath)!,
             $"symlink-directory-{Guid.NewGuid():N}");
         string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
-        string outsidePath = Path.Combine(outsideDirectory, outsideFileName);
-        string secondLinkPath = Path.Combine(modelsPath, $"second-link-{Guid.NewGuid():N}");
-        string firstLinkPath = Path.Combine(modelsPath, $"first-link-{Guid.NewGuid():N}");
+        string outsidePath = Path.Join(outsideDirectory, outsideFileName);
+        string secondLinkPath = Path.Join(modelsPath, $"second-link-{Guid.NewGuid():N}");
+        string firstLinkPath = Path.Join(modelsPath, $"first-link-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outsideDirectory);
         await File.WriteAllTextAsync(outsidePath, "outside");
         _ = Directory.CreateSymbolicLink(
@@ -247,7 +247,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         try
         {
-            string requestedPath = Path.Combine(Path.GetFileName(firstLinkPath), outsideFileName);
+            string requestedPath = Path.Join(Path.GetFileName(firstLinkPath), outsideFileName);
             HttpResponseMessage response = await _client!.GetAsync(
                 BuildViewerDownloadUrl(requestedPath));
 
@@ -265,14 +265,14 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task DownloadForViewer_WithLinkTargetContainingIntermediateSymlink_Returns403()
     {
         string modelsPath = GetModelStoragePath();
-        string outsideDirectory = Path.Combine(
+        string outsideDirectory = Path.Join(
             Path.GetDirectoryName(modelsPath)!,
             $"intermediate-target-{Guid.NewGuid():N}");
-        string outsideInnerDirectory = Path.Combine(outsideDirectory, "inner");
+        string outsideInnerDirectory = Path.Join(outsideDirectory, "inner");
         string outsideFileName = $"outside-{Guid.NewGuid():N}.stl";
-        string outsidePath = Path.Combine(outsideInnerDirectory, outsideFileName);
-        string nestedLinkPath = Path.Combine(modelsPath, $"nested-{Guid.NewGuid():N}");
-        string bridgeLinkPath = Path.Combine(modelsPath, $"bridge-{Guid.NewGuid():N}");
+        string outsidePath = Path.Join(outsideInnerDirectory, outsideFileName);
+        string nestedLinkPath = Path.Join(modelsPath, $"nested-{Guid.NewGuid():N}");
+        string bridgeLinkPath = Path.Join(modelsPath, $"bridge-{Guid.NewGuid():N}");
         Directory.CreateDirectory(outsideInnerDirectory);
         await File.WriteAllTextAsync(outsidePath, "outside");
         _ = Directory.CreateSymbolicLink(
@@ -280,11 +280,11 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
             Path.GetRelativePath(modelsPath, outsideDirectory));
         _ = Directory.CreateSymbolicLink(
             bridgeLinkPath,
-            Path.Combine(Path.GetFileName(nestedLinkPath), "inner"));
+            Path.Join(Path.GetFileName(nestedLinkPath), "inner"));
 
         try
         {
-            string requestedPath = Path.Combine(Path.GetFileName(bridgeLinkPath), outsideFileName);
+            string requestedPath = Path.Join(Path.GetFileName(bridgeLinkPath), outsideFileName);
             HttpResponseMessage response = await _client!.GetAsync(
                 BuildViewerDownloadUrl(requestedPath));
 
@@ -302,8 +302,8 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     public async Task DownloadForViewer_WithSymlinkCycle_Returns403()
     {
         string modelsPath = GetModelStoragePath();
-        string firstLinkPath = Path.Combine(modelsPath, $"cycle-a-{Guid.NewGuid():N}.stl");
-        string secondLinkPath = Path.Combine(modelsPath, $"cycle-b-{Guid.NewGuid():N}.stl");
+        string firstLinkPath = Path.Join(modelsPath, $"cycle-a-{Guid.NewGuid():N}.stl");
+        string secondLinkPath = Path.Join(modelsPath, $"cycle-b-{Guid.NewGuid():N}.stl");
         bool firstLinkCreated = false;
         bool secondLinkCreated = false;
 
@@ -337,11 +337,11 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
     {
         const int linkCount = 65;
         string modelsPath = GetModelStoragePath();
-        string targetPath = Path.Combine(modelsPath, $"depth-target-{Guid.NewGuid():N}.stl");
+        string targetPath = Path.Join(modelsPath, $"depth-target-{Guid.NewGuid():N}.stl");
         string[] linkPaths = new string[linkCount];
         for (int index = 0; index < linkPaths.Length; index++)
         {
-            linkPaths[index] = Path.Combine(
+            linkPaths[index] = Path.Join(
                 modelsPath,
                 $"depth-{index:D2}-{Guid.NewGuid():N}.stl");
         }
@@ -384,9 +384,9 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Join(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
-        string filePath = Path.Combine(modelsPath, fileName);
+        string filePath = Path.Join(modelsPath, fileName);
 
         string fileContent = "invalid STL file content (corrupted)";
         await File.WriteAllTextAsync(filePath, fileContent);
@@ -459,7 +459,7 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
 
         var modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Join(Path.GetTempPath(), "slicer_models_fallback");
 
         var model = new Model3D
         {
@@ -499,15 +499,15 @@ public class Model3DFileDownloadRegressionTests : IAsyncLifetime
         var modelId = Guid.NewGuid();
         string modelFileName = $"{modelId}.stl";
         string thumbnailFileName = $"{modelId}.png";
-        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Combine(Path.GetTempPath(), "slicer_models_fallback");
+        string modelsPath = config["STORAGE_PATHS:UPLOADS"] ?? Path.Join(Path.GetTempPath(), "slicer_models_fallback");
         Directory.CreateDirectory(modelsPath);
 
         // Create model file
-        string modelPath = Path.Combine(modelsPath, modelFileName);
+        string modelPath = Path.Join(modelsPath, modelFileName);
         await File.WriteAllTextAsync(modelPath, "invalid model");
 
         // Create thumbnail file
-        string thumbnailPath = Path.Combine(modelsPath, thumbnailFileName);
+        string thumbnailPath = Path.Join(modelsPath, thumbnailFileName);
         byte[] thumbnailContent = new byte[] { 0x89, 0x50, 0x4E, 0x47 }; // PNG header
         await File.WriteAllBytesAsync(thumbnailPath, thumbnailContent);
 

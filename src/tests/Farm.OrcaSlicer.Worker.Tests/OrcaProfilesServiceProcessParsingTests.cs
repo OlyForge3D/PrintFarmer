@@ -15,7 +15,7 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
 
     public OrcaProfilesServiceProcessParsingTests()
     {
-        _profilesRoot = Path.Combine(Path.GetTempPath(), "pfarm-orca-profiles-" + Guid.NewGuid().ToString("N"));
+        _profilesRoot = Path.Join(Path.GetTempPath(), "pfarm-orca-profiles-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_profilesRoot);
     }
 
@@ -276,15 +276,15 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
         (string name, string subPath)[] machineEntries,
         (string name, string subPath)[] processEntries)
     {
-        string manufacturerDir = Path.Combine(_profilesRoot, manufacturer);
+        string manufacturerDir = Path.Join(_profilesRoot, manufacturer);
         Directory.CreateDirectory(manufacturerDir);
-        Directory.CreateDirectory(Path.Combine(manufacturerDir, "machine"));
-        Directory.CreateDirectory(Path.Combine(manufacturerDir, "process"));
+        Directory.CreateDirectory(Path.Join(manufacturerDir, "machine"));
+        Directory.CreateDirectory(Path.Join(manufacturerDir, "process"));
 
         string machineJson = FormatBundleEntries(machineEntries);
         string processJson = FormatBundleEntries(processEntries);
 
-        string bundlePath = Path.Combine(_profilesRoot, manufacturer + ".json");
+        string bundlePath = Path.Join(_profilesRoot, manufacturer + ".json");
         File.WriteAllText(
             bundlePath,
             $$"""
@@ -308,14 +308,14 @@ public sealed class OrcaProfilesServiceProcessParsingTests : IDisposable
 
     private void WriteMachineProfile(string manufacturer, string subPath, string content)
     {
-        string profilePath = Path.Combine(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
+        string profilePath = Path.Join(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
         File.WriteAllText(profilePath, content);
     }
 
     private void WriteProcessProfile(string manufacturer, string subPath, string content)
     {
-        string profilePath = Path.Combine(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
+        string profilePath = Path.Join(_profilesRoot, manufacturer, subPath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(profilePath)!);
         File.WriteAllText(profilePath, content);
     }

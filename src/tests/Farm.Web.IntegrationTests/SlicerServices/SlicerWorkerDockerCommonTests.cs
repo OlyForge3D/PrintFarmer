@@ -18,7 +18,7 @@ public class SlicerWorkerDockerCommonTests
     {
         _output = output;
         _root = DockerTestHelpers.GetRepositoryRoot();
-        _composeFile = Path.Combine(_root, "docker-compose.yml");
+        _composeFile = Path.Join(_root, "docker-compose.yml");
     }
 
     // ... tests that call DockerTestHelpers as in original file
