@@ -6,6 +6,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.OperatorFeatures;
+using Farm.Infrastructure.Services.ServerIdentity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -68,6 +69,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly NativePushMetrics _metrics;
     private readonly ILogger<NativePushDispatcher> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IServerIdentityService _serverIdentity;
 
     // Internal deterministic test seam. Production never assigns this; it
     // signals only after a resolution has captured a non-empty settlement set
@@ -114,7 +116,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IOptionsMonitor<NativePushSettings> optionsMonitor,
         NativePushMetrics metrics,
         ILogger<NativePushDispatcher> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IServerIdentityService? serverIdentity = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _sender = sender as INativePushTransportSender
@@ -125,6 +128,13 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
+
+        // Tests that do not care about origin-server identity may omit this
+        // dependency; production DI always supplies the persisted
+        // ServerIdentityService. The in-memory fallback never touches the
+        // database and generates a single stable value for this dispatcher
+        // instance's lifetime — it must never be reachable from production.
+        _serverIdentity = serverIdentity ?? new InMemoryServerIdentityServiceForTests();
     }
 
     private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
@@ -709,9 +719,35 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IOperatorFeatureGate gate,
         CancellationToken cancellationToken)
     {
+        Guid originServerId;
+        try
+        {
+            originServerId = await _serverIdentity.GetOrCreateServerIdAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // A new send must never go out with a missing or fabricated origin — fail
+            // this device's attempt closed rather than silently omitting the field or
+            // substituting a stand-in value (issue #1407).
+            _metrics.IsolatedDeviceFailure.Add(
+                1,
+                new KeyValuePair<string, object?>("stage", "server-identity"));
+            _logger.LogWarning(
+                ex,
+                "[NativePush] Unable to resolve server identity for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; skipping this device.",
+                deviceToken.Id,
+                userId,
+                attentionItemId);
+            return DeviceDispatchOutcome.Completed;
+        }
+
         NativePushEnvelope envelope = item is not null
-            ? BuildEnvelope(item, changeKind, deviceToken)
-            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
+            ? BuildEnvelope(item, changeKind, deviceToken, originServerId)
+            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken, originServerId);
         AttentionSnapshot lifecycleSnapshot = activeSnapshot
             ?? resolvedSnapshot
             ?? throw new InvalidOperationException("A lifecycle snapshot is required before native-push transport.");
@@ -1727,7 +1763,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private NativePushEnvelope BuildEnvelope(
         AttentionItemDto item,
         AttentionChangeKind changeKind,
-        DeviceToken deviceToken)
+        DeviceToken deviceToken,
+        Guid originServerId)
     {
         bool isResolved = changeKind == AttentionChangeKind.Resolved;
         string category = AttentionPushCategories.CategoryFor(item.Kind) ?? "PRINTER_FAILURE";
@@ -1777,13 +1814,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             DeepLink: deepLink,
             Priority: isResolved ? NativePushPriority.Background : NativePushPriority.Alert,
             ExpiresAtUtc: expiresAt,
-            ActionIds: actionIds);
+            ActionIds: actionIds,
+            OriginServerId: originServerId);
     }
 
     private NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
         string attentionItemId,
         AttentionSnapshot snapshot,
-        DeviceToken deviceToken)
+        DeviceToken deviceToken,
+        Guid originServerId)
     {
         string category = AttentionPushCategories.CategoryFor(snapshot.Kind) ?? "PRINTER_FAILURE";
         string threadId = AttentionPushCategories.ThreadIdFor(
@@ -1818,7 +1857,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             DeepLink: deepLink,
             Priority: NativePushPriority.Background,
             ExpiresAtUtc: UtcNow.Add(InformationalAlertTtl),
-            ActionIds: Array.Empty<string>());
+            ActionIds: Array.Empty<string>(),
+            OriginServerId: originServerId);
     }
 
     private enum DeviceDispatchOutcome
@@ -3054,5 +3094,20 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             AttentionKind.Offline => prefs.PushOnPrinterOffline,
             _ => true,
         };
+    }
+
+    /// <summary>
+    /// Test-only fallback used when a constructor call site does not care about origin-
+    /// server identity and omits the dependency. Generates one stable value per
+    /// dispatcher instance without touching the database. Production DI always supplies
+    /// <see cref="Farm.Infrastructure.Services.ServerIdentity.ServerIdentityService"/>
+    /// instead.
+    /// </summary>
+    private sealed class InMemoryServerIdentityServiceForTests : IServerIdentityService
+    {
+        private readonly Guid _serverId = Guid.NewGuid();
+
+        public Task<Guid> GetOrCreateServerIdAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_serverId);
     }
 }

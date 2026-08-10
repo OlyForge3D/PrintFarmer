@@ -195,6 +195,8 @@ public static class FeatureServicesStartup
 
         services.AddScoped<Farm.Infrastructure.Repositories.Notifications.IDeviceTokenRepository,
             Farm.Infrastructure.Repositories.Notifications.EfDeviceTokenRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.ServerIdentity.IServerIdentityService,
+            Farm.Infrastructure.Services.ServerIdentity.ServerIdentityService>();
         services.AddSingleton<Farm.Infrastructure.Services.Notifications.NativePush.NativePushMetrics>();
         Farm.Infrastructure.Services.Notifications.NativePush.NativePushMode nativePushMode =
             configuration.GetSection(Farm.Infrastructure.Services.Notifications.NativePush.NativePushSettings.SectionName)

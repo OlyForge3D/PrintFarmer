@@ -344,7 +344,8 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
             envelope.JobId,
             envelope.ToolheadIndex,
             envelope.DeepLink,
-            envelope.ActionIds);
+            envelope.ActionIds,
+            envelope.OriginServerId);
         return JsonSerializer.Serialize(root, ApsOptions);
     }
 
@@ -513,5 +514,6 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         [property: JsonPropertyName("jobId")] Guid? JobId,
         [property: JsonPropertyName("toolheadIndex")] int? ToolheadIndex,
         [property: JsonPropertyName("deepLink")] string DeepLink,
-        [property: JsonPropertyName("actions")] IReadOnlyList<string> Actions);
+        [property: JsonPropertyName("actions")] IReadOnlyList<string> Actions,
+        [property: JsonPropertyName("originServerId")] Guid OriginServerId);
 }

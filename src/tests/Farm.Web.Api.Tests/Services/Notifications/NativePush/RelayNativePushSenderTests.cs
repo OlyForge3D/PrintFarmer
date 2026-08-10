@@ -16,6 +16,8 @@ namespace Farm.Web.Api.Tests.Services.Notifications.NativePush;
 /// </summary>
 public sealed class RelayNativePushSenderTests
 {
+    private static readonly Guid SampleServerId = Guid.Parse("11111111-2222-3333-4444-555555555555");
+
     private static readonly NativePushEnvelope Sample = new(
         DeviceTokenId: Guid.NewGuid().ToString("D"),
         Token: "device-token-abc",
@@ -36,7 +38,8 @@ public sealed class RelayNativePushSenderTests
         DeepLink: "printfarmer://attention/att-1",
         Priority: NativePushPriority.Alert,
         ExpiresAtUtc: null,
-        ActionIds: new[] { AttentionPushCategories.ActionPause });
+        ActionIds: new[] { AttentionPushCategories.ActionPause },
+        OriginServerId: SampleServerId);
 
     [Fact]
     public async Task SendAsync_MissingEndpointOrApiKey_ReturnsNotConfigured()
@@ -123,6 +126,7 @@ public sealed class RelayNativePushSenderTests
         doc.RootElement.GetProperty("token").GetString().Should().Be("device-token-abc");
         doc.RootElement.GetProperty("category").GetString().Should().Be("PRINTER_FAILURE");
         doc.RootElement.GetProperty("deepLink").GetString().Should().Be("printfarmer://attention/att-1");
+        doc.RootElement.GetProperty("originServerId").GetGuid().Should().Be(SampleServerId);
     }
 
     [Fact]

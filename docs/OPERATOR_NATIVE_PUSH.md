@@ -180,7 +180,8 @@ APS payload shape (identical across relay and direct modes):
   "jobId": "{jobId}",
   "toolheadIndex": 0,
   "deepLink": "printfarmer://attention/{attentionItemId}",
-  "actions": ["PAUSE", "CANCEL", "SNOOZE_15"]
+  "actions": ["PAUSE", "CANCEL", "SNOOZE_15"],
+  "originServerId": "01234567-89ab-cdef-0123-456789abcdef"
 }
 ```
 
@@ -189,6 +190,16 @@ The alert `aps` dictionary has exactly the six members shown above; `sound` and
 when absent. A resolved dismissal instead has the exact APS dictionary
 `{ "content-available": 1 }` and uses background priority; it never includes an
 alert, sound, badge, category, thread, or mutable-content member.
+
+`originServerId` (#1407) is a stable, opaque UUID identifying *this* PrintFarmer
+server instance — not the printer, job, or attention item. It is generated once on
+first use and persisted server-side (see below), so every push this server sends
+(direct or relay mode, alert or silent) always carries the same value across
+restarts. It is present on every envelope, including resolved/dismissal pushes, and
+is never a fabricated or empty value: if the server cannot resolve its own identity,
+that device's send is skipped and logged rather than going out without an origin.
+The mobile app uses this value to bind a delayed notification tap to the correct
+locally-registered server after the user has switched servers.
 
 ## 3. Double gate on `nativePushEnabled`
 
@@ -208,6 +219,29 @@ per #725:
 `OperatorFeatures__nativePushEnabled=false` (env / hard-disable) is the
 emergency rollback per #725. Runtime toggles from the Unified Settings page
 take effect on the next request without a restart.
+
+### Registration response (#1407)
+
+`POST /api/notifications/device-tokens` returns `200 OK` (previously
+`204 No Content`) with a JSON body carrying this server's `serverId`:
+
+```json
+{ "serverId": "01234567-89ab-cdef-0123-456789abcdef" }
+```
+
+`serverId` is the same value emitted as `originServerId` on push payloads, so a
+successful registration response is sufficient for the mobile app to bind that
+registration to the correct locally-registered server entry without waiting for a
+push to arrive. It is stable across repeated registrations against the same
+server. `DELETE /api/notifications/device-tokens` (unregister) is unaffected and
+still returns `204 No Content`.
+
+`ServerIdentityService` generates this identity once and persists it in the
+existing generic `AppSettingsEntity` table (`Key="ServerIdentity"`) rather than a
+dedicated table/migration — it is a server-generated identity, not a
+user-configurable setting, so it bypasses the `SettingsService`/`[AppSetting]`
+discovery framework. The value is cached in memory after the first read so the
+per-device dispatch loop never re-queries the database.
 
 ## 4. Registration retention on disable
 

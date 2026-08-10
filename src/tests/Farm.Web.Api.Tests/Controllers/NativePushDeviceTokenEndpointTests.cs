@@ -4,6 +4,7 @@ using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -88,7 +89,11 @@ public sealed class NativePushDeviceTokenEndpointTests
                 appBundleId = bundleId,
             });
 
-        registered.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        registered.StatusCode.Should().Be(HttpStatusCode.OK);
+        DeviceTokenRegistrationResponse? registrationBody =
+            await registered.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        registrationBody.Should().NotBeNull();
+        registrationBody!.ServerId.Should().NotBe(Guid.Empty);
         await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
         {
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -110,6 +115,48 @@ public sealed class NativePushDeviceTokenEndpointTests
         await using AsyncServiceScope verifyScope = factory.Services.CreateAsyncScope();
         AppDbContext verifyDb = verifyScope.ServiceProvider.GetRequiredService<AppDbContext>();
         (await verifyDb.DeviceTokens.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RegisterDeviceTokenAsync_MultipleRegistrations_ReturnStableServerId()
+    {
+        // Issue #1407: serverId is this server's own persisted, generated identity — it
+        // must be stable across separate registration calls (i.e. the same underlying
+        // ServerIdentityService instance/store), not re-derived per request.
+        await using var factory = new CustomWebApplicationFactory();
+        HttpClient client = await CreateNativePushClientAsync(factory);
+
+        HttpResponseMessage first = await client.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-a",
+                token = new string('a', 64),
+                platform = "ios",
+                environment = "production",
+                appBundleId = "com.example.app",
+            });
+        HttpResponseMessage second = await client.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-b",
+                token = new string('b', 64),
+                platform = "ios",
+                environment = "production",
+                appBundleId = "com.example.app",
+            });
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        DeviceTokenRegistrationResponse? firstBody =
+            await first.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        DeviceTokenRegistrationResponse? secondBody =
+            await second.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        firstBody.Should().NotBeNull();
+        secondBody.Should().NotBeNull();
+        firstBody!.ServerId.Should().NotBe(Guid.Empty);
+        secondBody!.ServerId.Should().Be(firstBody.ServerId);
     }
 
     [Theory]
@@ -174,7 +221,7 @@ public sealed class NativePushDeviceTokenEndpointTests
                 platform = "ios",
                 environment = "production",
             });
-        registered.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        registered.StatusCode.Should().Be(HttpStatusCode.OK);
         using var delete = new HttpRequestMessage(HttpMethod.Delete, "/api/notifications/device-tokens")
         {
             Content = JsonContent.Create(new { installationId = new string('x', 129) }),
