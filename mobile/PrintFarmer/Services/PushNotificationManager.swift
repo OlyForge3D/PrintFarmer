@@ -54,6 +54,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private var serverRegistry: ServerRegistry?
     private var configuredServerID: UUID?
     private var configurationEpoch = 0
+    private var allowsUnscopedRegistration = true
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -75,11 +76,13 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     func configure(
         notificationService: any NotificationServiceProtocol,
         serverRegistry: ServerRegistry? = nil,
-        serverID: UUID? = nil
+        serverID: UUID? = nil,
+        allowsUnscopedRegistration: Bool = true
     ) {
         self.notificationService = notificationService
         self.serverRegistry = serverRegistry
         self.configuredServerID = serverID
+        self.allowsUnscopedRegistration = allowsUnscopedRegistration
         configurationEpoch &+= 1
         // #818: the disabled-push state is per-server. When the active server
         // changes (ServiceContainer reconfigures us with the new server's
@@ -338,6 +341,16 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         guard let service = notificationService else {
             logger.warning("No notification service configured — device token not sent to server")
             return
+        }
+        guard allowsUnscopedRegistration || configuredServerID != nil else {
+            logger.warning("Device token registration ignored — no active server context")
+            return
+        }
+        if let configuredServerID {
+            guard serverRegistry?.activeServerID == configuredServerID else {
+                logger.warning("Device token registration ignored — no active server context")
+                return
+            }
         }
 
         let initiatingServerID = configuredServerID

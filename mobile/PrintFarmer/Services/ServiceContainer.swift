@@ -528,7 +528,8 @@ final class ServiceContainer: @unchecked Sendable {
         PushNotificationManager.shared.configure(
             notificationService: self.notificationService,
             serverRegistry: nil,
-            serverID: nil
+            serverID: nil,
+            allowsUnscopedRegistration: false
         )
         #endif
         // H1: record the demo desired target + advance the transition epoch

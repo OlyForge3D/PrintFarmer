@@ -63,12 +63,17 @@ struct PFarmApp: App {
                 .onChange(of: serverRegistry.activeServerID) {
                     router.invalidatePendingNavigation()
                 }
+                .onChange(of: services.activeServerGeneration) {
+                    router.invalidatePendingNavigation()
+                }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    router.routeNotification(
-                        userInfo: notification.userInfo ?? [:],
-                        activeOriginServerId: serverRegistry.activeServer?.originServerId
-                    )
+                    if !DemoMode.shared.isActive {
+                        router.routeNotification(
+                            userInfo: notification.userInfo ?? [:],
+                            activeOriginServerId: serverRegistry.activeServer?.originServerId
+                        )
+                    }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
                     if let userInfo = notification.userInfo,
@@ -102,7 +107,8 @@ struct PFarmApp: App {
                         PushNotificationManager.shared.configure(
                             notificationService: services.notificationService,
                             serverRegistry: DemoMode.shared.isActive ? nil : serverRegistry,
-                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID
+                            serverID: DemoMode.shared.isActive ? nil : serverRegistry.activeServerID,
+                            allowsUnscopedRegistration: !DemoMode.shared.isActive
                         )
                         // Issue #1321: wire the services job-attention lock-screen
                         // actions (Pause/Resume/Cancel/Snooze) execute against.
