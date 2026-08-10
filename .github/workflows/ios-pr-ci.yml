@@ -126,7 +126,12 @@ jobs:
     name: Unit Tests (iOS)
     runs-on: macos-latest
     needs: [select, build]
-    if: needs.select.outputs.should_run == 'true'
+    # Skip ONLY when the selector explicitly said `false`. If `select` itself
+    # failed, `should_run` is empty — and a skipped job reports "Success" to
+    # branch protection, so a bare `== 'true'` would turn a selector crash into
+    # a silent green. Gated on `build` succeeding so a real build failure isn't
+    # reported twice.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.select.outputs.should_run != 'false' }}
     defaults:
       run:
         working-directory: mobile
@@ -199,7 +204,9 @@ jobs:
     name: Attention XCUI (${{ matrix.family }}, accessibility XXXL)
     runs-on: macos-latest
     needs: select
-    if: needs.select.outputs.should_run == 'true'
+    # See the `test` job: skip only on an explicit `false`, never on a
+    # selector failure.
+    if: ${{ !cancelled() && needs.select.outputs.should_run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
@@ -281,7 +288,9 @@ jobs:
     name: XCUI (${{ matrix.family }}, ${{ matrix.suite }})
     runs-on: macos-latest
     needs: select
-    if: needs.select.outputs.should_run == 'true'
+    # See the `test` job: skip only on an explicit `false`, never on a
+    # selector failure.
+    if: ${{ !cancelled() && needs.select.outputs.should_run != 'false' }}
     strategy:
       fail-fast: false
       matrix:
