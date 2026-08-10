@@ -17,7 +17,7 @@ complete the fresh pre-PR review and PR lifecycle.
 - [x] Add parser, router, notification-response, registration, and isolation tests.
 - [x] Run focused mobile validation and fix failures caused by this change.
 - [x] Commit and push all intended changes.
-- [ ] Obtain fresh Bishop/Hicks/Vasquez review at the resulting head.
+- [x] Obtain fresh Bishop/Hicks/Vasquez review at the resulting head.
 - [ ] Open and own the PR for #1405 with issue linkage.
 
 ## Validation
@@ -25,4 +25,5 @@ complete the fresh pre-PR review and PR lifecycle.
 - `xcodebuild test` focused on `DeepLinkHandlerTests`, `AppRouterTests`,
   `PushDegradationTests`, and `JobAttentionNotificationActionsTests`: passed on
   iPhone 17 simulator.
+- Final reviewed and pushed head: `0aff9aa84560c965905fef2e9f54b7c952596089`.
 - `git diff --check`: passed.
