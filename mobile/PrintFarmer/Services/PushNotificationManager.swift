@@ -389,7 +389,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     }
 
     /// Unregister the device token from the server (e.g., on logout).
-    func unregisterFromServer() async {
+    func unregisterFromServer(clearLocalToken: Bool = true) async {
         guard let token = deviceToken, let service = notificationService else { return }
 
         do {
@@ -403,8 +403,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.error("Failed to unregister device token: \(error.localizedDescription)")
         }
 
-        UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
-        self.deviceToken = nil
+        if clearLocalToken {
+            UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
+            self.deviceToken = nil
+        }
     }
 }
 

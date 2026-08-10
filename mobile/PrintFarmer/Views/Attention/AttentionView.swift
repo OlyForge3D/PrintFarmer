@@ -779,6 +779,8 @@ struct AttentionView: View {
                 }
                 if router.pendingAttentionItemId == itemId {
                     focusPendingAttentionItem(using: proxy)
+                } else if router.pendingAttentionItemId != nil {
+                    focusPendingAttentionItem(using: proxy)
                 }
             }
             return
@@ -811,6 +813,9 @@ struct AttentionView: View {
             guard router.pendingAttentionItemId == itemId else {
                 if resolvingAttentionItemId == itemId {
                     resolvingAttentionItemId = nil
+                }
+                if router.pendingAttentionItemId != nil {
+                    focusPendingAttentionItem(using: proxy)
                 }
                 return
             }
