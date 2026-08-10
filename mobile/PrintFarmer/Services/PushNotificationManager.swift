@@ -287,6 +287,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
                 permissionStatus = .authorized
                 registrationError = nil
                 logger.info("Notification permission granted")
+                UIApplication.shared.registerForRemoteNotifications()
             } else {
                 permissionStatus = .denied
                 logger.info("Notification permission denied by user")
@@ -362,6 +363,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         let initiatingConfigurationEpoch = configurationEpoch
         do {
             let originServerId = try await service.registerDeviceToken(token, platform: "ios")
+            guard deviceToken == nil || deviceToken == token else { return }
             if let serverRegistry,
                let initiatingServerID,
                configurationEpoch == initiatingConfigurationEpoch,
@@ -379,6 +381,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.info("Device token registered with server")
         } catch NetworkError.featureDisabled {
             guard configurationEpoch == initiatingConfigurationEpoch,
+                  (deviceToken == nil || deviceToken == token),
                   configuredServerID == initiatingServerID,
                   serverRegistry?.activeServerID == initiatingServerID else {
                 return
@@ -486,6 +489,10 @@ extension PushNotificationManager: UNUserNotificationCenterDelegate {
         let userInfo = response.notification.request.content.userInfo
         let category = response.notification.request.content.categoryIdentifier
         let actionIdentifier = response.actionIdentifier
+        if actionIdentifier == UNNotificationDismissActionIdentifier {
+            completionHandler()
+            return
+        }
 
         // Issue #1321: a job-attention action button (Pause/Resume/Cancel/
         // Snooze/Open Swap) was tapped rather than the notification body

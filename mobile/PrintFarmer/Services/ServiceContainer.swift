@@ -526,7 +526,7 @@ final class ServiceContainer: @unchecked Sendable {
         let epoch = transitionEpoch.current
         authOperationEpoch.advance()
         if activeServerID != nil {
-            guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
+            guard await unregisterNotificationToken(clearLocalToken: false) else {
                 return false
             }
             guard transitionEpoch.isCurrent(epoch) else { return false }
@@ -854,7 +854,7 @@ final class ServiceContainer: @unchecked Sendable {
     private func switchToActiveServer(_ server: RegisteredServer, epoch: Int) async {
         offlineWriteReplayAuthority.invalidate()
         if activeServerID != nil {
-            guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
+            guard await unregisterNotificationToken(clearLocalToken: false) else {
                 scheduleNotificationHandoffRetry(.server(server), epoch: epoch)
                 return
             }
@@ -963,7 +963,7 @@ final class ServiceContainer: @unchecked Sendable {
             return
         }
         guard activeServerID != nil else { return }
-        guard await PushNotificationManager.shared.unregisterFromServer() else {
+        guard await unregisterNotificationToken() else {
             scheduleNotificationHandoffRetry(.none, epoch: epoch)
             return
         }
@@ -993,6 +993,14 @@ final class ServiceContainer: @unchecked Sendable {
                   self.transitionEpoch.isCurrent(epoch) else { return }
             self.requestTarget(target)
         }
+    }
+
+    private func unregisterNotificationToken(clearLocalToken: Bool = true) async -> Bool {
+            #if canImport(UIKit)
+            return await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: clearLocalToken)
+            #else
+            return true
+            #endif
     }
 
     /// After a superseded switch (which must not rebuild/publish), replace the
