@@ -756,7 +756,9 @@ struct AttentionView: View {
                 proxy.scrollTo(itemId, anchor: .center)
             }
             router.pendingAttentionItemId = nil
-            resolvingAttentionItemId = nil
+            if resolvingAttentionItemId == itemId {
+                resolvingAttentionItemId = nil
+            }
             return
         }
 
@@ -768,7 +770,9 @@ struct AttentionView: View {
                       feedViewModel.isRefreshing || feedViewModel.isLoadingMore {
                     try? await Task.sleep(for: .milliseconds(50))
                 }
-                resolvingAttentionItemId = nil
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
+                }
                 if router.pendingAttentionItemId == itemId {
                     focusPendingAttentionItem(using: proxy)
                 }
@@ -801,10 +805,14 @@ struct AttentionView: View {
             }
 
             guard router.pendingAttentionItemId == itemId else {
-                resolvingAttentionItemId = nil
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
+                }
                 return
             }
-            resolvingAttentionItemId = nil
+            if resolvingAttentionItemId == itemId {
+                resolvingAttentionItemId = nil
+            }
             router.notificationRoutingError = "This attention item could not be loaded for the selected server."
             router.pendingAttentionItemId = nil
         }
