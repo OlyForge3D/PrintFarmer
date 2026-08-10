@@ -798,6 +798,9 @@ struct AttentionView: View {
 
         guard resolvingAttentionItemId != itemId else { return }
         guard feedViewModel.canLoadMore else {
+            if feedViewModel.paginationFailure != nil {
+                return
+            }
             router.notificationRoutingError = "This attention item is unavailable on the selected server."
             router.pendingAttentionItemId = nil
             return
@@ -826,6 +829,12 @@ struct AttentionView: View {
                 }
                 if router.pendingAttentionItemId != nil {
                     focusPendingAttentionItem(using: proxy)
+                }
+                return
+            }
+            if feedViewModel.paginationFailure != nil {
+                if resolvingAttentionItemId == itemId {
+                    resolvingAttentionItemId = nil
                 }
                 return
             }

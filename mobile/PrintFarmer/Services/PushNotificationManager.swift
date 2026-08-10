@@ -56,6 +56,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private var configurationEpoch = 0
     private var allowsUnscopedRegistration = true
     private var registrationTask: Task<Void, Never>?
+    private var registrationEpoch: UInt64 = 0
     private var pendingRemoteTap: [AnyHashable: Any]?
     private var pendingLocalTap: [AnyHashable: Any]?
 
@@ -325,6 +326,9 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
+        registrationEpoch &+= 1
+        registrationTask?.cancel()
+        registrationTask = nil
         self.registrationError = error.localizedDescription
         self.deviceToken = nil
         UserDefaults.standard.removeObject(forKey: Self.deviceTokenKey)
@@ -341,7 +345,14 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     /// server) is treated as a normal "push not configured" outcome — no
     /// user-visible error, no retry — and flips the app into local-only alerting
     /// mode. A successful registration clears that signal (clean re-enable path).
-    func registerTokenWithServer(_ token: String) async {
+    func registerTokenWithServer(
+        _ token: String,
+        expectedRegistrationEpoch: UInt64? = nil
+    ) async {
+        if let expectedRegistrationEpoch,
+           expectedRegistrationEpoch != registrationEpoch {
+            return
+        }
         guard let service = notificationService else {
             logger.warning("No notification service configured — device token not sent to server")
             return
@@ -363,6 +374,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         let initiatingConfigurationEpoch = configurationEpoch
         do {
             let originServerId = try await service.registerDeviceToken(token, platform: "ios")
+            if let expectedRegistrationEpoch,
+               expectedRegistrationEpoch != registrationEpoch {
+                return
+            }
             guard deviceToken == nil || deviceToken == token else { return }
             if let serverRegistry,
                let initiatingServerID,
@@ -381,6 +396,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
             logger.info("Device token registered with server")
         } catch NetworkError.featureDisabled {
             guard configurationEpoch == initiatingConfigurationEpoch,
+                  expectedRegistrationEpoch == nil || expectedRegistrationEpoch == registrationEpoch,
                   (deviceToken == nil || deviceToken == token),
                   configuredServerID == initiatingServerID,
                   serverRegistry?.activeServerID == initiatingServerID else {
@@ -397,8 +413,13 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
     func startTokenRegistration(_ token: String) {
         registrationTask?.cancel()
+        registrationEpoch &+= 1
+        let expectedRegistrationEpoch = registrationEpoch
         registrationTask = Task { [weak self] in
-            await self?.registerTokenWithServer(token)
+            await self?.registerTokenWithServer(
+                token,
+                expectedRegistrationEpoch: expectedRegistrationEpoch
+            )
         }
     }
 
