@@ -275,6 +275,7 @@ struct AttentionView: View {
     @State private var showingMaintenance = false
     @State private var showingNotifications = false
     @State private var pendingAction: AttentionPendingAction?
+    @State private var resolvingAttentionItemId: String?
     /// Locally observed feature-disabled flag. Populated from the shared
     /// operator feature gate (#725) via `SystemCapabilitiesService` and
     /// also flipped locally when `/api/attention` returns ProblemDetails
@@ -744,17 +745,53 @@ struct AttentionView: View {
     }
 
     private func focusPendingAttentionItem(using proxy: ScrollViewProxy) {
-        guard let itemId = router.pendingAttentionItemId,
-              feedViewModel.groups.contains(where: { group in
-                  group.items.contains(where: { $0.id == itemId })
-              }) else {
+        guard let itemId = router.pendingAttentionItemId else {
             return
         }
 
-        withAnimation {
-            proxy.scrollTo(itemId, anchor: .center)
+        if feedViewModel.groups.contains(where: { group in
+            group.items.contains(where: { $0.id == itemId })
+        }) {
+            withAnimation {
+                proxy.scrollTo(itemId, anchor: .center)
+            }
+            router.pendingAttentionItemId = nil
+            resolvingAttentionItemId = nil
+            return
         }
-        router.pendingAttentionItemId = nil
+
+        guard resolvingAttentionItemId != itemId else { return }
+        guard feedViewModel.canLoadMore else {
+            router.notificationRoutingError = "This attention item is unavailable on the selected server."
+            router.pendingAttentionItemId = nil
+            return
+        }
+
+        resolvingAttentionItemId = itemId
+        Task { @MainActor in
+            while router.pendingAttentionItemId == itemId,
+                  feedViewModel.canLoadMore,
+                  await feedViewModel.loadMore() {
+                if feedViewModel.groups.contains(where: { group in
+                    group.items.contains(where: { $0.id == itemId })
+                }) {
+                    withAnimation {
+                        proxy.scrollTo(itemId, anchor: .center)
+                    }
+                    router.pendingAttentionItemId = nil
+                    resolvingAttentionItemId = nil
+                    return
+                }
+            }
+
+            guard router.pendingAttentionItemId == itemId else {
+                resolvingAttentionItemId = nil
+                return
+            }
+            resolvingAttentionItemId = nil
+            router.notificationRoutingError = "This attention item could not be loaded for the selected server."
+            router.pendingAttentionItemId = nil
+        }
     }
 
     /// Rendered in place of the auto-loading sentinel when `loadMore`
