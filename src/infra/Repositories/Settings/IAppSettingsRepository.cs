@@ -77,6 +77,12 @@ public interface IAppSettingsRepository
     /// generate-once-ever semantics (e.g. a durable server identity) should use this method for
     /// the initial write and re-read on a <see langword="false"/> result instead of calling
     /// <see cref="SetAsync"/>.
+    ///
+    /// A <see cref="DbUpdateException"/> is only ever treated as "lost the insert race" after
+    /// this method independently confirms a row for <paramref name="key"/> now exists in the
+    /// database. If no such row is found, the failure was not a duplicate-key conflict (e.g. a
+    /// genuine connectivity or constraint failure unrelated to this key) and the original
+    /// exception is rethrown rather than being reported as a benign race loss.
     /// </remarks>
     Task<bool> TryInsertIfAbsentAsync(string key, string value, CancellationToken ct = default);
 
@@ -153,10 +159,25 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
         }
         catch (DbUpdateException)
         {
-            // A concurrent caller committed a row for this key first. Detach our losing
-            // entity so the context doesn't keep retrying the same failed insert on a later
-            // SaveChangesAsync call from this same scope.
+            // Detach our losing (or failed) entity so the context doesn't keep retrying the
+            // same failed insert on a later SaveChangesAsync call from this same scope.
             _db.Entry(setting).State = EntityState.Detached;
+
+            // A DbUpdateException here is only a benign "lost the insert race" outcome if a
+            // row for this key genuinely exists now - i.e. a concurrent caller's insert won.
+            // Confirm that independently (bypassing the identity map with AsNoTracking) rather
+            // than assuming every DbUpdateException is a duplicate-key conflict: an unrelated
+            // failure (connectivity loss, a different constraint, etc.) must propagate instead
+            // of being silently swallowed and misreported as "someone else won the race".
+            bool rowExists = await _db.AppSettingsEntities
+                .AsNoTracking()
+                .AnyAsync(s => s.Key == key, ct);
+
+            if (!rowExists)
+            {
+                throw;
+            }
+
             return false;
         }
     }
