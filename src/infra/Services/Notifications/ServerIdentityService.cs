@@ -55,17 +55,26 @@ public sealed class ServerIdentityService : IServerIdentityService, IDisposable
     /// <inheritdoc />
     public async Task<string> GetServerIdAsync(CancellationToken cancellationToken = default)
     {
-        if (_cachedServerId is not null)
+        string? fastPathId = Volatile.Read(ref _cachedServerId);
+        if (fastPathId is not null)
         {
-            return _cachedServerId;
+            return fastPathId;
         }
 
         await _lock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (_cachedServerId is not null)
+            // Double-checked locking: re-read via Volatile.Read rather than a plain field
+            // access. Another caller may have populated the cache while this call waited on
+            // the semaphore; a plain re-read of the same field here is otherwise (correctly)
+            // provable as still-null from this thread's own sequential view and gets flagged
+            // as a dead/constant condition by static analysis that doesn't model the
+            // concurrent writer — Volatile.Read makes the "value may have changed underneath
+            // us" intent explicit for both readers and analyzers.
+            string? lockedPathId = Volatile.Read(ref _cachedServerId);
+            if (lockedPathId is not null)
             {
-                return _cachedServerId;
+                return lockedPathId;
             }
 
             using IServiceScope scope = _scopeFactory.CreateScope();
@@ -74,8 +83,8 @@ public sealed class ServerIdentityService : IServerIdentityService, IDisposable
             AppSettingsEntity? existing = await settings.GetReadOnlyAsync(SettingsKey, cancellationToken).ConfigureAwait(false);
             if (existing is not null && TryParseServerId(existing.SettingsJson, out string existingId))
             {
-                _cachedServerId = existingId;
-                return _cachedServerId;
+                Volatile.Write(ref _cachedServerId, existingId);
+                return existingId;
             }
 
             string newServerId = Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture);
@@ -90,8 +99,8 @@ public sealed class ServerIdentityService : IServerIdentityService, IDisposable
             bool inserted = await settings.TryInsertIfAbsentAsync(SettingsKey, json, cancellationToken).ConfigureAwait(false);
             if (inserted)
             {
-                _cachedServerId = newServerId;
-                return _cachedServerId;
+                Volatile.Write(ref _cachedServerId, newServerId);
+                return newServerId;
             }
 
             // Lost the race with another concurrent caller inserting the same key. Re-read
@@ -100,8 +109,8 @@ public sealed class ServerIdentityService : IServerIdentityService, IDisposable
             AppSettingsEntity? afterRace = await settings.GetReadOnlyAsync(SettingsKey, cancellationToken).ConfigureAwait(false);
             if (afterRace is not null && TryParseServerId(afterRace.SettingsJson, out string raceWinnerId))
             {
-                _cachedServerId = raceWinnerId;
-                return _cachedServerId;
+                Volatile.Write(ref _cachedServerId, raceWinnerId);
+                return raceWinnerId;
             }
 
             _logger.LogError("[ServerIdentity] Concurrent identity generation failed and no committed row could be re-read.");
@@ -136,12 +145,13 @@ public sealed class ServerIdentityService : IServerIdentityService, IDisposable
                 serverId = record.ServerId;
                 return true;
             }
+
+            return false;
         }
         catch (JsonException)
         {
+            return false;
         }
-
-        return false;
     }
 
     private sealed record ServerIdentityRecord(string ServerId);

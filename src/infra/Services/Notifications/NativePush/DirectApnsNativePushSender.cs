@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -141,7 +142,7 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         {
             _logger.LogError(
                 "[NativePush/direct] Refusing to send attentionItemId={AttentionItemId} — originServerId is missing or non-canonical.",
-                envelope.AttentionItemId);
+                LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.Terminal("invalid_origin_server_id");
         }
 
