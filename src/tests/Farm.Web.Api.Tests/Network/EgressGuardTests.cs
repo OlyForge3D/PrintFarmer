@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Net.Sockets;
 using Farm.Infrastructure.Network;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -118,7 +119,77 @@ public class EgressGuardTests
         pinned.ToString().Should().StartWith("https://[::1]/");
     }
 
-    private static EgressGuard CreateGuard(string? allowedRanges = null)
+    [Fact]
+    public void CreatePinnedUri_PreservesUserInfoAndFragment()
+    {
+        // UserInfo and Fragment were silently dropped by the original hand-rolled
+        // string-interpolation implementation; UriBuilder must now preserve them.
+        var original = new Uri("http://user:pass@printer.local:8080/api/v1/status?foo=bar#section");
+
+        Uri pinned = EgressGuard.CreatePinnedUri(original, IPAddress.Parse("192.168.1.50"));
+
+        pinned.Host.Should().Be("192.168.1.50");
+        pinned.UserInfo.Should().Be("user:pass");
+        pinned.Fragment.Should().Be("#section");
+    }
+
+    [Fact]
+    public async Task CheckAsync_ResolverReturnsHostNotFound_DoesNotRetryAndDenies()
+    {
+        int callCount = 0;
+        EgressGuard guard = CreateGuard(resolveHostAsync: (_, _) =>
+        {
+            callCount++;
+            throw new SocketException((int)SocketError.HostNotFound);
+        });
+
+        EgressCheckResult result = await guard.CheckAsync("http://definitely-does-not-exist.invalid:3333/");
+
+        result.IsAllowed.Should().BeFalse();
+        callCount.Should().Be(1, "a definitive NXDOMAIN must not be retried — it cannot resolve differently on a second attempt");
+    }
+
+    [Fact]
+    public async Task CheckAsync_ResolverFailsTransientlyThenSucceeds_RetriesOnceAndAllows()
+    {
+        int callCount = 0;
+        EgressGuard guard = CreateGuard(resolveHostAsync: (_, _) =>
+        {
+            callCount++;
+            if (callCount == 1)
+            {
+                throw new SocketException((int)SocketError.TryAgain);
+            }
+
+            return Task.FromResult(new[] { IPAddress.Parse("192.168.1.50") });
+        });
+
+        EgressCheckResult result = await guard.CheckAsync("http://transient-blip.example:3333/");
+
+        result.IsAllowed.Should().BeTrue();
+        result.ResolvedAddress.Should().Be(IPAddress.Parse("192.168.1.50"));
+        callCount.Should().Be(2, "a transient resolver failure should be retried exactly once before giving up");
+    }
+
+    [Fact]
+    public async Task CheckAsync_ResolverFailsTransientlyOnBothAttempts_FailsClosed()
+    {
+        int callCount = 0;
+        EgressGuard guard = CreateGuard(resolveHostAsync: (_, _) =>
+        {
+            callCount++;
+            throw new SocketException((int)SocketError.TryAgain);
+        });
+
+        EgressCheckResult result = await guard.CheckAsync("http://always-fails.example:3333/");
+
+        result.IsAllowed.Should().BeFalse();
+        callCount.Should().Be(2);
+    }
+
+    private static EgressGuard CreateGuard(
+        string? allowedRanges = null,
+        Func<string, CancellationToken, Task<IPAddress[]>>? resolveHostAsync = null)
     {
         IConfiguration configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(
@@ -127,6 +198,8 @@ public class EgressGuardTests
                     : new Dictionary<string, string?> { ["ALLOWED_NETWORK_RANGES"] = allowedRanges })
             .Build();
 
-        return new EgressGuard(configuration, NullLogger<EgressGuard>.Instance);
+        return resolveHostAsync is null
+            ? new EgressGuard(configuration, NullLogger<EgressGuard>.Instance)
+            : new EgressGuard(configuration, NullLogger<EgressGuard>.Instance, resolveHostAsync);
     }
 }

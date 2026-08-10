@@ -98,6 +98,35 @@ public sealed class FlashForgeClientTests
         port.Should().Be(8899);
     }
 
+    [Fact]
+    public void ParseHostPort_BracketedIPv6WithPort_ParsesCorrectly()
+    {
+        // A naive LastIndexOf(':') split would break here: an IPv6 address contains multiple
+        // colons, so the bracketed form must be recognized and unwrapped before splitting.
+        var (host, port) = FlashForgeClient.ParseHostPort("[::1]:8899");
+
+        host.Should().Be("::1");
+        port.Should().Be(8899);
+    }
+
+    [Fact]
+    public void ParseHostPort_BracketedIPv6WithoutPort_ReturnsDefaultPort()
+    {
+        var (host, port) = FlashForgeClient.ParseHostPort("[fe80::1]");
+
+        host.Should().Be("fe80::1");
+        port.Should().Be(IFlashForgeClient.DefaultPort);
+    }
+
+    [Fact]
+    public void ParseHostPort_BracketedIPv6WithHttpSchemeAndPath_StripsSchemeAndPath()
+    {
+        var (host, port) = FlashForgeClient.ParseHostPort("http://[2001:db8::1]:8899/some/path");
+
+        host.Should().Be("2001:db8::1");
+        port.Should().Be(8899);
+    }
+
     #endregion
 
     #region ParseMachineStatus

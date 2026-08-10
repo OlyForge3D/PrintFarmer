@@ -45,8 +45,31 @@ public interface IEgressGuard
     Task<EgressCheckResult> CheckAsync(string url, CancellationToken ct = default);
 }
 
-public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuard> logger) : IEgressGuard
+public sealed class EgressGuard : IEgressGuard
 {
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<EgressGuard> _logger;
+    private readonly Func<string, CancellationToken, Task<IPAddress[]>> _resolveHostAsync;
+
+    public EgressGuard(IConfiguration configuration, ILogger<EgressGuard> logger)
+        : this(configuration, logger, (host, ct) => Dns.GetHostAddressesAsync(host, ct))
+    {
+    }
+
+    /// <summary>
+    /// Test-only constructor allowing the DNS resolver to be replaced with a fake, so retry/backoff
+    /// and fail-closed behavior can be exercised deterministically without touching live DNS.
+    /// </summary>
+    internal EgressGuard(
+        IConfiguration configuration,
+        ILogger<EgressGuard> logger,
+        Func<string, CancellationToken, Task<IPAddress[]>> resolveHostAsync)
+    {
+        _configuration = configuration;
+        _logger = logger;
+        _resolveHostAsync = resolveHostAsync;
+    }
+
     public async Task<EgressCheckResult> CheckAsync(string url, CancellationToken ct = default)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? uri) ||
@@ -70,7 +93,7 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
                 // transient blip. Fail CLOSED: an egress guard that lets DNS-resolution failure
                 // silently pass an unvetted destination through can be trivially defeated by an
                 // attacker whose domain resolves intermittently.
-                logger.LogWarning(
+                _logger.LogWarning(
                     "Egress blocked to {Host}: destination hostname did not resolve",
                     uri.Host);
                 return EgressCheckResult.Deny("Destination hostname could not be resolved", uri);
@@ -84,7 +107,7 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
             if (NetworkDestinationClassifier.IsLoopbackLinkLocalOrMulticast(address) &&
                 !IsExplicitlyAllowed(address, allowedRanges))
             {
-                logger.LogWarning(
+                _logger.LogWarning(
                     "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
                     uri.Host,
                     address);
@@ -103,9 +126,12 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
     }
 
     /// <summary>
-    /// Resolves <paramref name="host"/> via DNS, retrying once immediately on failure to absorb a
-    /// transient resolution blip before the caller treats it as a hard deny. Returns an empty
-    /// array (never throws) when resolution fails on both attempts.
+    /// Resolves <paramref name="host"/> via DNS, retrying once after a short backoff on a
+    /// transient resolution failure (e.g. a temporary resolver timeout or an mDNS/LAN blip)
+    /// before the caller treats it as a hard deny. A definitive NXDOMAIN (<see
+    /// cref="SocketError.HostNotFound"/>) is not retried — the record does not exist, so a second
+    /// lookup cannot change the outcome and would only add latency to every deny. Returns an
+    /// empty array (never throws) when resolution fails on both attempts.
     /// </summary>
     private async Task<IPAddress[]> ResolveWithBoundedRetryAsync(string host, CancellationToken ct)
     {
@@ -113,15 +139,26 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
         {
             try
             {
-                IPAddress[] addresses = await Dns.GetHostAddressesAsync(host, ct);
+                IPAddress[] addresses = await _resolveHostAsync(host, ct);
                 if (addresses.Length > 0)
                 {
                     return addresses;
                 }
             }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.HostNotFound)
+            {
+                // Definitive "this name does not exist" — retrying would not help and would only
+                // slow down every legitimately-denied request.
+                return [];
+            }
             catch (SocketException)
             {
-                // Fall through to retry (or return empty on the final attempt).
+                // Transient resolver failure (timeout, temporary failure, etc.). Back off briefly
+                // before the final retry so a short-lived blip has a chance to clear.
+                if (attempt == 0)
+                {
+                    await Task.Delay(TimeSpan.FromMilliseconds(50), ct);
+                }
             }
         }
 
@@ -130,27 +167,28 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
 
     /// <summary>
     /// Rebuilds <paramref name="original"/> with <paramref name="pinnedAddress"/> as a literal
-    /// host, preserving scheme/port/path/query. Consumers should use the returned URI for the
-    /// actual outbound connection after a successful <see cref="CheckAsync"/>, and set the
-    /// original hostname as the request's Host header (for HTTP callers) to preserve
-    /// virtual-hosting/TLS SNI behavior — this guarantees the connection reuses the exact address
-    /// that was vetted rather than re-resolving the hostname.
+    /// host, preserving scheme/port/path/query/fragment/user-info. Consumers should use the
+    /// returned URI for the actual outbound connection after a successful
+    /// <see cref="CheckAsync"/>, and set the original hostname as the request's Host header (for
+    /// HTTP callers) to preserve virtual-hosting/TLS SNI behavior — this guarantees the
+    /// connection reuses the exact address that was vetted rather than re-resolving the hostname.
     /// </summary>
     public static Uri CreatePinnedUri(Uri original, IPAddress pinnedAddress)
     {
         ArgumentNullException.ThrowIfNull(original);
         ArgumentNullException.ThrowIfNull(pinnedAddress);
 
-        string host = pinnedAddress.AddressFamily == AddressFamily.InterNetworkV6
-            ? $"[{pinnedAddress}]"
-            : pinnedAddress.ToString();
-
-        return new Uri($"{original.Scheme}://{host}:{original.Port}{original.PathAndQuery}");
+        // Building from a UriBuilder seeded with the original URI (rather than re-interpolating
+        // a string) preserves every other component — including UserInfo and Fragment, which a
+        // hand-rolled "{scheme}://{host}:{port}{PathAndQuery}" format string would silently drop
+        // — and lets UriBuilder bracket IPv6 literals itself instead of duplicating that logic.
+        var builder = new UriBuilder(original) { Host = pinnedAddress.ToString() };
+        return builder.Uri;
     }
 
     private string[] GetAllowedRanges()
     {
-        string? raw = configuration["ALLOWED_NETWORK_RANGES"];
+        string? raw = _configuration["ALLOWED_NETWORK_RANGES"];
         return string.IsNullOrWhiteSpace(raw)
             ? []
             : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
