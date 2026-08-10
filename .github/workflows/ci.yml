@@ -124,6 +124,8 @@ jobs:
           shellcheck -x -s bash -S warning \
             scripts/ci/select-dotnet-tests.sh \
             scripts/ci/tests/test-select-dotnet-tests.sh \
+            scripts/ci/select-ios-build.sh \
+            scripts/ci/tests/test-select-ios-build.sh \
             .githooks/pre-push \
             .githooks/tests/test-pre-push.sh \
             .githooks/setup.sh
@@ -134,6 +136,8 @@ jobs:
           for f in \
               scripts/ci/select-dotnet-tests.sh \
               scripts/ci/tests/test-select-dotnet-tests.sh \
+              scripts/ci/select-ios-build.sh \
+              scripts/ci/tests/test-select-ios-build.sh \
               .githooks/pre-push \
               .githooks/tests/test-pre-push.sh \
               .githooks/setup.sh; do
@@ -142,6 +146,9 @@ jobs:
 
       - name: Selector tests
         run: bash scripts/ci/tests/test-select-dotnet-tests.sh
+
+      - name: iOS build selector tests
+        run: bash scripts/ci/tests/test-select-ios-build.sh
 
       - name: Pre-push hook tests
         run: bash .githooks/tests/test-pre-push.sh
