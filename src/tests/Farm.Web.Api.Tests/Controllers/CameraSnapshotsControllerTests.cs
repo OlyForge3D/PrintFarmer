@@ -29,6 +29,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private HttpClient? _client;
+    private HttpClient? _adminClient;
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -45,11 +46,19 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     {
         await _factory.ResetDatabaseAsync();
         _client = await _factory.CreateAuthenticatedClientAsync();
+
+        // DELETE now requires the queue:write permission (farm_admin), which the
+        // default authenticated client above deliberately does not have — see
+        // GH #1424. Destructive-endpoint tests use this admin client instead.
+        _adminClient = await _factory.CreateAdminClientAsync(
+            username: "camera-snapshots-admin",
+            email: "camera-snapshots-admin@example.com");
     }
 
     public async Task DisposeAsync()
     {
         _client?.Dispose();
+        _adminClient?.Dispose();
         _factory?.Dispose();
     }
 
@@ -347,7 +356,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     [Fact]
     public async Task Delete_WhenSnapshotNotFound_ReturnsNotFound()
     {
-        HttpResponseMessage response = await _client!.DeleteAsync($"/api/snapshots/{Guid.NewGuid()}");
+        HttpResponseMessage response = await _adminClient!.DeleteAsync($"/api/snapshots/{Guid.NewGuid()}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
@@ -357,7 +366,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     {
         var snapshot = await SeedSnapshotAsync(filePath: "printer/no-file.jpg");
 
-        HttpResponseMessage response = await _client!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
+        HttpResponseMessage response = await _adminClient!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
@@ -393,7 +402,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         db.CameraSnapshots.Add(snapshot);
         await db.SaveChangesAsync();
 
-        await _client!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
+        await _adminClient!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
 
         File.Exists(fullPath).Should().BeFalse();
     }
@@ -403,7 +412,7 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
     {
         CameraSnapshot snapshot = await SeedSnapshotAsync(filePath: "../../etc/passwd");
 
-        HttpResponseMessage response = await _client!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
+        HttpResponseMessage response = await _adminClient!.DeleteAsync($"/api/snapshots/{snapshot.Id}");
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
