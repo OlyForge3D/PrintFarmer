@@ -352,8 +352,9 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
         </div>
 
         {/* Workers table */}
-        <div className="bg-pf-bg-1 rounded-sm border border-pf-border overflow-hidden">
-        <table className="w-full">
+        <div className="bg-pf-bg-1 rounded-sm border border-pf-border">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px]">
           <thead className="bg-pf-bg-2 border-b border-pf-border">
             <tr>
               <th className="px-6 py-3 text-left text-xs font-medium text-pf-text-primary uppercase tracking-wider">Worker</th>
@@ -544,6 +545,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
             ))}
           </tbody>
         </table>
+        </div>
 
         {workers.length === 0 && (
           <div className="text-center py-12 text-pf-text-secondary">
