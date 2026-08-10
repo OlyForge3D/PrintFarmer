@@ -272,23 +272,26 @@ public class CamerasController(
     [ProducesResponseType(503)]
     public async Task<ActionResult<CameraEndpointDetectionDto>> DetectCameraEndpointsAsync(DetectCameraEndpointsRequest request, CancellationToken ct)
     {
+        if (!_startupStatus.IsReady)
+        {
+            return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
+        }
+
+        if (request == null || request.PrinterId == Guid.Empty)
+        {
+            return BadRequest(new { message = "Printer ID is required" });
+        }
+
+        // Authorization must happen outside the probe's try/catch below: if the authorization
+        // check itself throws, we must fail closed (propagate/500), not swallow it into the
+        // "probing failed" 200 response used for detection-only failures.
+        if (!await CanAccessCameraPrinterAsync(request.PrinterId, ct))
+        {
+            return NotFound(new { message = "Printer not found" });
+        }
+
         try
         {
-            if (!_startupStatus.IsReady)
-            {
-                return StatusCode(503, new { message = "System is still initializing. Please wait a moment and try again." });
-            }
-
-            if (request == null || request.PrinterId == Guid.Empty)
-            {
-                return BadRequest(new { message = "Printer ID is required" });
-            }
-
-            if (!await CanAccessCameraPrinterAsync(request.PrinterId, ct))
-            {
-                return NotFound(new { message = "Printer not found" });
-            }
-
             Farm.Infrastructure.Discovery.PrinterCameraProbeResult? result = await _cameraEndpointDetectionService.DetectAsync(request.PrinterId, ct);
             if (result is null)
             {

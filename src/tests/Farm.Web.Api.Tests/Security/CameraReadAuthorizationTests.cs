@@ -232,6 +232,22 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.OK);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("/enabled")]
+    [InlineData("/display")]
+    public async Task ListEndpoint_MatchingRoleCaller_SeesRestrictedCamera(string suffix)
+    {
+        (_, Guid cameraId, Guid allowedRoleId) = await SeedRestrictedFixtureWithRoleAsync();
+        using HttpClient client = CreateClientWithRole(allowedRoleId);
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras{suffix}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(cameraId.ToString());
+    }
+
     // --- farm_admin bypasses the group check -------------------------------------------------
 
     [Theory]
@@ -253,6 +269,46 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime
         }
     }
 
+    [Fact]
+    public async Task GetCamerasByPrinter_FarmAdmin_BypassesGroupCheck()
+    {
+        (Guid printerId, _, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras/by-printer/{printerId}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task DetectEndpoints_FarmAdmin_BypassesGroupCheck()
+    {
+        (Guid printerId, _, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/cameras/detect-endpoints",
+            new { printerId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/enabled")]
+    [InlineData("/display")]
+    public async Task ListEndpoint_FarmAdmin_SeesRestrictedCamera(string suffix)
+    {
+        (_, Guid cameraId, _) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateAdminClient();
+
+        HttpResponseMessage response = await client.GetAsync($"/api/cameras{suffix}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(cameraId.ToString());
+    }
+
     // --- Open-by-default scenarios stay visible (documents current behavior) ---------------
 
     [Fact]
@@ -266,6 +322,19 @@ public sealed class CameraReadAuthorizationTests : IAsyncLifetime
 
         zeroAclResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         ungroupedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task StandaloneCamera_DirectGetById_IsVisibleToAnyAuthenticatedCaller()
+    {
+        (_, _, Guid standaloneCameraId) = await SeedRestrictedFixtureAsync();
+        using HttpClient client = CreateForeignRoleClient();
+
+        HttpResponseMessage response = await client.GetAsync(BuildCameraUrl(standaloneCameraId, ""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        string body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(standaloneCameraId.ToString());
     }
 
     // --- Architecture guard: every action taking a camera/printer id must call the

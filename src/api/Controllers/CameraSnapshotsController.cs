@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -18,11 +19,24 @@ namespace Farm.Web.Api.Controllers;
 public class CameraSnapshotsController(
     AppDbContext db,
     IStoragePathService storagePathService,
-    ILogger<CameraSnapshotsController> logger) : ControllerBase
+    ILogger<CameraSnapshotsController> logger,
+    IQueueResourceAuthorizationService? queueResourceAuthorization = null) : ControllerBase
 {
     private readonly AppDbContext _db = db;
     private readonly IStoragePathService _storagePathService = storagePathService;
     private readonly ILogger<CameraSnapshotsController> _logger = logger;
+    private readonly IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
+
+    /// <summary>
+    /// Enforces the same PrinterGroup access rules as <see cref="Farm.Web.Api.Controllers.PrintersController"/>
+    /// on the printer that captured a snapshot, so a caller excluded from a printer's group cannot
+    /// enumerate or view its snapshots (mirrors issue #1421's fix for CamerasController).
+    /// </summary>
+    private async Task<bool> CanAccessSnapshotPrinterAsync(Guid printerId, PrinterGroupAccessLevel accessLevel, CancellationToken ct)
+    {
+        return _queueResourceAuthorization is not null &&
+            await _queueResourceAuthorization.CanAccessPrinterAsync(User, printerId, accessLevel, ct);
+    }
 
     /// <summary>
     /// Lists snapshots for a specific print job.
@@ -45,7 +59,17 @@ public class CameraSnapshotsController(
             })
             .ToListAsync(ct);
 
-        return Ok(snapshots);
+        if (snapshots.Count == 0)
+        {
+            return Ok(snapshots);
+        }
+
+        Guid[] printerIds = snapshots.Select(s => s.PrinterId).Distinct().ToArray();
+        IReadOnlySet<Guid> allowed = _queueResourceAuthorization is null
+            ? new HashSet<Guid>()
+            : await _queueResourceAuthorization.FilterAccessiblePrinterIdsAsync(User, printerIds, PrinterGroupAccessLevel.View, ct);
+
+        return Ok(snapshots.Where(s => allowed.Contains(s.PrinterId)).ToList());
     }
 
     /// <summary>
@@ -58,6 +82,11 @@ public class CameraSnapshotsController(
         [FromQuery] int offset = 0,
         CancellationToken ct = default)
     {
+        if (!await CanAccessSnapshotPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
         limit = Math.Clamp(limit, 1, 200);
         offset = Math.Max(offset, 0);
         List<CameraSnapshotDto> snapshots = await _db.CameraSnapshots
@@ -88,6 +117,11 @@ public class CameraSnapshotsController(
     {
         CameraSnapshot? snapshot = await _db.CameraSnapshots.FindAsync([snapshotId], ct);
         if (snapshot is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanAccessSnapshotPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();
         }
@@ -124,6 +158,11 @@ public class CameraSnapshotsController(
     {
         CameraSnapshot? snapshot = await _db.CameraSnapshots.FindAsync([snapshotId], ct);
         if (snapshot is null)
+        {
+            return NotFound();
+        }
+
+        if (!await CanAccessSnapshotPrinterAsync(snapshot.PrinterId, PrinterGroupAccessLevel.Manage, ct))
         {
             return NotFound();
         }
