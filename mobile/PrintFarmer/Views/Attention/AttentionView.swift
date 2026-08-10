@@ -741,6 +741,9 @@ struct AttentionView: View {
             .onChange(of: feedItemCount) { _, _ in
                 focusPendingAttentionItem(using: proxy)
             }
+            .onChange(of: feedViewModel.isShowingStaleCache) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
         }
     }
 

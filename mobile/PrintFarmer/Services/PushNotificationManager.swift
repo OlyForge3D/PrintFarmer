@@ -55,6 +55,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private var configuredServerID: UUID?
     private var configurationEpoch = 0
     private var allowsUnscopedRegistration = true
+    private var registrationTask: Task<Void, Never>?
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -317,7 +318,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         UserDefaults.standard.set(token, forKey: Self.deviceTokenKey)
         logger.info("APNs device token received: \(token.prefix(8))...")
 
-        Task { await registerTokenWithServer(token) }
+        registrationTask?.cancel()
+        registrationTask = Task { [weak self] in
+            await self?.registerTokenWithServer(token)
+        }
     }
 
     func didFailToRegisterForRemoteNotifications(error: Error) {
@@ -391,6 +395,9 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     /// Unregister the device token from the server (e.g., on logout).
     @discardableResult
     func unregisterFromServer(clearLocalToken: Bool = true) async -> Bool {
+        registrationTask?.cancel()
+        await registrationTask?.value
+        registrationTask = nil
         guard let token = deviceToken else { return true }
         guard let service = notificationService else { return false }
         let unregisterEpoch = configurationEpoch
