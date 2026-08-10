@@ -902,7 +902,7 @@ public sealed class NativePushDispatcherTests
         Guid firstOwner = Guid.Parse("00000000-0000-0000-0000-000000000001");
         Guid laterOwner = Guid.Parse("00000000-0000-0000-0000-000000000002");
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-kill-switch-{Guid.NewGuid():N}.db");
         string connectionString =
@@ -1083,7 +1083,7 @@ public sealed class NativePushDispatcherTests
         tokenA.Id = Guid.Parse("00000000-0000-0000-0000-000000000101");
         tokenB.Id = Guid.Parse("00000000-0000-0000-0000-000000000102");
         laterOwnerToken.Id = Guid.Parse("00000000-0000-0000-0000-000000000201");
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-persistence-{Guid.NewGuid():N}.db");
         string connectionString =
@@ -1488,7 +1488,7 @@ public sealed class NativePushDispatcherTests
         production.Token = sharedProviderToken;
         production.Environment = "production";
         production.AppBundleId = "com.example.production";
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-invalidation-{Guid.NewGuid():N}.db");
         string connectionString =
@@ -2139,7 +2139,7 @@ public sealed class NativePushDispatcherTests
         string tokenA = new('a', 64);
         string tokenB = new('b', 64);
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-registration-refresh-{Guid.NewGuid():N}.db");
         string connectionString =
@@ -6274,7 +6274,7 @@ public sealed class NativePushDispatcherTests
         string originalToken = new('a', 64);
         string replacementToken = new('z', 64);
         AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-post-send-disable-{Guid.NewGuid():N}.db");
         string connectionString =

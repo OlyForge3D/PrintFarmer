@@ -19,7 +19,7 @@ public sealed class WorkerVersionEndpointTests : IDisposable
 {
     private const string ConfiguredEngineVersion = "9.8.7";
     private readonly string _workingDirectory =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-worker-version-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-worker-version-{Guid.NewGuid():N}");
     private readonly WorkerVersionApplicationFactory _factory;
 
     public WorkerVersionEndpointTests()

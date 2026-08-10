@@ -26,7 +26,7 @@ public class ChunkedUploadServiceTests : IDisposable
     public ChunkedUploadServiceTests()
     {
         // Create temporary test directory
-        _testDirectory = Path.Combine(Path.GetTempPath(), "ChunkedUploadTests_" + Guid.NewGuid().ToString("N"));
+        _testDirectory = Path.Join(Path.GetTempPath(), "ChunkedUploadTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testDirectory);
 
         // Setup mocks
@@ -352,7 +352,7 @@ public class ChunkedUploadServiceTests : IDisposable
             hashAlgorithm: "sha256",
             expectedHash: expectedHash);
 
-        string tempPath = Path.Combine(_testDirectory, $"test.gcode.{initResult.UploadId}.part");
+        string tempPath = Path.Join(_testDirectory, $"test.gcode.{initResult.UploadId}.part");
         string metaPath = tempPath + ".meta.json";
 
         // Act
@@ -368,7 +368,7 @@ public class ChunkedUploadServiceTests : IDisposable
         Assert.Equal(expectedHash, status.FinalHash);
         Assert.False(File.Exists(tempPath));
         Assert.False(File.Exists(metaPath));
-        Assert.True(File.Exists(Path.Combine(_testDirectory, "test.gcode")));
+        Assert.True(File.Exists(Path.Join(_testDirectory, "test.gcode")));
     }
 
     [Fact]
@@ -392,9 +392,9 @@ public class ChunkedUploadServiceTests : IDisposable
             hashAlgorithm: "sha256",
             expectedHash: "deadbeef");
 
-        string tempPath = Path.Combine(_testDirectory, $"hashcheck.gcode.{initResult.UploadId}.part");
+        string tempPath = Path.Join(_testDirectory, $"hashcheck.gcode.{initResult.UploadId}.part");
         string metaPath = tempPath + ".meta.json";
-        string finalPath = Path.Combine(_testDirectory, "hashcheck.gcode");
+        string finalPath = Path.Join(_testDirectory, "hashcheck.gcode");
 
         // Act
         InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -603,7 +603,7 @@ public class ChunkedUploadServiceTests : IDisposable
     public async Task ExtractMetadataFromFileAsync_WhenFileMissing_ReturnsNull()
     {
         // Act
-        GcodeMetadataExtracted? result = await _service.ExtractMetadataFromFileAsync(Path.Combine(_testDirectory, "missing.gcode"));
+        GcodeMetadataExtracted? result = await _service.ExtractMetadataFromFileAsync(Path.Join(_testDirectory, "missing.gcode"));
 
         // Assert
         Assert.Null(result);
@@ -614,7 +614,7 @@ public class ChunkedUploadServiceTests : IDisposable
     public async Task ExtractMetadataFromFileAsync_WhenNotGcode_ReturnsNull()
     {
         // Arrange
-        string filePath = Path.Combine(_testDirectory, "notes.txt");
+        string filePath = Path.Join(_testDirectory, "notes.txt");
         await File.WriteAllTextAsync(filePath, "hello world");
 
         // Act
@@ -629,7 +629,7 @@ public class ChunkedUploadServiceTests : IDisposable
     public async Task ExtractMetadataFromFileAsync_WithGcodeContent_ReturnsMetadata()
     {
         // Arrange
-        string filePath = Path.Combine(_testDirectory, "meta.gcode");
+        string filePath = Path.Join(_testDirectory, "meta.gcode");
         await File.WriteAllTextAsync(filePath, "; G-code file\nG1 X10");
 
         var metadata = new GcodeMetadataExtracted { SlicerName = "TestSlicer" };

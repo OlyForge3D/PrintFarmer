@@ -21,7 +21,7 @@ public class FileIntegrityServiceTests
     public async Task FileExistsAsync_WhenFilePresent_ReturnsTrue()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "hello");
         FileIntegrityService sut = CreateSut();
 
@@ -43,7 +43,7 @@ public class FileIntegrityServiceTests
     public async Task VerifyHashAsync_WithMatchingHash_ReturnsTrue()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "abc");
         const string expectedHash = "hash123";
         _fileManagementService.Setup(x => x.ComputeFileHashAsync(tempFile, "sha256", It.IsAny<CancellationToken>()))
@@ -68,7 +68,7 @@ public class FileIntegrityServiceTests
     public async Task VerifyHashAsync_WhenFileMissing_ReturnsFalse()
     {
         // Arrange
-        string missing = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string missing = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         FileIntegrityService sut = CreateSut();
 
         // Act
@@ -83,7 +83,7 @@ public class FileIntegrityServiceTests
     public async Task VerifyIntegrityAsync_WithSizeMismatch_ReturnsSizeFailure()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "abc");
         FileIntegrityService sut = CreateSut();
 
@@ -107,7 +107,7 @@ public class FileIntegrityServiceTests
     public async Task VerifyIntegrityAsync_WithHashMismatch_ReturnsHashFailure()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "abc");
         _fileManagementService.Setup(x => x.ComputeFileHashAsync(tempFile, "sha256", It.IsAny<CancellationToken>()))
             .ReturnsAsync("actual");
@@ -132,7 +132,7 @@ public class FileIntegrityServiceTests
     public async Task VerifyIntegrityAsync_WhenHashThrowsUnauthorized_ReturnsPermissionDenied()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "abc");
         _fileManagementService.Setup(x => x.ComputeFileHashAsync(tempFile, "sha256", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException("denied"));
@@ -157,7 +157,7 @@ public class FileIntegrityServiceTests
     public async Task RecomputeHashAsync_WhenFileMissing_ReturnsNull()
     {
         // Arrange
-        string missing = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string missing = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         FileIntegrityService sut = CreateSut();
 
         // Act
@@ -172,7 +172,7 @@ public class FileIntegrityServiceTests
     public async Task RecomputeHashAsync_WhenFileExists_ReturnsHash()
     {
         // Arrange
-        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string tempFile = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(tempFile, "abc");
         _fileManagementService.Setup(x => x.ComputeFileHashAsync(tempFile, "sha256", It.IsAny<CancellationToken>()))
             .ReturnsAsync("hash-abc");

@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Tests.Dispatch;
 
 public sealed class StoredGcodeIntegrityVerifierTests : IDisposable
 {
-    private readonly string _storageRoot = Path.Combine(
+    private readonly string _storageRoot = Path.Join(
         Directory.GetCurrentDirectory(),
         ".test-artifacts",
         $"printfarmer-integrity-{Guid.NewGuid():N}");
@@ -32,7 +32,7 @@ public sealed class StoredGcodeIntegrityVerifierTests : IDisposable
     public async Task VerifyAsync_BytesChangedAfterQueue_ReturnsHashMismatch()
     {
         const string FileName = "calibration.gcode";
-        string path = Path.Combine(_storageRoot, FileName);
+        string path = Path.Join(_storageRoot, FileName);
         byte[] original = "G28\n"u8.ToArray();
         await File.WriteAllBytesAsync(path, original);
         string expected = Convert.ToHexString(SHA256.HashData(original));

@@ -49,9 +49,9 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
         _connectionString = _keepAliveConnection.ConnectionString;
 
         // Create temp directories for file storage (isolated per test)
-        string tempDir = Path.Combine(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
-        _modelStoragePath = Path.Combine(tempDir, "models");
-        _gcodeStoragePath = Path.Combine(tempDir, "gcode");
+        string tempDir = Path.Join(Path.GetTempPath(), $"farm_test_{Guid.NewGuid()}");
+        _modelStoragePath = Path.Join(tempDir, "models");
+        _gcodeStoragePath = Path.Join(tempDir, "gcode");
 
         // Create the directories
         Directory.CreateDirectory(_modelStoragePath);

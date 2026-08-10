@@ -540,10 +540,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_CrashBeforeSend_ResumesSameAttemptExactlyOnce()
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-resume-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -554,7 +554,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
 
                 claim = await CreateClaim(
@@ -644,10 +644,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_SdcpLostAcknowledgement_RetainsStartFences()
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-sdcp-response-loss-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -661,7 +661,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
                 claim = await CreateClaim(
                         seed,
@@ -744,10 +744,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task BackendStartConsumer_RealOctoPrintExplicit4xx_ReleasesAndRearms(
         HttpStatusCode statusCode)
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-octoprint-rejection-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -765,7 +765,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
                 claim = await CreateClaim(
                         seed,
@@ -873,10 +873,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_RealOctoPrintPostSendLoss_SendsOnceAndRetainsFences()
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-octoprint-response-loss-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -894,7 +894,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
                 claim = await CreateClaim(
                         seed,
@@ -977,10 +977,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_RealMoonraker502_RetainsFences()
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-moonraker-502-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -997,7 +997,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     file => file.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
                 claim = await CreateClaim(
                         seed,
@@ -1288,10 +1288,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task Cancel_DuringStart_BothBarrierOrderings_AreAcceptedAndHonoredExactlyOnce(
         bool startOwnsBarrierFirst)
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-cancel-start-race-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -1301,7 +1301,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     candidate => candidate.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
                 DispatchClaimResult claim = await CreateClaim(
                         seed,
@@ -2338,10 +2338,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task DispatchRoute_TwoMatchingIfMatchRequests_LoserReturns412WithBothEtags()
     {
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             AppContext.BaseDirectory,
             $"queue-dispatch-etag-race-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(Path.Combine(storageRoot, "gcode"));
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
         try
         {
             Fixture fixture;
@@ -2355,7 +2355,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
                     candidate => candidate.Id == fixture.GcodeId);
                 await File.WriteAllBytesAsync(
-                    Path.Combine(storageRoot, "gcode", gcode.FileName),
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
                     AuthoritativeGcodeBytes);
             }
 

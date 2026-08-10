@@ -20,7 +20,7 @@ public sealed class SqliteNativePushSchemaUpgradeTests
     [Fact]
     public async Task ApplyAsync_PreRegistrationVersionDatabase_PreservesAndUpdatesExistingRegistration()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"native-push-sqlite-upgrade-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False";

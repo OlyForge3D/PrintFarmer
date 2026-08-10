@@ -24,8 +24,8 @@ public class OrcaSlicerProfilesProviderTests
         // Test binary location: src/tests/Farm.Web.Api.Tests/bin/Release/net9.0
         // Navigate back to pfarm root (6 levels), then into sample_profiles/orcaslicer
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         // DEBUG: Verify the path exists
         if (!Directory.Exists(sampleProfilesPath))
@@ -74,8 +74,8 @@ public class OrcaSlicerProfilesProviderTests
     public void SampleProfileMirror_OrcaSlicer242Assets_HasCompleteBinaryInventory()
     {
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
         Dictionary<string, int> expectedAssets = new(StringComparer.OrdinalIgnoreCase)
         {
             [".png"] = 120,
@@ -102,8 +102,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository (real OrcaSlicer structure)
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -127,8 +127,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -156,8 +156,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -173,8 +173,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -212,8 +212,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -230,7 +230,7 @@ public class OrcaSlicerProfilesProviderTests
 
         int expectedFilamentCount = CountExistingUniversalFilamentsFromBundle(sampleProfilesPath);
         int topLevelFilamentCount = Directory.GetFiles(
-            Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary", "filament"),
+            Path.Join(sampleProfilesPath, "OrcaFilamentLibrary", "filament"),
             "*.json",
             SearchOption.TopDirectoryOnly).Length;
 
@@ -243,8 +243,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -252,7 +252,7 @@ public class OrcaSlicerProfilesProviderTests
         IEnumerable<SlicerProfileMetadata> machineProfiles = await provider.ListOfficialProfilesAsync();
 
         // Verify process profiles exist in sample data
-        string processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
+        string processDir = Path.Join(sampleProfilesPath, "Prusa", "process");
         Directory.Exists(processDir).Should().BeTrue("Sample data should have Prusa process profiles directory");
 
         string[] processFiles = Directory.GetFiles(processDir, "*.json");
@@ -273,8 +273,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -309,8 +309,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -353,8 +353,8 @@ public class OrcaSlicerProfilesProviderTests
     {
         // Use sample profiles from the repository
         string currentDir = Directory.GetCurrentDirectory();
-        string repoRoot = Path.GetFullPath(Path.Combine(currentDir, "..", "..", "..", "..", "..", ".."));
-        string sampleProfilesPath = Path.Combine(repoRoot, "sample_profiles", "orcaslicer");
+        string repoRoot = Path.GetFullPath(Path.Join(currentDir, "..", "..", "..", "..", "..", ".."));
+        string sampleProfilesPath = Path.Join(repoRoot, "sample_profiles", "orcaslicer");
 
         var provider = new OrcaSlicerProfilesProvider(sampleProfilesPath);
 
@@ -368,7 +368,7 @@ public class OrcaSlicerProfilesProviderTests
         if (coreOne04NozzleProfile != null)
         {
             // Load the process profiles from disk to check compatible_printers_condition
-            string processDir = Path.Combine(sampleProfilesPath, "Prusa", "process");
+            string processDir = Path.Join(sampleProfilesPath, "Prusa", "process");
 
             if (Directory.Exists(processDir))
             {
@@ -421,17 +421,17 @@ public class OrcaSlicerProfilesProviderTests
 
     private static int CountExistingUniversalFilamentsFromBundle(string sampleProfilesPath)
     {
-        string bundlePath = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary.json");
+        string bundlePath = Path.Join(sampleProfilesPath, "OrcaFilamentLibrary.json");
         string bundleJson = File.ReadAllText(bundlePath);
         using JsonDocument bundleDoc = JsonDocument.Parse(bundleJson);
         JsonElement filamentList = bundleDoc.RootElement.GetProperty("filament_list");
-        string universalFilamentsDir = Path.Combine(sampleProfilesPath, "OrcaFilamentLibrary");
+        string universalFilamentsDir = Path.Join(sampleProfilesPath, "OrcaFilamentLibrary");
 
         return filamentList
             .EnumerateArray()
             .Select(entry => entry.GetProperty("sub_path").GetString())
             .Where(subPath => !string.IsNullOrWhiteSpace(subPath))
-            .Count(subPath => File.Exists(Path.Combine(universalFilamentsDir, subPath!)));
+            .Count(subPath => File.Exists(Path.Join(universalFilamentsDir, subPath!)));
     }
 }
 

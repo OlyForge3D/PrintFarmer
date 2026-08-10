@@ -37,7 +37,7 @@ public class ModelThumbnailReplacementTests
 
         Assert.Equal(fixture.Model.Id, result.Id);
         Assert.Equal($"/api/3d-models/thumbnail/{fixture.Model.Id}", result.ThumbnailUrl);
-        string replacementPath = Path.Combine(fixture.StoragePath, fixture.Model.ThumbnailFileName!);
+        string replacementPath = Path.Join(fixture.StoragePath, fixture.Model.ThumbnailFileName!);
         Assert.Equal(replacementBytes, await fixture.FileSystem.ReadAllBytesAsync(replacementPath));
         Assert.False(fixture.FileSystem.FileExists(fixture.ThumbnailPath));
         Assert.DoesNotContain(
@@ -222,10 +222,10 @@ public class ModelThumbnailReplacementTests
 
     private static ReplacementFixture CreateFixture(Exception? saveException = null)
     {
-        string storagePath = Path.Combine(Path.GetTempPath(), "pfarm-thumbnail-replacement-tests", Guid.NewGuid().ToString("N"));
+        string storagePath = Path.Join(Path.GetTempPath(), "pfarm-thumbnail-replacement-tests", Guid.NewGuid().ToString("N"));
         Guid modelId = Guid.NewGuid();
         string thumbnailFileName = $"{modelId}_thumb.png";
-        string thumbnailPath = Path.Combine(storagePath, thumbnailFileName);
+        string thumbnailPath = Path.Join(storagePath, thumbnailFileName);
         byte[] originalThumbnailBytes = CreatePng(4, 4);
         TestFileSystem fileSystem = TestFileSystemFactory.WithThumbnail(thumbnailPath, originalThumbnailBytes);
         Model3D model = new()

@@ -77,12 +77,12 @@ public sealed class PrintJobManagementSecurityTests
     {
         const string backendSecret =
             "https://admin:super-secret@10.0.0.5/private?apiKey=top-secret";
-        string storageRoot = Path.Combine(
+        string storageRoot = Path.Join(
             Path.GetTempPath(),
             $"printfarmer-dispatch-{Guid.NewGuid()}");
         Directory.CreateDirectory(storageRoot);
         string fileName = "artifact.gcode";
-        await File.WriteAllTextAsync(Path.Combine(storageRoot, fileName), string.Empty);
+        await File.WriteAllTextAsync(Path.Join(storageRoot, fileName), string.Empty);
 
         try
         {

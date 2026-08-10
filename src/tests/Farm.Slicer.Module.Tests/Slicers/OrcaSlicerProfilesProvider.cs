@@ -142,14 +142,14 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         try
         {
             // Load universal filaments from OrcaFilamentLibrary directory
-            string universalFilamentsDir = Path.Combine(_profilesPath, "OrcaFilamentLibrary");
+            string universalFilamentsDir = Path.Join(_profilesPath, "OrcaFilamentLibrary");
 
             if (!Directory.Exists(universalFilamentsDir))
             {
                 return; // No universal filaments available
             }
 
-            string bundlePath = Path.Combine(_profilesPath, "OrcaFilamentLibrary.json");
+            string bundlePath = Path.Join(_profilesPath, "OrcaFilamentLibrary.json");
             if (!File.Exists(bundlePath))
             {
                 return;
@@ -175,7 +175,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
                         continue;
                     }
 
-                    string filamentsFile = Path.Combine(universalFilamentsDir, subPath);
+                    string filamentsFile = Path.Join(universalFilamentsDir, subPath);
                     if (!File.Exists(filamentsFile))
                     {
                         continue;
@@ -209,7 +209,7 @@ internal class OrcaSlicerProfilesProvider : ISlicerProfilesProvider
         {
             // Construct the full path to the profile file
             // subPath is relative to the manufacturer directory, e.g., "machine/Prusa CORE One.json"
-            string profilePath = Path.Combine(_profilesPath, manufacturerName, subPath);
+            string profilePath = Path.Join(_profilesPath, manufacturerName, subPath);
 
             if (!File.Exists(profilePath))
             {

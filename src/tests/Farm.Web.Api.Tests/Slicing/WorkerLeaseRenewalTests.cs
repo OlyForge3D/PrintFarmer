@@ -31,7 +31,7 @@ namespace Farm.Web.Api.Tests.Slicing;
 public sealed class WorkerLeaseRenewalTests : IDisposable
 {
     private readonly string _workingDirectory =
-        Path.Combine(AppContext.BaseDirectory, "worker-renewal-tests", Guid.NewGuid().ToString("N"));
+        Path.Join(AppContext.BaseDirectory, "worker-renewal-tests", Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {
@@ -274,10 +274,10 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
 
     private string CreateJobOutput(Guid jobId)
     {
-        string jobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
-        string outputDirectory = Path.Combine(jobDirectory, "output");
+        string jobDirectory = Path.Join(_workingDirectory, jobId.ToString());
+        string outputDirectory = Path.Join(jobDirectory, "output");
         _ = Directory.CreateDirectory(outputDirectory);
-        File.WriteAllText(Path.Combine(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
+        File.WriteAllText(Path.Join(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
         return jobDirectory;
     }
 
@@ -382,7 +382,7 @@ public sealed class WorkerLeaseRenewalTests : IDisposable
             return new SlicingResult
             {
                 Success = true,
-                ResultFileUrl = new Uri(Path.GetFullPath(Path.Combine(_jobDirectory, "output", "result.gcode"))),
+                ResultFileUrl = new Uri(Path.GetFullPath(Path.Join(_jobDirectory, "output", "result.gcode"))),
                 OutputFileSizeBytes = 32,
             };
         }

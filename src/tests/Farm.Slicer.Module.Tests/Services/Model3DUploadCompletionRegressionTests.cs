@@ -123,7 +123,7 @@ public class Model3DUploadCompletionRegressionTests
         var mockLogger = new Mock<ILogger<Model3DFileService>>();
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         mockStoragePath.Setup(x => x.GetModelUploadDirectory())
-            .Returns(Path.Combine(Path.GetTempPath(), "test-models"));
+            .Returns(Path.Join(Path.GetTempPath(), "test-models"));
 
         var service = new Model3DFileService(
             mockRepo.Object,
@@ -186,7 +186,7 @@ public class Model3DUploadCompletionRegressionTests
         var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         mockStoragePath.Setup(x => x.GetModelUploadDirectory())
-            .Returns(Path.Combine(Path.GetTempPath(), "test-models"));
+            .Returns(Path.Join(Path.GetTempPath(), "test-models"));
 
         var service = new Model3DFileService(
             mockRepo.Object,
@@ -271,7 +271,7 @@ public class Model3DUploadCompletionRegressionTests
         var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         mockStoragePath.Setup(x => x.GetModelUploadDirectory())
-            .Returns(Path.Combine(Path.GetTempPath(), "test-models"));
+            .Returns(Path.Join(Path.GetTempPath(), "test-models"));
 
         var service = new Model3DFileService(
             mockRepo.Object,
@@ -363,7 +363,7 @@ public class Model3DUploadCompletionRegressionTests
         var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         mockStoragePath.Setup(x => x.GetModelUploadDirectory())
-            .Returns(Path.Combine(Path.GetTempPath(), "test-models"));
+            .Returns(Path.Join(Path.GetTempPath(), "test-models"));
 
         var service = new Model3DFileService(
             mockRepo.Object,
@@ -455,7 +455,7 @@ public class Model3DUploadCompletionRegressionTests
         var config = new ConfigurationBuilder().AddInMemoryCollection().Build();
         var mockStoragePath = new Mock<IStoragePathService>(MockBehavior.Strict);
         mockStoragePath.Setup(x => x.GetModelUploadDirectory())
-            .Returns(Path.Combine(Path.GetTempPath(), "test-models"));
+            .Returns(Path.Join(Path.GetTempPath(), "test-models"));
 
         var service = new Model3DFileService(
             mockRepo.Object,

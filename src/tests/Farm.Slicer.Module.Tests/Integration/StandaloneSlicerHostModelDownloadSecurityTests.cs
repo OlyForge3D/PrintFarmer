@@ -43,7 +43,7 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
     {
         Guid modelId = Guid.NewGuid();
         string fileName = $"{modelId}.stl";
-        string filePath = Path.Combine(factory.ModelStoragePath, fileName);
+        string filePath = Path.Join(factory.ModelStoragePath, fileName);
         await File.WriteAllTextAsync(filePath, "split-host model file");
 
         try
@@ -84,7 +84,7 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
     public async Task DownloadForViewer_WithAuthenticatedRequest_Returns200()
     {
         string fileName = $"viewer-{Guid.NewGuid():N}.stl";
-        string filePath = Path.Combine(factory.ModelStoragePath, fileName);
+        string filePath = Path.Join(factory.ModelStoragePath, fileName);
         await File.WriteAllTextAsync(filePath, "split-host viewer");
 
         try
@@ -144,7 +144,7 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
     public async Task DownloadForViewer_WithSymlinkOutsideStorageRoot_Returns403()
     {
         string outsidePath = CreateOutsideFile("symlink");
-        string linkPath = Path.Combine(
+        string linkPath = Path.Join(
             factory.ModelStoragePath,
             $"link-{Guid.NewGuid():N}.stl");
         _ = File.CreateSymbolicLink(linkPath, outsidePath);
@@ -166,7 +166,7 @@ public class StandaloneSlicerHostModelDownloadSecurityTests(
 
     private string CreateOutsideFile(string prefix)
     {
-        string path = Path.Combine(
+        string path = Path.Join(
             factory.OutsideStoragePath,
             $"{prefix}-{Guid.NewGuid():N}.stl");
         File.WriteAllText(path, "outside");
@@ -194,14 +194,14 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
 
     public StandaloneSlicerHostApplicationFactory()
     {
-        _testRoot = Path.Combine(
+        _testRoot = Path.Join(
             Path.GetTempPath(),
             $"slicer-host-security-{Guid.NewGuid():N}");
-        ModelStoragePath = Path.Combine(_testRoot, "models");
-        OutsideStoragePath = Path.Combine(
+        ModelStoragePath = Path.Join(_testRoot, "models");
+        OutsideStoragePath = Path.Join(
             Path.GetTempPath(),
             $"slicer-host-security-outside-{Guid.NewGuid():N}");
-        _databasePath = Path.Combine(_testRoot, "slicer-host.db");
+        _databasePath = Path.Join(_testRoot, "slicer-host.db");
         Directory.CreateDirectory(ModelStoragePath);
         Directory.CreateDirectory(OutsideStoragePath);
 
@@ -249,11 +249,11 @@ public sealed class StandaloneSlicerHostApplicationFactory : WebApplicationFacto
         _ = builder.UseSetting("STORAGE_PATHS:UPLOADS", ModelStoragePath);
         _ = builder.UseSetting(
             "STORAGE_PATHS:GCODE",
-            Path.Combine(_testRoot, "gcode"));
+            Path.Join(_testRoot, "gcode"));
         _ = builder.UseSetting("WorkerAuth:SharedKey", "split-host-test-worker-key");
         _ = builder.UseSetting(
             "ArtifactStorage:RootPath",
-            Path.Combine(_testRoot, "artifacts"));
+            Path.Join(_testRoot, "artifacts"));
         _ = builder.UseSetting("ArtifactStorage:EnableStorageAlerts", "false");
     }
 

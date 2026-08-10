@@ -25,7 +25,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         """{"machineProfileName":"Test Machine","processProfileName":"Test Process","filamentProfileName":"Test Filament"}""";
 
     private readonly string _testRoot =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-profile-handoff-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-profile-handoff-{Guid.NewGuid():N}");
 
     [Theory]
     [InlineData(false)]
@@ -34,7 +34,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         bool emitPipeProgress)
     {
         _ = Directory.CreateDirectory(_testRoot);
-        string captureDirectory = Path.Combine(_testRoot, "capture");
+        string captureDirectory = Path.Join(_testRoot, "capture");
         _ = Directory.CreateDirectory(captureDirectory);
         string fakeOrcaPath = await CreateFakeOrcaAsync(captureDirectory, emitPipeProgress);
 
@@ -47,7 +47,7 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
                 ["SlicerApi:BaseUrl"] = "http://localhost",
                 ["Worker:PollIntervalSeconds"] = "1",
                 ["Worker:LeaseDurationSeconds"] = "300",
-                ["Worker:WorkingDirectory"] = Path.Combine(_testRoot, "work"),
+                ["Worker:WorkingDirectory"] = Path.Join(_testRoot, "work"),
                 ["Worker:OrcaSlicerPath"] = fakeOrcaPath,
             })
             .Build();
@@ -94,16 +94,16 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
         _ = poller.ExecutedJob.Profile.Should().NotBeNull();
         _ = poller.ExecutedJob.Profile!.MachineProfile!.Name.Should().Be("Test Machine");
 
-        string machineJson = await File.ReadAllTextAsync(Path.Combine(captureDirectory, "machine.json"));
-        string processJson = await File.ReadAllTextAsync(Path.Combine(captureDirectory, "process.json"));
-        string filamentJson = await File.ReadAllTextAsync(Path.Combine(captureDirectory, "filament.json"));
+        string machineJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "machine.json"));
+        string processJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "process.json"));
+        string filamentJson = await File.ReadAllTextAsync(Path.Join(captureDirectory, "filament.json"));
         _ = machineJson.Should().Contain("\"printer_model\"");
         _ = machineJson.Should().NotContain("\"machineProfile\"");
         _ = processJson.Should().Contain("\"layer_height\"");
         _ = processJson.Should().NotContain("\"processProfile\"");
         _ = filamentJson.Should().Contain("\"filament_type\"");
         _ = filamentJson.Should().NotContain("\"filamentProfile\"");
-        _ = File.Exists(Path.Combine(captureDirectory, "orca-invoked.txt")).Should().BeTrue();
+        _ = File.Exists(Path.Join(captureDirectory, "orca-invoked.txt")).Should().BeTrue();
 
         CompleteSliceJobRequest? completed = JsonSerializer.Deserialize<CompleteSliceJobRequest>(
             terminal.Body,
@@ -130,13 +130,13 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
     {
         if (OperatingSystem.IsWindows())
         {
-            string scriptPath = Path.Combine(_testRoot, "fake-orca.cmd");
+            string scriptPath = Path.Join(_testRoot, "fake-orca.cmd");
             string script = $"""
                 @echo off
-                copy /Y "%CD%\machine.json" "{Path.Combine(captureDirectory, "machine.json")}" >nul
-                copy /Y "%CD%\process.json" "{Path.Combine(captureDirectory, "process.json")}" >nul
-                copy /Y "%CD%\filament.json" "{Path.Combine(captureDirectory, "filament.json")}" >nul
-                echo invoked>"{Path.Combine(captureDirectory, "orca-invoked.txt")}"
+                copy /Y "%CD%\machine.json" "{Path.Join(captureDirectory, "machine.json")}" >nul
+                copy /Y "%CD%\process.json" "{Path.Join(captureDirectory, "process.json")}" >nul
+                copy /Y "%CD%\filament.json" "{Path.Join(captureDirectory, "filament.json")}" >nul
+                echo invoked>"{Path.Join(captureDirectory, "orca-invoked.txt")}"
                 (
                   echo ; estimated printing time = 120s
                   echo ; filament used = 1g
@@ -149,18 +149,18 @@ public sealed class ProfileHandoffIntegrationTests : IAsyncDisposable
             return scriptPath;
         }
 
-        string unixScriptPath = Path.Combine(_testRoot, "fake-orca");
+        string unixScriptPath = Path.Join(_testRoot, "fake-orca");
         string progressCommand = emitPipeProgress
             ? "printf '%s\\n' '{\"total_percent\":50,\"message\":\"Testing\"}' > \"$PWD/progress.pipe\""
             : ":";
         string unixScript = $"""
             #!/bin/sh
             set -eu
-            cp "$PWD/machine.json" "{Path.Combine(captureDirectory, "machine.json")}"
-            cp "$PWD/process.json" "{Path.Combine(captureDirectory, "process.json")}"
-            cp "$PWD/filament.json" "{Path.Combine(captureDirectory, "filament.json")}"
+            cp "$PWD/machine.json" "{Path.Join(captureDirectory, "machine.json")}"
+            cp "$PWD/process.json" "{Path.Join(captureDirectory, "process.json")}"
+            cp "$PWD/filament.json" "{Path.Join(captureDirectory, "filament.json")}"
             {progressCommand}
-            printf 'invoked\n' > "{Path.Combine(captureDirectory, "orca-invoked.txt")}"
+            printf 'invoked\n' > "{Path.Join(captureDirectory, "orca-invoked.txt")}"
             printf '; estimated printing time = 120s\n; filament used = 1g\n; layer_count = 2\nG28\n' > "$PWD/output/plate_1.gcode"
             """;
         await File.WriteAllTextAsync(

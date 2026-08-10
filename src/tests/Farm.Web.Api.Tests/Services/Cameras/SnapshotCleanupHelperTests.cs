@@ -30,7 +30,7 @@ public class SnapshotCleanupHelperTests : IDisposable
             .Options;
         _db = new AppDbContext(options);
 
-        _snapshotRoot = Path.Combine(Path.GetTempPath(), "pfarm-cleanup-tests", Guid.NewGuid().ToString());
+        _snapshotRoot = Path.Join(Path.GetTempPath(), "pfarm-cleanup-tests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(_snapshotRoot);
 
         _storagePathService = new Mock<IStoragePathService>(MockBehavior.Strict);
@@ -80,7 +80,7 @@ public class SnapshotCleanupHelperTests : IDisposable
 
     private string CreatePhysicalFile(string relativePath)
     {
-        string fullPath = Path.Combine(_snapshotRoot, relativePath);
+        string fullPath = Path.Join(_snapshotRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         File.WriteAllBytes(fullPath, [0xFF, 0xD8, 0xFF]); // JPEG magic bytes
         return fullPath;
@@ -145,7 +145,7 @@ public class SnapshotCleanupHelperTests : IDisposable
         SeedSnapshot(cameraId, "../../etc/passwd");
 
         // Create a sentinel file at the resolved traversal target to detect any accidental deletion.
-        string traversalTarget = Path.GetFullPath(Path.Combine(_snapshotRoot, "../../etc/passwd"));
+        string traversalTarget = Path.GetFullPath(Path.Join(_snapshotRoot, "../../etc/passwd"));
         Directory.CreateDirectory(Path.GetDirectoryName(traversalTarget)!);
         File.WriteAllText(traversalTarget, "sentinel");
 

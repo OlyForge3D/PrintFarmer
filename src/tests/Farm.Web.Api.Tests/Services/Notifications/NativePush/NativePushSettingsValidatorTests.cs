@@ -192,7 +192,7 @@ public sealed class NativePushSettingsValidatorTests
     public void Validate_DirectMode_UnreadableP8Path_FailsWithSanitizedDiagnostics()
     {
         // Use a random /tmp-ish path that certainly does not exist.
-        string missing = Path.Combine(Path.GetTempPath(), "farm-tests-" + Guid.NewGuid().ToString("N") + ".p8");
+        string missing = Path.Join(Path.GetTempPath(), "farm-tests-" + Guid.NewGuid().ToString("N") + ".p8");
 
         var settings = new NativePushSettings
         {
@@ -258,7 +258,7 @@ public sealed class NativePushSettingsValidatorTests
 
         // Guaranteed non-existent path — proves the file is not consulted
         // when inline PEM is present.
-        string garbagePath = Path.Combine(
+        string garbagePath = Path.Join(
             Path.GetTempPath(),
             "farm-tests-nonexistent-" + Guid.NewGuid().ToString("N") + ".p8");
 
@@ -328,7 +328,7 @@ public sealed class NativePushSettingsValidatorTests
     {
         // Write junk to a real, readable temp file — File.Open + ReadAllText
         // succeed, but ImportFromPem fails.
-        string tempPath = Path.Combine(
+        string tempPath = Path.Join(
             Path.GetTempPath(),
             "farm-tests-invalid-pem-" + Guid.NewGuid().ToString("N") + ".p8");
         File.WriteAllText(tempPath, "not a pem file");
@@ -428,7 +428,7 @@ public sealed class NativePushSettingsValidatorTests
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         string publicPem = key.ExportSubjectPublicKeyInfoPem();
-        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-public-{Guid.NewGuid():N}.p8");
+        string path = Path.Join(Path.GetTempPath(), $"farm-tests-public-{Guid.NewGuid():N}.p8");
         File.WriteAllText(path, publicPem);
         try
         {
@@ -463,7 +463,7 @@ public sealed class NativePushSettingsValidatorTests
     public void Validate_DirectMode_FilePrivateP256_Succeeds()
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-private-{Guid.NewGuid():N}.p8");
+        string path = Path.Join(Path.GetTempPath(), $"farm-tests-private-{Guid.NewGuid():N}.p8");
         File.WriteAllText(path, key.ExportPkcs8PrivateKeyPem());
         try
         {
@@ -493,7 +493,7 @@ public sealed class NativePushSettingsValidatorTests
         using ECDsa publicKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using ECDsa privateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         string publicPem = publicKey.ExportSubjectPublicKeyInfoPem();
-        string path = Path.Combine(Path.GetTempPath(), $"farm-tests-fallback-{Guid.NewGuid():N}.p8");
+        string path = Path.Join(Path.GetTempPath(), $"farm-tests-fallback-{Guid.NewGuid():N}.p8");
         File.WriteAllText(path, privateKey.ExportPkcs8PrivateKeyPem());
         try
         {

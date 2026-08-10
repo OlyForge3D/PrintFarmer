@@ -31,7 +31,7 @@ public class Model3DFileServiceAttributionTests
         Mock<IFileManagementService> fileManagement = new(MockBehavior.Loose);
         Mock<IFolderManagementService> folderService = new(MockBehavior.Loose);
         Mock<IStoragePathService> storagePath = new(MockBehavior.Strict);
-        string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfarm-attribution-tests", Guid.NewGuid().ToString());
+        string tempDir = System.IO.Path.Join(System.IO.Path.GetTempPath(), "pfarm-attribution-tests", Guid.NewGuid().ToString());
         storagePath.Setup(x => x.GetModelUploadDirectory()).Returns(tempDir);
         Mock<IStoredFileOperationsService> fileOps = new(MockBehavior.Loose);
 

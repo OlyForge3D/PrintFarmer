@@ -15,9 +15,9 @@ namespace Farm.Slicer.Module.Tests.Artifacts;
 public sealed class ArtifactOrphanReconciliationTests : IDisposable
 {
     private readonly string _root =
-        Path.Combine(Path.GetTempPath(), $"artifact-reconciliation-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"artifact-reconciliation-{Guid.NewGuid():N}");
     private readonly string _outsideRoot =
-        Path.Combine(Path.GetTempPath(), $"artifact-reconciliation-outside-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"artifact-reconciliation-outside-{Guid.NewGuid():N}");
 
     [Fact]
     public async Task ScanAndCleanupAsync_StaleDatabaseLessPermanentFile_DeletesFile()
@@ -162,7 +162,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             ArtifactStorageFileSystem.GetStagingDirectory(_root);
         Directory.CreateDirectory(stagingDirectory);
         Guid artifactId = Guid.NewGuid();
-        string stagingPath = Path.Combine(
+        string stagingPath = Path.Join(
             stagingDirectory,
             artifactId.ToString("N") +
                 ArtifactStorageFileSystem.StagingFileExtension);
@@ -174,7 +174,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             ArtifactStorageFileSystem.GetPublishedLeasePath(
                 _root,
                 artifactId);
-        string permanentPath = Path.Combine(
+        string permanentPath = Path.Join(
             _root,
             $"{artifactId}-hard-crash.gcode");
 
@@ -267,7 +267,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             "gcode",
             CancellationToken.None);
         Artifact pendingArtifact = await repositoryEntered.Task;
-        string permanentPath = Path.Combine(
+        string permanentPath = Path.Join(
             _root,
             pendingArtifact.RelativePath.Replace(
                 '/',
@@ -282,7 +282,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
                 ArtifactStorageFileSystem.GetStagingDirectory(_root);
             Directory.Move(
                 stagingDirectory,
-                Path.Combine(_root, ".staging-moved"));
+                Path.Join(_root, ".staging-moved"));
             Directory.CreateDirectory(stagingDirectory);
             SetStale(leasePath);
         }
@@ -338,8 +338,8 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         string stagingDirectory =
             ArtifactStorageFileSystem.GetStagingDirectory(_root);
         string movedStagingDirectory =
-            Path.Combine(_root, ".staging-moved");
-        string outsideLeasePath = Path.Combine(
+            Path.Join(_root, ".staging-moved");
+        string outsideLeasePath = Path.Join(
             _outsideRoot,
             pendingArtifact.Id.ToString("N") +
                 ArtifactStorageFileSystem.LeaseFileExtension);
@@ -356,7 +356,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
             _ = await uploadTask;
 
             File.Exists(outsideLeasePath).Should().BeTrue();
-            File.Exists(Path.Combine(
+            File.Exists(Path.Join(
                     movedStagingDirectory,
                     pendingArtifact.Id.ToString("N") +
                         ArtifactStorageFileSystem.LeaseFileExtension))
@@ -376,15 +376,15 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_outsideRoot);
-        string outsidePath = Path.Combine(_outsideRoot, "outside.gcode");
+        string outsidePath = Path.Join(_outsideRoot, "outside.gcode");
         await File.WriteAllTextAsync(outsidePath, "outside");
         SetStale(outsidePath);
 
-        string unexpectedPath = Path.Combine(_root, "unexpected.bin");
+        string unexpectedPath = Path.Join(_root, "unexpected.bin");
         await File.WriteAllTextAsync(unexpectedPath, "unexpected");
         SetStale(unexpectedPath);
 
-        string linkPath = Path.Combine(
+        string linkPath = Path.Join(
             _root,
             $"{Guid.NewGuid()}-linked.gcode");
         bool linkCreated;
@@ -434,13 +434,13 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_outsideRoot);
         Guid artifactId = Guid.NewGuid();
-        string legacyDirectory = Path.Combine(_root, "legacy");
-        string movedLegacyDirectory = Path.Combine(_root, "legacy-moved");
+        string legacyDirectory = Path.Join(_root, "legacy");
+        string movedLegacyDirectory = Path.Join(_root, "legacy-moved");
         Directory.CreateDirectory(legacyDirectory);
         string fileName = $"{artifactId}-orphan.gcode";
-        string orphanPath = Path.Combine(legacyDirectory, fileName);
-        string movedOrphanPath = Path.Combine(movedLegacyDirectory, fileName);
-        string outsidePath = Path.Combine(_outsideRoot, fileName);
+        string orphanPath = Path.Join(legacyDirectory, fileName);
+        string movedOrphanPath = Path.Join(movedLegacyDirectory, fileName);
+        string outsidePath = Path.Join(_outsideRoot, fileName);
         await File.WriteAllTextAsync(orphanPath, "orphan");
         await File.WriteAllTextAsync(outsidePath, "outside");
         SetStale(orphanPath);
@@ -519,9 +519,9 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_outsideRoot);
         string currentYearPath =
-            Path.Combine(_root, DateTime.UtcNow.Year.ToString());
+            Path.Join(_root, DateTime.UtcNow.Year.ToString());
         string nextYearPath =
-            Path.Combine(_root, DateTime.UtcNow.AddYears(1).Year.ToString());
+            Path.Join(_root, DateTime.UtcNow.AddYears(1).Year.ToString());
         _ = Directory.CreateSymbolicLink(currentYearPath, _outsideRoot);
         _ = Directory.CreateSymbolicLink(nextYearPath, _outsideRoot);
         var repository = new Mock<IArtifactsRepository>(MockBehavior.Strict);
@@ -546,7 +546,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
             artifact.RelativePath.Should().Be(
                 $"{artifact.Id}-hostile.gcode");
-            File.Exists(Path.Combine(_root, artifact.RelativePath))
+            File.Exists(Path.Join(_root, artifact.RelativePath))
                 .Should().BeTrue();
             Directory.EnumerateFileSystemEntries(_outsideRoot).Should().BeEmpty();
         }
@@ -562,11 +562,11 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
     {
         Directory.CreateDirectory(_root);
         Directory.CreateDirectory(_outsideRoot);
-        string outsidePath = Path.Combine(_outsideRoot, "outside.gcode");
+        string outsidePath = Path.Join(_outsideRoot, "outside.gcode");
         await File.WriteAllTextAsync(outsidePath, "outside");
         Guid artifactId = Guid.NewGuid();
         string publishedPath =
-            Path.Combine(_root, $"{artifactId}-pinned.gcode");
+            Path.Join(_root, $"{artifactId}-pinned.gcode");
         using ArtifactWriteLease writeLease =
             ArtifactWriteLease.Create(_root, artifactId);
         FileStream stagingStream = writeLease.OpenStagingStream();
@@ -602,11 +602,11 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         Directory.CreateDirectory(_root);
         string stagingDirectory =
             ArtifactStorageFileSystem.EnsureStagingDirectory(_root);
-        string stagingPath = Path.Combine(
+        string stagingPath = Path.Join(
             stagingDirectory,
             $"{Guid.NewGuid():N}{ArtifactStorageFileSystem.StagingFileExtension}");
         string publishedPath =
-            Path.Combine(_root, $"{Guid.NewGuid()}-fallback.gcode");
+            Path.Join(_root, $"{Guid.NewGuid()}-fallback.gcode");
         using FileStream stagingStream =
             ArtifactStorageFileSystem.CreateNamedLinuxStagingStream(stagingPath);
         await stagingStream.WriteAsync("pinned"u8.ToArray());
@@ -634,12 +634,12 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         Directory.CreateDirectory(_outsideRoot);
         string stagingDirectory =
             ArtifactStorageFileSystem.EnsureStagingDirectory(_root);
-        string stagingPath = Path.Combine(
+        string stagingPath = Path.Join(
             stagingDirectory,
             $"{Guid.NewGuid():N}{ArtifactStorageFileSystem.StagingFileExtension}");
-        string outsidePath = Path.Combine(_outsideRoot, "outside.gcode");
+        string outsidePath = Path.Join(_outsideRoot, "outside.gcode");
         string publishedPath =
-            Path.Combine(_root, $"{Guid.NewGuid()}-fallback-race.gcode");
+            Path.Join(_root, $"{Guid.NewGuid()}-fallback-race.gcode");
         await File.WriteAllTextAsync(outsidePath, "outside");
         using FileStream stagingStream =
             ArtifactStorageFileSystem.CreateNamedLinuxStagingStream(stagingPath);
@@ -719,14 +719,14 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
 
     private string CreatePermanentFile(Guid artifactId, string fileName)
     {
-        string directory = Path.Combine(
+        string directory = Path.Join(
             _root,
             "2026",
             "08",
             "06",
             Guid.NewGuid().ToString());
         Directory.CreateDirectory(directory);
-        string path = Path.Combine(directory, $"{artifactId}-{fileName}");
+        string path = Path.Join(directory, $"{artifactId}-{fileName}");
         File.WriteAllText(path, "artifact");
         return path;
     }
@@ -739,7 +739,7 @@ public sealed class ArtifactOrphanReconciliationTests : IDisposable
         string stagingDirectory =
             ArtifactStorageFileSystem.GetStagingDirectory(_root);
         Directory.CreateDirectory(stagingDirectory);
-        string path = Path.Combine(
+        string path = Path.Join(
             stagingDirectory,
             artifactId.ToString("N") + extension);
         File.WriteAllText(path, content);

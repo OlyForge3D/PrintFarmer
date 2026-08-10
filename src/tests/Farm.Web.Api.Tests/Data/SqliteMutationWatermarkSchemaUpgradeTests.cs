@@ -15,7 +15,7 @@ public sealed class SqliteMutationWatermarkSchemaUpgradeTests
     [Fact]
     public async Task ApplyAsync_ExistingDatabase_IsAdditiveAndIdempotent()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"mutation-watermark-upgrade-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False";

@@ -14,7 +14,7 @@ namespace Farm.Slicer.Module.Tests.Slicing;
 public sealed class ClaimNextJobConcurrencyTests : IAsyncDisposable
 {
     private readonly string _databasePath =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-claim-{Guid.NewGuid():N}.db");
+        Path.Join(Path.GetTempPath(), $"printfarmer-claim-{Guid.NewGuid():N}.db");
 
     [Fact]
     public async Task ClaimNextJobAsync_TwoConcurrentWorkers_ExactlyOneClaimsJob()

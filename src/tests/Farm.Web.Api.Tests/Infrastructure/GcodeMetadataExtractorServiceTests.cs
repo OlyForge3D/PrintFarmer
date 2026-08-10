@@ -504,12 +504,12 @@ G28
     {
         // Read the actual Voron_Design_Cube_v7 gcode file from OrcaSlicer
         // Navigate up from bin/Debug/net9.0 to the test project root
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -554,12 +554,12 @@ G28
     {
         // Read the actual Shape-Box gcode file from PrusaSlicer
         // Navigate up from bin/Debug/net9.0 to the test project root
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -604,12 +604,12 @@ G28
     {
         // This test uses the full-size OrcaSlicer gcode file (same as Voron_Design_Cube)
         // The metadata is beyond the first 500 lines, so we verify the parser handles this correctly
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -661,12 +661,12 @@ G28
     {
         // This test uses the full-size PrusaSlicer gcode file (same as Shape-Box)
         // The metadata is beyond the first 500 lines, so we verify the parser handles this correctly
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -731,12 +731,12 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_ParsesRealPrusaSlicerGcodeFile_ExtractsInfill()
     {
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -754,12 +754,12 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_ParsesRealOrcaSlicerGcodeFile_ExtractsInfill()
     {
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -796,12 +796,12 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_DebugPrusaPerimeters()
     {
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -833,12 +833,12 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_DebugOrcaPerimeters()
     {
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             Directory.GetCurrentDirectory(),
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",
@@ -931,12 +931,12 @@ G28
     [Fact]
     public async Task ExtractMetadataAsync_QidiXPlus4RealFile_ParsesPrinterModelAndMetadata()
     {
-        string testProjectPath = Path.GetFullPath(Path.Combine(
+        string testProjectPath = Path.GetFullPath(Path.Join(
             AppDomain.CurrentDomain.BaseDirectory,
             "..", "..", ".."
         ));
 
-        string filePath = Path.Combine(
+        string filePath = Path.Join(
             testProjectPath,
             "Infrastructure",
             "sample_gcode",

@@ -918,7 +918,7 @@ internal sealed class TemporarySqliteDatabase : IAsyncDisposable
 
     internal static async Task<TemporarySqliteDatabase> CreateAsync()
     {
-        string path = System.IO.Path.Combine(
+        string path = System.IO.Path.Join(
             System.IO.Path.GetTempPath(),
             $"printfarmer-database-migration-{Guid.NewGuid():N}.db");
         var connection = new SqliteConnection($"Data Source={path};Pooling=False");

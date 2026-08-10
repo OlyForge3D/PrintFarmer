@@ -18,7 +18,7 @@ public class OrcaSlicerDockerIntegrationTests : IAsyncLifetime
     {
         _output = output;
         _baseDirectory = DockerTestHelpers.GetRepositoryRoot();
-        _dockerComposeFile = Path.Combine(_baseDirectory, "docker-compose.yml");
+        _dockerComposeFile = Path.Join(_baseDirectory, "docker-compose.yml");
     }
 
     public async Task InitializeAsync()
@@ -46,7 +46,7 @@ public class OrcaSlicerDockerIntegrationTests : IAsyncLifetime
     public async Task OrcaSlicerWorker_ShouldBuildDockerImage_Successfully()
     {
         _output.WriteLine("Building OrcaSlicer worker Docker image...");
-        string dockerfilePath = Path.Combine(_baseDirectory, "Dockerfile.multistage");
+        string dockerfilePath = Path.Join(_baseDirectory, "Dockerfile.multistage");
         if (!File.Exists(dockerfilePath))
         {
             _output.WriteLine("Dockerfile.multistage not found, skipping Docker build test on this host.");

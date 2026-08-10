@@ -86,7 +86,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
 
         FolderNode folder = await GetOrCreateModelFolderAsync(appContext);
 
-        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
+        string filePath = Path.Join(Path.GetTempPath(), Guid.NewGuid() + "_" + fileName);
 
         // Create the actual file
         File.WriteAllText(filePath, "mock stl content");
@@ -383,7 +383,7 @@ public class SlicingSubmissionServiceIntegrationTests : IAsyncLifetime
         FolderNode folder = await GetOrCreateModelFolderAsync(appContext);
 
         // Create model but don't create the actual file
-        string nonExistentPath = Path.Combine(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid() + ".stl");
+        string nonExistentPath = Path.Join(Path.GetTempPath(), "nonexistent_" + Guid.NewGuid() + ".stl");
         var model = new Model3D
         {
             Id = Guid.NewGuid(),

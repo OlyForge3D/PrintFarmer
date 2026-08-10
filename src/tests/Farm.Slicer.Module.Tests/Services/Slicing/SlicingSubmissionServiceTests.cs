@@ -735,7 +735,7 @@ public class SlicingSubmissionServiceTests : IDisposable
 
     private string CreateTempFile(string fileName, int size)
     {
-        string tempPath = Path.Combine(Path.GetTempPath(), $"{Guid.NewGuid()}_{fileName}");
+        string tempPath = Path.Join(Path.GetTempPath(), $"{Guid.NewGuid()}_{fileName}");
         byte[] content = new byte[size];
         RandomNumberGenerator.Fill(content);
         File.WriteAllBytes(tempPath, content);

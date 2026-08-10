@@ -617,7 +617,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         _ = modelFiles.Should().HaveCount(stored.Count, "every staged file must have durable metadata");
         foreach (Model3D model in stored)
         {
-            string path = Path.Combine(_harness.ModelRoot, model.FileName);
+            string path = Path.Join(_harness.ModelRoot, model.FileName);
             _ = File.Exists(path).Should().BeTrue();
             byte[] bytes = await File.ReadAllBytesAsync(path);
             _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(firstJob.ModelSha256);
@@ -674,7 +674,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext verify = _harness.CreateSlicerContext();
         Model3D committed = await verify.Models3D.AsNoTracking()
             .SingleAsync(candidate => candidate.Id == committedModelId);
-        byte[] bytes = await File.ReadAllBytesAsync(Path.Combine(_harness.ModelRoot, committed.FileName));
+        byte[] bytes = await File.ReadAllBytesAsync(Path.Join(_harness.ModelRoot, committed.FileName));
         _ = Convert.ToHexString(SHA256.HashData(bytes)).Should().Be(committedDigest);
     }
 
@@ -699,7 +699,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
         Model3D model = await slicer.Models3D.AsNoTracking()
             .SingleAsync(candidate => candidate.Id == job.Model3DId);
-        string storedPath = Path.Combine(_harness.ModelRoot, model.FileName);
+        string storedPath = Path.Join(_harness.ModelRoot, model.FileName);
         _ = File.Exists(storedPath).Should().BeTrue();
         byte[] storedBytes = await File.ReadAllBytesAsync(storedPath);
         _ = Convert.ToHexString(SHA256.HashData(storedBytes)).Should().Be(job.ModelSha256);
@@ -736,7 +736,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
         Model3D model = await slicer.Models3D.AsNoTracking().SingleAsync(
             candidate => candidate.UploadedByUserId == fixture.Owner.UserId);
-        string recoveredPath = Path.Combine(_harness.ModelRoot, model.FileName);
+        string recoveredPath = Path.Join(_harness.ModelRoot, model.FileName);
         _ = recoveredPath.Should().Be(stagedPath);
         _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
         byte[] recoveredBytes = await File.ReadAllBytesAsync(recoveredPath);
@@ -774,7 +774,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
         Model3D stored = await slicer.Models3D.AsNoTracking()
             .SingleAsync(model => model.Id == job.Model3DId);
-        _ = Path.Combine(_harness.ModelRoot, stored.FileName).Should().Be(stagedPath);
+        _ = Path.Join(_harness.ModelRoot, stored.FileName).Should().Be(stagedPath);
         _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
     }
 
@@ -812,7 +812,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext verify = _harness.CreateSlicerContext();
         Model3D stored = await verify.Models3D.AsNoTracking()
             .SingleAsync(model => model.Id == job.Model3DId);
-        string recoveredPath = Path.Combine(_harness.ModelRoot, stored.FileName);
+        string recoveredPath = Path.Join(_harness.ModelRoot, stored.FileName);
         _ = recoveredPath.Should().Be(stagedPath);
         _ = Directory.GetFiles(_harness.ModelRoot, "*.stl").Should().ContainSingle();
         byte[] bytes = await File.ReadAllBytesAsync(recoveredPath);
@@ -859,7 +859,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
         Model3D stored = await slicer.Models3D.AsNoTracking()
             .SingleAsync(model => model.Id == job.Model3DId);
-        string storedPath = Path.Combine(_harness.ModelRoot, stored.FileName);
+        string storedPath = Path.Join(_harness.ModelRoot, stored.FileName);
         _ = File.Exists(storedPath).Should().BeTrue();
         _ = Directory.GetFiles(_harness.ModelRoot, "*.stl")
             .Should().ContainSingle().Which.Should().Be(storedPath);
@@ -1684,7 +1684,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         Artifact artifact = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
             .SingleAsync(slicer.Artifacts, candidate => candidate.Id == artifactId);
         await File.WriteAllBytesAsync(
-            Path.Combine(_harness.ArtifactRoot, artifact.RelativePath),
+            Path.Join(_harness.ArtifactRoot, artifact.RelativePath),
             Encoding.UTF8.GetBytes(";tampered\nG28\n"));
     }
 
@@ -1696,7 +1696,7 @@ public sealed class CalibrationGenerationSagaTests : IAsyncLifetime
         await using Farm.Slicer.Module.Data.SlicerDbContext slicer = _harness.CreateSlicerContext();
         Artifact artifact = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
             .SingleAsync(slicer.Artifacts, candidate => candidate.Id == artifactId);
-        return Path.Combine(_harness.ArtifactRoot, artifact.RelativePath);
+        return Path.Join(_harness.ArtifactRoot, artifact.RelativePath);
     }
 
     private async Task<byte[]> ReadArtifactBytesAsync(Guid artifactId) =>

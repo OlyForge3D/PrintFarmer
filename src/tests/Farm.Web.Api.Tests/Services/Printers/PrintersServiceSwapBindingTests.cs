@@ -704,7 +704,7 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
     [Fact]
     public async Task GuidedConcurrentFirstGateBinds_OneSucceeds_OneConflicts_AndTopologyRemainsCanonical()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             AppContext.BaseDirectory,
             $"toolhead-race-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Default Timeout=30";

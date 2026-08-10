@@ -38,7 +38,7 @@ public class ModelUploadStreamingTests
         Assert.Equal(Convert.ToHexString(SHA256.HashData(modelBytes)).ToLowerInvariant(), addedModel.FileHash);
         string thumbnailName = Assert.IsType<string>(addedModel.ThumbnailFileName);
         Assert.Equal($"{result.Id}_thumb.png", thumbnailName);
-        Assert.Equal(thumbnailBytes, await fixture.FileSystem.ReadAllBytesAsync(Path.Combine(fixture.StoragePath, thumbnailName)));
+        Assert.Equal(thumbnailBytes, await fixture.FileSystem.ReadAllBytesAsync(Path.Join(fixture.StoragePath, thumbnailName)));
         Assert.DoesNotContain(fixture.FileSystem.GetFiles(fixture.StoragePath, "*", SearchOption.AllDirectories), path => path.Contains(".tmp", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -322,7 +322,7 @@ public class ModelUploadStreamingTests
         CancellationTokenSource? cancelDuringThumbnail = null,
         Model3D? raceWinner = null)
     {
-        string storagePath = Path.Combine(Path.GetTempPath(), "pfarm-model-upload-tests", Guid.NewGuid().ToString("N"));
+        string storagePath = Path.Join(Path.GetTempPath(), "pfarm-model-upload-tests", Guid.NewGuid().ToString("N"));
         TestFileSystem fileSystem = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
         Mock<IModel3DFileRepository> repository = new(MockBehavior.Strict);
         Model3D? addedModel = null;

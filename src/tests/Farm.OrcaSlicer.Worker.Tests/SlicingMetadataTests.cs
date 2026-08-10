@@ -12,7 +12,7 @@ namespace Farm.OrcaSlicer.Worker.Tests;
 public sealed class SlicingMetadataTests : IDisposable
 {
     private readonly string _workingDirectory =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-slicing-metadata-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-slicing-metadata-{Guid.NewGuid():N}");
     private readonly HttpClient _httpClient = new();
 
     [Theory]

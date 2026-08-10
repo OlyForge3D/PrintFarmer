@@ -574,7 +574,7 @@ public sealed class DirectApnsNativePushSenderTests
     public async Task SendAsync_MissingP8File_LogsOnlySanitizedSigningCategory()
     {
         string secretLeaf = $"native-push-missing-secret-{Guid.NewGuid():N}.p8";
-        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        string keyPath = Path.GetFullPath(Path.Join(Path.GetTempPath(), secretLeaf));
         File.Delete(keyPath);
         NativePushSettings settings = MakePathSettings(keyPath);
         var logger = new RecordingDirectSenderLogger();
@@ -601,7 +601,7 @@ public sealed class DirectApnsNativePushSenderTests
     public async Task SendAsync_UnreadableP8Path_LogsOnlySanitizedSigningCategory()
     {
         string secretLeaf = $"native-push-unreadable-secret-{Guid.NewGuid():N}.p8";
-        string keyPath = Path.GetFullPath(Path.Combine(Path.GetTempPath(), secretLeaf));
+        string keyPath = Path.GetFullPath(Path.Join(Path.GetTempPath(), secretLeaf));
         Directory.CreateDirectory(keyPath);
         NativePushSettings settings = MakePathSettings(keyPath);
         var logger = new RecordingDirectSenderLogger();
@@ -634,7 +634,7 @@ public sealed class DirectApnsNativePushSenderTests
     [Fact]
     public async Task SendAsync_CorruptedOnDiskPem_DisposesReplacementKeyWhenImportThrows()
     {
-        string keyPath = Path.Combine(
+        string keyPath = Path.Join(
             Path.GetTempPath(),
             $"native-push-corrupt-key-{Guid.NewGuid():N}.p8");
         const string secretPemFragment = "corrupted-private-material-secret";

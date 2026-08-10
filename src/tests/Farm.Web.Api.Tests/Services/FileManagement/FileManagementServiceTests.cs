@@ -19,7 +19,7 @@ public class FileManagementServiceTests
     [Fact]
     public void ResolveVirtualPath_NormalizesSegmentsAndLeadingSlash()
     {
-        string root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string root = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(root);
         FileManagementService sut = CreateSut();
 
@@ -28,7 +28,7 @@ public class FileManagementServiceTests
             (string storageRoot, string resolved, string normalized) = sut.ResolveVirtualPath("folder/./sub/../file", root);
 
             storageRoot.Should().Be(root);
-            resolved.Should().Be(Path.GetFullPath(Path.Combine(root, "folder", "sub", "file")));
+            resolved.Should().Be(Path.GetFullPath(Path.Join(root, "folder", "sub", "file")));
             normalized.Should().Be("/folder/sub/file");
         }
         finally
@@ -50,10 +50,10 @@ public class FileManagementServiceTests
     [Fact]
     public void ResolveUniqueFileName_WhenCollision_AppendsCounter()
     {
-        string root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string root = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(root);
         string proposed = "model.stl";
-        File.WriteAllText(Path.Combine(root, proposed), "content");
+        File.WriteAllText(Path.Join(root, proposed), "content");
         FileManagementService sut = CreateSut();
 
         try
@@ -71,7 +71,7 @@ public class FileManagementServiceTests
     [Fact]
     public void ResolveUniqueFileName_WhenNoCollision_ReturnsOriginal()
     {
-        string root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string root = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(root);
         string proposed = "fresh.3mf";
         FileManagementService sut = CreateSut();
@@ -91,7 +91,7 @@ public class FileManagementServiceTests
     [Fact]
     public async Task ComputeFileHashAsync_WithSha256_ReturnsExpectedHash()
     {
-        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string filePath = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(filePath, "abc");
         FileManagementService sut = CreateSut();
 
@@ -112,7 +112,7 @@ public class FileManagementServiceTests
     [Fact]
     public async Task ComputeFileHashAsync_WithSha1_ReturnsExpectedHash()
     {
-        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string filePath = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(filePath, "data");
         FileManagementService sut = CreateSut();
 
@@ -133,7 +133,7 @@ public class FileManagementServiceTests
     [Fact]
     public async Task ComputeFileHashAsync_WithUnsupportedAlgorithm_Throws()
     {
-        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string filePath = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         await File.WriteAllTextAsync(filePath, "abc");
         FileManagementService sut = CreateSut();
 
@@ -154,7 +154,7 @@ public class FileManagementServiceTests
     {
         FileManagementService sut = CreateSut();
 
-        Func<Task> act = () => sut.ComputeFileHashAsync(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()), "sha256");
+        Func<Task> act = () => sut.ComputeFileHashAsync(Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString()), "sha256");
 
         await act.Should().ThrowAsync<FileNotFoundException>();
     }
@@ -172,7 +172,7 @@ public class FileManagementServiceTests
     [Fact]
     public void GenerateETag_ReturnsStrongAndWeakValues()
     {
-        string filePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string filePath = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         File.WriteAllText(filePath, "etag");
         DateTime timestamp = new DateTime(2024, 01, 02, 03, 04, 05, DateTimeKind.Utc);
         File.SetLastWriteTimeUtc(filePath, timestamp);
@@ -196,9 +196,9 @@ public class FileManagementServiceTests
     [Fact]
     public void IsSafePath_ReturnsTrueWhenInsideRoot()
     {
-        string root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string root = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(root);
-        string candidate = Path.Combine(root, "nested", "file.txt");
+        string candidate = Path.Join(root, "nested", "file.txt");
         FileManagementService sut = CreateSut();
 
         try
@@ -216,7 +216,7 @@ public class FileManagementServiceTests
     [Fact]
     public void IsSafePath_ReturnsFalseWhenOutsideRoot()
     {
-        string root = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        string root = Path.Join(Path.GetTempPath(), Guid.NewGuid().ToString());
         Directory.CreateDirectory(root);
         string candidate = "/etc/passwd";
         FileManagementService sut = CreateSut();

@@ -40,7 +40,7 @@ public class CameraSnapshotServiceTests : IDisposable
         _httpClientFactory = new Mock<IHttpClientFactory>(MockBehavior.Loose);
         _storagePathService = new Mock<IStoragePathService>(MockBehavior.Strict);
 
-        _snapshotRoot = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "pfarm-snapshot-tests", Guid.NewGuid().ToString());
+        _snapshotRoot = System.IO.Path.Join(System.IO.Path.GetTempPath(), "pfarm-snapshot-tests", Guid.NewGuid().ToString());
         _storagePathService.Setup(s => s.GetSnapshotStorageDirectory()).Returns(_snapshotRoot);
     }
 
@@ -166,7 +166,7 @@ public class CameraSnapshotServiceTests : IDisposable
         await service.CaptureSnapshotAsync(printerId, "PrintCompleted");
 
         CameraSnapshot snapshot = _db.CameraSnapshots.Single();
-        string fullPath = System.IO.Path.Combine(_snapshotRoot, snapshot.FilePath);
+        string fullPath = System.IO.Path.Join(_snapshotRoot, snapshot.FilePath);
         System.IO.File.Exists(fullPath).Should().BeTrue();
     }
 

@@ -43,7 +43,7 @@ public sealed class CalibrationBlobStoreTests
         new(
             Options.Create(new CalibrationBlobStorageOptions
             {
-                RootPath = Path.Combine(Path.GetTempPath(), $"calibration-blobs-{Guid.NewGuid():N}"),
+                RootPath = Path.Join(Path.GetTempPath(), $"calibration-blobs-{Guid.NewGuid():N}"),
                 MaxBytes = 1024,
                 MaxWidth = 128,
                 MaxHeight = 128,

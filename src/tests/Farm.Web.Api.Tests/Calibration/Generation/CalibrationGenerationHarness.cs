@@ -61,16 +61,16 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     private CalibrationGenerationHarness(string rootPath)
     {
         _rootPath = rootPath;
-        ArtifactRoot = Path.Combine(rootPath, "artifacts");
-        GcodeRoot = Path.Combine(rootPath, "gcode");
-        ModelRoot = Path.Combine(rootPath, "models");
+        ArtifactRoot = Path.Join(rootPath, "artifacts");
+        GcodeRoot = Path.Join(rootPath, "gcode");
+        ModelRoot = Path.Join(rootPath, "models");
         _ = Directory.CreateDirectory(ArtifactRoot);
         _ = Directory.CreateDirectory(GcodeRoot);
         _ = Directory.CreateDirectory(ModelRoot);
         _coreConnectionString =
-            $"Data Source={Path.Combine(rootPath, "core.db")};Pooling=false;Default Timeout=30";
+            $"Data Source={Path.Join(rootPath, "core.db")};Pooling=false;Default Timeout=30";
         _slicerConnectionString =
-            $"Data Source={Path.Combine(rootPath, "slicer.db")};Pooling=false;Default Timeout=30";
+            $"Data Source={Path.Join(rootPath, "slicer.db")};Pooling=false;Default Timeout=30";
     }
 
     public string ArtifactRoot { get; }
@@ -85,7 +85,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
 
     public static async Task<CalibrationGenerationHarness> CreateAsync()
     {
-        CalibrationGenerationHarness harness = new(Path.Combine(
+        CalibrationGenerationHarness harness = new(Path.Join(
             Path.GetTempPath(),
             $"pf-calibration-generation-{Guid.NewGuid():N}"));
         await using (AppDbContext core = harness.CreateCoreContext())
@@ -321,7 +321,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
         {
             byte[] bytes = Encoding.UTF8.GetBytes(gcode);
             string relativePath = $"{Guid.NewGuid():N}.gcode";
-            await File.WriteAllBytesAsync(Path.Combine(ArtifactRoot, relativePath), bytes);
+            await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
             artifactId = Guid.NewGuid();
             string digest = Convert.ToHexString(SHA256.HashData(bytes));
             _ = slicer.Artifacts.Add(new Artifact
@@ -400,7 +400,7 @@ internal sealed class CalibrationGenerationHarness : IDisposable
     {
         byte[] bytes = Encoding.UTF8.GetBytes(gcode);
         string relativePath = $"{artifactId:N}.gcode";
-        await File.WriteAllBytesAsync(Path.Combine(ArtifactRoot, relativePath), bytes);
+        await File.WriteAllBytesAsync(Path.Join(ArtifactRoot, relativePath), bytes);
         string digest = Convert.ToHexString(SHA256.HashData(bytes));
         return new Artifact
         {

@@ -9,7 +9,7 @@ public class CategoryAnnotationTests
         DirectoryInfo? dir = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (dir != null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "farm-web.sln")) || Directory.Exists(Path.Combine(dir.FullName, ".git")))
+            if (File.Exists(Path.Join(dir.FullName, "farm-web.sln")) || Directory.Exists(Path.Join(dir.FullName, ".git")))
             {
                 return dir.FullName;
             }
@@ -21,7 +21,7 @@ public class CategoryAnnotationTests
     private static IEnumerable<string> GetTestFiles()
     {
         string repoRoot = FindRepoRoot();
-        string testsRoot = Path.Combine(repoRoot, "src", "tests");
+        string testsRoot = Path.Join(repoRoot, "src", "tests");
         if (!Directory.Exists(testsRoot))
         {
             yield break;

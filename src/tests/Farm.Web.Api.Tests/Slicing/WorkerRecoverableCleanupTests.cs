@@ -22,7 +22,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     private const string RecoveryMarkerFileName = ".printfarmer-recovery.json";
 
     private readonly string _workingDirectory =
-        Path.Combine(Path.GetTempPath(), $"pf-worker-cleanup-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"pf-worker-cleanup-{Guid.NewGuid():N}");
 
     public void Dispose()
     {
@@ -76,7 +76,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
         _ = poller.FailureReported.Should().BeTrue();
         _ = Directory.Exists(jobDirectory).Should().BeTrue();
-        _ = File.Exists(Path.Combine(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
+        _ = File.Exists(Path.Join(jobDirectory, RecoveryMarkerFileName)).Should().BeTrue();
     }
 
     [Fact(DisplayName = "An artifact upload timeout is durably reported and cleaned")]
@@ -113,11 +113,11 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     public async Task TerminalAcknowledgement_CurrentClaimAttempt_RemovesEmptyJobParent()
     {
         Guid jobId = Guid.NewGuid();
-        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
-        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
-        string outputDirectory = Path.Combine(attemptDirectory, "output");
+        string jobParent = Path.Join(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Join(jobParent, Guid.NewGuid().ToString());
+        string outputDirectory = Path.Join(attemptDirectory, "output");
         _ = Directory.CreateDirectory(outputDirectory);
-        await File.WriteAllTextAsync(Path.Combine(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
+        await File.WriteAllTextAsync(Path.Join(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
 
         RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
         await poller.RunAsync(jobId, attemptDirectory);
@@ -130,13 +130,13 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     public async Task TerminalAcknowledgement_CurrentClaimAttempt_PreservesSiblingParent()
     {
         Guid jobId = Guid.NewGuid();
-        string jobParent = Path.Combine(_workingDirectory, jobId.ToString());
-        string attemptDirectory = Path.Combine(jobParent, Guid.NewGuid().ToString());
-        _ = Directory.CreateDirectory(Path.Combine(attemptDirectory, "output"));
+        string jobParent = Path.Join(_workingDirectory, jobId.ToString());
+        string attemptDirectory = Path.Join(jobParent, Guid.NewGuid().ToString());
+        _ = Directory.CreateDirectory(Path.Join(attemptDirectory, "output"));
         await File.WriteAllTextAsync(
-            Path.Combine(attemptDirectory, "output", "result.gcode"),
+            Path.Join(attemptDirectory, "output", "result.gcode"),
             "; produced gcode\nG28\n");
-        _ = Directory.CreateDirectory(Path.Combine(jobParent, Guid.NewGuid().ToString()));
+        _ = Directory.CreateDirectory(Path.Join(jobParent, Guid.NewGuid().ToString()));
 
         RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
         await poller.RunAsync(jobId, attemptDirectory);
@@ -149,7 +149,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     {
         Guid jobId = Guid.NewGuid();
         string jobDirectory = CreateJobOutput(jobId);
-        await File.WriteAllTextAsync(Path.Combine(jobDirectory, RecoveryMarkerFileName), "{}");
+        await File.WriteAllTextAsync(Path.Join(jobDirectory, RecoveryMarkerFileName), "{}");
         RecordingPoller poller = CreatePoller(HttpStatusCode.OK);
 
         await poller.RunAsync(jobId, jobDirectory);
@@ -162,23 +162,23 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     public async Task LegacyTerminalCleanup_DoesNotEnumerateParentOfConfiguredWorkingDirectory()
     {
         Guid jobId = Guid.NewGuid();
-        string configuredJobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
-        string configuredOutputDirectory = Path.Combine(configuredJobDirectory, "output");
+        string configuredJobDirectory = Path.Join(_workingDirectory, jobId.ToString());
+        string configuredOutputDirectory = Path.Join(configuredJobDirectory, "output");
         _ = Directory.CreateDirectory(configuredOutputDirectory);
         await File.WriteAllTextAsync(
-            Path.Combine(configuredOutputDirectory, "result.gcode"),
+            Path.Join(configuredOutputDirectory, "result.gcode"),
             "; produced gcode\nG28\n");
 
-        string outsideRecoveryDirectory = Path.Combine(
+        string outsideRecoveryDirectory = Path.Join(
             Path.GetDirectoryName(_workingDirectory)!,
             Guid.NewGuid().ToString(),
             Guid.NewGuid().ToString());
         _ = Directory.CreateDirectory(outsideRecoveryDirectory);
-        await File.WriteAllTextAsync(Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName), "{}");
+        await File.WriteAllTextAsync(Path.Join(outsideRecoveryDirectory, RecoveryMarkerFileName), "{}");
         File.SetLastWriteTimeUtc(
-            Path.Combine(outsideRecoveryDirectory, RecoveryMarkerFileName),
+            Path.Join(outsideRecoveryDirectory, RecoveryMarkerFileName),
             DateTime.UtcNow.AddDays(-10));
-        await File.WriteAllBytesAsync(Path.Combine(outsideRecoveryDirectory, "old.gcode"), new byte[32]);
+        await File.WriteAllBytesAsync(Path.Join(outsideRecoveryDirectory, "old.gcode"), new byte[32]);
 
         try
         {
@@ -207,14 +207,14 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
     {
         Guid jobId = Guid.NewGuid();
         string insideJobDirectory = CreateJobOutput(jobId);
-        string outsideAttempt = Path.Combine(
+        string outsideAttempt = Path.Join(
             Path.GetDirectoryName(_workingDirectory)!,
             "outside",
             jobId.ToString(),
             Guid.NewGuid().ToString(),
             "output");
         _ = Directory.CreateDirectory(outsideAttempt);
-        string outsideResult = Path.Combine(outsideAttempt, "result.gcode");
+        string outsideResult = Path.Join(outsideAttempt, "result.gcode");
         await File.WriteAllTextAsync(outsideResult, "; outside\nG28\n");
 
         RecordingPoller poller = CreatePoller(HttpStatusCode.OK, workingDirectory: _workingDirectory);
@@ -245,10 +245,10 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
 
     private string CreateJobOutput(Guid jobId)
     {
-        string jobDirectory = Path.Combine(_workingDirectory, jobId.ToString());
-        string outputDirectory = Path.Combine(jobDirectory, "output");
+        string jobDirectory = Path.Join(_workingDirectory, jobId.ToString());
+        string outputDirectory = Path.Join(jobDirectory, "output");
         _ = Directory.CreateDirectory(outputDirectory);
-        File.WriteAllText(Path.Combine(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
+        File.WriteAllText(Path.Join(outputDirectory, "result.gcode"), "; produced gcode\nG28\n");
         return jobDirectory;
     }
 
@@ -365,7 +365,7 @@ public sealed class WorkerRecoverableCleanupTests : IDisposable
             Task.FromResult(new SlicingResult
             {
                 Success = true,
-                ResultFileUrl = new Uri(Path.GetFullPath(ResultFilePathOverride ?? Path.Combine(_jobDirectory, "output", "result.gcode"))),
+                ResultFileUrl = new Uri(Path.GetFullPath(ResultFilePathOverride ?? Path.Join(_jobDirectory, "output", "result.gcode"))),
                 OutputFileSizeBytes = 32,
             });
 

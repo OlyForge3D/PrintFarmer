@@ -148,7 +148,7 @@ public class OperatorFeatureGateRealStorageTests
     [Fact]
     public async Task SameScopedGate_ObservesDisableAndReenableCommittedByAnotherRelationalContext()
     {
-        string databasePath = Path.Combine(
+        string databasePath = Path.Join(
             Path.GetTempPath(),
             $"operator-feature-gate-refresh-{Guid.NewGuid():N}.db");
         string connectionString = $"Data Source={databasePath};Pooling=False";

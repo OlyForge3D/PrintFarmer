@@ -17,7 +17,7 @@ public static class TestPaths
         string? current = AppContext.BaseDirectory;
         while (current is not null)
         {
-            if (File.Exists(Path.Combine(current, "farm-web.sln")))
+            if (File.Exists(Path.Join(current, "farm-web.sln")))
             {
                 return current;
             }
@@ -35,14 +35,14 @@ public static class TestPaths
     /// <summary>
     /// Root directory for test-specific temp artifacts inside the repository.
     /// </summary>
-    public static string RepoTempRoot => EnsureCreated(Path.Combine(_root.Value, "src", "tests", "_temp"));
+    public static string RepoTempRoot => EnsureCreated(Path.Join(_root.Value, "src", "tests", "_temp"));
 
     /// <summary>
     /// Returns a unique temp directory for a specific test context (e.g. class or scenario).
     /// </summary>
     public static string GetUniqueTempDirectory([CallerMemberName] string? name = null)
     {
-        string dir = Path.Combine(RepoTempRoot, name ?? "unnamed", Guid.NewGuid().ToString("N"));
+        string dir = Path.Join(RepoTempRoot, name ?? "unnamed", Guid.NewGuid().ToString("N"));
         return EnsureCreated(dir);
     }
 
@@ -51,8 +51,8 @@ public static class TestPaths
     /// </summary>
     public static string GetTempFilePath(string fileName, [CallerMemberName] string? name = null)
     {
-        string dir = EnsureCreated(Path.Combine(RepoTempRoot, name ?? "files"));
-        return Path.Combine(dir, fileName);
+        string dir = EnsureCreated(Path.Join(RepoTempRoot, name ?? "files"));
+        return Path.Join(dir, fileName);
     }
 
     private static string EnsureCreated(string path)

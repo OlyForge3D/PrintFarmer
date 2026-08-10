@@ -17,7 +17,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
 {
     private const string ApiBaseUrl = "https://slicer.example.test:5246";
     private readonly string _workingDirectory =
-        Path.Combine(Path.GetTempPath(), $"printfarmer-worker-request-{Guid.NewGuid():N}");
+        Path.Join(Path.GetTempPath(), $"printfarmer-worker-request-{Guid.NewGuid():N}");
 
     [Fact]
     public void CreateModelDownloadRequest_ClaimScopedRoute_UsesApiBaseAndClaimHeaders()
@@ -99,7 +99,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
         await fetch.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*redirects are not allowed*");
         handler.RequestCount.Should().Be(1);
-        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+        File.Exists(Path.Join(_workingDirectory, job.ModelFileName)).Should().BeFalse();
     }
 
     [Theory]
@@ -132,7 +132,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
             "safe model.stl");
 
         destination.Should().Be(
-            Path.GetFullPath(Path.Combine(_workingDirectory, "safe_model.stl")));
+            Path.GetFullPath(Path.Join(_workingDirectory, "safe_model.stl")));
         Path.GetDirectoryName(destination).Should().Be(Path.GetFullPath(_workingDirectory));
     }
 
@@ -156,7 +156,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
 
         await fetch.Should().ThrowAsync<InvalidDataException>()
             .WithMessage("*4-byte limit*");
-        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+        File.Exists(Path.Join(_workingDirectory, job.ModelFileName)).Should().BeFalse();
     }
 
     [Fact]
@@ -197,7 +197,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
             _workingDirectory,
             CancellationToken.None);
 
-        path.Should().Be(Path.Combine(_workingDirectory, "model_file.stl"));
+        path.Should().Be(Path.Join(_workingDirectory, "model_file.stl"));
         (await File.ReadAllBytesAsync(path)).Should().BeEquivalentTo(payload);
         handler.LastRequestUri.Should().Be(
             new Uri($"{ApiBaseUrl}/api/slice/{job.Id:D}/model"));
@@ -282,7 +282,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
 
         await fetch.Should().ThrowAsync<InvalidDataException>()
             .WithMessage("*4-byte limit*");
-        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+        File.Exists(Path.Join(_workingDirectory, job.ModelFileName)).Should().BeFalse();
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public sealed class ModelDownloadRequestTests : IDisposable
 
         await fetch.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*does not match the digest*");
-        File.Exists(Path.Combine(_workingDirectory, job.ModelFileName)).Should().BeFalse();
+        File.Exists(Path.Join(_workingDirectory, job.ModelFileName)).Should().BeFalse();
     }
 
     [Fact]

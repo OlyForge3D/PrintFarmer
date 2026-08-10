@@ -23,7 +23,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public LocalSlicerFileStorageTests()
     {
         _testLogger = NullLogger<LocalSlicerFileStorage>.Instance;
-        _tempBasePath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
+        _tempBasePath = Path.Join(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "slicer-storage-tests");
 
         _options = new LocalFileStorageOptions
         {
@@ -64,7 +64,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         _ = url.Should().Contain(key);
 
         // Verify file exists in test file system
-        string filePath = Path.Combine(_tempBasePath, key);
+        string filePath = Path.Join(_tempBasePath, key);
         _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
@@ -83,7 +83,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         _ = url.Should().Contain(key);
 
         // Verify file exists in test file system
-        string filePath = Path.Combine(_tempBasePath, key);
+        string filePath = Path.Join(_tempBasePath, key);
         _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().BeEquivalentTo(content);
     }
 
@@ -101,7 +101,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         _ = url.Should().NotBeNullOrEmpty();
 
         // Verify directory structure was created
-        string filePath = Path.Combine(_tempBasePath, key);
+        string filePath = Path.Join(_tempBasePath, key);
         _ = (await _testFs.ReadAllBytesAsync(filePath)).Should().NotBeNull();
 
         string? directoryPath = Path.GetDirectoryName(filePath);
@@ -127,7 +127,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         await stream.CopyToAsync(memoryStream);
         byte[] downloadedContent = memoryStream.ToArray();
 
-        string filePath = Path.Combine(_tempBasePath, key);
+        string filePath = Path.Join(_tempBasePath, key);
         byte[] uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
         _ = uploadedContent.Should().BeEquivalentTo(originalContent);
     }
@@ -160,7 +160,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     [Fact]
     public async Task DownloadFileAsync_AbsolutePathOutsideStorageRoot_ThrowsUnauthorizedAccessException()
     {
-        string outsidePath = Path.Combine(
+        string outsidePath = Path.Join(
             Path.GetDirectoryName(_tempBasePath)!,
             $"outside-{Guid.NewGuid():N}.stl");
 
@@ -172,7 +172,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     [Fact]
     public async Task DownloadFileAsync_FileUriOutsideStorageRoot_ThrowsUnauthorizedAccessException()
     {
-        string outsidePath = Path.Combine(
+        string outsidePath = Path.Join(
             Path.GetDirectoryName(_tempBasePath)!,
             $"outside-{Guid.NewGuid():N}.stl");
         string outsideFileUri = new Uri(outsidePath, UriKind.Absolute).AbsoluteUri;
@@ -212,7 +212,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         _ = await _storage.UploadFileAsync(key, originalContent, "application/octet-stream");
 
         // Act
-        string filePath = Path.Combine(_tempBasePath, key);
+        string filePath = Path.Join(_tempBasePath, key);
         byte[] downloadedContent = await _testFs.ReadAllBytesAsync(filePath);
 
         // Assert
@@ -372,7 +372,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         _ = await _storage.UploadFileAsync(newKey, content, "application/octet-stream");
 
         // Make one file appear old by manually setting its creation time
-        string oldFilePath = Path.Combine(_tempBasePath, oldKey);
+        string oldFilePath = Path.Join(_tempBasePath, oldKey);
         DateTime oldTime = DateTime.UtcNow.AddDays(-2);
         _testFs.SetCreationTimeUtc(oldFilePath, oldTime);
         _testFs.SetLastWriteTimeUtc(oldFilePath, oldTime);
@@ -472,7 +472,7 @@ public class LocalSlicerFileStorageTests : IDisposable
     public void Constructor_ValidOptions_ShouldCreateBaseDirectory()
     {
         // Arrange
-        string newTempPath = Path.Combine(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
+        string newTempPath = Path.Join(TestInfrastructure.TestPaths.GetUniqueTempDirectory(), "test-directory-creation");
         LocalFileStorageOptions options = new LocalFileStorageOptions { BasePath = newTempPath };
         IOptions<LocalFileStorageOptions> optionsWrapper = Options.Create(options);
 

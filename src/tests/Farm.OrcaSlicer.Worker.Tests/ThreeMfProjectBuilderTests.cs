@@ -17,7 +17,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
 {
     private static readonly XNamespace Ns3Mf = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02";
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
-    private readonly string _tempDir = Path.Combine(Path.GetTempPath(), $"3mf-test-{Guid.NewGuid():N}");
+    private readonly string _tempDir = Path.Join(Path.GetTempPath(), $"3mf-test-{Guid.NewGuid():N}");
 
     public ThreeMfProjectBuilderTests()
     {
@@ -43,7 +43,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
         float x3 = 0, float y3 = 1, float z3 = 0,
         string? name = null)
     {
-        string path = Path.Combine(_tempDir, name ?? $"model-{Guid.NewGuid():N}.stl");
+        string path = Path.Join(_tempDir, name ?? $"model-{Guid.NewGuid():N}.stl");
         using FileStream fs = File.Create(path);
         using BinaryWriter bw = new(fs);
 
@@ -77,7 +77,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
     /// </summary>
     private string CreateTwoTriangleStl(string? name = null)
     {
-        string path = Path.Combine(_tempDir, name ?? $"quad-{Guid.NewGuid():N}.stl");
+        string path = Path.Join(_tempDir, name ?? $"quad-{Guid.NewGuid():N}.stl");
         using FileStream fs = File.Create(path);
         using BinaryWriter bw = new(fs);
 
@@ -147,7 +147,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
     [Fact]
     public void ParseBinaryStl_TooSmallFile_ThrowsInvalidOperation()
     {
-        string path = Path.Combine(_tempDir, "tiny.stl");
+        string path = Path.Join(_tempDir, "tiny.stl");
         File.WriteAllBytes(path, new byte[10]);
 
         Action act = () => ThreeMfProjectBuilder.ParseBinaryStl(path);
@@ -158,7 +158,7 @@ public class ThreeMfProjectBuilderTests : IDisposable
     [Fact]
     public void ParseBinaryStl_SizeMismatch_ThrowsInvalidOperation()
     {
-        string path = Path.Combine(_tempDir, "truncated.stl");
+        string path = Path.Join(_tempDir, "truncated.stl");
         using (FileStream fs = File.Create(path))
         using (BinaryWriter bw = new(fs))
         {

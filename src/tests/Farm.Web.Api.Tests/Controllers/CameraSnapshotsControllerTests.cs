@@ -307,8 +307,8 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         var storagePath = scope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
 
         string snapshotRoot = storagePath.GetSnapshotStorageDirectory();
-        string relativePath = Path.Combine($"{printerId}", "snapshot.jpg");
-        string fullPath = Path.Combine(snapshotRoot, relativePath);
+        string relativePath = Path.Join($"{printerId}", "snapshot.jpg");
+        string fullPath = Path.Join(snapshotRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, [0xFF, 0xD8, 0xFF, 0xE0]); // JPEG magic bytes
 
@@ -376,8 +376,8 @@ public class CameraSnapshotsControllerTests : IAsyncLifetime
         var storagePath = setupScope.ServiceProvider.GetRequiredService<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>();
 
         string snapshotRoot = storagePath.GetSnapshotStorageDirectory();
-        string relativePath = Path.Combine($"{printerId}", "snapshot.jpg");
-        string fullPath = Path.Combine(snapshotRoot, relativePath);
+        string relativePath = Path.Join($"{printerId}", "snapshot.jpg");
+        string fullPath = Path.Join(snapshotRoot, relativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, [0xFF, 0xD8]);
 
