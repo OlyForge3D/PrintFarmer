@@ -84,6 +84,7 @@ enum NotificationDeepLinkRouting {
         case missingLink
         case invalidLink
         case unsupportedDestination
+        case wrongServer
 
         var message: String {
             switch self {
@@ -91,13 +92,25 @@ enum NotificationDeepLinkRouting {
                 return "This notification does not contain a destination for the selected server."
             case .invalidLink, .unsupportedDestination:
                 return "This notification's destination is invalid for the selected server."
+            case .wrongServer:
+                return "This notification belongs to a different server."
             }
         }
     }
 
     static func destination(
-        from userInfo: [AnyHashable: Any]
+        from userInfo: [AnyHashable: Any],
+        activeOriginServerId: UUID? = nil
     ) -> Result<DeepLinkDestination, Failure> {
+        if let originValue = userInfo["originServerId"] {
+            guard let originString = originValue as? String,
+                  let originServerId = UUID(uuidString: originString) else {
+                return .failure(.invalidLink)
+            }
+            guard let activeOriginServerId, originServerId == activeOriginServerId else {
+                return .failure(.wrongServer)
+            }
+        }
         let urlString = (userInfo["deepLink"] as? String) ?? (userInfo["link"] as? String)
         guard let urlString, !urlString.isEmpty else {
             return .failure(.missingLink)

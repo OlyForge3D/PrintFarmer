@@ -45,7 +45,7 @@ actor NotificationService: NotificationServiceProtocol {
     /// `POST /api/notifications/device-tokens` (see `NativePushRegistrationContract`).
     /// The `platform` argument is retained for protocol compatibility; the wire
     /// value is always the canonical `"ios"` token.
-    func registerDeviceToken(_ token: String, platform: String = "ios") async throws {
+    func registerDeviceToken(_ token: String, platform: String = "ios") async throws -> UUID {
         let body = DeviceTokenRegistrationBody(
             installationId: NativePushInstallation.identifier(),
             token: token,
@@ -53,7 +53,8 @@ actor NotificationService: NotificationServiceProtocol {
             environment: NativePushInstallation.environment,
             appBundleId: NativePushInstallation.appBundleId
         )
-        try await apiClient.postVoid(Self.deviceTokensPath, body: body)
+        let response: DeviceTokenRegistrationResponse = try await apiClient.post(Self.deviceTokensPath, body: body)
+        return response.serverId
     }
 
     /// Unregister this installation's device token from the backend (e.g., on
@@ -79,6 +80,10 @@ private struct DeviceTokenRegistrationBody: Encodable, Sendable {
     let platform: String
     let environment: String
     let appBundleId: String?
+}
+
+private struct DeviceTokenRegistrationResponse: Decodable, Sendable {
+    let serverId: UUID
 }
 
 /// Canonical request body for `DELETE /api/notifications/device-tokens`.

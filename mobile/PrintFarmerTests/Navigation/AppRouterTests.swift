@@ -18,6 +18,7 @@ final class AppRouterTests: XCTestCase {
 
     private let printerId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
     private let spoolId = 42
+    private let originServerId = UUID(uuidString: "00000000-0000-0000-0000-000000000010")!
 
     // MARK: - Defaults
 
@@ -106,6 +107,21 @@ final class AppRouterTests: XCTestCase {
             router.notificationRoutingError,
             "This notification's destination is invalid for the selected server."
         )
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
+    func testNotificationRoutingSurfacesWrongServerOrigin() {
+        let router = AppRouter()
+
+        router.routeNotification(
+            userInfo: [
+                "originServerId": "00000000-0000-0000-0000-000000000011",
+                "deepLink": "printfarmer://printer/\(printerId.uuidString)"
+            ],
+            activeOriginServerId: originServerId
+        )
+
+        XCTAssertEqual(router.notificationRoutingError, "This notification belongs to a different server.")
         XCTAssertEqual(router.selectedTab, .attention)
     }
 

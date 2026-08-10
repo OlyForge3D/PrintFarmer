@@ -101,8 +101,14 @@ final class AppRouter {
         }
     }
 
-    func routeNotification(userInfo: [AnyHashable: Any]) {
-        switch NotificationDeepLinkRouting.destination(from: userInfo) {
+    func routeNotification(
+        userInfo: [AnyHashable: Any],
+        activeOriginServerId: UUID? = nil
+    ) {
+        switch NotificationDeepLinkRouting.destination(
+            from: userInfo,
+            activeOriginServerId: activeOriginServerId
+        ) {
         case .success(let destination):
             notificationRoutingError = nil
             navigate(to: destination)

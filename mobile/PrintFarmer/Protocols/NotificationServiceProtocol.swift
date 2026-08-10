@@ -8,7 +8,7 @@ protocol NotificationServiceProtocol: Sendable {
     func markRead(id: String) async throws
     func markAllRead(ids: [String]) async throws
     func delete(id: String) async throws
-    func registerDeviceToken(_ token: String, platform: String) async throws
+    func registerDeviceToken(_ token: String, platform: String) async throws -> UUID
     func unregisterDeviceToken(_ token: String) async throws
 }
 

@@ -51,6 +51,8 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
     /// Set after login to enable server-side token registration.
     private var notificationService: (any NotificationServiceProtocol)?
+    private var serverRegistry: ServerRegistry?
+    private var configuredServerID: UUID?
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -69,8 +71,14 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
 
     // MARK: - Configuration
 
-    func configure(notificationService: any NotificationServiceProtocol) {
+    func configure(
+        notificationService: any NotificationServiceProtocol,
+        serverRegistry: ServerRegistry? = nil,
+        serverID: UUID? = nil
+    ) {
         self.notificationService = notificationService
+        self.serverRegistry = serverRegistry
+        self.configuredServerID = serverID
         // #818: the disabled-push state is per-server. When the active server
         // changes (ServiceContainer reconfigures us with the new server's
         // service), clear the local-only signal so it is re-derived from the
@@ -282,7 +290,12 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
 
         do {
-            try await service.registerDeviceToken(token, platform: "ios")
+            let originServerId = try await service.registerDeviceToken(token, platform: "ios")
+            if let serverRegistry,
+               let configuredServerID,
+               serverRegistry.activeServerID == configuredServerID {
+                try serverRegistry.associateOriginServerId(originServerId, with: configuredServerID)
+            }
             localOnlyAlerting = false
             registrationError = nil
             logger.info("Device token registered with server")

@@ -62,7 +62,10 @@ struct PFarmApp: App {
                 }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    router.routeNotification(userInfo: notification.userInfo ?? [:])
+                    router.routeNotification(
+                        userInfo: notification.userInfo ?? [:],
+                        activeOriginServerId: serverRegistry.activeServer?.originServerId
+                    )
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
                     if let userInfo = notification.userInfo,
@@ -93,7 +96,11 @@ struct PFarmApp: App {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)
                     if !UITestBootstrap.isEnabled {
-                        PushNotificationManager.shared.configure(notificationService: services.notificationService)
+                        PushNotificationManager.shared.configure(
+                            notificationService: services.notificationService,
+                            serverRegistry: serverRegistry,
+                            serverID: serverRegistry.activeServerID
+                        )
                         // Issue #1321: wire the services job-attention lock-screen
                         // actions (Pause/Resume/Cancel/Snooze) execute against.
                         PushNotificationManager.shared.configureActionHandling(

@@ -406,7 +406,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(notificationService: self.notificationService)
+        PushNotificationManager.shared.configure(
+            notificationService: self.notificationService,
+            serverRegistry: serverRegistry,
+            serverID: activeServer?.id
+        )
         // Issue #1321: keep lock-screen/Notification Center action handling
         // wired to whichever services are currently live (not just at first
         // launch) so job-attention actions never execute against stale
@@ -1004,7 +1008,11 @@ final class ServiceContainer: @unchecked Sendable {
         self.qrScannerService = QRSpoolScannerService()
         self.barcodeScannerService = BarcodeScannerService()
         self.nfcService = NFCService()
-        PushNotificationManager.shared.configure(notificationService: self.notificationService)
+        PushNotificationManager.shared.configure(
+            notificationService: self.notificationService,
+            serverRegistry: serverRegistry,
+            serverID: server?.id
+        )
         // Issue #1321: re-wire lock-screen/Notification Center action handling
         // to the freshly rebuilt services on every rebuild (server switch,
         // re-login, logout->login), not just at initial launch. Without this,
