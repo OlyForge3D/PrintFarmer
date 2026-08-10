@@ -760,6 +760,22 @@ struct AttentionView: View {
             return
         }
 
+        if feedViewModel.isRefreshing || feedViewModel.isLoadingMore {
+            guard resolvingAttentionItemId != itemId else { return }
+            resolvingAttentionItemId = itemId
+            Task { @MainActor in
+                while router.pendingAttentionItemId == itemId,
+                      feedViewModel.isRefreshing || feedViewModel.isLoadingMore {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+                resolvingAttentionItemId = nil
+                if router.pendingAttentionItemId == itemId {
+                    focusPendingAttentionItem(using: proxy)
+                }
+            }
+            return
+        }
+
         guard resolvingAttentionItemId != itemId else { return }
         guard feedViewModel.canLoadMore else {
             router.notificationRoutingError = "This attention item is unavailable on the selected server."
