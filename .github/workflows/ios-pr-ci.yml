@@ -48,50 +48,11 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -uo pipefail
-          should_run=true
-          reason="non-pull_request event — running full iOS build"
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            if [[ -n "$PR_BASE_SHA" && -n "$PR_HEAD_SHA" ]]; then
-              # github.event.pull_request.base.sha is the base branch's CURRENT
-              # tip, not the PR's fork point — GitHub advances it as other PRs
-              # merge. A two-dot diff against it therefore reports every file
-              # that landed on the base branch after this PR forked, which made
-              # non-mobile PRs match `^mobile/` and pay for the whole Xcode
-              # toolchain (see #1418). Diff against the true merge-base so only
-              # the PR's own commits count. `fetch-depth: 0` above guarantees
-              # the merge-base is reachable. Mirrors the same treatment in
-              # scripts/ci/compute-change-set.sh.
-              rc=0
-              if diff_base_sha=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA" 2>/dev/null); then
-                changed=$(git diff --no-renames --name-only "$diff_base_sha" "$PR_HEAD_SHA" 2>/dev/null) || rc=$?
-              else
-                rc=1
-              fi
-              if (( rc != 0 )); then
-                should_run=true
-                reason="diff failed — running full iOS build to be safe"
-              elif [[ -z "$changed" ]]; then
-                should_run=false
-                reason="no changed files detected"
-              elif echo "$changed" | grep -Eq '^(mobile/|\.github/workflows/ios-pr-ci\.yml$|scripts/ci/resolve-ios-simulator\.sh$|scripts/ci/test-resolve-ios-simulator\.sh$)'; then
-                should_run=true
-                reason="iOS-relevant paths changed"
-              else
-                should_run=false
-                reason="no iOS-relevant paths changed"
-              fi
-            else
-              should_run=true
-              reason="missing base/head SHA — running full iOS build to be safe"
-            fi
-          fi
-          {
-            echo "should_run=$should_run"
-            echo "reason=$reason"
-          } >> "$GITHUB_OUTPUT"
-          echo "iOS build selector: should_run=$should_run reason=$reason"
+        # Logic lives in the script so scripts/ci/tests/test-select-ios-build.sh
+        # can exercise the real git plumbing; `fetch-depth: 0` above guarantees
+        # the merge-base it resolves is reachable. Mirrors ci.yml's use of
+        # scripts/ci/compute-change-set.sh.
+        run: bash scripts/ci/select-ios-build.sh
 
   build:
     name: Build (iOS)
