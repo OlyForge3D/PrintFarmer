@@ -325,7 +325,10 @@ final class AuthViewModel {
 
     func loginAsDemo() async {
         services.invalidateOfflineWriteReplayAuthority()
-        await services.switchToDemo()
+        guard await services.switchToDemo() else {
+            errorMessage = "Could not enter demo mode while disconnecting notifications."
+            return
+        }
         DemoMode.shared.activate()
         currentUser = DemoData.demoUser
         isAuthenticated = true

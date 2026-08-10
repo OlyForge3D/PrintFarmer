@@ -521,17 +521,17 @@ final class ServiceContainer: @unchecked Sendable {
     }
 
     /// Replaces all services with demo implementations at runtime.
-    func switchToDemo() async {
+    @discardableResult
+    func switchToDemo() async -> Bool {
         let replayRevision = offlineWriteReplayAuthority.invalidate()
+        recordTarget(.demo)
+        let epoch = transitionEpoch.current
+        authOperationEpoch.advance()
         if activeServerID != nil {
             guard await PushNotificationManager.shared.unregisterFromServer(clearLocalToken: false) else {
-                Task { @MainActor [weak self] in
-                    try? await Task.sleep(for: .seconds(5))
-                    guard let self else { return }
-                    await self.switchToDemo()
-                }
-                return
+                return false
             }
+            guard transitionEpoch.isCurrent(epoch) else { return false }
         }
         #if canImport(UIKit)
         // Invalidate real-server notification actions before the first await.
@@ -542,18 +542,6 @@ final class ServiceContainer: @unchecked Sendable {
             allowsUnscopedRegistration: false
         )
         #endif
-        // H1: record the demo desired target + advance the transition epoch
-        // synchronously, so any suspended real switch is invalidated and the worker
-        // reconciles `.demo` (a no-op that never rebuilds real) instead of re-reading
-        // the registry and undoing demo.
-        recordTarget(.demo)
-        // Bishop: entering demo must also supersede any IN-FLIGHT login/restore auth
-        // operation. Advancing the auth epoch fails-closes a late-returning real login
-        // at every token-gated destination (VM state, credentials, owner, APIClient
-        // session, and the snapshot publication CAS), so it can have zero real side
-        // effects while demo is active — not merely a disabled button.
-        authOperationEpoch.advance()
-        let epoch = transitionEpoch.current
         // Revoke synchronously before advancing the generation so no stale
         // snapshot commit can apply across the demo transition.
         farmSnapshotAuthority.revoke()
@@ -562,10 +550,10 @@ final class ServiceContainer: @unchecked Sendable {
         let displacedSignalR = self.signalRService
         guard await offlineWriteQueue.unbind(authorityRevision: replayRevision),
               transitionEpoch.isCurrent(epoch) else {
-            return
+            return false
         }
         await displacedSignalR.disconnect()
-        guard transitionEpoch.isCurrent(epoch) else { return }
+        guard transitionEpoch.isCurrent(epoch) else { return false }
         self.apiClient = nil
         self.authService = DemoAuthService()
         self.printerService = DemoPrinterService()
@@ -604,6 +592,7 @@ final class ServiceContainer: @unchecked Sendable {
         self.barcodeScannerService = nil
         self.nfcService = nil
         #endif
+        return true
     }
 
     /// Replaces all services with real implementations backed by the active or given base URL.
