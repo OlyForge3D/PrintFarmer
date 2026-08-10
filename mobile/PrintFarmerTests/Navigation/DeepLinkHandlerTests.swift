@@ -145,7 +145,7 @@ final class DeepLinkHandlerTests: XCTestCase {
 
         for (link, expectedDestination) in cases {
             XCTAssertEqual(
-                NotificationDeepLinkRouting.destination(from: ["link": link]),
+                NotificationDeepLinkRouting.destination(from: ["deepLink": link]),
                 .success(expectedDestination)
             )
         }
@@ -157,7 +157,7 @@ final class DeepLinkHandlerTests: XCTestCase {
             .failure(.missingLink)
         )
         XCTAssertEqual(
-            NotificationDeepLinkRouting.destination(from: ["link": "printfarmer://attention"]),
+            NotificationDeepLinkRouting.destination(from: ["deepLink": "printfarmer://attention"]),
             .failure(.unsupportedDestination)
         )
     }

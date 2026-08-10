@@ -9,6 +9,7 @@ struct PrinterDetailView: View {
     @State private var viewModel: PrinterDetailViewModel
     @State private var coverageViewModel: PrinterFilamentCoverageViewModel
     @State private var activeTasks: [Task<Void, Never>] = []
+    @State private var guidedSwapTarget: AppRouter.FilamentSwapDeepLink?
 
     private let printerId: UUID
 
@@ -113,6 +114,11 @@ struct PrinterDetailView: View {
                 await viewModel.prepareReadyConfirmation()
                 router.pendingNFCReadyPrinterId = nil
             }
+            if let target = router.pendingFilamentSwap, target.printerId == viewModel.printerId {
+                guidedSwapTarget = target
+                router.pendingFilamentSwap = nil
+                viewModel.showSpoolPicker = true
+            }
         }
         .onDisappear {
             activeTasks.forEach { $0.cancel() }
@@ -135,7 +141,14 @@ struct PrinterDetailView: View {
         }
         .sheet(isPresented: $viewModel.showSpoolPicker) {
             SpoolPickerView { spool in
-                let task = Task { await viewModel.setActiveSpool(spool) }
+                let task = Task {
+                    if let target = guidedSwapTarget {
+                        await viewModel.bindToolheadSpool(spool, at: target.toolheadIndex)
+                        guidedSwapTarget = nil
+                    } else {
+                        await viewModel.setActiveSpool(spool)
+                    }
+                }
                 activeTasks.append(task)
             }
         }

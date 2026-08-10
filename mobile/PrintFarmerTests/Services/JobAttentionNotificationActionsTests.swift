@@ -186,7 +186,7 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
 
     func testOpenSwapActionPostsPushNotificationTappedWithSameUserInfo() async {
         let printerId = UUID()
-        let userInfo: [AnyHashable: Any] = ["link": "printfarmer://printer/\(printerId.uuidString)"]
+        let userInfo: [AnyHashable: Any] = ["deepLink": "printfarmer://printer/\(printerId.uuidString)"]
 
         var receivedLink: String?
         let observer = NotificationCenter.default.addObserver(
@@ -194,13 +194,13 @@ final class JobAttentionNotificationActionsTests: XCTestCase {
             object: nil,
             queue: nil
         ) { notification in
-            receivedLink = notification.userInfo?["link"] as? String
+            receivedLink = notification.userInfo?["deepLink"] as? String
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         await PushNotificationManager.shared.handleJobAttentionAction(.openSwap, userInfo: userInfo)
 
-        XCTAssertEqual(receivedLink, userInfo["link"] as? String,
+        XCTAssertEqual(receivedLink, userInfo["deepLink"] as? String,
                        "Open Swap must forward through the existing tap-routing notification.")
     }
 

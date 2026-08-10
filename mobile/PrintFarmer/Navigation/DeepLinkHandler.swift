@@ -98,7 +98,8 @@ enum NotificationDeepLinkRouting {
     static func destination(
         from userInfo: [AnyHashable: Any]
     ) -> Result<DeepLinkDestination, Failure> {
-        guard let urlString = userInfo["link"] as? String, !urlString.isEmpty else {
+        let urlString = (userInfo["deepLink"] as? String) ?? (userInfo["link"] as? String)
+        guard let urlString, !urlString.isEmpty else {
             return .failure(.missingLink)
         }
         guard let url = URL(string: urlString) else {
