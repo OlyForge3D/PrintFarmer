@@ -137,6 +137,8 @@ final class ScanViewModel {
                 return
             case .spoolDetail(let id):
                 deferredSpoolId = id
+            case .attentionItem, .filamentSwap:
+                break
             }
         }
 

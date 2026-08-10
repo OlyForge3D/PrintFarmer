@@ -662,7 +662,8 @@ struct AttentionView: View {
 
     @ViewBuilder
     private var attentionList: some View {
-        List {
+        ScrollViewReader { proxy in
+            List {
             if let failure = feedViewModel.loadFailure, feedViewModel.snapshot != nil {
                 // Inline refresh-error banner shown when a snapshot is
                 // already visible. The list stays pull-to-refresh
@@ -701,10 +702,11 @@ struct AttentionView: View {
                                 retryMedia(itemID: item.id)
                             }
                         )
-                        .listRowInsets(
-                            EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
-                        )
-                        .listRowBackground(Color.clear)
+                            .id(item.id)
+                            .listRowInsets(
+                                EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+                            )
+                            .listRowBackground(Color.clear)
                     }
                 } header: {
                     Text(group.severity.accessibilityLabel)
@@ -726,9 +728,33 @@ struct AttentionView: View {
                       paginationFailure.cursor == feedViewModel.snapshot?.nextCursor {
                 paginationRetrySurface(paginationFailure)
             }
+            }
+            .listStyle(.insetGrouped)
+            .accessibilityIdentifier("attention.list")
+            .onAppear {
+                focusPendingAttentionItem(using: proxy)
+            }
+            .onChange(of: router.pendingAttentionItemId) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
+            .onChange(of: feedItemCount) { _, _ in
+                focusPendingAttentionItem(using: proxy)
+            }
         }
-        .listStyle(.insetGrouped)
-        .accessibilityIdentifier("attention.list")
+    }
+
+    private func focusPendingAttentionItem(using proxy: ScrollViewProxy) {
+        guard let itemId = router.pendingAttentionItemId,
+              feedViewModel.groups.contains(where: { group in
+                  group.items.contains(where: { $0.id == itemId })
+              }) else {
+            return
+        }
+
+        withAnimation {
+            proxy.scrollTo(itemId, anchor: .center)
+        }
+        router.pendingAttentionItemId = nil
     }
 
     /// Rendered in place of the auto-loading sentinel when `loadMore`

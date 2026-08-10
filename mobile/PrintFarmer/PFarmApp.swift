@@ -62,11 +62,7 @@ struct PFarmApp: App {
                 }
                 #if canImport(UIKit)
                 .onReceive(NotificationCenter.default.publisher(for: .pushNotificationTapped)) { notification in
-                    guard let userInfo = notification.userInfo,
-                          let urlString = userInfo["link"] as? String,
-                          let url = URL(string: urlString),
-                          let destination = DeepLinkHandler.parse(url: url) else { return }
-                    router.navigate(to: destination)
+                    router.routeNotification(userInfo: notification.userInfo ?? [:])
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .localNotificationTapped)) { notification in
                     if let userInfo = notification.userInfo,
@@ -80,6 +76,19 @@ struct PFarmApp: App {
                     }
                 }
                 #endif
+                .alert(
+                    "Couldn't Open Notification",
+                    isPresented: Binding(
+                        get: { router.notificationRoutingError != nil },
+                        set: { if !$0 { router.notificationRoutingError = nil } }
+                    )
+                ) {
+                    Button("OK") {
+                        router.notificationRoutingError = nil
+                    }
+                } message: {
+                    Text(router.notificationRoutingError ?? "")
+                }
                 .task {
                     await authViewModel.restoreSession()
                     #if canImport(UIKit)

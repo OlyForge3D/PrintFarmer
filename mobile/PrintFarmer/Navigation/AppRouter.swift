@@ -25,6 +25,12 @@ import SwiftUI
 /// the migration and hardening rationale.
 @MainActor @Observable
 final class AppRouter {
+    struct FilamentSwapDeepLink: Equatable {
+        let printerId: UUID
+        let toolheadIndex: Int
+        let jobId: UUID?
+    }
+
     var selectedTab: AppTab = .attention
     var printersPath = NavigationPath()
     var jobsPath = NavigationPath()
@@ -43,6 +49,9 @@ final class AppRouter {
     var sidebarVisibility: NavigationSplitViewVisibility = .automatic
     var pendingNFCReadyPrinterId: UUID?
     var pendingSpoolHighlightId: Int?
+    var pendingAttentionItemId: String?
+    var pendingFilamentSwap: FilamentSwapDeepLink?
+    var notificationRoutingError: String?
 
     /// Monotonic token observed by legacy/operator sheet presenters to close
     /// any active sheet before a task-action destination is applied (#726).
@@ -73,6 +82,32 @@ final class AppRouter {
             selectedTab = .inventory
             inventoryPath = NavigationPath()
             pendingSpoolHighlightId = id
+        case .attentionItem(let id):
+            selectedTab = .attention
+            notificationsPath = NavigationPath()
+            pendingAttentionItemId = id
+        case .filamentSwap(let printerId, let toolheadIndex, let jobId):
+            selectedTab = .farm
+            printersPath = NavigationPath()
+            pendingFilamentSwap = FilamentSwapDeepLink(
+                printerId: printerId,
+                toolheadIndex: toolheadIndex,
+                jobId: jobId
+            )
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(50))
+                printersPath.append(AppDestination.printerDetail(id: printerId))
+            }
+        }
+    }
+
+    func routeNotification(userInfo: [AnyHashable: Any]) {
+        switch NotificationDeepLinkRouting.destination(from: userInfo) {
+        case .success(let destination):
+            notificationRoutingError = nil
+            navigate(to: destination)
+        case .failure(let failure):
+            notificationRoutingError = failure.message
         }
     }
 

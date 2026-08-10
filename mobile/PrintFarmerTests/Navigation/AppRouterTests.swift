@@ -72,6 +72,43 @@ final class AppRouterTests: XCTestCase {
         XCTAssertEqual(router.pendingSpoolHighlightId, spoolId)
     }
 
+    func testAttentionDeepLinkSelectsAttentionAndPreservesItem() {
+        let router = AppRouter()
+
+        router.navigate(to: .attentionItem(id: "failure-123"))
+
+        XCTAssertEqual(router.selectedTab, .attention)
+        XCTAssertEqual(router.pendingAttentionItemId, "failure-123")
+    }
+
+    func testFilamentSwapDeepLinkSelectsFarmAndPreservesDestination() async {
+        let jobId = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        let router = AppRouter()
+
+        router.navigate(to: .filamentSwap(printerId: printerId, toolheadIndex: 2, jobId: jobId))
+
+        XCTAssertEqual(router.selectedTab, .farm)
+        XCTAssertEqual(
+            router.pendingFilamentSwap,
+            .init(printerId: printerId, toolheadIndex: 2, jobId: jobId)
+        )
+
+        try? await Task.sleep(for: .milliseconds(120))
+        XCTAssertFalse(router.printersPath.isEmpty)
+    }
+
+    func testNotificationRoutingSurfacesInvalidDestination() {
+        let router = AppRouter()
+
+        router.routeNotification(userInfo: ["link": "printfarmer://attention"])
+
+        XCTAssertEqual(
+            router.notificationRoutingError,
+            "This notification's destination is invalid for the selected server."
+        )
+        XCTAssertEqual(router.selectedTab, .attention)
+    }
+
     // MARK: - Reset to root
 
     func testResetToRootClearsAttentionPath() {
