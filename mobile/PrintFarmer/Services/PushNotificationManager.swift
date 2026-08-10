@@ -53,6 +53,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
     private var notificationService: (any NotificationServiceProtocol)?
     private var serverRegistry: ServerRegistry?
     private var configuredServerID: UUID?
+    private var configurationEpoch = 0
 
     // Issue #1321: services needed to execute lock-screen/notification-center
     // actions (Pause/Resume/Cancel/Snooze) without opening the app. Kept
@@ -79,6 +80,7 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         self.notificationService = notificationService
         self.serverRegistry = serverRegistry
         self.configuredServerID = serverID
+        configurationEpoch &+= 1
         // #818: the disabled-push state is per-server. When the active server
         // changes (ServiceContainer reconfigures us with the new server's
         // service), clear the local-only signal so it is re-derived from the
@@ -193,6 +195,10 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
               let originValue = userInfo["originServerId"] as? String,
               let originServerId = UUID(uuidString: originValue) else {
             logger.warning("Job-attention action ignored — notification origin is unavailable")
+            return false
+        }
+        guard configuredServerID == activeServer.id else {
+            logger.warning("Job-attention action ignored — server services are still switching")
             return false
         }
         guard originServerId == expectedOrigin else {
@@ -318,18 +324,30 @@ final class PushNotificationManager: NSObject, @unchecked Sendable {
         }
 
         let initiatingServerID = configuredServerID
+        let initiatingConfigurationEpoch = configurationEpoch
         do {
             let originServerId = try await service.registerDeviceToken(token, platform: "ios")
             if let serverRegistry,
                let initiatingServerID,
+               configurationEpoch == initiatingConfigurationEpoch,
                configuredServerID == initiatingServerID,
                serverRegistry.activeServerID == initiatingServerID {
                 try serverRegistry.associateOriginServerId(originServerId, with: initiatingServerID)
+            }
+            guard configurationEpoch == initiatingConfigurationEpoch,
+                  configuredServerID == initiatingServerID,
+                  serverRegistry?.activeServerID == initiatingServerID else {
+                return
             }
             localOnlyAlerting = false
             registrationError = nil
             logger.info("Device token registered with server")
         } catch NetworkError.featureDisabled {
+            guard configurationEpoch == initiatingConfigurationEpoch,
+                  configuredServerID == initiatingServerID,
+                  serverRegistry?.activeServerID == initiatingServerID else {
+                return
+            }
             // Expected on the push-disabled beta default. Benign, not an error.
             localOnlyAlerting = true
             registrationError = nil
