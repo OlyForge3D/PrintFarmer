@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Infrastructure.Services.ServerIdentity;
 
@@ -19,15 +20,21 @@ namespace Farm.Infrastructure.Services.ServerIdentity;
 /// concurrent callers is resolved by retrying as an update when the unique index on
 /// <c>Key</c> rejects a duplicate insert, so exactly one generated value wins.
 /// </remarks>
-public sealed class ServerIdentityService(IDbContextFactory<AppDbContext> dbContextFactory) : IServerIdentityService
+/// <remarks>
+/// Resolves <see cref="IDbContextFactory{AppDbContext}"/> from a fresh DI scope per
+/// database access (mirroring <c>CatalogCache</c>'s pattern) rather than injecting it
+/// directly into this singleton — some hosts (e.g. test harnesses that isolate storage
+/// per test) register the factory as scoped, which a singleton cannot consume directly.
+/// </remarks>
+public sealed class ServerIdentityService(IServiceScopeFactory scopeFactory) : IServerIdentityService, IDisposable
 {
     /// <summary>The <c>AppSettingsEntity.Key</c> this identity is persisted under.</summary>
     public const string SettingsKey = "ServerIdentity";
 
     private const int UpsertMaxAttempts = 3;
 
-    private readonly IDbContextFactory<AppDbContext> _dbContextFactory =
-        dbContextFactory ?? throw new ArgumentNullException(nameof(dbContextFactory));
+    private readonly IServiceScopeFactory _scopeFactory =
+        scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
 
     private readonly SemaphoreSlim _lock = new(1, 1);
     private Guid? _cachedServerId;
@@ -58,9 +65,18 @@ public sealed class ServerIdentityService(IDbContextFactory<AppDbContext> dbCont
         }
     }
 
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _lock.Dispose();
+    }
+
     private async Task<Guid> ResolveOrCreateAsync(CancellationToken cancellationToken)
     {
-        await using AppDbContext db = await _dbContextFactory
+        await using AsyncServiceScope scope = _scopeFactory.CreateAsyncScope();
+        IDbContextFactory<AppDbContext> dbContextFactory =
+            scope.ServiceProvider.GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using AppDbContext db = await dbContextFactory
             .CreateDbContextAsync(cancellationToken)
             .ConfigureAwait(false);
 

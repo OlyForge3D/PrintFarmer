@@ -3,7 +3,7 @@ using Farm.Infrastructure.Services.ServerIdentity;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Moq;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.ServerIdentity;
@@ -200,10 +200,7 @@ public sealed class ServerIdentityServiceTests : IDisposable
             _ = dbB.Database.EnsureCreated();
         }
 
-        Mock<IDbContextFactory<AppDbContext>> factoryMockB = new();
-        _ = factoryMockB.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new AppDbContext(optionsB));
-        ServerIdentityService serviceB = new(factoryMockB.Object);
+        ServerIdentityService serviceB = new(BuildScopeFactory(optionsB));
 
         Guid idA = await serviceA.GetOrCreateServerIdAsync();
         Guid idB = await serviceB.GetOrCreateServerIdAsync();
@@ -240,9 +237,30 @@ public sealed class ServerIdentityServiceTests : IDisposable
 
     private ServerIdentityService CreateService()
     {
-        Mock<IDbContextFactory<AppDbContext>> factoryMock = new();
-        _ = factoryMock.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => new AppDbContext(_options));
-        return new ServerIdentityService(factoryMock.Object);
+        return new ServerIdentityService(BuildScopeFactory(_options));
+    }
+
+    private static IServiceScopeFactory BuildScopeFactory(DbContextOptions<AppDbContext> options)
+    {
+        ServiceCollection services = new();
+        _ = services.AddSingleton<IDbContextFactory<AppDbContext>>(new FixedOptionsDbContextFactory(options));
+        ServiceProvider provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IServiceScopeFactory>();
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IDbContextFactory{AppDbContext}"/> backed by a fixed
+    /// <see cref="DbContextOptions{AppDbContext}"/> instance — used to build a real
+    /// <see cref="IServiceScopeFactory"/> for these tests instead of mocking scope
+    /// plumbing, mirroring how <see cref="ServerIdentityService"/> resolves the factory
+    /// from a scope in production.
+    /// </summary>
+    private sealed class FixedOptionsDbContextFactory(DbContextOptions<AppDbContext> options)
+        : IDbContextFactory<AppDbContext>
+    {
+        public AppDbContext CreateDbContext() => new(options);
+
+        public Task<AppDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new AppDbContext(options));
     }
 }
