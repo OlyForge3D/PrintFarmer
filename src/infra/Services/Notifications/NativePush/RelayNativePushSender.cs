@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -64,6 +65,16 @@ public sealed class RelayNativePushSender(
             return NativePushDispatchResult.NotConfigured();
         }
 
+        // Issue #1407: the relay request must carry the same origin server identity as the
+        // direct path. Never substitute a different/blank value — refuse the send instead.
+        if (!NativePushRegistrationContract.IsCanonicalOriginServerId(envelope.OriginServerId))
+        {
+            _logger.LogError(
+                "[NativePush/relay] Refusing to send attentionItemId={AttentionItemId} — originServerId is missing or non-canonical.",
+                envelope.AttentionItemId);
+            return NativePushDispatchResult.Terminal("invalid_origin_server_id");
+        }
+
         var body = new RelayDispatchRequest(
             InstallationId: relay.InstallationId,
             Token: envelope.Token,
@@ -84,7 +95,8 @@ public sealed class RelayNativePushSender(
             DeepLink: envelope.DeepLink,
             Priority: envelope.Priority == NativePushPriority.Background ? 5 : 10,
             ExpiresAtUtc: envelope.ExpiresAtUtc,
-            ActionIds: envelope.ActionIds);
+            ActionIds: envelope.ActionIds,
+            OriginServerId: envelope.OriginServerId);
 
         HttpClient client = _httpClientFactory.CreateClient(HttpClientName);
         using var request = new HttpRequestMessage(HttpMethod.Post, relay.Endpoint);
@@ -190,5 +202,6 @@ public sealed class RelayNativePushSender(
         string DeepLink,
         int Priority,
         DateTime? ExpiresAtUtc,
-        IReadOnlyList<string> ActionIds);
+        IReadOnlyList<string> ActionIds,
+        string OriginServerId);
 }

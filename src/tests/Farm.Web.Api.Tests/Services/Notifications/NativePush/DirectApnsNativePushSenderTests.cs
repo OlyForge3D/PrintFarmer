@@ -40,7 +40,8 @@ public sealed class DirectApnsNativePushSenderTests
         DeepLink: "printfarmer://attention/att-1",
         Priority: NativePushPriority.Alert,
         ExpiresAtUtc: null,
-        ActionIds: new[] { AttentionPushCategories.ActionPause });
+        ActionIds: new[] { AttentionPushCategories.ActionPause },
+        OriginServerId: "11111111-1111-1111-1111-111111111111");
 
     [Fact]
     public async Task SendAsync_MissingSettings_ReturnsNotConfigured()
@@ -182,7 +183,7 @@ public sealed class DirectApnsNativePushSenderTests
             captured.Headers.GetValues("apns-expiration").Should().Equal(
                 new DateTimeOffset(expiration).ToUnixTimeSeconds().ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"]}""";
+            string expectedJson = $$"""{"aps":{"alert":{"title":"Printer A","body":"Print failed"},"sound":"default","badge":1,"category":"PRINTER_FAILURE","thread-id":"printer:x:failure","mutable-content":1},"attentionItemId":"att-1","attentionKind":"failure","changeKind":"created","printerId":"{{Sample.PrinterId:D}}","deepLink":"printfarmer://attention/att-1","actions":["PAUSE"],"originServerId":"11111111-1111-1111-1111-111111111111"}""";
             capturedJson.Should().Be(expectedJson);
 
             captured.Headers.Authorization!.Scheme.Should().Be("bearer");
@@ -205,6 +206,97 @@ public sealed class DirectApnsNativePushSenderTests
 
             byte[] signedData = Encoding.ASCII.GetBytes($"{parts[0]}.{parts[1]}");
             key.VerifyData(signedData, sigBytes, HashAlgorithmName.SHA256).Should().BeTrue();
+        }
+        finally
+        {
+            key.Dispose();
+            sut.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_ValidOriginServerId_SerializesCamelCaseEqualToEnvelopeValue()
+    {
+        // Issue #1407: the direct-APNs wire payload must carry the same originServerId as
+        // the envelope, camelCase, with no substitution or inference.
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        string? capturedJson = null;
+        DirectApnsNativePushSender sut = CreateSender(settings, request =>
+        {
+            capturedJson = request.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(Sample);
+
+            result.Success.Should().BeTrue();
+            capturedJson.Should().NotBeNull();
+            using JsonDocument payload = JsonDocument.Parse(capturedJson!);
+            payload.RootElement.GetProperty("originServerId").GetString()
+                .Should().Be(Sample.OriginServerId);
+        }
+        finally
+        {
+            key.Dispose();
+            sut.Dispose();
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("11111111-1111-1111-1111-111111111111X")]
+    [InlineData("11111111-1111-1111-1111-111111111111Z")]
+    public async Task SendAsync_InvalidOriginServerId_ReturnsTerminalWithoutCallingApns(string invalidOriginServerId)
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        int requests = 0;
+        DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope invalid = Sample with { OriginServerId = invalidOriginServerId };
+
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(invalid);
+
+            result.Success.Should().BeFalse();
+            result.Reason.Should().Be("invalid_origin_server_id");
+            result.Reason.Should().NotContain("https://").And.NotContain("Bearer");
+            Volatile.Read(ref requests).Should().Be(0,
+                "an invalid origin server id must never be silently substituted or sent to APNs");
+        }
+        finally
+        {
+            key.Dispose();
+            sut.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task SendAsync_NullOriginServerId_ReturnsTerminalWithoutCallingApns()
+    {
+        (NativePushSettings settings, ECDsa key) = MakeDirectSettings();
+        int requests = 0;
+        DirectApnsNativePushSender sut = CreateSender(settings, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope missing = Sample with { OriginServerId = null! };
+
+        try
+        {
+            NativePushDispatchResult result = await sut.SendAsync(missing);
+
+            result.Success.Should().BeFalse();
+            result.Reason.Should().Be("invalid_origin_server_id");
+            Volatile.Read(ref requests).Should().Be(0,
+                "a missing origin server id must never be silently substituted or sent to APNs");
         }
         finally
         {

@@ -36,7 +36,8 @@ public sealed class RelayNativePushSenderTests
         DeepLink: "printfarmer://attention/att-1",
         Priority: NativePushPriority.Alert,
         ExpiresAtUtc: null,
-        ActionIds: new[] { AttentionPushCategories.ActionPause });
+        ActionIds: new[] { AttentionPushCategories.ActionPause },
+        OriginServerId: "22222222-2222-2222-2222-222222222222");
 
     [Fact]
     public async Task SendAsync_MissingEndpointOrApiKey_ReturnsNotConfigured()
@@ -123,6 +124,49 @@ public sealed class RelayNativePushSenderTests
         doc.RootElement.GetProperty("token").GetString().Should().Be("device-token-abc");
         doc.RootElement.GetProperty("category").GetString().Should().Be("PRINTER_FAILURE");
         doc.RootElement.GetProperty("deepLink").GetString().Should().Be("printfarmer://attention/att-1");
+        doc.RootElement.GetProperty("originServerId").GetString().Should().Be(Sample.OriginServerId);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("22222222-2222-2222-2222-222222222222X")]
+    public async Task SendAsync_InvalidOriginServerId_ReturnsTerminalWithoutCallingRelay(string invalidOriginServerId)
+    {
+        int requests = 0;
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope invalid = Sample with { OriginServerId = invalidOriginServerId };
+
+        NativePushDispatchResult result = await sut.SendAsync(invalid);
+
+        result.Success.Should().BeFalse();
+        result.Reason.Should().Be("invalid_origin_server_id");
+        result.Reason.Should().NotContain("https://").And.NotContain("secret-key");
+        Volatile.Read(ref requests).Should().Be(0,
+            "an invalid origin server id must never be silently substituted or sent to the relay");
+    }
+
+    [Fact]
+    public async Task SendAsync_NullOriginServerId_ReturnsTerminalWithoutCallingRelay()
+    {
+        int requests = 0;
+        RelayNativePushSender sut = CreateSender(MakeRelaySettings(), out _, _ =>
+        {
+            Interlocked.Increment(ref requests);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        NativePushEnvelope missing = Sample with { OriginServerId = null! };
+
+        NativePushDispatchResult result = await sut.SendAsync(missing);
+
+        result.Success.Should().BeFalse();
+        result.Reason.Should().Be("invalid_origin_server_id");
+        Volatile.Read(ref requests).Should().Be(0,
+            "a missing origin server id must never be silently substituted or sent to the relay");
     }
 
     [Fact]

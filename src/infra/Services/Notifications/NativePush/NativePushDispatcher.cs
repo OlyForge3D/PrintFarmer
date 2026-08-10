@@ -68,6 +68,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private readonly NativePushMetrics _metrics;
     private readonly ILogger<NativePushDispatcher> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IServerIdentityService _serverIdentity;
 
     // Internal deterministic test seam. Production never assigns this; it
     // signals only after a resolution has captured a non-empty settlement set
@@ -114,7 +115,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IOptionsMonitor<NativePushSettings> optionsMonitor,
         NativePushMetrics metrics,
         ILogger<NativePushDispatcher> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IServerIdentityService? serverIdentity = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _sender = sender as INativePushTransportSender
@@ -125,6 +127,27 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         _metrics = metrics ?? throw new ArgumentNullException(nameof(metrics));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
+
+        // Production DI always supplies the real, durably persisted identity service.
+        // Tests that construct the dispatcher directly (without registering
+        // IServerIdentityService) fall back to a per-instance ephemeral identity so the
+        // envelope/payload validation added by issue #1407 has a valid value to work with
+        // without requiring every existing test call site to be touched.
+        _serverIdentity = serverIdentity ?? new EphemeralServerIdentityService();
+    }
+
+    /// <summary>
+    /// Test/no-DI fallback used only when no <see cref="IServerIdentityService"/> is
+    /// supplied to the constructor. Mints one stable canonical UUID per dispatcher instance
+    /// — never persisted, never shared across instances/processes. Production code paths
+    /// always register the real <c>ServerIdentityService</c> in DI.
+    /// </summary>
+    private sealed class EphemeralServerIdentityService : IServerIdentityService
+    {
+        private readonly string _serverId = Guid.NewGuid().ToString("D", CultureInfo.InvariantCulture);
+
+        public Task<string> GetServerIdAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(_serverId);
     }
 
     private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
@@ -337,6 +360,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             IAttentionService attention = sp.GetRequiredService<IAttentionService>();
             AppDbContext db = sp.GetRequiredService<AppDbContext>();
 
+            // Issue #1407: resolve the origin server identity once per dispatch, inside the
+            // existing failure-isolation boundary. A failure here is handled identically to
+            // any other pre-delivery failure (logged, fences/leases still released below) —
+            // it never partially fans out with a missing/invalid identity.
+            string originServerId = await _serverIdentity.GetServerIdAsync(cancellationToken).ConfigureAwait(false);
+
             IReadOnlyList<Guid> owners;
             if (targetUserId is Guid explicitUser)
             {
@@ -420,6 +449,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         attention,
                         db,
                         preObservedResolution,
+                        originServerId,
                         cancellationToken);
                 }
                 catch (OperationCanceledException)
@@ -504,6 +534,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         IAttentionService attention,
         AppDbContext db,
         GlobalResolvedParticipant? preObservedResolution,
+        string originServerId,
         CancellationToken cancellationToken)
     {
         AttentionLifecycle lifecycle;
@@ -656,6 +687,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         deviceToken,
                         settings,
                         gate,
+                        originServerId,
                         cancellationToken);
                     if (outcome == DeviceDispatchOutcome.DispatchStopped)
                     {
@@ -707,11 +739,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         DeviceToken deviceToken,
         NativePushSettings settings,
         IOperatorFeatureGate gate,
+        string originServerId,
         CancellationToken cancellationToken)
     {
         NativePushEnvelope envelope = item is not null
-            ? BuildEnvelope(item, changeKind, deviceToken)
-            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken);
+            ? BuildEnvelope(item, changeKind, deviceToken, originServerId)
+            : BuildSilentEnvelopeFromSnapshot(attentionItemId, resolvedSnapshot!, deviceToken, originServerId);
         AttentionSnapshot lifecycleSnapshot = activeSnapshot
             ?? resolvedSnapshot
             ?? throw new InvalidOperationException("A lifecycle snapshot is required before native-push transport.");
@@ -1727,7 +1760,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
     private NativePushEnvelope BuildEnvelope(
         AttentionItemDto item,
         AttentionChangeKind changeKind,
-        DeviceToken deviceToken)
+        DeviceToken deviceToken,
+        string originServerId)
     {
         bool isResolved = changeKind == AttentionChangeKind.Resolved;
         string category = AttentionPushCategories.CategoryFor(item.Kind) ?? "PRINTER_FAILURE";
@@ -1777,13 +1811,15 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             DeepLink: deepLink,
             Priority: isResolved ? NativePushPriority.Background : NativePushPriority.Alert,
             ExpiresAtUtc: expiresAt,
-            ActionIds: actionIds);
+            ActionIds: actionIds,
+            OriginServerId: originServerId);
     }
 
     private NativePushEnvelope BuildSilentEnvelopeFromSnapshot(
         string attentionItemId,
         AttentionSnapshot snapshot,
-        DeviceToken deviceToken)
+        DeviceToken deviceToken,
+        string originServerId)
     {
         string category = AttentionPushCategories.CategoryFor(snapshot.Kind) ?? "PRINTER_FAILURE";
         string threadId = AttentionPushCategories.ThreadIdFor(
@@ -1818,7 +1854,8 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             DeepLink: deepLink,
             Priority: NativePushPriority.Background,
             ExpiresAtUtc: UtcNow.Add(InformationalAlertTtl),
-            ActionIds: Array.Empty<string>());
+            ActionIds: Array.Empty<string>(),
+            OriginServerId: originServerId);
     }
 
     private enum DeviceDispatchOutcome

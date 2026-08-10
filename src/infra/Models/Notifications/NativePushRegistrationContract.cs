@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Domain.Notifications;
+﻿using System.Globalization;
+
+namespace Farm.Infrastructure.Domain.Notifications;
 
 /// <summary>Canonical bounds and wire representations for native-push registrations.</summary>
 public static class NativePushRegistrationContract
@@ -35,6 +37,13 @@ public static class NativePushRegistrationContract
 
     /// <summary>Data-annotation pattern for a canonical lowercase bundle identifier.</summary>
     public const string AppBundleIdPattern = "^[a-z0-9]+(?:[.-][a-z0-9]+)*$";
+
+    /// <summary>Exact length of a canonical lowercase hyphenated UUID string (RFC 4122 "D" form).</summary>
+    public const int OriginServerIdLength = 36;
+
+    /// <summary>Data-annotation pattern for a canonical lowercase hyphenated UUID.</summary>
+    public const string OriginServerIdPattern =
+        "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
     /// <summary>Returns whether an installation identifier is in canonical wire form.</summary>
     public static bool IsCanonicalInstallationId(string? value)
@@ -84,6 +93,21 @@ public static class NativePushRegistrationContract
         return segments.All(segment =>
             segment.Length > 0
             && segment.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9'));
+    }
+
+    /// <summary>
+    /// Returns whether a value is a canonical, lowercase, hyphenated UUID string suitable for
+    /// the <c>originServerId</c> native-push wire field and the persisted server identity
+    /// contract. Rejects uppercase, non-hyphenated ("N"), and any other non-canonical
+    /// <see cref="Guid"/> text representation so the stored/serialized form is always
+    /// byte-for-byte stable.
+    /// </summary>
+    public static bool IsCanonicalOriginServerId(string? value)
+    {
+        return value is not null
+            && value.Length == OriginServerIdLength
+            && Guid.TryParseExact(value, "D", out Guid parsed)
+            && string.Equals(parsed.ToString("D", CultureInfo.InvariantCulture), value, StringComparison.Ordinal);
     }
 
     private static bool IsAsciiLetterOrDigit(char value)

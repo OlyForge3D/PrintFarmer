@@ -3,7 +3,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
+using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Settings;
+using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -88,7 +90,12 @@ public sealed class NativePushDeviceTokenEndpointTests
                 appBundleId = bundleId,
             });
 
-        registered.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        registered.StatusCode.Should().Be(HttpStatusCode.OK);
+        DeviceTokenRegistrationResponse? registerBody = await registered.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        registerBody.Should().NotBeNull();
+        registerBody!.ServerId.Should().NotBeNullOrWhiteSpace();
+        Guid.TryParseExact(registerBody.ServerId, "D", out _).Should().BeTrue("serverId must be a canonical lowercase UUID");
+
         await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
         {
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -174,7 +181,7 @@ public sealed class NativePushDeviceTokenEndpointTests
                 platform = "ios",
                 environment = "production",
             });
-        registered.StatusCode.Should().Be(HttpStatusCode.NoContent);
+        registered.StatusCode.Should().Be(HttpStatusCode.OK);
         using var delete = new HttpRequestMessage(HttpMethod.Delete, "/api/notifications/device-tokens")
         {
             Content = JsonContent.Create(new { installationId = new string('x', 129) }),
@@ -186,6 +193,84 @@ public sealed class NativePushDeviceTokenEndpointTests
         await using AsyncServiceScope scope = factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         (await db.DeviceTokens.CountAsync()).Should().Be(1);
+    }
+
+    /// <summary>
+    /// Issue #1407: the registered <c>serverId</c> must be generated exactly once and be
+    /// stable across every subsequent registration call for the lifetime of the server's
+    /// database — restarts/config reload are equivalent to "another registration call
+    /// against the same durable identity" from the HTTP surface's point of view.
+    /// </summary>
+    [Fact]
+    public async Task RegisterDeviceTokenAsync_TwoCalls_ReturnSameServerId()
+    {
+        await using var factory = new CustomWebApplicationFactory();
+        HttpClient client = await CreateNativePushClientAsync(factory);
+
+        HttpResponseMessage first = await client.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-a",
+                token = new string('a', 64),
+                platform = "ios",
+                environment = "production",
+            });
+        HttpResponseMessage second = await client.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-b",
+                token = new string('b', 64),
+                platform = "ios",
+                environment = "production",
+            });
+
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        second.StatusCode.Should().Be(HttpStatusCode.OK);
+        DeviceTokenRegistrationResponse? firstBody = await first.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        DeviceTokenRegistrationResponse? secondBody = await second.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        firstBody.Should().NotBeNull();
+        secondBody.Should().NotBeNull();
+        secondBody!.ServerId.Should().Be(firstBody!.ServerId, "the server identity must never change across registration calls");
+    }
+
+    /// <summary>
+    /// Issue #1407: two logically distinct server databases must never produce the same
+    /// identity — <see cref="ServerIdentityService"/> generates independently per database.
+    /// </summary>
+    [Fact]
+    public async Task RegisterDeviceTokenAsync_TwoIndependentServers_ProduceDistinctServerIds()
+    {
+        await using var factoryOne = new CustomWebApplicationFactory();
+        await using var factoryTwo = new CustomWebApplicationFactory();
+        HttpClient clientOne = await CreateNativePushClientAsync(factoryOne);
+        HttpClient clientTwo = await CreateNativePushClientAsync(factoryTwo);
+
+        HttpResponseMessage responseOne = await clientOne.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-1",
+                token = new string('a', 64),
+                platform = "ios",
+                environment = "production",
+            });
+        HttpResponseMessage responseTwo = await clientTwo.PostAsJsonAsync(
+            "/api/notifications/device-tokens",
+            new
+            {
+                installationId = "installation-1",
+                token = new string('a', 64),
+                platform = "ios",
+                environment = "production",
+            });
+
+        DeviceTokenRegistrationResponse? bodyOne = await responseOne.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        DeviceTokenRegistrationResponse? bodyTwo = await responseTwo.Content.ReadFromJsonAsync<DeviceTokenRegistrationResponse>();
+        bodyOne.Should().NotBeNull();
+        bodyTwo.Should().NotBeNull();
+        bodyTwo!.ServerId.Should().NotBe(bodyOne!.ServerId, "distinct server databases must never share a generated identity");
     }
 
     private static async Task<HttpClient> CreateNativePushClientAsync(CustomWebApplicationFactory factory)

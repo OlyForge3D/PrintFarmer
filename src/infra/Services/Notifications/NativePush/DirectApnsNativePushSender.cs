@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Domain.Notifications;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -130,6 +131,18 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
                 envelope.AttentionItemId,
                 reason);
             return NativePushDispatchResult.NotConfigured();
+        }
+
+        // Issue #1407: the origin server identity is routing metadata, never a secret. A
+        // missing/non-canonical value must never be silently substituted (e.g. with a
+        // different active server's id) — refuse the send entirely so an unattributable
+        // payload can never leave this process.
+        if (!NativePushRegistrationContract.IsCanonicalOriginServerId(envelope.OriginServerId))
+        {
+            _logger.LogError(
+                "[NativePush/direct] Refusing to send attentionItemId={AttentionItemId} — originServerId is missing or non-canonical.",
+                envelope.AttentionItemId);
+            return NativePushDispatchResult.Terminal("invalid_origin_server_id");
         }
 
         string bundleId = apns.BundleId!;
@@ -344,7 +357,8 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
             envelope.JobId,
             envelope.ToolheadIndex,
             envelope.DeepLink,
-            envelope.ActionIds);
+            envelope.ActionIds,
+            envelope.OriginServerId);
         return JsonSerializer.Serialize(root, ApsOptions);
     }
 
@@ -513,5 +527,6 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         [property: JsonPropertyName("jobId")] Guid? JobId,
         [property: JsonPropertyName("toolheadIndex")] int? ToolheadIndex,
         [property: JsonPropertyName("deepLink")] string DeepLink,
-        [property: JsonPropertyName("actions")] IReadOnlyList<string> Actions);
+        [property: JsonPropertyName("actions")] IReadOnlyList<string> Actions,
+        [property: JsonPropertyName("originServerId")] string OriginServerId);
 }

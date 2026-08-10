@@ -361,20 +361,27 @@ public class NotificationsController(INotificationService notificationService, V
     /// Registers or updates the native-push device token for the current installation.
     /// Feature-gated by <c>OperatorFeatures.NativePushEnabled</c>; when disabled, returns
     /// 404 <c>ProblemDetails</c> with <c>code=featureDisabled</c> per issue #708 / #725.
+    /// Returns <c>200 OK</c> with the server's stable <c>serverId</c> (issue #1407) — this
+    /// is a breaking change from the prior <c>204 No Content</c> response. The registration
+    /// request never carries or influences the origin server identity: <c>installationId</c>
+    /// remains the sole client key and token/environment/platform/appBundleId remain the
+    /// only provider data the upsert accepts.
     /// See <c>docs/OPERATOR_NATIVE_PUSH.md</c>.
     /// </summary>
     [HttpPost("device-tokens")]
-    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(typeof(DeviceTokenRegistrationResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> RegisterDeviceTokenAsync(
         [FromBody] DeviceTokenRegistrationRequest request,
         [FromServices] IOperatorFeatureGate operatorFeatures,
         [FromServices] IDeviceTokenRepository deviceTokens,
+        [FromServices] IServerIdentityService serverIdentity,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(operatorFeatures);
         ArgumentNullException.ThrowIfNull(deviceTokens);
+        ArgumentNullException.ThrowIfNull(serverIdentity);
 
         if (!await operatorFeatures.IsEnabledAsync(OperatorFeature.NativePush, cancellationToken).ConfigureAwait(false))
         {
@@ -404,7 +411,9 @@ public class NotificationsController(INotificationService notificationService, V
             request.Environment,
             request.AppBundleId,
             cancellationToken);
-        return NoContent();
+
+        string serverId = await serverIdentity.GetServerIdAsync(cancellationToken).ConfigureAwait(false);
+        return Ok(new DeviceTokenRegistrationResponse(serverId));
     }
 
     /// <summary>
@@ -1150,6 +1159,17 @@ public class DeviceTokenRegistrationRequest
         ErrorMessage = "AppBundleId must use canonical lowercase bundle-id syntax.")]
     public string? AppBundleId { get; set; }
 }
+
+/// <summary>
+/// Response body for <c>POST /api/notifications/device-tokens</c> (issue #1407). Carries
+/// only the server's own stable, opaque identity — never any caller-supplied value, and
+/// never a secret or URL.
+/// </summary>
+/// <param name="ServerId">
+/// Canonical UUID identifying this PrintFarmer server instance. Generated once per fresh
+/// install; stable across restarts, config reloads, and every subsequent registration call.
+/// </param>
+public sealed record DeviceTokenRegistrationResponse(string ServerId);
 
 /// <summary>Request model for unregistering a native-push device token.</summary>
 public class DeviceTokenUnregistrationRequest

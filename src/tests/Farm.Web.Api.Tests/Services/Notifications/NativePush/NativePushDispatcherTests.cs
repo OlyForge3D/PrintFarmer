@@ -8,6 +8,7 @@ using Farm.Infrastructure.Dtos.Attention;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Attention;
+using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Settings;
@@ -329,6 +330,54 @@ public sealed class NativePushDispatcherTests
         captured.Where(envelope => envelope.ChangeKind == AttentionChangeKind.Resolved)
             .Select(envelope => envelope.Token)
             .Should().BeEquivalentTo(tokenA.Token, tokenB.Token);
+
+        // Issue #1407: every envelope the dispatcher builds must carry a stable, canonical
+        // originServerId — even across multiple DispatchAsync calls on the same instance.
+        captured.Select(envelope => envelope.OriginServerId).Distinct().Should().ContainSingle();
+        captured.Should().OnlyContain(envelope =>
+            NativePushRegistrationContract.IsCanonicalOriginServerId(envelope.OriginServerId));
+    }
+
+    [Fact]
+    public async Task DispatchAsync_WithInjectedServerIdentity_UsesPersistedServerIdOnEnvelope()
+    {
+        // Issue #1407: production DI supplies the durably persisted IServerIdentityService;
+        // the dispatcher must use that value verbatim rather than minting its own ephemeral
+        // identity when one is explicitly provided.
+        Guid ownerId = Guid.NewGuid();
+        AttentionItemDto item = BuildAttentionItem(AttentionKind.Offline);
+        await using AppDbContext db = BuildDbContext();
+        Mock<IOperatorFeatureGate> gate = BuildGate(enabled: true);
+        DeviceToken token = MakeToken(ownerId, "owner-a");
+        var tokens = new Mock<IDeviceTokenRepository>();
+        tokens.Setup(repository => repository.GetActiveTokenOwnersAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([ownerId]);
+        tokens.Setup(repository => repository.GetActiveByUserAsync(ownerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([token]);
+        tokens.Setup(repository => repository.RecordSuccessAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<long>(),
+                It.IsAny<DateTime>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var attention = new Mock<IAttentionService>();
+        attention.Setup(service => service.FindItemAsync(ownerId, item.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(item);
+        var captured = new List<NativePushEnvelope>();
+        var sender = new Mock<INativePushSender>();
+        sender.SetupGet(value => value.ModeName).Returns("direct");
+        sender.Setup(value => value.SendAsync(It.IsAny<NativePushEnvelope>(), It.IsAny<CancellationToken>()))
+            .Callback<NativePushEnvelope, CancellationToken>((envelope, _) => captured.Add(envelope))
+            .ReturnsAsync(NativePushDispatchResult.Delivered());
+        const string persistedServerId = "33333333-3333-3333-3333-333333333333";
+        var serverIdentity = new StaticServerIdentityService(persistedServerId);
+        NativePushDispatcher sut = BuildWithScope(
+            sender, gate.Object, tokens.Object, attention.Object, db, serverIdentity: serverIdentity);
+
+        await sut.DispatchAsync(item.Id, AttentionChangeKind.Created, targetUserId: null);
+
+        captured.Should().ContainSingle();
+        captured[0].OriginServerId.Should().Be(persistedServerId);
     }
 
     [Fact]
@@ -7813,7 +7862,8 @@ public sealed class NativePushDispatcherTests
         AppDbContext db,
         NativePushSettings? settings = null,
         TimeProvider? timeProvider = null,
-        NativePushMetrics? metrics = null)
+        NativePushMetrics? metrics = null,
+        IServerIdentityService? serverIdentity = null)
     {
         return BuildWithScope(
             sender.Object,
@@ -7823,7 +7873,8 @@ public sealed class NativePushDispatcherTests
             db,
             settings,
             timeProvider,
-            metrics);
+            metrics,
+            serverIdentity);
     }
 
     private static NativePushDispatcher BuildWithScope(
@@ -7834,7 +7885,8 @@ public sealed class NativePushDispatcherTests
         AppDbContext db,
         NativePushSettings? settings = null,
         TimeProvider? timeProvider = null,
-        NativePushMetrics? metrics = null)
+        NativePushMetrics? metrics = null,
+        IServerIdentityService? serverIdentity = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(gate);
@@ -7851,7 +7903,8 @@ public sealed class NativePushDispatcherTests
             monitor,
             metrics ?? new NativePushMetrics(),
             NullLogger<NativePushDispatcher>.Instance,
-            timeProvider);
+            timeProvider,
+            serverIdentity);
     }
 
     private static AppDbContext BuildDbContext()
@@ -8314,6 +8367,13 @@ public sealed class NativePushDispatcherTests
         public NativePushSettings Get(string? name) => CurrentValue;
 
         public IDisposable? OnChange(Action<NativePushSettings, string?> listener) => null;
+    }
+
+    /// <summary>Test double standing in for the durably persisted IServerIdentityService.</summary>
+    private sealed class StaticServerIdentityService(string serverId) : IServerIdentityService
+    {
+        public Task<string> GetServerIdAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(serverId);
     }
 
     private sealed class MutableOptionsMonitor(NativePushSettings value) : IOptionsMonitor<NativePushSettings>
