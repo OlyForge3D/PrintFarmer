@@ -126,7 +126,9 @@ public class ModelServiceIntegrationTests : IAsyncLifetime
     {
         var memoryStream = new MemoryStream();
         _streamsToDispose.Add(memoryStream);
-        using (var writer = new StreamWriter(memoryStream, System.Text.Encoding.UTF8, -1, leaveOpen: true))
+        // encoderShouldEmitUTF8Identifier: false — matches the no-BOM behavior of the original
+        // `new StreamWriter(memoryStream)` default constructor; Encoding.UTF8 would add a BOM.
+        using (var writer = new StreamWriter(memoryStream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), -1, leaveOpen: true))
         {
             writer.Write(content);
             writer.Flush();
