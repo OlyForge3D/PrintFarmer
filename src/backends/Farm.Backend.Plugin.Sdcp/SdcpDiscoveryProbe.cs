@@ -54,8 +54,8 @@ public class SdcpDiscoveryProbe : INetworkDiscoveryProbe
                 string name = attributesElement.GetPropertyOrNull("Name")?.GetString()
                     ?? attributesElement.GetPropertyOrNull("MachineName")?.GetString()
                     ?? "SDCP Printer";
-                string? protocolVersion = attributesElement.GetPropertyOrNull("ProtocolVersion")?.GetString();
-                string? firmwareVersion = attributesElement.GetPropertyOrNull("FirmwareVersion")?.GetString();
+                _ = attributesElement.GetPropertyOrNull("ProtocolVersion")?.GetString();
+                _ = attributesElement.GetPropertyOrNull("FirmwareVersion")?.GetString();
                 string? brandName = attributesElement.GetPropertyOrNull("BrandName")?.GetString();
 
                 DiscoveredPrinterDto dto = new DiscoveredPrinterDto

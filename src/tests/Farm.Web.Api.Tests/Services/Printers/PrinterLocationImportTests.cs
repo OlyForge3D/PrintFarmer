@@ -326,7 +326,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         using var stream = new MemoryStream(csvBytes);
-        object result = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
+        _ = await _printersService.ImportFromStreamAsync(stream, "test.csv", "skip", CancellationToken.None);
 
         // Assert - Reimported printer should have location assigned
         Printer? reimportedPrinter = await _dbContext.Printers
@@ -372,7 +372,7 @@ public class PrinterLocationImportTests : IAsyncLifetime
         await _dbContext.SaveChangesAsync();
 
         using var stream = new MemoryStream(jsonBytes);
-        object result = await _printersService.ImportFromStreamAsync(stream, "test.json", "skip", CancellationToken.None);
+        _ = await _printersService.ImportFromStreamAsync(stream, "test.json", "skip", CancellationToken.None);
 
         // Assert - Reimported printer should have location assigned
         Printer? reimportedPrinter = await _dbContext.Printers

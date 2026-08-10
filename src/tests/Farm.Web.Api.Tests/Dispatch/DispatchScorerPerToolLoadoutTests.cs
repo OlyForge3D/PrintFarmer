@@ -155,7 +155,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_EmitsPerToolFactor_PerRequirement()
     {
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0),
             new PrintJobToolMaterialRequirement(1, "PETG", null, 10.0));
@@ -176,7 +176,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_MismatchOnRequiredTool_ScoresLowButDoesNotEliminate()
     {
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "ABS");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "ABS");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, null),
             new PrintJobToolMaterialRequirement(1, "PETG", null, null));
@@ -199,7 +199,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     {
         // T0 loaded PLA, T1 loaded PLA — but requirement asks for T1 to be PETG, which is
         // loaded nowhere. So T1 should get the "not loaded anywhere" 20 score.
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PLA");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PLA");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, null),
             new PrintJobToolMaterialRequirement(1, "PETG", null, null));
@@ -217,7 +217,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     {
         // T0 has PETG, T1 has PLA. Requirement asks T0 = PLA. Indexed match fails but the
         // material is available on another physical toolhead → partial credit (75).
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PETG", t1Material: "PLA");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PETG", t1Material: "PLA");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, null));
         _context.PrintJobs.Add(job);
@@ -232,7 +232,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_MmuGateOnlyPrinter_MapsStoredIndicesToGcodeTools()
     {
-        (Printer printer, Toolhead gate0, Toolhead gate1) = SeedMultiToolheadPrinter(
+        (Printer _, Toolhead gate0, Toolhead gate1) = SeedMultiToolheadPrinter(
             t0Material: "PLA",
             t1Material: "PETG");
         gate0.ToolheadType = ToolheadType.MmuGate;
@@ -255,7 +255,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_MixedPhysicalAndMmuGate_PrefersMappedMmuSourceForT0()
     {
-        (Printer printer, _, Toolhead gate0) = SeedMultiToolheadPrinter(
+        (Printer _, _, Toolhead gate0) = SeedMultiToolheadPrinter(
             t0Material: "ABS",
             t1Material: "PLA");
         gate0.ToolheadType = ToolheadType.MmuGate;
@@ -274,7 +274,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_MmuMaterialLoadedOnDifferentTool_ScoresPartialCredit()
     {
-        (Printer printer, _, Toolhead gate0) = SeedMultiToolheadPrinter(
+        (Printer _, _, Toolhead gate0) = SeedMultiToolheadPrinter(
             t0Material: "ABS",
             t1Material: "PETG");
         gate0.ToolheadType = ToolheadType.MmuGate;
@@ -293,7 +293,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_NullPerToolMaterial_ScoresNeutral()
     {
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: null, t1Material: null);
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: null, t1Material: null);
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, null, null, null));
         _context.PrintJobs.Add(job);
@@ -310,7 +310,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     {
         // Issue #711, FIX E: when the multi-slot-fallback operator feature is OFF, the scorer
         // must not emit any per-tool loadout factors even though the job carries per-tool reqs.
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0),
             new PrintJobToolMaterialRequirement(1, "PETG", null, 10.0));
@@ -335,7 +335,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     public async Task ScorePrinters_MultiSlotFallbackEnabled_EmitsPerToolFactors()
     {
         // Complement of the gate-off test: an explicitly enabled gate matches default behavior.
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, 25.0),
             new PrintJobToolMaterialRequirement(1, "PETG", null, 10.0));
@@ -569,7 +569,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     [Fact]
     public async Task ScorePrinters_NoCoverageService_KeepsMaterialScoreWithUnknownExplanation()
     {
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
         _context.PrintJobs.Add(job);
@@ -625,7 +625,7 @@ public class DispatchScorerPerToolLoadoutTests : IDisposable
     {
         // (d) The coverage service is wired but returns no data for this printer → the factor
         // falls back to the material-only score (100) and flags that grams are unverified.
-        (Printer printer, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
+        (Printer _, _, _) = SeedMultiToolheadPrinter(t0Material: "PLA", t1Material: "PETG");
         PrintJob job = CreateJobWithToolRequirements(
             new PrintJobToolMaterialRequirement(0, "PLA", null, 100.0));
         _context.PrintJobs.Add(job);

@@ -1153,7 +1153,7 @@ public class ProfilesService(
                 StringComparer.OrdinalIgnoreCase);
 
             // Fetch all profiles from worker
-            (AllProfilesResponseDto? allProfiles, string? orcaVersion, string workerUrl) = await FetchProfilesFromWorkerAsync(httpClient, ct);
+            (AllProfilesResponseDto? allProfiles, string? orcaVersion, string _) = await FetchProfilesFromWorkerAsync(httpClient, ct);
 
             if (allProfiles?.ByHierarchy == null || allProfiles.ByHierarchy.Count == 0)
             {

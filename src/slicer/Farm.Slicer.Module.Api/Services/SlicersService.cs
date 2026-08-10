@@ -1123,7 +1123,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
                     foreach (KeyValuePair<string, PrinterModelProfilesDto> modelEntry in manufacturerProfiles.Models)
                     {
-                        string modelId = modelEntry.Key;
+                        _ = modelEntry.Key;
                         PrinterModelProfilesDto modelProfiles = modelEntry.Value;
                         string displayName = modelProfiles.Name;
 

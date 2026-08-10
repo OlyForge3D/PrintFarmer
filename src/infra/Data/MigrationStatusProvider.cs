@@ -11,7 +11,7 @@ public class MigrationStatusProvider(AppDbContext context) : IMigrationStatusPro
 
         bool hasMigrations = false;
         bool appliedAny = false;
-        string mode = "Unavailable";
+        string mode;
         try
         {
             IEnumerable<string> available = context.Database.GetMigrations();

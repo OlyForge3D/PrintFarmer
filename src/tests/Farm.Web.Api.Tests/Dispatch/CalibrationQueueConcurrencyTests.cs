@@ -1145,7 +1145,7 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
     {
         // Arrange: seed a database with OutboxSequenceState + one calibration job.
         await using AppDbContext seedCtx = CreateContext();
-        (Guid printerId, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
+        (Guid _, Guid jobId, _) = await SeedAsync(seedCtx, JobKind.Standard);
 
         // Verify the seed row exists.
         OutboxSequenceState? seedState = await seedCtx.OutboxSequenceStates.SingleOrDefaultAsync();

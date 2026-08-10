@@ -227,7 +227,7 @@ public sealed class PrusaLinkPollingService(
                         ? state.LastKnownProgress != status.Progress
                         : Math.Abs(state.LastKnownProgress.Value - status.Progress.Value) > 0.01;
 #pragma warning restore S1244
-                    bool hasChanges = state.LastKnownIsOnline != status.IsOnline
+                    _ = state.LastKnownIsOnline != status.IsOnline
                         || state.LastKnownState != status.State
                         || progressChanged
                         || state.LastKnownJobName != status.JobName;

@@ -38,7 +38,7 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        ArtifactsMetrics metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
+        _ = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
         MeterListener meterListener = new MeterListener();
         List<long> counterValues = new List<long>();
@@ -96,7 +96,7 @@ public class ArtifactsMetricsTests(CustomWebApplicationFactory factory) : IClass
         // Arrange
         using IServiceScope scope = _factory.Services.CreateScope();
         IArtifactsService service = scope.ServiceProvider.GetRequiredService<IArtifactsService>();
-        ArtifactsMetrics metrics = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
+        _ = scope.ServiceProvider.GetRequiredService<ArtifactsMetrics>();
 
         MeterListener meterListener = new MeterListener();
         List<long> gaugeValues = new List<long>();

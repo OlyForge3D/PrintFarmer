@@ -108,7 +108,7 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        _ = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
         WorkerSliceJobResponse claimed = await ClaimJobAsync();
         claimed.ModelFileUrls.Should().BeNull();
@@ -257,7 +257,7 @@ public class SliceJobMultiModelTests(Xunit.Abstractions.ITestOutputHelper output
         HttpResponseMessage submitResp = await _client.PostAsJsonAsync("/api/slice", submit);
         submitResp.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        var submitted = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
+        _ = await submitResp.Content.ReadFromJsonAsync<SubmitSliceJobResponse>();
 
         WorkerSliceJobResponse claimed = await ClaimJobAsync();
         claimed.ModelFileTransforms.Should().BeNull();

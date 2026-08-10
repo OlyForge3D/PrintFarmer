@@ -39,7 +39,7 @@ public sealed class SchedulerOccurrenceSemanticsTests
         await db.Database.EnsureCreatedAsync();
         DateTime due = new(2026, 7, 27, 12, 0, 0, DateTimeKind.Utc);
         Guid actorId = Guid.NewGuid();
-        (PrintJob job, JobSchedule schedule) = await SeedScheduleAsync(
+        (PrintJob job, JobSchedule _) = await SeedScheduleAsync(
             db,
             actorId,
             due,

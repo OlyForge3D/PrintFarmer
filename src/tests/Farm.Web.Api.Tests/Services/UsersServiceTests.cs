@@ -268,7 +268,7 @@ public class UsersServiceTests
             .ReturnsAsync(createdUser);
 
         // Act
-        UserDto result = await _usersService.CreateUserAsync(request, _cancellationToken);
+        _ = await _usersService.CreateUserAsync(request, _cancellationToken);
 
         // Assert
         // Verify the user is created with correct defaults (checked via AddUserAsync call)

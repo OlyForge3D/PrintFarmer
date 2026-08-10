@@ -125,7 +125,7 @@ public class LocalSlicerFileStorageTests : IDisposable
 
         using MemoryStream memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream);
-        byte[] downloadedContent = memoryStream.ToArray();
+        _ = memoryStream.ToArray();
 
         string filePath = Path.Join(_tempBasePath, key);
         byte[] uploadedContent = await _testFs.ReadAllBytesAsync(filePath);
@@ -480,7 +480,7 @@ public class LocalSlicerFileStorageTests : IDisposable
         {
             // Act
             TestFileSystem testFs = TestFileSystemFactory.WithFiles(new Dictionary<string, byte[]>());
-            LocalSlicerFileStorage storage = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
+            _ = new LocalSlicerFileStorage(optionsWrapper, _testLogger, testFs);
 
             // Assert - the storage implementation should create the base directory via the file system
             _ = testFs.DirectoryExists(newTempPath).Should().BeTrue();

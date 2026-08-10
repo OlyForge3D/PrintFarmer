@@ -480,7 +480,7 @@ public class UnifiedSettingsController(
         // For now, we'll use the modular settings service to save individual settings
         // and then reload the unified AppSettings. This approach allows us to support
         // any settings class without hardcoding specific mappings.
-        string className = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
+        _ = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
 
         // Save to modular settings service (this updates the underlying configuration)
         if (settingsValues is System.Text.Json.JsonElement jsonElement)

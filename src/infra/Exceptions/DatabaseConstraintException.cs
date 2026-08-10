@@ -63,7 +63,6 @@ public sealed class DatabaseConstraintException : Exception
         string message = "Failed to save changes to the database";
 
         // Check for specific EF exception types
-        string exceptionType = ex.GetType().Name;
 
         // Look for constraint violation in exception message or inner exceptions
         if (ex.Message.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase))

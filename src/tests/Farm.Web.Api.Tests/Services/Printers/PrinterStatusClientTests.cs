@@ -148,7 +148,7 @@ public class PrinterStatusClientTests
     public void MoonrakerStatusClient_SupportsCorrectBackend()
     {
         // Arrange
-        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateMoonrakerMocks();
+        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateMoonrakerMocks();
         var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
 
         // Act & Assert
@@ -159,7 +159,7 @@ public class PrinterStatusClientTests
     public async Task MoonrakerStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateMoonrakerMocks();
+        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateMoonrakerMocks();
         var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
 
         // Act & Assert
@@ -171,7 +171,7 @@ public class PrinterStatusClientTests
     public async Task MoonrakerStatusClient_GetCameraStreamUrlAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateMoonrakerMocks();
+        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateMoonrakerMocks();
         var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
 
         // Act & Assert
@@ -183,7 +183,7 @@ public class PrinterStatusClientTests
     public async Task MoonrakerStatusClient_IsCameraAvailableAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateMoonrakerMocks();
+        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateMoonrakerMocks();
         var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
 
         // Act & Assert
@@ -195,7 +195,7 @@ public class PrinterStatusClientTests
     public async Task MoonrakerStatusClient_GetPrinterDtoAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateMoonrakerMocks();
+        (Mock<IMoonrakerClient>? mockMoonraker, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateMoonrakerMocks();
         var client = new MoonrakerStatusClient(mockMoonraker.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
 
         // Act & Assert
@@ -211,7 +211,7 @@ public class PrinterStatusClientTests
     public void PrusaLinkStatusClient_SupportsCorrectBackend()
     {
         // Arrange
-        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreatePrusaLinkMocks();
+        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreatePrusaLinkMocks();
         var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<PrusaLinkStatusClient>.Instance);
 
         // Act & Assert
@@ -222,7 +222,7 @@ public class PrinterStatusClientTests
     public async Task PrusaLinkStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreatePrusaLinkMocks();
+        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreatePrusaLinkMocks();
         var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<PrusaLinkStatusClient>.Instance);
 
         // Act & Assert
@@ -242,7 +242,7 @@ public class PrinterStatusClientTests
             ServerUrl = "http://prusa.local"
         };
 
-        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreatePrusaLinkMocks();
+        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreatePrusaLinkMocks();
         var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<PrusaLinkStatusClient>.Instance);
 
         // Act
@@ -264,7 +264,7 @@ public class PrinterStatusClientTests
             ServerUrl = "http://prusa.local"
         };
 
-        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreatePrusaLinkMocks();
+        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreatePrusaLinkMocks();
         var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<PrusaLinkStatusClient>.Instance);
 
         // Act
@@ -286,7 +286,7 @@ public class PrinterStatusClientTests
             ServerUrl = "http://prusa.local"
         };
 
-        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreatePrusaLinkMocks();
+        (Mock<IPrusaLinkClient>? mockPrusa, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreatePrusaLinkMocks();
         var client = new PrusaLinkStatusClient(mockPrusa.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<PrusaLinkStatusClient>.Instance);
 
         // Act
@@ -304,7 +304,7 @@ public class PrinterStatusClientTests
     public void SdcpStatusClient_SupportsCorrectBackend()
     {
         // Arrange
-        (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateSdcpMocks();
+        (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateSdcpMocks();
         var client = new SdcpStatusClient(mockSdcp.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<SdcpStatusClient>.Instance);
 
         // Act & Assert
@@ -315,7 +315,7 @@ public class PrinterStatusClientTests
     public async Task SdcpStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateSdcpMocks();
+        (Mock<ISdcpClient>? mockSdcp, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateSdcpMocks();
         var client = new SdcpStatusClient(mockSdcp.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<SdcpStatusClient>.Instance);
 
         // Act & Assert
@@ -331,7 +331,7 @@ public class PrinterStatusClientTests
     public void OctoPrintStatusClient_SupportsCorrectBackend()
     {
         // Arrange
-        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateOctoPrintMocks();
+        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateOctoPrintMocks();
         var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<OctoPrintStatusClient>.Instance);
 
         // Act & Assert
@@ -342,7 +342,7 @@ public class PrinterStatusClientTests
     public async Task OctoPrintStatusClient_GetPrinterStatusAsync_WithNullPrinter_ThrowsArgumentNullException()
     {
         // Arrange
-        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateOctoPrintMocks();
+        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateOctoPrintMocks();
         var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<OctoPrintStatusClient>.Instance);
 
         // Act & Assert
@@ -362,7 +362,7 @@ public class PrinterStatusClientTests
             ServerUrl = "http://octoprint.local"
         };
 
-        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? mockLogger) = CreateOctoPrintMocks();
+        (Mock<IOctoPrintClient>? mockOcto, Mock<ICircuitBreakerService>? mockBreaker, Mock<ILogger<PrinterStatusClientFactory>>? _) = CreateOctoPrintMocks();
         var client = new OctoPrintStatusClient(mockOcto.Object, mockBreaker.Object, CreateSpoolProvider(), NullLogger<OctoPrintStatusClient>.Instance);
 
         // Act

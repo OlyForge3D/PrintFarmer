@@ -76,7 +76,7 @@ public class BatchDispatchService(
             Strategy = strategy,
         }, ct);
 
-        BatchDispatchResult result = new() { TotalCount = jobs.Count };
+        BatchDispatchResult result;
 
         result = strategy switch
         {
@@ -286,8 +286,7 @@ public class BatchDispatchService(
             AppDbContext dispatchDb =
                 scope.ServiceProvider.GetRequiredService<AppDbContext>();
             Farm.Infrastructure.Dtos.PrintQueue.QueuedPrintJobDto dispatched;
-            using (DispatchCapacityLease capacityLease =
-                await concurrencyCoordinator.AcquireCapacityAsync(
+            using (await concurrencyCoordinator.AcquireCapacityAsync(
                     settings.MaxConcurrentDispatches,
                     ct))
             {

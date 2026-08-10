@@ -171,7 +171,7 @@ public class PrinterStatusFallbackService(
             throw new ArgumentNullException(nameof(circuitBreakerKey));
         }
 
-        CircuitBreaker breaker = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
+        _ = _circuitBreaker.GetCircuitBreaker(circuitBreakerKey);
 
         // Reset by getting a fresh instance - depends on ICircuitBreakerService implementation
         _logger.LogInformation("Resetting circuit breaker {CircuitBreakerKey}", circuitBreakerKey);

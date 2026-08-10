@@ -96,7 +96,7 @@ public class SliceJobCompletionE2ETests(CustomWebApplicationFactory factory) : I
         {
             (Artifact artifact, string fullPath)? result = await artifactsService.GetWithPathAsync(artifact.Id, default);
             _ = result.Should().NotBeNull();
-            (Artifact? a, string? path) = result!.Value;
+            (Artifact? _, string? path) = result!.Value;
             _ = File.Exists(path).Should().BeTrue($"artifact file should exist at {path}");
         }
     }

@@ -115,7 +115,7 @@ public class DiscoveryProbeValidationTests
             Content = new StringContent(json)
         };
 
-        (bool valid, int score, string reason) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
+        (bool valid, int score, string _) = await probe.CallValidateAsync(response, await response.Content.ReadAsStringAsync());
 
         valid.Should().BeTrue();
         score.Should().Be(expectedScore);

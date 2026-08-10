@@ -226,7 +226,7 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
 
         try
         {
-            string moonrakerUrl = printer.FrontendUrl;
+            _ = printer.FrontendUrl;
             string? streamUrl = await GetCameraStreamUrlAsync(printer, ct);
             return !string.IsNullOrEmpty(streamUrl);
         }

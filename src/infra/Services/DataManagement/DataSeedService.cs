@@ -326,13 +326,6 @@ public class DataSeedService : IDataSeedService
 
             // Build lookups for component resolution using composite key (name:manufacturer)
             // This allows different manufacturers to have components with the same name
-            Dictionary<string, Guid> hotendsByKey = await _context.HotendModelDefinitions
-                .Include(h => h.Manufacturer)
-                .ToDictionaryAsync(
-                    h => $"{h.Name}:{h.Manufacturer?.Name ?? "Unknown"}",
-                    h => h.Id,
-                    StringComparer.OrdinalIgnoreCase);
-
             // Also build name-only lookup for backward compatibility (first match wins)
             Dictionary<string, Guid> hotendsByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (var h in await _context.HotendModelDefinitions.ToListAsync())
@@ -340,25 +333,11 @@ public class DataSeedService : IDataSeedService
                 hotendsByName.TryAdd(h.Name, h.Id);
             }
 
-            Dictionary<string, Guid> extrudersByKey = await _context.ExtruderModelDefinitions
-                .Include(e => e.Manufacturer)
-                .ToDictionaryAsync(
-                    e => $"{e.Name}:{e.Manufacturer?.Name ?? "Unknown"}",
-                    e => e.Id,
-                    StringComparer.OrdinalIgnoreCase);
-
             Dictionary<string, Guid> extrudersByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (var e in await _context.ExtruderModelDefinitions.ToListAsync())
             {
                 extrudersByName.TryAdd(e.Name, e.Id);
             }
-
-            Dictionary<string, Guid> nozzlesByKey = await _context.NozzleModelDefinitions
-                .Include(n => n.Manufacturer)
-                .ToDictionaryAsync(
-                    n => $"{n.Name}:{n.Manufacturer?.Name ?? "Unknown"}",
-                    n => n.Id,
-                    StringComparer.OrdinalIgnoreCase);
 
             Dictionary<string, Guid> nozzlesByName = new(StringComparer.OrdinalIgnoreCase);
             foreach (var n in await _context.NozzleModelDefinitions.ToListAsync())

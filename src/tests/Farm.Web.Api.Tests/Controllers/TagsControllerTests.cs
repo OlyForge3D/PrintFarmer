@@ -220,7 +220,7 @@ public class TagsControllerTests
         ActionResult<IEnumerable<TagSuggestionDto>> result = await _controller.GetPopularTagsAsync(0, CancellationToken.None);
 
         // Assert
-        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        _ = Assert.IsType<OkObjectResult>(result.Result);
         _tagServiceMock.Verify(s => s.GetPopularTagsAsync(10, It.IsAny<CancellationToken>()), Times.Once);
     }
 
