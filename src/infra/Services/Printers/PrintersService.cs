@@ -2018,7 +2018,7 @@ public class PrintersService(
             }
             else
             {
-                _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", LogSanitizer.Sanitize(dto.LocationName), p.Name);
+                _logger.LogWarning("[CreatePrinterFromDto] Location '{DtoLocationName}' not found for printer {PName} - printer will have no location", LogSanitizer.Sanitize(dto.LocationName), LogSanitizer.Sanitize(p.Name));
             }
         }
 
@@ -2183,7 +2183,7 @@ public class PrintersService(
         if (updated)
         {
             EnsureServiceState(printer).LastCapabilityUpdate = DateTime.UtcNow;
-            _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", modelTemplate.Name, LogSanitizer.Sanitize(printer.Name));
+            _logger.LogInformation("[ApplyModelTemplate] Applied template defaults from model '{ModelTemplateName}' to printer '{PrinterName}'", LogSanitizer.Sanitize(modelTemplate.Name), LogSanitizer.Sanitize(printer.Name));
         }
         else
         {

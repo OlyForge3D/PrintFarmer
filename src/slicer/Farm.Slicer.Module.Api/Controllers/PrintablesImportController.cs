@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Logging;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -58,17 +59,17 @@ public sealed class PrintablesImportController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogInformation("Bad Printables URL supplied: {Url} — {Message}", url, ex.Message);
+            _logger.LogInformation("Bad Printables URL supplied: {Url} — {Message}", LogSanitizer.Sanitize(url), LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error for URL {Url}", url);
+            _logger.LogWarning(ex, "Printables API error for URL {Url}", LogSanitizer.Sanitize(url));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error fetching Printables preview for {Url}", url);
+            _logger.LogError(ex, "Unexpected error fetching Printables preview for {Url}", LogSanitizer.Sanitize(url));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to fetch Printables preview.");
         }
     }
@@ -97,17 +98,17 @@ public sealed class PrintablesImportController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogInformation("Bad Printables import request supplied for {Url}: {Message}", url, ex.Message);
+            _logger.LogInformation("Bad Printables import request supplied for {Url}: {Message}", LogSanitizer.Sanitize(url), LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error during import workflow for URL {Url}", url);
+            _logger.LogWarning(ex, "Printables API error during import workflow for URL {Url}", LogSanitizer.Sanitize(url));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error importing Printables model for {Url}", url);
+            _logger.LogError(ex, "Unexpected error importing Printables model for {Url}", LogSanitizer.Sanitize(url));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to import Printables model.");
         }
     }
@@ -134,17 +135,17 @@ public sealed class PrintablesImportController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogInformation("Bad Printables one-click import request for model {ModelId}: {Message}", request.ModelId, ex.Message);
+            _logger.LogInformation("Bad Printables one-click import request for model {ModelId}: {Message}", LogSanitizer.Sanitize(request.ModelId), LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error during one-click import workflow for model {ModelId}", request.ModelId);
+            _logger.LogWarning(ex, "Printables API error during one-click import workflow for model {ModelId}", LogSanitizer.Sanitize(request.ModelId));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error in Printables one-click import for model {ModelId}", request.ModelId);
+            _logger.LogError(ex, "Unexpected error in Printables one-click import for model {ModelId}", LogSanitizer.Sanitize(request.ModelId));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to one-click import Printables model.");
         }
     }
@@ -356,7 +357,7 @@ public sealed class PrintablesImportController(
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error resolving attribution for {Url}", request.PrintablesUrl);
+            _logger.LogWarning(ex, "Printables API error resolving attribution for {Url}", LogSanitizer.Sanitize(request.PrintablesUrl));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
         catch (Exception ex)
@@ -396,7 +397,7 @@ public sealed class PrintablesImportController(
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error while browsing collections for {Username}", username);
+            _logger.LogWarning(ex, "Printables API error while browsing collections for {Username}", LogSanitizer.Sanitize(username));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
     }
@@ -435,7 +436,7 @@ public sealed class PrintablesImportController(
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error while browsing user models for {Username}", username);
+            _logger.LogWarning(ex, "Printables API error while browsing user models for {Username}", LogSanitizer.Sanitize(username));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
     }
@@ -476,7 +477,7 @@ public sealed class PrintablesImportController(
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error while browsing collection {CollectionId}", collectionId);
+            _logger.LogWarning(ex, "Printables API error while browsing collection {CollectionId}", LogSanitizer.Sanitize(collectionId));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
     }
@@ -521,7 +522,7 @@ public sealed class PrintablesImportController(
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error during search for query {Query}", query);
+            _logger.LogWarning(ex, "Printables API error during search for query {Query}", LogSanitizer.Sanitize(query));
             return StatusCode(StatusCodes.Status502BadGateway, ex.Message);
         }
     }

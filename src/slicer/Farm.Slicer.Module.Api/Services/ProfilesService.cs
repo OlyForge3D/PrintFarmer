@@ -3111,7 +3111,7 @@ public class ProfilesService(
         };
 
         await _processProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
+        _logger.LogInformation("Cloned process profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {
@@ -3156,7 +3156,7 @@ public class ProfilesService(
         };
 
         await _filamentProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
+        _logger.LogInformation("Cloned filament profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {
@@ -3198,7 +3198,7 @@ public class ProfilesService(
         };
 
         await _machineProfileRepo.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", source.Name, LogSanitizer.Sanitize(newName), userId);
+        _logger.LogInformation("Cloned machine profile '{SourceName}' to '{NewName}' for user {UserId}", LogSanitizer.Sanitize(source.Name), LogSanitizer.Sanitize(newName), userId);
 
         return new CloneSingleProfileResponseDto
         {

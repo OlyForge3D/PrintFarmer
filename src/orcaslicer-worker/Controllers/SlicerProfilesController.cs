@@ -275,7 +275,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching profiles for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), ex.Message);
+            _logger.LogError("Error fetching profiles for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch manufacturer profiles", message = ex.Message });
         }
     }
@@ -317,7 +317,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching models for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), ex.Message);
+            _logger.LogError("Error fetching models for manufacturer '{Manufacturer}': {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch printer models", message = ex.Message });
         }
     }
@@ -360,7 +360,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
+            _logger.LogError("Error fetching machine profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
         }
     }
@@ -402,7 +402,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}': {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(model), ex.Message);
+            _logger.LogError("Error fetching machine profiles for manufacturer='{Manufacturer}', model='{Model}': {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(model), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch machine profiles", message = ex.Message });
         }
     }
@@ -464,7 +464,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching process profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
+            _logger.LogError("Error fetching process profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch process profiles", message = ex.Message });
         }
     }
@@ -529,7 +529,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching filament profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
+            _logger.LogError("Error fetching filament profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch filament profiles", message = ex.Message });
         }
     }
@@ -604,7 +604,7 @@ public class ProfilesController(ISlicerProfilesService profileService, ILogger<P
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching all profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), ex.Message);
+            _logger.LogError("Error fetching all profiles for '{PrinterModel}': {Message}", LogSanitizer.Sanitize(printerModel), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = "Failed to fetch profiles", message = ex.Message });
         }
     }
