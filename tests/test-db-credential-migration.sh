@@ -413,7 +413,7 @@ test_migration_escapes_shell_metacharacters_in_password() {
         else
             echo "ROUNDTRIP_OK"
         fi
-    ) > "$TEST_TEMP_DIR/roundtrip-result.txt" 2>&1
+    ) > "$TEST_TEMP_DIR/roundtrip-result.txt" 2>&1 || true
     local failures_before=$TESTS_FAILED
 
     assert_file_not_exists "$marker_file" "Rewriting and re-sourcing .deploy-config must never execute an embedded command substitution" || true

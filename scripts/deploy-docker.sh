@@ -2998,7 +2998,7 @@ COMPOSE_FILE=$COMPOSE_FILE
 
 # Database Configuration
 DB_PROVIDER=$DB_PROVIDER
-DB_PASSWORD=${DB_PASSWORD:-}
+DB_PASSWORD=$(printf '%q' "${DB_PASSWORD:-}")
 
 # Persist include flags only for the selected provider to avoid leaking
 # unrelated DB credentials or enabling unintended DB containers later.
@@ -3028,7 +3028,7 @@ EOF
 # PostgreSQL Configuration
 POSTGRES_DB=${POSTGRES_DB:-printfarmer}
 POSTGRES_USER=${POSTGRES_USER:-postgres}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+POSTGRES_PASSWORD=$(printf '%q' "${POSTGRES_PASSWORD:-}")
 EOF
             ;;
         sqlserver)
@@ -3036,7 +3036,7 @@ EOF
 
 # SQL Server Configuration
 SQLSERVER_DB=${SQLSERVER_DB:-printfarmer}
-SQLSERVER_PASSWORD=${SQLSERVER_PASSWORD:-}
+SQLSERVER_PASSWORD=$(printf '%q' "${SQLSERVER_PASSWORD:-}")
 SQLSERVER_PORT=${SQLSERVER_PORT:-1433}
 SQLSERVER_EDITION=${SQLSERVER_EDITION:-Developer}
 EOF
