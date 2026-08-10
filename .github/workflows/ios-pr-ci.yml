@@ -54,8 +54,21 @@ jobs:
           reason="non-pull_request event — running full iOS build"
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
             if [[ -n "$PR_BASE_SHA" && -n "$PR_HEAD_SHA" ]]; then
-              changed=$(git diff --no-renames --name-only "$PR_BASE_SHA" "$PR_HEAD_SHA" 2>/dev/null)
-              rc=$?
+              # github.event.pull_request.base.sha is the base branch's CURRENT
+              # tip, not the PR's fork point — GitHub advances it as other PRs
+              # merge. A two-dot diff against it therefore reports every file
+              # that landed on the base branch after this PR forked, which made
+              # non-mobile PRs match `^mobile/` and pay for the whole Xcode
+              # toolchain (see #1418). Diff against the true merge-base so only
+              # the PR's own commits count. `fetch-depth: 0` above guarantees
+              # the merge-base is reachable. Mirrors the same treatment in
+              # scripts/ci/compute-change-set.sh.
+              rc=0
+              if diff_base_sha=$(git merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA" 2>/dev/null); then
+                changed=$(git diff --no-renames --name-only "$diff_base_sha" "$PR_HEAD_SHA" 2>/dev/null) || rc=$?
+              else
+                rc=1
+              fi
               if (( rc != 0 )); then
                 should_run=true
                 reason="diff failed — running full iOS build to be safe"
