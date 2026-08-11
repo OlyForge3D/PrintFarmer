@@ -126,6 +126,8 @@ jobs:
             scripts/ci/tests/test-select-dotnet-tests.sh \
             scripts/ci/select-ios-build.sh \
             scripts/ci/tests/test-select-ios-build.sh \
+            scripts/ci/generate-codeql-slnf.sh \
+            scripts/ci/tests/test-generate-codeql-slnf.sh \
             .githooks/pre-push \
             .githooks/tests/test-pre-push.sh \
             .githooks/setup.sh
@@ -138,6 +140,8 @@ jobs:
               scripts/ci/tests/test-select-dotnet-tests.sh \
               scripts/ci/select-ios-build.sh \
               scripts/ci/tests/test-select-ios-build.sh \
+              scripts/ci/generate-codeql-slnf.sh \
+              scripts/ci/tests/test-generate-codeql-slnf.sh \
               .githooks/pre-push \
               .githooks/tests/test-pre-push.sh \
               .githooks/setup.sh; do
@@ -149,6 +153,9 @@ jobs:
 
       - name: iOS build selector tests
         run: bash scripts/ci/tests/test-select-ios-build.sh
+
+      - name: CodeQL solution filter tests
+        run: bash scripts/ci/tests/test-generate-codeql-slnf.sh
 
       - name: Pre-push hook tests
         run: bash .githooks/tests/test-pre-push.sh

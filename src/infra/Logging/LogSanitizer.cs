@@ -29,32 +29,26 @@ public static partial class LogSanitizer
     /// </summary>
     /// <param name="value">The value to sanitize. May be null or empty.</param>
     /// <returns>
-    /// The original value if it contains no control characters (including <see langword="null"/>
-    /// or empty strings), otherwise a sanitized copy safe for logging.
+    /// <see langword="null"/> for a <see langword="null"/> input, otherwise a value safe for
+    /// logging — the original instance when it contains no control characters.
     /// </returns>
     public static string? Sanitize(string? value)
     {
-        if (string.IsNullOrEmpty(value))
+        if (value is null)
         {
-            return value;
+            return null;
         }
 
-        bool hasControlChar = false;
-        for (int i = 0; i < value.Length; i++)
-        {
-            if (char.IsControl(value[i]))
-            {
-                hasControlChar = true;
-                break;
-            }
-        }
-
-        // Fast path: no control characters present, return the original instance unchanged.
-        if (!hasControlChar)
-        {
-            return value;
-        }
-
+        // Every non-null path must return the result of the Replace chain. CodeQL's
+        // cs/log-forging barrier only recognizes values produced by String.Replace, so an
+        // early return of `value` itself — such as the "no control characters" fast path
+        // this method used to have — routes the tainted string around the barrier and makes
+        // CodeQL report every call site despite the value being sanitized.
+        //
+        // Skipping that fast path costs nothing in allocations: both String.Replace and
+        // Regex.Replace return the original instance when there is nothing to replace, so a
+        // clean string still comes back as the very same reference.
+        //
         // Escape CR/LF explicitly (in that order, so a "\r\n" pair becomes a single "\r\n"
         // literal rather than two independently-escaped characters) so they cannot start a
         // forged log line, then strip any other ASCII control characters.

@@ -8,11 +8,34 @@ queries:
   - uses: security-and-quality
 
 # NOTE: paths-ignore only applies to interpreted languages (JS/TS, Python,
-# Ruby). For compiled languages like C#, CodeQL analyzes whatever the build
-# compiles and path filters here have no effect — verified empirically after
-# a prior attempt to exclude the vendored, auto-generated
+# Ruby) and to compiled languages analysed with `build-mode: none`. Our C# leg
+# uses `build-mode: manual`, so CodeQL analyzes whatever the build compiles and
+# the filters below have no effect on it — verified empirically after a prior
+# attempt to exclude the vendored, auto-generated
 # src/slicer/Farm.Slicer.Module/Services/Rendering/Lib3MF.cs (3MF Consortium /
 # Automatic Component Toolkit output) via paths-ignore had zero effect on its
 # alert count. Alerts for that file are instead dismissed individually via the
 # code-scanning API as won't-fix, each with a comment citing its vendored/
 # generated provenance.
+#
+# C# test code is therefore excluded from the build instead: the CodeQL
+# workflow builds a generated solution filter that omits src/tests/**. See
+# scripts/ci/generate-codeql-slnf.sh.
+#
+# The entries below cover the javascript-typescript leg only (build-mode:
+# none), where path filtering does work. They exclude frontend unit tests,
+# their shared test harness, and the Playwright e2e suite — test code that
+# exercises fixtures and mock data rather than shipping to users, and whose
+# alerts are noise on a security scan.
+paths-ignore:
+  - '**/__tests__/**'
+  - '**/*.test.js'
+  - '**/*.test.jsx'
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.spec.js'
+  - '**/*.spec.jsx'
+  - '**/*.spec.ts'
+  - '**/*.spec.tsx'
+  - src/Web/ReactApp/e2e
+  - src/Web/ReactApp/src/test
