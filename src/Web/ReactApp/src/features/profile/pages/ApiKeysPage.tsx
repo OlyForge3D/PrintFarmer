@@ -13,6 +13,7 @@ import {
   rotateApiKey,
   revealApiKey,
   getApiKeySettings,
+  resolveScopeNames,
   type ApiKeyDto,
   type ApiKeyPurpose,
   type ApiKeyScope,
@@ -20,10 +21,102 @@ import {
   type CreateApiKeyResponse,
 } from '@/services/apiKeysService';
 
-const SCOPE_OPTIONS: { value: ApiKeyScope; label: string; description: string }[] = [
-  { value: 'ModelRead', label: 'Model Read', description: 'Read 3D model/library metadata and files.' },
-  { value: 'ModelWrite', label: 'Model Write', description: 'Create, update, or delete model/library entries.' },
-  { value: 'LibrarySync', label: 'Library Sync', description: 'Sync the local desktop model library with the server.' },
+interface ScopeOption {
+  value: ApiKeyScope;
+  label: string;
+  description: string;
+  /** Rendered as an explicit warning when this scope carries real-world impact. */
+  impact?: string;
+}
+
+interface ScopeGroup {
+  id: string;
+  title: string;
+  description: string;
+  options: ScopeOption[];
+}
+
+/**
+ * Scopes are presented as independent checkboxes, grouped only for readability. There is
+ * deliberately no "all calibration" or "select all" toggle: every scope maps to exactly one
+ * server-side permission, and a bulk toggle makes it too easy to grant destructive or
+ * physically-actuating authority without reading what it does.
+ */
+const SCOPE_GROUPS: ScopeGroup[] = [
+  {
+    id: 'library',
+    title: 'Model library',
+    description: 'Access to the 3D model library. Grants no calibration, slicing, or printing authority.',
+    options: [
+      { value: 'ModelRead', label: 'Model read', description: 'Read 3D model/library metadata and files.' },
+      { value: 'ModelWrite', label: 'Model write', description: 'Create, update, or delete model/library entries.' },
+      { value: 'LibrarySync', label: 'Library sync', description: 'Sync the local desktop model library with the server.' },
+    ],
+  },
+  {
+    id: 'calibration',
+    title: 'Calibration',
+    description: 'Each option grants exactly one calibration permission to this key.',
+    options: [
+      { value: 'CalibrationRead', label: 'Calibration read', description: 'View calibration projects, attempts, photos, and generated profiles.' },
+      { value: 'CalibrationCreate', label: 'Calibration create', description: 'Create calibration projects and attempts.' },
+      { value: 'CalibrationUpdate', label: 'Calibration update', description: 'Edit calibration projects, drafts, observations, and photos.' },
+      {
+        value: 'CalibrationDelete',
+        label: 'Calibration delete',
+        description: 'Delete calibration projects, drafts, and photos.',
+        impact: 'Destructive — permanently removes calibration data.',
+      },
+      {
+        value: 'CalibrationGenerate',
+        label: 'Calibration generate',
+        description: 'Produce and export generated calibration profiles.',
+        impact: 'Also requires Calibration read, Slicing submit, and Slicing read artifact.',
+      },
+      { value: 'CalibrationPublish', label: 'Calibration publish', description: 'Publish a generated calibration profile revision for others to use.' },
+    ],
+  },
+  {
+    id: 'slicing',
+    title: 'Slicing',
+    description: 'Submitting slice jobs is separate from generating calibration profiles.',
+    options: [
+      {
+        value: 'SlicingSubmit',
+        label: 'Slicing submit',
+        description: 'Submit slicing jobs.',
+        impact: 'Consumes slicer worker capacity.',
+      },
+      { value: 'SlicingReadArtifact', label: 'Slicing read artifact', description: 'Download sliced G-code artifacts.' },
+    ],
+  },
+  {
+    id: 'queue',
+    title: 'Print queue',
+    description: 'Required only if this key needs to queue or run physical prints.',
+    options: [
+      { value: 'QueueRead', label: 'Queue read', description: 'View the print queue.' },
+      { value: 'QueueWrite', label: 'Queue write', description: 'Add and edit print jobs. Also requires Queue read.' },
+      {
+        value: 'QueueStart',
+        label: 'Queue start',
+        description: 'Start a job on a printer. Also requires Queue read.',
+        impact: 'Starts a physical print on real hardware.',
+      },
+      {
+        value: 'QueueCancel',
+        label: 'Queue cancel',
+        description: 'Cancel a job. Also requires Queue read.',
+        impact: 'Stops a physical print already in progress.',
+      },
+      {
+        value: 'QueueAcknowledgeBedClear',
+        label: 'Queue acknowledge bed clear',
+        description: 'Confirm the bed is clear so the next job may start. Also requires Queue read.',
+        impact: 'Lets the farm start the next physical print.',
+      },
+    ],
+  },
 ];
 
 const MAX_KEY_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
@@ -291,7 +384,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
     createMutation.mutate({
       name: newKeyName.trim(),
       purpose: newKeyPurpose,
-      scopes: newKeyPurpose === 'Desktop' ? newKeyScopes.join(',') : undefined,
+      scopeNames: newKeyPurpose === 'Desktop' ? newKeyScopes : undefined,
       expiresAt: newKeyExpiresAt ? new Date(newKeyExpiresAt).toISOString() : undefined,
     });
   };
@@ -497,21 +590,38 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                     <legend className="text-sm font-medium text-pf-text-primary">
                       Scopes <span className="text-pf-error" aria-hidden="true">*</span>
                     </legend>
-                    <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">At least one scope is required for Desktop-purpose keys.</p>
+                    <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">
+                      Select only what this key needs. Each option grants exactly one permission, and the
+                      server will reject any scope the key&apos;s owner is not already authorized for.
+                    </p>
                     {fieldErrors.scopes && (
                       <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">
                         {fieldErrors.scopes}
                       </p>
                     )}
-                    <div className="space-y-2">
-                      {SCOPE_OPTIONS.map((scope) => (
-                        <Checkbox
-                          key={scope.value}
-                          id={`scope-${scope.value}`}
-                          checked={newKeyScopes.includes(scope.value)}
-                          onChange={() => toggleScope(scope.value)}
-                          label={`${scope.label} — ${scope.description}`}
-                        />
+                    <div className="space-y-4">
+                      {SCOPE_GROUPS.map((group) => (
+                        <div key={group.id} className="space-y-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-pf-text-secondary">
+                            {group.title}
+                          </p>
+                          <p className="text-xs text-pf-text-muted">{group.description}</p>
+                          <div className="space-y-2">
+                            {group.options.map((scope) => (
+                              <Checkbox
+                                key={scope.value}
+                                id={`scope-${scope.value}`}
+                                checked={newKeyScopes.includes(scope.value)}
+                                onChange={() => toggleScope(scope.value)}
+                                label={
+                                  scope.impact
+                                    ? `${scope.label} — ${scope.description} ${scope.impact}`
+                                    : `${scope.label} — ${scope.description}`
+                                }
+                              />
+                            ))}
+                          </div>
+                        </div>
                       ))}
                     </div>
                   </fieldset>
@@ -609,9 +719,9 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                         Created: {formatDate(apiKey.createdAt)}
                         {apiKey.expiresAt && ` • Expires: ${formatDate(apiKey.expiresAt)}`}
                       </p>
-                      {apiKey.purpose === 'Desktop' && apiKey.scopes && apiKey.scopes !== 'None' && (
+                      {apiKey.purpose === 'Desktop' && resolveScopeNames(apiKey).length > 0 && (
                         <p className="text-sm text-pf-text-secondary mt-1">
-                          Scopes: {apiKey.scopes}
+                          Scopes: {resolveScopeNames(apiKey).join(', ')}
                         </p>
                       )}
                     </div>

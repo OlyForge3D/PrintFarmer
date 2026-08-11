@@ -4,8 +4,11 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Api;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Authentication;
+using Farm.Slicer.Module.Api.Filters;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -158,5 +161,85 @@ public class CrossHostJwtAcceptanceTests
 
         validationResult.IsValid.Should().BeFalse();
         validationResult.Exception.Should().NotBeNull();
+    }
+
+    /// <summary>
+    /// Cross-host parity for the calibration permission claims: the slicer host authorizes its
+    /// calibration/slicing routes through <see cref="ClaimsPermissionValidator"/>, which reads the
+    /// stable <c>permission</c> claim. An exchanged Desktop token carries no role, so this proves
+    /// the permission claim alone is sufficient there - and that an unselected permission is not.
+    /// </summary>
+    [Fact]
+    public async Task DesktopExchangeToken_PermissionClaims_AreAcceptedBySlicerHostValidator()
+    {
+        Guid userId = Guid.NewGuid();
+        ApiKey key = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            Name = "desktop-app",
+            KeyHash = "irrelevant-lookup-is-mocked",
+            Purpose = ApiKeyPurpose.Desktop,
+            Scopes = ApiKeyScope.CalibrationRead | ApiKeyScope.SlicingSubmit,
+            IsActive = true,
+            ExpiresAt = DateTime.UtcNow.AddDays(30),
+        };
+        User owner = new() { Id = userId, Username = "desktop-owner", Email = "owner@example.com", IsActive = true };
+
+        var mockApiKeyRepository = new Mock<IApiKeyRepository>();
+        var mockUsersRepository = new Mock<IUsersRepository>();
+        var mockAuditService = new Mock<IAuthAuditService>();
+        var mockConfiguration = new Mock<IConfiguration>();
+        var mockLogger = new Mock<ILogger<ApiKeyExchangeService>>();
+
+        mockConfiguration.Setup(c => c["Jwt:Key"]).Returns(SharedJwtKey);
+        mockConfiguration.Setup(c => c["Jwt:Issuer"]).Returns(SharedIssuer);
+        mockConfiguration.Setup(c => c["Jwt:Audience"]).Returns(SharedAudience);
+        mockApiKeyRepository.Setup(r => r.GetByKeyHashAsync(It.IsAny<string>())).ReturnsAsync(key);
+        mockUsersRepository.Setup(r => r.GetUserEntityAsync(userId, It.IsAny<CancellationToken>())).ReturnsAsync(owner);
+        mockUsersRepository
+            .Setup(r => r.GetActiveRoleNamesAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        mockUsersRepository
+            .Setup(r => r.GetGrantedPermissionsAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([("calibration", "read"), ("slicing", "submit")]);
+
+        var exchangeService = new ApiKeyExchangeService(
+            mockApiKeyRepository.Object, mockUsersRepository.Object, mockAuditService.Object,
+            mockConfiguration.Object, mockLogger.Object);
+
+        ApiKeyExchangeResult result = await exchangeService.ExchangeApiKeyAsync("raw-desktop-key", null, null);
+        result.Success.Should().BeTrue();
+
+        var slicerHostValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(SharedJwtKey)),
+            ValidateIssuer = true,
+            ValidIssuer = SharedIssuer,
+            ValidateAudience = true,
+            ValidAudience = SharedAudience,
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+        };
+
+        var handler = new JsonWebTokenHandler();
+        Microsoft.IdentityModel.Tokens.TokenValidationResult validationResult =
+            await handler.ValidateTokenAsync(result.Token, slicerHostValidationParameters);
+        validationResult.IsValid.Should().BeTrue();
+
+        ClaimsPrincipal principal = new(validationResult.ClaimsIdentity);
+        principal.IsInRole(PrintFarmerPermissions.FarmAdminRole)
+            .Should().BeFalse("an exchanged token must never carry the admin role");
+
+        DefaultHttpContext httpContext = new() { User = principal };
+        ClaimsPermissionValidator validator = new(new Mock<ILogger<ClaimsPermissionValidator>>().Object);
+
+        (await validator.HasPermissionAsync(httpContext, PrintFarmerPermissions.Calibration.Read))
+            .Should().BeTrue("the mapped permission claim is present and no role is needed");
+        (await validator.HasPermissionAsync(httpContext, PrintFarmerPermissions.Slicing.Submit))
+            .Should().BeTrue();
+        (await validator.HasPermissionAsync(httpContext, PrintFarmerPermissions.Calibration.Delete))
+            .Should().BeFalse("an unselected permission must not be reachable on the slicer host either");
     }
 }

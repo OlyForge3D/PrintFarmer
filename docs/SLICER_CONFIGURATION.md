@@ -240,13 +240,17 @@ Content-Type: application/json
 {
   "token": "eyJhbGciOi...",
   "expiresAt": "2026-01-20T12:15:00Z",
-  "scopes": ["ModelRead", "ModelWrite"]
+  "scopes": ["ModelRead", "CalibrationRead"]
 }
 ```
 
+`scopes` lists the **effective** scopes granted to this token, which may be a subset of the key's
+stored scopes if the owner has since lost a permission — see
+[Anti-self-escalation](#anti-self-escalation).
+
 **Response** (401 Unauthorized) - returned uniformly for a missing, malformed, unknown, revoked,
-expired, wrong-purpose (non-Desktop), or under-scoped (no scopes granted) key, and never reveals
-which of these applies:
+expired, wrong-purpose (non-Desktop), under-scoped (no scopes granted), or fully-revoked (no scope
+survives the owner-authorization intersection) key, and never reveals which of these applies:
 
 ```json
 {
@@ -271,10 +275,93 @@ sent directly by an untrusted caller is ignored (see [`docs/DEPLOYMENT.md`](DEPL
 The issued token is a normal JWT signed with the same `Jwt:Key`/`Jwt:Issuer`/`Jwt:Audience`
 configuration as login tokens, so it validates identically wherever those settings match, but it
 carries a deliberately minimal claim set: the owning user's identity, a `token_use=desktop_exchange`
-marker, the API key's ID, and one `scope` claim per scope granted to the exchanged key
-(`ModelRead`, `ModelWrite`, `LibrarySync`) - no role or permission claims. Its lifetime is
-configurable via `Jwt:DesktopExchangeLifetimeMinutes` (default 15 minutes) and is independent of,
-and much shorter than, the API key's own 90-day expiry.
+marker, the API key's ID, one `scope` claim per **effective** scope, and one `permission` claim per
+permission-backed effective scope (see [Scopes and permissions](#scopes-and-permissions)).
+
+**A Desktop-exchange token never carries a role claim** — not even when its owner is a
+`farm_admin`. There is therefore no admin bypass on an exchanged token: an admin-owned key is
+limited to exactly the scopes it was created with.
+
+Its lifetime is configurable via `Jwt:DesktopExchangeLifetimeMinutes` (default 15 minutes) and is
+**clamped to a hard ceiling of 15 minutes** — a larger configured value is reduced and the clamp is
+logged. The lifetime is independent of, and much shorter than, the API key's own 90-day expiry.
+
+### Scopes and permissions
+
+A Desktop key carries explicitly selected scopes. They fall into two groups:
+
+| Group | Scopes | How they authorize |
+|---|---|---|
+| Model/library | `ModelRead`, `ModelWrite`, `LibrarySync` | Scope policies only. **Never** become permission claims. |
+| Calibration | `CalibrationRead`, `CalibrationCreate`, `CalibrationUpdate`, `CalibrationDelete`, `CalibrationGenerate`, `CalibrationPublish` | Each maps to exactly one `calibration:*` permission claim. |
+| Slicing | `SlicingSubmit`, `SlicingReadArtifact` | `slicing:submit`, `slicing:read-artifact`. |
+| Print queue | `QueueRead`, `QueueWrite`, `QueueStart`, `QueueCancel`, `QueueAcknowledgeBedClear` | The matching `queue:*` permission claim. |
+
+`queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and `obico:manage` are
+deliberately **not** reachable from any Desktop scope.
+
+The mapping lives in one place — `DesktopScopePermissionMap` — which both key creation and token
+exchange consume, so the two can never drift.
+
+**Selecting scopes.** Prefer the canonical `scopeNames` array on
+`POST /api/users/{userId}/apikeys`:
+
+```json
+{
+  "name": "Desktop calibration client",
+  "purpose": "Desktop",
+  "scopeNames": ["ModelRead", "CalibrationRead", "SlicingSubmit"]
+}
+```
+
+The legacy `scopes` flags field still works for existing clients, but supplying both is rejected.
+Composite aliases (`"All"`) are not accepted in `scopeNames`. Responses include both `scopes`
+(legacy) and `scopeNames` (canonical); **prefer `scopeNames`** — the flags field renders the exact
+value `7` as the single name `"All"`, which reads like "every privilege" but actually means only
+the three model/library scopes.
+
+**Dependencies.** Some scopes are useless alone and are rejected at creation with a `400`:
+`CalibrationGenerate` also requires `CalibrationRead`, `SlicingSubmit`, and `SlicingReadArtifact`;
+the other calibration scopes require `CalibrationRead`; the queue mutation scopes require
+`QueueRead`.
+
+### Anti-self-escalation
+
+A key can never grant more authority than its owner has.
+
+- **At creation**, every permission-backed scope is checked against the **target owner's** live
+  database roles and grants — never against the caller's JWT claims. A `farm_admin` caller cannot
+  mint a calibration key for an unprivileged user. Unauthorized scopes are rejected with a `400`
+  naming the missing permissions.
+- **At exchange**, the owner's authorization is re-resolved and intersected with the key's stored
+  flags to produce a single **effective mask**. The `scope` claims, the `permission` claims, and
+  the `scopes` array in the response all derive from that one mask, so a scope can never appear
+  without its permission.
+- **Revocation downgrades rather than breaks.** If the owner has lost a permission, only the
+  affected scopes are dropped; unrelated model/library scopes are retained, so a revoked
+  calibration role does not break desktop model sync. The exchange fails only when nothing
+  survives. The requested, effective, and dropped scope names and the granted permissions are
+  recorded in the audit log (never the key, its hash, or the token). Revocation therefore takes
+  effect on the next exchange, bounded by the ≤15-minute token lifetime.
+
+### Credential management requires an interactive session
+
+Credential-management endpoints reject Desktop-exchange tokens with a `403`. An exchange token is
+a short-lived bearer credential held on an end-user machine and carries the owner's identity, so
+plain `[Authorize]` would let a stolen token bootstrap a **durable** credential — the same
+laundering pattern in two places:
+
+| Endpoint | Why it is covered |
+|---|---|
+| `/api/users/{userId}/apikeys` (all verbs) and `/api/apikeys/settings` | Minting a replacement API key valid for up to a year, with scopes of the attacker's choosing. |
+| `POST /api/auth/passkey/register/begin` and `.../complete` | Registering an attacker-controlled passkey, then using it to obtain a full interactive login. |
+| `GET`/`PATCH`/`DELETE /api/auth/passkey/credentials[/{id}]` | Enumerating, renaming, or deleting the owner's existing passkeys. |
+
+Normal login sessions — including the admin UI — are unaffected: the rule denies only principals
+carrying `token_use=desktop_exchange`, and every other principal passes through untouched. The
+passkey **login** ceremony (`passkey/login/begin` and `.../complete`) stays anonymous, since the
+signed assertion is itself the credential being verified. Password change is not affected because
+it already requires the current password.
 
 ### Authorization Policies
 
@@ -285,16 +372,27 @@ only constrain principals carrying the `token_use=desktop_exchange` claim), and 
 **OctoPrint**-purpose keys can never obtain a Desktop-exchange token, since the exchange endpoint
 rejects any key whose `Purpose` is not `Desktop`.
 
+Calibration, slicing, and queue endpoints are gated by ordinary `permission` claims on both hosts
+(`RequirePermissionAttribute` on the main API, `ClaimsPermissionValidator` on the slicer host), so
+an exchanged token reaches them through exactly the same check as a login session.
+
 ### Database Migrations
 
-The `ApiKeys` table's `Purpose` and `Scopes` columns are provisioned by the
-`AddApiKeyPurposeAndScopes` EF Core migration, present for both the PostgreSQL and SQL Server
-providers (`src/migrations/Farm.Migrations.PostgreSQL` and `src/migrations/Farm.Migrations.SqlServer`).
-Both columns default to `0` (`ApiKeyPurpose.OctoPrint` / `ApiKeyScope.None`), so every pre-existing
-key upgrades in place as an unscoped, OctoPrint-purpose key - it keeps working for slicer uploads
-exactly as before and is never implicitly granted Desktop model/library access. Run
-`dotnet ef database update` (with `DB_PROVIDER` set to `postgres` or `sqlserver`) to apply the
-migration; SQLite deployments continue to use `EnsureCreated()` and pick up the columns automatically.
+The `ApiKeys` table's `Purpose` and `Scopes` columns are provisioned by the initial EF Core
+migration for both the PostgreSQL and SQL Server providers (`src/migrations/Farm.Migrations.PostgreSQL`
+and `src/migrations/Farm.Migrations.SqlServer`). Both columns default to `0`
+(`ApiKeyPurpose.OctoPrint` / `ApiKeyScope.None`), so every pre-existing key upgrades in place as an
+unscoped, OctoPrint-purpose key — it keeps working for slicer uploads exactly as before and is
+never implicitly granted Desktop access.
+
+**Adding calibration/slicing/queue scopes requires no migration.** `Scopes` is already an `int`
+column and the new values are additional bits within it. Every key stored as `1`, `2`, `4`, or the
+frozen aggregate `7` continues to mean exactly what it meant when issued and yields **zero**
+calibration, slicing, or queue permissions.
+
+**Scopes are immutable.** There is no endpoint to change an existing key's scopes, and rotation
+preserves them exactly. To use the new scopes you must **issue a new key**. The exchange request
+body is unchanged (`{ "apiKey": "..." }`), so no desktop client change is required to exchange one.
 
 ### Slicer Host Configuration
 
