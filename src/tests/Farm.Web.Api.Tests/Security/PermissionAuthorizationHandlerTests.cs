@@ -57,6 +57,26 @@ public sealed class PermissionAuthorizationHandlerTests
     }
 
     [Theory]
+    [InlineData("printers", "write")]
+    [InlineData("calibration", "delete")]
+    [InlineData("job_queue", "create")]
+    public async Task HandleRequirementAsync_ResourceAdmin_SatisfiesNonReadActions(string resource, string action)
+    {
+        // The implication is not coupled to "read" specifically: an admin grant on a
+        // resource satisfies every action check on that resource.
+        AuthorizationHandlerContext context = CreateContext(
+            resource,
+            action,
+            grantedPermission: $"{resource}:admin");
+
+        var handler = new PermissionAuthorizationHandler(NullLogger<PermissionAuthorizationHandler>.Instance);
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.Should().BeTrue(
+            $"a '{resource}:admin' grant must imply '{resource}:{action}'");
+    }
+
+    [Theory]
     [MemberData(nameof(CanonicalResources))]
     public async Task HandleRequirementAsync_ResourceRead_DoesNotSatisfyAdminCheck(string resource)
     {
@@ -112,6 +132,24 @@ public sealed class PermissionAuthorizationHandlerTests
         await handler.HandleAsync(context);
 
         context.HasSucceeded.Should().BeFalse("an unrelated permission on the same resource must not satisfy the check");
+    }
+
+    [Fact]
+    public async Task HandleRequirementAsync_ClaimValueComparisonIsCaseSensitive()
+    {
+        // ClaimsIdentity.HasClaim(type, value) compares the claim VALUE with
+        // StringComparison.Ordinal (case-sensitive) — only the claim TYPE comparison is
+        // case-insensitive. A mixed-case permission claim must not satisfy a lowercase
+        // resource:admin check (or vice versa).
+        AuthorizationHandlerContext context = CreateContext(
+            resource: "printers",
+            action: "read",
+            grantedPermission: "Printers:Admin");
+
+        var handler = new PermissionAuthorizationHandler(NullLogger<PermissionAuthorizationHandler>.Instance);
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.Should().BeFalse("permission claim values are matched case-sensitively; 'Printers:Admin' must not satisfy 'printers:read'");
     }
 
     [Fact]

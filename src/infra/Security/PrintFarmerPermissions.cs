@@ -114,13 +114,22 @@ public static class PrintFarmerPermissions
             return true;
         }
 
-        // A resource-level admin grant implies every finer-grained action on that same
-        // resource (e.g. "calibration:admin" implies "calibration:read"). This never
-        // crosses resources and does not extend beyond the "admin" action.
         (string resource, string action) = Split(permission);
-        return !string.Equals(action, AdminAction, StringComparison.Ordinal)
-            && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
+        return ImpliesViaResourceAdmin(user, resource, action);
     }
+
+    /// <summary>
+    /// Returns true when the principal holds "{resource}:admin" and the requested
+    /// <paramref name="action"/> is not itself "admin". A resource-level admin grant
+    /// implies every finer-grained action on that same resource (e.g. "calibration:admin"
+    /// implies "calibration:read"); the implication never crosses resources and does not
+    /// extend beyond the "admin" action. This is the single source of truth for the
+    /// implication so every enforcement point (the authorization handler, SignalR hubs,
+    /// capability services) stays coherent.
+    /// </summary>
+    public static bool ImpliesViaResourceAdmin(ClaimsPrincipal user, string resource, string action) =>
+        !string.Equals(action, AdminAction, StringComparison.Ordinal)
+        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(
