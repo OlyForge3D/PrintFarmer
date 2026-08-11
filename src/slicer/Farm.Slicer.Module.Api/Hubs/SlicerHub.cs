@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Security;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Logging;
@@ -39,7 +40,7 @@ public static class SlicerHubEvents
 /// SignalR hub for slicer service registration and status.
 /// Mapped to /hubs/slicer-registry.
 /// </summary>
-[Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+[RequirePermission("slicer_engines", "admin")]
 public class SlicerHub(ILogger<SlicerHub> logger) : Hub
 {
     private readonly ILogger<SlicerHub> _logger = logger ?? throw new ArgumentNullException(nameof(logger));

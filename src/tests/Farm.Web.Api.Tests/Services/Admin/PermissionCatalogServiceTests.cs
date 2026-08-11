@@ -1,7 +1,7 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Admin;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;

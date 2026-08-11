@@ -129,7 +129,7 @@ public sealed class PermissionSeedTests
                 dataSeedService.Object);
             await secondInitializer.SeedAllAsync();
 
-            (await secondContext.Resources.CountAsync()).Should().Be(15);
+            (await secondContext.Resources.CountAsync()).Should().Be(37);
             (await secondContext.UserActions.CountAsync()).Should().Be(17);
             (await secondContext.Roles.CountAsync()).Should().Be(2);
         }
@@ -164,8 +164,8 @@ public sealed class PermissionSeedTests
         await Task.WhenAll(firstInitializer.SeedAllAsync(), secondInitializer.SeedAllAsync());
 
         await using AppDbContext verificationContext = new(options);
-        (await verificationContext.Resources.CountAsync()).Should().Be(15);
-        (await verificationContext.Resources.Select(resource => resource.Name).Distinct().CountAsync()).Should().Be(15);
+        (await verificationContext.Resources.CountAsync()).Should().Be(37);
+        (await verificationContext.Resources.Select(resource => resource.Name).Distinct().CountAsync()).Should().Be(37);
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed class PermissionSeedTests
 
         await initializer.SeedAllAsync();
 
-        (await context.Resources.CountAsync()).Should().Be(15);
+        (await context.Resources.CountAsync()).Should().Be(37);
     }
 
     private sealed class ResourceInsertInterceptor(DbContextOptions<AppDbContext> contenderOptions) : SaveChangesInterceptor

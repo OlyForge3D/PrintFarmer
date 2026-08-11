@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Security;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue.Dispatch;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 

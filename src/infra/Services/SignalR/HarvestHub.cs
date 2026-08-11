@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
@@ -19,7 +20,7 @@ public class HarvestHub : Hub
     }
 
     // Called by backend to broadcast per-file progress to all clients in the operation group
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [RequirePermission("gcode_harvest", "admin")]
     public async Task BroadcastFileProgressAsync(Guid operationId, string fileName, long bytesCopied, long totalBytes)
     {
         double percent = totalBytes > 0 ? (bytesCopied * 100.0 / totalBytes) : 0;

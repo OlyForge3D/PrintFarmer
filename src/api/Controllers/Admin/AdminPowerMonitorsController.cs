@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Web.Api.Services.SmartPlug;
@@ -14,7 +15,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/power-monitors")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("power_monitors", "admin")]
 [Tags("Admin - Power Monitors")]
 public class AdminPowerMonitorsController(
     AppDbContext db,

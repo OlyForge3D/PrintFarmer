@@ -376,6 +376,110 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     /// <summary>
+    /// Creates an authenticated HTTP client for a custom (non-farm_admin) role granted exactly
+    /// one <c>{resource}:{action}</c> permission. Used to prove that the slicer module's
+    /// permission enforcement (both <see cref="Farm.Infrastructure.Authorization.RequirePermissionAttribute"/>
+    /// on SignalR hubs and <see cref="Farm.Slicer.Module.Api.Filters.RequirePermissionAttribute"/>
+    /// on REST controllers) grants reach to a custom role holding the matching permission, not
+    /// just to the literal <c>farm_admin</c> role name (issue #1451).
+    /// </summary>
+    public async Task<HttpClient> CreateOperatorClientAsync(
+        string resource,
+        string action,
+        string username = "test-operator",
+        string email = "operator@example.com",
+        string password = "TestPassword123!")
+    {
+        using (AsyncServiceScope scope = Services.CreateAsyncScope())
+        {
+            AppDbContext context = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            IPasswordHashingService passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHashingService>();
+
+            User? existingUser = await context.Users.FirstOrDefaultAsync(u => u.Username == username);
+            if (existingUser == null)
+            {
+                var user = new User
+                {
+                    Id = Guid.NewGuid(),
+                    Username = username,
+                    Email = email,
+                    PasswordHash = passwordHasher.HashPassword(password),
+                    FirstName = "Test",
+                    LastName = "Operator",
+                    IsActive = true,
+                    EmailConfirmed = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                };
+                context.Users.Add(user);
+                await context.SaveChangesAsync();
+
+                string roleName = $"custom_{resource}_{action}";
+                Role? role = await context.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
+                if (role == null)
+                {
+                    role = new Role
+                    {
+                        Id = Guid.NewGuid(),
+                        Name = roleName,
+                        Description = $"Test custom role granting {resource}:{action}",
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    context.Roles.Add(role);
+                    await context.SaveChangesAsync();
+                }
+
+                Resource? resourceEntity = await context.Set<Resource>().FirstOrDefaultAsync(r => r.Name == resource);
+                UserAction? actionEntity = await context.Set<UserAction>().FirstOrDefaultAsync(a => a.Name == action);
+                if (resourceEntity == null || actionEntity == null)
+                {
+                    throw new InvalidOperationException(
+                        $"Seeded resource '{resource}' or action '{action}' not found; check DatabaseInitializer seeding.");
+                }
+
+                bool alreadyGranted = await context.RolePermissions.AnyAsync(rp =>
+                    rp.RoleId == role.Id && rp.ResourceId == resourceEntity.Id && rp.ActionId == actionEntity.Id);
+                if (!alreadyGranted)
+                {
+                    context.RolePermissions.Add(new RolePermission
+                    {
+                        Id = Guid.NewGuid(),
+                        RoleId = role.Id,
+                        ResourceId = resourceEntity.Id,
+                        ActionId = actionEntity.Id,
+                        Granted = true,
+                        CreatedAt = DateTime.UtcNow
+                    });
+                    await context.SaveChangesAsync();
+                }
+
+                context.UserRoles.Add(new UserRole
+                {
+                    UserId = user.Id,
+                    RoleId = role.Id,
+                    IsActive = true,
+                    AssignedAt = DateTime.UtcNow
+                });
+                await context.SaveChangesAsync();
+            }
+        }
+
+        using (AsyncServiceScope scope = Services.CreateAsyncScope())
+        {
+            IAuthenticationService authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+            AuthenticationResult result = await authService.AuthenticateAsync(username, password);
+
+            HttpClient client = CreateClient();
+            if (result.Success && !string.IsNullOrEmpty(result.Token))
+            {
+                client.DefaultRequestHeaders.Add("Authorization", $"Bearer {result.Token}");
+            }
+            return client;
+        }
+    }
+
+    /// <summary>
     /// Creates an authenticated HTTP client with a valid worker API key.
     /// </summary>
     public async Task<HttpClient> CreateWorkerClientAsync(

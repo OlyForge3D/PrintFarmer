@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting Diagnostics")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("gcode_harvest", "admin")]
 public class GcodeHarvestDiagnosticsController(
 ILogger<GcodeHarvestDiagnosticsController> logger,
 IGcodeHarvestService harvestService) : ControllerBase

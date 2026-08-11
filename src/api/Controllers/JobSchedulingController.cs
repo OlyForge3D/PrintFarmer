@@ -2,10 +2,10 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

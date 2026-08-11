@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.CustomFields;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -63,7 +64,7 @@ public class CustomFieldsController(
 
     /// <summary>Creates a new custom field definition.</summary>
     [HttpPost("definitions")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("custom_fields", "admin")]
     [ProducesResponseType(typeof(CustomFieldDefinitionDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -101,7 +102,7 @@ public class CustomFieldsController(
 
     /// <summary>Updates a custom field definition.</summary>
     [HttpPut("definitions/{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("custom_fields", "admin")]
     [ProducesResponseType(typeof(CustomFieldDefinitionDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -144,7 +145,7 @@ public class CustomFieldsController(
 
     /// <summary>Deletes a custom field definition and all associated values.</summary>
     [HttpDelete("definitions/{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("custom_fields", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteDefinitionAsync(Guid id, CancellationToken ct)
@@ -202,7 +203,7 @@ public class CustomFieldsController(
 
     /// <summary>Sets (upserts) custom field values for a single entity.</summary>
     [HttpPut("values/{entityType}/{entityId:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("custom_fields", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> SetValuesAsync(
         CustomFieldEntityType entityType,

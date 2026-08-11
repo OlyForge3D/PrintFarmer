@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Logging;
@@ -235,7 +236,7 @@ public class SpoolmanController(
     /// <returns>The created spool</returns>
     /// <response code="201">Returns the created spool</response>
     /// <response code="400">If the creation fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("spools")]
     [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -275,7 +276,7 @@ public class SpoolmanController(
     /// <response code="400">If the barcode is empty.</response>
     /// <response code="404">If no filament has the requested barcode in articleNumber.</response>
     /// <response code="500">If Spoolman import fails unexpectedly.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("spools/by-barcode")]
     [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -357,7 +358,7 @@ public class SpoolmanController(
     /// <returns>Updated spool</returns>
     /// <response code="200">Returns the updated spool</response>
     /// <response code="400">If the update fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPatch("spools/{id:int}")]
     [ProducesResponseType(typeof(SpoolmanSpoolDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -392,7 +393,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <response code="204">Spool deleted successfully</response>
     /// <response code="400">If the delete fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpDelete("spools/{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -431,7 +432,7 @@ public class SpoolmanController(
     /// <returns>Bulk update result with success/error counts</returns>
     /// <response code="200">Returns the bulk update result</response>
     /// <response code="400">If the request is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPatch("spools/bulk")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -476,7 +477,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">Returns the bulk delete result</response>
     /// <response code="400">If the request is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpDelete("spools/bulk")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -521,7 +522,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <returns>Import result with counts</returns>
     /// <response code="200">Returns import result</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("spools/import")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -769,7 +770,7 @@ public class SpoolmanController(
     /// <response code="400">If the barcode or filament ID is invalid.</response>
     /// <response code="404">If the target filament does not exist.</response>
     /// <response code="500">If saving fails unexpectedly.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("barcodes")]
     [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -849,7 +850,7 @@ public class SpoolmanController(
     /// <summary>
     /// Returns recent backend barcode scan diagnostic entries.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpGet("barcodes/scan-logs")]
     [ProducesResponseType(typeof(IReadOnlyList<BarcodeScanLogDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -971,7 +972,7 @@ public class SpoolmanController(
     /// <returns>The created filament</returns>
     /// <response code="201">Returns the created filament</response>
     /// <response code="400">If the creation fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("filaments")]
     [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1009,7 +1010,7 @@ public class SpoolmanController(
     /// <returns>Bulk update result with success/error counts</returns>
     /// <response code="200">Returns the bulk update result</response>
     /// <response code="400">If the request is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPatch("filaments/bulk")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1044,7 +1045,7 @@ public class SpoolmanController(
     /// <returns>Updated filament</returns>
     /// <response code="200">Returns the updated filament</response>
     /// <response code="400">If the update fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPatch("filaments/{id:int}")]
     [ProducesResponseType(typeof(SpoolmanFilamentDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1072,7 +1073,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <response code="204">Filament deleted successfully</response>
     /// <response code="400">If the delete fails</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpDelete("filaments/{id:int}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1098,7 +1099,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <response code="200">Returns the bulk delete result</response>
     /// <response code="400">If the request is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpDelete("filaments/bulk")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -1189,7 +1190,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token</param>
     /// <returns>Import result with counts</returns>
     /// <response code="200">Returns import result</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("spoolman", "admin")]
     [HttpPost("filaments/import")]
     [ProducesResponseType(typeof(SpoolmanBulkUpdateResult), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

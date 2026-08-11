@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -138,7 +139,7 @@ public class PredictionController(PredictionService predictionService) : Control
     /// <param name="request">Completion record request</param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>Success response</returns>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("prediction", "admin")]
     [HttpPost("jobs/{jobId:guid}/record-completion")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

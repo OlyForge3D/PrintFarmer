@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Locations;
 using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Authorization;
@@ -167,7 +168,7 @@ public class LocationsController(
     /// <summary>
     /// Creates a new printer location.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("locations", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(LocationDto), 201)]
     [ProducesResponseType(400)]
@@ -216,7 +217,7 @@ public class LocationsController(
     /// <summary>
     /// Updates an existing printer location.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("locations", "admin")]
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(LocationDto), 200)]
     [ProducesResponseType(404)]
@@ -256,7 +257,7 @@ public class LocationsController(
     /// <summary>
     /// Moves a location to a new parent.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("locations", "admin")]
     [HttpPost("{id}/move")]
     [ProducesResponseType(typeof(LocationDto), 200)]
     [ProducesResponseType(400)]
@@ -301,7 +302,7 @@ public class LocationsController(
     /// <summary>
     /// Deletes a printer location (soft delete).
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("locations", "admin")]
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]

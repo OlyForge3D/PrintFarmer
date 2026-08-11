@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/diagnostics")]
 [Tags("Diagnostics")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("diagnostics", "admin")]
 public class ConnectionDiagnosticsController(
     IEnumerable<IPrinterConnectionHealthProvider> healthProviders,
     ILogger<ConnectionDiagnosticsController> logger) : ControllerBase

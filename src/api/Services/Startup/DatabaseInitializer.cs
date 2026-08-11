@@ -279,7 +279,29 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             new { Name = "queue", DisplayName = "Calibration Queue", ResourceType = "queue", Description = "Authorized queue operations" },
             new { Name = "slicing", DisplayName = "Slicing", ResourceType = "slicer", Description = "Authorized slicing and artifact operations" },
             new { Name = "dispatch-settings", DisplayName = "Dispatch Settings", ResourceType = "system", Description = "Dispatch configuration management" },
-            new { Name = "obico", DisplayName = "Obico Integration", ResourceType = "integration", Description = "Obico ML failure-detection server management and connectivity probes" }
+            new { Name = "obico", DisplayName = "Obico Integration", ResourceType = "integration", Description = "Obico ML failure-detection server management and connectivity probes" },
+            new { Name = "catalog", DisplayName = "Catalog", ResourceType = "catalog", Description = "Manufacturer, machine, and material catalog management" },
+            new { Name = "quota", DisplayName = "Quota", ResourceType = "system", Description = "User and group print quota management" },
+            new { Name = "filament_type", DisplayName = "Filament Type", ResourceType = "catalog", Description = "Filament type and fallback group management" },
+            new { Name = "maintenance", DisplayName = "Maintenance", ResourceType = "maintenance", Description = "Printer maintenance components, plans, schedules, and tasks" },
+            new { Name = "material_cluster", DisplayName = "Material Cluster", ResourceType = "catalog", Description = "Material cluster management" },
+            new { Name = "parts_inventory", DisplayName = "Parts Inventory", ResourceType = "inventory", Description = "Spare parts inventory management" },
+            new { Name = "cameras", DisplayName = "Cameras", ResourceType = "system", Description = "Printer camera management" },
+            new { Name = "custom_fields", DisplayName = "Custom Fields", ResourceType = "system", Description = "Custom field definitions management" },
+            new { Name = "locations", DisplayName = "Locations", ResourceType = "system", Description = "Printer physical location management" },
+            new { Name = "bed_type", DisplayName = "Bed Type", ResourceType = "catalog", Description = "Print bed type management" },
+            new { Name = "bins", DisplayName = "Bins", ResourceType = "inventory", Description = "Storage bin management" },
+            new { Name = "tags", DisplayName = "Tags", ResourceType = "system", Description = "Entity tag management" },
+            new { Name = "nfc_devices", DisplayName = "NFC Devices", ResourceType = "system", Description = "NFC device management" },
+            new { Name = "webhooks", DisplayName = "Webhooks", ResourceType = "integration", Description = "Outbound webhook management" },
+            new { Name = "power_monitors", DisplayName = "Power Monitors", ResourceType = "integration", Description = "Power monitor device management" },
+            new { Name = "home_assistant", DisplayName = "Home Assistant Integration", ResourceType = "integration", Description = "Home Assistant integration management" },
+            new { Name = "telegram", DisplayName = "Telegram Integration", ResourceType = "integration", Description = "Telegram notification integration management" },
+            new { Name = "monitoring", DisplayName = "Monitoring", ResourceType = "system", Description = "System health and monitoring management" },
+            new { Name = "prediction", DisplayName = "Prediction", ResourceType = "system", Description = "Print failure prediction management" },
+            new { Name = "background_services", DisplayName = "Background Services", ResourceType = "system", Description = "Background service status and control" },
+            new { Name = "diagnostics", DisplayName = "Diagnostics", ResourceType = "system", Description = "Connection and SignalR diagnostics" },
+            new { Name = "data_management", DisplayName = "Data Management", ResourceType = "system", Description = "Catalog/full data export, import, and reseed operations" }
         };
         foreach (var resource in resources)
         {

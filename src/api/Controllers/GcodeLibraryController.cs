@@ -1,5 +1,6 @@
 ﻿using System.Security.Cryptography;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Queue;
@@ -150,7 +151,7 @@ public class GcodeLibraryController(Services.Gcode.IGcodeFilesService gcodeServi
     /// Delete a G-code file from the library.
     /// </summary>
     /// <param name="id">The unique identifier of the G-code file to delete.</param>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("gcode_library", "admin")]
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]

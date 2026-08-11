@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cameras;
@@ -330,7 +331,7 @@ public class CamerasController(
     /// <response code="201">Returns the created camera</response>
     /// <response code="400">If the request is invalid</response>
     /// <response code="503">If the system is still initializing</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("cameras", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(CameraDto), 201)]
     [ProducesResponseType(400)]
@@ -386,7 +387,7 @@ public class CamerasController(
     /// <response code="200">Returns the updated camera</response>
     /// <response code="404">If the camera is not found</response>
     /// <response code="503">If the system is still initializing</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("cameras", "admin")]
     [HttpPut("{id}")]
     [ProducesResponseType(typeof(CameraDto), 200)]
     [ProducesResponseType(404)]
@@ -436,7 +437,7 @@ public class CamerasController(
     /// <response code="204">Camera deleted successfully</response>
     /// <response code="404">If the camera is not found</response>
     /// <response code="503">If the system is still initializing</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("cameras", "admin")]
     [HttpDelete("{id}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -474,7 +475,7 @@ public class CamerasController(
     /// <response code="200">Returns the updated camera</response>
     /// <response code="404">If the camera is not found</response>
     /// <response code="503">If the system is still initializing</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("cameras", "admin")]
     [HttpPatch("{id}/toggle")]
     [ProducesResponseType(typeof(CameraDto), 200)]
     [ProducesResponseType(404)]
