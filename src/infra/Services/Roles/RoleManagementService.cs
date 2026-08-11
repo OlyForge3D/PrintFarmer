@@ -158,8 +158,6 @@ public partial class RoleManagementService(
             throw new RoleManagementException(RoleManagementErrorCode.NameIsImmutable, "Role name is immutable and cannot be changed after creation.");
         }
 
-        RoleDetailDto? before = await _roles.GetRoleDetailAsync(roleId, ct);
-
         // Whether this request *might* deactivate the role, based on the caller's intent alone
         // (not yet on role.IsActive, which may be stale by the time a transaction opens below).
         bool requestsDeactivation = request.IsActive is false;
@@ -171,6 +169,7 @@ public partial class RoleManagementService(
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = requestsDeactivation
             ? await _roles.BeginSerializableTransactionAsync(ct)
             : null;
+        RoleDetailDto? before;
         try
         {
             if (requestsDeactivation)
@@ -184,6 +183,11 @@ public partial class RoleManagementService(
                     throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
                 }
             }
+
+            // Captured after the (optional) reload above, so the audit trail's "before" state
+            // reflects what was actually about to be overwritten rather than a value read
+            // before this request's consistency scope began. See issue #1448 review discussion.
+            before = await _roles.GetRoleDetailAsync(roleId, ct);
 
             bool wantsDeactivation = requestsDeactivation && role.IsActive;
 
@@ -270,8 +274,6 @@ public partial class RoleManagementService(
             throw new RoleManagementException(RoleManagementErrorCode.SystemRoleProtected, $"System role '{role.Name}' cannot be deleted.");
         }
 
-        RoleDetailDto? before = await _roles.GetRoleDetailAsync(roleId, ct);
-
         // D8/D9 — the member count, reassignment-target validation and admin-equivalence, the
         // lockout guardrail, and the delete/reassign/cascade mutation it protects must all
         // execute against one consistent snapshot under serializable isolation. Reading any of
@@ -280,6 +282,7 @@ public partial class RoleManagementService(
         // the transaction, invalidating the decision made from stale data. See issue #1448
         // review discussion.
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _roles.BeginSerializableTransactionAsync(ct);
+        RoleDetailDto? before;
         try
         {
             // Reload role.IsActive inside the transaction: the entity above was loaded before
@@ -290,6 +293,11 @@ public partial class RoleManagementService(
             {
                 throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
             }
+
+            // Captured after the reload above, so the audit trail's "before" state reflects
+            // what was actually about to be deleted rather than a value read before this
+            // request's consistency scope began. See issue #1448 review discussion.
+            before = await _roles.GetRoleDetailAsync(roleId, ct);
 
             int memberCount = await _roles.CountActiveMembersAsync(roleId, ct);
             Role? targetRole = null;
