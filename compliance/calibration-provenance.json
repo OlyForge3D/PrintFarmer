@@ -1212,6 +1212,19 @@
       }
     },
     {
+      "id": "calibration-printer-seeder-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationPrinterSeeder.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test helper that seeds a calibration-eligible printer and its profile triple; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-printer-update-mapper",
       "destinationPath": "src/api/Services/Calibration/CalibrationPrinterUpdateMapper.cs",
       "referenceUrls": [
@@ -1221,6 +1234,58 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-resolution-contract",
+      "destinationPath": "src/infra/Calibration/CalibrationProfileResolutionContract.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer implementation of the split-deployment calibration profile resolution wire contract (fixed routes, exact three-identifier request validation, shared serializer options); no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-resolution-contract-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationProfileResolutionContractTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test implementation pinning the exactness of the calibration profile resolution request contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-resolution-endpoint",
+      "destinationPath": "src/slicer/Farm.Slicer.Module.Api/Controllers/Calibration/CalibrationProfileResolutionController.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer implementation of the authenticated slicer-host calibration profile resolution endpoint, reusing the existing permission filter and problem-details helpers; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-resolution-startup-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationProfileResolutionStartupTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering deployment-topology selection and configuration validation for the calibration profile resolver; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
         "decision": "approved"
       }
     },
@@ -1312,6 +1377,71 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-08-06",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-profile-resolver",
+      "destinationPath": "src/api/Services/Calibration/SlicerHostCalibrationProfileResolver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer implementation of the main-API calibration profile resolver adapter that forwards the end-user bearer token to the slicer host; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-profile-resolver-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SlicerHostCalibrationProfileResolverTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering bearer forwarding, bounds, failure mapping and leakage prevention in the calibration profile resolver adapter; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-resolution-endpoint-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SlicerHostCalibrationResolutionEndpointTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test implementation covering authentication, permission, ownership scoping and request exactness of the slicer-host calibration resolution endpoint; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-resolution-test-server",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SlicerHostResolutionTestServer.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test harness that hosts the production calibration resolution endpoint on an in-process HTTP test server; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-slicer-host-resolver-options",
+      "destinationPath": "src/api/Services/Calibration/SlicerHostCalibrationResolverOptions.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer implementation of the strongly typed configuration and validation for the split-deployment calibration profile resolver hop; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
         "decision": "approved"
       }
     },
@@ -1485,6 +1615,19 @@
       }
     },
     {
+      "id": "calibration-split-deployment-resolution-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/SplitDeploymentCalibrationResolutionTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer end-to-end test implementation of the split-deployment calibration resolution hop through the real adapter and endpoint; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-sqlite-concurrency-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/CalibrationProjectSqliteConcurrencyTests.cs",
       "referenceUrls": [
@@ -1494,6 +1637,19 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-test-jwt",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationTestJwt.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/pull/1444"
+      ],
+      "statement": "Independent PrintFarmer test helper that mints the shared-signing-key session tokens a split deployment uses; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-11",
         "decision": "approved"
       }
     }
