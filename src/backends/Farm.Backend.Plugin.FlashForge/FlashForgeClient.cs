@@ -517,7 +517,8 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
 
     /// <summary>
     /// Parses host and port from a base URL string.
-    /// Accepts formats: "http://host:port", "host:port", "host" (uses default port).
+    /// Accepts formats: "http://host:port", "host:port", "host" (uses default port), and
+    /// IPv6 literals in bracketed form (e.g. "[::1]:8899", "[::1]").
     /// </summary>
     internal static (string Host, int Port) ParseHostPort(string baseUrl)
     {
@@ -539,6 +540,25 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
         if (pathIndex >= 0)
         {
             stripped = stripped[..pathIndex];
+        }
+
+        // Bracketed IPv6 literal, e.g. "[::1]:8899" or "[::1]". Must be handled before the
+        // naive LastIndexOf(':') split below, which would otherwise split inside the address
+        // itself (IPv6 addresses contain multiple colons) and produce an unparseable host.
+        if (stripped.StartsWith('['))
+        {
+            int closeBracket = stripped.IndexOf(']');
+            if (closeBracket > 0)
+            {
+                string host = stripped[1..closeBracket];
+                string remainder = stripped[(closeBracket + 1)..];
+                if (remainder.StartsWith(':') && int.TryParse(remainder[1..], CultureInfo.InvariantCulture, out int bracketedPort))
+                {
+                    return (host, bracketedPort);
+                }
+
+                return (host, IFlashForgeClient.DefaultPort);
+            }
         }
 
         // Split host:port

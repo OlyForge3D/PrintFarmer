@@ -9,6 +9,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.AutoDispatch;

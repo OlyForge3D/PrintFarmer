@@ -93,6 +93,58 @@ public class ObicoServerControllerTests
     }
 
     [Fact]
+    public async Task TestServerHealthAsync_WhenEgressGuardResolvesAnAddress_ConnectionTargetsThePinnedIpNotTheHostname()
+    {
+        // The real outbound connection must reuse the exact IP the egress guard vetted rather
+        // than letting HttpClient re-resolve "obico.local" independently — otherwise a
+        // DNS-rebinding attacker could swap the record between the check and this connection.
+        List<HttpRequestMessage> requests = [];
+        Mock<IEgressGuard> pinningEgressGuard = new(MockBehavior.Strict);
+        pinningEgressGuard
+            .Setup(guard => guard.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string url, CancellationToken _) =>
+                EgressCheckResult.Allow(new Uri(url), IPAddress.Parse("203.0.113.5")));
+
+        (ObicoServerController controller, AppDbContext dbContext) = CreateController(
+            request =>
+            {
+                requests.Add(request);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("{\"detections\":[]}", Encoding.UTF8, "application/json")
+                };
+            },
+            pinningEgressGuard.Object);
+
+        ObicoServer server = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Pinned Obico",
+            Url = "http://obico.local:3333",
+            IsEnabled = true,
+            MaxConcurrentAnalyses = 4,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        };
+        dbContext.ObicoServers.Add(server);
+        await dbContext.SaveChangesAsync();
+
+        ActionResult<ObicoServerHealthDto> result = await controller.TestServerHealthAsync(server.Id, CancellationToken.None);
+
+        OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
+        ObicoServerHealthDto health = Assert.IsType<ObicoServerHealthDto>(okResult.Value);
+        health.Healthy.Should().BeTrue();
+
+        requests.Should().NotBeEmpty();
+        foreach (HttpRequestMessage request in requests)
+        {
+            request.RequestUri.Should().NotBeNull();
+            request.RequestUri!.Host.Should().Be("203.0.113.5", "the connection must target the vetted IP, not re-resolve the hostname");
+            request.Headers.Host.Should().Be("obico.local:3333", "the original hostname must be preserved via the Host header for virtual-hosting/SNI");
+        }
+    }
+
+    [Fact]
     public async Task CreateServerAsync_WhenUpstreamServerCannotReachProbeSnapshot_PersistsCompatibleServer()
     {
         List<CapturedRequest> requests = [];

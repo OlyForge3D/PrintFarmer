@@ -13,15 +13,18 @@ namespace Farm.Web.Api.Tests.TestInfrastructure;
 public static class TestHelpers
 {
     /// <summary>
-    /// Build an <see cref="IEgressGuard"/> mock that allows every destination. Use for tests
-    /// that construct a controller depending on egress vetting but do not exercise the
-    /// vetting behavior itself.
+    /// Build an <see cref="IEgressGuard"/> mock that allows every destination and pins a
+    /// resolved address (rather than the null-<see cref="EgressCheckResult.ResolvedAddress"/>
+    /// "no pinning" fallback), so tests that construct a controller depending on egress vetting
+    /// exercise the same pinned code path production traffic takes, not just the legacy
+    /// unpinned-by-hostname branch.
     /// </summary>
     public static IEgressGuard PermissiveEgressGuard()
     {
         var mock = new Mock<IEgressGuard>();
         mock.Setup(g => g.CheckAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((string url, CancellationToken _) => EgressCheckResult.Allow(new Uri(url)));
+            .ReturnsAsync((string url, CancellationToken _) =>
+                EgressCheckResult.Allow(new Uri(url), System.Net.IPAddress.Parse("203.0.113.100")));
         return mock.Object;
     }
 
