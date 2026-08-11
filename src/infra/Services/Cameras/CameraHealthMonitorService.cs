@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -340,7 +341,7 @@ public sealed class CameraHealthMonitorService(
                 "Camera {CameraId} ({CameraName}) health degraded: {PrevStatus} → {NewStatus} " +
                 "(failures: {Failures}, message: {Message})",
                 camera.Id, camera.Name, previousStatus, camera.HealthStatus,
-                camera.ConsecutiveFailures, errorMessage);
+                camera.ConsecutiveFailures, LogSanitizer.Sanitize(errorMessage));
         }
     }
 }

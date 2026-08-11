@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
 using Microsoft.EntityFrameworkCore;
@@ -127,7 +128,7 @@ public class JobSchedulingService(
 
         await _context.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("[JobScheduling] Scheduled job '{JobId}' for {ScheduledTime} (timezone: {TimeZone})", jobId, utcTime, timeZone);
+        _logger.LogInformation("[JobScheduling] Scheduled job '{JobId}' for {ScheduledTime} (timezone: {TimeZone})", jobId, utcTime, LogSanitizer.Sanitize(timeZone));
 
         return await GetScheduledJobAsync(jobId, actorSubject, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve scheduled job");

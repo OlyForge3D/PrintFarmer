@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -271,7 +272,7 @@ public class BinsController(
             },
             ct);
 
-        _logger.LogInformation("Registered bin {BinId} from barcode {Barcode}.", entity.Id, code);
+        _logger.LogInformation("Registered bin {BinId} from barcode {Barcode}.", entity.Id, LogSanitizer.Sanitize(code));
 
         return Created($"/api/bins/{code}", ToDto(entity));
     }

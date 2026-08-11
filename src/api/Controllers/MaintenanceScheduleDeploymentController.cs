@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -178,7 +179,7 @@ public class MaintenanceScheduleDeploymentController(
             "Deployed plan {PlanId} to printer {PrinterId} (toolhead {ToolheadId}) as schedule {ScheduleId}",
             request.MaintenancePlanId,
             request.PrinterId,
-            request.ToolheadId,
+            LogSanitizer.Sanitize(request.ToolheadId?.ToString()),
             schedule.Id);
 
         // Reload with navigation properties

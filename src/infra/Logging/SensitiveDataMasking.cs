@@ -28,11 +28,15 @@ public static class SensitiveDataMasking
         }
 
         string local = email[..atIndex];
-        string domain = email[(atIndex + 1)..];
+
+        // The domain (and, below, the first/last local-part characters) still originate from
+        // caller-controlled input, so run them through LogSanitizer before they end up in a log
+        // message argument to prevent CR/LF log forging.
+        string domain = LogSanitizer.Sanitize(email[(atIndex + 1)..]) ?? string.Empty;
 
         return local.Length <= 2
             ? $"***@{domain}"
-            : $"{local[0]}***{local[^1]}@{domain}";
+            : $"{LogSanitizer.Sanitize(local[0].ToString())}***{LogSanitizer.Sanitize(local[^1].ToString())}@{domain}";
     }
 
     /// <summary>
@@ -47,11 +51,11 @@ public static class SensitiveDataMasking
             return "unknown";
         }
 
-        return value.Contains('@', StringComparison.Ordinal) ? MaskEmail(value) : value;
+        return value.Contains('@', StringComparison.Ordinal) ? MaskEmail(value) : LogSanitizer.Sanitize(value) ?? "unknown";
     }
 
     private static string MaskGeneric(string value)
     {
-        return value.Length <= 2 ? "***" : $"{value[..2]}***";
+        return value.Length <= 2 ? "***" : $"{LogSanitizer.Sanitize(value[..2])}***";
     }
 }

@@ -3,6 +3,7 @@ using System.Reflection;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -473,7 +474,7 @@ public sealed class FilamentFallbackGroupService(
             logger.LogWarning(
                 ex,
                 "Concurrent unique-constraint violation persisting fallback group '{GroupName}' on printer {PrinterId}; surfacing as validation error.",
-                groupName,
+                LogSanitizer.Sanitize(groupName),
                 printerId);
             throw translated;
         }

@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Domain.Webhooks;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Webhooks;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.Authorization;
@@ -80,7 +81,7 @@ public class WebhooksController(
 
         await _webhookRepository.AddAsync(webhook, ct);
 
-        _logger.LogInformation("Webhook subscription created: {Id} → {Url}", webhook.Id, webhook.Url);
+        _logger.LogInformation("Webhook subscription created: {Id} → {Url}", webhook.Id, LogSanitizer.Sanitize(webhook.Url));
         return StatusCode(201, ToDto(webhook));
     }
 

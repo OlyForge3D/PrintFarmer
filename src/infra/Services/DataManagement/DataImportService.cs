@@ -3,6 +3,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.DataManagement;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Services.DataManagement;
@@ -254,7 +255,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import manufacturer '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing manufacturer: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing manufacturer: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -303,7 +304,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import filament type '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing filament type: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing filament type: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -403,7 +404,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import printer model '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing printer model: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing printer model: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -460,7 +461,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import hotend '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing hotend: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing hotend: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -513,7 +514,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import extruder '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing extruder: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing extruder: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -562,7 +563,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import toolhead '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing toolhead: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing toolhead: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -617,7 +618,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import nozzle '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing nozzle: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing nozzle: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -655,7 +656,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import location '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing location: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing location: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
@@ -758,7 +759,7 @@ public class DataImportService : IDataImportService
             catch (Exception ex)
             {
                 errors.Add($"Failed to import printer '{dto.Name}': {ex.Message}");
-                _logger.LogError(ex, "[DataImport] Error importing printer: {Name}", dto.Name);
+                _logger.LogError(ex, "[DataImport] Error importing printer: {Name}", LogSanitizer.Sanitize(dto.Name));
             }
         }
 
