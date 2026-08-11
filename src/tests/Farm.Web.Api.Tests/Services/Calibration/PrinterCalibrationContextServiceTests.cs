@@ -305,13 +305,17 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.VerifyNoProfileResolverCalls();
     }
 
-    [Fact]
-    public async Task GetCandidatesAsync_WithMissingProfileIds_ReturnsTypedReasonsWithoutResolverCalls()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCandidatesAsync_WithMissingOrEmptyProfileIds_ReturnsTypedReasonsWithoutResolverCalls(
+        bool useEmptyIds)
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
-        harness.Printer.CalibrationMachineProfileId = null;
-        harness.Printer.CalibrationProcessProfileId = null;
-        harness.Printer.CalibrationFilamentProfileId = null;
+        Guid? profileId = useEmptyIds ? Guid.Empty : null;
+        harness.Printer.CalibrationMachineProfileId = profileId;
+        harness.Printer.CalibrationProcessProfileId = profileId;
+        harness.Printer.CalibrationFilamentProfileId = profileId;
         _ = await harness.Db.SaveChangesAsync();
 
         CalibrationCandidateDto candidate =
