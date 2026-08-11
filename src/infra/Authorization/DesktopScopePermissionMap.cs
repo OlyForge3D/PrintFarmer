@@ -98,11 +98,14 @@ public static class DesktopScopePermissionMap
             new(ApiKeyScope.CalibrationDelete, nameof(ApiKeyScope.CalibrationDelete),
                 PrintFarmerPermissions.Calibration.Delete, [ApiKeyScope.CalibrationRead]),
 
-            // Generation submits a slicing job and then reads the produced artifact, so all three
-            // must be present or the workflow dead-ends after the job is accepted.
+            // Generation submits a slicing job and then polls calibration orchestration for its
+            // outcome; promotion of the produced G-code is server-side. It therefore needs
+            // calibration:generate + slicing:submit (and calibration:read for the workspace), but
+            // NOT slicing:read-artifact - the desktop client never downloads artifact bytes.
+            // SlicingReadArtifact stays independently selectable for clients that genuinely do.
             new(ApiKeyScope.CalibrationGenerate, nameof(ApiKeyScope.CalibrationGenerate),
                 PrintFarmerPermissions.Calibration.Generate,
-                [ApiKeyScope.CalibrationRead, ApiKeyScope.SlicingSubmit, ApiKeyScope.SlicingReadArtifact]),
+                [ApiKeyScope.CalibrationRead, ApiKeyScope.SlicingSubmit]),
             new(ApiKeyScope.CalibrationPublish, nameof(ApiKeyScope.CalibrationPublish),
                 PrintFarmerPermissions.Calibration.Publish, [ApiKeyScope.CalibrationRead]),
 
@@ -256,8 +259,18 @@ public static class DesktopScopePermissionMap
     /// </param>
     /// <param name="ownerPermissions">The owner's live granted permission values.</param>
     /// <remarks>
+    /// <para>
     /// Unaffected model/library scopes are always retained, so revoking a calibration role never
     /// breaks a desktop client's model sync - the key only loses the authority that was revoked.
+    /// </para>
+    /// <para>
+    /// Authority is evaluated with <see cref="PrintFarmerPermissions.SetGrantsPermission"/>, so a
+    /// same-resource <c>{resource}:admin</c> grant satisfies the mapped permission exactly as it
+    /// does at the enforcement points. Without that, an owner holding <c>calibration:admin</c>
+    /// would lose calibration scopes here even though PrintFarmer authorizes those actions for
+    /// them. The implication never crosses resources, so <c>calibration:admin</c> grants no queue
+    /// or slicing scope.
+    /// </para>
     /// </remarks>
     public static EffectiveDesktopScopes ResolveEffectiveScopes(
         ApiKeyScope storedScopes,
@@ -278,7 +291,7 @@ public static class DesktopScopePermissionMap
 
             bool authorized = definition.Permission is null ||
                 isOwnerFarmAdmin ||
-                ownerPermissions.Contains(definition.Permission);
+                PrintFarmerPermissions.SetGrantsPermission(ownerPermissions, definition.Permission);
 
             if (authorized)
             {

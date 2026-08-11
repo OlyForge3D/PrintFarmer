@@ -314,17 +314,20 @@ Key properties:
   scopes existed — including any stored as the frozen aggregate `All` (`7`) —
   yields zero calibration, slicing, and queue permissions. Scopes are immutable
   and rotation preserves them, so **using them requires issuing a new key**.
-- **Never more than the owner.** Selected scopes are validated at creation
-  against the target owner's live roles and grants, and re-intersected on every
-  exchange. Losing a permission drops only the affected scopes; unrelated
+- **Owner authority follows the same rules as enforcement.** Selected scopes
+  are validated at creation against the target owner's live roles and grants,
+  and re-intersected on every exchange. An exact permission grant satisfies the
+  check, as does a same-resource `{resource}:admin` grant (`calibration:admin`
+  implies every `calibration:*` action) — the implication never crosses
+  resources. Losing a permission drops only the affected scopes; unrelated
   model/library scopes are retained.
-- **Today, calibration keys must be owned by a `farm_admin`.** There is no API or
-  UI yet for granting individual role permissions (tracked as epic #1445), so
-  `farm_admin` members are the only users who hold the calibration, slicing, and
-  queue permissions. Creating such a key for a `farm_user` returns `400`, and an
-  already-issued one would have those scopes dropped at exchange. The owner
-  intersection is unconditional either way, and an admin-owned exchanged token
-  still carries no role claim.
+- **`farm_admin` ownership is the safe production path.** Role CRUD exists, but
+  the per-permission grant UI does not yet (epic #1445), so prefer a
+  `farm_admin` owner and treat custom-role ownership as advanced configuration.
+  A stock `farm_user` holds none of these permissions: creation returns `400`,
+  and an already-issued key would have those scopes dropped at exchange. The
+  owner intersection is unconditional either way, and an admin-owned exchanged
+  token still carries no role claim.
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
@@ -358,10 +361,12 @@ Content-Type: application/json
 ```
 
 `400` is returned when the owner lacks a requested permission, when a scope's
-prerequisites are missing (`CalibrationGenerate` also needs `CalibrationRead`,
-`SlicingSubmit`, and `SlicingReadArtifact`; queue mutations need `QueueRead`;
+prerequisites are missing (`CalibrationGenerate` also needs `CalibrationRead`
+and `SlicingSubmit`; queue mutations need `QueueRead`;
 `QueueAcknowledgeBedClear` also needs `QueueStart`), when an unknown or composite
-scope name is supplied, or when both `scopeNames` and `scopes` are set. See[`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
+scope name is supplied, or when both `scopeNames` and `scopes` are set.
+`SlicingReadArtifact` is not a generation prerequisite — a generating client polls
+orchestration rather than downloading artifact bytes. See[`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
 for the full scope-to-permission table.
 
 ### Calibration generation core

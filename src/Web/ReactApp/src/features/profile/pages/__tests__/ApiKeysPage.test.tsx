@@ -650,7 +650,8 @@ describe('ApiKeysPage', () => {
 
       const generate = screen.getByLabelText(/^Calibration generate —/);
       expect(generate).toHaveAccessibleName(/Slicing submit/i);
-      expect(generate).toHaveAccessibleName(/Slicing read artifact/i);
+      // Least privilege: generation polls orchestration, so artifact download is NOT implied.
+      expect(generate).not.toHaveAccessibleName(/requires .*Slicing read artifact/i);
       expect(screen.getByLabelText(/^Slicing submit —/)).not.toBe(generate);
     });
 

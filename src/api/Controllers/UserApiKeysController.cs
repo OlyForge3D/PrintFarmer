@@ -453,7 +453,12 @@ public class UserApiKeysController : ControllerBase
             .Select(p => $"{p.Resource}:{p.Action}")
             .ToHashSet(StringComparer.Ordinal);
 
-        List<string> missing = requested.Where(p => !ownerPermissions.Contains(p)).ToList();
+        // Same-resource `{resource}:admin` satisfies the mapped permission, exactly as it does at
+        // the enforcement points and at exchange time. Checking only for an exact match here would
+        // reject a key whose owner is genuinely authorized.
+        List<string> missing = requested
+            .Where(p => !PrintFarmerPermissions.SetGrantsPermission(ownerPermissions, p))
+            .ToList();
         if (missing.Count == 0)
         {
             return null;

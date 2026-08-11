@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
@@ -172,7 +173,31 @@ public class DesktopScopePermissionMapTests
                 ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationGenerate);
 
         unsatisfied.Select(u => u.MissingPrerequisite)
-            .Should().BeEquivalentTo(new[] { "SlicingSubmit", "SlicingReadArtifact" });
+            .Should().BeEquivalentTo(new[] { "SlicingSubmit" });
+    }
+
+    /// <summary>
+    /// Least privilege: generation submits a slice job and polls calibration orchestration, so it
+    /// must NOT drag in artifact-download authority. <see cref="ApiKeyScope.SlicingReadArtifact"/>
+    /// stays independently selectable for clients that genuinely download bytes.
+    /// </summary>
+    [Fact]
+    public void CalibrationGenerate_DoesNotRequireSlicingReadArtifact()
+    {
+        DesktopScopeDefinition generate = DesktopScopePermissionMap.Definitions
+            .Single(d => d.Scope == ApiKeyScope.CalibrationGenerate);
+
+        generate.Requires.Should().NotContain(ApiKeyScope.SlicingReadArtifact);
+        generate.Requires.Should().BeEquivalentTo(
+            new[] { ApiKeyScope.CalibrationRead, ApiKeyScope.SlicingSubmit });
+
+        DesktopScopePermissionMap.GetUnsatisfiedDependencies(
+            ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationGenerate | ApiKeyScope.SlicingSubmit)
+            .Should().BeEmpty("generation needs only calibration:read, calibration:generate and slicing:submit");
+
+        DesktopScopePermissionMap.GetPermissions(
+            ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationGenerate | ApiKeyScope.SlicingSubmit)
+            .Should().NotContain(PrintFarmerPermissions.Slicing.ReadArtifact);
     }
 
     [Fact]
@@ -180,8 +205,7 @@ public class DesktopScopePermissionMapTests
     {
         ApiKeyScope scopes = ApiKeyScope.CalibrationRead |
             ApiKeyScope.CalibrationGenerate |
-            ApiKeyScope.SlicingSubmit |
-            ApiKeyScope.SlicingReadArtifact;
+            ApiKeyScope.SlicingSubmit;
 
         DesktopScopePermissionMap.GetUnsatisfiedDependencies(scopes).Should().BeEmpty();
     }
@@ -283,6 +307,176 @@ public class DesktopScopePermissionMapTests
         permissions.Should().Equal(PrintFarmerPermissions.Calibration.Read);
         scopeNames.Should().NotContain("CalibrationDelete");
         permissions.Should().NotContain(PrintFarmerPermissions.Calibration.Delete);
+    }
+
+    #endregion
+
+    #region Resource-admin implication (issue #1447 / PR #1463 semantics)
+
+    /// <summary>
+    /// A grant of <c>{resource}:admin</c> authorizes every finer-grained action on that resource at
+    /// the enforcement points, so the owner-authority intersection must honour it too. Otherwise an
+    /// owner holding <c>calibration:admin</c> would lose calibration scopes here while PrintFarmer
+    /// still authorizes those actions for them.
+    /// </summary>
+    [Theory]
+    [InlineData(ApiKeyScope.CalibrationRead)]
+    [InlineData(ApiKeyScope.CalibrationCreate)]
+    [InlineData(ApiKeyScope.CalibrationUpdate)]
+    [InlineData(ApiKeyScope.CalibrationDelete)]
+    [InlineData(ApiKeyScope.CalibrationGenerate)]
+    [InlineData(ApiKeyScope.CalibrationPublish)]
+    public void ResolveEffectiveScopes_CalibrationAdmin_AuthorizesEverySelectedCalibrationScope(ApiKeyScope scope)
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            scope,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" });
+
+        result.Effective.Should().Be(scope);
+        result.Dropped.Should().Be(ApiKeyScope.None);
+    }
+
+    /// <summary>
+    /// Only what the key selected: a resource-admin grant is authority, not selection.
+    /// </summary>
+    [Fact]
+    public void ResolveEffectiveScopes_CalibrationAdmin_DoesNotAddUnselectedCalibrationScopes()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" });
+
+        result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
+        DesktopScopePermissionMap.GetPermissions(result.Effective)
+            .Should().Equal(PrintFarmerPermissions.Calibration.Read);
+    }
+
+    [Theory]
+    [InlineData(ApiKeyScope.QueueRead)]
+    [InlineData(ApiKeyScope.QueueWrite)]
+    [InlineData(ApiKeyScope.QueueStart)]
+    [InlineData(ApiKeyScope.QueueCancel)]
+    [InlineData(ApiKeyScope.QueueAcknowledgeBedClear)]
+    public void ResolveEffectiveScopes_QueueAdmin_AuthorizesEverySelectedQueueScope(ApiKeyScope scope)
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            scope,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "queue:admin" });
+
+        result.Effective.Should().Be(scope);
+    }
+
+    [Theory]
+    [InlineData(ApiKeyScope.SlicingSubmit)]
+    [InlineData(ApiKeyScope.SlicingReadArtifact)]
+    public void ResolveEffectiveScopes_SlicingAdmin_AuthorizesEverySelectedSlicingScope(ApiKeyScope scope)
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            scope,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "slicing:admin" });
+
+        result.Effective.Should().Be(scope);
+    }
+
+    /// <summary>
+    /// The implication is same-resource only. A calibration admin gets no queue or slicing
+    /// authority, and vice versa — this is the escalation the rule must not permit.
+    /// </summary>
+    [Theory]
+    [InlineData("calibration:admin")]
+    [InlineData("queue:admin")]
+    [InlineData("slicing:admin")]
+    public void ResolveEffectiveScopes_ResourceAdmin_NeverCrossesResources(string adminGrant)
+    {
+        ApiKeyScope everyPrivilegedScope = DesktopScopePermissionMap.PermissionBackedScopes;
+
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            everyPrivilegedScope,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { adminGrant });
+
+        string resource = adminGrant.Split(':')[0];
+        foreach (DesktopScopeDefinition definition in DesktopScopePermissionMap.Definitions
+            .Where(d => d.Permission is not null))
+        {
+            bool sameResource = definition.Permission!.StartsWith($"{resource}:", StringComparison.Ordinal);
+            bool survived = (result.Effective & definition.Scope) == definition.Scope;
+
+            survived.Should().Be(
+                sameResource,
+                $"{definition.Name} maps to {definition.Permission} and the grant was {adminGrant}");
+        }
+    }
+
+    /// <summary>
+    /// A wildcard-looking grant must not be invented: `*:admin` is not a resource.
+    /// </summary>
+    [Theory]
+    [InlineData("*:admin")]
+    [InlineData("admin")]
+    [InlineData("calibration:administrator")]
+    [InlineData("Calibration:Admin")]
+    public void ResolveEffectiveScopes_NonCanonicalAdminGrants_ConferNothing(string grant)
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { grant });
+
+        result.Effective.Should().Be(ApiKeyScope.None);
+        result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
+    }
+
+    [Fact]
+    public void ResolveEffectiveScopes_ExactPermissionStillWorksAlongsideTheImplication()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead | ApiKeyScope.QueueRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal)
+            {
+                PrintFarmerPermissions.Calibration.Read,
+                "queue:admin",
+            });
+
+        result.Effective.Should().Be(ApiKeyScope.CalibrationRead | ApiKeyScope.QueueRead);
+        result.Dropped.Should().Be(ApiKeyScope.None);
+    }
+
+    [Fact]
+    public void ResolveEffectiveScopes_OwnerWithNeitherExactNorAdminGrant_DropsTheScope()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "queue:admin", PrintFarmerPermissions.Slicing.Submit });
+
+        result.Effective.Should().Be(ApiKeyScope.None);
+        result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
+    }
+
+    /// <summary>
+    /// The set-based overload must agree with the canonical principal-based rule, since both
+    /// delegate to the same core — this is the guard against the two drifting apart.
+    /// </summary>
+    [Theory]
+    [InlineData("calibration", "read", true)]
+    [InlineData("calibration", "publish", true)]
+    [InlineData("calibration", "admin", false)]
+    [InlineData("queue", "read", false)]
+    public void SetBasedImplication_MatchesThePrincipalBasedRule(string resource, string action, bool expected)
+    {
+        HashSet<string> permissions = new(StringComparer.Ordinal) { "calibration:admin" };
+        ClaimsPrincipal principal = new(new ClaimsIdentity(
+            [new Claim(PrintFarmerPermissions.ClaimType, "calibration:admin")],
+            "TestAuth"));
+
+        PrintFarmerPermissions.ImpliesViaResourceAdmin(permissions, resource, action).Should().Be(expected);
+        PrintFarmerPermissions.ImpliesViaResourceAdmin(principal, resource, action).Should().Be(expected);
     }
 
     #endregion

@@ -128,8 +128,55 @@ public static class PrintFarmerPermissions
     /// capability services) stays coherent.
     /// </summary>
     public static bool ImpliesViaResourceAdmin(ClaimsPrincipal user, string resource, string action) =>
+        ImpliesViaResourceAdminCore(resource, action, permission => user.HasClaim(ClaimType, permission));
+
+    /// <summary>
+    /// Permission-set overload of <see cref="ImpliesViaResourceAdmin(ClaimsPrincipal, string, string)"/>,
+    /// for callers that resolve a user's granted permissions directly from the database rather
+    /// than from a <see cref="ClaimsPrincipal"/> — notably the Desktop API-key exchange, which
+    /// must decide authority for a key's owner who is not the current request principal.
+    /// </summary>
+    /// <remarks>
+    /// Shares <see cref="ImpliesViaResourceAdminCore"/> with the principal overload so the rule
+    /// cannot drift between the enforcement path and the provisioning path. Synthesizing a
+    /// <see cref="ClaimsPrincipal"/> just to reuse the other overload would be worse: it would
+    /// invent a principal that never authenticated, and any future role-sensitive change to the
+    /// implication would then silently apply to a fabricated identity.
+    /// </remarks>
+    public static bool ImpliesViaResourceAdmin(IReadOnlySet<string> grantedPermissions, string resource, string action)
+    {
+        ArgumentNullException.ThrowIfNull(grantedPermissions);
+        return ImpliesViaResourceAdminCore(resource, action, grantedPermissions.Contains);
+    }
+
+    /// <summary>
+    /// The implication rule itself, expressed once. Both overloads above differ only in how they
+    /// answer "does this subject hold that permission".
+    /// </summary>
+    private static bool ImpliesViaResourceAdminCore(string resource, string action, Func<string, bool> holdsPermission) =>
         !string.Equals(action, AdminAction, StringComparison.Ordinal)
-        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
+        && holdsPermission($"{resource}:{AdminAction}");
+
+    /// <summary>
+    /// Whether a resolved set of granted permissions satisfies <paramref name="permission"/>,
+    /// by exact match or by same-resource admin implication.
+    /// </summary>
+    /// <remarks>
+    /// This is the set-based counterpart of <see cref="HasPermission"/> minus the
+    /// <see cref="FarmAdminRole"/> bypass, which callers handle separately because a role is not
+    /// part of a permission set.
+    /// </remarks>
+    public static bool SetGrantsPermission(IReadOnlySet<string> grantedPermissions, string permission)
+    {
+        ArgumentNullException.ThrowIfNull(grantedPermissions);
+        if (grantedPermissions.Contains(permission))
+        {
+            return true;
+        }
+
+        (string resource, string action) = Split(permission);
+        return ImpliesViaResourceAdmin(grantedPermissions, resource, action);
+    }
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(

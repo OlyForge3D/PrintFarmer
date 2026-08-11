@@ -328,8 +328,7 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         using HttpClient client = await ScopedClientAsync(
             ApiKeyScope.CalibrationRead |
             ApiKeyScope.CalibrationGenerate |
-            ApiKeyScope.SlicingSubmit |
-            ApiKeyScope.SlicingReadArtifact);
+            ApiKeyScope.SlicingSubmit);
 
         Guid projectId = Guid.NewGuid();
 
@@ -368,6 +367,17 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         using HttpResponseMessage customUpdate = await client.PutAsJsonAsync(
             $"/api/slicer/profiles/custom/{Guid.NewGuid()}", new { name = "renamed" });
         ShouldBeDenied(customUpdate, "a Desktop-exchange token must never mutate profile state");
+
+        // Least privilege: generation polls calibration orchestration and never downloads artifact
+        // bytes, so it must not carry slicing:read-artifact by implication.
+        using HttpResponseMessage artifactRead = await client.GetAsync($"/api/artifacts/{Guid.NewGuid()}");
+        ShouldBeDenied(artifactRead, "slicing:read-artifact is not implied by calibration generation");
+
+        using HttpResponseMessage artifactsForJob = await client.GetAsync($"/api/artifacts/job/{Guid.NewGuid()}");
+        ShouldBeDenied(artifactsForJob, "slicing:read-artifact is not implied by calibration generation");
+
+        using HttpResponseMessage artifactMetadata = await client.GetAsync($"/api/artifacts/{Guid.NewGuid()}/metadata");
+        ShouldBeDenied(artifactMetadata, "slicing:read-artifact is not implied by calibration generation");
     }
 
     #endregion
