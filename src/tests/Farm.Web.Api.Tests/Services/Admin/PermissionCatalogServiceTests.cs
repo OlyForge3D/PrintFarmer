@@ -46,14 +46,40 @@ public class PermissionCatalogServiceTests
     }
 
     [Fact]
-    public async Task GetCatalogAsync_EnumeratesControllerLevelAttribute_MergedWithMethodMetadata()
+    public async Task GetCatalogAsync_ControllerLevelAndMethodLevelAttributesOnSameEndpoint_DistinctPermissions_BothAppearGatingTheSameRoute()
     {
-        // ASP.NET Core MVC merges class-level and method-level attributes into a single
-        // endpoint's metadata collection. Simulate that merge directly: an endpoint whose
-        // metadata carries a class-applied [RequirePermission] alongside route metadata.
+        // ASP.NET Core MVC merges a class-applied [RequirePermission] and a method-applied
+        // [RequirePermission] into a single endpoint's metadata collection (RequirePermissionAttribute
+        // is AllowMultiple = true). Simulate that merge directly by adding two distinct attributes
+        // to one endpoint's metadata, as MVC would for a controller-level + action-level pairing.
         RouteEndpoint endpoint = BuildEndpoint(
             "api/admin/data",
             ["GET"],
+            new RequirePermissionAttribute("admin", "execute"),
+            new RequirePermissionAttribute("system_settings", "read"));
+
+        await using AppDbContext db = CreateContext();
+        await SeedCatalogAsync(db, ("admin", "Administration", "execute", "Execute"));
+        await SeedCatalogAsync(db, ("system_settings", "System Settings", "read", "Read"));
+
+        PermissionCatalogDto catalog = await CreateService(db, endpoint).GetCatalogAsync();
+
+        catalog.Resources.Should().HaveCount(2);
+        catalog.Resources.SelectMany(r => r.Permissions).Select(p => p.Permission)
+            .Should().BeEquivalentTo("admin:execute", "system_settings:read");
+        catalog.Resources.SelectMany(r => r.Permissions).Should().OnlyContain(
+            p => p.Routes.Count == 1 && p.Routes[0].Template == "api/admin/data" && p.Routes[0].Method == "GET");
+    }
+
+    [Fact]
+    public async Task GetCatalogAsync_ControllerLevelAndMethodLevelAttributesOnSameEndpoint_SamePermission_ProducesExactlyOneEntryWithOneRoute()
+    {
+        // Guards against a duplicate [RequirePermission] applied at both class and method level
+        // (accidentally or otherwise) fanning out into duplicate catalog entries or routes.
+        RouteEndpoint endpoint = BuildEndpoint(
+            "api/admin/data",
+            ["GET"],
+            new RequirePermissionAttribute("admin", "execute"),
             new RequirePermissionAttribute("admin", "execute"));
 
         await using AppDbContext db = CreateContext();
@@ -62,8 +88,29 @@ public class PermissionCatalogServiceTests
         PermissionCatalogDto catalog = await CreateService(db, endpoint).GetCatalogAsync();
 
         catalog.Resources.Should().ContainSingle().Which.Resource.Should().Be("admin");
-        catalog.Resources[0].Permissions.Should().ContainSingle()
-            .Which.Permission.Should().Be("admin:execute");
+        PermissionCatalogEntryDto entry = catalog.Resources[0].Permissions.Should().ContainSingle().Which;
+        entry.Permission.Should().Be("admin:execute");
+        entry.Routes.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new PermissionRouteDto { Method = "GET", Template = "api/admin/data" });
+    }
+
+    [Fact]
+    public async Task GetCatalogAsync_EndpointWithoutHttpMethodMetadata_FallsBackToAnyMethod()
+    {
+        RouteEndpointBuilder builder = new(
+            requestDelegate: _ => Task.CompletedTask,
+            routePattern: RoutePatternFactory.Parse("api/legacy-endpoint"),
+            order: 0);
+        builder.Metadata.Add(new RequirePermissionAttribute("legacy", "read"));
+        RouteEndpoint endpoint = (RouteEndpoint)builder.Build();
+
+        await using AppDbContext db = CreateContext();
+
+        PermissionCatalogDto catalog = await CreateService(db, endpoint).GetCatalogAsync();
+
+        catalog.Resources.Should().ContainSingle().Which.Permissions.Should().ContainSingle()
+            .Which.Routes.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new PermissionRouteDto { Method = "ANY", Template = "api/legacy-endpoint" });
     }
 
     [Fact]
