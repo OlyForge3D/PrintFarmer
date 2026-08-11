@@ -17,7 +17,7 @@ public static partial class LogSanitizer
     /// exact "remove/replace line breaks with String.Replace" idiom CodeQL's cs/log-forging
     /// barrier detection recognizes, rather than a manual character-by-character copy loop).
     /// </summary>
-    [GeneratedRegex(@"[\x00-\x09\x0B\x0C\x0E-\x1F\x7F]")]
+    [GeneratedRegex(@"[\x00-\x09\x0B\x0C\x0E-\x1F\x7F-\x9F]")]
     private static partial Regex OtherControlCharsPattern();
 
     /// <summary>

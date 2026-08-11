@@ -198,7 +198,7 @@ public class NfcTagService(
         db.NfcTagBindings.Remove(binding);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("NFC tag binding {Id} (tag {TagUid}) deleted", id, binding.TagUid);
+        logger.LogInformation("NFC tag binding {Id} (tag {TagUid}) deleted", id, LogSanitizer.Sanitize(binding.TagUid));
         return true;
     }
 

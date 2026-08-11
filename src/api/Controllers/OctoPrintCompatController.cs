@@ -105,14 +105,15 @@ public class OctoPrintCompatController : ControllerBase
         {
             _logger.LogWarning(
                 "OctoPrint upload rejected: no files in form. Form keys: [{FormKeys}]",
-                string.Join(", ", Request.Form.Keys));
+                LogSanitizer.Sanitize(string.Join(", ", Request.Form.Keys)));
             return BadRequest(new { message = "No file uploaded - no files in form" });
         }
 
         IFormFile file = Request.Form.Files[0];
+        string? sanitizedFileName = LogSanitizer.Sanitize(file.FileName);
         _logger.LogInformation(
             "OctoPrint upload file received: Name={FileName}, Length={Length}, ContentType={ContentType}, FormFieldName={FieldName}",
-            file.FileName, file.Length, file.ContentType, file.Name);
+            sanitizedFileName, file.Length, LogSanitizer.Sanitize(file.ContentType), LogSanitizer.Sanitize(file.Name));
 
         if (file.Length == 0)
         {
@@ -155,9 +156,9 @@ public class OctoPrintCompatController : ControllerBase
                 return StatusCode(500, new { message = "Upload quota service missing" });
             }
 
-            _logger.LogDebug("OctoPrint upload: calling UploadFileAsync for {FileName}", file.FileName);
+            _logger.LogDebug("OctoPrint upload: calling UploadFileAsync for {FileName}", sanitizedFileName);
             GcodeFileEntryDto uploadDto = await _gcodeFilesService.UploadFileAsync(null, file, uploadSettings, quotaService, HttpContext.RequestAborted);
-            _logger.LogInformation("OctoPrint upload saved: {File} name={Name}, id={Id}", file.FileName, uploadDto.FileName, uploadDto.Id);
+            _logger.LogInformation("OctoPrint upload saved: {File} name={Name}, id={Id}", sanitizedFileName, LogSanitizer.Sanitize(uploadDto.FileName), uploadDto.Id);
 
             if (print)
             {
@@ -187,19 +188,19 @@ public class OctoPrintCompatController : ControllerBase
 
                 _logger.LogInformation(
                     "OctoPrint upload+print: Enqueueing job for file={FileName}, model={Model}, nozzle={Nozzle}mm, material={Material}",
-                    file.FileName,
-                    enqueueReq.RequiredPrinterModel ?? "(any)",
+                    sanitizedFileName,
+                    LogSanitizer.Sanitize(enqueueReq.RequiredPrinterModel) ?? "(any)",
                     enqueueReq.RequiredNozzleDiameter?.ToString("F2") ?? "(any)",
-                    enqueueReq.RequiredMaterialType ?? "(any)");
+                    LogSanitizer.Sanitize(enqueueReq.RequiredMaterialType) ?? "(any)");
 
                 JobQueuePrintJobDto? job = await _jobQueueService.AddJobToQueueAsync(enqueueReq, null, HttpContext.RequestAborted);
                 if (job is null)
                 {
                     _logger.LogInformation(
                         "OctoPrint upload+print: No compatible printer found for {FileName}. Model={Model}, Material={Material}",
-                        file.FileName,
-                        enqueueReq.RequiredPrinterModel ?? "(any)",
-                        enqueueReq.RequiredMaterialType ?? "(any)");
+                        sanitizedFileName,
+                        LogSanitizer.Sanitize(enqueueReq.RequiredPrinterModel) ?? "(any)",
+                        LogSanitizer.Sanitize(enqueueReq.RequiredMaterialType) ?? "(any)");
 
                     return Ok(new
                     {
@@ -212,7 +213,7 @@ public class OctoPrintCompatController : ControllerBase
 
                 _logger.LogInformation(
                     "OctoPrint upload+print: file={FileName}, jobId={JobId}, assignedPrinter={PrinterName} ({PrinterId})",
-                    file.FileName, job.Id, job.AssignedPrinterName, LogSanitizer.Sanitize(job.AssignedPrinterId?.ToString()));
+                    sanitizedFileName, job.Id, LogSanitizer.Sanitize(job.AssignedPrinterName), LogSanitizer.Sanitize(job.AssignedPrinterId?.ToString()));
 
                 return Accepted(new { file = uploadDto, jobId = job.Id, status = "Queued", assignedPrinter = job.AssignedPrinterName });
             }
@@ -224,14 +225,14 @@ public class OctoPrintCompatController : ControllerBase
             _logger.LogError(
                 ex,
                 "OctoPrint upload failed for file {FileName} ({Length} bytes). ExceptionType={ExceptionType}, Message={Message}",
-                file.FileName, file.Length, ex.GetType().Name, ex.Message);
+                sanitizedFileName, file.Length, ex.GetType().Name, LogSanitizer.Sanitize(ex.Message));
 
             // Log inner exception if present
             if (ex.InnerException != null)
             {
                 _logger.LogError(
                     "OctoPrint upload inner exception: Type={InnerType}, Message={InnerMessage}",
-                    ex.InnerException.GetType().Name, ex.InnerException.Message);
+                    ex.InnerException.GetType().Name, LogSanitizer.Sanitize(ex.InnerException.Message));
             }
 
             // Include more detail in dev/debug scenarios
