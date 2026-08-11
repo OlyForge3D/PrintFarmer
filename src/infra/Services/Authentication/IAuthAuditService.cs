@@ -142,7 +142,6 @@ public interface IAuthAuditService
     Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// <summary>
     /// Log a role permission grant change (full-replacement) performed via the role
     /// permission API (#1449).
     /// </summary>

@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Admin;
@@ -8,6 +9,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Primitives;
 using Moq;
@@ -20,20 +22,39 @@ namespace Farm.Web.Api.Tests.Services.Admin;
 /// #1449: catalog-only validation, farm_admin immutability (D6), optimistic concurrency via
 /// <see cref="Role.UpdatedAt"/>, the D9 lockout invariant for <c>roles:admin</c>/<c>users:admin</c>,
 /// full-replacement diffing, session revocation counting, and audit logging.
+///
+/// Uses a real in-memory Sqlite database (not the EF InMemory provider) because
+/// <see cref="RolePermissionService"/> opens a real serializable transaction, which the
+/// InMemory provider does not support. Mirrors the pattern established by
+/// <c>RoleManagementServiceTests</c> (#1448).
 /// </summary>
-public class RolePermissionServiceTests
+public sealed class RolePermissionServiceTests : IAsyncDisposable
 {
     private const string QueueReadPermission = "queue:read";
     private const string QueueWritePermission = "queue:write";
 
+    private readonly SqliteConnection _connection;
+    private readonly DbContextOptions<AppDbContext> _options;
     private readonly Mock<IAuthAuditService> _authAuditServiceMock = new(MockBehavior.Strict);
     private readonly Mock<ITokenRevocationService> _tokenRevocationServiceMock = new(MockBehavior.Strict);
     private readonly List<RouteEndpoint> _endpoints = [];
 
+    public RolePermissionServiceTests()
+    {
+        _connection = new SqliteConnection("Data Source=:memory:");
+        _connection.Open();
+        _options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await _connection.DisposeAsync();
+    }
+
     [Fact]
     public async Task GetRolePermissionsAsync_UnknownRole_ReturnsNull()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
 
         RolePermissionService service = CreateService(db);
@@ -46,7 +67,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task GetRolePermissionsAsync_JoinsCatalogWithCurrentGrants_ReportsAbsentGrantedAndDenied()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "write", "Write");
         await SeedCatalogAsync(db, "printers", "Printers", "read", "Read");
@@ -74,7 +95,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_UnknownRole_ReturnsRoleNotFound()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         RolePermissionService service = CreateService(db);
 
         RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
@@ -89,7 +110,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_FarmAdminRole_ReturnsFarmAdminImmutable()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         Role farmAdmin = await CreateRoleAsync(db, "farm_admin");
         RolePermissionService service = CreateService(db);
 
@@ -105,7 +126,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_UnknownPermission_ReturnsInvalidPermissions()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
         Role role = await CreateRoleAsync(db, "operator");
         RolePermissionService service = CreateService(db);
@@ -123,7 +144,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_StaleUpdatedAt_ReturnsConcurrencyConflict()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
         Role role = await CreateRoleAsync(db, "operator");
         RolePermissionService service = CreateService(db);
@@ -144,7 +165,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_RemovingLastActiveRoleHoldingRolesAdmin_ReturnsLockoutViolation()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "roles", "Roles", "admin", "Admin");
         Role role = await CreateRoleAsync(db, "operator");
         // Simulate the only role (other than the immutable farm_admin) holding roles:admin.
@@ -164,7 +185,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_RemovingRolesAdmin_WhenAnotherActiveRoleHoldsIt_Succeeds()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "roles", "Roles", "admin", "Admin");
         Role role = await CreateRoleAsync(db, "operator");
         Role otherRole = await CreateRoleAsync(db, "super_operator");
@@ -185,7 +206,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_RemovingRolesAdmin_WhenOnlyOtherHolderIsInactive_ReturnsLockoutViolation()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "roles", "Roles", "admin", "Admin");
         Role role = await CreateRoleAsync(db, "operator");
         Role inactiveRole = await CreateRoleAsync(db, "retired_role", isActive: false);
@@ -205,7 +226,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_NoOpRequest_ReturnsSuccessWithoutAuditOrRevocationOrUpdatedAtChange()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
         Role role = await CreateRoleAsync(db, "operator");
         await GrantAsync(db, role, "queue", "read", granted: true);
@@ -231,7 +252,7 @@ public class RolePermissionServiceTests
     [Fact]
     public async Task UpdateRolePermissionsAsync_HappyPath_AppliesDiff_RevokesSessions_AndAudits()
     {
-        await using AppDbContext db = CreateContext();
+        await using AppDbContext db = await CreateContextAsync();
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
         await SeedCatalogAsync(db, "queue", "Calibration Queue", "write", "Write");
         Role role = await CreateRoleAsync(db, "operator");
@@ -294,6 +315,180 @@ public class RolePermissionServiceTests
         _authAuditServiceMock.VerifyAll();
     }
 
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_HappyPath_ChangeIsVisibleToJwtPermissionDerivation()
+    {
+        // Proves AC1 ("takes effect on next token issue") against the actual production code
+        // path AuthenticationService.GenerateJwtTokenAsync uses to derive JWT permission
+        // claims, rather than just asserting RolePermission row state.
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "write", "Write");
+        Role role = await CreateRoleAsync(db, "operator");
+        await GrantAsync(db, role, "queue", "read", granted: true);
+
+        Guid userId = Guid.NewGuid();
+        await AssignUserToRoleAsync(db, userId, role, isActive: true);
+        SetupNoOpRevocationAndAudit();
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = role.UpdatedAt, Permissions = [QueueWritePermission] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        result.Should().BeOfType<RolePermissionUpdateResult.Success>();
+
+        EfUsersRepository usersRepository = new(db);
+        List<(string Resource, string Action)> grantedPermissions = await usersRepository.GetGrantedPermissionsAsync(userId);
+
+        grantedPermissions.Should().ContainSingle(p => p.Resource == "queue" && p.Action == "write");
+        grantedPermissions.Should().NotContain(p => p.Resource == "queue" && p.Action == "read");
+    }
+
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_RemovingLastActiveRoleHoldingUsersAdmin_ReturnsLockoutViolation()
+    {
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "users", "Users", "admin", "Admin");
+        Role role = await CreateRoleAsync(db, "operator");
+        await GrantAsync(db, role, "users", "admin", granted: true);
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = role.UpdatedAt, Permissions = [] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        result.Should().BeOfType<RolePermissionUpdateResult.LockoutViolation>()
+            .Which.Permissions.Should().ContainSingle().Which.Should().Be("users:admin");
+    }
+
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_RemovingUsersAdmin_WhenAnotherActiveRoleHoldsIt_Succeeds()
+    {
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "users", "Users", "admin", "Admin");
+        Role role = await CreateRoleAsync(db, "operator");
+        Role otherRole = await CreateRoleAsync(db, "super_operator");
+        await GrantAsync(db, role, "users", "admin", granted: true);
+        await GrantAsync(db, otherRole, "users", "admin", granted: true);
+        SetupNoOpRevocationAndAudit();
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = role.UpdatedAt, Permissions = [] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        result.Should().BeOfType<RolePermissionUpdateResult.Success>();
+    }
+
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_RemovingUsersAdmin_WhenOnlyOtherHolderIsInactive_ReturnsLockoutViolation()
+    {
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "users", "Users", "admin", "Admin");
+        Role role = await CreateRoleAsync(db, "operator");
+        Role inactiveRole = await CreateRoleAsync(db, "retired_role", isActive: false);
+        await GrantAsync(db, role, "users", "admin", granted: true);
+        await GrantAsync(db, inactiveRole, "users", "admin", granted: true);
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = role.UpdatedAt, Permissions = [] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        result.Should().BeOfType<RolePermissionUpdateResult.LockoutViolation>();
+    }
+
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_NonCatalogGrant_SurvivesUntouchedWhenNotResubmitted()
+    {
+        // roles:admin/users:admin are not yet catalog-enforced (FR-4 is separate future work),
+        // so a client's request payload can never include them. A naive full-replacement diff
+        // would delete this row simply because the client didn't (couldn't) resubmit it. This
+        // proves the fix: only catalog-visible existing grants participate in the replacement.
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
+        Role role = await CreateRoleAsync(db, "operator");
+        await GrantAsync(db, role, "queue", "read", granted: true);
+
+        // Seed roles:admin/users:admin resource+action rows directly (bypassing SeedCatalogAsync
+        // so no enforced endpoint -- and therefore no catalog entry -- is registered for them).
+        Resource rolesResource = new() { Id = Guid.NewGuid(), Name = "roles", DisplayName = "Roles", ResourceType = "test", IsActive = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        UserAction adminAction = new() { Id = Guid.NewGuid(), Name = "admin", DisplayName = "Admin", CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow };
+        db.Resources.Add(rolesResource);
+        db.UserActions.Add(adminAction);
+        await db.SaveChangesAsync();
+        db.RolePermissions.Add(new RolePermission
+        {
+            Id = Guid.NewGuid(),
+            RoleId = role.Id,
+            ResourceId = rolesResource.Id,
+            ActionId = adminAction.Id,
+            Granted = true,
+            CreatedAt = DateTime.UtcNow,
+        });
+        await db.SaveChangesAsync();
+        SetupNoOpRevocationAndAudit();
+        RolePermissionService service = CreateService(db);
+
+        // Client's request never mentions roles:admin -- it isn't in the catalog, so the client
+        // has no way to see or resubmit it. Re-request the one catalog-visible grant unchanged.
+        RolePermissionUpdateResult result = await service.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = role.UpdatedAt, Permissions = [QueueReadPermission] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        result.Should().BeOfType<RolePermissionUpdateResult.Success>();
+
+        bool rolesAdminStillGranted = await db.RolePermissions
+            .AsNoTracking()
+            .AnyAsync(rp => rp.RoleId == role.Id && rp.ResourceId == rolesResource.Id && rp.ActionId == adminAction.Id && rp.Granted);
+        rolesAdminStillGranted.Should().BeTrue("a non-catalog grant the client could never resubmit must not be silently stripped");
+    }
+
+    [Fact]
+    public async Task UpdateRolePermissionsAsync_ConcurrentUpdatesWithSameStaleUpdatedAt_OnlyOneSucceeds()
+    {
+        // Proves the DB-level concurrency token (Role.UpdatedAt IsConcurrencyToken) actually
+        // rejects the second of two writers racing on the same stale UpdatedAt, rather than
+        // silently letting the second overwrite the first (Bishop's/Vasquez's review finding).
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "write", "Write");
+        Role role = await CreateRoleAsync(db, "operator");
+        DateTime staleUpdatedAt = role.UpdatedAt;
+        SetupNoOpRevocationAndAudit();
+
+        RolePermissionService serviceA = CreateService(db);
+        await using AppDbContext dbB = await CreateContextAsync();
+        RolePermissionService serviceB = new(dbB, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), dbB), _authAuditServiceMock.Object, _tokenRevocationServiceMock.Object);
+
+        RolePermissionUpdateResult resultA = await serviceA.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = staleUpdatedAt, Permissions = [QueueReadPermission] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        RolePermissionUpdateResult resultB = await serviceB.UpdateRolePermissionsAsync(
+            role.Id,
+            new UpdateRolePermissionsRequestDto { UpdatedAt = staleUpdatedAt, Permissions = [QueueWritePermission] },
+            Guid.NewGuid(),
+            "127.0.0.1");
+
+        resultA.Should().BeOfType<RolePermissionUpdateResult.Success>("the first writer to commit against the stale UpdatedAt should win");
+        resultB.Should().BeOfType<RolePermissionUpdateResult.ConcurrencyConflict>(
+            "the second writer read the same stale UpdatedAt already consumed by the first writer's commit");
+    }
+
     private void AddEnforcedPermissionEndpoint(string resourceName, string actionName)
     {
         string template = $"api/test/{resourceName}/{actionName}";
@@ -328,12 +523,11 @@ public class RolePermissionServiceTests
     private RolePermissionService CreateService(AppDbContext db) =>
         new(db, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), db), _authAuditServiceMock.Object, _tokenRevocationServiceMock.Object);
 
-    private static AppDbContext CreateContext()
+    private async Task<AppDbContext> CreateContextAsync()
     {
-        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase($"role-permission-service-{Guid.NewGuid()}")
-            .Options;
-        return new(options);
+        AppDbContext context = new(_options);
+        _ = await context.Database.EnsureCreatedAsync();
+        return context;
     }
 
     private async Task SeedCatalogAsync(AppDbContext db, string resourceName, string resourceDisplayName, string actionName, string actionDisplayName)
@@ -409,6 +603,16 @@ public class RolePermissionServiceTests
 
     private static async Task AssignUserToRoleAsync(AppDbContext db, Guid userId, Role role, bool isActive)
     {
+        db.Users.Add(new User
+        {
+            Id = userId,
+            Username = $"user-{userId:N}",
+            Email = $"{userId:N}@example.test",
+            PasswordHash = "hash",
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+        });
         db.UserRoles.Add(new UserRole
         {
             Id = Guid.NewGuid(),

@@ -65,6 +65,18 @@ public sealed class RolePermissionService : IRolePermissionService
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // The read-check-write sequence below (role lookup, farm_admin/concurrency/catalog
+        // validation, the D9 lockout check, and the RolePermission mutation) must commit as one
+        // atomic unit under serializable isolation. Without this, two concurrent PUTs against
+        // the same role (or against two different roles that each hold the last copy of
+        // roles:admin/users:admin) could each read a pre-conflict state, both pass their checks,
+        // and both commit -- silently overwriting each other or leaving zero admin coverage.
+        // Mirrors the transaction pattern used for role deactivation in RoleManagementService
+        // (#1448 review discussion).
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _context.Database
+            .BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken)
+            .ConfigureAwait(false);
+
         Role? role = await _context.Roles
             .Include(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Resource)
@@ -109,7 +121,16 @@ public sealed class RolePermissionService : IRolePermissionService
         Dictionary<string, RolePermission> existingByPermission = role.RolePermissions
             .ToDictionary(rp => $"{rp.Resource.Name}:{rp.Action.Name}", StringComparer.Ordinal);
 
-        List<string> currentlyGranted = existingByPermission
+        // Full-replacement semantics only apply to permissions the client can actually see and
+        // round-trip via GET, i.e. permissions present in the derived catalog. Grants such as
+        // roles:admin/users:admin that are not yet catalog-enforced (FR-4) are invisible to the
+        // client's request payload; a plain "replace everything not resubmitted" would silently
+        // strip them just because the client never had a chance to include them.
+        Dictionary<string, RolePermission> catalogVisibleExisting = existingByPermission
+            .Where(kv => catalogByPermission.ContainsKey(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+
+        List<string> currentlyGranted = catalogVisibleExisting
             .Where(kv => kv.Value.Granted)
             .Select(kv => kv.Key)
             .ToList();
@@ -139,7 +160,7 @@ public sealed class RolePermissionService : IRolePermissionService
             });
         }
 
-        List<RolePermission> toRemove = role.RolePermissions
+        List<RolePermission> toRemove = catalogVisibleExisting.Values
             .Where(rp => !requestedSet.Contains($"{rp.Resource.Name}:{rp.Action.Name}", StringComparer.Ordinal))
             .ToList();
         _context.RolePermissions.RemoveRange(toRemove);
@@ -175,7 +196,19 @@ public sealed class RolePermissionService : IRolePermissionService
 
         role.UpdatedAt = now;
 
-        await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+            await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent transaction committed a conflicting change to this role (or to the
+            // lockout-guarded permission rows) between our read and our write. Serializable
+            // isolation surfaces this as a save/commit failure rather than silent corruption.
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return new RolePermissionUpdateResult.ConcurrencyConflict();
+        }
 
         int revokedSessionCount = await RevokeSessionsForRoleAsync(roleId, actingUserId, role.Name, ipAddress, cancellationToken)
             .ConfigureAwait(false);
