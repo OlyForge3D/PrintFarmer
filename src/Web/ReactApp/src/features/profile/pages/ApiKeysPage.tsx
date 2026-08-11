@@ -84,8 +84,8 @@ const SCOPE_GROUPS: ScopeGroup[] = [
       {
         value: 'SlicingSubmit',
         label: 'Slicing submit',
-        description: 'Submit slicing jobs.',
-        impact: 'Consumes slicer worker capacity.',
+        description: 'Submit slicing jobs, and read the slicer profile catalog.',
+        impact: 'Consumes slicer worker capacity. Cannot modify profiles.',
       },
       { value: 'SlicingReadArtifact', label: 'Slicing read artifact', description: 'Download sliced G-code artifacts.' },
     ],

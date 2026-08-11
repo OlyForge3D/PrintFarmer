@@ -294,11 +294,20 @@ A Desktop key carries explicitly selected scopes. They fall into two groups:
 |---|---|---|
 | Model/library | `ModelRead`, `ModelWrite`, `LibrarySync` | Scope policies only. **Never** become permission claims. |
 | Calibration | `CalibrationRead`, `CalibrationCreate`, `CalibrationUpdate`, `CalibrationDelete`, `CalibrationGenerate`, `CalibrationPublish` | Each maps to exactly one `calibration:*` permission claim. |
-| Slicing | `SlicingSubmit`, `SlicingReadArtifact` | `slicing:submit`, `slicing:read-artifact`. |
-| Print queue | `QueueRead`, `QueueWrite`, `QueueStart`, `QueueCancel`, `QueueAcknowledgeBedClear` | The matching `queue:*` permission claim. |
+| Slicing | `SlicingSubmit`, `SlicingReadArtifact` | `slicing:submit`, `slicing:read-artifact`. || Print queue | `QueueRead`, `QueueWrite`, `QueueStart`, `QueueCancel`, `QueueAcknowledgeBedClear` | The matching `queue:*` permission claim. |
 
 `queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and `obico:manage` are
 deliberately **not** reachable from any Desktop scope.
+
+> **What `SlicingSubmit` actually reaches.** `slicing:submit` is a broad, pre-existing permission:
+> the slicer host's `ProfilesController` is gated by it at the class level, so a key holding this
+> scope can **read and enumerate the slicer profile catalog** (list, hierarchy, schemas, per-machine
+> process/filament queries). That read reach is required for submission and is not narrowed here.
+> Profile-state **mutation** (`POST /api/slicer/profiles/upload`, `POST .../clone`,
+> `PUT .../custom/{id}`) additionally requires an interactive session, so a Desktop key can never
+> modify profile state — see
+> [Credential management requires an interactive session](#credential-management-requires-an-interactive-session).
+> Every other mutating route on that controller was already `farm_admin`-only.
 
 The mapping lives in one place — `DesktopScopePermissionMap` — which both key creation and token
 exchange consume, so the two can never drift.
@@ -357,12 +366,20 @@ laundering pattern in two places:
 | `/api/users/{userId}/apikeys` (all verbs) and `/api/apikeys/settings` | Minting a replacement API key valid for up to a year, with scopes of the attacker's choosing. |
 | `POST /api/auth/passkey/register/begin` and `.../complete` | Registering an attacker-controlled passkey, then using it to obtain a full interactive login. |
 | `GET`/`PATCH`/`DELETE /api/auth/passkey/credentials[/{id}]` | Enumerating, renaming, or deleting the owner's existing passkeys. |
+| `POST /api/slicer/profiles/upload`, `POST /api/slicer/profiles/clone`, `PUT /api/slicer/profiles/custom/{id}` | `ProfilesController` is class-gated by the broad `slicing:submit` permission, which a calibration-generation key legitimately holds. Mutating profile state is not part of that intent. |
+
+These are the complete set of non-`farm_admin` mutating routes on `ProfilesController`; every other
+mutating route there was already `farm_admin`-only. The policy is registered in **both** hosts (the
+main API in `AuthenticationStartup`, and the standalone slicer host in `Farm.Slicer.Host/Program.cs`)
+so the deny holds in monolithic and microservices deployments alike.
 
 Normal login sessions — including the admin UI — are unaffected: the rule denies only principals
-carrying `token_use=desktop_exchange`, and every other principal passes through untouched. The
-passkey **login** ceremony (`passkey/login/begin` and `.../complete`) stays anonymous, since the
-signed assertion is itself the credential being verified. Password change is not affected because
-it already requires the current password.
+carrying `token_use=desktop_exchange`, and every other principal passes through untouched,
+including the slicer host's standalone-mode principal. The handler calls `Fail()` rather than
+merely declining to succeed, so the Development-only `Security:DevModeBypassAuth` GET bypass cannot
+re-open these endpoints. The passkey **login** ceremony (`passkey/login/begin` and `.../complete`)
+stays anonymous, since the signed assertion is itself the credential being verified. Password
+change is not affected because it already requires the current password.
 
 ### Authorization Policies
 
