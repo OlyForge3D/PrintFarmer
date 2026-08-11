@@ -7,6 +7,7 @@ import {
   rotateApiKey,
   revealApiKey,
   getApiKeySettings,
+  resolveScopeNames,
   CreateApiKeyRequest,
 } from '../apiKeysService';
 import { apiClient } from '../api';
@@ -212,6 +213,56 @@ describe('apiKeysService', () => {
       const result = await getApiKeySettings();
 
       expect(result.hashingEnabled).toBe(false);
+    });
+  });
+
+  describe('resolveScopeNames', () => {
+    it('should prefer the canonical scopeNames array when present', () => {
+      expect(
+        resolveScopeNames({ scopes: 'All', scopeNames: ['ModelRead', 'CalibrationRead'] })
+      ).toEqual(['ModelRead', 'CalibrationRead']);
+    });
+
+    it('should expand the legacy All alias into the three model scopes it actually means', () => {
+      // The backend renders the exact flags value 7 as "All", which reads as "every privilege"
+      // but grants no calibration, slicing, or queue authority at all.
+      expect(resolveScopeNames({ scopes: 'All' })).toEqual([
+        'ModelRead',
+        'ModelWrite',
+        'LibrarySync',
+      ]);
+      expect(resolveScopeNames({ scopes: 'All' })).not.toContain('CalibrationRead');
+    });
+
+    it('should parse a legacy comma-separated flags string', () => {
+      expect(resolveScopeNames({ scopes: 'ModelRead, LibrarySync' })).toEqual([
+        'ModelRead',
+        'LibrarySync',
+      ]);
+    });
+
+    it('should return nothing for unscoped keys', () => {
+      expect(resolveScopeNames({ scopes: 'None' })).toEqual([]);
+      expect(resolveScopeNames({ scopes: '' })).toEqual([]);
+      expect(resolveScopeNames({ scopes: 'None', scopeNames: [] })).toEqual([]);
+    });
+  });
+
+  describe('createApiKey scope payload', () => {
+    it('should send canonical scopeNames rather than a packed flags string', async () => {
+      vi.mocked(apiClient.createUserApiKey).mockResolvedValue({ key: 'raw', id: 'id-1' });
+
+      const request: CreateApiKeyRequest = {
+        name: 'Calibration client',
+        purpose: 'Desktop',
+        scopeNames: ['CalibrationRead', 'SlicingSubmit'],
+      };
+      await createApiKey(userId, request);
+
+      expect(apiClient.createUserApiKey).toHaveBeenCalledWith(userId, request);
+      const sent = vi.mocked(apiClient.createUserApiKey).mock.calls[0][1] as CreateApiKeyRequest;
+      expect(sent.scopeNames).toEqual(['CalibrationRead', 'SlicingSubmit']);
+      expect(sent).not.toHaveProperty('scopes');
     });
   });
 });

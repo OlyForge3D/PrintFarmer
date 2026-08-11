@@ -59,7 +59,7 @@ async function openDesktopCreateFormWithScope(name: string) {
   fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
   fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: name } });
   fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-  fireEvent.click(screen.getByLabelText(/Model Read/));
+  fireEvent.click(screen.getByLabelText(/Model read/));
 }
 
 describe('ApiKeysPage', () => {
@@ -191,15 +191,15 @@ describe('ApiKeysPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
 
-    expect(screen.queryByText(/Model Read/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Model read/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Expires At')).toBeInTheDocument();
 
     const purposeSelect = screen.getByLabelText('Purpose');
     fireEvent.change(purposeSelect, { target: { value: 'Desktop' } });
 
-    expect(screen.getByText(/Model Read/)).toBeInTheDocument();
-    expect(screen.getByText(/Model Write/)).toBeInTheDocument();
-    expect(screen.getByText(/Library Sync/)).toBeInTheDocument();
+    expect(screen.getByText(/Model read/)).toBeInTheDocument();
+    expect(screen.getByText(/Model write/)).toBeInTheDocument();
+    expect(screen.getByText(/Library sync/)).toBeInTheDocument();
   });
 
   it('should require at least one scope before creating a Desktop-purpose key', async () => {
@@ -224,13 +224,13 @@ describe('ApiKeysPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
     fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByLabelText(/Model read/));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
       expect(apiKeysService.createApiKey).toHaveBeenCalledWith(
         'user-1',
-        expect.objectContaining({ name: 'Desktop client', purpose: 'Desktop', scopes: 'ModelRead' })
+        expect.objectContaining({ name: 'Desktop client', purpose: 'Desktop', scopeNames: ['ModelRead'] })
       );
     });
     expect(await screen.findByText('raw-key')).toBeInTheDocument();
@@ -306,7 +306,7 @@ describe('ApiKeysPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
     fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
     fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByLabelText(/Model read/));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('one-time-secret')).toBeInTheDocument();
@@ -356,7 +356,7 @@ describe('ApiKeysPage', () => {
 
     fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
     fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByLabelText(/Model read/));
 
     const submitButton = screen.getByRole('button', { name: 'Create' });
     submitButton.focus();
@@ -382,7 +382,7 @@ describe('ApiKeysPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
     fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
     fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByLabelText(/Model read/));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('clipboard-secret')).toBeInTheDocument();
@@ -406,7 +406,7 @@ describe('ApiKeysPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
     fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Desktop client' } });
     fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
-    fireEvent.click(screen.getByLabelText(/Model Read/));
+    fireEvent.click(screen.getByLabelText(/Model read/));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(await screen.findByText('clipboard-fail-secret')).toBeInTheDocument();
@@ -585,6 +585,156 @@ describe('ApiKeysPage', () => {
 
     expect(await screen.findByText('Request failed with status code 403')).toBeInTheDocument();
     expect(screen.queryByRole('status', { name: 'API Key Created Successfully' })).not.toBeInTheDocument();
+  });
+
+  describe('privileged scope selection', () => {
+    it('should offer each calibration, slicing, and queue scope as an independent checkbox', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      for (const label of [
+        /^Calibration read —/,
+        /^Calibration create —/,
+        /^Calibration update —/,
+        /^Calibration delete —/,
+        /^Calibration generate —/,
+        /^Calibration publish —/,
+        /^Slicing submit —/,
+        /^Slicing read artifact —/,
+        /^Queue read —/,
+        /^Queue write —/,
+        /^Queue start —/,
+        /^Queue cancel —/,
+        /^Queue acknowledge bed clear —/,
+      ]) {
+        const checkbox = screen.getByLabelText(label);
+        expect(checkbox).toBeInTheDocument();
+        expect(checkbox).toHaveProperty('type', 'checkbox');
+        expect(checkbox).not.toBeChecked();
+      }
+    });
+
+    // A bulk toggle makes it far too easy to hand a key destructive or physically-actuating
+    // authority without reading what each option does.
+    it('should not offer an all-calibration or select-all shortcut', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      expect(screen.queryByLabelText(/^All calibration/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/select all/i)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/^All$/)).not.toBeInTheDocument();
+    });
+
+    it('should spell out the high-impact consequence of destructive and physical scopes', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      expect(screen.getByLabelText(/^Calibration delete —/)).toHaveAccessibleName(/Destructive/i);
+      expect(screen.getByLabelText(/^Queue start —/)).toHaveAccessibleName(/physical print/i);
+      expect(screen.getByLabelText(/^Queue cancel —/)).toHaveAccessibleName(/physical print/i);
+    });
+
+    // Generation and slicing submission are separate permissions on the server; the UI must not
+    // imply that picking "generate" is sufficient.
+    it('should tell the user that generation additionally requires the slicing scopes', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      const generate = screen.getByLabelText(/^Calibration generate —/);
+      expect(generate).toHaveAccessibleName(/Slicing submit/i);
+      expect(generate).toHaveAccessibleName(/Slicing read artifact/i);
+      expect(screen.getByLabelText(/^Slicing submit —/)).not.toBe(generate);
+    });
+
+    it('should send exactly the selected scope names', async () => {
+      vi.mocked(apiKeysService.createApiKey).mockResolvedValue({ key: 'raw-key', id: 'new-id' });
+
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Calibration client' } });
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+      fireEvent.click(screen.getByLabelText(/^Calibration read —/));
+      fireEvent.click(screen.getByLabelText(/^Slicing submit —/));
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => {
+        expect(apiKeysService.createApiKey).toHaveBeenCalledWith(
+          'user-1',
+          expect.objectContaining({
+            purpose: 'Desktop',
+            scopeNames: ['CalibrationRead', 'SlicingSubmit'],
+          })
+        );
+      });
+    });
+
+    // The server owns the owner-authorization decision; the UI must show its rejection rather
+    // than pre-filtering options and hiding the failure.
+    it('should surface a server rejection for an unauthorized scope', async () => {
+      vi.mocked(apiKeysService.createApiKey).mockRejectedValue(
+        new Error('The API key owner is not authorized for the requested scope(s). Grant the owner these permissions first: calibration:read.')
+      );
+
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Unauthorized client' } });
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+      fireEvent.click(screen.getByLabelText(/^Calibration read —/));
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+      expect(await screen.findByText(/not authorized for the requested scope/i)).toBeInTheDocument();
+      expect(screen.queryByRole('status', { name: 'API Key Created Successfully' })).not.toBeInTheDocument();
+    });
+
+    it('should list a legacy All-scoped key as its individual scopes, never as "All"', async () => {
+      vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+        {
+          id: 'legacy-key',
+          name: 'Legacy Desktop Key',
+          isActive: true,
+          createdAt: '2024-01-01T00:00:00Z',
+          purpose: 'Desktop',
+          scopes: 'All',
+          isExpired: false,
+        },
+      ]);
+
+      renderPage();
+
+      expect(await screen.findByText('Legacy Desktop Key')).toBeInTheDocument();
+      expect(screen.getByText(/Scopes: ModelRead, ModelWrite, LibrarySync/)).toBeInTheDocument();
+      expect(screen.queryByText(/Scopes: All/)).not.toBeInTheDocument();
+    });
+
+    it('should render scopeNames returned by the server for a calibration key', async () => {
+      vi.mocked(apiKeysService.listApiKeys).mockResolvedValue([
+        {
+          id: 'cal-key',
+          name: 'Calibration Desktop Key',
+          isActive: true,
+          createdAt: '2024-01-01T00:00:00Z',
+          purpose: 'Desktop',
+          scopes: 'CalibrationRead, SlicingSubmit',
+          scopeNames: ['CalibrationRead', 'SlicingSubmit'],
+          isExpired: false,
+        },
+      ]);
+
+      renderPage();
+
+      expect(await screen.findByText('Calibration Desktop Key')).toBeInTheDocument();
+      expect(screen.getByText(/Scopes: CalibrationRead, SlicingSubmit/)).toBeInTheDocument();
+    });
   });
 
   it('should surface an error when toggling (revoking) a key is rejected by the server', async () => {
@@ -897,7 +1047,7 @@ describe('ApiKeysPage', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Create' }));
       expect(await screen.findByText(/select at least one scope/i)).toBeInTheDocument();
 
-      fireEvent.click(screen.getByLabelText(/Model Read/));
+      fireEvent.click(screen.getByLabelText(/Model read/));
       expect(screen.queryByText(/select at least one scope/i)).not.toBeInTheDocument();
     });
 
