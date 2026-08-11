@@ -12,9 +12,27 @@ namespace Farm.Web.Api.Tests.Security;
 ///
 /// Unlike <see cref="RoleToPermissionMigrationCompletenessTests"/> — which only checks for the
 /// specific <c>farm_admin</c> role name left over from the migration — this test fails on
-/// <em>any</em> <see cref="AuthorizeAttribute.Roles"/> value set on an API controller type or
-/// method, in the main API or the slicer host. A role-name gate is a surface a custom role can
-/// never reach, no matter which permissions it holds, so new ones must not accumulate.
+/// <em>any</em> <see cref="AuthorizeAttribute.Roles"/> value set on a <see cref="ControllerBase"/>
+/// -derived type (concrete or abstract base) or method, in the main API or the slicer host. A
+/// role-name gate is a surface a custom role can never reach, no matter which permissions it
+/// holds, so new ones must not accumulate.
+///
+/// <b>Scope, deliberately matching issue #1452's ask:</b> this checks
+/// <see cref="AuthorizeAttribute.Roles"/> only, on REST controllers in the main API
+/// (<c>Farm.Web.Api</c>) and slicer host (<c>Farm.Slicer.Module.Api</c>) assemblies. It does
+/// <em>not</em> cover two related, pre-existing surfaces found during review, which are
+/// deliberately left out of this test's scope rather than being silently swept into its
+/// allowlist:
+/// <list type="bullet">
+/// <item>Policy-based role aliases such as <c>[Authorize(Policy = "farm_admin")]</c> or
+/// <c>[Authorize(Policy = "RequireAdmin")]</c> (registered via <c>policy.RequireRole(...)</c> in
+/// <c>AuthenticationStartup.cs</c>) are functionally equivalent role-name gates, but are a much
+/// larger, pre-existing surface that #1451 did not migrate. Closing that gap needs its own
+/// migration effort and is tracked as follow-up issue #1467, not folded into this test's
+/// allowlist.</item>
+/// <item>SignalR Hub methods (e.g. <c>HarvestHub</c>) are not <see cref="ControllerBase"/>
+/// -derived and are out of scope for "API controllers" as the issue describes them.</item>
+/// </list>
 /// </summary>
 public sealed class AuthorizeRolesGateArchitectureTests
 {
@@ -22,8 +40,8 @@ public sealed class AuthorizeRolesGateArchitectureTests
     /// Explicit, minimal allowlist for genuine exceptions. Each entry MUST carry a written
     /// reason as an inline comment explaining why a role-name gate (not a
     /// <c>[RequirePermission]</c> permission gate) is correct for that member. Entries are
-    /// "Namespace.Type" for a type-level gate, or "Namespace.Type.Method" for a method-level
-    /// gate.
+    /// "Namespace.Type" for a type-level gate, or "Namespace.Type.Method(paramType1,paramType2)"
+    /// for a method-level gate (parameter types are required to disambiguate overloads).
     /// </summary>
     private static readonly HashSet<string> AllowedRoleGates = new(StringComparer.Ordinal)
     {
@@ -46,15 +64,25 @@ public sealed class AuthorizeRolesGateArchitectureTests
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
+            // Scan every controller-related type — including abstract base controllers and
+            // non-public controllers — not just concrete public leaf controllers. A role-name
+            // gate declared on a shared abstract base (e.g. CalibrationControllerBase) applies
+            // to every derived concrete controller just as much as one declared directly, and
+            // must be caught here too.
             foreach (Type type in assembly.GetTypes())
             {
-                if (!IsApiController(type))
+                if (!typeof(ControllerBase).IsAssignableFrom(type))
                 {
                     continue;
                 }
 
                 string typeDisplayName = type.FullName ?? type.Name;
 
+                // inherit: false is intentional and safe here: because every ControllerBase-
+                // derived type (abstract or concrete) is scanned individually, an attribute
+                // declared on a base type is discovered when that base type itself is visited,
+                // not via inheritance on a derived type — avoiding duplicate offender reports
+                // for the same declared attribute.
                 CollectRoleGateOffenses(type, typeDisplayName, offenders);
 
                 foreach (MethodInfo method in type.GetMethods(
@@ -62,7 +90,13 @@ public sealed class AuthorizeRolesGateArchitectureTests
                     | BindingFlags.Instance | BindingFlags.Static
                     | BindingFlags.DeclaredOnly))
                 {
-                    CollectRoleGateOffenses(method, $"{typeDisplayName}.{method.Name}", offenders);
+                    string parameterSignature = string.Join(
+                        ',',
+                        method.GetParameters().Select(p => p.ParameterType.Name));
+                    CollectRoleGateOffenses(
+                        method,
+                        $"{typeDisplayName}.{method.Name}({parameterSignature})",
+                        offenders);
                 }
             }
         }
@@ -75,16 +109,6 @@ public sealed class AuthorizeRolesGateArchitectureTests
             "[RequirePermission(resource, action)] on the offending member(s), or add a " +
             "documented, reasoned entry to AllowedRoleGates if a genuine exception applies. " +
             $"Offenders: {string.Join(", ", offenders)}");
-    }
-
-    private static bool IsApiController(Type type)
-    {
-        if (type.IsAbstract || !type.IsPublic)
-        {
-            return false;
-        }
-
-        return typeof(ControllerBase).IsAssignableFrom(type);
     }
 
     private static void CollectRoleGateOffenses(
