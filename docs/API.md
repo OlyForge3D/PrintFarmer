@@ -318,6 +318,13 @@ Key properties:
   against the target owner's live roles and grants, and re-intersected on every
   exchange. Losing a permission drops only the affected scopes; unrelated
   model/library scopes are retained.
+- **Today, calibration keys must be owned by a `farm_admin`.** There is no API or
+  UI yet for granting individual role permissions (tracked as epic #1445), so
+  `farm_admin` members are the only users who hold the calibration, slicing, and
+  queue permissions. Creating such a key for a `farm_user` returns `400`, and an
+  already-issued one would have those scopes dropped at exchange. The owner
+  intersection is unconditional either way, and an admin-owned exchanged token
+  still carries no role claim.
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
@@ -353,8 +360,7 @@ Content-Type: application/json
 prerequisites are missing (`CalibrationGenerate` also needs `CalibrationRead`,
 `SlicingSubmit`, and `SlicingReadArtifact`; queue mutations need `QueueRead`;
 `QueueAcknowledgeBedClear` also needs `QueueStart`), when an unknown or composite
-scope name is supplied, or when both `scopeNames` and `scopes` are set. See
-[`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
+scope name is supplied, or when both `scopeNames` and `scopes` are set. See[`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
 for the full scope-to-permission table.
 
 ### Calibration generation core
