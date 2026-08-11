@@ -119,7 +119,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CalibrationRoutes_InMicroservicesDeployment_ReturnProfileServiceUnavailable()
+    public async Task CalibrationRoutes_InMicroservicesDeployment_KeepCandidatesIndependentOfProfiles()
     {
         await using SlicerDisabledWebApplicationFactory microservicesFactory = new(
             "microservices",
@@ -130,21 +130,23 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
             });
         using HttpClient client = microservicesFactory.CreateClient();
 
-        foreach (string route in new[]
-                 {
-                     "/api/printers/calibration-candidates",
-                     $"/api/printers/{Guid.NewGuid()}/calibration-context?slicerType=OrcaSlicer",
-                 })
+        HttpResponseMessage candidates =
+            await client.GetAsync("/api/printers/calibration-candidates");
+        string candidatesBody = await candidates.Content.ReadAsStringAsync();
+        _ = candidates.StatusCode.Should().Be(HttpStatusCode.OK, candidatesBody);
+        using (JsonDocument document = JsonDocument.Parse(candidatesBody))
         {
-            HttpResponseMessage response = await client.GetAsync(route);
-            string body = await response.Content.ReadAsStringAsync();
+            _ = document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        }
 
-            _ = response.StatusCode.Should().Be(
-                HttpStatusCode.ServiceUnavailable,
-                body);
-            using JsonDocument document = JsonDocument.Parse(body);
+        HttpResponseMessage context = await client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/calibration-context?slicerType=OrcaSlicer");
+        string contextBody = await context.Content.ReadAsStringAsync();
+        _ = context.StatusCode.Should().Be(HttpStatusCode.NotFound, contextBody);
+        using (JsonDocument document = JsonDocument.Parse(contextBody))
+        {
             _ = document.RootElement.GetProperty("code").GetString()
-                .Should().Be("profile_service_unavailable");
+                .Should().Be("printer_not_found");
         }
 
         using JsonDocument capabilities =

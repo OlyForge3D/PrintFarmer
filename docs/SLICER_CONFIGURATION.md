@@ -333,10 +333,12 @@ internal hop:
   forwards the caller's own bearer token; it mints no service credential and logs neither the token
   nor the internal address.
 
-Because Desktop API-key exchange tokens carry only `scope` claims and no permission claims, they
-cannot satisfy `calibration:read`. PrintFarmerDesktop must use a normal login/session token for
-calibration discovery. See `docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and
-verification steps.
+Current servers without permission-backed Desktop scopes issue exchange tokens with only `scope`
+claims, so PrintFarmerDesktop must use a normal login/session token for
+calibration discovery. Newer servers may accept explicitly provisioned, owner-authorized
+`CalibrationRead` keys whose exchange token includes the exact `calibration:read` permission.
+The slicer host enforces that permission for both token sources. See
+`docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and verification steps.
 
 ## Support
 

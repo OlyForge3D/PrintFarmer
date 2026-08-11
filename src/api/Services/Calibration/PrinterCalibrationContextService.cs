@@ -59,12 +59,6 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
-        if (profileResolver is null ||
-            !await profileResolver.IsAvailableAsync(cancellationToken))
-        {
-            return new(null, "profile_service_unavailable");
-        }
-
         List<Printer> printers = await dbContext.Printers
             .AsNoTracking()
             .Where(printer => printer.IsEnabled)
@@ -77,17 +71,11 @@ public sealed class PrinterCalibrationContextService(
         List<CalibrationCandidateDto> candidates = new(printers.Count);
         foreach (Printer printer in printers)
         {
-            CalibrationEvaluation evaluation;
-            try
-            {
-                evaluation =
-                    await EvaluateAsync(printer, profileAccessScope, cancellationToken);
-            }
-            catch (CalibrationProfileResolverUnavailableException)
-            {
-                return new(null, "profile_service_unavailable");
-            }
-
+            CalibrationEvaluation evaluation = await EvaluateAsync(
+                printer,
+                profileAccessScope,
+                resolveProfiles: false,
+                cancellationToken);
             candidates.Add(evaluation.Candidate);
         }
 
@@ -101,12 +89,6 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
-        if (profileResolver is null ||
-            !await profileResolver.IsAvailableAsync(cancellationToken))
-        {
-            return new(null, "profile_service_unavailable");
-        }
-
         Printer? printer = await dbContext.Printers
             .AsNoTracking()
             .Where(candidate => candidate.Id == printerId && candidate.IsEnabled)
@@ -127,15 +109,23 @@ public sealed class PrinterCalibrationContextService(
                 printer.ConfigurationRevision);
         }
 
+        if (profileResolver is null)
+        {
+            return new(null, "profile_service_unavailable");
+        }
+
         CalibrationEvaluation evaluation;
         try
         {
-            evaluation =
-                await EvaluateAsync(printer, profileAccessScope, cancellationToken);
+            evaluation = await EvaluateAsync(
+                printer,
+                profileAccessScope,
+                resolveProfiles: true,
+                cancellationToken);
         }
-        catch (CalibrationProfileResolverUnavailableException)
+        catch (CalibrationProfileResolverUnavailableException exception)
         {
-            return new(null, "profile_service_unavailable");
+            return new(null, exception.ErrorCode);
         }
 
         DateTime capturedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
@@ -259,6 +249,7 @@ public sealed class PrinterCalibrationContextService(
     private async Task<CalibrationEvaluation> EvaluateAsync(
         Printer printer,
         CalibrationProfileAccessScope profileAccessScope,
+        bool resolveProfiles,
         CancellationToken cancellationToken)
     {
         List<CalibrationRejectionReasonDto> reasons = [];
@@ -397,14 +388,15 @@ public sealed class PrinterCalibrationContextService(
             reasons,
             missingInputs);
 
-        CalibrationProfileEvaluation profileEvaluation =
-            await EvaluateProfilesAsync(
+        CalibrationProfileEvaluation profileEvaluation = resolveProfiles
+            ? await EvaluateProfilesAsync(
                 printer,
                 physicalToolheads,
                 reasons,
                 missingInputs,
                 profileAccessScope,
-                cancellationToken);
+                cancellationToken)
+            : CalibrationProfileEvaluation.Empty;
 
         CalibrationCandidateDto candidate = new()
         {

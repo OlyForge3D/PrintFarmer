@@ -18,7 +18,6 @@ public sealed class PrinterCalibrationController(
 {
     [HttpGet("calibration-candidates")]
     [ProducesResponseType(typeof(IReadOnlyList<CalibrationCandidateDto>), StatusCodes.Status200OK)]
-    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetCandidatesAsync(
         CancellationToken cancellationToken)
     {
@@ -89,6 +88,14 @@ public sealed class PrinterCalibrationController(
                 (StatusCodes.Status503ServiceUnavailable, "Printer status unavailable"),
             "profile_service_unavailable" =>
                 (StatusCodes.Status503ServiceUnavailable, "Profile service unavailable"),
+            "profile_service_authentication_failed" =>
+                (StatusCodes.Status503ServiceUnavailable, "Profile service authentication failed"),
+            "profile_service_authorization_failed" =>
+                (StatusCodes.Status503ServiceUnavailable, "Profile service authorization failed"),
+            "profile_service_configuration_error" =>
+                (StatusCodes.Status503ServiceUnavailable, "Profile service configuration error"),
+            "profile_service_timeout" =>
+                (StatusCodes.Status503ServiceUnavailable, "Profile service timed out"),
             _ =>
                 (StatusCodes.Status500InternalServerError, "Calibration context error"),
         };
