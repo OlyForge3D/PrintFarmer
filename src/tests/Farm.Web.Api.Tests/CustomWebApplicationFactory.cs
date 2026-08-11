@@ -232,6 +232,12 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
     }
 
     /// <summary>
+    /// Connection string of this factory's isolated in-memory SQLite database. Split-deployment
+    /// tests need it so a separate slicer-host test server can read the same profile tables.
+    /// </summary>
+    internal string TestConnectionString => _connectionString;
+
+    /// <summary>
     /// Cleans up temporary directories created during test setup.
     /// </summary>
     public override async ValueTask DisposeAsync()

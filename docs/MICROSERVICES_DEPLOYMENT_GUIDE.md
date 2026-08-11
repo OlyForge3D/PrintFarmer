@@ -126,6 +126,86 @@ After deployment, access PrintFarmer at:
    - API discovers printers via mDNS on host network
    - Reads local network configuration from ALLOWED_NETWORK_RANGES
 
+5. **API → Slicer Host (calibration profile resolution)**:
+   ```
+   api → http://slicer-host:5246/api/slicer/calibration/resolved-profiles
+   api → http://slicer-host:5246/healthz/calibration-resolver
+   ```
+   - In split/microservices mode the API does **not** load the slicer module, so it has no
+     in-process calibration profile store. It resolves the three explicitly selected
+     machine/process/filament profiles over this authenticated internal hop instead.
+   - The API forwards the **end user's own bearer token**; the slicer host validates it, requires
+     `calibration:read`, and derives ownership scope (including the audited farm-admin bypass)
+     from that token. No service-to-service credential is minted and the caller can never supply
+     a user id or ownership bypass.
+   - The availability probe carries no end-user token and returns no profile data. It is the only
+     thing `calibrationContextEnabled` trusts, so an unreachable slicer host fails closed.
+   - Configured by `SlicerHost__BaseUrl` on the `api` service (see below).
+
+## Calibration Profile Resolution (split deployments)
+
+`GET /api/printers/calibration-candidates` and
+`GET /api/printers/{id}/calibration-context?slicerType=OrcaSlicer` need a reachable calibration
+profile store. In a split deployment that store lives behind `slicer-host`, so both the API and the
+slicer host must be configured for the hop:
+
+| Service | Setting | Value |
+| --- | --- | --- |
+| `api` | `SlicerHost__BaseUrl` | `http://slicer-host:5246` (compose default; override with `SLICER_HOST_URL`) |
+| `api` + `slicer-host` | `Jwt__Key` | identical, unique, 32+ byte secret in both services |
+| `api` + `slicer-host` | `Jwt__Issuer` / `Jwt__Audience` | identical in both services |
+| `api` | `ASPNETCORE_ENVIRONMENT` | `Production` |
+| `api` | `DEVMODE_BYPASS_AUTH` | `false` |
+
+Optional bounds (`SlicerHost__ResolveTimeoutSeconds`, `SlicerHost__HealthTimeoutSeconds`,
+`SlicerHost__MaxResponseBytes`) have safe defaults; an out-of-range or malformed value fails the API
+startup rather than degrading silently. Leaving `SlicerHost__BaseUrl` unset keeps the previous
+fail-closed behaviour: calibration discovery answers `503 profile_service_unavailable` and
+`calibrationContextEnabled` stays `false`.
+
+### Rollout
+
+1. Apply database migrations for both the core and slicer schemas as usual for the release.
+2. Set the values in the table above in `.env` (or your secret manager). `Jwt__Key` **must** be the
+   same string in both services — a mismatch makes the slicer host reject every forwarded token and
+   calibration stays unavailable.
+3. Restart both services together so the API picks up the resolver configuration and the slicer host
+   exposes the resolution routes:
+   ```bash
+   docker compose up -d --force-recreate api slicer-host
+   ```
+4. Verify without leaking secrets:
+   ```bash
+   # From the API container: resolver availability (no end-user token needed).
+   docker exec printfarmer-api curl -fsS http://slicer-host:5246/healthz/calibration-resolver
+   # Expect: Healthy
+
+   # Public capability document must now report the context feature as operational.
+   curl -fsS http://<host>:5245/api/system/capabilities | jq '.deploymentMode, .calibrationContextEnabled'
+   # Expect: "split" and true
+
+   # Authenticated discovery (token from a normal login/session, not a Desktop exchange token).
+   curl -fsS -H "Authorization: Bearer <session-jwt>" \
+     http://<host>:5245/api/printers/calibration-candidates | jq 'length'
+   ```
+   The capability document never contains the slicer-host address, and neither service logs the
+   forwarded token.
+
+### Caller permissions
+
+Candidate and context requests require an authenticated JWT carrying `calibration:read` (or the
+`farm_admin` role). Desktop API-key exchange tokens deliberately carry only `scope` claims and no
+permission claims (see `docs/SLICER_CONFIGURATION.md`), so they cannot read calibration candidates —
+PrintFarmerDesktop must use a normal login/session token for calibration discovery.
+
+### Environment correction
+
+Production deployments must run the API with `ASPNETCORE_ENVIRONMENT=Production` and
+`DEVMODE_BYPASS_AUTH=false`. Running production on `Development` relaxes JWT signing-key validation
+(`AuthenticationStartup.ValidateJwtKey` skips the placeholder and minimum-length checks outside
+Production) and, with the dev bypass enabled, allows unauthenticated GET requests. Neither is
+acceptable on a production farm.
+
 ## Database Setup
 
 ### PostgreSQL (Recommended)

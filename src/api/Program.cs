@@ -205,6 +205,12 @@ if (slicerModuleEnabled)
     builder.Services.AddSlicerHostAdapters();
 }
 
+// Calibration profile resolution. Monolith hosts keep the local database-backed resolver registered
+// by AddSlicerModule; split/microservices hosts get the authenticated HTTP adapter that reaches the
+// slicer host owning the profile store (otherwise no resolver exists and calibration discovery
+// returns profile_service_unavailable).
+builder.Services.AddCalibrationProfileResolution(builder.Configuration);
+
 builder.Services.AddEndpointsApiExplorer();
 
 // Native OpenAPI builds schemas from Http.Json metadata. MVC controller serialization is configured separately.

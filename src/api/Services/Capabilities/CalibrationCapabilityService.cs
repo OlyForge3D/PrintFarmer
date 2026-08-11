@@ -121,8 +121,7 @@ public sealed class CalibrationCapabilityService(
         ICalibrationProfileResolver? profileResolver =
             _serviceProvider.GetService<ICalibrationProfileResolver>();
         bool calibrationContextOperational =
-            profileResolver is not null &&
-            await profileResolver.IsAvailableAsync(cancellationToken);
+            await IsProfileResolverAvailableAsync(profileResolver, cancellationToken);
 
         // Promotion is only advertised when routing, library storage, the durable outbox and the
         // reconciler are all usable in this deployment. Split hosts without artifact routing stay false.
@@ -250,6 +249,41 @@ public sealed class CalibrationCapabilityService(
             EffectivePermissions = effectivePermissions,
             EffectiveCapabilities = effectiveCapabilities,
         };
+    }
+
+    /// <summary>
+    /// Probes the calibration profile resolver without letting its failure mode reach the caller.
+    /// </summary>
+    /// <param name="profileResolver">The registered resolver, if any.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns><see langword="true"/> only when a registered resolver proves it is usable.</returns>
+    /// <remarks>
+    /// The capability document is public and must degrade rather than fail. A split deployment
+    /// resolves profiles over an internal HTTP hop, so this probe can raise transport exceptions
+    /// that the other capability probes here never had to consider.
+    /// </remarks>
+    private async Task<bool> IsProfileResolverAvailableAsync(
+        ICalibrationProfileResolver? profileResolver,
+        CancellationToken cancellationToken)
+    {
+        if (profileResolver is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            return await profileResolver.IsAvailableAsync(cancellationToken);
+        }
+        catch (Exception exception) when (
+            exception is not OperationCanceledException ||
+            !cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Capability discovery could not evaluate calibration profile resolution ({ExceptionType})",
+                exception.GetType().Name);
+            return false;
+        }
     }
 
     private async Task<WorkerHealthSnapshot> GetWorkerHealthAsync(
@@ -423,6 +457,19 @@ public sealed class CalibrationCapabilityService(
                 Message = "Slicing is disabled for this deployment.",
             });
         }
+        else if (!workerHealth.RegistryAvailable)
+        {
+            // Ordered before the credential check on purpose: CredentialedWorkerCount is 0 both when
+            // no worker holds a key and when the registry could not be read at all. Reporting
+            // "authentication not configured" for an unobservable registry sent operators to rotate
+            // worker keys for what is actually a persistence outage.
+            reasons.Add(new()
+            {
+                Feature = "slicing",
+                Code = "slicer_registry_unavailable",
+                Message = "The slicer registry is not currently available.",
+            });
+        }
         else if (!workerAuthenticationConfigured)
         {
             reasons.Add(new()
@@ -430,15 +477,6 @@ public sealed class CalibrationCapabilityService(
                 Feature = "slicing",
                 Code = "worker_authentication_not_configured",
                 Message = "Authenticated slicer worker communication is not configured.",
-            });
-        }
-        else if (!workerHealth.RegistryAvailable)
-        {
-            reasons.Add(new()
-            {
-                Feature = "slicing",
-                Code = "slicer_registry_unavailable",
-                Message = "The slicer registry is not currently available.",
             });
         }
         else if (!slicingOperational)
