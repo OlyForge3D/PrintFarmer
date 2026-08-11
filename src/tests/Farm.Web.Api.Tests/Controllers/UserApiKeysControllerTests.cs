@@ -550,6 +550,52 @@ public class UserApiKeysControllerTests
         _store.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Mutual exclusion must key off field <b>presence</b>, not off whether the value happens to be
+    /// empty. Both of these send both fields, and in each case the caller could reasonably believe
+    /// the other field governed what was stored.
+    /// </summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_WithEmptyScopeNamesAndLegacyScopes_IsRejected()
+    {
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop, ApiKeyScope.ModelRead, ScopeNames: []);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value!.ToString().Should().Contain("not both");
+        _store.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task CreateApiKeyAsync_WithScopeNamesAndLegacyNoneScope_IsRejected()
+    {
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop, ApiKeyScope.None, ScopeNames: ["ModelRead"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value!.ToString().Should().Contain("not both");
+        _store.Should().BeEmpty();
+    }
+
+    /// <summary>Each field alone still works, so neither client generation is broken.</summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_WithEitherScopeFieldAlone_IsAccepted()
+    {
+        IActionResult legacyOnly = await _controller.CreateApiKeyAsync(
+            _userId, new CreateApiKeyRequest("legacy", ApiKeyPurpose.Desktop, ApiKeyScope.ModelRead));
+        Assert.IsType<OkObjectResult>(legacyOnly);
+
+        IActionResult namesOnly = await _controller.CreateApiKeyAsync(
+            _userId, new CreateApiKeyRequest("canonical", ApiKeyPurpose.Desktop, ScopeNames: ["ModelWrite"]));
+        Assert.IsType<OkObjectResult>(namesOnly);
+
+        _store.Should().HaveCount(2);
+        _store[0].Scopes.Should().Be(ApiKeyScope.ModelRead);
+        _store[1].Scopes.Should().Be(ApiKeyScope.ModelWrite);
+    }
+
     [Theory]
     [InlineData("All")]
     [InlineData("None")]
