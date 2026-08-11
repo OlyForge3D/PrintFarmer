@@ -392,6 +392,9 @@ public static class ServiceCollectionExtensions
     private static void RegisterTelemetryAndLogging(IServiceCollection services)
     {
         ActivitySource activitySource = new("PrintFarmer.API");
+
+        // Registered via factory delegate (not the instance overload) so the DI container
+        // takes ownership and disposes this singleton at application shutdown.
         _ = services.AddSingleton(_ => activitySource);
 
         // Telemetry service (thread-safe, manages Meter/ActivitySource lifetimes)

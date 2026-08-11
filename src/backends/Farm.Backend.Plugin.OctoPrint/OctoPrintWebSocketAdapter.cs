@@ -390,11 +390,11 @@ public sealed class OctoPrintWebSocketAdapter(
     {
         try
         {
-            var request = new HttpRequestMessage(HttpMethod.Post, $"{_printer.ServerUrl}/api/login");
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{_printer.ServerUrl}/api/login");
             request.Headers.Add("X-Api-Key", _printer.Credential?.ApiKey);
             request.Content = new StringContent("{\"passive\":true}", Encoding.UTF8, "application/json");
 
-            HttpResponseMessage response = await _octoPrintClient.SendAsync(request, ct);
+            using HttpResponseMessage response = await _octoPrintClient.SendAsync(request, ct);
             response.EnsureSuccessStatusCode();
 
             string content = await response.Content.ReadAsStringAsync(ct);

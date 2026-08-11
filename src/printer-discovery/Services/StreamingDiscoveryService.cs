@@ -153,7 +153,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
             DateTime lastProgressUpdate = DateTime.UtcNow;
 
             // Use batched parallel scanning with progress updates
-            SemaphoreSlim semaphore = new(maxConcurrent);
+            using SemaphoreSlim semaphore = new(maxConcurrent);
             List<Task> tasks = new();
 
             foreach (string ip in ipAddresses)
