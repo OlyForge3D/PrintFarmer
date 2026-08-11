@@ -693,11 +693,13 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         generate.StatusCode.Should().NotBe(
             HttpStatusCode.Forbidden,
             "calibration:generate + slicing:submit are both present");
+        generate.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
 
         HttpResponseMessage catalogRead = await client.GetAsync("/api/slicer/profiles");
         catalogRead.StatusCode.Should().NotBe(
             HttpStatusCode.Forbidden,
             "profile catalog reads stay reachable for submit, and this is disclosed");
+        catalogRead.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
     }
 
     /// <summary>
@@ -723,16 +725,21 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         upload.StatusCode.Should().NotBe(
             HttpStatusCode.Forbidden,
             "an interactive session's existing access must be unchanged");
+        upload.StatusCode.Should().NotBe(
+            HttpStatusCode.Unauthorized,
+            "a 401 would mean the fixture client is not authenticated, which would make the assertion above pass vacuously");
 
         using HttpResponseMessage update = await client.PutAsJsonAsync(
             $"/api/slicer/profiles/custom/{Guid.NewGuid()}",
             new { name = "renamed" });
         update.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+        update.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
 
         using HttpResponseMessage clone = await client.PostAsJsonAsync(
             "/api/slicer/profiles/clone",
             new { sourceProfileId = Guid.NewGuid(), profileType = "process" });
         clone.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+        clone.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
     }
 
     #endregion
