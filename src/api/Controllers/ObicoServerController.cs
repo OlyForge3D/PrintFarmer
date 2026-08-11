@@ -331,7 +331,24 @@ public class ObicoServerController : ControllerBase
 
             using HttpClient httpClient = _httpClientFactory.CreateClient(VettedEgressClientName);
             httpClient.Timeout = TimeSpan.FromSeconds(10);
-            httpClient.BaseAddress = new Uri(server.Url.TrimEnd('/') + "/");
+
+            // Reuse the exact address the egress guard just vetted rather than letting the
+            // outbound connection re-resolve the hostname independently — otherwise a
+            // DNS-rebinding attacker could swap the record between the check above and this
+            // connection. The original hostname is preserved via the Host header for
+            // virtual-hosting/TLS SNI correctness.
+            if (egressCheck.ResolvedAddress is not null && egressCheck.Uri is not null)
+            {
+                Uri pinnedUri = EgressGuard.CreatePinnedUri(egressCheck.Uri, egressCheck.ResolvedAddress);
+                httpClient.BaseAddress = new Uri(pinnedUri.ToString().TrimEnd('/') + "/");
+                httpClient.DefaultRequestHeaders.Host = egressCheck.Uri.IsDefaultPort
+                    ? egressCheck.Uri.Host
+                    : $"{egressCheck.Uri.Host}:{egressCheck.Uri.Port}";
+            }
+            else
+            {
+                httpClient.BaseAddress = new Uri(server.Url.TrimEnd('/') + "/");
+            }
 
             if (!string.IsNullOrWhiteSpace(server.ApiKey))
             {

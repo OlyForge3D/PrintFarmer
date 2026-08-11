@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Telemetry;
