@@ -2,6 +2,7 @@
 using System.IO;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Settings;
@@ -78,7 +79,7 @@ public class OctoPrintCompatController : ControllerBase
 
         _logger.LogInformation(
             "OctoPrint upload request: ContentType={ContentType}, ContentLength={ContentLength}, print={Print}, select={Select}, printerId={PrinterId}",
-            Request.ContentType, Request.ContentLength, print, select, printerId);
+            LogSanitizer.Sanitize(Request.ContentType), Request.ContentLength, print, select, LogSanitizer.Sanitize(printerId?.ToString()));
 
         // API key validation is handled by the action's [OctoPrintApiKey] filter.
 
@@ -88,7 +89,7 @@ public class OctoPrintCompatController : ControllerBase
         RateLimitResult rateResult = await _rateLimitService.CheckOctoPrintUploadLimitAsync(rateKey, _settings.RateLimitPerMinute);
         if (!rateResult.IsAllowed)
         {
-            _logger.LogWarning("Rate limit exceeded for {Key}", rateKey);
+            _logger.LogWarning("Rate limit exceeded for {Key}", LogSanitizer.Sanitize(rateKey));
             return StatusCode(429, new { message = "Rate limit exceeded" });
         }
 
@@ -96,7 +97,7 @@ public class OctoPrintCompatController : ControllerBase
 
         if (!Request.HasFormContentType)
         {
-            _logger.LogWarning("OctoPrint upload rejected: not multipart/form-data. ContentType={ContentType}", Request.ContentType);
+            _logger.LogWarning("OctoPrint upload rejected: not multipart/form-data. ContentType={ContentType}", LogSanitizer.Sanitize(Request.ContentType));
             return BadRequest(new { message = "No file uploaded - expected multipart/form-data" });
         }
 
@@ -211,7 +212,7 @@ public class OctoPrintCompatController : ControllerBase
 
                 _logger.LogInformation(
                     "OctoPrint upload+print: file={FileName}, jobId={JobId}, assignedPrinter={PrinterName} ({PrinterId})",
-                    file.FileName, job.Id, job.AssignedPrinterName, job.AssignedPrinterId);
+                    file.FileName, job.Id, job.AssignedPrinterName, LogSanitizer.Sanitize(job.AssignedPrinterId?.ToString()));
 
                 return Accepted(new { file = uploadDto, jobId = job.Id, status = "Queued", assignedPrinter = job.AssignedPrinterName });
             }

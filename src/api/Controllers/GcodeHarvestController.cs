@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
 using Farm.Infrastructure.Services.Printers;
@@ -565,24 +566,24 @@ public class GcodeHarvestController(
 
         try
         {
-            _logger.LogInformation("Harvesting single file '{Filename}' on printer {PrinterId}", filename, printerId);
+            _logger.LogInformation("Harvesting single file '{Filename}' on printer {PrinterId}", LogSanitizer.Sanitize(filename), printerId);
 
             // Call the harvest service to download, process, and add file to library
             GcodeHarvestResultDto result = await _harvestService.HarvestSingleFileDirectAsync(printerId, filename, ct);
 
             if (!result.Success)
             {
-                _logger.LogWarning("Failed to harvest file '{Filename}': {Message}", filename, result.Message);
+                _logger.LogWarning("Failed to harvest file '{Filename}': {Message}", LogSanitizer.Sanitize(filename), LogSanitizer.Sanitize(result.Message));
                 return BadRequest(result);
             }
 
-            _logger.LogInformation("Successfully harvested file '{Filename}' with ID {FirstOrDefault}", filename, result.ImportedFileIds.FirstOrDefault());
+            _logger.LogInformation("Successfully harvested file '{Filename}' with ID {FirstOrDefault}", LogSanitizer.Sanitize(filename), result.ImportedFileIds.FirstOrDefault());
 
             return Ok(result);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to harvest file '{Filename}' on printer {PrinterId}: {Message}", filename, printerId, ex.Message);
+            _logger.LogError(ex, "Failed to harvest file '{Filename}' on printer {PrinterId}: {Message}", LogSanitizer.Sanitize(filename), printerId, LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to harvest file");
         }
     }

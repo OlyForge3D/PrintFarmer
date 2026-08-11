@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.Extensions.Logging;
@@ -138,7 +139,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error finding location with name '{Name}'", name);
+            _logger.LogError(ex, "Error finding location with name '{Name}'", LogSanitizer.Sanitize(name));
             throw;
         }
     }
@@ -221,7 +222,7 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.AddAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Location '{LocationName}' created at path '{Path}'", location.Name, location.Path);
+            _logger.LogInformation("Location '{LocationName}' created at path '{Path}'", LogSanitizer.Sanitize(location.Name), LogSanitizer.Sanitize(location.Path));
 
             return ToLocationDto(location);
         }
@@ -283,7 +284,7 @@ public class LocationService : ILocationService
             await _unitOfWork.Locations.UpdateAsync(location, ct);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Location '{LocationName}' updated successfully", location.Name);
+            _logger.LogInformation("Location '{LocationName}' updated successfully", LogSanitizer.Sanitize(location.Name));
 
             return ToLocationDto(location);
         }
@@ -631,7 +632,7 @@ public class LocationService : ILocationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error moving location {Id} to parent {NewParentId}", id, newParentId);
+            _logger.LogError(ex, "Error moving location {Id} to parent {NewParentId}", id, LogSanitizer.Sanitize(newParentId?.ToString()));
             throw;
         }
     }
