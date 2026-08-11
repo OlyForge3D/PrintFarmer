@@ -288,13 +288,14 @@ logged. The lifetime is independent of, and much shorter than, the API key's own
 
 ### Scopes and permissions
 
-A Desktop key carries explicitly selected scopes. They fall into two groups:
+A Desktop key carries explicitly selected scopes. They fall into four groups:
 
 | Group | Scopes | How they authorize |
 |---|---|---|
 | Model/library | `ModelRead`, `ModelWrite`, `LibrarySync` | Scope policies only. **Never** become permission claims. |
 | Calibration | `CalibrationRead`, `CalibrationCreate`, `CalibrationUpdate`, `CalibrationDelete`, `CalibrationGenerate`, `CalibrationPublish` | Each maps to exactly one `calibration:*` permission claim. |
-| Slicing | `SlicingSubmit`, `SlicingReadArtifact` | `slicing:submit`, `slicing:read-artifact`. || Print queue | `QueueRead`, `QueueWrite`, `QueueStart`, `QueueCancel`, `QueueAcknowledgeBedClear` | The matching `queue:*` permission claim. |
+| Slicing | `SlicingSubmit`, `SlicingReadArtifact` | `slicing:submit`, `slicing:read-artifact`. |
+| Print queue | `QueueRead`, `QueueWrite`, `QueueStart`, `QueueCancel`, `QueueAcknowledgeBedClear` | The matching `queue:*` permission claim. |
 
 `queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and `obico:manage` are
 deliberately **not** reachable from any Desktop scope.
@@ -353,6 +354,22 @@ A key can never grant more authority than its owner has.
   survives. The requested, effective, and dropped scope names and the granted permissions are
   recorded in the audit log (never the key, its hash, or the token). Revocation therefore takes
   effect on the next exchange, bounded by the ≤15-minute token lifetime.
+
+> **Who can own a calibration-scoped key today.** The owner-authority intersection above is
+> mandatory and unconditional, but PrintFarmer currently has **no API or UI for granting individual
+> role permissions** — that gap is tracked separately as epic #1445 and is deliberately out of scope
+> here. Until it lands, the only owners who hold the calibration, slicing, and queue permissions are
+> members of the built-in `farm_admin` role, so **a calibration-scoped Desktop key must be owned by
+> a `farm_admin` user**. A `farm_user` cannot obtain effective calibration claims today: creating
+> such a key for them returns `400`, and if they were somehow issued one, the exchange-time
+> intersection would drop every calibration scope. This is an operational constraint on *who may own
+> the key*, not a relaxation of the rule — an admin-owned exchanged token still carries no role
+> claim and only the scopes explicitly selected on that key.
+>
+> **Revocation latency differs by token type.** An exchanged Desktop token is capped at 15 minutes,
+> so a permission change takes effect on the next exchange. An ordinary login JWT carries its
+> permission claims for up to 7 days; #1445 covers the `ALL_TOKENS_` revocation path for that case.
+> Nothing in this feature extends the exchange token's lifetime.
 
 ### Credential management requires an interactive session
 

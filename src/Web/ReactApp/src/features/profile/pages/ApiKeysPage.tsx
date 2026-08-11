@@ -592,7 +592,8 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                     </legend>
                     <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">
                       Select only what this key needs. Each option grants exactly one permission, and the
-                      server will reject any scope the key&apos;s owner is not already authorized for.
+                      server will reject any scope the key&apos;s owner is not already authorized for —
+                      today that means calibration, slicing, and queue scopes require a farm admin owner.
                     </p>
                     {fieldErrors.scopes && (
                       <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">
