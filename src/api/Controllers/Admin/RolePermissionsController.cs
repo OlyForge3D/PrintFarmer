@@ -1,7 +1,7 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Dtos;
 using Farm.Web.Api.Services.Admin;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Controllers.Admin;
@@ -13,7 +13,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/roles")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("roles", "admin")]
 [Tags("Admin - Roles")]
 public sealed class RolePermissionsController(IRolePermissionService rolePermissionService) : ControllerBase
 {
