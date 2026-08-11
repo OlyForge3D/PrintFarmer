@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Assets;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Assets;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -38,14 +39,14 @@ public sealed class AssetsController(IAssetService assetService, ILogger<AssetsC
     {
         if (string.IsNullOrWhiteSpace(manufacturerId) || string.IsNullOrWhiteSpace(modelId))
         {
-            _logger.LogWarning("[AssetsController] Invalid parameters: {ManufacturerId}/{ModelId}", manufacturerId, modelId);
+            _logger.LogWarning("[AssetsController] Invalid parameters: {ManufacturerId}/{ModelId}", LogSanitizer.Sanitize(manufacturerId), LogSanitizer.Sanitize(modelId));
             return BadRequest("Manufacturer ID and Model ID are required");
         }
 
         PrinterAssetDto? asset = await _assetService.GetPrinterAssetAsync(manufacturerId, modelId, ct);
         if (asset == null)
         {
-            _logger.LogInformation("[AssetsController] Asset not found: {ManufacturerId}/{ModelId}", manufacturerId, modelId);
+            _logger.LogInformation("[AssetsController] Asset not found: {ManufacturerId}/{ModelId}", LogSanitizer.Sanitize(manufacturerId), LogSanitizer.Sanitize(modelId));
             return NotFound();
         }
 

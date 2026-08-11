@@ -2,6 +2,7 @@
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Users;
 using Fido2NetLib;
 using Fido2NetLib.Objects;
@@ -150,7 +151,7 @@ public class PasskeyService(
 
         if (credential is null)
         {
-            logger.LogWarning("Passkey assertion failed — no stored credential for {Username}", username);
+            logger.LogWarning("Passkey assertion failed — no stored credential for {Username}", LogSanitizer.Sanitize(username));
             return new AuthenticationResult(false, Error: "Credential not found.");
         }
 
@@ -158,8 +159,8 @@ public class PasskeyService(
         {
             logger.LogWarning(
                 "Passkey assertion rejected — credential belongs to {Owner}, not {Requester}",
-                credential.User.Username,
-                username);
+                LogSanitizer.Sanitize(credential.User.Username),
+                LogSanitizer.Sanitize(username));
             return new AuthenticationResult(false, Error: "Credential not found.");
         }
 
@@ -185,7 +186,7 @@ public class PasskeyService(
 
         logger.LogInformation(
             "Passkey login successful for {Username} (credentialId={CredentialId}, newSignCount={SignCount})",
-            username,
+            LogSanitizer.Sanitize(username),
             Convert.ToBase64String(credential.CredentialId),
             assertionResult.SignCount);
 
@@ -240,7 +241,7 @@ public class PasskeyService(
         credential.DeviceName = newName;
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Passkey credential {CredentialId} renamed to '{NewName}' for user {UserId}", credentialId, newName, userId);
+        logger.LogInformation("Passkey credential {CredentialId} renamed to '{NewName}' for user {UserId}", credentialId, LogSanitizer.Sanitize(newName), userId);
         return true;
     }
 

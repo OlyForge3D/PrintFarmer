@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.AspNetCore.Mvc;
 using PrinterDiscovery.Services;
 
@@ -39,8 +40,8 @@ public class DiscoveryController(
             _logger.LogInformation(
                 "Starting streaming discovery with session {SessionId}, Subnets: {Subnets}, Backends: {Backends}, Timeout: {Timeout}ms, MaxConcurrent: {MaxConcurrent}",
                 sessionId,
-                request?.Subnets != null ? string.Join(", ", request.Subnets) : "default",
-                request?.Backends != null ? string.Join(", ", request.Backends) : "all",
+                request?.Subnets != null ? LogSanitizer.Sanitize(string.Join(", ", request.Subnets)) : "default",
+                request?.Backends != null ? LogSanitizer.Sanitize(string.Join(", ", request.Backends)) : "all",
                 request?.ProbeTimeoutMs?.ToString() ?? "default",
                 request?.MaxConcurrentProbes?.ToString() ?? "default");
 
@@ -92,13 +93,13 @@ public class DiscoveryController(
     {
         try
         {
-            _logger.LogInformation("Cancelling streaming discovery session {SessionId}", sessionId);
+            _logger.LogInformation("Cancelling streaming discovery session {SessionId}", LogSanitizer.Sanitize(sessionId));
             _streamingDiscoveryService.CancelSession(sessionId);
             return Ok(new { message = "Discovery session cancelled" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to cancel discovery session {SessionId}", sessionId);
+            _logger.LogError(ex, "Failed to cancel discovery session {SessionId}", LogSanitizer.Sanitize(sessionId));
             return StatusCode(500, new { error = "Failed to cancel discovery", message = ex.Message });
         }
     }

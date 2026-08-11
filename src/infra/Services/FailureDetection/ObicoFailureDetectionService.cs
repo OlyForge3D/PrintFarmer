@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Logging;
 
@@ -164,8 +165,8 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
 
             _logger.LogDebug(
                 "[ObicoFailureDetection] Requesting snapshot URL analysis from {ApiUrl}/{RequestPath}",
-                obicoServerUrl.TrimEnd('/'),
-                requestPath);
+                LogSanitizer.Sanitize(obicoServerUrl.TrimEnd('/')),
+                LogSanitizer.Sanitize(requestPath));
 
             HttpResponseMessage response = await httpClient.GetAsync(requestPath, ct);
             return await ParseResponseAsync(
@@ -213,7 +214,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             using HttpClient httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(_settingsService.Get<ObicoSettings>().AnalysisTimeoutSeconds);
 
-            _logger.LogDebug("[ObicoFailureDetection] Fetching image from {SnapshotUrl}", snapshotUrl);
+            _logger.LogDebug("[ObicoFailureDetection] Fetching image from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
 
             HttpResponseMessage response = await httpClient.GetAsync(snapshotUrl, ct);
 
@@ -242,12 +243,12 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "[ObicoFailureDetection] Failed to fetch snapshot from {SnapshotUrl}", snapshotUrl);
+            _logger.LogError(ex, "[ObicoFailureDetection] Failed to fetch snapshot from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
             return FailureDetectionResult.Error($"PrintFarmer could not download the camera snapshot: {ex.Message}");
         }
         catch (TaskCanceledException)
         {
-            _logger.LogWarning("[ObicoFailureDetection] Snapshot fetch timeout from {SnapshotUrl}", snapshotUrl);
+            _logger.LogWarning("[ObicoFailureDetection] Snapshot fetch timeout from {SnapshotUrl}", LogSanitizer.Sanitize(snapshotUrl));
             return FailureDetectionResult.Error("Snapshot fetch timeout. PrintFarmer could not download the camera snapshot in time.");
         }
         catch (Exception ex)

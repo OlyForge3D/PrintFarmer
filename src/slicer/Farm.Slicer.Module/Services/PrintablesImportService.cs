@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Dtos;
+﻿using Farm.Infrastructure.Logging;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -30,7 +31,7 @@ public sealed class PrintablesImportService(
     {
         string modelId = ParseModelId(printablesUrl);
 
-        _logger.LogInformation("Fetching Printables preview for model ID {ModelId} from {Url}", modelId, printablesUrl);
+        _logger.LogInformation("Fetching Printables preview for model ID {ModelId} from {Url}", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(printablesUrl));
 
         try
         {
@@ -72,7 +73,7 @@ public sealed class PrintablesImportService(
             throw new ArgumentException("Source URL must not be empty.", nameof(sourceUrl));
         }
 
-        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", modelId, sourceUrl);
+        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(sourceUrl));
 
         PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, sourceUrl, ct);
         List<PrintablesFileEntryDto> selectedFiles = SelectFilesForImport(preview, fileIds);
@@ -105,7 +106,7 @@ public sealed class PrintablesImportService(
         _logger.LogInformation(
             "Imported {ImportedCount} Printables file(s) from model {ModelId}",
             importedModels.Count,
-            modelId);
+            LogSanitizer.Sanitize(modelId));
 
         return importedModels;
     }
