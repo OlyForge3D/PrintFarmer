@@ -1184,6 +1184,8 @@ public class JobQueueController(
             message,
             jobETag = result.JobETag is not null ? Convert.ToBase64String(result.JobETag) : null,
             dispatchStateETag = result.DispatchStateETag is not null ? Convert.ToBase64String(result.DispatchStateETag) : null,
+            bedClearCommandId = result.BedClearCommandId,
+            bedClearIdempotencyKeySha256 = result.BedClearIdempotencyKeySha256,
         };
 
     private ObjectResult MapDispatchResponse(QueuedPrintJobDto result) =>

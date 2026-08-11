@@ -224,42 +224,16 @@ public class JobQueueService : IJobQueueService
     {
         List<PrintJob> jobs = await _dataService.GetPrintJobsForPrinterAsync(printerId, ct);
 
-        List<JobQueuePrintJobDto> dtos = jobs.Select(j => new JobQueuePrintJobDto
+        var dtos = new List<JobQueuePrintJobDto>(jobs.Count);
+        foreach (PrintJob job in jobs)
         {
-            Id = j.Id,
-            RowVersion = ToBase64RowVersion(j.RowVersion),
-            Revision = j.Revision,
-            GcodeFileId = j.GcodeFileId,
-            AssignedPrinterId = j.AssignedPrinterId,
-            Status = (PrintJobStatus?)j.Status,
-            Priority = (PrintJobPriority)j.Priority,
-            QueuePosition = 0,
-            RequiredNozzleDiameter = j.RequiredNozzleDiameter,
-            RequiredMaterialType = j.RequiredMaterialType,
-            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(j),
-            EstimatedPrintTime = j.EstimatedPrintTime,
-            EstimatedFilamentUsage = j.EstimatedFilamentUsage,
-            ActualStartTime = j.ActualStartTime,
-            ActualEndTime = j.ActualEndTime,
-            ActualPrintTime = j.ActualPrintTime,
-            ActualFilamentUsage = j.ActualFilamentUsage,
-            FailureReason = j.FailureReason,
-            EstimatedCost = j.EstimatedCost,
-            ActualCost = j.ActualCost,
-            Copies = j.Copies,
-            CompletedCopies = j.CompletedCopies,
-            RemainingCopies = j.RemainingCopies,
-            ProjectFileId = j.ProjectFileId,
-            PlateIndex = j.PlateIndex,
-            PlateName = j.PlateName,
-            DeadlineAtUtc = j.DeadlineAtUtc,
-            CreatedAt = j.CreatedAt,
-            UpdatedAt = j.UpdatedAt,
-            GcodeFileName = j.GcodeFile?.Name ?? string.Empty,
-            AssignedPrinterName = j.AssignedPrinter?.Name ?? string.Empty,
-            ToolheadUsages = MapToolheadUsages(j),
-            HarvestedAt = j.HarvestedAt
-        }).ToList();
+            JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
+                job,
+                job.GcodeFile?.Name ?? string.Empty,
+                job.AssignedPrinter?.Name ?? string.Empty);
+            await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
+            dtos.Add(dto);
+        }
 
         List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Infrastructure.PrintJobStatus.Queued || d.Status.Value == Farm.Infrastructure.PrintJobStatus.Assigned)).ToList();
         for (int i = 0; i < queued.Count; i++)
@@ -767,10 +741,13 @@ public class JobQueueService : IJobQueueService
             }
         }
 
-        return MapToJobQueuePrintJobDto(
+        JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
             job,
             gcode.Name,
             (await _dataService.GetAvailablePrintersAsync(ct)).Find(p => p.Id == assignedPrinterId)?.Name ?? "Unknown");
+        await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
+
+        return dto;
     }
 
     /// <summary>
@@ -786,6 +763,24 @@ public class JobQueueService : IJobQueueService
     /// </remarks>
     public async Task<JobQueuePrintJobDto?> GetJobAsync(Guid id, CancellationToken ct)
     {
+        if (_db?.Database.IsRelational() != true ||
+            _db.Database.CurrentTransaction is not null)
+        {
+            return await GetJobCoreAsync(id, ct);
+        }
+
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using ProviderSafeSerializableTransactionScope transaction =
+                await ProviderSafeSerializableTransaction.BeginAsync(_db, ct);
+            JobQueuePrintJobDto? dto = await GetJobCoreAsync(id, ct);
+            await transaction.CommitAsync(ct);
+            return dto;
+        });
+    }
+
+    private async Task<JobQueuePrintJobDto?> GetJobCoreAsync(Guid id, CancellationToken ct)
+    {
         PrintJob? job = await _dataService.GetPrintJobByIdAsync(id, ct);
 
         if (job is null)
@@ -793,21 +788,7 @@ public class JobQueueService : IJobQueueService
             return null;
         }
 
-        // The authoritative GET carries BOTH revision tokens so a client can supply
-        // If-Match for job mutations AND for dispatch-state (bed-clear) mutations.
-        string? dispatchStateEtag = null;
-        long? dispatchStateRevision = null;
         QueueDispatchAttempt? latestAttempt = null;
-        if (job.AssignedPrinterId.HasValue && _db is not null)
-        {
-            PrinterDispatchState? ds = await _db.PrinterDispatchStates
-                .AsNoTracking()
-                .FirstOrDefaultAsync(s => s.PrinterId == job.AssignedPrinterId.Value, ct);
-
-            dispatchStateEtag = ToBase64RowVersion(ds?.RowVersion);
-            dispatchStateRevision = ds?.Revision;
-        }
-
         if (_db is not null)
         {
             latestAttempt = await _db.QueueDispatchAttempts
@@ -818,55 +799,17 @@ public class JobQueueService : IJobQueueService
                 .FirstOrDefaultAsync(ct);
         }
 
-        JobQueuePrintJobDto dto = new()
-        {
-            Id = job.Id,
-            RowVersion = ToBase64RowVersion(job.RowVersion),
-            Revision = job.Revision,
-            DispatchStateRowVersion = dispatchStateEtag,
-            DispatchStateRevision = dispatchStateRevision,
-            JobKind = job.JobKind,
-            GcodeFileId = job.GcodeFileId,
-            GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
-            AssignedPrinterId = job.AssignedPrinterId,
-            AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-            Status = (PrintJobStatus?)job.Status,
-            Priority = (PrintJobPriority)job.Priority,
-            QueuePosition = job.QueuePosition,
-            RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-            RequiredMaterialType = job.RequiredMaterialType,
-            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
-            EstimatedPrintTime = job.EstimatedPrintTime,
-            EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-            ActualStartTime = job.ActualStartTime,
-            ActualEndTime = job.ActualEndTime,
-            ActualPrintTime = job.ActualPrintTime,
-            ActualFilamentUsage = job.ActualFilamentUsage,
-            FailureReason = job.FailureReason,
-            SpoolmanFilamentId = job.SpoolmanFilamentId,
-            FilamentName = job.FilamentName,
-            FilamentVendor = job.FilamentVendor,
-            FilamentColor = job.FilamentColor,
-            EstimatedCost = job.EstimatedCost,
-            ActualCost = job.ActualCost,
-            Copies = job.Copies,
-            CompletedCopies = job.CompletedCopies,
-            RemainingCopies = job.RemainingCopies,
-            ProjectFileId = job.ProjectFileId,
-            PlateIndex = job.PlateIndex,
-            PlateName = job.PlateName,
-            DeadlineAtUtc = job.DeadlineAtUtc,
-            CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job),
-            HarvestedAt = job.HarvestedAt
-        };
+        JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
+            job,
+            job.GcodeFile?.Name ?? string.Empty,
+            job.AssignedPrinter?.Name ?? "Unknown");
+        await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
         if (latestAttempt is not null)
         {
             dto.DispatchResult = QueueDispatchAttemptResultMapper.Map(
                 latestAttempt,
                 job,
-                dispatchStateEtag);
+                dto.DispatchStateRowVersion);
         }
 
         return dto;
@@ -1038,35 +981,13 @@ public class JobQueueService : IJobQueueService
         job.UpdatedAt = DateTime.UtcNow;
         await _repo.SaveChangesAsync(ct);
 
-        return new JobQueuePrintJobDto
-        {
-            Id = job.Id,
-            RowVersion = ToBase64RowVersion(job.RowVersion),
-            Revision = job.Revision,
-            GcodeFileId = job.GcodeFileId,
-            GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
-            AssignedPrinterId = job.AssignedPrinterId,
-            AssignedPrinterName = job.AssignedPrinter?.Name ?? "Unknown",
-            Status = (PrintJobStatus?)job.Status,
-            Priority = (PrintJobPriority)job.Priority,
-            QueuePosition = job.QueuePosition,
-            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
-            EstimatedPrintTime = job.EstimatedPrintTime,
-            EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-            EstimatedCost = job.EstimatedCost,
-            ActualCost = job.ActualCost,
-            Copies = job.Copies,
-            CompletedCopies = job.CompletedCopies,
-            RemainingCopies = job.RemainingCopies,
-            ProjectFileId = job.ProjectFileId,
-            PlateIndex = job.PlateIndex,
-            PlateName = job.PlateName,
-            DeadlineAtUtc = job.DeadlineAtUtc,
-            CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job),
-            HarvestedAt = job.HarvestedAt
-        };
+        JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
+            job,
+            job.GcodeFile?.Name ?? string.Empty,
+            job.AssignedPrinter?.Name ?? "Unknown");
+        await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
+
+        return dto;
     }
 
     /// <summary>
@@ -1333,48 +1254,19 @@ public class JobQueueService : IJobQueueService
         if (request.AssignedPrinterId.HasValue)
         {
             job = await _dataService.GetPrintJobByIdAsync(id, ct);
+            if (job is null)
+            {
+                return null;
+            }
         }
 
-        return new JobQueuePrintJobDto
-        {
-            Id = job!.Id,
-            RowVersion = ToBase64RowVersion(job.RowVersion),
-            Revision = job.Revision,
-            GcodeFileId = job.GcodeFileId,
-            GcodeFileName = job.GcodeFile?.Name ?? string.Empty,
-            AssignedPrinterId = job.AssignedPrinterId,
-            AssignedPrinterName = job.AssignedPrinter?.Name ?? string.Empty,
-            Status = (PrintJobStatus?)job.Status,
-            Priority = (PrintJobPriority)job.Priority,
-            QueuePosition = job.QueuePosition,
-            RequiredNozzleDiameter = job.RequiredNozzleDiameter,
-            RequiredMaterialType = job.RequiredMaterialType,
-            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
-            EstimatedPrintTime = job.EstimatedPrintTime,
-            EstimatedFilamentUsage = job.EstimatedFilamentUsage,
-            ActualStartTime = job.ActualStartTime,
-            ActualEndTime = job.ActualEndTime,
-            ActualPrintTime = job.ActualPrintTime,
-            ActualFilamentUsage = job.ActualFilamentUsage,
-            FailureReason = job.FailureReason,
-            SpoolmanFilamentId = job.SpoolmanFilamentId,
-            FilamentName = job.FilamentName,
-            FilamentVendor = job.FilamentVendor,
-            FilamentColor = job.FilamentColor,
-            EstimatedCost = job.EstimatedCost,
-            ActualCost = job.ActualCost,
-            Copies = job.Copies,
-            CompletedCopies = job.CompletedCopies,
-            RemainingCopies = job.RemainingCopies,
-            ProjectFileId = job.ProjectFileId,
-            PlateIndex = job.PlateIndex,
-            PlateName = job.PlateName,
-            DeadlineAtUtc = job.DeadlineAtUtc,
-            CreatedAt = job.CreatedAt,
-            UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job!),
-            HarvestedAt = job.HarvestedAt
-        };
+        JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
+            job,
+            job.GcodeFile?.Name ?? string.Empty,
+            job.AssignedPrinter?.Name ?? string.Empty);
+        await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
+
+        return dto;
     }
 
     private async Task PrepareFirstAssignmentAsync(
@@ -1660,11 +1552,14 @@ public class JobQueueService : IJobQueueService
                 "The provided idempotency key was already used with a different calibration payload.");
         }
 
-        return MapToJobQueuePrintJobDto(
+        JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
             existingJob,
             existingJob.GcodeFile?.Name ?? fallbackGcodeName,
             existingJob.AssignedPrinter?.Name ?? "Unknown",
             isIdempotentReplay: true);
+        await ApplyAuthoritativeDispatchProjectionAsync(dto, existingJob, ct);
+
+        return dto;
     }
 
     /// <summary>
@@ -1729,8 +1624,11 @@ public class JobQueueService : IJobQueueService
         {
             Id = job.Id,
             RowVersion = ToBase64RowVersion(job.RowVersion),
+            Revision = job.Revision,
             JobKind = job.JobKind,
             CalibrationProjectId = job.CalibrationProjectId,
+            CalibrationAttemptId = job.CalibrationAttemptId,
+            CalibrationOrchestrationId = job.CalibrationOrchestrationId,
             PinnedPrinterConfigRevision = job.PinnedPrinterConfigRevision,
             IsIdempotentReplay = isIdempotentReplay,
             GcodeFileId = job.GcodeFileId,
@@ -1742,6 +1640,7 @@ public class JobQueueService : IJobQueueService
             QueuePosition = job.QueuePosition,
             RequiredNozzleDiameter = job.RequiredNozzleDiameter,
             RequiredMaterialType = job.RequiredMaterialType,
+            ToolRequirements = Farm.Infrastructure.Services.PrintJobs.PrintJobRequirementsMapper.ToWireRequirements(job),
             EstimatedPrintTime = job.EstimatedPrintTime,
             EstimatedFilamentUsage = job.EstimatedFilamentUsage,
             ActualStartTime = job.ActualStartTime,
@@ -1764,8 +1663,114 @@ public class JobQueueService : IJobQueueService
             DeadlineAtUtc = job.DeadlineAtUtc,
             CreatedAt = job.CreatedAt,
             UpdatedAt = job.UpdatedAt,
-            ToolheadUsages = MapToolheadUsages(job)
+            ToolheadUsages = MapToolheadUsages(job),
+            HarvestedAt = job.HarvestedAt
         };
+    }
+
+    private async Task ApplyAuthoritativeDispatchProjectionAsync(
+        JobQueuePrintJobDto dto,
+        PrintJob job,
+        CancellationToken ct)
+    {
+        dto.BedClearState = job.JobKind == JobKind.FilamentCalibration
+            ? BedClearState.Invalidated
+            : null;
+        if (_db is null)
+        {
+            return;
+        }
+
+        PrinterDispatchState? assignedDispatchState = null;
+        if (job.AssignedPrinterId.HasValue)
+        {
+            assignedDispatchState = await _db.PrinterDispatchStates
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    state => state.PrinterId == job.AssignedPrinterId.Value,
+                    ct);
+        }
+
+        dto.DispatchStateRowVersion = ToBase64RowVersion(assignedDispatchState?.RowVersion);
+        dto.DispatchStateRevision = assignedDispatchState?.Revision;
+        if (job.JobKind != JobKind.FilamentCalibration)
+        {
+            return;
+        }
+
+        BedClearCommandRecord? command = await _db.BedClearCommandRecords
+            .AsNoTracking()
+            .Where(record => record.JobId == job.Id)
+            .OrderByDescending(record => record.CreatedAtUtc)
+            .ThenByDescending(record => record.Id)
+            .FirstOrDefaultAsync(ct);
+        if (command is null)
+        {
+            dto.BedClearState = assignedDispatchState?.AcknowledgedJobId == job.Id
+                ? BedClearState.Invalidated
+                : BedClearState.None;
+            return;
+        }
+
+        dto.BedClearCommandId = command.Id;
+        dto.BedClearIdempotencyKeySha256 =
+            BedClearCommandCorrelation.HashIdempotencyKey(
+                command.IdempotencyKey);
+        dto.BedClearExpiresAtUtc = command.ExpiresAtUtc;
+        if (command.Status is BedClearCommandStatus.Claimed or
+            BedClearCommandStatus.Accepted or
+            BedClearCommandStatus.Unknown)
+        {
+            dto.BedClearState = BedClearState.Consumed;
+            return;
+        }
+
+        if (command.Status is BedClearCommandStatus.Rejected or
+            BedClearCommandStatus.Expired)
+        {
+            dto.BedClearState = BedClearState.Invalidated;
+            return;
+        }
+
+        PrinterDispatchState? commandDispatchState = assignedDispatchState;
+        if (commandDispatchState?.PrinterId != command.PrinterId)
+        {
+            commandDispatchState = await _db.PrinterDispatchStates
+                .AsNoTracking()
+                .SingleOrDefaultAsync(
+                    state => state.PrinterId == command.PrinterId,
+                    ct);
+        }
+
+        if (commandDispatchState is null)
+        {
+            dto.BedClearState = BedClearState.Invalidated;
+            return;
+        }
+
+        Guid? currentQueueHeadId = await _db.PrintJobs
+            .AsNoTracking()
+            .Where(candidate =>
+                candidate.AssignedPrinterId == command.PrinterId &&
+                (candidate.Status == PrintJobStatus.Queued ||
+                 candidate.Status == PrintJobStatus.Assigned))
+            .OrderByPriorityDescending()
+            .Select(candidate => (Guid?)candidate.Id)
+            .FirstOrDefaultAsync(ct);
+        long? currentPrinterConfigRevision = await _db.Printers
+            .AsNoTracking()
+            .Where(printer => printer.Id == command.PrinterId)
+            .Select(printer => (long?)printer.ConfigurationRevision)
+            .SingleOrDefaultAsync(ct);
+        dto.BedClearState = BedClearCommandValidity.IsCurrent(
+            command,
+            job,
+            commandDispatchState,
+            currentQueueHeadId,
+            currentPrinterConfigRevision,
+            DateTime.UtcNow)
+                ? BedClearState.Acknowledged
+                : BedClearState.Invalidated;
     }
 
     private static DateTime? NormalizeUtcDeadline(DateTime? value)

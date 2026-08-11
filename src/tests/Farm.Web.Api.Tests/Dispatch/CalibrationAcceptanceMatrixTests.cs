@@ -415,6 +415,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         await using AppDbContext ctx1 = CreateContext();
         var r1 = await CreateAckService(ctx1).AcknowledgeAsync(req);
         r1.Outcome.Should().Be(BedClearAckOutcome.Accepted, "first ack must succeed");
+        r1.BedClearCommandId.Should().NotBeNull();
+        r1.BedClearIdempotencyKeySha256.Should().Be(
+            BedClearCommandCorrelation.HashIdempotencyKey(req.IdempotencyKey));
 
         // Replay with same key.
         await using AppDbContext ctx2 = CreateContext();
@@ -423,6 +426,9 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         var r2 = await CreateAckService(ctx2).AcknowledgeAsync(replayReq);
 
         r2.Outcome.Should().Be(BedClearAckOutcome.Replayed, "exact replay must return Replayed");
+        r2.BedClearCommandId.Should().Be(r1.BedClearCommandId);
+        r2.BedClearIdempotencyKeySha256.Should()
+            .Be(r1.BedClearIdempotencyKeySha256);
 
         // Still only one BackendStartCommand event.
         await using AppDbContext verifyCtx = CreateContext();
@@ -534,6 +540,8 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
         r2.Outcome.Should().Be(BedClearAckOutcome.IdempotencyMismatch,
             "using the same idempotency key for a different job must return IdempotencyMismatch");
+        r2.BedClearCommandId.Should().BeNull();
+        r2.BedClearIdempotencyKeySha256.Should().BeNull();
     }
 
     [Fact]

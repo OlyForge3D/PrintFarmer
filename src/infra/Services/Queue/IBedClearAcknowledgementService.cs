@@ -85,11 +85,15 @@ public sealed record AcknowledgeBedClearRequest(
 /// <param name="JobETag">Current ETag (row version) of the print job, when available.</param>
 /// <param name="DispatchStateETag">Current ETag of the dispatch state, when available.</param>
 /// <param name="ErrorDetail">Human-readable detail (no credentials or paths).</param>
+/// <param name="BedClearCommandId">Exact durable command identity for accepted or replayed requests.</param>
+/// <param name="BedClearIdempotencyKeySha256">Lower-case SHA-256 correlation of the exact case-sensitive UTF-8 key.</param>
 public sealed record AcknowledgeBedClearResult(
     BedClearAckOutcome Outcome,
     byte[]? JobETag,
     byte[]? DispatchStateETag,
-    string? ErrorDetail);
+    string? ErrorDetail,
+    Guid? BedClearCommandId = null,
+    string? BedClearIdempotencyKeySha256 = null);
 
 /// <summary>
 /// Manages exact-job, one-use, expiring bed-clear acknowledgements used by

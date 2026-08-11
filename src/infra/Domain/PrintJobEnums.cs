@@ -114,6 +114,25 @@ public enum BedClearCommandStatus
     Expired = 5,
 }
 
+/// <summary>
+/// Authoritative exact-job bed-clear lifecycle projected by queue reads.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum BedClearState
+{
+    /// <summary>No bed-clear command has been acknowledged for this calibration job.</summary>
+    None = 0,
+
+    /// <summary>A live exact-job acknowledgement is waiting to be consumed.</summary>
+    Acknowledged = 1,
+
+    /// <summary>The exact-job acknowledgement was consumed by a dispatch claim.</summary>
+    Consumed = 2,
+
+    /// <summary>The latest acknowledgement is no longer valid for dispatch.</summary>
+    Invalidated = 3,
+}
+
 /// <summary>Durable phase of a dispatch attempt around backend network I/O.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum DispatchBackendCallPhase

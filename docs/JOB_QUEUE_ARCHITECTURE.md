@@ -229,19 +229,42 @@ exception text.
 | PUT | `/{id}` | Update job (status/priority/printer assignment) |
 | DELETE | `/{id}` | Remove job from queue |
 
-#### Data Model
+#### Authoritative Job Read
 
-```csharp
-public record JobQueuePrintJobDto(
-    Guid Id,
-    string GcodeFileName,
-    Guid? AssignedPrinterId,
-    string Status,          // Queued, Printing, Completed, Error
-    int Priority,
-    DateTime CreatedAt,
-    DateTime? CompletedAt
-);
-```
+`GET /api/job-queue/{id}` returns the persisted job identity and lineage through
+`JobQueuePrintJobDto`. Calibration jobs include `jobKind`,
+`calibrationProjectId`, `calibrationAttemptId`,
+`calibrationOrchestrationId`, `pinnedPrinterConfigRevision`,
+`assignedPrinterId`, and `status`.
+
+The same representation exposes both concurrency domains:
+
+- `rowVersion` and `revision` identify the job; the opaque row version is also
+  returned in `ETag`.
+- `dispatchStateRowVersion` and `dispatchStateRevision` identify the assigned
+  printer's dispatch state; the opaque row version is also returned in
+  `X-Dispatch-State-ETag`.
+
+For filament-calibration jobs, `bedClearState` is always explicit and
+server-derived from the exact persisted command and dispatch fences:
+
+| State | Meaning |
+|-------|---------|
+| `None` | No bed-clear command exists for this job. |
+| `Acknowledged` | The pending command still matches the job, assigned printer, urgent-first queue head, job and queue revisions, printer configuration revision, and unexpired acknowledgement. |
+| `Consumed` | The command was claimed by dispatch or reached an accepted/unknown backend outcome requiring that exact attempt to complete or reconcile. |
+| `Invalidated` | The command is terminal or any exact-job fence no longer matches, including expiry, reorder, cancellation, reassignment, or configuration drift. |
+
+When a command exists, `bedClearCommandId`, `bedClearExpiresAtUtc`, and
+`bedClearIdempotencyKeySha256` identify it without exposing the raw key. The
+hash is lower-case SHA-256 over the exact case-sensitive UTF-8 idempotency key,
+allowing a client to correlate lost-response recovery with its operation ID.
+Accepted and replayed acknowledgement responses return the same command ID and
+key hash. Actor identity, raw idempotency keys, backend details, and failure
+text are never exposed. `bedClearState` is null only for standard or legacy
+non-calibration jobs. Clients must treat a missing or null state on a
+calibration job as unavailable, not as `None`; the acknowledgement POST
+revalidates every fence authoritatively.
 
 **Use Case:** "Show active jobs on the Printer Dashboard"
 

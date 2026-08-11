@@ -176,19 +176,24 @@ public sealed class BedClearAcknowledgementService(
                     .Where(printer => printer.Id == request.PrinterId)
                     .Select(printer => (long?)printer.ConfigurationRevision)
                     .SingleOrDefaultAsync(ct);
-                bool pendingIsStale =
-                    priorCommand.ExpiresAtUtc <= DateTime.UtcNow ||
-                    priorCommand.QueueRevision != dispatchState.QueueRevision ||
-                    !priorCommand.JobRowVersion.SequenceEqual(job.RowVersion ?? []) ||
-                    priorCommand.PrinterConfigRevision != currentPrinterRevision ||
-                    currentHeadId != priorCommand.JobId;
+                DateTime utcNow = DateTime.UtcNow;
+                bool pendingIsStale = !BedClearCommandValidity.IsCurrent(
+                    priorCommand,
+                    job,
+                    dispatchState,
+                    currentHeadId,
+                    currentPrinterRevision,
+                    utcNow);
                 if (pendingIsStale)
                 {
                     await PersistBedClearTerminalAsync(
                         priorCommand,
                         job,
                         dispatchState,
-                        expired: priorCommand.ExpiresAtUtc <= DateTime.UtcNow,
+                        expired: BedClearCommandValidity.IsExpired(
+                            priorCommand,
+                            dispatchState,
+                            utcNow),
                         "pending_inputs_changed",
                         ct);
                     return new AcknowledgeBedClearResult(
@@ -209,7 +214,10 @@ public sealed class BedClearAcknowledgementService(
                 replayOutcome,
                 job.RowVersion,
                 dispatchState.RowVersion,
-                null);
+                null,
+                priorCommand.Id,
+                BedClearCommandCorrelation.HashIdempotencyKey(
+                    priorCommand.IdempotencyKey));
         }
 
         if (!effectiveJobRevision.SequenceEqual(job.RowVersion ?? []))
@@ -768,13 +776,19 @@ public sealed class BedClearAcknowledgementService(
                 string? replayError = isReplay
                     ? null
                     : "Idempotency key was concurrently used with different inputs.";
+                string? winnerKeyHash = isReplay
+                    ? BedClearCommandCorrelation.HashIdempotencyKey(
+                        winner.IdempotencyKey)
+                    : null;
                 return new AcknowledgeBedClearResult(
                     isReplay
                         ? BedClearAckOutcome.Replayed
                         : BedClearAckOutcome.IdempotencyMismatch,
                     null,
                     null,
-                    replayError);
+                    replayError,
+                    isReplay ? winner.Id : null,
+                    winnerKeyHash);
             }
 
             throw;
@@ -788,7 +802,12 @@ public sealed class BedClearAcknowledgementService(
 
         return new AcknowledgeBedClearResult(
             BedClearAckOutcome.Accepted,
-            job.RowVersion, dispatchState.RowVersion, null);
+            job.RowVersion,
+            dispatchState.RowVersion,
+            null,
+            commandRecord.Id,
+            BedClearCommandCorrelation.HashIdempotencyKey(
+                commandRecord.IdempotencyKey));
     }
 
     /// <inheritdoc />
