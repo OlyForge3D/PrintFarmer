@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
@@ -161,7 +162,7 @@ public class WorkersController(
 
         await _workerRepository.DisableWorkerAsync(id, request.Reason);
 
-        _logger.LogWarning("Worker {WorkerId} disabled: {Reason}", id, request.Reason);
+        _logger.LogWarning("Worker {WorkerId} disabled: {Reason}", id, LogSanitizer.Sanitize(request.Reason));
         return NoContent();
     }
 

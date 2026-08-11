@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.JsonWebTokens;
@@ -64,7 +65,7 @@ public class TokenRevocationService(
             // Audit log the revocation
             await _authAuditService.LogTokenRevokedAsync(userId, revokedByUserId, reason, ipAddress);
 
-            _logging.LogInformation("[TokenRevocation] Token revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
+            _logging.LogInformation("[TokenRevocation] Token revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, LogSanitizer.Sanitize(reason));
             return true;
         }
         catch (Exception ex)
@@ -126,7 +127,7 @@ public class TokenRevocationService(
                 $"All tokens revoked ({revokedCount} refresh tokens). {reason}",
                 ipAddress);
 
-            _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, reason);
+            _logging.LogWarning("[TokenRevocation] All tokens revoked for UserId: {UserId} by Admin: {RevokedByUserId}. Count: {RevokedCount}. Reason: {Reason}", userId, revokedByUserId, revokedCount, LogSanitizer.Sanitize(reason));
             return revokedCount + 1; // Include the marker
         }
         catch (Exception ex)

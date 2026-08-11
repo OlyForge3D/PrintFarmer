@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Farm.Infrastructure.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Notifications.NativePush;
 
@@ -21,8 +22,8 @@ public sealed class DisabledNativePushSender(ILogger<DisabledNativePushSender> l
         ArgumentNullException.ThrowIfNull(envelope);
         _logger.LogDebug(
             "[NativePush/disabled] Skipping send for attentionItemId={AttentionItemId} deviceTokenId={DeviceTokenId} — sender is disabled.",
-            envelope.AttentionItemId,
-            envelope.DeviceTokenId);
+            LogSanitizer.Sanitize(envelope.AttentionItemId),
+            LogSanitizer.Sanitize(envelope.DeviceTokenId));
         return Task.FromResult(NativePushDispatchResult.NotConfigured());
     }
 

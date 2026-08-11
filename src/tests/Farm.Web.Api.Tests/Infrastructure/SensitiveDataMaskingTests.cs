@@ -75,4 +75,33 @@ public class SensitiveDataMaskingTests
     {
         SensitiveDataMasking.MaskIfEmail(value).Should().Be("unknown");
     }
+
+    [Fact]
+    public void MaskEmail_WithControlCharactersInDomain_SanitizesDomain()
+    {
+        // A malicious domain containing CR/LF must not be able to forge a new log line via
+        // MaskEmail's output (cs/log-forging).
+        string masked = SensitiveDataMasking.MaskEmail("jsmith@evil.com\r\nFAKE LOG LINE");
+        masked.Should().Be("j***h@evil.com\\r\\nFAKE LOG LINE");
+        masked.Should().NotContain("\r");
+        masked.Should().NotContain("\n");
+    }
+
+    [Fact]
+    public void MaskEmail_WithControlCharactersInLocalPart_SanitizesLocalPart()
+    {
+        // Local part must be longer than 2 characters to exercise the branch that
+        // interpolates local[0]/local[^1] directly (the ">2" branch); a local part
+        // of length <= 2 collapses to "***" and never emits the raw characters.
+        string masked = SensitiveDataMasking.MaskEmail("\rbc@example.com");
+        masked.Should().Be("\\r***c@example.com");
+        masked.Should().NotContain("\r");
+    }
+
+    [Fact]
+    public void MaskIfEmail_WithControlCharactersInNonEmailValue_SanitizesValue()
+    {
+        string masked = SensitiveDataMasking.MaskIfEmail("some-key\r\ninjected");
+        masked.Should().Be("some-key\\r\\ninjected");
+    }
 }

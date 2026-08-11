@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.SignalR;
@@ -118,7 +119,7 @@ public sealed class AttentionBroadcaster(
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[AttentionBroadcaster] Native-push dispatch failed for itemId={ItemId}", payload.ItemId);
+                    _logger.LogWarning(ex, "[AttentionBroadcaster] Native-push dispatch failed for itemId={ItemId}", LogSanitizer.Sanitize(payload.ItemId));
                 }
             },
             shutdownToken);

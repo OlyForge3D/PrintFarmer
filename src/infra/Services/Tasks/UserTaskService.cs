@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using System.Text.Json;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -361,7 +362,7 @@ public class UserTaskService(
         };
 
         await _taskRepository.AddAsync(newTask, ct);
-        _logger.LogInformation("[UserTaskService] Created manual task: {TaskTitle}", newTask.Title);
+        _logger.LogInformation("[UserTaskService] Created manual task: {TaskTitle}", LogSanitizer.Sanitize(newTask.Title));
 
         UserTaskDto createdDto = MapToDto(newTask);
         await BroadcastTaskCreatedAsync(createdDto, ct);

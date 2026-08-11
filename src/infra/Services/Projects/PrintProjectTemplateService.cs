@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Projects;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Projects;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -101,7 +102,7 @@ public class PrintProjectTemplateService(AppDbContext db, ILogger<PrintProjectTe
         }
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("Created project template {TemplateId}: {TemplateName}", template.Id, template.Name);
+        logger.LogInformation("Created project template {TemplateId}: {TemplateName}", template.Id, LogSanitizer.Sanitize(template.Name));
 
         return MapToDetailDto(template);
     }

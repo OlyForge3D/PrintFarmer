@@ -36,7 +36,7 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
 
         logger.LogInformation(
             "Created quota {QuotaId} type={Type} limit={Limit} for user={UserId} group={Group}",
-            quota.Id, quota.QuotaType, quota.LimitAmount, quota.UserId, LogSanitizer.Sanitize(quota.GroupName));
+            quota.Id, quota.QuotaType, quota.LimitAmount, LogSanitizer.Sanitize(quota.UserId?.ToString()), LogSanitizer.Sanitize(quota.GroupName));
         return quota;
     }
 
