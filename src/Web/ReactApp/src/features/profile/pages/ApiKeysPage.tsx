@@ -112,7 +112,7 @@ const SCOPE_GROUPS: ScopeGroup[] = [
       {
         value: 'QueueAcknowledgeBedClear',
         label: 'Queue acknowledge bed clear',
-        description: 'Confirm the bed is clear so the next job may start. Also requires Queue read.',
+        description: 'Confirm the bed is clear so the next job may start. Also requires Queue read and Queue start.',
         impact: 'Lets the farm start the next physical print.',
       },
     ],

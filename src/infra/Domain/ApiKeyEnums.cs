@@ -125,6 +125,6 @@ public enum ApiKeyScope : int
     /// <summary>Grants <c>queue:cancel</c>: <b>cancel a running physical print</b>.</summary>
     QueueCancel = 1 << 19,
 
-    /// <summary>Grants <c>queue:acknowledge-bed-clear</c>: confirm the bed is clear so the next job may start.</summary>
+    /// <summary>Grants <c>queue:acknowledge-bed-clear</c>: confirm the bed is clear so the next job may start. Requires <see cref="QueueStart"/>, which the bed-clear routes also check.</summary>
     QueueAcknowledgeBedClear = 1 << 20,
 }
