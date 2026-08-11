@@ -301,6 +301,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Catalog.ICatalogRepository, Farm.Infrastructure.Repositories.Catalog.EfCatalogRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.Users.IUsersRepository, Farm.Infrastructure.Repositories.Users.EfUsersRepository>();
         _ = services.AddScoped<Farm.Infrastructure.Repositories.SystemLogs.ISystemLogRepository, Farm.Infrastructure.Repositories.SystemLogs.EfSystemLogRepository>();
+        _ = services.AddScoped<Farm.Infrastructure.Repositories.Roles.IRolesRepository, Farm.Infrastructure.Repositories.Roles.EfRolesRepository>();
 
         // Unit of Work pattern: coordinates access to 6 repositories with a shared DbContext
         // This prevents FK constraint violations and ensures atomic transactions across coordinated operations:
@@ -441,6 +442,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasskeyService, Farm.Infrastructure.Services.Authentication.PasskeyService>();
+        _ = services.AddScoped<Farm.Infrastructure.Services.Roles.IRoleManagementService, Farm.Infrastructure.Services.Roles.RoleManagementService>();
     }
 
     private static void RegisterPasskeyServices(IServiceCollection services, IConfiguration configuration)
