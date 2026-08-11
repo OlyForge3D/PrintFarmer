@@ -336,6 +336,7 @@ public class PrintersController(
         {
             TestConnectionResponse result = await TestBackendConnectionAsync(
                 serverUri,
+                egressCheck,
                 request.Backend,
                 request.ApiKey,
                 request.Username,
@@ -360,6 +361,7 @@ public class PrintersController(
     /// </summary>
     private async Task<TestConnectionResponse> TestBackendConnectionAsync(
         Uri serverUrl,
+        EgressCheckResult egressCheck,
         PrinterBackend backend,
         string? apiKey,
         string? username,
@@ -367,18 +369,31 @@ public class PrintersController(
         int? backendPort,
         CancellationToken ct)
     {
+        // Reuse the exact address the egress guard just vetted for the real connection instead
+        // of letting each backend re-resolve the hostname independently — otherwise a
+        // DNS-rebinding attacker could swap the record between the check above and the
+        // connection made by the backend helpers below.
+        Uri connectUri = egressCheck.ResolvedAddress is not null
+            ? EgressGuard.CreatePinnedUri(serverUrl, egressCheck.ResolvedAddress)
+            : serverUrl;
+        string? hostHeader = serverUrl.IsDefaultPort ? serverUrl.Host : $"{serverUrl.Host}:{serverUrl.Port}";
+
         using HttpClient httpClient = _httpClientFactory.CreateClient("VettedEgress");
         httpClient.Timeout = TimeSpan.FromSeconds(10);
+        if (connectUri != serverUrl)
+        {
+            httpClient.DefaultRequestHeaders.Host = hostHeader;
+        }
 
         string? effectiveApiKey = apiKey ?? password;
 
         return backend switch
         {
-            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, serverUrl, backendPort, ct),
-            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(serverUrl, apiKey, username, password, ct),
-            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, serverUrl, effectiveApiKey, ct),
-            PrinterBackend.SDCP => await TestSdcpConnectionAsync(serverUrl, backendPort, ct),
-            PrinterBackend.FlashForge => await TestFlashForgeConnectionAsync(serverUrl, backendPort, ct),
+            PrinterBackend.Moonraker => await TestMoonrakerConnectionAsync(httpClient, connectUri, backendPort, ct),
+            PrinterBackend.PrusaLink => await TestPrusaLinkConnectionAsync(connectUri, apiKey, username, password, connectUri != serverUrl ? hostHeader : null, ct),
+            PrinterBackend.OctoPrint => await TestOctoPrintConnectionAsync(httpClient, connectUri, effectiveApiKey, ct),
+            PrinterBackend.SDCP => await TestSdcpConnectionAsync(connectUri, backendPort, ct),
+            PrinterBackend.FlashForge => await TestFlashForgeConnectionAsync(connectUri, backendPort, ct),
             _ => new TestConnectionResponse { Success = false, Message = $"Unsupported backend type: {backend}" }
         };
     }
@@ -537,7 +552,7 @@ public class PrintersController(
     /// Tests PrusaLink connection by hitting /api/v1/status endpoint with Digest Authentication.
     /// </summary>
     private static async Task<TestConnectionResponse> TestPrusaLinkConnectionAsync(
-        Uri serverUrl, string? apiKey, string? username, string? password, CancellationToken ct)
+        Uri serverUrl, string? apiKey, string? username, string? password, string? hostHeader, CancellationToken ct)
     {
         string? credentialSecret = !string.IsNullOrWhiteSpace(password) ? password : apiKey;
         if (string.IsNullOrWhiteSpace(credentialSecret))
@@ -568,6 +583,10 @@ public class PrintersController(
         {
             Timeout = TimeSpan.FromSeconds(10)
         };
+        if (!string.IsNullOrEmpty(hostHeader))
+        {
+            digestClient.DefaultRequestHeaders.Host = hostHeader;
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Get, builder.Uri);
 
