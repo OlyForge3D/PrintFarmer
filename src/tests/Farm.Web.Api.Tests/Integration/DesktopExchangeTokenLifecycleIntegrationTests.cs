@@ -201,6 +201,10 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
             before.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
         }
 
+        // Revoke in a strictly later second than the token's whole-second `nbf`, which is the
+        // real-world case: an operator revokes some time after the token was issued.
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+
         using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
         {
             ITokenRevocationService revocation =
@@ -248,12 +252,11 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
             await revocation.RevokeAllUserTokensAsync(_ownerId, _ownerId, "test forced revocation");
         }
 
-        // Re-exchange after the marker so the new token's `iat` is strictly later than the
-        // revocation timestamp; a client recovering from a 401 behaves this way. Token bytes are
-        // deterministic for identical claims and second-resolution timestamps, so token identity
-        // is not the property under test - usability is.
-        await Task.Delay(TimeSpan.FromSeconds(1.1));
-
+        // No delay: a real client reacts to the 401 immediately. JWT `nbf` has whole-second
+        // resolution while the revocation marker keeps fractional seconds, so a naive
+        // `RevokedAt > issuedAt` comparison would reject this brand-new token and strand the
+        // client in a retry loop until the clock ticked over. This asserts the recovery contract
+        // holds at the moment it is actually exercised.
         ApiKeyExchangeResponse second = await ExchangeAsync(rawKey);
         second.Token.Should().NotBeNullOrWhiteSpace();
 
@@ -261,7 +264,7 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
         using HttpResponseMessage response = await client.GetAsync($"/api/gcode-library/{Guid.NewGuid()}");
         response.StatusCode.Should().NotBe(
             HttpStatusCode.Unauthorized,
-            "revocation invalidates issued tokens, not the key: a freshly exchanged token must work");
+            "revocation invalidates issued tokens, not the key: an immediately re-exchanged token must work");
         response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
     }
 
