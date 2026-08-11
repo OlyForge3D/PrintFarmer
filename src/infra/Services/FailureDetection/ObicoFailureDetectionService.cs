@@ -80,7 +80,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             _logger.LogDebug(
                 "[ObicoFailureDetection] Uploading {Size} byte image to legacy contract at {ApiUrl}/p/",
                 imageData.Length,
-                obicoServerUrl);
+                LogSanitizer.Sanitize(obicoServerUrl));
 
             HttpResponseMessage response = await httpClient.PostAsync("p/", content, ct);
             (bool handled, bool snapshotReachabilityFallbackTriggered, FailureDetectionResult result) parsedResponse = await ParseResponseAsync(
@@ -276,7 +276,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             {
                 _logger.LogInformation(
                     "[ObicoFailureDetection] Snapshot URL contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}); falling back to legacy upload",
-                    obicoServerUrl,
+                    LogSanitizer.Sanitize(obicoServerUrl),
                     (int)response.StatusCode);
                 return (false, false, FailureDetectionResult.Error("Legacy fallback requested"));
             }
@@ -286,7 +286,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             {
                 _logger.LogInformation(
                     "[ObicoFailureDetection] Obico server could not reach the supplied snapshot URL via {ApiUrl}/p/ (HTTP {StatusCode}); falling back to local fetch and legacy upload",
-                    obicoServerUrl,
+                    LogSanitizer.Sanitize(obicoServerUrl),
                     (int)response.StatusCode);
                 return (false, true, FailureDetectionResult.Error("Legacy fallback requested"));
             }
@@ -296,9 +296,9 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             {
                 _logger.LogWarning(
                     "[ObicoFailureDetection] Legacy upload contract unavailable at {ApiUrl}/p/ (HTTP {StatusCode}): {Error}",
-                    obicoServerUrl,
+                    LogSanitizer.Sanitize(obicoServerUrl),
                     response.StatusCode,
-                    errorBody);
+                    LogSanitizer.Sanitize(errorBody));
                 return (
                     true,
                     false,
@@ -311,7 +311,7 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             _logger.LogWarning(
                 "[ObicoFailureDetection] API returned {StatusCode}: {Error}",
                 response.StatusCode,
-                errorBody);
+                LogSanitizer.Sanitize(errorBody));
             return (true, false, FailureDetectionResult.Error(CreatePredictionApiErrorMessage(
                 response.StatusCode,
                 isSnapshotUrlRequest: allowLegacyFallback)));
@@ -324,11 +324,11 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
             {
                 _logger.LogInformation(
                     "[ObicoFailureDetection] Snapshot URL contract response from {ApiUrl}/p/ was not recognized; falling back to legacy upload",
-                    obicoServerUrl);
+                    LogSanitizer.Sanitize(obicoServerUrl));
                 return (false, false, FailureDetectionResult.Error("Legacy fallback requested"));
             }
 
-            _logger.LogWarning("[ObicoFailureDetection] Invalid API response: {Response}", responseBody);
+            _logger.LogWarning("[ObicoFailureDetection] Invalid API response: {Response}", LogSanitizer.Sanitize(responseBody));
             return (true, false, FailureDetectionResult.Error("Invalid API response format"));
         }
 

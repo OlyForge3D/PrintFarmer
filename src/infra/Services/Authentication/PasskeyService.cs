@@ -111,7 +111,7 @@ public class PasskeyService(
 
         logger.LogInformation(
             "Passkey registered for {Username} (credentialId={CredentialId}, aaguid={AaGuid})",
-            username,
+            LogSanitizer.Sanitize(username),
             Convert.ToBase64String(result.Id),
             aaguidDescription ?? "unknown");
 

@@ -144,7 +144,7 @@ public class MaintenancePlanController(
         try
         {
             await _planRepository.DeleteAsync(plan, ct);
-            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, LogSanitizer.Sanitize(plan.Name));
             return NoContent();
         }
         catch (DbUpdateException)
@@ -201,7 +201,7 @@ public class MaintenancePlanController(
         }
 
         await _planRepository.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned maintenance plan {SourceId} as {CloneId} '{CloneName}'", id, clone.Id, clone.Name);
+        _logger.LogInformation("Cloned maintenance plan {SourceId} as {CloneId} '{CloneName}'", id, clone.Id, LogSanitizer.Sanitize(clone.Name));
 
         // Reload to get navigation properties for the response
         MaintenancePlan? saved = await _planRepository.GetByIdAsync(clone.Id, ct);

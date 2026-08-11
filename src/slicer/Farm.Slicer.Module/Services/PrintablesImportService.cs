@@ -36,12 +36,12 @@ public sealed class PrintablesImportService(
         try
         {
             PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, printablesUrl, ct);
-            _logger.LogInformation("Preview fetched for Printables model {ModelId}: '{Name}'", modelId, preview.Name);
+            _logger.LogInformation("Preview fetched for Printables model {ModelId}: '{Name}'", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(preview.Name));
             return preview;
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error for model {ModelId}", modelId);
+            _logger.LogWarning(ex, "Printables API error for model {ModelId}", LogSanitizer.Sanitize(modelId));
             throw;
         }
     }
@@ -152,7 +152,7 @@ public sealed class PrintablesImportService(
 
         _logger.LogInformation(
             "Fetching attribution for Printables model {ModelId} to persist on file record {FileId}",
-            parsedModelId, modelId);
+            LogSanitizer.Sanitize(parsedModelId), modelId);
 
         PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(parsedModelId, printablesUrl, ct);
 
@@ -166,7 +166,7 @@ public sealed class PrintablesImportService(
 
         _logger.LogInformation(
             "Attribution persisted for model record {FileId}: creator={Creator}, license={License}",
-            modelId, preview.Creator, preview.License);
+            modelId, LogSanitizer.Sanitize(preview.Creator), LogSanitizer.Sanitize(preview.License));
     }
 
     /// <inheritdoc />
