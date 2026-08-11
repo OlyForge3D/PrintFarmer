@@ -321,11 +321,16 @@ Key properties:
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
-  with `403` on `/api/users/{userId}/apikeys`, `/api/apikeys/settings`, and the
+  with `403` on `/api/users/{userId}/apikeys`, `/api/apikeys/settings`, the
   passkey registration and credential-management endpoints
-  (`/api/auth/passkey/register/*`, `/api/auth/passkey/credentials*`), so a
-  stolen token cannot bootstrap a durable credential. The anonymous passkey
-  login ceremony is unaffected.
+  (`/api/auth/passkey/register/*`, `/api/auth/passkey/credentials*`), and the
+  non-admin slicer profile mutations (`/api/slicer/profiles/upload`, `.../clone`,
+  `PUT .../custom/{id}`), so a stolen token cannot bootstrap a durable credential
+  or alter profile state. The anonymous passkey login ceremony is unaffected.
+- **`SlicingSubmit` reaches the profile catalog.** `slicing:submit` class-gates
+  the slicer host's `ProfilesController`, so a key with this scope can read and
+  enumerate the profile catalog. That read reach is required for submission;
+  mutation is blocked as above.
 - `queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and
   `obico:manage` are not reachable from any Desktop scope.
 
