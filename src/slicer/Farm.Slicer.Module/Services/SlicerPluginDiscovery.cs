@@ -64,9 +64,19 @@ public static class SlicerPluginDiscovery
                 AssemblyLoadContext.Default.LoadFromAssemblyPath(dll);
                 Debug.WriteLine($"[SlicerPluginDiscovery] Loaded assembly from plugins dir: {dll}");
             }
-            catch (Exception ex)
+            catch (BadImageFormatException ex)
             {
                 // Non-.NET files, native DLLs, or incompatible assemblies — skip
+                Debug.WriteLine($"[SlicerPluginDiscovery] Skipped {dll}: {ex.Message}");
+            }
+            catch (FileLoadException ex)
+            {
+                // Non-.NET files, native DLLs, or incompatible assemblies — skip
+                Debug.WriteLine($"[SlicerPluginDiscovery] Skipped {dll}: {ex.Message}");
+            }
+            catch (FileNotFoundException ex)
+            {
+                // File was deleted/moved between directory listing and load attempt — skip
                 Debug.WriteLine($"[SlicerPluginDiscovery] Skipped {dll}: {ex.Message}");
             }
         }

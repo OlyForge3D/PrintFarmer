@@ -26,9 +26,14 @@ public sealed class PrinterBackendJsonConverter : JsonConverter<PrinterBackend>
                 _ => PrinterBackend.Moonraker
             };
         }
-        catch
+        catch (JsonException)
         {
             return PrinterBackend.Moonraker; // graceful fallback
+        }
+        catch (InvalidOperationException)
+        {
+            // e.g. malformed UTF-16 surrogate content in the string token
+            return PrinterBackend.Moonraker;
         }
     }
 
@@ -75,8 +80,13 @@ public sealed class PrintJobStatusJsonConverter : JsonConverter<PrintJobStatus>
                 _ => PrintJobStatus.Queued
             };
         }
-        catch
+        catch (JsonException)
         {
+            return PrintJobStatus.Queued;
+        }
+        catch (InvalidOperationException)
+        {
+            // e.g. malformed UTF-16 surrogate content in the string token
             return PrintJobStatus.Queued;
         }
     }
@@ -116,8 +126,13 @@ public sealed class StringToBoolJsonConverter : JsonConverter<bool>
                 _ => false
             };
         }
-        catch
+        catch (JsonException)
         {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            // e.g. malformed UTF-16 surrogate content in the string token
             return false;
         }
     }

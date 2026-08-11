@@ -35,8 +35,13 @@ public static class SpoolmanJsonParser
 
             return result;
         }
-        catch
+        catch (JsonException)
         {
+            return [];
+        }
+        catch (InvalidOperationException)
+        {
+            // e.g. an array element is not a JSON object (unexpected shape from a malformed/malicious response)
             return [];
         }
     }
@@ -65,8 +70,13 @@ public static class SpoolmanJsonParser
 
             return result;
         }
-        catch
+        catch (JsonException)
         {
+            return [];
+        }
+        catch (InvalidOperationException)
+        {
+            // e.g. an array element is not a JSON object (unexpected shape from a malformed/malicious response)
             return [];
         }
     }
@@ -241,7 +251,7 @@ public static class SpoolmanJsonParser
                 ColorHex: colorHex);
             return true;
         }
-        catch
+        catch (InvalidOperationException)
         {
             material = default!;
             return false;
@@ -682,8 +692,9 @@ public static class SpoolmanJsonParser
                 }
             }
         }
-        catch
+        catch (ArgumentOutOfRangeException)
         {
+            // Unix timestamp value outside the representable DateTimeOffset range.
         }
 
         return null;
