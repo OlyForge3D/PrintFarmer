@@ -547,9 +547,12 @@ GET /api/printers/calibration-candidates
 Requires `calibration:read`. The response includes every enabled printer with
 its configuration revision, observed status freshness, explicit firmware and
 slicer identities, geometry, physical toolheads, declared adapter operations,
-and typed eligibility results.
+and typed preliminary eligibility results. Candidate entries always set
+`profilesEvaluated: false`: profile visibility, compatibility, and safety have
+not been checked, so clients must fetch the selected printer's calibration
+context before creating or mutating calibration work.
 
-Printer Calibration eligibility is strictly conjunctive:
+Candidate eligibility is strictly conjunctive over API-owned printer metadata:
 
 - firmware family is explicitly `Klipper`;
 - G-code dialect is explicitly `Klipper`;
@@ -562,15 +565,16 @@ Printer Calibration eligibility is strictly conjunctive:
 - live status is authoritative, fresh, and online;
 - the adapter explicitly supports status, file upload, and print start, or a
   combined upload-and-print operation;
-- selected machine, process, and filament profiles are compatible, safe, and
-  visible to the caller, with explicit upstream distribution, compatible
-  version, and `orca-json` format identity.
+- selected machine, process, and filament profile identifiers are present and
+  non-empty.
 
 Eligibility never derives from manufacturer, model, aliases, transport
 backend, Moonraker, OctoPrint, or a static printer catalog. Missing, stale,
-unverified, inaccessible, incompatible, or operationally incomplete data
-keeps the printer in the response with `eligible: false`, `missingInputs`, and
-stable `{ code, field, message }` rejection reasons.
+unverified or operationally incomplete printer metadata keeps the printer in
+the response with `eligible: false`, `missingInputs`, and stable
+`{ code, field, message }` rejection reasons. An eligible candidate is only
+eligible to proceed to context resolution; it is not proof that its profiles
+are visible, compatible, or safe.
 
 ```json
 [
@@ -596,6 +600,7 @@ stable `{ code, field, message }` rejection reasons.
       "version": "2.4.2",
       "profileFormat": "orca-json"
     },
+    "profilesEvaluated": false,
     "eligible": true,
     "missingInputs": [],
     "rejectionReasons": []
@@ -616,8 +621,8 @@ Requires `calibration:read`. An optional `configurationRevision` query value
 provides optimistic concurrency. If the printer changed, the API returns
 `409 printer_configuration_changed` and the current revision.
 
-The `200` response repeats the candidate state and adds an immutable
-credential-free snapshot:
+The `200` response repeats the candidate state, sets
+`profilesEvaluated: true`, and adds an immutable credential-free snapshot:
 
 - canonical `snapshotSha256`, schema version, capture time, and authenticated
   subject;
@@ -639,8 +644,10 @@ Transient printer status and capture metadata do not change the canonical
 snapshot hash.
 
 An incomplete context still returns `200` with `eligible: false`, typed
-rejection reasons, and no synthesized defaults. Consumers must not generate or
-dispatch calibration work from an ineligible context.
+rejection reasons, and no synthesized defaults. The context is authoritative
+for full eligibility because profiles have been evaluated. Consumers must not
+create, mutate, generate, or dispatch calibration work unless the selected
+context has both `profilesEvaluated: true` and `eligible: true`.
 
 | Status | Stable code | Meaning |
 |---|---|---|

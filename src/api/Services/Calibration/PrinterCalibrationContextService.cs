@@ -449,6 +449,7 @@ public sealed class PrinterCalibrationContextService(
             MaxChamberTemperature = printer.MaxChamberTemp,
             Firmware = MapFirmware(printer),
             Slicer = MapSlicer(printer),
+            ProfilesEvaluated = resolveProfiles,
             Eligible = reasons.Count == 0,
             MissingInputs = missingInputs.Order(StringComparer.Ordinal).ToArray(),
             RejectionReasons = reasons

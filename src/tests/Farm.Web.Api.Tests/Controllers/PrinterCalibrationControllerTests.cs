@@ -176,6 +176,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         {
             JsonElement candidate = candidates.RootElement.EnumerateArray().Single();
             _ = candidate.GetProperty("id").GetGuid().Should().Be(printerId);
+            _ = candidate.GetProperty("profilesEvaluated").GetBoolean().Should().BeFalse();
             _ = candidate.GetProperty("eligible").GetBoolean().Should().BeTrue();
             _ = candidate.GetProperty("firmware").GetProperty("family").GetString()
                 .Should().Be("Klipper");
@@ -190,6 +191,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         _ = contextResponse.StatusCode.Should().Be(HttpStatusCode.OK, contextBody);
         using JsonDocument context = JsonDocument.Parse(contextBody);
         JsonElement root = context.RootElement;
+        _ = root.GetProperty("profilesEvaluated").GetBoolean().Should().BeTrue();
         _ = root.GetProperty("eligible").GetBoolean().Should().BeTrue();
         _ = root.GetProperty("capturedBySubject").GetString()
             .Should().Be(subjectId.ToString());
