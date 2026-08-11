@@ -157,6 +157,11 @@ public class RolesController(IRoleManagementService roleManagementService) : Con
             _ => StatusCodes.Status400BadRequest
         };
 
+        if (ex.ErrorCode == RoleManagementErrorCode.HasMembers && ex.MemberCount is { } memberCount)
+        {
+            return StatusCode(statusCode, new RoleHasMembersResponse { Error = ex.Message, MemberCount = memberCount });
+        }
+
         return StatusCode(statusCode, new { error = ex.Message, code = ex.ErrorCode.ToString() });
     }
 

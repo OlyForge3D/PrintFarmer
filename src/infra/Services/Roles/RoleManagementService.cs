@@ -336,7 +336,10 @@ public partial class RoleManagementService(
                 {
                     throw new RoleManagementException(
                         RoleManagementErrorCode.HasMembers,
-                        $"Role '{role.Name}' has {memberCount} member(s). Pass reassignTo={{roleId}} or cascade=true to proceed.");
+                        $"Role '{role.Name}' has {memberCount} member(s). Pass reassignTo={{roleId}} or cascade=true to proceed.")
+                    {
+                        MemberCount = memberCount
+                    };
                 }
             }
 

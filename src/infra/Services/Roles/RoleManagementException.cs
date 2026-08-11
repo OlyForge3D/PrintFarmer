@@ -48,6 +48,14 @@ public class RoleManagementException : Exception
 {
     public RoleManagementErrorCode ErrorCode { get; }
 
+    /// <summary>
+    /// The member count at the time a <see cref="RoleManagementErrorCode.HasMembers"/> error
+    /// was raised, so the controller can return it in the structured <c>RoleHasMembersResponse</c>
+    /// body instead of only embedding it in the free-text <see cref="Exception.Message"/>.
+    /// Null for every other error code.
+    /// </summary>
+    public int? MemberCount { get; init; }
+
     public RoleManagementException(RoleManagementErrorCode errorCode, string message)
         : base(message)
     {

@@ -82,6 +82,49 @@ public sealed class RolesControllerTests
         ((ObjectResult)result).StatusCode.Should().Be(expectedStatusCode);
     }
 
+    [Fact]
+    public async Task DeleteRoleAsync_HasMembers_ReturnsStructuredRoleHasMembersResponseWithMemberCount()
+    {
+        // Issue #1448 documents RoleHasMembersResponse (with MemberCount) as the 409 body for
+        // the "role still has members" case; the generic { error, code } payload used by other
+        // error codes would break the documented contract for generated clients/UI code.
+        Mock<IRoleManagementService> service = new(MockBehavior.Strict);
+        _ = service
+            .Setup(s => s.DeleteRoleAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<bool>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RoleManagementException(RoleManagementErrorCode.HasMembers, "Role 'operators' has 3 member(s).") { MemberCount = 3 });
+
+        RolesController controller = CreateController(service.Object);
+
+        IActionResult result = await controller.DeleteRoleAsync(Guid.NewGuid(), reassignTo: null, cascade: false, CancellationToken.None);
+
+        ObjectResult objectResult = result.Should().BeOfType<ObjectResult>().Which;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        RoleHasMembersResponse body = objectResult.Value.Should().BeOfType<RoleHasMembersResponse>().Which;
+        body.MemberCount.Should().Be(3);
+        body.Error.Should().Contain("operators");
+    }
+
+    [Fact]
+    public async Task DeleteRoleAsync_MapsEachErrorCodeToItsExpectedStatusCode_MemberCountUnset()
+    {
+        // Every non-HasMembers error code (and a HasMembers thrown without MemberCount set, in
+        // case a future call site forgets to populate it) must still fall back to the generic
+        // { error, code } payload rather than throwing while trying to build a
+        // RoleHasMembersResponse from a null count.
+        Mock<IRoleManagementService> service = new(MockBehavior.Strict);
+        _ = service
+            .Setup(s => s.DeleteRoleAsync(It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<bool>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new RoleManagementException(RoleManagementErrorCode.HasMembers, "test failure"));
+
+        RolesController controller = CreateController(service.Object);
+
+        IActionResult result = await controller.DeleteRoleAsync(Guid.NewGuid(), reassignTo: null, cascade: false, CancellationToken.None);
+
+        ObjectResult objectResult = result.Should().BeOfType<ObjectResult>().Which;
+        objectResult.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        objectResult.Value.Should().NotBeOfType<RoleHasMembersResponse>();
+    }
+
     [Theory]
     [InlineData(RoleManagementErrorCode.NotFound, StatusCodes.Status404NotFound)]
     [InlineData(RoleManagementErrorCode.SystemRoleProtected, StatusCodes.Status403Forbidden)]
