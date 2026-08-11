@@ -64,7 +64,7 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetCandidates_ReachesTheSlicerHostOverHttpAndReportsAnEligiblePrinter()
+    public async Task GetCandidates_ListsEligiblePrinterWithoutRequiringTheSlicerHost()
     {
         CalibrationPrinterSeeder.SeededPrinter seeded =
             await CalibrationPrinterSeeder.SeedAsync(_factory.Services);
@@ -171,7 +171,7 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Capabilities_FallBackToUnavailableWhenTheSlicerHostStopsAnswering()
+    public async Task Capabilities_ReportContextUnavailableWhileCandidatesRemainAvailable()
     {
         using HttpClient client = CreateCalibrationReaderClient();
         await _slicerHost!.DisposeAsync();
@@ -191,10 +191,9 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
         HttpResponseMessage candidates =
             await client.GetAsync("/api/printers/calibration-candidates");
         string body = await candidates.Content.ReadAsStringAsync();
-        _ = candidates.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
-        using JsonDocument problem = JsonDocument.Parse(body);
-        _ = problem.RootElement.GetProperty("code").GetString()
-            .Should().Be("profile_service_unavailable");
+        _ = candidates.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using JsonDocument candidateList = JsonDocument.Parse(body);
+        _ = candidateList.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
     }
 
     private HttpClient CreateCalibrationReaderClient(Guid? userId = null) =>

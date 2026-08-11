@@ -170,10 +170,12 @@ which has available capacity. `requiredVersion` retains the first configured
 version for older clients. `supportedVersions` reports the complete policy,
 `observedVersions` reports fresh upstream worker versions, and `versionPolicy`
 is `allow-list`. Calibration context is operational when the caller can
-reach the local upstream OrcaSlicer profile resolver. The monolith advertises
+reach the upstream OrcaSlicer profile resolver. The monolith advertises
 and serves that context; a split API without a caller-reachable resolver
-advertises it as non-operational and returns
-`503 profile_service_unavailable`. Persistence, synchronization, private
+advertises it as non-operational. Candidate listing remains available because
+it uses API-owned printer metadata and does not resolve profiles. Selecting a
+printer for context returns a typed `503 profile_service_*` failure when the
+resolver cannot complete the single profile-triple request. Persistence, synchronization, private
 photos, and immutable generated-profile history are implemented independently.
 `calibrationSlicingEnabled` is computed, never constant: it additionally
 requires a healthy worker that attests its pinned OrcaSlicer binary digest and
@@ -725,7 +727,11 @@ dispatch calibration work from an ineligible context.
 | `403` | `permission_denied` | The caller lacks `calibration:read`. |
 | `404` | `printer_not_found` | The printer is missing or disabled. |
 | `409` | `printer_configuration_changed` | The requested revision is no longer current. |
-| `503` | `profile_service_unavailable` | The profile resolver is not caller-reachable. |
+| `503` | `profile_service_authentication_failed` | The selected-context hop could not forward or validate the caller's authentication. |
+| `503` | `profile_service_authorization_failed` | The slicer host refused the caller's profile access. |
+| `503` | `profile_service_configuration_error` | The configured resolver route or request contract is incompatible. |
+| `503` | `profile_service_timeout` | The bounded selected-context profile request timed out. |
+| `503` | `profile_service_unavailable` | The profile resolver is otherwise unavailable. |
 
 This context supports the public **Printer Calibration** workflow for Klipper
 printers based on upstream OrcaSlicer and its

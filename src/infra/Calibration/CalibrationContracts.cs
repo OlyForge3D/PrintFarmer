@@ -433,11 +433,13 @@ public sealed class CalibrationProfileResolverUnavailableException : Exception
     public CalibrationProfileResolverUnavailableException()
         : base("The calibration profile resolver is unavailable.")
     {
+        ErrorCode = "profile_service_unavailable";
     }
 
     public CalibrationProfileResolverUnavailableException(string message)
         : base(message)
     {
+        ErrorCode = "profile_service_unavailable";
     }
 
     public CalibrationProfileResolverUnavailableException(
@@ -445,7 +447,19 @@ public sealed class CalibrationProfileResolverUnavailableException : Exception
         Exception innerException)
         : base(message, innerException)
     {
+        ErrorCode = "profile_service_unavailable";
     }
+
+    public CalibrationProfileResolverUnavailableException(
+        string message,
+        string errorCode,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+    }
+
+    public string ErrorCode { get; }
 }
 
 /// <summary>Resolves explicitly selected profiles without exposing an internal service address.</summary>

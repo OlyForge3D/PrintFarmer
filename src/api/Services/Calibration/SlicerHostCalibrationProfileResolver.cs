@@ -22,9 +22,10 @@ namespace Farm.Web.Api.Services.Calibration;
 /// Security posture: the current end user's already-validated bearer token is forwarded verbatim so
 /// the slicer host performs its own authentication, permission check and ownership scoping. No
 /// service-to-service credential is minted here, the token is never logged, and the internal base
-/// address never appears in logs or responses. Every dependency failure is converted into
-/// <see cref="CalibrationProfileResolverUnavailableException"/> so the caller degrades to a stable
-/// <c>profile_service_unavailable</c> instead of leaking transport detail.
+/// address never appears in logs or responses. Dependency failures are converted into a typed
+/// <see cref="CalibrationProfileResolverUnavailableException"/> so the caller can distinguish safe
+/// authentication, authorization, configuration, timeout, and availability failure codes without
+/// leaking transport detail.
 /// </para>
 /// </remarks>
 public sealed class SlicerHostCalibrationProfileResolver(
@@ -160,6 +161,7 @@ public sealed class SlicerHostCalibrationProfileResolver(
             logger.LogWarning("Calibration profile resolution timed out");
             throw new CalibrationProfileResolverUnavailableException(
                 "The calibration profile resolver did not respond in time.",
+                "profile_service_timeout",
                 exception);
         }
         finally
@@ -188,7 +190,8 @@ public sealed class SlicerHostCalibrationProfileResolver(
         logger.LogWarning(
             "Calibration profile resolution has no forwardable end-user bearer token");
         throw new CalibrationProfileResolverUnavailableException(
-            "No end-user bearer token is available to authenticate calibration profile resolution.");
+            "No end-user bearer token is available to authenticate calibration profile resolution.",
+            "profile_service_authentication_failed");
     }
 
     private CalibrationProfileResolverUnavailableException Unavailable(HttpStatusCode statusCode)
@@ -196,8 +199,17 @@ public sealed class SlicerHostCalibrationProfileResolver(
         logger.LogWarning(
             "Calibration profile resolution was refused with {StatusCode}",
             (int)statusCode);
+        string errorCode = statusCode switch
+        {
+            HttpStatusCode.Unauthorized => "profile_service_authentication_failed",
+            HttpStatusCode.Forbidden => "profile_service_authorization_failed",
+            HttpStatusCode.BadRequest or HttpStatusCode.NotFound =>
+                "profile_service_configuration_error",
+            _ => "profile_service_unavailable",
+        };
         return new CalibrationProfileResolverUnavailableException(
-            "The calibration profile resolver refused the request.");
+            "The calibration profile resolver refused the request.",
+            errorCode);
     }
 
     private static bool IsJsonResponse(HttpResponseMessage response)
