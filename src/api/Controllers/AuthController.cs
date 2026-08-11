@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
@@ -398,13 +399,21 @@ public class AuthController(
     }
 
     // ─── passkey / WebAuthn ──────────────────────────────────────────────────
+    //
+    // Passkey *registration* and credential management are credential-management operations, so
+    // they require an interactive session. A Desktop API-key exchange token carries the owner's
+    // NameIdentifier/Name and would otherwise satisfy plain [Authorize]: a stolen 15-minute token
+    // could register an attacker-controlled passkey and then bootstrap a full interactive login
+    // from it, or enumerate/delete/rename the owner's existing credentials. The passkey *login*
+    // ceremony below is [AllowAnonymous] and unaffected - the signed assertion is itself the
+    // credential being verified.
 
     /// <summary>
     /// Begins a passkey registration ceremony. Returns <c>PublicKeyCredentialCreationOptions</c>
     /// for the browser's <c>navigator.credentials.create()</c> call.
     /// </summary>
     [HttpPost("passkey/register/begin")]
-    [Authorize]
+    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CredentialCreateOptions), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyRegisterBeginAsync(CancellationToken ct)
@@ -434,7 +443,7 @@ public class AuthController(
     /// Credential persistence is deferred to #354.
     /// </summary>
     [HttpPost("passkey/register/complete")]
-    [Authorize]
+    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
@@ -538,7 +547,7 @@ public class AuthController(
 
     /// <summary>Lists all registered passkey credentials for the current user.</summary>
     [HttpGet("passkey/credentials")]
-    [Authorize]
+    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(IEnumerable<PasskeyCredentialDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListPasskeyCredentialsAsync(CancellationToken ct)
     {
@@ -561,7 +570,7 @@ public class AuthController(
 
     /// <summary>Deletes a passkey credential owned by the current user.</summary>
     [HttpDelete("passkey/credentials/{id:int}")]
-    [Authorize]
+    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeletePasskeyCredentialAsync(int id, CancellationToken ct)
@@ -578,7 +587,7 @@ public class AuthController(
 
     /// <summary>Renames a passkey credential owned by the current user.</summary>
     [HttpPatch("passkey/credentials/{id:int}")]
-    [Authorize]
+    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

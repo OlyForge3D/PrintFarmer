@@ -267,9 +267,18 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, LogSanitizer.Sanitize(reason));
     }
 
-    public async Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
+    public async Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, ApiKeyExchangeScopeAudit? scopeAudit = null, string? correlationId = null, CancellationToken cancellationToken = default)
     {
-        var metadata = new { ApiKeyId = apiKeyId };
+        // Scope/permission names are compile-time constants from DesktopScopePermissionMap, never
+        // caller-supplied text; the key, its hash, and the issued token are never recorded.
+        var metadata = new
+        {
+            ApiKeyId = apiKeyId,
+            RequestedScopes = scopeAudit?.RequestedScopes,
+            EffectiveScopes = scopeAudit?.EffectiveScopes,
+            DroppedScopes = scopeAudit?.DroppedScopes,
+            GrantedPermissions = scopeAudit?.GrantedPermissions,
+        };
 
         AuthAuditLog auditLog = new()
         {
@@ -285,7 +294,13 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}", userId, apiKeyId, LogSanitizer.Sanitize(ipAddress));
+        _logging.LogInformation(
+            "[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}; effective scopes: {EffectiveScopes}; dropped: {DroppedScopes}",
+            userId,
+            apiKeyId,
+            LogSanitizer.Sanitize(ipAddress),
+            string.Join(",", scopeAudit?.EffectiveScopes ?? []),
+            string.Join(",", scopeAudit?.DroppedScopes ?? []));
     }
 
     public async Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)

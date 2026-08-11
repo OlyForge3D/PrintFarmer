@@ -3,7 +3,10 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.AspNetCore.Authorization;
@@ -13,6 +16,7 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/users/{userId:guid}/apikeys")]
+[Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
 public class UserApiKeysController : ControllerBase
 {
     internal const int MaxNameLength = 256;
@@ -25,13 +29,16 @@ public class UserApiKeysController : ControllerBase
 
     private readonly Farm.Infrastructure.Repositories.Api.IApiKeyRepository _repo;
     private readonly ISettingsService _settingsService;
+    private readonly IUsersRepository _usersRepository;
 
     public UserApiKeysController(
         Farm.Infrastructure.Repositories.Api.IApiKeyRepository repo,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        IUsersRepository usersRepository)
     {
         _repo = repo;
         _settingsService = settingsService;
+        _usersRepository = usersRepository;
     }
 
     [HttpGet]
@@ -52,7 +59,8 @@ public class UserApiKeysController : ControllerBase
             k.ExpiresAt,
             k.Purpose,
             k.Scopes,
-            k.IsExpired));
+            k.IsExpired,
+            DesktopScopePermissionMap.GetScopeNames(k.Scopes)));
         return Ok(result);
     }
 
@@ -72,12 +80,28 @@ public class UserApiKeysController : ControllerBase
         }
 
         ApiKeyPurpose purpose = req.Purpose ?? ApiKeyPurpose.OctoPrint;
-        ApiKeyScope scopes = req.Scopes ?? ApiKeyScope.None;
+        if (!TryResolveRequestedScopes(req, out ApiKeyScope scopes, out string? scopeParseError))
+        {
+            return BadRequest(new { error = scopeParseError });
+        }
+
         DateTime? expiresAt = req.ExpiresAt;
 
         if (!TryValidateScopesAndExpiry(purpose, scopes, ref expiresAt, out string? validationError))
         {
             return BadRequest(new { error = validationError });
+        }
+
+        // Privileged scopes translate 1:1 into permission claims at exchange time, so they may
+        // only be stored on a key whose owner is independently authorized for them. Resolved from
+        // the target owner's live database roles/grants - never from the caller's JWT claims, which
+        // the caller could otherwise present to authorize a key for someone else. Checked here for
+        // early, actionable feedback; the exchange re-resolves and downgrades regardless, so a
+        // later revocation still takes effect.
+        string? escalationError = await ValidateOwnerScopeAuthorizationAsync(userId, scopes, HttpContext.RequestAborted);
+        if (escalationError is not null)
+        {
+            return BadRequest(new { error = escalationError });
         }
 
         string rawKey = GenerateKey();
@@ -102,6 +126,7 @@ public class UserApiKeysController : ControllerBase
             id = key.Id,
             purpose = key.Purpose,
             scopes = key.Scopes,
+            scopeNames = DesktopScopePermissionMap.GetScopeNames(key.Scopes),
             expiresAt = key.ExpiresAt
         });
     }
@@ -172,7 +197,16 @@ public class UserApiKeysController : ControllerBase
         oldKey.KeyHash = storedValue;
         await _repo.UpdateAsync(oldKey);
 
-        return Ok(new { key = rawKey, id = oldKey.Id });
+        // Rotation replaces only the secret: purpose, scopes, and expiry are preserved exactly.
+        return Ok(new
+        {
+            key = rawKey,
+            id = oldKey.Id,
+            purpose = oldKey.Purpose,
+            scopes = oldKey.Scopes,
+            scopeNames = DesktopScopePermissionMap.GetScopeNames(oldKey.Scopes),
+            expiresAt = oldKey.ExpiresAt
+        });
     }
 
     /// <summary>
@@ -237,6 +271,55 @@ public class UserApiKeysController : ControllerBase
     }
 
     /// <summary>
+    /// Resolves the requested scopes from either the canonical <c>scopeNames</c> array (preferred)
+    /// or the legacy <c>scopes</c> flags field, which is retained for existing clients.
+    /// </summary>
+    /// <remarks>
+    /// <c>scopeNames</c> exists because the legacy field is a <c>[Flags]</c> enum: it serializes
+    /// the exact value 7 as the single name <c>"All"</c> and accepts raw numbers, both of which
+    /// make privilege review error-prone. The canonical array names each granted scope explicitly
+    /// and rejects composite aliases outright. Supplying both is rejected rather than silently
+    /// resolved, so a client can never think it sent one thing while the server stored another.
+    /// </remarks>
+    private static bool TryResolveRequestedScopes(
+        CreateApiKeyRequest req,
+        out ApiKeyScope scopes,
+        out string? error)
+    {
+        scopes = ApiKeyScope.None;
+        error = null;
+
+        bool hasScopeNames = req.ScopeNames is { Count: > 0 };
+        bool hasLegacyScopes = req.Scopes is not null && req.Scopes != ApiKeyScope.None;
+
+        if (hasScopeNames && hasLegacyScopes)
+        {
+            error = "Specify either 'scopeNames' or the legacy 'scopes' field, not both.";
+            return false;
+        }
+
+        if (!hasScopeNames)
+        {
+            scopes = req.Scopes ?? ApiKeyScope.None;
+            return true;
+        }
+
+        foreach (string name in req.ScopeNames!)
+        {
+            if (!DesktopScopePermissionMap.TryParseScopeName(name, out ApiKeyScope parsed))
+            {
+                // Deliberately does not echo the caller-supplied value back.
+                error = "Unknown API key scope name. Use the individual scope names returned by the API; composite aliases such as 'All' are not accepted.";
+                return false;
+            }
+
+            scopes |= parsed;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Validates and normalizes the requested purpose/scopes/expiry combination, applying
     /// safe defaults for Desktop-purpose keys. OctoPrint-purpose and legacy keys are
     /// never allowed to carry scopes, so existing or unscoped keys can never gain desktop
@@ -256,7 +339,10 @@ public class UserApiKeysController : ControllerBase
             return false;
         }
 
-        if ((scopes & ~ApiKeyScope.All) != ApiKeyScope.None)
+        // Validated against the explicit known-flag mask, never against ApiKeyScope.All: All is
+        // frozen at the three legacy model/library scopes and must never authorize the privileged
+        // calibration/slicing flags.
+        if (DesktopScopePermissionMap.HasUndefinedBits(scopes))
         {
             error = "Invalid API key scope.";
             return false;
@@ -299,7 +385,20 @@ public class UserApiKeysController : ControllerBase
             case ApiKeyPurpose.Desktop:
                 if (scopes == ApiKeyScope.None)
                 {
-                    error = "At least one scope (ModelRead, ModelWrite, or LibrarySync) is required for Desktop-purpose API keys.";
+                    error = "At least one scope is required for Desktop-purpose API keys.";
+                    return false;
+                }
+
+                // Reject combinations that would dead-end mid-workflow (e.g. generating a
+                // calibration profile without being able to submit the slice job it needs).
+                IReadOnlyList<(string Scope, string MissingPrerequisite)> unsatisfied =
+                    DesktopScopePermissionMap.GetUnsatisfiedDependencies(scopes);
+                if (unsatisfied.Count > 0)
+                {
+                    string detail = string.Join(
+                        "; ",
+                        unsatisfied.Select(u => $"{u.Scope} also requires {u.MissingPrerequisite}"));
+                    error = $"Incomplete scope selection: {detail}.";
                     return false;
                 }
 
@@ -317,6 +416,48 @@ public class UserApiKeysController : ControllerBase
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Verifies that the key's <b>owner</b> - not the caller - independently holds every
+    /// permission the requested privileged scopes map to, so a key can never grant more than its
+    /// owner already has. A <c>farm_admin</c> owner may authorize any mapped permission (the admin
+    /// role itself is still never copied into an exchanged token).
+    /// </summary>
+    /// <returns>An error message when the owner is not authorized, otherwise <c>null</c>.</returns>
+    private async Task<string?> ValidateOwnerScopeAuthorizationAsync(
+        Guid ownerId,
+        ApiKeyScope scopes,
+        CancellationToken ct)
+    {
+        IReadOnlyList<string> requested = DesktopScopePermissionMap.GetPermissions(scopes);
+        if (requested.Count == 0)
+        {
+            return null;
+        }
+
+        List<string> roles = await _usersRepository.GetActiveRoleNamesAsync(ownerId, ct) ?? [];
+        if (roles.Contains(PrintFarmerPermissions.FarmAdminRole, StringComparer.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        List<(string Resource, string Action)> granted =
+            await _usersRepository.GetGrantedPermissionsAsync(ownerId, ct) ?? [];
+        HashSet<string> ownerPermissions = granted
+            .Select(p => $"{p.Resource}:{p.Action}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        List<string> missing = requested.Where(p => !ownerPermissions.Contains(p)).ToList();
+        if (missing.Count == 0)
+        {
+            return null;
+        }
+
+        // Names come from PrintFarmerPermissions compile-time constants, never from the request
+        // body, so echoing them back cannot reflect caller-controlled content.
+        return "The API key owner is not authorized for the requested scope(s). " +
+            $"Grant the owner these permissions first: {string.Join(", ", missing)}.";
     }
 
     private static string GenerateKey()
@@ -344,8 +485,41 @@ public class UserApiKeysController : ControllerBase
     }
 }
 
-public record CreateApiKeyRequest(string? Name, ApiKeyPurpose? Purpose = null, ApiKeyScope? Scopes = null, DateTime? ExpiresAt = null);
+/// <summary>
+/// Request to create an API key.
+/// </summary>
+/// <param name="Name">Display name for the key.</param>
+/// <param name="Purpose">OctoPrint (default) or Desktop.</param>
+/// <param name="Scopes">
+/// Legacy flags field, retained for existing clients. Prefer <paramref name="ScopeNames"/>.
+/// </param>
+/// <param name="ExpiresAt">Optional expiry; Desktop keys always get one.</param>
+/// <param name="ScopeNames">
+/// Canonical, explicit scope names (e.g. <c>["ModelRead", "CalibrationRead"]</c>). Composite
+/// aliases such as <c>"All"</c> are rejected. Cannot be combined with <paramref name="Scopes"/>.
+/// </param>
+public record CreateApiKeyRequest(
+    string? Name,
+    ApiKeyPurpose? Purpose = null,
+    ApiKeyScope? Scopes = null,
+    DateTime? ExpiresAt = null,
+    IReadOnlyList<string>? ScopeNames = null);
 
+/// <summary>
+/// An API key as returned to the owning user or an administrator. Never contains the secret.
+/// </summary>
+/// <param name="Id">The key's unique identifier.</param>
+/// <param name="Name">The key's display name.</param>
+/// <param name="IsActive">Whether the key is currently enabled.</param>
+/// <param name="CreatedAt">When the key was created (UTC).</param>
+/// <param name="ExpiresAt">When the key expires (UTC), if it has an expiry.</param>
+/// <param name="Purpose">What the key authenticates: OctoPrint uploads or the Desktop app.</param>
+/// <param name="Scopes">
+/// Legacy flags rendering. Renders the exact value 7 as the single, misleading name <c>All</c>;
+/// prefer <paramref name="ScopeNames"/>.
+/// </param>
+/// <param name="IsExpired">Whether the key's expiry has already passed.</param>
+/// <param name="ScopeNames">The key's scopes as individual canonical names.</param>
 public record ApiKeyDto(
     Guid Id,
     string Name,
@@ -354,4 +528,5 @@ public record ApiKeyDto(
     DateTime? ExpiresAt,
     ApiKeyPurpose Purpose,
     ApiKeyScope Scopes,
-    bool IsExpired);
+    bool IsExpired,
+    IReadOnlyList<string> ScopeNames);
