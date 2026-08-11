@@ -77,6 +77,8 @@ repository are intentionally omitted.
 - [Operator Feature Gates](./OPERATOR_FEATURE_GATES.md) - Feature availability
 - [Operator Native Push](./OPERATOR_NATIVE_PUSH.md) - Native push setup
 - [Offline Write Replay](./OFFLINE_WRITE_REPLAY.md) - Offline mutation replay
+- [Role Permission Precedence](./ROLE_PERMISSION_PRECEDENCE.md) - Grant/deny
+  precedence rule for `RolePermission.Granted`
 
 ## Frontend And Design
 

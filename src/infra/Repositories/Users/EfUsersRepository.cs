@@ -211,13 +211,20 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
 
     public async Task<List<(string Resource, string Action)>> GetGrantedPermissionsAsync(Guid userId, CancellationToken ct = default)
     {
-        return await _db.UserRoles
+        // Grant/deny precedence: an explicit deny (Granted == false) on any of the user's
+        // active roles suppresses a permission even if another active role grants it.
+        // See docs/ROLE_PERMISSION_PRECEDENCE.md and issue #1450.
+        List<(string Resource, string Action, bool Granted)> rows = await _db.UserRoles
             .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
-            .Where(rp => rp.Granted)
-            .Select(rp => new ValueTuple<string, string>(rp.Resource.Name, rp.Action.Name))
-            .Distinct()
+            .Select(rp => new ValueTuple<string, string, bool>(rp.Resource.Name, rp.Action.Name, rp.Granted))
             .ToListAsync(ct);
+
+        return rows
+            .GroupBy(rp => (rp.Resource, rp.Action))
+            .Where(g => g.All(rp => rp.Granted))
+            .Select(g => (g.Key.Resource, g.Key.Action))
+            .ToList();
     }
 
     public async Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default)
