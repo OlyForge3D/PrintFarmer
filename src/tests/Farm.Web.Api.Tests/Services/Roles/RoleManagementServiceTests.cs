@@ -536,4 +536,31 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         stillExists.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task CreateRoleAsync_MapsAConcurrentDuplicateNameInsertToInvalidNameInsteadOfBubblingTheDbException()
+    {
+        // ValidateNewNameAsync's app-level uniqueness check is not atomic with the insert: two
+        // concurrent creates for the same name can both pass that check, and only the
+        // database's unique index on Role.Name ultimately rejects the loser via a
+        // DbUpdateException on SaveChangesAsync. Simulate the loser's view with a mocked
+        // repository: the initial NameExistsAsync check passes, the insert-time
+        // SaveChangesAsync throws (as it would when the unique index rejects the row), and a
+        // second NameExistsAsync check (now reflecting the winner's already-committed row)
+        // confirms the collision.
+        Mock<IRolesRepository> repository = new(MockBehavior.Loose);
+        _ = repository.SetupSequence(r => r.NameExistsAsync("dupe_role", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false)
+            .ReturnsAsync(true);
+        _ = repository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new DbUpdateException("duplicate key", new InvalidOperationException("UNIQUE constraint failed: Roles.Name")));
+
+        RoleManagementService service = new(repository.Object, _authAuditService.Object);
+
+        CreateCustomRoleRequest request = new() { Name = "dupe_role", DisplayName = "Dupe Role" };
+        Func<Task> act = () => service.CreateRoleAsync(request, Guid.NewGuid(), null);
+
+        (await act.Should().ThrowAsync<RoleManagementException>())
+            .Which.ErrorCode.Should().Be(RoleManagementErrorCode.InvalidName);
+    }
 }

@@ -91,7 +91,28 @@ public partial class RoleManagementService(
         };
 
         await _roles.AddRoleAsync(role, ct);
-        await _roles.SaveChangesAsync(ct);
+
+        try
+        {
+            await _roles.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+        {
+            // The app-level uniqueness check in ValidateNewNameAsync is not itself atomic with
+            // this insert: two concurrent creates for the same name can both pass validation,
+            // and only the database's unique index on Role.Name ultimately rejects the loser.
+            // Translate that into the same domain error a non-concurrent duplicate would get,
+            // instead of letting a raw DbUpdateException bubble up as an unhandled 500.
+            if (await _roles.NameExistsAsync(name, excludeRoleId: null, ct))
+            {
+                throw new RoleManagementException(
+                    RoleManagementErrorCode.InvalidName,
+                    $"A role named '{name}' already exists.",
+                    ex);
+            }
+
+            throw;
+        }
 
         if (copyFromRoleId is { } source)
         {
