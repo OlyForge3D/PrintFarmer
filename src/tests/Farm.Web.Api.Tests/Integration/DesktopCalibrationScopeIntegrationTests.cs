@@ -695,11 +695,21 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
             "calibration:generate + slicing:submit are both present");
         generate.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
 
-        HttpResponseMessage catalogRead = await client.GetAsync("/api/slicer/profiles");
-        catalogRead.StatusCode.Should().NotBe(
+        // Strict: the catalog read must actually succeed, not merely avoid a 403. A bare
+        // NotBe(Forbidden) would also be satisfied by a 404 (wrong route) or a 503 (dependency
+        // down), neither of which proves the scope reaches the endpoint.
+        using HttpResponseMessage catalogRead = await client.GetAsync("/api/slicer/profiles");
+        catalogRead.StatusCode.Should().Be(
+            HttpStatusCode.OK,
+            "profile catalog reads stay reachable for slicing:submit, and this is disclosed");
+
+        // Paired negative on the same route with a real exchanged token that lacks slicing:submit,
+        // proving the 200 above came from the scope rather than from an absent policy.
+        using HttpClient withoutSubmit = await ExchangeClientAsync(ApiKeyScope.ModelRead);
+        using HttpResponseMessage deniedCatalogRead = await withoutSubmit.GetAsync("/api/slicer/profiles");
+        deniedCatalogRead.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "profile catalog reads stay reachable for submit, and this is disclosed");
-        catalogRead.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+            "slicing:submit class-gates the profile catalog, so a token without it must be refused");
     }
 
     /// <summary>

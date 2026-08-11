@@ -289,16 +289,21 @@ public class UserApiKeysController : ControllerBase
         scopes = ApiKeyScope.None;
         error = null;
 
-        bool hasScopeNames = req.ScopeNames is { Count: > 0 };
-        bool hasLegacyScopes = req.Scopes is not null && req.Scopes != ApiKeyScope.None;
+        // Mutual exclusion keys off field *presence*, not off whether the value happens to be
+        // empty. Inferring presence from a non-empty array or a non-None flag would silently
+        // accept `{"scopeNames": [], "scopes": "ModelRead"}` and
+        // `{"scopeNames": ["ModelRead"], "scopes": "None"}` - in both cases the caller sent both
+        // fields and could reasonably believe the other one governed what was stored.
+        bool sentScopeNames = req.ScopeNames is not null;
+        bool sentLegacyScopes = req.Scopes is not null;
 
-        if (hasScopeNames && hasLegacyScopes)
+        if (sentScopeNames && sentLegacyScopes)
         {
             error = "Specify either 'scopeNames' or the legacy 'scopes' field, not both.";
             return false;
         }
 
-        if (!hasScopeNames)
+        if (!sentScopeNames)
         {
             scopes = req.Scopes ?? ApiKeyScope.None;
             return true;

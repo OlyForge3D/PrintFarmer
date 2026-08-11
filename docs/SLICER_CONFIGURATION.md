@@ -303,7 +303,9 @@ deliberately **not** reachable from any Desktop scope.
 > **What `SlicingSubmit` actually reaches.** `slicing:submit` is a broad, pre-existing permission:
 > the slicer host's `ProfilesController` is gated by it at the class level, so a key holding this
 > scope can **read and enumerate the slicer profile catalog** (list, hierarchy, schemas, per-machine
-> process/filament queries). That read reach is required for submission and is not narrowed here.
+> process/filament queries), and it also authorizes **uploading the G-code artifact for a slice job
+> the caller owns** (`POST /api/artifacts/{jobId}`, additionally constrained by per-job ownership).
+> That reach is required for submission and is not narrowed here.
 > Profile-state **mutation** (`POST /api/slicer/profiles/upload`, `POST .../clone`,
 > `PUT .../custom/{id}`) additionally requires an interactive session, so a Desktop key can never
 > modify profile state — see
@@ -466,10 +468,15 @@ internal hop:
   forwards the caller's own bearer token; it mints no service credential and logs neither the token
   nor the internal address.
 
-Because Desktop API-key exchange tokens carry only `scope` claims and no permission claims, they
-cannot satisfy `calibration:read`. PrintFarmerDesktop must use a normal login/session token for
-calibration discovery. See `docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and
-verification steps.
+A Desktop API-key exchange token satisfies `calibration:read` here **only** when its key was
+explicitly provisioned with the `CalibrationRead` scope *and* the key's owner still holds
+`calibration:read` at exchange time — the exchange then emits the mapped `permission` claim
+alongside the `scope` claim. A key without that scope, and every legacy or model/library-only key
+(including any stored as the frozen aggregate `All`/`7`), carries **no** permission claims and
+cannot reach this endpoint; such clients must use a normal login/session token. Near term, because
+there is no permission-grant API or UI yet (epic #1445), the owner must be a `farm_admin` member —
+see [Scopes and permissions](#scopes-and-permissions). See
+`docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and verification steps.
 
 ## Support
 

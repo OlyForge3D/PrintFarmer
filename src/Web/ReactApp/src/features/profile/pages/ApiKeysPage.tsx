@@ -59,13 +59,23 @@ const SCOPE_GROUPS: ScopeGroup[] = [
     description: 'Each option grants exactly one calibration permission to this key.',
     options: [
       { value: 'CalibrationRead', label: 'Calibration read', description: 'View calibration projects, attempts, photos, and generated profiles.' },
-      { value: 'CalibrationCreate', label: 'Calibration create', description: 'Create calibration projects and attempts.' },
-      { value: 'CalibrationUpdate', label: 'Calibration update', description: 'Edit calibration projects, drafts, observations, and photos.' },
+      {
+        value: 'CalibrationCreate',
+        label: 'Calibration create',
+        description: 'Create calibration projects and attempts.',
+        impact: 'Also requires Calibration read.',
+      },
+      {
+        value: 'CalibrationUpdate',
+        label: 'Calibration update',
+        description: 'Edit calibration projects, drafts, observations, and photos.',
+        impact: 'Also requires Calibration read.',
+      },
       {
         value: 'CalibrationDelete',
         label: 'Calibration delete',
         description: 'Delete calibration projects, drafts, and photos.',
-        impact: 'Destructive — permanently removes calibration data.',
+        impact: 'Destructive — permanently removes calibration data. Also requires Calibration read.',
       },
       {
         value: 'CalibrationGenerate',
@@ -73,7 +83,12 @@ const SCOPE_GROUPS: ScopeGroup[] = [
         description: 'Produce and export generated calibration profiles.',
         impact: 'Also requires Calibration read, Slicing submit, and Slicing read artifact.',
       },
-      { value: 'CalibrationPublish', label: 'Calibration publish', description: 'Publish a generated calibration profile revision for others to use.' },
+      {
+        value: 'CalibrationPublish',
+        label: 'Calibration publish',
+        description: 'Publish a generated calibration profile revision for others to use.',
+        impact: 'Also requires Calibration read.',
+      },
     ],
   },
   {
@@ -84,7 +99,7 @@ const SCOPE_GROUPS: ScopeGroup[] = [
       {
         value: 'SlicingSubmit',
         label: 'Slicing submit',
-        description: 'Submit slicing jobs, and read the slicer profile catalog.',
+        description: 'Submit slicing jobs, read the slicer profile catalog, and upload artifacts for its own jobs.',
         impact: 'Consumes slicer worker capacity. Cannot modify profiles.',
       },
       { value: 'SlicingReadArtifact', label: 'Slicing read artifact', description: 'Download sliced G-code artifacts.' },
