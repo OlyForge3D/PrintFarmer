@@ -324,6 +324,10 @@ public static class FeatureServicesStartup
         // Admin Control Center overview aggregation (issue #933). Composes the existing
         // health-check pipeline; does not run its own probes.
         services.AddScoped<Farm.Web.Api.Services.Admin.IAdminOverviewService, Farm.Web.Api.Services.Admin.AdminOverviewService>();
+
+        // Permission catalog derived from EndpointDataSource (issue #1446). Read-only; does
+        // not seed or mutate the database catalog.
+        services.AddScoped<Farm.Web.Api.Services.Admin.IPermissionCatalogService, Farm.Web.Api.Services.Admin.PermissionCatalogService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);
