@@ -70,6 +70,12 @@ lcov.info
 coverage-final.json
 src/tests/_temp/
 src/test-artifacts/
+# Generated at CI time by scripts/ci/generate-codeql-slnf.sh for the CodeQL C#
+# build; regenerated per run so it never drifts from farm-web.sln. The wildcard
+# form also covers the per-PID scratch filters written by the generator's test
+# suite, which must sit beside the solution.
+src/farm-web.codeql.slnf
+src/farm-web.codeql.*.slnf
 /src/src/
 
 # API runtime directories
