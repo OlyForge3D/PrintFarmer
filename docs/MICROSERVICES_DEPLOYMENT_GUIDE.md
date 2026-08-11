@@ -146,13 +146,17 @@ After deployment, access PrintFarmer at:
 
 `GET /api/printers/calibration-candidates` lists enabled printers from API-owned status, firmware,
 adapter, geometry, slicer identity, and hardware metadata. It does not contact the profile store, so
-operators can still choose a printer while `slicer-host` is unavailable.
+operators can still choose a printer while `slicer-host` is unavailable. Candidate entries set
+`profilesEvaluated: false`; their eligibility is preliminary and does not assert profile visibility,
+compatibility, or safety.
 
 After selection,
 `GET /api/printers/{id}/calibration-context?slicerType=OrcaSlicer` resolves that printer's exact
 machine, process, and filament profile identifiers in one bounded request. In a split deployment the
 profile store lives behind `slicer-host`, so both the API and slicer host must be configured for this
-selected-context hop:
+request. A successful context sets `profilesEvaluated: true` and is the authoritative eligibility
+result required before calibration project creation or mutation.
+Configure the selected-context hop as follows:
 
 | Service | Setting | Value |
 | --- | --- | --- |

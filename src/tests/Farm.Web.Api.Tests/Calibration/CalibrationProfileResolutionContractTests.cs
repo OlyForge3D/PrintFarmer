@@ -107,4 +107,22 @@ public sealed class CalibrationProfileResolutionContractTests
 
         _ = deserialize.Should().Throw<JsonException>();
     }
+
+    [Fact]
+    public void CalibrationDiscoveryDtos_SerializeProfileEvaluationStateInCamelCase()
+    {
+        JsonSerializerOptions options = new(JsonSerializerDefaults.Web);
+        CalibrationCandidateDto candidate = new();
+        CalibrationContextDto context = new(candidate);
+
+        using JsonDocument candidateJson =
+            JsonDocument.Parse(JsonSerializer.Serialize(candidate, options));
+        using JsonDocument contextJson =
+            JsonDocument.Parse(JsonSerializer.Serialize(context, options));
+
+        _ = candidateJson.RootElement.GetProperty("profilesEvaluated").GetBoolean()
+            .Should().BeFalse();
+        _ = contextJson.RootElement.GetProperty("profilesEvaluated").GetBoolean()
+            .Should().BeTrue();
+    }
 }

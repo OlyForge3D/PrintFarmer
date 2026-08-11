@@ -26,6 +26,7 @@ public sealed class PrinterCalibrationContextServiceTests
 
         _ = result.ErrorCode.Should().BeNull();
         CalibrationCandidateDto candidate = result.Value.Should().ContainSingle().Which;
+        _ = candidate.ProfilesEvaluated.Should().BeFalse();
         _ = candidate.Eligible.Should().BeTrue();
         _ = candidate.RejectionReasons.Should().BeEmpty();
         _ = candidate.Firmware.Family.Should().Be("Klipper");
@@ -266,6 +267,7 @@ public sealed class PrinterCalibrationContextServiceTests
 
         CalibrationContextDto candidate = await harness.GetContextAsync();
 
+        _ = candidate.ProfilesEvaluated.Should().BeTrue();
         _ = candidate.Eligible.Should().BeFalse();
         _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
             "profile_hash_mismatch",
@@ -378,6 +380,25 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = result.Value.Should().BeNull();
         _ = result.ErrorCode.Should().Be("profile_service_unavailable");
         harness.VerifySingleProfileResolution();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithoutRegisteredProfileResolver_ReturnsStableServiceError()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        PrinterCalibrationContextService service = harness.CreateService(profileResolver: null);
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
+        _ = result.Value.Should().BeNull();
+        _ = result.ErrorCode.Should().Be("profile_service_unavailable");
+        harness.VerifyNoProfileResolverCalls();
     }
 
     [Theory]
@@ -630,13 +651,8 @@ public sealed class PrinterCalibrationContextServiceTests
                     ["Calibration:HardwareMetadataStaleAfterSeconds"] = "2592000",
                 })
                 .Build();
-            Service = new PrinterCalibrationContextService(
-                Db,
-                _statusReader.Object,
-                _capabilityFactory.Object,
-                configuration,
-                new FixedTimeProvider(Now),
-                _profileResolver.Object);
+            Configuration = configuration;
+            Service = CreateService(_profileResolver.Object);
         }
 
         public AppDbContext Db { get; }
@@ -647,11 +663,23 @@ public sealed class PrinterCalibrationContextServiceTests
 
         public PrinterCalibrationContextService Service { get; }
 
+        private IConfiguration Configuration { get; }
+
         public BackendCapabilities Capabilities { get; set; }
 
         public PrinterStatusSnapshot? Status { get; set; }
 
         public ResolvedCalibrationProfiles Profiles { get; set; }
+
+        public PrinterCalibrationContextService CreateService(
+            ICalibrationProfileResolver? profileResolver) =>
+            new(
+                Db,
+                _statusReader.Object,
+                _capabilityFactory.Object,
+                Configuration,
+                new FixedTimeProvider(Now),
+                profileResolver);
 
         public async Task AddPrinterAsync(string name)
         {

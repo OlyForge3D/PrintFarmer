@@ -191,6 +191,8 @@ public class CalibrationCandidateDto
     public CalibrationSlicerIdentityDto Slicer { get; init; } =
         new(null, null, null, null);
 
+    public bool ProfilesEvaluated { get; init; }
+
     public bool Eligible { get; init; }
 
     public IReadOnlyList<string> MissingInputs { get; init; } = [];
@@ -242,6 +244,7 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
         MaxChamberTemperature = candidate.MaxChamberTemperature;
         Firmware = candidate.Firmware;
         Slicer = candidate.Slicer;
+        ProfilesEvaluated = true;
         Eligible = candidate.Eligible;
         MissingInputs = candidate.MissingInputs;
         RejectionReasons = candidate.RejectionReasons;
