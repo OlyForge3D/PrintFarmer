@@ -263,6 +263,20 @@ default 5/minute) to resist brute-force and enumeration attempts, and every exch
 (success or failure) is recorded in the authentication audit log. The raw API key, its hash, and
 the issued JWT are never written to logs or audit records.
 
+### 401 vs 403, and recovering from either
+
+The distinction is load-bearing for a desktop client:
+
+| Condition | Status | What the client should do |
+|---|---|---|
+| Exchange token expired (≤15 min lifetime) | `401` | Exchange the API key again. |
+| All the owner's tokens force-revoked (`ALL_TOKENS_` marker) | `401` | Exchange again; the key itself is unaffected. |
+| Token valid but the key lacks the required scope/permission | `403` | Stop retrying — the key was never granted that authority. |
+
+Re-exchange succeeds only while both the key and its owner remain valid: a deactivated key, an
+expired key, a deactivated owner, or an owner who has lost every mapped permission all return the
+uniform `401 Invalid API key` from the exchange endpoint itself.
+
 "Client IP" is `HttpContext.Connection.RemoteIpAddress`. When PrintFarmer runs behind a reverse
 proxy (nginx, Traefik, IIS, etc.) you must enable and configure `ForwardedHeaders` so the framework
 rewrites the connection address from `X-Forwarded-For` — otherwise the rate-limit key will be the
@@ -333,10 +347,12 @@ value `7` as the single name `"All"`, which reads like "every privilege" but act
 the three model/library scopes.
 
 **Dependencies.** Some scopes are useless alone and are rejected at creation with a `400`:
-`CalibrationGenerate` also requires `CalibrationRead`, `SlicingSubmit`, and `SlicingReadArtifact`;
-the other calibration scopes require `CalibrationRead`; the queue mutation scopes require
-`QueueRead`; and `QueueAcknowledgeBedClear` additionally requires `QueueStart`, because the
-bed-clear routes check both.
+`CalibrationGenerate` also requires `CalibrationRead` and `SlicingSubmit`; the other calibration
+scopes require `CalibrationRead`; the queue mutation scopes require `QueueRead`; and
+`QueueAcknowledgeBedClear` additionally requires `QueueStart`, because the bed-clear routes check
+both. `SlicingReadArtifact` is deliberately **not** a generation prerequisite — generation submits a
+slice job and polls calibration orchestration, and promotion is server-side, so a generating client
+never downloads artifact bytes. Select that scope only for a client that genuinely does.
 
 ### Anti-self-escalation
 
@@ -357,16 +373,23 @@ A key can never grant more authority than its owner has.
   recorded in the audit log (never the key, its hash, or the token). Revocation therefore takes
   effect on the next exchange, bounded by the ≤15-minute token lifetime.
 
-> **Who can own a calibration-scoped key today.** The owner-authority intersection above is
-> mandatory and unconditional, but PrintFarmer currently has **no API or UI for granting individual
-> role permissions** — that gap is tracked separately as epic #1445 and is deliberately out of scope
-> here. Until it lands, the only owners who hold the calibration, slicing, and queue permissions are
-> members of the built-in `farm_admin` role, so **a calibration-scoped Desktop key must be owned by
-> a `farm_admin` user**. A `farm_user` cannot obtain effective calibration claims today: creating
-> such a key for them returns `400`, and if they were somehow issued one, the exchange-time
-> intersection would drop every calibration scope. This is an operational constraint on *who may own
-> the key*, not a relaxation of the rule — an admin-owned exchanged token still carries no role
-> claim and only the scopes explicitly selected on that key.
+> **Who can own a calibration-scoped key.** The owner-authority intersection above is mandatory and
+> unconditional. Which users satisfy it depends on how roles are provisioned:
+>
+> - **`farm_admin` members** always do, and remain the safe production path until the
+>   permission-grant UI in epic #1445 is complete.
+> - **A custom role** carrying the exact mapped permission (e.g. `calibration:read`) also
+>   satisfies it, as does a same-resource **`{resource}:admin`** grant — `calibration:admin`
+>   implies every `calibration:*` action, exactly as it does at the enforcement points. The
+>   implication never crosses resources: `calibration:admin` grants no queue or slicing scope.
+> - **A stock `farm_user`** holds none of the calibration, slicing, or queue permissions, so
+>   creating such a key for one returns `400`, and an already-issued key would have those scopes
+>   dropped at exchange.
+>
+> Since role CRUD exists but the per-permission grant UI does not yet, prefer a `farm_admin` owner
+> in production and treat custom-role ownership as advanced configuration. Either way an
+> admin-owned exchanged token still carries no role claim and only the scopes explicitly selected
+> on that key.
 >
 > **Revocation latency differs by token type.** An exchanged Desktop token is capped at 15 minutes,
 > so a permission change takes effect on the next exchange. An ordinary login JWT carries its

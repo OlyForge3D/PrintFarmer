@@ -126,7 +126,8 @@ public class ApiKeyExchangeService(
         EffectiveDesktopScopes effective = DesktopScopePermissionMap.ResolveEffectiveScopes(
             apiKey.Scopes,
             ownerAuthorization.IsFarmAdmin,
-            ownerAuthorization.Permissions);
+            ownerAuthorization.Permissions,
+            ownerAuthorization.DeniedPermissions);
 
         if (effective.Effective == ApiKeyScope.None)
         {
@@ -227,7 +228,10 @@ public class ApiKeyExchangeService(
     /// A single point-in-time snapshot of the owner's authorization, so every scope decision in one
     /// exchange is evaluated against consistent data rather than re-querying per scope.
     /// </summary>
-    private sealed record OwnerAuthorization(bool IsFarmAdmin, IReadOnlySet<string> Permissions);
+    private sealed record OwnerAuthorization(
+        bool IsFarmAdmin,
+        IReadOnlySet<string> Permissions,
+        IReadOnlySet<string> DeniedPermissions);
 
     private async Task<OwnerAuthorization> ResolveOwnerAuthorizationAsync(Guid ownerId, CancellationToken ct)
     {
@@ -240,7 +244,16 @@ public class ApiKeyExchangeService(
             .Select(p => $"{p.Resource}:{p.Action}")
             .ToHashSet(StringComparer.Ordinal);
 
-        return new OwnerAuthorization(isFarmAdmin, permissions);
+        // Explicit denies are resolved alongside grants so the same-resource admin implication
+        // cannot resurrect an action the operator denied - the precedence rule established in
+        // docs/ROLE_PERMISSION_PRECEDENCE.md.
+        List<(string Resource, string Action)> denied =
+            await _usersRepository.GetDeniedPermissionsAsync(ownerId, ct) ?? [];
+        HashSet<string> deniedPermissions = denied
+            .Select(p => $"{p.Resource}:{p.Action}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        return new OwnerAuthorization(isFarmAdmin, permissions, deniedPermissions);
     }
 
     private async Task<ApiKeyExchangeResult> FailAsync(string reason, string? ipAddress, string? userAgent, CancellationToken ct)
