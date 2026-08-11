@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Parsing;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Mutations;
@@ -119,7 +120,7 @@ public sealed class FilamentCoverageSpoolResolver(
                 _logger.LogDebug(
                     ex,
                     "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}",
-                    identity.SourceIdentity);
+                    LogSanitizer.Sanitize(identity.SourceIdentity));
                 return new FilamentCoverageSpoolSnapshot(
                     null,
                     true,
@@ -321,7 +322,7 @@ public sealed class FilamentCoverageSpoolResolver(
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}", request.ServerUrl);
+            _logger.LogDebug(ex, "[FilamentCoverage] Native Spoolman source unavailable at {ServerUrl}", LogSanitizer.Sanitize(request.ServerUrl));
             return Failure(request.SpoolIds, true, ReasonSourceUnavailable);
         }
     }

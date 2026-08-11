@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -77,7 +78,7 @@ public class CustomFieldService(
 
         logger.LogInformation(
             "Created custom field definition '{FieldName}' ({Id}) for {EntityType}",
-            definition.FieldName, definition.Id, definition.EntityType);
+            LogSanitizer.Sanitize(definition.FieldName), definition.Id, definition.EntityType);
 
         return MapDefinitionToDto(definition);
     }
@@ -131,7 +132,7 @@ public class CustomFieldService(
 
         logger.LogInformation(
             "Updated custom field definition '{FieldName}' ({Id})",
-            definition.FieldName, definition.Id);
+            LogSanitizer.Sanitize(definition.FieldName), definition.Id);
 
         return MapDefinitionToDto(definition);
     }
@@ -151,7 +152,7 @@ public class CustomFieldService(
 
         logger.LogInformation(
             "Deleted custom field definition '{FieldName}' ({Id})",
-            definition.FieldName, definition.Id);
+            LogSanitizer.Sanitize(definition.FieldName), definition.Id);
     }
 
     public async Task<IReadOnlyList<CustomFieldValueDto>> GetValuesForEntityAsync(

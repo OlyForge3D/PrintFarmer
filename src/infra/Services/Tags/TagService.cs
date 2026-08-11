@@ -7,6 +7,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Microsoft.EntityFrameworkCore;
@@ -50,7 +51,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get all tags: {Message}", ex.Message);
+            _logger.LogError("Failed to get all tags: {Message}", LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -70,7 +71,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get tag {TagId}: {Message}", tagId, ex.Message);
+            _logger.LogError("Failed to get tag {TagId}: {Message}", tagId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -139,7 +140,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to create tag: {Message}\n{StackTrace}", ex.Message, ex.StackTrace);
+            _logger.LogError("Failed to create tag: {Message}\n{StackTrace}", LogSanitizer.Sanitize(ex.Message), LogSanitizer.Sanitize(ex.StackTrace));
             throw;
         }
     }
@@ -166,11 +167,11 @@ public class TagService(
             await _tagRepository.RemoveAsync(tag, ct);
             await _tagRepository.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Deleted tag '{TagName}' (ID: {TagId})", tag.Name, tagId);
+            _logger.LogInformation("Deleted tag '{TagName}' (ID: {TagId})", LogSanitizer.Sanitize(tag.Name), tagId);
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to delete tag {TagId}: {Message}", tagId, ex.Message);
+            _logger.LogError("Failed to delete tag {TagId}: {Message}", tagId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -269,7 +270,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to assign tag {TagId} to object {ObjectId}: {Message}", tagId, objectId, ex.Message);
+            _logger.LogError("Failed to assign tag {TagId} to object {ObjectId}: {Message}", tagId, objectId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -292,7 +293,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to remove tag {TagId} from object {ObjectId}: {Message}", tagId, objectId, ex.Message);
+            _logger.LogError("Failed to remove tag {TagId} from object {ObjectId}: {Message}", tagId, objectId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -316,7 +317,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get tags for object {ObjectId}: {Message}", objectId, ex.Message);
+            _logger.LogError("Failed to get tags for object {ObjectId}: {Message}", objectId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -358,7 +359,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get tags for objects of type {ObjectType}: {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to get tags for objects of type {ObjectType}: {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -389,7 +390,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to assign tags to object {ObjectId}: {Message}", objectId, ex.Message);
+            _logger.LogError("Failed to assign tags to object {ObjectId}: {Message}", objectId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -425,7 +426,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to bulk assign tags to objects ({ObjectType}): {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to bulk assign tags to objects ({ObjectType}): {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -473,7 +474,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to search tags for query '{Query}': {Message}", query, ex.Message);
+            _logger.LogError("Failed to search tags for query '{Query}': {Message}", LogSanitizer.Sanitize(query), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -524,7 +525,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get popular tags (count={Count}): {Message}", count, ex.Message);
+            _logger.LogError("Failed to get popular tags (count={Count}): {Message}", count, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -604,7 +605,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get tag analytics: {Message}", ex.Message);
+            _logger.LogError("Failed to get tag analytics: {Message}", LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -636,7 +637,7 @@ public class TagService(
                 throw new KeyNotFoundException($"Target tag {targetTagId} not found");
             }
 
-            _logger.LogInformation("Merging tag '{SourceTagName}' into '{TargetTagName}'", sourceTag.Name, targetTag.Name);
+            _logger.LogInformation("Merging tag '{SourceTagName}' into '{TargetTagName}'", LogSanitizer.Sanitize(sourceTag.Name), LogSanitizer.Sanitize(targetTag.Name));
 
             // Get all objects using source tag
             IReadOnlyList<Guid> sourceObjectIds = await _tagRepository.GetObjectsByTagAsync(sourceTagId, string.Empty, ct);
@@ -659,11 +660,11 @@ public class TagService(
             await _tagRepository.RemoveAsync(sourceTag, ct);
             await _tagRepository.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Successfully merged tag '{SourceTagName}' into '{TargetTagName}'", sourceTag.Name, targetTag.Name);
+            _logger.LogInformation("Successfully merged tag '{SourceTagName}' into '{TargetTagName}'", LogSanitizer.Sanitize(sourceTag.Name), LogSanitizer.Sanitize(targetTag.Name));
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to merge tag {SourceTagId} into {TargetTagId}: {Message}", sourceTagId, targetTagId, ex.Message);
+            _logger.LogError("Failed to merge tag {SourceTagId} into {TargetTagId}: {Message}", sourceTagId, targetTagId, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -689,7 +690,7 @@ public class TagService(
             List<Guid> includeTagList = includeTags?.ToList() ?? [];
             List<Guid> excludeTagList = excludeTags?.ToList() ?? [];
 
-            _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", objectType, includeTagList.Count, excludeTagList.Count, requireAllTags);
+            _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", LogSanitizer.Sanitize(objectType), includeTagList.Count, excludeTagList.Count, requireAllTags);
 
             // Get objects for include tags
             HashSet<Guid> objectSet;
@@ -750,12 +751,12 @@ public class TagService(
             }
 
             var results = objectSet.ToList();
-            _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, objectType);
+            _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, LogSanitizer.Sanitize(objectType));
             return results;
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -797,7 +798,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get tag suggestions for '{PartialName}': {Message}", partialName, ex.Message);
+            _logger.LogError("Failed to get tag suggestions for '{PartialName}': {Message}", LogSanitizer.Sanitize(partialName), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -833,7 +834,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get objects with all tags ({ObjectType}): {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to get objects with all tags ({ObjectType}): {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -862,7 +863,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get objects with any tag ({ObjectType}): {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to get objects with any tag ({ObjectType}): {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -898,7 +899,7 @@ public class TagService(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to get objects excluding tags ({ObjectType}): {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to get objects excluding tags ({ObjectType}): {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -960,13 +961,13 @@ public class TagService(
 
             _logger.LogDebug(
                 "Complex filter returned {ResultObjectsCount} {ObjectType} objects (includeAll: {IncludeAll}, includeAny: {IncludeAny}, exclude: {Exclude})",
-                resultObjects.Count, objectType, includeAllList.Count, includeAnyList.Count, excludeList.Count);
+                resultObjects.Count, LogSanitizer.Sanitize(objectType), includeAllList.Count, includeAnyList.Count, excludeList.Count);
 
             return resultObjects;
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to apply complex filter to {ObjectType} objects: {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to apply complex filter to {ObjectType} objects: {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -997,7 +998,7 @@ public class TagService(
             List<Guid> includeTagList = includeTags?.ToList() ?? [];
             List<Guid> excludeTagList = excludeTags?.ToList() ?? [];
 
-            _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", objectType, includeTagList.Count, excludeTagList.Count, requireAllTags);
+            _logger.LogInformation("Filtering {ObjectType} objects - IncludeTags: {IncludeTagListCount}, ExcludeTags: {ExcludeTagListCount}, RequireAllTags: {RequireAllTags}", LogSanitizer.Sanitize(objectType), includeTagList.Count, excludeTagList.Count, requireAllTags);
 
             // Get objects for include tags
             HashSet<Guid> objectSet;
@@ -1058,12 +1059,12 @@ public class TagService(
             }
 
             var results = objectSet.ToList();
-            _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, objectType);
+            _logger.LogInformation("Filter returned {ResultsCount} {ObjectType} objects", results.Count, LogSanitizer.Sanitize(objectType));
             return results;
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", objectType, ex.Message);
+            _logger.LogError("Failed to filter {ObjectType} objects by tags: {Message}", LogSanitizer.Sanitize(objectType), LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }

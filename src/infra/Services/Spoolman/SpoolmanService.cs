@@ -8,6 +8,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Parsing;
@@ -99,7 +100,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 if (path == probePaths[^1])
                 {
                     (string? Category, string? Message) = CategorizeException(ex);
-                    logger.LogError(ex, "Probe failed for {Url}", candidateBaseUrl);
+                    logger.LogError(ex, "Probe failed for {Url}", LogSanitizer.Sanitize(candidateBaseUrl));
                     return new SpoolmanProbeResult(false, NormalizedUrl: normalized, EndpointTried: path, StatusCode: null, Version: null, Message: Message, ErrorCategory: Category);
                 }
             }
@@ -503,7 +504,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         {
             logger.LogWarning(
                 "Barcode {Barcode} matched {Count} Spoolman filaments; returning filament {FilamentId}.",
-                trimmedBarcode,
+                LogSanitizer.Sanitize(trimmedBarcode),
                 matches.Count,
                 first.Id);
         }
@@ -797,7 +798,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         {
             logger.LogWarning(
                 "Barcode {Barcode} is already assigned to Spoolman filament {ExistingFilamentId}; also assigning it to filament {FilamentId}.",
-                trimmedBarcode,
+                LogSanitizer.Sanitize(trimmedBarcode),
                 existing.Id,
                 filamentId);
         }
@@ -1311,7 +1312,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
             string? mediaType = resp.Content.Headers.ContentType?.MediaType;
             if (!string.IsNullOrEmpty(mediaType) && !mediaType.Contains("json", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, mediaType);
+                logger.LogDebug("Spoolman material page {Page} content-type {MediaType} not JSON; aborting", page, LogSanitizer.Sanitize(mediaType));
                 break;
             }
 
@@ -1677,7 +1678,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
 
         List<string> ips = networkRanges
-            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning("{Message}", msg)))
+            .SelectMany(r => NetworkRangeHelper.ExpandNetworkRange(r, msg => logger.LogWarning("{Message}", LogSanitizer.Sanitize(msg))))
             .Distinct()
             .ToList();
         Task<SpoolmanDiscoveryResult>[] tasks = ips.Select(ip => ScanIpForSpoolmanAsync(ip, ct)).ToArray();
@@ -1761,7 +1762,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", url);
+            logger.LogError(ex, "Failed to fetch external filaments from Spoolman at {Url}", LogSanitizer.Sanitize(url));
             throw;
         }
     }
@@ -1793,7 +1794,7 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", url);
+            logger.LogError(ex, "Failed to fetch external materials from Spoolman at {Url}", LogSanitizer.Sanitize(url));
             throw;
         }
     }

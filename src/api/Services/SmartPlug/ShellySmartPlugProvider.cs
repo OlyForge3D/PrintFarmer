@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SmartPlug;
@@ -37,7 +38,7 @@ public sealed class ShellySmartPlugProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "Shelly TestConnection failed for {DeviceAddress}", deviceAddress);
+            logger.LogDebug(ex, "Shelly TestConnection failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return false;
         }
     }
@@ -59,7 +60,7 @@ public sealed class ShellySmartPlugProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "Shelly Gen2 endpoint unavailable for {DeviceAddress}", deviceAddress);
+            logger.LogDebug(ex, "Shelly Gen2 endpoint unavailable for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return null;
         }
     }
@@ -81,7 +82,7 @@ public sealed class ShellySmartPlugProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Shelly GetCurrentReading failed for {DeviceAddress}", deviceAddress);
+            logger.LogWarning(ex, "Shelly GetCurrentReading failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return null;
         }
     }

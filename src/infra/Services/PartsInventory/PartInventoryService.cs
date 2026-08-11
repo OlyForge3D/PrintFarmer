@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Microsoft.EntityFrameworkCore;
@@ -229,7 +230,7 @@ public class PartInventoryService(
                 await transaction.RollbackAsync(ct);
             }
 
-            logger.LogInformation(ex, "Unique-constraint conflict creating SKU {Sku}; treating as already-exists.", trimmedSku);
+            logger.LogInformation(ex, "Unique-constraint conflict creating SKU {Sku}; treating as already-exists.", LogSanitizer.Sanitize(trimmedSku));
             await using AppDbContext readDb = await dbFactory.CreateDbContextAsync(ct);
             PartInventory? existing = await readDb.PartInventories
                 .Include(p => p.DefaultBin)
@@ -433,8 +434,8 @@ public class PartInventoryService(
             logger.LogInformation(
                 ex,
                 "Composite unique conflict on (SKU={Sku}, OperationKey={OperationKey}); returning idempotent replay.",
-                trimmedSku,
-                operationKey);
+                LogSanitizer.Sanitize(trimmedSku),
+                LogSanitizer.Sanitize(operationKey));
             AdjustResult? replay = await TryReplayAsync(trimmedSku, operationKey, ct);
             return replay ?? new AdjustResult(
                 PartInventoryOutcome.Conflict,

@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Maintenance;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
@@ -103,7 +104,7 @@ public class MaintenanceTasksController(
         };
 
         await _taskRepository.AddAsync(task, ct);
-        _logger.LogInformation("Created maintenance task {TaskId} '{TaskName}'", task.Id, task.TaskName);
+        _logger.LogInformation("Created maintenance task {TaskId} '{TaskName}'", task.Id, LogSanitizer.Sanitize(task.TaskName));
 
         return Created($"/api/maintenance/tasks/{task.Id}", MaintenanceResponseMapper.ToTaskResponse(task));
     }
@@ -147,7 +148,7 @@ public class MaintenanceTasksController(
         task.UpdatedAt = DateTime.UtcNow;
 
         await _taskRepository.UpdateAsync(task, ct);
-        _logger.LogInformation("Updated maintenance task {TaskId} '{TaskName}'", task.Id, task.TaskName);
+        _logger.LogInformation("Updated maintenance task {TaskId} '{TaskName}'", task.Id, LogSanitizer.Sanitize(task.TaskName));
 
         return Ok(MaintenanceResponseMapper.ToTaskResponse(task));
     }
@@ -170,7 +171,7 @@ public class MaintenanceTasksController(
         }
 
         await _taskRepository.DeleteAsync(task, ct);
-        _logger.LogInformation("Deleted maintenance task {TaskId} '{TaskName}'", task.Id, task.TaskName);
+        _logger.LogInformation("Deleted maintenance task {TaskId} '{TaskName}'", task.Id, LogSanitizer.Sanitize(task.TaskName));
 
         return NoContent();
     }

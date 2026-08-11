@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Authentication;
 using Microsoft.Extensions.Logging;
 
@@ -80,7 +81,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning("[AuthAudit] Login failed for '{UsernameOrEmail}' from IP: {IpAddress} - Reason: {Reason}", maskedIdentifier, ipAddress, reason);
+        _logging.LogWarning("[AuthAudit] Login failed for '{UsernameOrEmail}' from IP: {IpAddress} - Reason: {Reason}", LogSanitizer.Sanitize(maskedIdentifier), LogSanitizer.Sanitize(ipAddress), LogSanitizer.Sanitize(reason));
     }
 
     public async Task LogLogoutAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -98,7 +99,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Logout for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
+        _logging.LogInformation("[AuthAudit] Logout for UserId: {UserId} from IP: {IpAddress}", userId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogRegisterAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -116,7 +117,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] New user registered: UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
+        _logging.LogInformation("[AuthAudit] New user registered: UserId: {UserId} from IP: {IpAddress}", userId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogPasswordChangeAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -134,7 +135,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Password changed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
+        _logging.LogInformation("[AuthAudit] Password changed for UserId: {UserId} from IP: {IpAddress}", userId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogPasswordResetInitiatedAsync(string email, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -156,7 +157,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Password reset initiated for email: {Email} from IP: {IpAddress}", maskedEmail, ipAddress);
+        _logging.LogInformation("[AuthAudit] Password reset initiated for email: {Email} from IP: {IpAddress}", LogSanitizer.Sanitize(maskedEmail), LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogPasswordResetAsync(Guid userId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -174,7 +175,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Password reset completed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
+        _logging.LogInformation("[AuthAudit] Password reset completed for UserId: {UserId} from IP: {IpAddress}", userId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogAccountLockedAsync(Guid userId, int attemptCount, TimeSpan lockoutDuration, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -220,7 +221,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Account unlocked for UserId: {UserId}. Reason: {Reason}", userId, reason);
+        _logging.LogInformation("[AuthAudit] Account unlocked for UserId: {UserId}. Reason: {Reason}", userId, LogSanitizer.Sanitize(reason));
     }
 
     public async Task LogRefreshTokenAsync(Guid userId, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -238,7 +239,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] Token refreshed for UserId: {UserId} from IP: {IpAddress}", userId, ipAddress);
+        _logging.LogInformation("[AuthAudit] Token refreshed for UserId: {UserId} from IP: {IpAddress}", userId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogTokenRevokedAsync(Guid userId, Guid revokedByUserId, string reason, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -263,7 +264,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, reason);
+        _logging.LogWarning("[AuthAudit] Token revoked for UserId: {UserId} by admin UserId: {RevokedByUserId}. Reason: {Reason}", userId, revokedByUserId, LogSanitizer.Sanitize(reason));
     }
 
     public async Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -284,7 +285,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogInformation("[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}", userId, apiKeyId, ipAddress);
+        _logging.LogInformation("[AuthAudit] API key exchanged for UserId: {UserId}, ApiKeyId: {ApiKeyId} from IP: {IpAddress}", userId, apiKeyId, LogSanitizer.Sanitize(ipAddress));
     }
 
     public async Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default)
@@ -303,7 +304,7 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         };
 
         await SaveAuditAsync(auditLog, cancellationToken);
-        _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", ipAddress, reason);
+        _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", LogSanitizer.Sanitize(ipAddress), LogSanitizer.Sanitize(reason));
     }
 
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)

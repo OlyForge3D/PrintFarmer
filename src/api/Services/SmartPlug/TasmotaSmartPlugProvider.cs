@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SmartPlug;
@@ -31,7 +32,7 @@ public sealed class TasmotaSmartPlugProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogWarning(ex, "Tasmota GetCurrentReading failed for {DeviceAddress}", deviceAddress);
+            logger.LogWarning(ex, "Tasmota GetCurrentReading failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return null;
         }
     }
@@ -50,7 +51,7 @@ public sealed class TasmotaSmartPlugProvider(
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogDebug(ex, "Tasmota TestConnection failed for {DeviceAddress}", deviceAddress);
+            logger.LogDebug(ex, "Tasmota TestConnection failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return false;
         }
     }

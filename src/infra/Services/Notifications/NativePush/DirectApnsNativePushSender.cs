@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -127,7 +128,7 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
         {
             _logger.LogWarning(
                 "[NativePush/direct] Skipping send for attentionItemId={AttentionItemId} — configuration incomplete: {Reason}.",
-                envelope.AttentionItemId,
+                LogSanitizer.Sanitize(envelope.AttentionItemId),
                 reason);
             return NativePushDispatchResult.NotConfigured();
         }
@@ -267,12 +268,12 @@ public sealed class DirectApnsNativePushSender : INativePushTransportSender, IDi
             _logger.LogWarning(
                 ex,
                 "[NativePush/direct] HTTP request timed out for attentionItemId={AttentionItemId}.",
-                envelope.AttentionItemId);
+                LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.Transient("timeout");
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning(ex, "[NativePush/direct] Transient network failure sending envelope for attentionItemId={AttentionItemId}.", envelope.AttentionItemId);
+            _logger.LogWarning(ex, "[NativePush/direct] Transient network failure sending envelope for attentionItemId={AttentionItemId}.", LogSanitizer.Sanitize(envelope.AttentionItemId));
             return NativePushDispatchResult.Transient("network");
         }
     }

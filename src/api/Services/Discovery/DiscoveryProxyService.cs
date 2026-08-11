@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
 using Farm.Infrastructure.Services.SignalR;
@@ -54,14 +55,14 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         Guid? ownerUserId = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("[DISCOVERY] Forwarding discovery request to printer-discovery service at {DiscoveryServiceUrl} (autoRegister={AutoRegister})", _discoveryServiceUrl, autoRegister);
+        _logger.LogInformation("[DISCOVERY] Forwarding discovery request to printer-discovery service at {DiscoveryServiceUrl} (autoRegister={AutoRegister})", LogSanitizer.Sanitize(_discoveryServiceUrl), autoRegister);
 
         try
         {
             // Get network discovery settings from database
             NetworkDiscoverySettings settings = _settingsService.Get<NetworkDiscoverySettings>() ?? new NetworkDiscoverySettings();
 
-            _logger.LogInformation("[DISCOVERY] Using settings - Subnets: {StringJoin}, Timeout: {SettingsClientTimeoutMs}ms, MaxConcurrent: {SettingsMaxConcurrentRequests}", string.Join(", ", settings.DiscoverySubnets), settings.ClientTimeoutMs, settings.MaxConcurrentRequests);
+            _logger.LogInformation("[DISCOVERY] Using settings - Subnets: {StringJoin}, Timeout: {SettingsClientTimeoutMs}ms, MaxConcurrent: {SettingsMaxConcurrentRequests}", LogSanitizer.Sanitize(string.Join(", ", settings.DiscoverySubnets)), settings.ClientTimeoutMs, settings.MaxConcurrentRequests);
 
             // Forward to the printer-discovery microservice's streaming endpoint
             HttpClient client = _httpClientFactory.CreateClient("PrinterDiscovery");
@@ -94,7 +95,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
                     ? msgElem.GetString() ?? "Discovery started"
                     : "Discovery started";
 
-                _logger.LogInformation("[DISCOVERY] Streaming discovery started with sessionId={SessionId}", sessionId);
+                _logger.LogInformation("[DISCOVERY] Streaming discovery started with sessionId={SessionId}", LogSanitizer.Sanitize(sessionId));
 
                 // Cache initial progress so clients can see it when they join
                 DiscoveryProgressDto initialProgress = new(
@@ -119,13 +120,13 @@ public class DiscoveryProxyService : IDiscoveryProxyService
             else
             {
                 string errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("[DISCOVERY] Microservice returned {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                _logger.LogWarning("[DISCOVERY] Microservice returned {StatusCode}: {ErrorContent}", response.StatusCode, LogSanitizer.Sanitize(errorContent));
                 throw new HttpRequestException($"Discovery service returned {response.StatusCode}");
             }
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "[DISCOVERY] Failed to reach printer-discovery service at {DiscoveryServiceUrl}", _discoveryServiceUrl);
+            _logger.LogError(ex, "[DISCOVERY] Failed to reach printer-discovery service at {DiscoveryServiceUrl}", LogSanitizer.Sanitize(_discoveryServiceUrl));
             throw new InvalidOperationException("Discovery service is not available. Please ensure the printer-discovery container is running.", ex);
         }
         catch (TaskCanceledException ex)
@@ -139,7 +140,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("[DISCOVERY] Forwarding cancel request for session {SessionId}", sessionId);
+        _logger.LogInformation("[DISCOVERY] Forwarding cancel request for session {SessionId}", LogSanitizer.Sanitize(sessionId));
 
         try
         {
@@ -154,7 +155,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
 
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogInformation("[DISCOVERY] Successfully cancelled session {SessionId}", sessionId);
+                _logger.LogInformation("[DISCOVERY] Successfully cancelled session {SessionId}", LogSanitizer.Sanitize(sessionId));
                 return new DiscoveryCancelResponse("Discovery session cancelled");
             }
             else
@@ -164,7 +165,7 @@ public class DiscoveryProxyService : IDiscoveryProxyService
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[DISCOVERY] Failed to forward cancel request for session {SessionId}", sessionId);
+            _logger.LogWarning(ex, "[DISCOVERY] Failed to forward cancel request for session {SessionId}", LogSanitizer.Sanitize(sessionId));
         }
 
         // Even if we can't reach the service, update local cache

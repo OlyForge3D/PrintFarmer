@@ -2,6 +2,7 @@
 using System.Text;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -55,7 +56,7 @@ public class NfcDeviceService(
         await db.SaveChangesAsync(ct);
 
         await db.Entry(device).Reference(d => d.Printer).LoadAsync(ct);
-        logger.LogInformation("NFC device registered: {Name} ({Id})", device.Name, device.Id);
+        logger.LogInformation("NFC device registered: {Name} ({Id})", LogSanitizer.Sanitize(device.Name), device.Id);
         return MapToDto(device, DateTime.UtcNow);
     }
 
@@ -96,7 +97,7 @@ public class NfcDeviceService(
 
         db.NfcDevices.Remove(device);
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("NFC device deleted: {Name} ({Id})", device.Name, device.Id);
+        logger.LogInformation("NFC device deleted: {Name} ({Id})", LogSanitizer.Sanitize(device.Name), device.Id);
         return true;
     }
 
@@ -115,7 +116,7 @@ public class NfcDeviceService(
         device.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(ct);
-        logger.LogInformation("NFC device approved: {Name} ({Id})", device.Name, device.Id);
+        logger.LogInformation("NFC device approved: {Name} ({Id})", LogSanitizer.Sanitize(device.Name), device.Id);
 
         return new NfcDeviceApprovalResultDto
         {
@@ -155,7 +156,7 @@ public class NfcDeviceService(
                 CreatedAt = DateTime.UtcNow
             };
             db.NfcDevices.Add(device);
-            logger.LogInformation("NFC device auto-registered via heartbeat (pending approval): {Ip} → printer {PrinterId}", dto.Ip, printerId);
+            logger.LogInformation("NFC device auto-registered via heartbeat (pending approval): {Ip} → printer {PrinterId}", LogSanitizer.Sanitize(dto.Ip), printerId);
         }
         else if (device.IsApproved && !ValidateToken(device, presentedToken))
         {
@@ -226,7 +227,7 @@ public class NfcDeviceService(
 
         logger.LogInformation(
             "NFC scan event: device {DeviceId}, spool {SpoolId}, format {Format}",
-            device.Id, dto.SpoolId, dto.TagFormat);
+            device.Id, dto.SpoolId, LogSanitizer.Sanitize(dto.TagFormat));
 
         // Route the event through the tag-binding service for SignalR broadcast
         if (nfcTagService is not null && dto.TagUid is not null)

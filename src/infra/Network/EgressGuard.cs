@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Sockets;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -95,7 +96,7 @@ public sealed class EgressGuard : IEgressGuard
                 // attacker whose domain resolves intermittently.
                 _logger.LogWarning(
                     "Egress blocked to {Host}: destination hostname did not resolve",
-                    uri.Host);
+                    LogSanitizer.Sanitize(uri.Host));
                 return EgressCheckResult.Deny("Destination hostname could not be resolved", uri);
             }
         }
@@ -108,7 +109,7 @@ public sealed class EgressGuard : IEgressGuard
         {
             _logger.LogWarning(
                 "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
-                uri.Host,
+                LogSanitizer.Sanitize(uri.Host),
                 blockedAddress);
             return EgressCheckResult.Deny(
                 "Destination resolves to a loopback, link-local, or multicast address",
