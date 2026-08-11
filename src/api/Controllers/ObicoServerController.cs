@@ -440,11 +440,11 @@ public class ObicoServerController : ControllerBase
     /// </summary>
     private static async Task<string?> TryValidateLegacyPredictionEndpointAsync(HttpClient httpClient, CancellationToken ct)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, "p/")
+        using var request = new HttpRequestMessage(HttpMethod.Post, "p/")
         {
             Content = new StringContent(string.Empty)
         };
-        HttpResponseMessage response = await httpClient.SendAsync(request, ct);
+        using HttpResponseMessage response = await httpClient.SendAsync(request, ct);
 
         bool endpointReachable = response.IsSuccessStatusCode ||
             response.StatusCode == HttpStatusCode.BadRequest ||
