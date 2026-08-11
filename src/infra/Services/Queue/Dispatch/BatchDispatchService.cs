@@ -350,15 +350,9 @@ public class BatchDispatchService(
     private ClaimedCandidate? TryClaimCandidate(
         IEnumerable<DispatchScore> candidates)
     {
-        foreach (DispatchScore candidate in candidates)
-        {
-            if (concurrencyCoordinator.TryClaimPrinter(candidate.PrinterId))
-            {
-                return new ClaimedCandidate(candidate);
-            }
-        }
-
-        return null;
+        DispatchScore? candidate = candidates.FirstOrDefault(candidate =>
+            concurrencyCoordinator.TryClaimPrinter(candidate.PrinterId));
+        return candidate is not null ? new ClaimedCandidate(candidate) : null;
     }
 
     private static BatchDispatchResult CreateSkippedResult(

@@ -112,15 +112,8 @@ public static class CalibrationGeometry
             }
         }
 
-        foreach (CalibrationBedPoint vertex in polygon)
-        {
-            if (vertex.X >= minX && vertex.X <= maxX && vertex.Y >= minY && vertex.Y <= maxY)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return polygon.Any(vertex =>
+            vertex.X >= minX && vertex.X <= maxX && vertex.Y >= minY && vertex.Y <= maxY);
     }
 
     /// <summary>Builds the axis-aligned rectangle polygon of a build volume with its origin offset.</summary>

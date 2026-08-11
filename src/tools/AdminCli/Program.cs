@@ -427,14 +427,12 @@ internal static class Program
 
         // Check for OrcaSlicer directory structure (manufacturer folders with machine/filament/process subdirs)
         string[] subdirs = Directory.GetDirectories(profilesPath);
-        foreach (string subdir in subdirs)
-        {
-            if (Directory.Exists(Path.Join(subdir, "machine")) ||
+        if (subdirs.Any(subdir =>
+                Directory.Exists(Path.Join(subdir, "machine")) ||
                 Directory.Exists(Path.Join(subdir, "filament")) ||
-                Directory.Exists(Path.Join(subdir, "process")))
-            {
-                return "orcaslicer";
-            }
+                Directory.Exists(Path.Join(subdir, "process"))))
+        {
+            return "orcaslicer";
         }
 
         return string.Empty;

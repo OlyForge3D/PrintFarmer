@@ -2960,15 +2960,12 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             return;
         }
 
-        foreach (KeyValuePair<string, DateTime> kv in _dedupe)
+        foreach (KeyValuePair<string, DateTime> kv in _dedupe.Where(kv => kv.Value <= nowUtc))
         {
-            if (kv.Value <= nowUtc)
-            {
-                // Value-comparing overload: if a concurrent writer refreshed the
-                // entry (later expiry) between snapshot and remove, do NOT drop
-                // it. Prevents a race where prune wipes an in-window dedupe key.
-                _ = ((ICollection<KeyValuePair<string, DateTime>>)_dedupe).Remove(kv);
-            }
+            // Value-comparing overload: if a concurrent writer refreshed the
+            // entry (later expiry) between snapshot and remove, do NOT drop
+            // it. Prevents a race where prune wipes an in-window dedupe key.
+            _ = ((ICollection<KeyValuePair<string, DateTime>>)_dedupe).Remove(kv);
         }
 
         if (rateLimitWindow is TimeSpan evictAfter)
@@ -3013,31 +3010,25 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // Keep lifecycle snapshots and tombstones long enough for real attention
         // lifetimes while bounding entries whose source never emits Resolved.
         DateTime snapshotCutoff = nowUtc - AttentionSnapshotTtl;
-        foreach (KeyValuePair<AttentionSnapshotKey, AttentionLifecycle> kv in _attentionLifecycles)
+        foreach (KeyValuePair<AttentionSnapshotKey, AttentionLifecycle> kv in _attentionLifecycles.Where(kv => kv.Value.TryRetire(snapshotCutoff)))
         {
-            if (kv.Value.TryRetire(snapshotCutoff))
+            _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>>)_attentionLifecycles)
+                .Remove(kv);
+            if (_attentionItemFences.TryGetValue(
+                    kv.Key.AttentionItemId,
+                    out AttentionItemFence? fence))
             {
-                _ = ((ICollection<KeyValuePair<AttentionSnapshotKey, AttentionLifecycle>>)_attentionLifecycles)
-                    .Remove(kv);
-                if (_attentionItemFences.TryGetValue(
-                        kv.Key.AttentionItemId,
-                        out AttentionItemFence? fence))
-                {
-                    fence.UntrackLifecycle(kv.Key.UserId, kv.Value);
-                }
+                fence.UntrackLifecycle(kv.Key.UserId, kv.Value);
             }
         }
 
         // Lifecycle tombstones reject delayed work for the same seven-day window as
         // delivery snapshots. Retirement and dictionary removal are coordinated so
         // a racing observer retries against a live replacement lane.
-        foreach (KeyValuePair<AttentionDispatchKey, AttentionDispatchLane> kv in _attentionDispatchLanes)
+        foreach (KeyValuePair<AttentionDispatchKey, AttentionDispatchLane> kv in _attentionDispatchLanes.Where(kv => kv.Value.TryRetire(snapshotCutoff)))
         {
-            if (kv.Value.TryRetire(snapshotCutoff))
-            {
-                _ = ((ICollection<KeyValuePair<AttentionDispatchKey, AttentionDispatchLane>>)_attentionDispatchLanes)
-                    .Remove(kv);
-            }
+            _ = ((ICollection<KeyValuePair<AttentionDispatchKey, AttentionDispatchLane>>)_attentionDispatchLanes)
+                .Remove(kv);
         }
 
         // Item fences use the same seven-day retention as snapshots/lanes so
@@ -3048,13 +3039,10 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
         // own retry-on-Retired loops (TryObserveLifecycle,
         // PublishResolvedTombstoneAndFenceLifecycles), which retry against a
         // fresh replacement fence rather than operate on the orphaned one.
-        foreach (KeyValuePair<string, AttentionItemFence> kv in _attentionItemFences)
+        foreach (KeyValuePair<string, AttentionItemFence> kv in _attentionItemFences.Where(kv => kv.Value.TryRetire(snapshotCutoff)))
         {
-            if (kv.Value.TryRetire(snapshotCutoff))
-            {
-                _ = ((ICollection<KeyValuePair<string, AttentionItemFence>>)_attentionItemFences)
-                    .Remove(kv);
-            }
+            _ = ((ICollection<KeyValuePair<string, AttentionItemFence>>)_attentionItemFences)
+                .Remove(kv);
         }
     }
 

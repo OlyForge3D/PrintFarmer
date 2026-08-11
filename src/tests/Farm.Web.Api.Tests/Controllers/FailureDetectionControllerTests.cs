@@ -355,15 +355,13 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         // with the correct reason message
         if (!isGloballyEnabled)
         {
-            foreach (var printer in printers.EnumerateArray())
+            foreach (var printer in printers.EnumerateArray().Where(printer =>
+                         printer.TryGetProperty("state", out var state) &&
+                         state.GetString() == "disabled"))
             {
-                if (printer.TryGetProperty("state", out var state) &&
-                    state.GetString() == "disabled")
-                {
-                    printer.TryGetProperty("reason", out var reason).Should().BeTrue();
-                    reason.GetString().Should().Contain("disabled in Settings",
-                        "Disabled printer reason should reference Settings when global monitoring is disabled");
-                }
+                printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+                reason.GetString().Should().Contain("disabled in Settings",
+                    "Disabled printer reason should reference Settings when global monitoring is disabled");
             }
         }
     }
@@ -386,18 +384,16 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         status.TryGetProperty("printers", out var printers).Should().BeTrue();
 
         // If any printer is in "misconfigured" state, the reason must reference camera setup
-        foreach (var printer in printers.EnumerateArray())
+        foreach (var printer in printers.EnumerateArray().Where(printer =>
+                     printer.TryGetProperty("state", out var state) &&
+                     state.GetString() == "misconfigured"))
         {
-            if (printer.TryGetProperty("state", out var state) &&
-                state.GetString() == "misconfigured")
-            {
-                printer.TryGetProperty("reason", out var reason).Should().BeTrue();
-                var reasonText = reason.GetString() ?? string.Empty;
-                reasonText.Should().Contain("camera",
-                    "Misconfigured state should only be used for camera-related issues that users can fix");
-                reasonText.Should().NotContain("administrator",
-                    "Misconfigured state should not reference administrator actions");
-            }
+            printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+            var reasonText = reason.GetString() ?? string.Empty;
+            reasonText.Should().Contain("camera",
+                "Misconfigured state should only be used for camera-related issues that users can fix");
+            reasonText.Should().NotContain("administrator",
+                "Misconfigured state should not reference administrator actions");
         }
     }
 
@@ -489,22 +485,20 @@ public class FailureDetectionControllerTests : IAsyncLifetime
         // For printers in the test database with legacy CameraSnapshotUrl but no Camera entities,
         // the failure detection should NOT report "No enabled camera snapshot URL is configured"
         // if the legacy field is populated.
-        foreach (var printer in printers.EnumerateArray())
+        foreach (var printer in printers.EnumerateArray().Where(printer =>
+                     printer.TryGetProperty("snapshotUrl", out var snapshotUrl) &&
+                     snapshotUrl.ValueKind == JsonValueKind.String &&
+                     !string.IsNullOrWhiteSpace(snapshotUrl.GetString())))
         {
-            if (printer.TryGetProperty("snapshotUrl", out var snapshotUrl) &&
-                snapshotUrl.ValueKind == JsonValueKind.String &&
-                !string.IsNullOrWhiteSpace(snapshotUrl.GetString()))
+            // If a snapshot URL is present in the status, the state should not be "misconfigured"
+            // due to missing camera configuration.
+            printer.TryGetProperty("state", out var state).Should().BeTrue();
+            if (state.GetString() == "misconfigured")
             {
-                // If a snapshot URL is present in the status, the state should not be "misconfigured"
-                // due to missing camera configuration.
-                printer.TryGetProperty("state", out var state).Should().BeTrue();
-                if (state.GetString() == "misconfigured")
-                {
-                    printer.TryGetProperty("reason", out var reason).Should().BeTrue();
-                    var reasonText = reason.GetString() ?? string.Empty;
-                    reasonText.Should().NotContain("camera snapshot URL",
-                        "Printers with snapshot URLs (legacy or Camera entities) should not report camera misconfiguration");
-                }
+                printer.TryGetProperty("reason", out var reason).Should().BeTrue();
+                var reasonText = reason.GetString() ?? string.Empty;
+                reasonText.Should().NotContain("camera snapshot URL",
+                    "Printers with snapshot URLs (legacy or Camera entities) should not report camera misconfiguration");
             }
         }
     }

@@ -569,12 +569,9 @@ public static class DispatchSafetyGates
                 _ = caps.Add("direct_drive");
             }
 
-            foreach (string material in toolhead.SupportedMaterials ?? [])
+            foreach (string material in (toolhead.SupportedMaterials ?? []).Where(material => !string.IsNullOrWhiteSpace(material)))
             {
-                if (!string.IsNullOrWhiteSpace(material))
-                {
-                    _ = caps.Add(material.Trim());
-                }
+                _ = caps.Add(material.Trim());
             }
         }
 

@@ -259,22 +259,19 @@ public sealed class CalibrationModelValidator : ICalibrationModelValidator
                 "The model does not fit the authoritative printable polygon."));
         }
 
-        foreach (CalibrationExcludedRegion region in bed.ExcludedRegions)
-        {
-            if (region.Polygon.Count >= 3 &&
+        if (bed.ExcludedRegions.Any(region =>
+                region.Polygon.Count >= 3 &&
                 CalibrationGeometry.IntersectsRectangle(
                     region.Polygon,
                     placedMinX - ExclusionClearanceMillimeters,
                     placedMinY - ExclusionClearanceMillimeters,
                     placedMaxX + ExclusionClearanceMillimeters,
-                    placedMaxY + ExclusionClearanceMillimeters))
-            {
-                problems.Add(new(
-                    CalibrationGenerationProblemCodes.ModelInsideExcludedRegion,
-                    $"{field}.bounds",
-                    "The model overlaps an authoritative excluded region."));
-                break;
-            }
+                    placedMaxY + ExclusionClearanceMillimeters)))
+        {
+            problems.Add(new(
+                CalibrationGenerationProblemCodes.ModelInsideExcludedRegion,
+                $"{field}.bounds",
+                "The model overlaps an authoritative excluded region."));
         }
 
         return problems.Count > 0

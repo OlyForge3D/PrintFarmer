@@ -152,22 +152,19 @@ public sealed class KlipperCalibrationGcodeGenerator(
                 "The calibration footprint falls outside the authoritative printable polygon."));
         }
 
-        foreach (CalibrationExcludedRegion region in document.Bed.ExcludedRegions)
-        {
-            if (region.Polygon.Count >= 3 &&
+        if (document.Bed.ExcludedRegions.Any(region =>
+                region.Polygon.Count >= 3 &&
                 CalibrationGeometry.IntersectsRectangle(
                     region.Polygon,
                     footprint.MinX,
                     footprint.MinY,
                     footprint.MaxX,
-                    footprint.MaxY))
-            {
-                problems.Add(new(
-                    CalibrationGenerationProblemCodes.GcodeMotionInsideExcludedRegion,
-                    "specification.footprint",
-                    "The calibration footprint overlaps an authoritative excluded region."));
-                break;
-            }
+                    footprint.MaxY)))
+        {
+            problems.Add(new(
+                CalibrationGenerationProblemCodes.GcodeMotionInsideExcludedRegion,
+                "specification.footprint",
+                "The calibration footprint overlaps an authoritative excluded region."));
         }
     }
 

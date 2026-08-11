@@ -463,12 +463,9 @@ public sealed class CalibrationGcodeAnnotator : ICalibrationGcodeAnnotator
     private static int CountLines(string gcode)
     {
         int count = 0;
-        foreach (char character in gcode)
+        foreach (char character in gcode.Where(character => character == '\n'))
         {
-            if (character == '\n')
-            {
-                count++;
-            }
+            count++;
         }
 
         return count;

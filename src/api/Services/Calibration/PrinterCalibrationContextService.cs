@@ -1653,12 +1653,10 @@ public sealed class PrinterCalibrationContextService(
             ? value.EnumerateArray()
             : [value];
         List<double> numbers = [];
-        foreach (JsonElement item in values)
+        foreach (JsonElement item in values.Where(item => TryReadNumber(item, out _)))
         {
-            if (TryReadNumber(item, out double number))
-            {
-                numbers.Add(number);
-            }
+            _ = TryReadNumber(item, out double number);
+            numbers.Add(number);
         }
 
         return numbers;
@@ -1697,23 +1695,15 @@ public sealed class PrinterCalibrationContextService(
         string propertyName,
         out JsonElement value)
     {
-        if (root is { ValueKind: JsonValueKind.Object })
-        {
-            foreach (JsonProperty property in root.Value.EnumerateObject())
-            {
-                if (string.Equals(
-                    property.Name,
-                    propertyName,
-                    StringComparison.OrdinalIgnoreCase))
-                {
-                    value = property.Value;
-                    return true;
-                }
-            }
-        }
+        JsonElement? match = root is { ValueKind: JsonValueKind.Object }
+            ? root.Value.EnumerateObject()
+                .Where(property => string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                .Select(property => (JsonElement?)property.Value)
+                .FirstOrDefault()
+            : null;
 
-        value = default;
-        return false;
+        value = match ?? default;
+        return match.HasValue;
     }
 
     private static string ComputeSha256(string value)

@@ -374,22 +374,15 @@ public class GcodeHarvestService(
                 // allowedExts are normalized to start with '.' so compare using
                 // OrdinalIgnoreCase when appropriate.
                 string name = f.Name;
-                bool extOk = false;
-                foreach (string? ext in allowedExts)
-                {
-                    if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
-                    {
-                        extOk = true;
-                        _logger.LogDebug("✅ File '{FName}' matches extension '{Ext}'", f.Name, ext);
-                        break;
-                    }
-                }
-
-                if (!extOk)
+                string? matchingExtension = allowedExts.FirstOrDefault(ext =>
+                    name.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
+                if (matchingExtension is null)
                 {
                     _logger.LogDebug("❌ File '{FName}' rejected: extension doesn't match any of [{StringJoin}]", f.Name, string.Join(", ", allowedExts));
                     return false;
                 }
+
+                _logger.LogDebug("✅ File '{FName}' matches extension '{Ext}'", f.Name, matchingExtension);
 
                 if (operation.MinFileSizeBytes.HasValue && f.Size < operation.MinFileSizeBytes.Value)
                 {

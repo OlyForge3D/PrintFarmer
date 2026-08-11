@@ -984,17 +984,17 @@ public sealed class CalibrationProjectService(
             return Validation<CalibrationAttemptDto>("attempt_invalid");
         }
 
-        foreach (JsonElement payload in new[]
-                 {
-                     request.Input,
-                     request.Specification,
-                     request.ProfileSnapshotIds,
-                 })
+        string? payloadSafetyCode = new[]
         {
-            if (ValidateSafeJson(payload) is string payloadSafetyCode)
-            {
-                return Validation<CalibrationAttemptDto>(payloadSafetyCode);
-            }
+            request.Input,
+            request.Specification,
+            request.ProfileSnapshotIds,
+        }
+            .Select(ValidateSafeJson)
+            .FirstOrDefault(code => code is not null);
+        if (payloadSafetyCode is not null)
+        {
+            return Validation<CalibrationAttemptDto>(payloadSafetyCode);
         }
 
         if (request.ActualSpoolSnapshot.HasValue &&
@@ -1318,17 +1318,17 @@ public sealed class CalibrationProjectService(
             return Validation<CalibrationObservationDto>("observation_invalid");
         }
 
-        foreach (JsonElement payload in new[]
-                 {
-                     request.Measurements,
-                     request.Result,
-                     request.Units,
-                 })
+        string? payloadSafetyCode = new[]
         {
-            if (ValidateSafeJson(payload) is string payloadSafetyCode)
-            {
-                return Validation<CalibrationObservationDto>(payloadSafetyCode);
-            }
+            request.Measurements,
+            request.Result,
+            request.Units,
+        }
+            .Select(ValidateSafeJson)
+            .FirstOrDefault(code => code is not null);
+        if (payloadSafetyCode is not null)
+        {
+            return Validation<CalibrationObservationDto>(payloadSafetyCode);
         }
 
         CalibrationAttempt? attempt = await FindVisibleAttemptAsync(attemptId, actor, cancellationToken);
@@ -3156,17 +3156,17 @@ public sealed class CalibrationProjectService(
             return "project_invalid";
         }
 
-        foreach (JsonElement payload in new[]
-                 {
-                     request.FilamentSnapshot,
-                     request.OrderedSteps,
-                     request.CurrentSelections,
-                 })
+        string? payloadSafetyCode = new[]
         {
-            if (ValidateSafeJson(payload) is string payloadSafetyCode)
-            {
-                return payloadSafetyCode;
-            }
+            request.FilamentSnapshot,
+            request.OrderedSteps,
+            request.CurrentSelections,
+        }
+            .Select(ValidateSafeJson)
+            .FirstOrDefault(code => code is not null);
+        if (payloadSafetyCode is not null)
+        {
+            return payloadSafetyCode;
         }
 
         return null;
@@ -3206,12 +3206,9 @@ public sealed class CalibrationProjectService(
         }
 
         IReadOnlyList<CalibrationToolheadDto> capturedToolheads = context.Snapshot.Toolheads;
-        foreach (CalibrationToolheadDto toolhead in capturedToolheads)
+        if (capturedToolheads.Any(toolhead => toolhead.Id == selectedId && toolhead.Index == selectedIndex))
         {
-            if (toolhead.Id == selectedId && toolhead.Index == selectedIndex)
-            {
-                return null;
-            }
+            return null;
         }
 
         return "toolhead_selection_invalid";
@@ -3512,12 +3509,9 @@ public sealed class CalibrationProjectService(
 
         if (node is JsonArray jsonArray)
         {
-            foreach (JsonNode? item in jsonArray)
+            foreach (JsonNode? item in jsonArray.Where(item => item is not null))
             {
-                if (item is not null)
-                {
-                    NormalizeOperationIdentifiers(item);
-                }
+                NormalizeOperationIdentifiers(item!);
             }
         }
     }

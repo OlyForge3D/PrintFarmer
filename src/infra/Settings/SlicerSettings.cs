@@ -59,12 +59,10 @@ public class SlicerSettings : IAppSetting, IValidatableSetting
                 throw new ValidationException("At least one slicer mode must be enabled.");
             }
 
-            foreach (SlicerMode mode in EnabledModes)
+            SlicerMode invalidMode = EnabledModes.FirstOrDefault(mode => !Enum.IsDefined(mode));
+            if (!Enum.IsDefined(invalidMode))
             {
-                if (!Enum.IsDefined(mode))
-                {
-                    throw new ValidationException($"Invalid SlicerMode value '{mode}' in EnabledModes. Must be Simple or Advanced.");
-                }
+                throw new ValidationException($"Invalid SlicerMode value '{invalidMode}' in EnabledModes. Must be Simple or Advanced.");
             }
 
             if (!EnabledModes.Contains(SlicerMode))

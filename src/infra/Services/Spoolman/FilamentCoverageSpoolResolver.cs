@@ -354,12 +354,9 @@ public sealed class FilamentCoverageSpoolResolver(
                     },
                     ct).ConfigureAwait(false);
 
-                foreach (SpoolmanSpoolDto spool in page.Items)
+                foreach (SpoolmanSpoolDto spool in page.Items.Where(spool => spoolIds.Contains(spool.Id)))
                 {
-                    if (spoolIds.Contains(spool.Id))
-                    {
-                        found[spool.Id] = spool;
-                    }
+                    found[spool.Id] = spool;
                 }
 
                 totalCount = page.TotalCount;

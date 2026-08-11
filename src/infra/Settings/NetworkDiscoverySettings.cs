@@ -86,12 +86,10 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
             throw new ValidationException("At least one valid subnet is required.");
         }
 
-        foreach (string subnet in DiscoverySubnets)
+        string? invalidSubnet = DiscoverySubnets.FirstOrDefault(subnet => !IsValidCidr(subnet));
+        if (invalidSubnet is not null)
         {
-            if (!IsValidCidr(subnet))
-            {
-                throw new ValidationException($"Invalid CIDR subnet: {subnet}");
-            }
+            throw new ValidationException($"Invalid CIDR subnet: {invalidSubnet}");
         }
     }
 

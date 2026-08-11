@@ -434,19 +434,19 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     {
         if (element.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement item in element.EnumerateArray())
+            foreach (JsonElement item in element.EnumerateArray().Where(item =>
+                         item.TryGetProperty("name", out _) && item.TryGetProperty("type", out _)))
             {
-                if (item.TryGetProperty("name", out JsonElement nameEl) && item.TryGetProperty("type", out JsonElement typeEl))
-                {
-                    string name = nameEl.GetString() ?? string.Empty;
-                    string type = typeEl.GetString() ?? string.Empty;
-                    string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
+                JsonElement nameEl = item.GetProperty("name");
+                JsonElement typeEl = item.GetProperty("type");
+                string name = nameEl.GetString() ?? string.Empty;
+                string type = typeEl.GetString() ?? string.Empty;
+                string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
 
-                    // Filter for machine code files (gcode)
-                    if (type.Equals("machinecode", StringComparison.OrdinalIgnoreCase))
-                    {
-                        files.Add(fullPath);
-                    }
+                // Filter for machine code files (gcode)
+                if (type.Equals("machinecode", StringComparison.OrdinalIgnoreCase))
+                {
+                    files.Add(fullPath);
                 }
             }
         }
@@ -469,17 +469,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 JsonElement root = doc.RootElement;
                 if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("plugins", out JsonElement pluginsProp))
                 {
-                    foreach (JsonElement plugin in pluginsProp.EnumerateArray())
+                    foreach (JsonElement plugin in pluginsProp.EnumerateArray().Where(plugin => plugin.TryGetProperty("key", out _)))
                     {
-                        if (plugin.TryGetProperty("key", out JsonElement keyProp))
+                        JsonElement keyProp = plugin.GetProperty("key");
+                        string? key = keyProp.GetString();
+                        if (!string.IsNullOrEmpty(key))
                         {
-                            string? key = keyProp.GetString();
-                            if (!string.IsNullOrEmpty(key))
+                            if (key.Equals("display_current_position", StringComparison.OrdinalIgnoreCase) || key.Equals("positioninfo", StringComparison.OrdinalIgnoreCase))
                             {
-                                if (key.Equals("display_current_position", StringComparison.OrdinalIgnoreCase) || key.Equals("positioninfo", StringComparison.OrdinalIgnoreCase))
-                                {
-                                    hasPositionPlugin = true;
-                                }
+                                hasPositionPlugin = true;
                             }
                         }
                     }
@@ -868,14 +866,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             double totalFilamentUsed = 0;
             int jobCount = 0;
 
-            foreach (HistoryJob job in historyList.Jobs)
+            foreach (HistoryJob job in historyList.Jobs.Where(job => job.Status == "Completed"))
             {
-                if (job.Status == "Completed")
-                {
-                    totalPrintTime += job.PrintDuration;
-                    totalFilamentUsed += job.FilamentUsed;
-                    jobCount++;
-                }
+                totalPrintTime += job.PrintDuration;
+                totalFilamentUsed += job.FilamentUsed;
+                jobCount++;
             }
 
             return new HistoryTotals
@@ -2129,41 +2124,41 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     {
         if (element.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement item in element.EnumerateArray())
+            foreach (JsonElement item in element.EnumerateArray().Where(item =>
+                         item.TryGetProperty("name", out _) && item.TryGetProperty("type", out _)))
             {
-                if (item.TryGetProperty("name", out JsonElement nameEl) && item.TryGetProperty("type", out JsonElement typeEl))
+                JsonElement nameEl = item.GetProperty("name");
+                JsonElement typeEl = item.GetProperty("type");
+                string name = nameEl.GetString() ?? string.Empty;
+                string type = typeEl.GetString() ?? string.Empty;
+                string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
+
+                // Filter for machine code files (gcode)
+                if (type.Equals("machinecode", StringComparison.OrdinalIgnoreCase))
                 {
-                    string name = nameEl.GetString() ?? string.Empty;
-                    string type = typeEl.GetString() ?? string.Empty;
-                    string fullPath = string.IsNullOrEmpty(path) ? name : $"{path}/{name}";
-
-                    // Filter for machine code files (gcode)
-                    if (type.Equals("machinecode", StringComparison.OrdinalIgnoreCase))
+                    // Extract size if available
+                    long? size = null;
+                    if (item.TryGetProperty("size", out JsonElement sizeEl) && sizeEl.ValueKind == JsonValueKind.Number)
                     {
-                        // Extract size if available
-                        long? size = null;
-                        if (item.TryGetProperty("size", out JsonElement sizeEl) && sizeEl.ValueKind == JsonValueKind.Number)
-                        {
-                            size = sizeEl.GetInt64();
-                        }
-
-                        // Extract modified timestamp if available (OctoPrint uses "date" field with Unix timestamp in seconds)
-                        long? modified = null;
-                        if (item.TryGetProperty("date", out JsonElement dateEl) && dateEl.ValueKind == JsonValueKind.Number)
-                        {
-                            long timestamp = (long)dateEl.GetDouble();
-                            modified = timestamp;
-                        }
-
-                        files.Add(new PrinterFileInfo
-                        {
-                            Name = Path.GetFileName(fullPath),
-                            Path = fullPath,
-                            Size = size,
-                            Modified = modified,
-                            ThumbnailUrl = null // OctoPrint doesn't expose thumbnail URLs
-                        });
+                        size = sizeEl.GetInt64();
                     }
+
+                    // Extract modified timestamp if available (OctoPrint uses "date" field with Unix timestamp in seconds)
+                    long? modified = null;
+                    if (item.TryGetProperty("date", out JsonElement dateEl) && dateEl.ValueKind == JsonValueKind.Number)
+                    {
+                        long timestamp = (long)dateEl.GetDouble();
+                        modified = timestamp;
+                    }
+
+                    files.Add(new PrinterFileInfo
+                    {
+                        Name = Path.GetFileName(fullPath),
+                        Path = fullPath,
+                        Size = size,
+                        Modified = modified,
+                        ThumbnailUrl = null // OctoPrint doesn't expose thumbnail URLs
+                    });
                 }
             }
         }

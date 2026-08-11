@@ -36,14 +36,7 @@ internal static class MoonrakerOnlineStatusClassifier
             return false;
         }
 
-        foreach (JsonProperty property in statusObj.EnumerateObject())
-        {
-            if (!string.Equals(property.Name, "webhooks", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return statusObj.EnumerateObject().Any(property =>
+            !string.Equals(property.Name, "webhooks", StringComparison.OrdinalIgnoreCase));
     }
 }

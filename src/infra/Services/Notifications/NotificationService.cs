@@ -1808,16 +1808,9 @@ public class NotificationService(
 
     private static bool IsKnownPushServiceHost(string host)
     {
-        foreach (string knownHost in KnownPushServiceHosts)
-        {
-            if (string.Equals(host, knownHost, StringComparison.OrdinalIgnoreCase) ||
-                host.EndsWith($".{knownHost}", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return KnownPushServiceHosts.Any(knownHost =>
+            string.Equals(host, knownHost, StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith($".{knownHost}", StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsValidPushKeys(string p256dh, string auth)

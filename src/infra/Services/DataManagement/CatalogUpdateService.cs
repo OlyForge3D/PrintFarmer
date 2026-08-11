@@ -385,17 +385,14 @@ public class CatalogUpdateService : ICatalogUpdateService
         }
 
         // Check for removed files (in local but not in remote)
-        foreach (KeyValuePair<string, CatalogFileEntry> localEntry in local.Files)
+        foreach (KeyValuePair<string, CatalogFileEntry> localEntry in local.Files.Where(localEntry => !remote.Files.ContainsKey(localEntry.Key)))
         {
-            if (!remote.Files.ContainsKey(localEntry.Key))
+            changes.Add(new CatalogFileChange
             {
-                changes.Add(new CatalogFileChange
-                {
-                    FileName = localEntry.Key,
-                    Category = GetCategoryName(localEntry.Key),
-                    ChangeType = "Removed"
-                });
-            }
+                FileName = localEntry.Key,
+                Category = GetCategoryName(localEntry.Key),
+                ChangeType = "Removed"
+            });
         }
 
         return changes;

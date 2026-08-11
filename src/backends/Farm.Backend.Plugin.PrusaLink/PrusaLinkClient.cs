@@ -504,14 +504,11 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             FileInfoBase folderInfo = await _apiClient.GetFileInfoAsync(baseUrl, storagePath, string.Empty, credential, ct: ct);
             if (folderInfo is FolderInfo folder && folder.Children != null)
             {
-                foreach (FileInfoBase child in folder.Children)
+                foreach (FileInfoBase child in folder.Children.Where(child => child.Type != FileTypes.Folder))
                 {
-                    if (child.Type != FileTypes.Folder)
-                    {
-                        // For v1 API, use the display name or name, and the name as path
-                        string displayName = child.DisplayName ?? child.Name;
-                        result.Add((displayName, "/" + Uri.EscapeDataString(child.Name)));
-                    }
+                    // For v1 API, use the display name or name, and the name as path
+                    string displayName = child.DisplayName ?? child.Name;
+                    result.Add((displayName, "/" + Uri.EscapeDataString(child.Name)));
                 }
             }
 
@@ -524,12 +521,9 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             try
             {
                 List<FileChild> legacyFiles = await _apiClient.GetFilesLegacyAsync(baseUrl, credential, ct);
-                foreach (FileChild file in legacyFiles)
+                foreach (FileChild file in legacyFiles.Where(file => file.Type != "FOLDER" && !string.IsNullOrEmpty(file.Display) && !string.IsNullOrEmpty(file.Path)))
                 {
-                    if (file.Type != "FOLDER" && !string.IsNullOrEmpty(file.Display) && !string.IsNullOrEmpty(file.Path))
-                    {
-                        result.Add((file.Display, file.Path));
-                    }
+                    result.Add((file.Display, file.Path));
                 }
             }
             catch (Exception legacyEx)

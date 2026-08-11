@@ -474,12 +474,10 @@ public class SpoolmanService(HttpClient http, ISettingsService settingsService, 
                 return null;
             }
 
-            foreach (SpoolmanFilamentDto filament in page.Items)
+            foreach (SpoolmanFilamentDto filament in page.Items.Where(filament =>
+                         string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal)))
             {
-                if (string.Equals(filament.ArticleNumber, trimmedBarcode, StringComparison.Ordinal))
-                {
-                    matches.Add(filament);
-                }
+                matches.Add(filament);
             }
 
             if (page.Items.Count == 0 || page.Items.Count < pageSize)

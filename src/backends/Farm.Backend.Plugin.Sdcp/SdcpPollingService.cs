@@ -133,16 +133,13 @@ public sealed class SdcpPollingService(
                     _logger.LogDebug("SdcpPollingService: Found {PrinterIdsCount} SDCP printers", printerIds.Count);
 
                     // Ensure polling loops exist for all SDCP printers
-                    foreach (Guid id in printerIds)
+                    foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
                     {
-                        if (!_pollingLoops.ContainsKey(id))
-                        {
 #pragma warning disable S6612 // Use the loop variable instead of capturing
-                            var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
+                        var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
-                            _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug("Started polling loop for SDCP printer {Id}", id);
-                        }
+                        _pollingLoops.TryAdd(id, pollingLoop);
+                        _logger.LogDebug("Started polling loop for SDCP printer {Id}", id);
                     }
 
                     // Remove polling loops for printers that are no longer SDCP

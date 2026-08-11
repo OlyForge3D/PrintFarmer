@@ -1364,13 +1364,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 double[] rot = new double[3];
                 int i = 0;
-                foreach (JsonElement el in rotEl.EnumerateArray())
+                foreach (JsonElement el in rotEl.EnumerateArray().Where(el => i < 3 && el.ValueKind == JsonValueKind.Number))
                 {
-                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
-                    {
-                        double v = el.GetDouble();
-                        rot[i++] = double.IsFinite(v) ? v : 0;
-                    }
+                    double v = el.GetDouble();
+                    rot[i++] = double.IsFinite(v) ? v : 0;
                 }
 
                 const double radToDeg = 180.0 / Math.PI;
@@ -1402,13 +1399,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 double[] scale = new double[3] { 1, 1, 1 };
                 int i = 0;
-                foreach (JsonElement el in scaleEl.EnumerateArray())
+                foreach (JsonElement el in scaleEl.EnumerateArray().Where(el => i < 3 && el.ValueKind == JsonValueKind.Number))
                 {
-                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
-                    {
-                        double v = el.GetDouble();
-                        scale[i++] = double.IsFinite(v) ? v : 1;
-                    }
+                    double v = el.GetDouble();
+                    scale[i++] = double.IsFinite(v) ? v : 1;
                 }
 
                 // Use uniform scale (first component). 1.0 = no change.
@@ -1425,13 +1419,10 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             {
                 double[] pos = new double[3];
                 int i = 0;
-                foreach (JsonElement el in posEl.EnumerateArray())
+                foreach (JsonElement el in posEl.EnumerateArray().Where(el => i < 3 && el.ValueKind == JsonValueKind.Number))
                 {
-                    if (i < 3 && el.ValueKind == JsonValueKind.Number)
-                    {
-                        double v = el.GetDouble();
-                        pos[i++] = double.IsFinite(v) ? v : 0;
-                    }
+                    double v = el.GetDouble();
+                    pos[i++] = double.IsFinite(v) ? v : 0;
                 }
 
                 const double epsilon = 0.001;
@@ -1535,12 +1526,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             "skirt_speed",
         ];
 
-        foreach (string key in speedKeys)
+        foreach (string key in speedKeys.Where(key => settings.TryGetValue(key, out object? val) && val?.ToString() == "0"))
         {
-            if (settings.TryGetValue(key, out object? val) && val?.ToString() == "0")
-            {
-                settings[key] = "1";
-            }
+            settings[key] = "1";
         }
 
         // OrcaSlicer 2.3.2 requires extruder_type and nozzle_volume_type for

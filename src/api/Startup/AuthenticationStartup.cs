@@ -52,14 +52,11 @@ public static class AuthenticationStartup
             return;
         }
 
-        foreach (string placeholder in ShippedPlaceholderKeys)
+        if (ShippedPlaceholderKeys.Any(placeholder => string.Equals(key, placeholder, StringComparison.Ordinal)))
         {
-            if (string.Equals(key, placeholder, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(
-                    "JWT Key matches a placeholder value shipped in this repository's deployment templates. " +
-                    "Configure a unique secret via environment variable Jwt__Key (the deploy installer generates one automatically).");
-            }
+            throw new InvalidOperationException(
+                "JWT Key matches a placeholder value shipped in this repository's deployment templates. " +
+                "Configure a unique secret via environment variable Jwt__Key (the deploy installer generates one automatically).");
         }
 
         int keyByteLength = Encoding.UTF8.GetByteCount(key);

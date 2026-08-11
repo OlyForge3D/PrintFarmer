@@ -81,56 +81,53 @@ internal static class ProgramHelpers
                 }
 
                 IPInterfaceProperties props = ni.GetIPProperties();
-                foreach (UnicastIPAddressInformation ua in props.UnicastAddresses)
+                foreach (UnicastIPAddressInformation ua in props.UnicastAddresses.Where(ua => ua.Address.AddressFamily == AddressFamily.InterNetwork))
                 {
-                    if (ua.Address.AddressFamily == AddressFamily.InterNetwork)
+                    int prefix = 24;
+                    if (ua.IPv4Mask is not null)
                     {
-                        int prefix = 24;
-                        if (ua.IPv4Mask is not null)
+                        byte[] maskBytes = ua.IPv4Mask.GetAddressBytes();
+                        int ones = 0;
+                        foreach (byte b in maskBytes)
                         {
-                            byte[] maskBytes = ua.IPv4Mask.GetAddressBytes();
-                            int ones = 0;
-                            foreach (byte b in maskBytes)
+                            byte v = b;
+                            while (v != 0)
                             {
-                                byte v = b;
-                                while (v != 0)
-                                {
-                                    ones += v & 1;
-                                    v >>= 1;
-                                }
-                            }
-
-                            if (ones > 0)
-                            {
-                                prefix = ones;
+                                ones += v & 1;
+                                v >>= 1;
                             }
                         }
 
-                        byte[] networkBytes = ua.Address.GetAddressBytes();
-                        if (prefix is >= 8 and <= 32)
+                        if (ones > 0)
                         {
-                            int fullBytes = prefix / 8;
-                            int remBits = prefix % 8;
-                            if (remBits > 0 && fullBytes < networkBytes.Length)
-                            {
-                                byte mask = (byte)(0xFF << (8 - remBits));
-                                networkBytes[fullBytes] = (byte)(networkBytes[fullBytes] & mask);
-                                for (int i = fullBytes + 1; i < networkBytes.Length; i++)
-                                {
-                                    networkBytes[i] = 0;
-                                }
-                            }
-                            else
-                            {
-                                for (int i = fullBytes; i < networkBytes.Length; i++)
-                                {
-                                    networkBytes[i] = 0;
-                                }
-                            }
-
-                            IPAddress networkBase = new(networkBytes);
-                            _ = suggestions.Add($"{networkBase}/{prefix}");
+                            prefix = ones;
                         }
+                    }
+
+                    byte[] networkBytes = ua.Address.GetAddressBytes();
+                    if (prefix is >= 8 and <= 32)
+                    {
+                        int fullBytes = prefix / 8;
+                        int remBits = prefix % 8;
+                        if (remBits > 0 && fullBytes < networkBytes.Length)
+                        {
+                            byte mask = (byte)(0xFF << (8 - remBits));
+                            networkBytes[fullBytes] = (byte)(networkBytes[fullBytes] & mask);
+                            for (int i = fullBytes + 1; i < networkBytes.Length; i++)
+                            {
+                                networkBytes[i] = 0;
+                            }
+                        }
+                        else
+                        {
+                            for (int i = fullBytes; i < networkBytes.Length; i++)
+                            {
+                                networkBytes[i] = 0;
+                            }
+                        }
+
+                        IPAddress networkBase = new(networkBytes);
+                        _ = suggestions.Add($"{networkBase}/{prefix}");
                     }
                 }
             }

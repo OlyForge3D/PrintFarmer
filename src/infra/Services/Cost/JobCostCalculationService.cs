@@ -404,15 +404,10 @@ public class JobCostCalculationService : IJobCostCalculationService
         }
 
         // Try substring match: check if materialName contains any known material key
-        foreach (KeyValuePair<string, decimal> entry in defaults)
-        {
-            if (materialName.Contains(entry.Key, StringComparison.OrdinalIgnoreCase))
-            {
-                return entry.Value;
-            }
-        }
-
-        return 0m;
+        return defaults
+            .Where(entry => materialName.Contains(entry.Key, StringComparison.OrdinalIgnoreCase))
+            .Select(entry => (decimal?)entry.Value)
+            .FirstOrDefault() ?? 0m;
     }
 
     /// <summary>

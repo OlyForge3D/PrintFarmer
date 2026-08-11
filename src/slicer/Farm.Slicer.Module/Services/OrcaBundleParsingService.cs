@@ -38,15 +38,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             }
 
             // Check if at least one expected section exists
-            foreach (string key in OrcaBundleKeys)
-            {
-                if (obj.ContainsKey(key))
-                {
-                    return true;
-                }
-            }
-
-            return false;
+            return OrcaBundleKeys.Any(key => obj.ContainsKey(key));
         }
         catch
         {

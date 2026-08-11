@@ -689,15 +689,12 @@ public sealed class OrcaCalibrationPlanCompiler(
         }
 
         IReadOnlyList<OrcaSettingOverride> overrides = BuildOverrides(document);
-        foreach (OrcaSettingOverride setting in overrides)
+        foreach (OrcaSettingOverride setting in overrides.Where(setting => !AllowedOverrideKeys.Contains(setting.Key)))
         {
-            if (!AllowedOverrideKeys.Contains(setting.Key))
-            {
-                problems.Add(new(
-                    CalibrationGenerationProblemCodes.PlanSettingNotAllowlisted,
-                    $"plan.overrides.{setting.Key}",
-                    "The plan attempted to override a setting outside the allowlist."));
-            }
+            problems.Add(new(
+                CalibrationGenerationProblemCodes.PlanSettingNotAllowlisted,
+                $"plan.overrides.{setting.Key}",
+                "The plan attempted to override a setting outside the allowlist."));
         }
 
         if (problems.Count > 0)

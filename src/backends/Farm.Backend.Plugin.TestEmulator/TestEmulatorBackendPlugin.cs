@@ -42,15 +42,9 @@ public class TestEmulatorBackendPlugin : IExtendedBackendPlugin
         // In .NET 10 minimal hosting, IConfiguration may be registered as a factory
         // rather than an ImplementationInstance. Try ImplementationInstance first,
         // then fall back to building a temporary provider.
-        IConfiguration? config = null;
-        foreach (ServiceDescriptor sd in services)
-        {
-            if (sd.ServiceType == typeof(IConfiguration) && sd.ImplementationInstance is IConfiguration c)
-            {
-                config = c;
-                break;
-            }
-        }
+        IConfiguration? config = services
+            .FirstOrDefault(sd => sd.ServiceType == typeof(IConfiguration) && sd.ImplementationInstance is IConfiguration)
+            ?.ImplementationInstance as IConfiguration;
 
         // Fallback: build a minimal provider to resolve IConfiguration
         if (config is null)

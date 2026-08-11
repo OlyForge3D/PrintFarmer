@@ -436,16 +436,9 @@ internal static class CalibrationMeshReader
             return true;
         }
 
-        foreach (string prefix in AllowedArchivePrefixes)
-        {
-            if (normalized.StartsWith(prefix, StringComparison.Ordinal) ||
-                string.Equals(normalized, prefix, StringComparison.Ordinal))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return AllowedArchivePrefixes.Any(prefix =>
+            normalized.StartsWith(prefix, StringComparison.Ordinal) ||
+            string.Equals(normalized, prefix, StringComparison.Ordinal));
     }
 
     private static bool LooksLikeAsciiStl(ReadOnlySpan<byte> content)

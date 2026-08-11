@@ -126,12 +126,9 @@ internal static class Program
     {
         foreach (string a in args)
         {
-            foreach (string k in keys)
+            if (keys.Any(k => string.Equals(a, k, StringComparison.OrdinalIgnoreCase)))
             {
-                if (string.Equals(a, k, StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
+                return true;
             }
         }
 
@@ -150,12 +147,9 @@ internal static class Program
     {
         for (int i = 0; i < args.Count; i++)
         {
-            foreach (string key in keys)
+            if (keys.Any(key => string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase)))
             {
-                if (string.Equals(args[i], key, StringComparison.OrdinalIgnoreCase))
-                {
-                    return i + 1 < args.Count ? args[i + 1] : null;
-                }
+                return i + 1 < args.Count ? args[i + 1] : null;
             }
         }
 

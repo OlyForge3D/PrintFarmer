@@ -32,13 +32,12 @@ public static class WorkerAuthConfiguration
     {
         if (configuration is IConfigurationRoot root)
         {
-            foreach (IConfigurationProvider provider in root.Providers.Reverse())
+            IConfigurationProvider? provider = root.Providers.Reverse().FirstOrDefault(provider =>
+                provider.TryGet(SharedKeyPath, out string? candidate) &&
+                string.Equals(candidate, value, StringComparison.Ordinal));
+            if (provider is not null)
             {
-                if (provider.TryGet(SharedKeyPath, out string? candidate) &&
-                    string.Equals(candidate, value, StringComparison.Ordinal))
-                {
-                    return provider.GetType().Name;
-                }
+                return provider.GetType().Name;
             }
         }
 

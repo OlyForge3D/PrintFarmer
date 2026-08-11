@@ -286,14 +286,7 @@ public sealed class OperatorFeatureGate : IOperatorFeatureGate
 
     private static FeatureDescriptor FindDescriptor(OperatorFeature feature)
     {
-        foreach (FeatureDescriptor d in Descriptors)
-        {
-            if (d.Feature == feature)
-            {
-                return d;
-            }
-        }
-
-        throw new ArgumentOutOfRangeException(nameof(feature), feature, "Unknown operator feature.");
+        return Descriptors.FirstOrDefault(d => d.Feature == feature)
+            ?? throw new ArgumentOutOfRangeException(nameof(feature), feature, "Unknown operator feature.");
     }
 }

@@ -537,20 +537,15 @@ public sealed class ObicoFailureDetectionService : IObicoFailureDetectionService
     /// </summary>
     private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
     {
-        if (element.ValueKind == JsonValueKind.Object)
-        {
-            foreach (JsonProperty property in element.EnumerateObject())
-            {
-                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-                {
-                    value = property.Value;
-                    return true;
-                }
-            }
-        }
+        JsonElement? match = element.ValueKind == JsonValueKind.Object
+            ? element.EnumerateObject()
+                .Where(property => string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                .Select(property => (JsonElement?)property.Value)
+                .FirstOrDefault()
+            : null;
 
-        value = default;
-        return false;
+        value = match ?? default;
+        return match.HasValue;
     }
 
     /// <summary>

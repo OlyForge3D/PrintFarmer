@@ -812,13 +812,11 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     private void EnsureImmutable<TEntity>()
         where TEntity : class
     {
-        foreach (EntityEntry<TEntity> entry in ChangeTracker.Entries<TEntity>())
+        if (ChangeTracker.Entries<TEntity>().Any(entry =>
+                entry.State is EntityState.Modified or EntityState.Deleted))
         {
-            if (entry.State is EntityState.Modified or EntityState.Deleted)
-            {
-                throw new InvalidOperationException(
-                    $"{typeof(TEntity).Name} rows are immutable calibration history.");
-            }
+            throw new InvalidOperationException(
+                $"{typeof(TEntity).Name} rows are immutable calibration history.");
         }
     }
 
@@ -1031,27 +1029,23 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 
     private void PopulateCaseInsensitiveShadowColumns()
     {
-        foreach (EntityEntry<Manufacturer> entry in ChangeTracker.Entries<Manufacturer>())
+        foreach (EntityEntry<Manufacturer> entry in ChangeTracker.Entries<Manufacturer>().Where(entry =>
+                     entry.State == EntityState.Added || entry.State == EntityState.Modified))
         {
-            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
-            {
-                string name = entry.Entity.Name ?? string.Empty;
-                entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
-            }
+            string name = entry.Entity.Name ?? string.Empty;
+            entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
         }
 
-        foreach (EntityEntry<PrinterModel> entry in ChangeTracker.Entries<PrinterModel>())
+        foreach (EntityEntry<PrinterModel> entry in ChangeTracker.Entries<PrinterModel>().Where(entry =>
+                     entry.State == EntityState.Added || entry.State == EntityState.Modified))
         {
-            if (entry.State == EntityState.Added || entry.State == EntityState.Modified)
-            {
-                string name = entry.Entity.Name ?? string.Empty;
-                entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
+            string name = entry.Entity.Name ?? string.Empty;
+            entry.Property("NameLowered").CurrentValue = name.ToLowerInvariant();
 
-                // Always bump UpdatedAt so catalog update detection picks up the change
-                if (entry.State == EntityState.Modified)
-                {
-                    entry.Entity.UpdatedAt = DateTime.UtcNow;
-                }
+            // Always bump UpdatedAt so catalog update detection picks up the change
+            if (entry.State == EntityState.Modified)
+            {
+                entry.Entity.UpdatedAt = DateTime.UtcNow;
             }
         }
     }

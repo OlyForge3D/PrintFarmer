@@ -3500,24 +3500,23 @@ public class PrintJobManagementService(
         // Can be a single value or array (for multi-extruder setups)
         string[] keys = ["nozzle_diameter", "NozzleDiameter", "nozzleDiameter"];
 
-        foreach (string key in keys)
+        string? key = keys.FirstOrDefault(key => metadata.ContainsKey(key));
+        if (key is not null)
         {
-            if (metadata.TryGetValue(key, out object? value))
+            object? value = metadata[key];
+            return value switch
             {
-                return value switch
-                {
-                    decimal d => d,
-                    double d => (decimal)d,
-                    float f => (decimal)f,
-                    int i => i,
-                    long l => l,
-                    string s when decimal.TryParse(s, out decimal result) => result,
-                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
-                        jsonElement.GetArrayLength() > 0 && jsonElement[0].TryGetDecimal(out decimal first) ? first : null,
-                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDecimal(out decimal d) => d,
-                    _ => null
-                };
-            }
+                decimal d => d,
+                double d => (decimal)d,
+                float f => (decimal)f,
+                int i => i,
+                long l => l,
+                string s when decimal.TryParse(s, out decimal result) => result,
+                System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
+                    jsonElement.GetArrayLength() > 0 && jsonElement[0].TryGetDecimal(out decimal first) ? first : null,
+                System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDecimal(out decimal d) => d,
+                _ => null
+            };
         }
 
         return null;
@@ -3536,20 +3535,19 @@ public class PrintJobManagementService(
         // Moonraker uses various keys for material type
         string[] keys = ["filament_type", "filament_name", "material", "MATERIAL", "Material"];
 
-        foreach (string key in keys)
+        string? key = keys.FirstOrDefault(key => metadata.ContainsKey(key));
+        if (key is not null)
         {
-            if (metadata.TryGetValue(key, out object? value))
+            object? value = metadata[key];
+            return value switch
             {
-                return value switch
-                {
-                    string s when !string.IsNullOrWhiteSpace(s) => s.Trim(),
-                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
-                        jsonElement.GetArrayLength() > 0 ? jsonElement[0].GetString()?.Trim() : null,
-                    System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.String =>
-                        jsonElement.GetString()?.Trim(),
-                    _ => null
-                };
-            }
+                string s when !string.IsNullOrWhiteSpace(s) => s.Trim(),
+                System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.Array =>
+                    jsonElement.GetArrayLength() > 0 ? jsonElement[0].GetString()?.Trim() : null,
+                System.Text.Json.JsonElement jsonElement when jsonElement.ValueKind == System.Text.Json.JsonValueKind.String =>
+                    jsonElement.GetString()?.Trim(),
+                _ => null
+            };
         }
 
         return null;
@@ -3568,26 +3566,24 @@ public class PrintJobManagementService(
         // Moonraker uses "estimated_time" in seconds
         string[] keys = ["estimated_time", "print_time", "EstimatedTime", "printTime"];
 
-        foreach (string key in keys)
+        foreach (string key in keys.Where(key => metadata.TryGetValue(key, out object? value)))
         {
-            if (metadata.TryGetValue(key, out object? value))
+            object? value = metadata[key];
+            double? seconds = value switch
             {
-                double? seconds = value switch
-                {
-                    double d => d,
-                    float f => f,
-                    int i => i,
-                    long l => l,
-                    decimal d => (double)d,
-                    string s when double.TryParse(s, out double result) => result,
-                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
-                    _ => null
-                };
+                double d => d,
+                float f => f,
+                int i => i,
+                long l => l,
+                decimal d => (double)d,
+                string s when double.TryParse(s, out double result) => result,
+                System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
+                _ => null
+            };
 
-                if (seconds.HasValue && seconds.Value > 0)
-                {
-                    return TimeSpan.FromSeconds(seconds.Value);
-                }
+            if (seconds.HasValue && seconds.Value > 0)
+            {
+                return TimeSpan.FromSeconds(seconds.Value);
             }
         }
 
@@ -3607,27 +3603,25 @@ public class PrintJobManagementService(
         // Moonraker uses "filament_total" for total filament in mm
         string[] keys = ["filament_total", "filament_used", "FilamentTotal", "filamentTotal"];
 
-        foreach (string key in keys)
+        foreach (string key in keys.Where(key => metadata.TryGetValue(key, out object? value)))
         {
-            if (metadata.TryGetValue(key, out object? value))
+            object? value = metadata[key];
+            double? mm = value switch
             {
-                double? mm = value switch
-                {
-                    double d => d,
-                    float f => f,
-                    int i => i,
-                    long l => l,
-                    decimal d => (double)d,
-                    string s when double.TryParse(s, out double result) => result,
-                    System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
-                    _ => null
-                };
+                double d => d,
+                float f => f,
+                int i => i,
+                long l => l,
+                decimal d => (double)d,
+                string s when double.TryParse(s, out double result) => result,
+                System.Text.Json.JsonElement jsonElement when jsonElement.TryGetDouble(out double d) => d,
+                _ => null
+            };
 
-                if (mm.HasValue && mm.Value > 0)
-                {
-                    // Convert from mm to grams (approximate: 1m of 1.75mm PLA = ~3g)
-                    return mm.Value * 0.003;
-                }
+            if (mm.HasValue && mm.Value > 0)
+            {
+                // Convert from mm to grams (approximate: 1m of 1.75mm PLA = ~3g)
+                return mm.Value * 0.003;
             }
         }
 

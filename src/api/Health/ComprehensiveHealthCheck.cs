@@ -333,63 +333,61 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
             int failedServices = 0;
             List<object> failedDetails = new();
 
-            foreach (ExternalServicePrinter printer in printers)
+            foreach (ExternalServicePrinter printer in printers.Where(printer =>
+                         printer.Backend == (int)PrinterBackend.Moonraker))
             {
                 // Check Moonraker printers
-                if (printer.Backend == (int)PrinterBackend.Moonraker)
+                externalServiceCount++;
+                try
                 {
-                    externalServiceCount++;
-                    try
-                    {
-                        using HttpClient client = httpClientFactory.CreateClient();
-                        client.Timeout = TimeSpan.FromSeconds(2);
-                        string attemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info";
-                        Stopwatch sw = Stopwatch.StartNew();
-                        HttpResponseMessage response = await client.GetAsync(attemptedUrl, cancellationToken);
-                        sw.Stop();
-                        if (!response.IsSuccessStatusCode)
-                        {
-                            failedServices++;
-                            string snippet = string.Empty;
-                            try
-                            {
-                                string body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
-                                snippet = body.Length > 200 ? body[..200] : body;
-                            }
-                            catch
-                            {
-                            }
-
-                            failedDetails.Add(new
-                            {
-                                printer.Id,
-                                printer.Name,
-                                printer.ServerUrl,
-                                printer.Backend,
-                                AttemptedUrl = attemptedUrl,
-                                CheckedAtUtc = DateTime.UtcNow,
-                                ElapsedMs = sw.ElapsedMilliseconds,
-                                StatusCode = (int)response.StatusCode,
-                                ResponseSnippet = snippet,
-                                ErrorMessage = "Non-200 response"
-                            });
-                        }
-                    }
-                    catch (Exception ex)
+                    using HttpClient client = httpClientFactory.CreateClient();
+                    client.Timeout = TimeSpan.FromSeconds(2);
+                    string attemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info";
+                    Stopwatch sw = Stopwatch.StartNew();
+                    HttpResponseMessage response = await client.GetAsync(attemptedUrl, cancellationToken);
+                    sw.Stop();
+                    if (!response.IsSuccessStatusCode)
                     {
                         failedServices++;
+                        string snippet = string.Empty;
+                        try
+                        {
+                            string body = await response.Content.ReadAsStringAsync(cancellationToken) ?? string.Empty;
+                            snippet = body.Length > 200 ? body[..200] : body;
+                        }
+                        catch
+                        {
+                        }
+
                         failedDetails.Add(new
                         {
                             printer.Id,
                             printer.Name,
                             printer.ServerUrl,
                             printer.Backend,
-                            AttemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info",
+                            AttemptedUrl = attemptedUrl,
                             CheckedAtUtc = DateTime.UtcNow,
-                            ElapsedMs = (long?)null,
-                            ErrorMessage = ex.Message
+                            ElapsedMs = sw.ElapsedMilliseconds,
+                            StatusCode = (int)response.StatusCode,
+                            ResponseSnippet = snippet,
+                            ErrorMessage = "Non-200 response"
                         });
                     }
+                }
+                catch (Exception ex)
+                {
+                    failedServices++;
+                    failedDetails.Add(new
+                    {
+                        printer.Id,
+                        printer.Name,
+                        printer.ServerUrl,
+                        printer.Backend,
+                        AttemptedUrl = $"{printer.ServerUrl.TrimEnd('/')}/server/info",
+                        CheckedAtUtc = DateTime.UtcNow,
+                        ElapsedMs = (long?)null,
+                        ErrorMessage = ex.Message
+                    });
                 }
             }
 

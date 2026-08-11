@@ -1040,14 +1040,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         string manufacturerDir,
         Dictionary<string, string> lookup)
     {
-        foreach (ManufacturerBundleProfileEntry entry in entries)
+        foreach (ManufacturerBundleProfileEntry entry in entries.Where(entry =>
+                     !string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(entry.SubPath)))
         {
-            if (!string.IsNullOrEmpty(entry.Name) && !string.IsNullOrEmpty(entry.SubPath))
-            {
-                // sub_path is relative to the manufacturer directory
-                string fullPath = Path.Join(manufacturerDir, entry.SubPath);
-                lookup[entry.Name] = fullPath;
-            }
+            // sub_path is relative to the manufacturer directory
+            string fullPath = Path.Join(manufacturerDir, entry.SubPath);
+            lookup[entry.Name] = fullPath;
         }
     }
 
@@ -1523,15 +1521,13 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         string[] speedKeys = ["print_speed", "inner_wall_speed", "outer_wall_speed", "sparse_infill_speed"];
 
-        foreach (string key in speedKeys)
+        foreach (string key in speedKeys.Where(key => root.TryGetProperty(key, out _)))
         {
-            if (root.TryGetProperty(key, out JsonElement speedElem))
+            JsonElement speedElem = root.GetProperty(key);
+            int? parsed = ParseIntValue(speedElem);
+            if (parsed.HasValue)
             {
-                int? parsed = ParseIntValue(speedElem);
-                if (parsed.HasValue)
-                {
-                    return parsed.Value;
-                }
+                return parsed.Value;
             }
         }
 
@@ -1542,15 +1538,13 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         string[] firstLayerHeightKeys = ["initial_layer_print_height", "first_layer_height"];
 
-        foreach (string key in firstLayerHeightKeys)
+        foreach (string key in firstLayerHeightKeys.Where(key => root.TryGetProperty(key, out _)))
         {
-            if (root.TryGetProperty(key, out JsonElement valueElem))
+            JsonElement valueElem = root.GetProperty(key);
+            double? parsed = ParseDoubleValue(valueElem);
+            if (parsed.HasValue)
             {
-                double? parsed = ParseDoubleValue(valueElem);
-                if (parsed.HasValue)
-                {
-                    return parsed.Value;
-                }
+                return parsed.Value;
             }
         }
 
@@ -1561,15 +1555,13 @@ public class OrcaProfilesService : ISlicerProfilesService
     {
         string[] firstLayerSpeedKeys = ["initial_layer_speed", "first_layer_speed", "initial_layer_print_speed"];
 
-        foreach (string key in firstLayerSpeedKeys)
+        foreach (string key in firstLayerSpeedKeys.Where(key => root.TryGetProperty(key, out _)))
         {
-            if (root.TryGetProperty(key, out JsonElement valueElem))
+            JsonElement valueElem = root.GetProperty(key);
+            int? parsed = ParseIntValue(valueElem);
+            if (parsed.HasValue)
             {
-                int? parsed = ParseIntValue(valueElem);
-                if (parsed.HasValue)
-                {
-                    return parsed.Value;
-                }
+                return parsed.Value;
             }
         }
 
@@ -1747,15 +1739,12 @@ public class OrcaProfilesService : ISlicerProfilesService
         if (compatibleElem.ValueKind == JsonValueKind.Array)
         {
             // Direct array format
-            foreach (JsonElement printer in compatibleElem.EnumerateArray())
+            foreach (JsonElement printer in compatibleElem.EnumerateArray().Where(printer => printer.ValueKind == JsonValueKind.String))
             {
-                if (printer.ValueKind == JsonValueKind.String)
+                string printerName = printer.GetString() ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(printerName))
                 {
-                    string printerName = printer.GetString() ?? string.Empty;
-                    if (!string.IsNullOrWhiteSpace(printerName))
-                    {
-                        targetList.Add(printerName);
-                    }
+                    targetList.Add(printerName);
                 }
             }
         }
@@ -1771,15 +1760,12 @@ public class OrcaProfilesService : ISlicerProfilesService
                     JsonElement root = doc.RootElement;
                     if (root.ValueKind == JsonValueKind.Array)
                     {
-                        foreach (JsonElement item in root.EnumerateArray())
+                        foreach (JsonElement item in root.EnumerateArray().Where(item => item.ValueKind == JsonValueKind.String))
                         {
-                            if (item.ValueKind == JsonValueKind.String)
+                            string printerName = item.GetString() ?? string.Empty;
+                            if (!string.IsNullOrWhiteSpace(printerName))
                             {
-                                string printerName = item.GetString() ?? string.Empty;
-                                if (!string.IsNullOrWhiteSpace(printerName))
-                                {
-                                    targetList.Add(printerName);
-                                }
+                                targetList.Add(printerName);
                             }
                         }
                     }
@@ -1876,16 +1862,10 @@ public class OrcaProfilesService : ISlicerProfilesService
             { "eva", "EVA" },
         };
 
-        foreach (KeyValuePair<string, string> kvp in materialMap)
-        {
-            // Check if the inherits field ends with or contains the material
-            if (lower.EndsWith("_" + kvp.Key) || lower.EndsWith(kvp.Key) || lower.Contains("_" + kvp.Key + "_"))
-            {
-                return kvp.Value;
-            }
-        }
-
-        return null;
+        return materialMap
+            .Where(kvp => lower.EndsWith("_" + kvp.Key) || lower.EndsWith(kvp.Key) || lower.Contains("_" + kvp.Key + "_"))
+            .Select(kvp => kvp.Value)
+            .FirstOrDefault();
     }
 
     /// <summary>
