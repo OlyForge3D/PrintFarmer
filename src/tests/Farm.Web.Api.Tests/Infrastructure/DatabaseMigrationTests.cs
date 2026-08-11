@@ -657,6 +657,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023649_UsePortableRevisionConcurrency",
                 "20260808052051_AddNfcDeviceApproval",
                 "20260808162502_AddPowerReadingCompositeIndex",
+                "20260811230934_AddRoleUpdatedAtConcurrencyToken",
             ]
             :
             [
@@ -665,6 +666,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023652_UsePortableRevisionConcurrency",
                 "20260808052059_AddNfcDeviceApproval",
                 "20260808162518_AddPowerReadingCompositeIndex",
+                "20260811230948_AddRoleUpdatedAtConcurrencyToken",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");

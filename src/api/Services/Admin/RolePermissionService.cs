@@ -2,7 +2,9 @@
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Authentication;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Farm.Web.Api.Services.Admin;
 
@@ -204,8 +206,24 @@ public sealed class RolePermissionService : IRolePermissionService
         catch (DbUpdateException)
         {
             // A concurrent transaction committed a conflicting change to this role (or to the
-            // lockout-guarded permission rows) between our read and our write. Serializable
-            // isolation surfaces this as a save/commit failure rather than silent corruption.
+            // lockout-guarded permission rows) between our read and our write. This is the
+            // normal path: SaveChangesAsync wraps provider errors (including the concurrency
+            // token's affected-rows check) in DbUpdateException.
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return new RolePermissionUpdateResult.ConcurrencyConflict();
+        }
+        catch (PostgresException ex) when (ex.SqlState is "40001" or "40P01")
+        {
+            // Postgres can defer detecting a SERIALIZABLE write-skew conflict (40001) or
+            // deadlock (40P01) until CommitAsync, which is a raw ADO.NET call that EF Core does
+            // not wrap in DbUpdateException the way it wraps SaveChangesAsync's SQL execution.
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            return new RolePermissionUpdateResult.ConcurrencyConflict();
+        }
+        catch (SqlException ex) when (ex.Number is 1205 or 3960)
+        {
+            // Same reasoning for SQL Server: deadlock (1205) or snapshot/serializable update
+            // conflict (3960) can surface at commit time, outside SaveChangesAsync's wrapping.
             await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
             return new RolePermissionUpdateResult.ConcurrencyConflict();
         }
