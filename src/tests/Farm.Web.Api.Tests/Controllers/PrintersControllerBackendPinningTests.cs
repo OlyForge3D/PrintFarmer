@@ -76,7 +76,7 @@ public class PrintersControllerBackendPinningTests
     [Fact]
     public async Task PrusaLink_WhenEgressGuardResolvesAnAddress_ConnectionTargetsThePinnedIpNotTheHostname()
     {
-        using LoopbackDigestServer server = LoopbackDigestServer.Start();
+        using LoopbackDigestServer server = LoopbackDigestServer.Start("prusalink.invalid.test");
 
         Mock<IEgressGuard> egressGuard = new(MockBehavior.Strict);
         egressGuard
@@ -102,8 +102,8 @@ public class PrintersControllerBackendPinningTests
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(result.Result);
         TestConnectionResponse response = Assert.IsType<TestConnectionResponse>(okResult.Value);
         response.Success.Should().BeTrue(
-            "a successful connection proves the request actually reached the loopback server at the pinned IP " +
-            "rather than failing DNS resolution against the non-resolvable placeholder hostname");
+            $"a successful connection proves the request actually reached the loopback server at the pinned IP " +
+            $"rather than failing DNS resolution against the non-resolvable placeholder hostname (actual message: {response.Message})");
 
         server.LastHostHeader.Should().StartWith(
             "prusalink.invalid.test",
@@ -230,12 +230,27 @@ public class PrintersControllerBackendPinningTests
 
         public string? LastHostHeader { get; private set; }
 
-        public static LoopbackDigestServer Start()
+        public static LoopbackDigestServer Start(string? additionalHostPrefix = null)
         {
             int port = GetFreeLoopbackPort();
-            string baseUrl = $"http://127.0.0.1:{port}/";
             HttpListener listener = new();
-            listener.Prefixes.Add(baseUrl);
+
+            // HttpListener routes incoming requests to a registered prefix by matching the
+            // request's Host header, not just the socket's bound address. The test client sends
+            // a Host header of the original (non-loopback) hostname to prove it's preserved
+            // end-to-end, and the two platform implementations diverge on how to accept that:
+            //  - Windows' native http.sys backing HttpListener is lenient here and accepts any
+            //    Host header against a single "http://127.0.0.1:{port}/" prefix, but registering
+            //    a "+"/"*" (all-hosts) prefix requires an admin URL ACL reservation and fails
+            //    with "Access is denied" for a normal dev/CI user.
+            //  - The managed cross-platform HttpListener implementation used on Linux enforces an
+            //    exact Host match against registered prefixes (no admin concept applies to "+"
+            //    there, since it is just a plain socket bind), so a plain loopback prefix 404s
+            //    any request whose Host header doesn't literally match "127.0.0.1".
+            listener.Prefixes.Add(
+                additionalHostPrefix is not null && !OperatingSystem.IsWindows()
+                    ? $"http://+:{port}/"
+                    : $"http://127.0.0.1:{port}/");
             listener.Start();
             return new LoopbackDigestServer(listener, port);
         }
