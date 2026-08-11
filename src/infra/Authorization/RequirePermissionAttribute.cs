@@ -3,7 +3,7 @@ using Farm.Infrastructure.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Logging;
 
-namespace Farm.Web.Api.Infrastructure.Authorization;
+namespace Farm.Infrastructure.Authorization;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class RequirePermissionAttribute
@@ -60,7 +60,7 @@ public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandl
         {
             _logger.LogInformation(
                 "Audited farm-admin permission bypass for user {UserId}: {Permission}",
-                user.FindFirstValue(ClaimTypes.NameIdentifier),
+                user.FindFirst(ClaimTypes.NameIdentifier)?.Value,
                 permissionClaim);
             context.Succeed(requirement);
             return Task.CompletedTask;

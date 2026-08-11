@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Monitoring;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -15,7 +16,7 @@ public class MonitoringController(
     /// Creates a short-lived monitoring session cookie for proxied Grafana/Jaeger access.
     /// </summary>
     [HttpPost("session")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("monitoring", "admin")]
     public IActionResult CreateSession([FromHeader(Name = "X-Forwarded-Proto")] string? forwardedProto = null)
     {
         var username = User.Identity?.Name;
@@ -83,7 +84,7 @@ public class MonitoringController(
     /// Returns availability status of monitoring services (Grafana, Jaeger, Prometheus).
     /// </summary>
     [HttpGet("status")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("monitoring", "admin")]
     public async Task<IActionResult> GetStatusAsync(CancellationToken cancellationToken)
     {
         var status = await healthService.GetStatusAsync(cancellationToken);
@@ -94,7 +95,7 @@ public class MonitoringController(
     /// Returns a curated summary of key application metrics from Prometheus.
     /// </summary>
     [HttpGet("metrics/summary")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("monitoring", "admin")]
     public async Task<IActionResult> GetMetricsSummaryAsync(CancellationToken cancellationToken)
     {
         var summary = await healthService.GetMetricsSummaryAsync(cancellationToken);
@@ -106,7 +107,7 @@ public class MonitoringController(
     /// Each metric is emitted as it resolves from Prometheus, allowing cards to render progressively.
     /// </summary>
     [HttpGet("metrics/stream")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("monitoring", "admin")]
     public async Task StreamMetricsSseAsync(CancellationToken cancellationToken)
     {
         Response.ContentType = "text/event-stream";

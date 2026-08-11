@@ -1,11 +1,11 @@
 ﻿using Farm.Api.Controllers;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

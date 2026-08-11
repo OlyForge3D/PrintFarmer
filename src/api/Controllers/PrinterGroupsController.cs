@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.PrinterGroups;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Services.PrinterGroups;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -59,7 +60,7 @@ public class PrinterGroupsController(
     /// Creates a new printer group.
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(typeof(PrinterGroupDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -93,7 +94,7 @@ public class PrinterGroupsController(
     /// Updates a printer group's name and description.
     /// </summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(typeof(PrinterGroupDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -133,7 +134,7 @@ public class PrinterGroupsController(
     /// Deletes a printer group. Printers in the group get their PrinterGroupId set to null.
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteGroupAsync(Guid id, CancellationToken ct)
@@ -158,7 +159,7 @@ public class PrinterGroupsController(
     /// Adds a printer to a group. The printer is removed from its previous group (if any).
     /// </summary>
     [HttpPut("{id:guid}/printers/{printerId:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -188,7 +189,7 @@ public class PrinterGroupsController(
     /// Removes a printer from a group (sets PrinterGroupId to null).
     /// </summary>
     [HttpDelete("{id:guid}/printers/{printerId:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> RemovePrinterFromGroupAsync(Guid id, Guid printerId, CancellationToken ct)
@@ -213,7 +214,7 @@ public class PrinterGroupsController(
     /// Gets the access rules for a printer group.
     /// </summary>
     [HttpGet("{id:guid}/access")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(typeof(IEnumerable<PrinterGroupAccessDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<PrinterGroupAccessDto>>> GetAccessRulesAsync(Guid id, CancellationToken ct)
@@ -240,7 +241,7 @@ public class PrinterGroupsController(
     /// Sets access rules for a printer group (replaces all existing rules).
     /// </summary>
     [HttpPut("{id:guid}/access")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [ProducesResponseType(typeof(IEnumerable<PrinterGroupAccessDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<PrinterGroupAccessDto>>> SetAccessRulesAsync(

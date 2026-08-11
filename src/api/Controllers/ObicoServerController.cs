@@ -1,12 +1,12 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FailureDetection;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

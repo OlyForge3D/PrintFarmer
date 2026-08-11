@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Contracts.FileManagement;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -552,7 +553,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="id">Gcode file ID</param>
     /// <returns>No content if successful</returns>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("gcode_library", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -580,7 +581,7 @@ public class GcodeFilesController(
     /// </summary>
     /// <param name="request">Request with list of file IDs (GUIDs) to delete</param>
     /// <returns>Deletion result with count</returns>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("gcode_library", "admin")]
     [HttpDelete]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

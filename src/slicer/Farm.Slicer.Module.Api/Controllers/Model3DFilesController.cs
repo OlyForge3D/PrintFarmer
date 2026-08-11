@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -426,7 +427,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="id">The model's unique identifier.</param>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteModelAsync(Guid id)
@@ -452,7 +453,7 @@ public class Model3DFilesController(
     /// </summary>
     /// <param name="request">Request containing model IDs to delete.</param>
     [HttpDelete]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> DeleteModelsAsync([FromBody] DeleteModelsRequest request)

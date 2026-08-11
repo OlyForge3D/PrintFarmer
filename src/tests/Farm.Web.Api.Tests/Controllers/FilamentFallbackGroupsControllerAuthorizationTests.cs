@@ -1,5 +1,6 @@
 ﻿using System.Linq;
 using System.Reflection;
+using Farm.Infrastructure.Authorization;
 using Farm.Web.Api.Controllers;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -8,13 +9,14 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Issue #711 round-5 FIX 4: fallback-group configuration mutations must require the
-/// <c>farm_admin</c> role (matching <c>PrintersController</c>/<c>MaintenanceController</c>), while
-/// read endpoints remain reachable by any authenticated user. The role metadata asserted here is
-/// exactly what the ASP.NET Core authorization middleware uses to return 403 for non-admins on
-/// mutations and 200 for authenticated reads. A live-pipeline test is not possible in this unit
-/// project (no authentication handler is wired), so the authorization contract is verified on the
-/// action metadata instead.
+/// Issue #711 round-5 FIX 4 (updated for issue #1451): fallback-group configuration mutations
+/// must require the <c>filament_type:admin</c> permission (matching the migrated
+/// <c>PrintersController</c>/<c>MaintenanceController</c> sites), while read endpoints remain
+/// reachable by any authenticated user. farm_admin still reaches these mutations exactly as
+/// before, via the unconditional bypass plus the seeded <c>admin</c> grant on every resource — a
+/// custom role can now reach them too, by holding <c>filament_type:admin</c> without being named
+/// farm_admin. A live-pipeline test is not possible in this unit project (no authentication
+/// handler is wired), so the authorization contract is verified on the action metadata instead.
 /// </summary>
 public sealed class FilamentFallbackGroupsControllerAuthorizationTests
 {
@@ -36,18 +38,19 @@ public sealed class FilamentFallbackGroupsControllerAuthorizationTests
     [InlineData(nameof(FilamentFallbackGroupsController.CreateAsync))]
     [InlineData(nameof(FilamentFallbackGroupsController.UpdateAsync))]
     [InlineData(nameof(FilamentFallbackGroupsController.DeleteAsync))]
-    public void MutationEndpoints_RequireFarmAdminRole(string methodName)
+    public void MutationEndpoints_RequireFilamentTypeAdminPermission(string methodName)
     {
         MethodInfo? method = ControllerType.GetMethod(methodName);
         method.Should().NotBeNull();
 
-        AuthorizeAttribute? authorize = method!
-            .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+        RequirePermissionAttribute? requirePermission = method!
+            .GetCustomAttributes<RequirePermissionAttribute>(inherit: true)
             .FirstOrDefault();
 
-        authorize.Should().NotBeNull($"{methodName} mutates fallback configuration and must require farm_admin");
-        authorize!.Roles.Should().Be("farm_admin",
-            "a non-farm_admin authenticated user must receive 403 on fallback-group mutations");
+        requirePermission.Should().NotBeNull(
+            $"{methodName} mutates fallback configuration and must require filament_type:admin");
+        requirePermission!.Resource.Should().Be("filament_type");
+        requirePermission.Action.Should().Be("admin");
     }
 
     [Theory]

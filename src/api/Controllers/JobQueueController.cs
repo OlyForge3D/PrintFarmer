@@ -1,6 +1,7 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
@@ -17,7 +18,6 @@ using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Infrastructure.OperatorFeatures;
 using Farm.Web.Api.Infrastructure.PartsInventory;

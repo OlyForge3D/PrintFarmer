@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/security")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("system_settings", "admin")]
 [Tags("Admin - Security")]
 public class SecurityAuditController(AppDbContext db) : ControllerBase
 {

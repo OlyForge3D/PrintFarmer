@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Auth;
@@ -9,7 +10,7 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/settings/security/password-policy")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("system_settings", "admin")]
 public class PasswordPolicyController(Farm.Infrastructure.Services.PasswordPolicy.IPasswordPolicyService svc) : ControllerBase
 {
     [HttpGet]

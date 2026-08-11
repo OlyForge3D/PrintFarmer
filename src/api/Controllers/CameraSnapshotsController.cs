@@ -1,10 +1,10 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.StorageManagement;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;

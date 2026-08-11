@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Repositories.Printers;
@@ -17,7 +18,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/maintenance/schedules")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("maintenance", "admin")]
 public class MaintenanceScheduleDeploymentController(
     ILogger<MaintenanceScheduleDeploymentController> logger,
     IPrinterMaintenanceScheduleRepository scheduleRepository,

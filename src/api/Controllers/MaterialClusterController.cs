@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.MaterialClusters;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Services.MaterialClusters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -34,7 +35,7 @@ public class MaterialClusterController(IMaterialClusterService clusterService) :
     }
 
     /// <summary>Creates a new material cluster, optionally with initial filament type members.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("material_cluster", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(MaterialClusterDto), 201)]
     [ProducesResponseType(400)]
@@ -50,7 +51,7 @@ public class MaterialClusterController(IMaterialClusterService clusterService) :
     }
 
     /// <summary>Updates an existing material cluster's name and description.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("material_cluster", "admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(MaterialClusterDto), 200)]
     [ProducesResponseType(400)]
@@ -67,7 +68,7 @@ public class MaterialClusterController(IMaterialClusterService clusterService) :
     }
 
     /// <summary>Deletes a material cluster and all its memberships.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("material_cluster", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -78,7 +79,7 @@ public class MaterialClusterController(IMaterialClusterService clusterService) :
     }
 
     /// <summary>Adds a filament type to a cluster.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("material_cluster", "admin")]
     [HttpPost("{clusterId:guid}/members/{filamentTypeId:guid}")]
     [ProducesResponseType(typeof(MaterialClusterDto), 200)]
     [ProducesResponseType(404)]
@@ -89,7 +90,7 @@ public class MaterialClusterController(IMaterialClusterService clusterService) :
     }
 
     /// <summary>Removes a filament type from a cluster.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("material_cluster", "admin")]
     [HttpDelete("{clusterId:guid}/members/{filamentTypeId:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]

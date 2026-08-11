@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Gcode;
 using Farm.Infrastructure.Services.GcodeHarvest;
@@ -15,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/gcode-harvest")]
 [Tags("G-code Harvesting")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("gcode_harvest", "admin")]
 public class GcodeHarvestController(
     IGcodeHarvestService harvestService,
     IGcodeHarvestQueue harvestQueue,

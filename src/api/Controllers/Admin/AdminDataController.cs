@@ -1,6 +1,6 @@
-﻿using Farm.Infrastructure.Dtos.DataManagement;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Dtos.DataManagement;
 using Farm.Infrastructure.Services.DataManagement;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -9,13 +9,13 @@ namespace Farm.Web.Api.Controllers.Admin;
 
 /// <summary>
 /// Admin controller for data export/import and backup/restore operations.
-/// All operations require an authenticated principal with the <c>admin:execute</c> permission.
+/// All operations require an authenticated principal with the <c>data_management:admin</c> permission.
 /// </summary>
 [ApiController]
 [Route("api/admin/data")]
 [Tags("Admin - Data Management")]
 [Authorize]
-[RequirePermission("admin", "execute")]
+[RequirePermission("data_management", "admin")]
 public class AdminDataController : ControllerBase
 {
     private readonly IDataExportService _exportService;

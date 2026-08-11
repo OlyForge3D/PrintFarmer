@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.BedTypes;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Services.BedTypes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -59,7 +60,7 @@ public class BedTypeController(
     /// Creates a new bed type.
     /// </summary>
     [HttpPost]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bed_type", "admin")]
     [ProducesResponseType(typeof(BedTypeDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
@@ -93,7 +94,7 @@ public class BedTypeController(
     /// Updates a bed type's name, description, and color.
     /// </summary>
     [HttpPut("{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bed_type", "admin")]
     [ProducesResponseType(typeof(BedTypeDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -134,7 +135,7 @@ public class BedTypeController(
     /// Printers with this bed type get BedTypeId set to null.
     /// </summary>
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bed_type", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
