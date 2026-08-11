@@ -525,11 +525,131 @@ public sealed class CalibrationCapabilitiesTests : IAsyncLifetime
         _ = await db.SaveChangesAsync();
     }
 
+    [Fact]
+    public async Task GetCapabilitiesAsync_WithReachableProfileStore_ReportsContextOperational()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DEPLOYMENT_MODE"] = "split",
+            })
+            .Build();
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ICalibrationProfileResolver>(
+            new AvailableCalibrationProfileResolver());
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationCapabilityService service = new(
+            configuration,
+            provider,
+            NullLogger<CalibrationCapabilityService>.Instance);
+
+        PlatformCapabilitiesDto capabilities =
+            await service.GetCapabilitiesAsync(null, CancellationToken.None);
+
+        _ = capabilities.DeploymentMode.Should().Be("split");
+        _ = capabilities.CalibrationContextEnabled.Should().BeTrue();
+        _ = capabilities.Calibration.Operational.Should().BeTrue();
+        _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
+            .Should().NotContain("profile_service_unavailable");
+
+        // The capability document must never disclose where the profile store lives.
+        _ = JsonSerializer.Serialize(capabilities)
+            .Should().NotContain("slicer-host", "the internal resolver address is not public");
+    }
+
+    [Fact]
+    public async Task GetCapabilitiesAsync_WithUnobservableWorkerRegistry_ReportsRegistryUnavailable()
+    {
+        // Slicing is enabled but the worker registry cannot be read, so the credentialed-worker
+        // count is 0 for want of evidence rather than for want of credentials. The diagnostic must
+        // name the registry outage instead of sending operators to rotate worker keys.
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Slicer:Enabled"] = "true",
+            })
+            .Build();
+        ServiceCollection services = new();
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationCapabilityService service = new(
+            configuration,
+            provider,
+            NullLogger<CalibrationCapabilityService>.Instance);
+
+        PlatformCapabilitiesDto capabilities =
+            await service.GetCapabilitiesAsync(null, CancellationToken.None);
+
+        string[] slicingReasons = capabilities.UnavailableReasons
+            .Where(reason => reason.Feature == "slicing")
+            .Select(reason => reason.Code)
+            .ToArray();
+        _ = slicingReasons.Should().Contain("slicer_registry_unavailable");
+        _ = slicingReasons.Should().NotContain("worker_authentication_not_configured");
+        _ = capabilities.SlicingOperational.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetCapabilitiesAsync_WhenProfileResolverThrows_DegradesInsteadOfFailing()
+    {
+        // The capability document is public: a split-mode transport failure inside the resolver
+        // must degrade the flag, never surface as an error to an anonymous caller.
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection()
+            .Build();
+        ServiceCollection services = new();
+        _ = services.AddSingleton<ICalibrationProfileResolver>(
+            new ThrowingCalibrationProfileResolver());
+        await using ServiceProvider provider = services.BuildServiceProvider();
+        CalibrationCapabilityService service = new(
+            configuration,
+            provider,
+            NullLogger<CalibrationCapabilityService>.Instance);
+
+        PlatformCapabilitiesDto capabilities =
+            await service.GetCapabilitiesAsync(null, CancellationToken.None);
+
+        _ = capabilities.CalibrationContextEnabled.Should().BeFalse();
+        _ = capabilities.UnavailableReasons.Select(reason => reason.Code)
+            .Should().Contain("profile_service_unavailable");
+    }
+
     private sealed class UnavailableCalibrationProfileResolver
         : ICalibrationProfileResolver
     {
         public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) =>
             Task.FromResult(false);
+
+        public Task<ResolvedCalibrationProfiles> ResolveAsync(
+            Guid machineProfileId,
+            Guid processProfileId,
+            Guid filamentProfileId,
+            CalibrationProfileAccessScope accessScope,
+            CancellationToken cancellationToken) =>
+            Task.FromException<ResolvedCalibrationProfiles>(
+                new CalibrationProfileResolverUnavailableException());
+    }
+
+    private sealed class AvailableCalibrationProfileResolver
+        : ICalibrationProfileResolver
+    {
+        public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(true);
+
+        public Task<ResolvedCalibrationProfiles> ResolveAsync(
+            Guid machineProfileId,
+            Guid processProfileId,
+            Guid filamentProfileId,
+            CalibrationProfileAccessScope accessScope,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new ResolvedCalibrationProfiles(null, null, null));
+    }
+
+    private sealed class ThrowingCalibrationProfileResolver
+        : ICalibrationProfileResolver
+    {
+        public Task<bool> IsAvailableAsync(CancellationToken cancellationToken) =>
+            Task.FromException<bool>(
+                new HttpIOException(HttpRequestError.ResponseEnded, "response ended prematurely"));
 
         public Task<ResolvedCalibrationProfiles> ResolveAsync(
             Guid machineProfileId,

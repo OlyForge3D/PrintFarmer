@@ -315,6 +315,29 @@ committed example configuration - a shared/known signing key lets anyone mint th
 services via environment variables or a secrets manager, never by committing it to source
 control.
 
+### Calibration Profile Resolution (split deployments)
+
+The slicer host owns the calibration profile store, so in split/microservices deployments the main
+API resolves the explicitly selected machine/process/filament profiles over an authenticated
+internal hop:
+
+- **Endpoint:** `POST /api/slicer/calibration/resolved-profiles` on the slicer host. The body is
+  exactly `machineProfileId`, `processProfileId` and `filamentProfileId`; any additional member
+  (including `userId` or `bypassOwnership`) is rejected with `400 invalid_profile_resolution_request`.
+- **Authorization:** `[Authorize]` plus `calibration:read`. The ownership scope — and the audited
+  farm-admin bypass — is derived from the slicer host's own validated JWT, never from the request.
+- **Availability probe:** `GET /healthz/calibration-resolver`, anonymous and data-free. It reports
+  `Healthy` only when a resolver is registered and its store answers.
+- **API side:** set `SlicerHost__BaseUrl` (compose default `http://slicer-host:5246`) on the `api`
+  service and use the *same* `Jwt__Key`/`Jwt__Issuer`/`Jwt__Audience` as the slicer host. The API
+  forwards the caller's own bearer token; it mints no service credential and logs neither the token
+  nor the internal address.
+
+Because Desktop API-key exchange tokens carry only `scope` claims and no permission claims, they
+cannot satisfy `calibration:read`. PrintFarmerDesktop must use a normal login/session token for
+calibration discovery. See `docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and
+verification steps.
+
 ## Support
 
 For issues or questions:

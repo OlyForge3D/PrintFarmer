@@ -3,13 +3,16 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
+using Farm.Slicer.Module.Api.Health;
 using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -111,7 +114,13 @@ builder.Services.AddSignalR()
 
 builder.Services.AddHealthChecks()
     .AddDbContextCheck<AppDbContext>("core-db")
-    .AddDbContextCheck<SlicerDbContext>("slicer-db");
+    .AddDbContextCheck<SlicerDbContext>("slicer-db")
+
+    // Availability probe the main API's split-mode calibration resolver adapter calls. It proves
+    // this host can serve profile resolution without needing (or accepting) an end-user token.
+    .AddCheck<CalibrationProfileResolverHealthCheck>(
+        CalibrationProfileResolutionContract.HealthCheckName,
+        tags: [CalibrationProfileResolutionContract.HealthCheckTag]);
 
 builder.Services.AddCors(options =>
     options.AddDefaultPolicy(policy =>
@@ -157,6 +166,17 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapSlicerHubs();
 app.MapHealthChecks("/healthz");
+
+// Dedicated, no-data availability probe for the main API's calibration resolver adapter.
+// Anonymous by design: it proves resolver reachability, never returns profile data, and must not
+// require the end-user token that the resolution endpoint itself demands.
+app.MapHealthChecks(
+    "/" + CalibrationProfileResolutionContract.HealthRelativeRoute,
+    new HealthCheckOptions
+    {
+        Predicate = registration =>
+            registration.Tags.Contains(CalibrationProfileResolutionContract.HealthCheckTag),
+    });
 app.MapGet("/", () => Results.Ok(new { service = "Farm.Slicer.Host", status = "running" }));
 
 app.MapGet("/api/system/version", () =>

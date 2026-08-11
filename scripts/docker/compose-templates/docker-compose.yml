@@ -93,6 +93,12 @@ services:
       - Jwt__Key=${Jwt__Key:?Jwt__Key must be set to a unique 32+ byte secret. Run the deploy installer (scripts/deploy-docker.sh) to generate one, or set Jwt__Key in your environment/.env file.}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+      # Slicer host that owns the calibration profile store in split deployments.
+      # The API resolves calibration profiles over an authenticated internal HTTP hop to this
+      # address, forwarding the caller's own bearer token. Without it the API has no profile
+      # resolver at all and calibration discovery answers 503 profile_service_unavailable.
+      # Container-internal address on the private compose network; never published.
+      - SlicerHost__BaseUrl=${SLICER_HOST_URL:-http://slicer-host:5246}
       # DevMode: Set to true to bypass auth for GET requests (debugging only!)
       - Security__DevModeBypassAuth=${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
