@@ -13,7 +13,7 @@ namespace Farm.Infrastructure.Services.ServerIdentity;
 /// bypasses <c>SettingsService</c>/<c>[AppSetting]</c> discovery.
 /// </summary>
 /// <remarks>
-/// Registered as a singleton (matching <see cref="NativePush.NativePushDispatcher"/>,
+/// Registered as a singleton (matching <see cref="Notifications.NativePush.NativePushDispatcher"/>,
 /// which resolves it once per dispatch) and caches the resolved value in memory after
 /// the first successful read/generate so later calls — including the dispatcher's
 /// per-device send loop — never hit the database again. A first-run race between two
