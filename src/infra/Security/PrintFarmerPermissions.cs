@@ -11,6 +11,13 @@ public static class PrintFarmerPermissions
     public const string ClaimType = "permission";
     public const string FarmAdminRole = "farm_admin";
 
+    /// <summary>
+    /// The action name that, when granted on a resource, implies every other action on
+    /// that same resource (e.g. "calibration:admin" implies "calibration:read"). The
+    /// implication never crosses resources and does not extend to any other action.
+    /// </summary>
+    public const string AdminAction = "admin";
+
     [SuppressMessage(
         "Design",
         "CA1034:Nested types should not be visible",
@@ -100,8 +107,29 @@ public static class PrintFarmerPermissions
     public static bool IsFarmAdmin(ClaimsPrincipal user) =>
         user.IsInRole(FarmAdminRole);
 
-    public static bool HasPermission(ClaimsPrincipal user, string permission) =>
-        IsFarmAdmin(user) || user.HasClaim(ClaimType, permission);
+    public static bool HasPermission(ClaimsPrincipal user, string permission)
+    {
+        if (IsFarmAdmin(user) || user.HasClaim(ClaimType, permission))
+        {
+            return true;
+        }
+
+        (string resource, string action) = Split(permission);
+        return ImpliesViaResourceAdmin(user, resource, action);
+    }
+
+    /// <summary>
+    /// Returns true when the principal holds "{resource}:admin" and the requested
+    /// <paramref name="action"/> is not itself "admin". A resource-level admin grant
+    /// implies every finer-grained action on that same resource (e.g. "calibration:admin"
+    /// implies "calibration:read"); the implication never crosses resources and does not
+    /// extend beyond the "admin" action. This is the single source of truth for the
+    /// implication so every enforcement point (the authorization handler, SignalR hubs,
+    /// capability services) stays coherent.
+    /// </summary>
+    public static bool ImpliesViaResourceAdmin(ClaimsPrincipal user, string resource, string action) =>
+        !string.Equals(action, AdminAction, StringComparison.Ordinal)
+        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(

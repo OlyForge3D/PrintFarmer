@@ -73,6 +73,22 @@ public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandl
             return Task.CompletedTask;
         }
 
+        // A resource-level admin grant implies every finer-grained action on that same
+        // resource (e.g. "calibration:admin" satisfies a "calibration:read" check). This
+        // implication never crosses resources, and does not extend to any other action
+        // hierarchy beyond "admin". Delegates to PrintFarmerPermissions so this handler
+        // and every other enforcement point (SignalR hubs, capability services) share a
+        // single source of truth and cannot silently drift apart.
+        if (PrintFarmerPermissions.ImpliesViaResourceAdmin(user, requirement.Resource, requirement.Action))
+        {
+            _logger.LogDebug(
+                "Authorization succeeded: User has resource-admin permission {ResourceAdminPermission} implying {Permission}",
+                $"{requirement.Resource}:{PrintFarmerPermissions.AdminAction}",
+                permissionClaim);
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
         _logger.LogDebug("Authorization failed: User lacks permission {Permission}", permissionClaim);
         context.Fail();
         return Task.CompletedTask;

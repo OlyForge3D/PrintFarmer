@@ -317,7 +317,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
     
     // Check specific permission
     const permissionString = `${resource}:${action}`;
-    return user.permissions.includes(permissionString);
+    if (user.permissions.includes(permissionString)) return true;
+
+    // A resource-level admin grant implies every finer-grained action on that same
+    // resource (e.g. "calibration:admin" implies "calibration:read"). This never
+    // crosses resources and does not extend beyond the "admin" action.
+    if (action !== 'admin' && user.permissions.includes(`${resource}:admin`)) return true;
+
+    return false;
   }, [user]);
 
   const value: AuthContextType = {
