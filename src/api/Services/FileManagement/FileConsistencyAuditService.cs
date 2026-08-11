@@ -356,14 +356,11 @@ public class FileConsistencyAuditService(
             {
                 string[] diskFiles = Directory.GetFiles(_gcodePath, "*.gcode", SearchOption.AllDirectories);
 
-                foreach (string filePath in diskFiles)
+                foreach (string filePath in diskFiles.Where(filePath => !dbGcodePaths.Contains(filePath)))
                 {
-                    if (!dbGcodePaths.Contains(filePath))
-                    {
-                        results.OrphanedCount++;
-                        results.OrphanedPaths.Add(filePath);
-                        _logger.LogWarning("Orphaned gcode file detected: {FilePath}", filePath);
-                    }
+                    results.OrphanedCount++;
+                    results.OrphanedPaths.Add(filePath);
+                    _logger.LogWarning("Orphaned gcode file detected: {FilePath}", filePath);
                 }
             }
             catch (Exception ex)

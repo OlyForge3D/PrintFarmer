@@ -70,19 +70,17 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
 
         string[] allowedRanges = GetAllowedRanges();
 
-        foreach (IPAddress address in addresses)
+        if (addresses.FirstOrDefault(address =>
+                NetworkDestinationClassifier.IsLoopbackLinkLocalOrMulticast(address) &&
+                !IsExplicitlyAllowed(address, allowedRanges)) is { } blockedAddress)
         {
-            if (NetworkDestinationClassifier.IsLoopbackLinkLocalOrMulticast(address) &&
-                !IsExplicitlyAllowed(address, allowedRanges))
-            {
-                logger.LogWarning(
-                    "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
-                    uri.Host,
-                    address);
-                return EgressCheckResult.Deny(
-                    "Destination resolves to a loopback, link-local, or multicast address",
-                    uri);
-            }
+            logger.LogWarning(
+                "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
+                uri.Host,
+                blockedAddress);
+            return EgressCheckResult.Deny(
+                "Destination resolves to a loopback, link-local, or multicast address",
+                uri);
         }
 
         return EgressCheckResult.Allow(uri);
@@ -98,14 +96,6 @@ public sealed class EgressGuard(IConfiguration configuration, ILogger<EgressGuar
 
     private static bool IsExplicitlyAllowed(IPAddress ip, string[] allowedRanges)
     {
-        foreach (string range in allowedRanges)
-        {
-            if (NetworkRangeHelper.IsIpInRange(ip, range))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return allowedRanges.Any(range => NetworkRangeHelper.IsIpInRange(ip, range));
     }
 }

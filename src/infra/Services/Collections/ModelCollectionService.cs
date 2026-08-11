@@ -229,12 +229,9 @@ public class ModelCollectionService(
         // Preserve order while de-duplicating the requested set.
         var desired = new List<Guid>();
         var seen = new HashSet<Guid>();
-        foreach (Guid id in modelIds)
+        foreach (Guid id in modelIds.Where(id => seen.Add(id)))
         {
-            if (seen.Add(id))
-            {
-                desired.Add(id);
-            }
+            desired.Add(id);
         }
 
         await ValidateModelsExistAsync(desired, ct);
@@ -248,34 +245,28 @@ public class ModelCollectionService(
         SyncVisibility visibility = VisibilityOf(collection);
 
         // Remove memberships that are no longer desired.
-        foreach (ModelCollectionMembership membership in current)
+        foreach (ModelCollectionMembership membership in current.Where(membership => !desiredSet.Contains(membership.ModelId)))
         {
-            if (!desiredSet.Contains(membership.ModelId))
-            {
-                _repository.RemoveMembership(membership);
-                _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Delete, collection.OwnerUserId, visibility, callerUserId, now);
-                changed = true;
-            }
+            _repository.RemoveMembership(membership);
+            _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Delete, collection.OwnerUserId, visibility, callerUserId, now);
+            changed = true;
         }
 
         // Add memberships that are newly desired.
-        foreach (Guid modelId in desired)
+        foreach (Guid modelId in desired.Where(modelId => !currentByModel.ContainsKey(modelId)))
         {
-            if (!currentByModel.ContainsKey(modelId))
+            var membership = new ModelCollectionMembership
             {
-                var membership = new ModelCollectionMembership
-                {
-                    Id = Guid.NewGuid(),
-                    CollectionId = collectionId,
-                    ModelId = modelId,
-                    CreatedAt = now,
-                    UpdatedAt = now,
-                    Revision = 1
-                };
-                await _repository.AddMembershipAsync(membership, ct);
-                _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Create, collection.OwnerUserId, visibility, callerUserId, now);
-                changed = true;
-            }
+                Id = Guid.NewGuid(),
+                CollectionId = collectionId,
+                ModelId = modelId,
+                CreatedAt = now,
+                UpdatedAt = now,
+                Revision = 1
+            };
+            await _repository.AddMembershipAsync(membership, ct);
+            _journal.Record(SyncEntityType.ModelCollectionMembership, membership.Id, SyncOperation.Create, collection.OwnerUserId, visibility, callerUserId, now);
+            changed = true;
         }
 
         if (changed)

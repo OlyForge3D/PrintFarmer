@@ -134,16 +134,13 @@ public sealed class FlashForgePollingService(
                     _logger.LogDebug("FlashForgePollingService: Found {Count} FlashForge printers", printerIds.Count);
 
                     // Ensure polling loops exist for all FlashForge printers
-                    foreach (Guid id in printerIds)
+                    foreach (Guid id in printerIds.Where(id => !_pollingLoops.ContainsKey(id)))
                     {
-                        if (!_pollingLoops.ContainsKey(id))
-                        {
 #pragma warning disable S6612 // Use the loop variable instead of capturing
-                            var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
+                        var pollingLoop = Task.Run(() => PollPrinterAsync(id, ct), ct);
 #pragma warning restore S6612
-                            _pollingLoops.TryAdd(id, pollingLoop);
-                            _logger.LogDebug("Started polling loop for FlashForge printer {Id}", id);
-                        }
+                        _pollingLoops.TryAdd(id, pollingLoop);
+                        _logger.LogDebug("Started polling loop for FlashForge printer {Id}", id);
                     }
 
                     // Remove polling loops for printers that are no longer FlashForge

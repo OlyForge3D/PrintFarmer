@@ -148,14 +148,12 @@ public sealed class FilamentRunoutSwitchEvaluator(
         }
 
         Dictionary<Guid, Toolhead> toolheadsById = toolheads.ToDictionary(t => t.Id);
-        foreach (FilamentFallbackChainMember backup in configuredBackups)
-        {
-            if (toolheadsById.TryGetValue(backup.ToolheadId, out Toolhead? toolhead)
+        if (configuredBackups.Any(backup =>
+                toolheadsById.TryGetValue(backup.ToolheadId, out Toolhead? toolhead)
                 && IsActiveFallback(toolhead, toolheads, mmuStatus)
-                && LiveMaterialConfirms(toolhead, toolheads, mmuStatus, warning.Material))
-            {
-                return RunoutSwitchAssessment.SwitchConfirmed;
-            }
+                && LiveMaterialConfirms(toolhead, toolheads, mmuStatus, warning.Material)))
+        {
+            return RunoutSwitchAssessment.SwitchConfirmed;
         }
 
         return RunoutSwitchAssessment.BackupAvailable;
@@ -182,15 +180,8 @@ public sealed class FilamentRunoutSwitchEvaluator(
         }
 
         string trimmed = value.Trim();
-        foreach (string candidate in whitelist)
-        {
-            if (string.Equals(trimmed, candidate, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return whitelist.Any(candidate =>
+            string.Equals(trimmed, candidate, StringComparison.OrdinalIgnoreCase));
     }
 
     private static bool IsActiveFallback(

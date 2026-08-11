@@ -883,17 +883,17 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
 
     private static int ReadOptionalIntAny(JsonElement element, params string[] propertyNames)
     {
-        foreach (string propertyName in propertyNames)
+        string? propertyName = propertyNames.FirstOrDefault(propertyName =>
+            element.TryGetProperty(propertyName, out _));
+        if (propertyName is not null)
         {
-            if (element.TryGetProperty(propertyName, out JsonElement target))
+            JsonElement target = element.GetProperty(propertyName);
+            return target.ValueKind switch
             {
-                return target.ValueKind switch
-                {
-                    JsonValueKind.Number when target.TryGetInt32(out int value) => value,
-                    JsonValueKind.Number when target.TryGetInt64(out long value) && value <= int.MaxValue => (int)value,
-                    _ => 0,
-                };
-            }
+                JsonValueKind.Number when target.TryGetInt32(out int value) => value,
+                JsonValueKind.Number when target.TryGetInt64(out long value) && value <= int.MaxValue => (int)value,
+                _ => 0,
+            };
         }
 
         return 0;
@@ -1056,12 +1056,13 @@ public sealed class PrintablesGraphQLClient : IPrintablesGraphQLClient
         JsonElement firstError = errorsEl[0];
         if (firstError.TryGetProperty("messages", out JsonElement messagesEl) && messagesEl.ValueKind == JsonValueKind.Array)
         {
-            foreach (JsonElement messageEl in messagesEl.EnumerateArray())
+            string? message = messagesEl.EnumerateArray()
+                .Where(messageEl => messageEl.ValueKind == JsonValueKind.String)
+                .Select(messageEl => messageEl.GetString())
+                .FirstOrDefault();
+            if (message is not null)
             {
-                if (messageEl.ValueKind == JsonValueKind.String)
-                {
-                    return messageEl.GetString();
-                }
+                return message;
             }
         }
 

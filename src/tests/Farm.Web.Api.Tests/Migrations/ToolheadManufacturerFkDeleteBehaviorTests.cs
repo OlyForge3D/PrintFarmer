@@ -143,14 +143,12 @@ public sealed class ToolheadManufacturerFkDeleteBehaviorTests
                     continue;
                 }
 
-                foreach (string col in fk.Columns)
+                foreach (string col in fk.Columns.Where(col =>
+                             nullability.TryGetValue(col, out bool isNullable) && !isNullable))
                 {
-                    if (nullability.TryGetValue(col, out bool isNullable) && !isNullable)
-                    {
-                        offenders.Add(
-                            $"table={createTable.Name} fk={fk.Name} column={col} — "
-                            + "SET NULL against NOT NULL column");
-                    }
+                    offenders.Add(
+                        $"table={createTable.Name} fk={fk.Name} column={col} — "
+                        + "SET NULL against NOT NULL column");
                 }
             }
         }

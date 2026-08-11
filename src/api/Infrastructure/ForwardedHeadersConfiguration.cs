@@ -121,20 +121,14 @@ public static class ForwardedHeadersConfiguration
 
     private static void LogSkippedEntries(ILogger logger, ForwardedHeadersSettings settings)
     {
-        foreach (string proxy in settings.KnownProxies)
+        foreach (string proxy in settings.KnownProxies.Where(proxy => !IPAddress.TryParse(proxy, out _)))
         {
-            if (!IPAddress.TryParse(proxy, out _))
-            {
-                logger.LogWarning("ForwardedHeaders:KnownProxies entry '{Entry}' is not a valid IP address and was skipped.", proxy);
-            }
+            logger.LogWarning("ForwardedHeaders:KnownProxies entry '{Entry}' is not a valid IP address and was skipped.", proxy);
         }
 
-        foreach (string network in settings.KnownNetworks)
+        foreach (string network in settings.KnownNetworks.Where(network => !IPNetwork.TryParse(network, out _)))
         {
-            if (!IPNetwork.TryParse(network, out _))
-            {
-                logger.LogWarning("ForwardedHeaders:KnownNetworks entry '{Entry}' is not a valid CIDR range and was skipped.", network);
-            }
+            logger.LogWarning("ForwardedHeaders:KnownNetworks entry '{Entry}' is not a valid CIDR range and was skipped.", network);
         }
     }
 }

@@ -519,16 +519,12 @@ public sealed class CalibrationSpecificationCompiler(
                 "The authoritative printable polygon has fewer than three vertices."));
         }
 
-        foreach (CalibrationExcludedRegion region in bed.ExcludedRegions)
+        if (bed.ExcludedRegions.Any(region => region.Polygon.Count < 3))
         {
-            if (region.Polygon.Count < 3)
-            {
-                problems.Add(new(
-                    CalibrationGenerationProblemCodes.ExcludedRegionInvalid,
-                    "context.bed.excludedRegions",
-                    "An authoritative excluded region has fewer than three vertices."));
-                break;
-            }
+            problems.Add(new(
+                CalibrationGenerationProblemCodes.ExcludedRegionInvalid,
+                "context.bed.excludedRegions",
+                "An authoritative excluded region has fewer than three vertices."));
         }
 
         if (context.Limits.MaxBedTemperatureCelsius is null)
@@ -744,22 +740,20 @@ public sealed class CalibrationSpecificationCompiler(
             return null;
         }
 
-        foreach (CalibrationExcludedRegion region in bed.ExcludedRegions)
-        {
-            if (region.Polygon.Count >= 3 &&
+        if (bed.ExcludedRegions.Any(region =>
+                region.Polygon.Count >= 3 &&
                 CalibrationGeometry.IntersectsRectangle(
                     region.Polygon,
                     footprint.MinX,
                     footprint.MinY,
                     footprint.MaxX,
-                    footprint.MaxY))
-            {
-                problems.Add(new(
-                    CalibrationGenerationProblemCodes.FootprintInsideExcludedRegion,
-                    "context.bed.excludedRegions",
-                    "The deterministic calibration footprint overlaps an excluded region."));
-                return null;
-            }
+                    footprint.MaxY)))
+        {
+            problems.Add(new(
+                CalibrationGenerationProblemCodes.FootprintInsideExcludedRegion,
+                "context.bed.excludedRegions",
+                "The deterministic calibration footprint overlaps an excluded region."));
+            return null;
         }
 
         return footprint;

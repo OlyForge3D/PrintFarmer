@@ -740,18 +740,15 @@ public sealed class CalibrationGcodeSafetyValidator(
             return;
         }
 
-        foreach (CalibrationExcludedRegion region in bed.ExcludedRegions)
+        if (bed.ExcludedRegions.Any(region =>
+                region.Polygon.Count >= 3 &&
+                CalibrationGeometry.ContainsPoint(region.Polygon, state.X, state.Y)))
         {
-            if (region.Polygon.Count >= 3 &&
-                CalibrationGeometry.ContainsPoint(region.Polygon, state.X, state.Y))
-            {
-                Add(
-                    problems,
-                    CalibrationGenerationProblemCodes.GcodeMotionInsideExcludedRegion,
-                    Field(lineNumber),
-                    "A commanded move enters an authoritative excluded region.");
-                return;
-            }
+            Add(
+                problems,
+                CalibrationGenerationProblemCodes.GcodeMotionInsideExcludedRegion,
+                Field(lineNumber),
+                "A commanded move enters an authoritative excluded region.");
         }
     }
 
@@ -828,30 +825,24 @@ public sealed class CalibrationGcodeSafetyValidator(
         int lineNumber,
         List<CalibrationGenerationProblem> problems)
     {
-        foreach (string marker in HostCommandMarkers)
+        if (HostCommandMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
         {
-            if (line.Contains(marker, StringComparison.OrdinalIgnoreCase))
-            {
-                Add(
-                    problems,
-                    CalibrationGenerationProblemCodes.GcodeContainsHostCommand,
-                    Field(lineNumber),
-                    "Calibration G-code contains a shell, host or network command.");
-                return;
-            }
+            Add(
+                problems,
+                CalibrationGenerationProblemCodes.GcodeContainsHostCommand,
+                Field(lineNumber),
+                "Calibration G-code contains a shell, host or network command.");
+            return;
         }
 
-        foreach (string marker in CredentialMarkers)
+        if (CredentialMarkers.Any(marker => line.Contains(marker, StringComparison.OrdinalIgnoreCase)))
         {
-            if (line.Contains(marker, StringComparison.OrdinalIgnoreCase))
-            {
-                Add(
-                    problems,
-                    CalibrationGenerationProblemCodes.GcodeContainsCredential,
-                    Field(lineNumber),
-                    "Calibration G-code contains a credential-bearing token.");
-                return;
-            }
+            Add(
+                problems,
+                CalibrationGenerationProblemCodes.GcodeContainsCredential,
+                Field(lineNumber),
+                "Calibration G-code contains a credential-bearing token.");
+            return;
         }
 
         if (line.Contains("://", StringComparison.Ordinal))

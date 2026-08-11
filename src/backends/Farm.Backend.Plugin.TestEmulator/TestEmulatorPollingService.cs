@@ -128,12 +128,9 @@ public sealed class TestEmulatorPollingService(
         }
 
         var activeSet = activePrinterIds as HashSet<Guid> ?? [.. activePrinterIds];
-        foreach (Guid cachedPrinterId in _lastBroadcastUpdates.Keys)
+        foreach (Guid cachedPrinterId in _lastBroadcastUpdates.Keys.Where(cachedPrinterId => !activeSet.Contains(cachedPrinterId)))
         {
-            if (!activeSet.Contains(cachedPrinterId))
-            {
-                _lastBroadcastUpdates.TryRemove(cachedPrinterId, out _);
-            }
+            _lastBroadcastUpdates.TryRemove(cachedPrinterId, out _);
         }
     }
 

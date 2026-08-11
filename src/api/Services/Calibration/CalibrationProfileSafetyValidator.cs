@@ -147,12 +147,9 @@ internal static class CalibrationProfileSafetyValidator
     private static string NormalizeName(string value)
     {
         StringBuilder builder = new(value.Length);
-        foreach (char character in value)
+        foreach (char character in value.Where(character => char.IsLetterOrDigit(character)))
         {
-            if (char.IsLetterOrDigit(character))
-            {
-                _ = builder.Append(char.ToLowerInvariant(character));
-            }
+            _ = builder.Append(char.ToLowerInvariant(character));
         }
 
         return builder.ToString();

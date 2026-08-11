@@ -136,13 +136,10 @@ public class StoragePathService(
                 GetSnapshotStorageDirectory()
             };
 
-            foreach (string? dir in directories)
+            foreach (string? dir in directories.Where(dir => !Directory.Exists(dir)))
             {
-                if (!Directory.Exists(dir))
-                {
-                    _logger.LogInformation("Creating storage directory: {Directory}", dir);
-                    _ = Directory.CreateDirectory(dir);
-                }
+                _logger.LogInformation("Creating storage directory: {Directory}", dir);
+                _ = Directory.CreateDirectory(dir);
             }
 
             await Task.CompletedTask;

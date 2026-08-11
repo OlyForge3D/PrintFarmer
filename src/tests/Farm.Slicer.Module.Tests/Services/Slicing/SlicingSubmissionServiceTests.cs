@@ -58,12 +58,9 @@ public class SlicingSubmissionServiceTests : IDisposable
     public void Dispose()
     {
         // Cleanup temp files
-        foreach (string file in _tempFiles)
+        foreach (string file in _tempFiles.Where(file => File.Exists(file)))
         {
-            if (File.Exists(file))
-            {
-                File.Delete(file);
-            }
+            File.Delete(file);
         }
     }
 

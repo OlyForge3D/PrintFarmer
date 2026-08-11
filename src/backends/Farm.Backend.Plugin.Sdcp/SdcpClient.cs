@@ -532,13 +532,11 @@ public sealed class SdcpClient(HttpClient httpClient, ILogger<SdcpClient> logger
         if (StatePriority.GetValueOrDefault(state) <= StatePriority.GetValueOrDefault("online")
             && status.CurrentStatus is { Length: > 0 })
         {
-            foreach (int code in status.CurrentStatus)
+            foreach (int code in status.CurrentStatus.Where(code =>
+                         MachineStatusCodeMap.TryGetValue(code, out string? mapped)
+                         && StatePriority.GetValueOrDefault(mapped) > StatePriority.GetValueOrDefault(state)))
             {
-                if (MachineStatusCodeMap.TryGetValue(code, out string? mapped)
-                    && StatePriority.GetValueOrDefault(mapped) > StatePriority.GetValueOrDefault(state))
-                {
-                    state = mapped;
-                }
+                state = MachineStatusCodeMap[code];
             }
         }
 

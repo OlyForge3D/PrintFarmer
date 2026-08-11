@@ -97,15 +97,7 @@ public static class IdempotencyKeyUtilities
 
         string normalized = UnicodeCompatibilityNormalizer.ToCompatibilityForm(operationKey.Trim());
 
-        foreach (string prefix in ReservedOperationKeyPrefixes)
-        {
-            if (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return ReservedOperationKeyPrefixes.Any(prefix => normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>
@@ -175,18 +167,7 @@ public static class IdempotencyKeyUtilities
             return false;
         }
 
-        foreach (char c in key)
-        {
-            // Printable ASCII only. Rejects control characters, non-ASCII,
-            // and internal whitespace (which would otherwise complicate the
-            // canonicalization and log escaping of the header value).
-            if (c < 0x21 || c > 0x7E)
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return !key.Any(c => c < 0x21 || c > 0x7E);
     }
 
     /// <summary>

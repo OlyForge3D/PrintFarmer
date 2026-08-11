@@ -220,17 +220,13 @@ public class OrcaSlicerAssetRegistry : ISlicerAssetRegistry, IDisposable
 
     private static bool TryGetProperty(JsonElement element, string propertyName, out JsonElement property)
     {
-        foreach (JsonProperty candidate in element.EnumerateObject())
-        {
-            if (candidate.NameEquals(propertyName))
-            {
-                property = candidate.Value;
-                return true;
-            }
-        }
+        JsonElement? match = element.EnumerateObject()
+            .Where(candidate => candidate.NameEquals(propertyName))
+            .Select(candidate => (JsonElement?)candidate.Value)
+            .FirstOrDefault();
 
-        property = default;
-        return false;
+        property = match ?? default;
+        return match.HasValue;
     }
 
     private static string? GetTextureFormat(string? bedTexture)

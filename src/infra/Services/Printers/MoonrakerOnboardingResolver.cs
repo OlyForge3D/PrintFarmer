@@ -240,12 +240,9 @@ public static class MoonrakerOnboardingResolver
 
                      // Port 80 /machine/system_info is inferred from SnapCon/U1Hub; real U1 hardware still needs verification.
                      new MoonrakerEndpointCandidate(SnapmakerU1MoonrakerPort, MachineSystemInfoPath)
-                 })
+                 }.Where(candidate => yielded.Add($"{candidate.BackendPort}:{candidate.EndpointPath}")))
         {
-            if (yielded.Add($"{candidate.BackendPort}:{candidate.EndpointPath}"))
-            {
-                yield return candidate;
-            }
+            yield return candidate;
         }
     }
 

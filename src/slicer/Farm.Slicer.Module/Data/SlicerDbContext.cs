@@ -105,13 +105,10 @@ public class SlicerDbContext(DbContextOptions<SlicerDbContext> options) : DbCont
     /// </remarks>
     private void NormalizeSliceJobEngines()
     {
-        foreach (EntityEntry<SliceJob> entry in ChangeTracker.Entries<SliceJob>())
+        foreach (EntityEntry<SliceJob> entry in ChangeTracker.Entries<SliceJob>().Where(entry => entry.State is EntityState.Added or EntityState.Modified))
         {
-            if (entry.State is EntityState.Added or EntityState.Modified)
-            {
-                entry.Entity.NormalizedEngine =
-                    (int)SlicerEngineNames.ResolvePersistedName(entry.Entity.SlicerEngineName);
-            }
+            entry.Entity.NormalizedEngine =
+                (int)SlicerEngineNames.ResolvePersistedName(entry.Entity.SlicerEngineName);
         }
     }
 

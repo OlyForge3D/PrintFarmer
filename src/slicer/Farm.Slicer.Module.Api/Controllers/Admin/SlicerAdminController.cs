@@ -57,12 +57,9 @@ public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
 
         // Check for unknown placeholders
         var knownKeys = SamplePlaceholders.Keys.ToHashSet();
-        foreach (Match match in PlaceholderPattern().Matches(request.Template))
+        foreach (Match match in PlaceholderPattern().Matches(request.Template).Where(match => !knownKeys.Contains(match.Value)))
         {
-            if (!knownKeys.Contains(match.Value))
-            {
-                result.AddWarning($"Unknown placeholder: {match.Value}");
-            }
+            result.AddWarning($"Unknown placeholder: {match.Value}");
         }
 
         // Render

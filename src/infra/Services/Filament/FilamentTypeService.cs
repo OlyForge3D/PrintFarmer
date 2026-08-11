@@ -290,12 +290,9 @@ public class FilamentTypeService(
         IReadOnlyList<SpoolmanMaterialDto> materials = await _spoolmanService.ListMaterialsAsync(ct);
 
         HashSet<string> uniqueMaterials = new(StringComparer.OrdinalIgnoreCase);
-        foreach (SpoolmanMaterialDto material in materials)
+        foreach (SpoolmanMaterialDto material in materials.Where(material => !string.IsNullOrWhiteSpace(material.Name)))
         {
-            if (!string.IsNullOrWhiteSpace(material.Name))
-            {
-                _ = uniqueMaterials.Add(material.Name.Trim());
-            }
+            _ = uniqueMaterials.Add(material.Name.Trim());
         }
 
         List<string> existingTypes = (await _repo.GetFilamentTypesAsync(ct)).Select(f => f.Name).ToList();

@@ -909,14 +909,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         double totalFilamentUsed = 0;
         int completedCount = 0;
 
-        foreach (HistoryJob job in history.Jobs)
+        foreach (HistoryJob job in history.Jobs.Where(job => job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)))
         {
-            if (job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase))
-            {
-                totalPrintTime += job.PrintDuration;
-                totalFilamentUsed += job.FilamentUsed;
-                completedCount++;
-            }
+            totalPrintTime += job.PrintDuration;
+            totalFilamentUsed += job.FilamentUsed;
+            completedCount++;
         }
 
         return new HistoryTotals

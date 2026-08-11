@@ -128,13 +128,14 @@ public class CostTrackingSettings : IAppSetting, IValidatableSetting
             throw new System.ComponentModel.DataAnnotations.ValidationException("Default filament price must be between 0 and 500.");
         }
 
-        foreach (KeyValuePair<string, decimal> entry in MaterialPriceDefaults)
+        KeyValuePair<string, decimal>? invalidEntry = MaterialPriceDefaults
+            .Where(entry => entry.Value < 0 || entry.Value > 500)
+            .Select(entry => (KeyValuePair<string, decimal>?)entry)
+            .FirstOrDefault();
+        if (invalidEntry.HasValue)
         {
-            if (entry.Value < 0 || entry.Value > 500)
-            {
-                throw new System.ComponentModel.DataAnnotations.ValidationException(
-                    $"Material price for '{entry.Key}' must be between 0 and 500.");
-            }
+            throw new System.ComponentModel.DataAnnotations.ValidationException(
+                $"Material price for '{invalidEntry.Value.Key}' must be between 0 and 500.");
         }
     }
 }

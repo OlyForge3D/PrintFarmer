@@ -814,23 +814,20 @@ public sealed class MoonrakerSubscriptionService(
                 List<string> subscribedObjects = [];
                 List<string> skippedObjects = [];
 
-                foreach (JsonElement objElem in objectsElem.EnumerateArray())
+                foreach (JsonElement objElem in objectsElem.EnumerateArray().Where(objElem => objElem.ValueKind == JsonValueKind.String))
                 {
-                    if (objElem.ValueKind == JsonValueKind.String)
-                    {
-                        string objectName = objElem.GetString() ?? string.Empty;
-                        string objectType = objectName.Split(' ')[0]; // Get base type (e.g., "extruder" from "extruder 0")
+                    string objectName = objElem.GetString() ?? string.Empty;
+                    string objectType = objectName.Split(' ')[0]; // Get base type (e.g., "extruder" from "extruder 0")
 
-                        // Skip blocklisted object types
-                        if (!blocklist.Contains(objectType))
-                        {
-                            subscriptionObjects[objectName] = null; // null = subscribe to all properties
-                            subscribedObjects.Add(objectName);
-                        }
-                        else
-                        {
-                            skippedObjects.Add(objectName);
-                        }
+                    // Skip blocklisted object types
+                    if (!blocklist.Contains(objectType))
+                    {
+                        subscriptionObjects[objectName] = null; // null = subscribe to all properties
+                        subscribedObjects.Add(objectName);
+                    }
+                    else
+                    {
+                        skippedObjects.Add(objectName);
                     }
                 }
 
@@ -1917,14 +1914,8 @@ public sealed class MoonrakerSubscriptionService(
         if (!state.QidiboxDetected)
         {
             // Detect Qidibox by presence of "box_stepper slot0" in the status
-            foreach (JsonProperty prop in statusObj.EnumerateObject())
-            {
-                if (prop.Name.StartsWith("box_stepper slot", StringComparison.Ordinal))
-                {
-                    hasBoxStepper = true;
-                    break;
-                }
-            }
+            hasBoxStepper = statusObj.EnumerateObject()
+                .Any(prop => prop.Name.StartsWith("box_stepper slot", StringComparison.Ordinal));
         }
 
         // Check save_variables (needed for both detection and ongoing updates)
@@ -2171,14 +2162,8 @@ public sealed class MoonrakerSubscriptionService(
         bool hasAfcSteppers = false;
         if (!state.AfcDetected)
         {
-            foreach (JsonProperty prop in statusObj.EnumerateObject())
-            {
-                if (prop.Name.StartsWith("AFC_stepper ", StringComparison.Ordinal))
-                {
-                    hasAfcSteppers = true;
-                    break;
-                }
-            }
+            hasAfcSteppers = statusObj.EnumerateObject()
+                .Any(prop => prop.Name.StartsWith("AFC_stepper ", StringComparison.Ordinal));
         }
 
         if (!hasAfcObject && !hasAfcSteppers && !state.AfcDetected)
@@ -2242,15 +2227,12 @@ public sealed class MoonrakerSubscriptionService(
                 lanesElem.ValueKind == JsonValueKind.Array)
             {
                 List<string> laneNames = [];
-                foreach (JsonElement lane in lanesElem.EnumerateArray())
+                foreach (JsonElement lane in lanesElem.EnumerateArray().Where(lane => lane.ValueKind == JsonValueKind.String))
                 {
-                    if (lane.ValueKind == JsonValueKind.String)
+                    string? name = lane.GetString();
+                    if (!string.IsNullOrEmpty(name))
                     {
-                        string? name = lane.GetString();
-                        if (!string.IsNullOrEmpty(name))
-                        {
-                            laneNames.Add(name);
-                        }
+                        laneNames.Add(name);
                     }
                 }
 

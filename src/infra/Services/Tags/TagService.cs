@@ -454,22 +454,19 @@ public class TagService(
 
             // Filter and enrich with usage counts
             List<TagSuggestionDto> suggestions = new();
-            foreach (Tag tag in allTags)
+            foreach (Tag tag in allTags.Where(tag => tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase)))
             {
-                if (tag.Name.Contains(lowerQuery, StringComparison.OrdinalIgnoreCase))
-                {
-                    // Count how many objects use this tag (across all types)
-                    int usageCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
+                // Count how many objects use this tag (across all types)
+                int usageCount = await _tagRepository.GetTagUsageCountAsync(tag.Id, ct);
 
-                    suggestions.Add(new TagSuggestionDto
-                    {
-                        Id = tag.Id,
-                        Name = tag.Name,
-                        Color = tag.Color,
-                        UsageCount = usageCount,
-                        IsPopular = false
-                    });
-                }
+                suggestions.Add(new TagSuggestionDto
+                {
+                    Id = tag.Id,
+                    Name = tag.Name,
+                    Color = tag.Color,
+                    UsageCount = usageCount,
+                    IsPopular = false
+                });
             }
 
             return suggestions.OrderBy(s => s.Name).ToList();
@@ -649,13 +646,10 @@ public class TagService(
             var objectsInTarget = new HashSet<Guid>(targetObjectIds);
 
             // Reassign objects from source to target (skip duplicates)
-            foreach (Guid objectId in sourceObjectIds)
+            foreach (Guid objectId in sourceObjectIds.Where(objectId => !objectsInTarget.Contains(objectId)))
             {
-                if (!objectsInTarget.Contains(objectId))
-                {
-                    // Use skip-navigation to assign directly (object-agnostic)
-                    await _tagRepository.AssignTagAsync(objectId, targetTagId, ct);
-                }
+                // Use skip-navigation to assign directly (object-agnostic)
+                await _tagRepository.AssignTagAsync(objectId, targetTagId, ct);
             }
 
             // Remove all objects from source tag

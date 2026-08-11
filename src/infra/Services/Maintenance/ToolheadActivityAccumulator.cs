@@ -204,14 +204,14 @@ public sealed class ToolheadActivityAccumulator : IToolheadActivityAccumulator
 
     private static void CompactAcknowledged(PrinterActivity activity)
     {
-        foreach (int toolIndex in activity.AcknowledgedActiveSeconds.Keys.ToArray())
+        foreach (int toolIndex in activity.AcknowledgedActiveSeconds.Keys
+                     .Where(toolIndex =>
+                         !activity.CumulativeActiveSeconds.TryGetValue(toolIndex, out double cumulativeSeconds)
+                         || activity.AcknowledgedActiveSeconds[toolIndex] >= cumulativeSeconds)
+                     .ToArray())
         {
-            if (!activity.CumulativeActiveSeconds.TryGetValue(toolIndex, out double cumulativeSeconds)
-                || activity.AcknowledgedActiveSeconds[toolIndex] >= cumulativeSeconds)
-            {
-                activity.AcknowledgedActiveSeconds.Remove(toolIndex);
-                activity.CumulativeActiveSeconds.Remove(toolIndex);
-            }
+            activity.AcknowledgedActiveSeconds.Remove(toolIndex);
+            activity.CumulativeActiveSeconds.Remove(toolIndex);
         }
 
         if (activity.AcknowledgedWindowSeconds >= activity.CumulativeWindowSeconds)

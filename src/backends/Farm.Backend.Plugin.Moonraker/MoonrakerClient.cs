@@ -1028,12 +1028,10 @@ public class MoonrakerClient(
             return values;
         }
 
-        foreach (JsonElement item in array.EnumerateArray())
+        foreach (JsonElement item in array.EnumerateArray().Where(item =>
+                     item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString())))
         {
-            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
-            {
-                values.Add(item.GetString()!);
-            }
+            values.Add(item.GetString()!);
         }
 
         return values;

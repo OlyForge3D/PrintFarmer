@@ -111,13 +111,10 @@ public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
 
         JsonElement models = queryResult.GetProperty("models");
         bool found = false;
-        foreach (JsonElement model in models.EnumerateArray())
+        foreach (JsonElement model in models.EnumerateArray().Where(model => model.GetProperty("id").GetString() == uploadedId))
         {
-            if (model.GetProperty("id").GetString() == uploadedId)
-            {
-                found = true;
-                break;
-            }
+            found = true;
+            break;
         }
 
         found.Should().BeTrue(
@@ -196,13 +193,10 @@ public class Model3DUploadQueryRoundTripTests : IAsyncLifetime
         JsonElement models = queryResult.GetProperty("models");
 
         bool modelFound = false;
-        foreach (JsonElement model in models.EnumerateArray())
+        foreach (JsonElement model in models.EnumerateArray().Where(model => model.GetProperty("id").GetString() == uploadedId))
         {
-            if (model.GetProperty("id").GetString() == uploadedId)
-            {
-                modelFound = true;
-                break;
-            }
+            modelFound = true;
+            break;
         }
 
         modelFound.Should().BeTrue(

@@ -396,20 +396,17 @@ public abstract class BasePreviewRenderer
                         mesh.Vertices.Add(new Vector3(v.X, v.Y, v.Z));
                     }
 
-                    foreach (Assimp.Face? face in aMesh.Faces)
+                    foreach (Assimp.Face? face in aMesh.Faces.Where(face => face.IndexCount >= 3))
                     {
-                        if (face.IndexCount >= 3)
+                        mesh.Faces.Add(new Face
                         {
-                            mesh.Faces.Add(new Face
+                            Indices = new[]
                             {
-                                Indices = new[]
-                                {
-                                    face.Indices[0] + vertexOffset,
-                                    face.Indices[1] + vertexOffset,
-                                    face.Indices[2] + vertexOffset
-                                }
-                            });
-                        }
+                                face.Indices[0] + vertexOffset,
+                                face.Indices[1] + vertexOffset,
+                                face.Indices[2] + vertexOffset
+                            }
+                        });
                     }
 
                     vertexOffset = mesh.Vertices.Count;
@@ -538,12 +535,9 @@ public abstract class BasePreviewRenderer
         var properties = new Dictionary<string, object?>();
 
         foreach (PropertyInfo prop in typeof(RenderOptions).GetProperties(
-            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance).Where(prop => prop.CanRead))
         {
-            if (prop.CanRead)
-            {
-                properties[prop.Name] = prop.GetValue(options);
-            }
+            properties[prop.Name] = prop.GetValue(options);
         }
 
         return properties;
@@ -730,12 +724,9 @@ public abstract class BasePreviewRenderer
         // ------------------------------------------------------------
         // 5. Copy faces
         // ------------------------------------------------------------
-        foreach (Face f in mesh.Faces)
+        foreach (Face f in mesh.Faces.Where(f => f.IndexCount == 3))
         {
-            if (f.IndexCount == 3)
-            {
-                result.Faces.Add(f);
-            }
+            result.Faces.Add(f);
         }
 
         // ------------------------------------------------------------

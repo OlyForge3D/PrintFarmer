@@ -170,15 +170,8 @@ public class AutoTagService : IAutoTagService
 
     private static string? ParseMaterialFromName(string filamentName)
     {
-        foreach (string material in KnownMaterials)
-        {
-            if (ContainsMaterialWord(filamentName, material))
-            {
-                return NormalizeMaterial(material);
-            }
-        }
-
-        return null;
+        string? material = KnownMaterials.FirstOrDefault(material => ContainsMaterialWord(filamentName, material));
+        return material is not null ? NormalizeMaterial(material) : null;
     }
 
     /// <summary>
