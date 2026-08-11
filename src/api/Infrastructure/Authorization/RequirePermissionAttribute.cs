@@ -73,6 +73,22 @@ public class PermissionAuthorizationHandler(ILogger<PermissionAuthorizationHandl
             return Task.CompletedTask;
         }
 
+        // A resource-level admin grant implies every finer-grained action on that same
+        // resource (e.g. "calibration:admin" satisfies a "calibration:read" check). This
+        // implication never crosses resources, and does not extend to any other action
+        // hierarchy beyond "admin".
+        string resourceAdminClaim = $"{requirement.Resource}:{PrintFarmerPermissions.AdminAction}";
+        if (!string.Equals(requirement.Action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal)
+            && user.HasClaim(PrintFarmerPermissions.ClaimType, resourceAdminClaim))
+        {
+            _logger.LogDebug(
+                "Authorization succeeded: User has resource-admin permission {ResourceAdminPermission} implying {Permission}",
+                resourceAdminClaim,
+                permissionClaim);
+            context.Succeed(requirement);
+            return Task.CompletedTask;
+        }
+
         _logger.LogDebug("Authorization failed: User lacks permission {Permission}", permissionClaim);
         context.Fail();
         return Task.CompletedTask;

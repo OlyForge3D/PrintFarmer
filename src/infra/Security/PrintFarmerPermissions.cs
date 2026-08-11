@@ -11,6 +11,13 @@ public static class PrintFarmerPermissions
     public const string ClaimType = "permission";
     public const string FarmAdminRole = "farm_admin";
 
+    /// <summary>
+    /// The action name that, when granted on a resource, implies every other action on
+    /// that same resource (e.g. "calibration:admin" implies "calibration:read"). The
+    /// implication never crosses resources and does not extend to any other action.
+    /// </summary>
+    public const string AdminAction = "admin";
+
     [SuppressMessage(
         "Design",
         "CA1034:Nested types should not be visible",
@@ -100,8 +107,20 @@ public static class PrintFarmerPermissions
     public static bool IsFarmAdmin(ClaimsPrincipal user) =>
         user.IsInRole(FarmAdminRole);
 
-    public static bool HasPermission(ClaimsPrincipal user, string permission) =>
-        IsFarmAdmin(user) || user.HasClaim(ClaimType, permission);
+    public static bool HasPermission(ClaimsPrincipal user, string permission)
+    {
+        if (IsFarmAdmin(user) || user.HasClaim(ClaimType, permission))
+        {
+            return true;
+        }
+
+        // A resource-level admin grant implies every finer-grained action on that same
+        // resource (e.g. "calibration:admin" implies "calibration:read"). This never
+        // crosses resources and does not extend beyond the "admin" action.
+        (string resource, string action) = Split(permission);
+        return !string.Equals(action, AdminAction, StringComparison.Ordinal)
+            && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
+    }
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(
