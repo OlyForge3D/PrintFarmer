@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.OpenFilamentDb;
 using Farm.Infrastructure.Services.Filament;
 using Farm.Infrastructure.Services.OpenFilamentDb;
@@ -79,7 +80,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "[FilamentTypeController] Exception in GetFilamentTypesAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "[FilamentTypeController] Exception in GetFilamentTypesAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
         }
     }
@@ -112,7 +113,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in GetFilamentPresetsAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message, detail = ex.ToString() });
         }
     }
@@ -144,7 +145,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in CreateFilamentTypeAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in CreateFilamentTypeAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -181,7 +182,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in UpdateFilamentTypeAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in UpdateFilamentTypeAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -211,7 +212,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in DeleteFilamentTypeAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in DeleteFilamentTypeAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -241,7 +242,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in SaveFilamentPresetsAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in SaveFilamentPresetsAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -295,7 +296,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in ExportCsvAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in ExportCsvAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, new { error = ex.Message });
         }
     }
@@ -328,7 +329,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in ImportCsvAsync: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error in ImportCsvAsync: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Failed to import CSV: {ex.Message}" });
         }
     }
@@ -350,7 +351,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error fetching SpoolmanDB filaments: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error fetching SpoolmanDB filaments: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to fetch SpoolmanDB data: {ex.Message}" });
         }
     }
@@ -372,7 +373,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error fetching SpoolmanDB materials: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error fetching SpoolmanDB materials: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to fetch SpoolmanDB data: {ex.Message}" });
         }
     }
@@ -404,7 +405,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error importing from SpoolmanDB: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error importing from SpoolmanDB: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Failed to import from SpoolmanDB: {ex.Message}" });
         }
     }
@@ -429,7 +430,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error syncing external materials: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error syncing external materials: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to sync external materials: {ex.Message}" });
         }
     }
@@ -453,7 +454,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error fetching OFD brands: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error fetching OFD brands: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to fetch brands from Open Filament Database: {ex.Message}" });
         }
     }
@@ -472,7 +473,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error fetching OFD brand detail for {Brand}: {Message}", brandSlug, ex.Message);
+            _logger?.LogError(ex, "Error fetching OFD brand detail for {Brand}: {Message}", LogSanitizer.Sanitize(brandSlug), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to fetch brand details: {ex.Message}" });
         }
     }
@@ -495,7 +496,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error fetching OFD filaments for {Brand}/{Material}: {Message}", brandSlug, materialSlug, ex.Message);
+            _logger?.LogError(ex, "Error fetching OFD filaments for {Brand}/{Material}: {Message}", LogSanitizer.Sanitize(brandSlug), LogSanitizer.Sanitize(materialSlug), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(502, new { message = $"Failed to fetch filaments: {ex.Message}" });
         }
     }
@@ -521,7 +522,7 @@ public class FilamentTypeController(
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error importing from OFD: {Message}", ex.Message);
+            _logger?.LogError(ex, "Error importing from OFD: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Failed to import from Open Filament Database: {ex.Message}" });
         }
     }

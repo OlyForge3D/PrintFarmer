@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.PrinterGroups;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -52,7 +53,7 @@ public class PrinterGroupService(
         await repository.AddAsync(group, ct);
         await repository.SaveChangesAsync(ct);
 
-        logger.LogInformation("Created printer group '{Name}' ({Id})", group.Name, group.Id);
+        logger.LogInformation("Created printer group '{Name}' ({Id})", LogSanitizer.Sanitize(group.Name), group.Id);
         return MapToDto(group);
     }
 
@@ -86,7 +87,7 @@ public class PrinterGroupService(
 
         await repository.SaveChangesAsync(ct);
 
-        logger.LogInformation("Updated printer group '{Name}' ({Id})", group.Name, group.Id);
+        logger.LogInformation("Updated printer group '{Name}' ({Id})", LogSanitizer.Sanitize(group.Name), group.Id);
         return MapToDto(group);
     }
 
@@ -101,7 +102,7 @@ public class PrinterGroupService(
         repository.Remove(group);
         await repository.SaveChangesAsync(ct);
 
-        logger.LogInformation("Deleted printer group '{Name}' ({Id})", group.Name, group.Id);
+        logger.LogInformation("Deleted printer group '{Name}' ({Id})", LogSanitizer.Sanitize(group.Name), group.Id);
     }
 
     public async Task AddPrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
@@ -138,7 +139,7 @@ public class PrinterGroupService(
         printer.PrinterGroupId = groupId;
         await repository.SaveChangesAsync(ct);
 
-        logger.LogInformation("Added printer '{PrinterName}' to group '{GroupName}'", printer.Name, group.Name);
+        logger.LogInformation("Added printer '{PrinterName}' to group '{GroupName}'", LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(group.Name));
     }
 
     public async Task RemovePrinterAsync(Guid groupId, Guid printerId, CancellationToken ct)
@@ -158,7 +159,7 @@ public class PrinterGroupService(
         printer.PrinterGroupId = null;
         await repository.SaveChangesAsync(ct);
 
-        logger.LogInformation("Removed printer '{PrinterName}' from group '{GroupName}'", printer.Name, group.Name);
+        logger.LogInformation("Removed printer '{PrinterName}' from group '{GroupName}'", LogSanitizer.Sanitize(printer.Name), LogSanitizer.Sanitize(group.Name));
     }
 
     public async Task<IReadOnlyList<PrinterGroupAccessDto>> GetAccessRulesAsync(Guid groupId, CancellationToken ct)

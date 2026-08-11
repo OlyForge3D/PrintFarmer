@@ -2,6 +2,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.FailureDetection;
@@ -128,7 +129,7 @@ public class ObicoServerController : ControllerBase
         _logger.LogInformation(
             "[ObicoServer] Created new Obico server: {ServerId} ({ServerName})",
             server.Id,
-            server.Name);
+            LogSanitizer.Sanitize(server.Name));
 
         return CreatedAtAction("GetServer", new { id = server.Id }, ToDto(server));
     }
@@ -238,7 +239,7 @@ public class ObicoServerController : ControllerBase
 
         _logger.LogInformation(
             "[ObicoServer] Updated Obico server: {ServerId} ({ServerName})",
-            server.Id, server.Name);
+            server.Id, LogSanitizer.Sanitize(server.Name));
 
         return Ok(ToDto(server));
     }
@@ -274,7 +275,7 @@ public class ObicoServerController : ControllerBase
 
         _logger.LogInformation(
             "[ObicoServer] Deleted Obico server: {ServerId} ({ServerName})",
-            server.Id, server.Name);
+            server.Id, LogSanitizer.Sanitize(server.Name));
 
         return NoContent();
     }
@@ -298,7 +299,7 @@ public class ObicoServerController : ControllerBase
         _logger.LogInformation(
             "[ObicoServer] Health check for {ServerId} ({ServerName}): healthy={IsHealthy}, latency={Latency}ms",
             server.Id,
-            server.Name,
+            LogSanitizer.Sanitize(server.Name),
             result.Healthy,
             result.LatencyMs);
 

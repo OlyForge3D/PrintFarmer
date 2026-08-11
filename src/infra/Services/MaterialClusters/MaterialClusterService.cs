@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -62,7 +63,7 @@ public class MaterialClusterService(AppDbContext db, ILogger<MaterialClusterServ
         db.MaterialClusters.Add(cluster);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Created material cluster '{Name}' with {Count} members", cluster.Name, cluster.Members.Count);
+        logger.LogInformation("Created material cluster '{Name}' with {Count} members", LogSanitizer.Sanitize(cluster.Name), cluster.Members.Count);
 
         return (await GetClusterByIdAsync(cluster.Id, ct))!;
     }
@@ -81,7 +82,7 @@ public class MaterialClusterService(AppDbContext db, ILogger<MaterialClusterServ
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Updated material cluster '{Name}'", cluster.Name);
+        logger.LogInformation("Updated material cluster '{Name}'", LogSanitizer.Sanitize(cluster.Name));
 
         return await GetClusterByIdAsync(id, ct);
     }
@@ -97,7 +98,7 @@ public class MaterialClusterService(AppDbContext db, ILogger<MaterialClusterServ
         db.MaterialClusters.Remove(cluster);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Deleted material cluster '{Name}'", cluster.Name);
+        logger.LogInformation("Deleted material cluster '{Name}'", LogSanitizer.Sanitize(cluster.Name));
         return true;
     }
 
@@ -132,7 +133,7 @@ public class MaterialClusterService(AppDbContext db, ILogger<MaterialClusterServ
         cluster.UpdatedAt = DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Added filament type {FilamentTypeId} to cluster '{ClusterName}'", filamentTypeId, cluster.Name);
+        logger.LogInformation("Added filament type {FilamentTypeId} to cluster '{ClusterName}'", filamentTypeId, LogSanitizer.Sanitize(cluster.Name));
 
         return await GetClusterByIdAsync(clusterId, ct);
     }

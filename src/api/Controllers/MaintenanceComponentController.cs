@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Maintenance;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
@@ -103,7 +104,7 @@ public class MaintenanceComponentController(
         };
 
         await _componentRepository.AddAsync(component, ct);
-        _logger.LogInformation("Created maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
+        _logger.LogInformation("Created maintenance component {ComponentId} '{ComponentName}'", component.Id, LogSanitizer.Sanitize(component.Name));
 
         return Created($"/api/maintenance/components/{component.Id}", ToResponse(component));
     }
@@ -135,7 +136,7 @@ public class MaintenanceComponentController(
         component.UpdatedAt = DateTime.UtcNow;
 
         await _componentRepository.UpdateAsync(component, ct);
-        _logger.LogInformation("Updated maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
+        _logger.LogInformation("Updated maintenance component {ComponentId} '{ComponentName}'", component.Id, LogSanitizer.Sanitize(component.Name));
 
         return Ok(ToResponse(component));
     }
@@ -159,7 +160,7 @@ public class MaintenanceComponentController(
         }
 
         await _componentRepository.DeleteAsync(component, ct);
-        _logger.LogInformation("Deleted maintenance component {ComponentId} '{ComponentName}'", component.Id, component.Name);
+        _logger.LogInformation("Deleted maintenance component {ComponentId} '{ComponentName}'", component.Id, LogSanitizer.Sanitize(component.Name));
 
         return NoContent();
     }

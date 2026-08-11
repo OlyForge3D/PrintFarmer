@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services;
 using Farm.Slicer.Module.Dtos;
 using Farm.Slicer.Module.Services;
@@ -50,7 +51,7 @@ public class Model3DFilesController(
             return BadRequest("No file uploaded or file is empty.");
         }
 
-        _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", modelFile.FileName, modelFile.Length);
+        _logger.LogInformation("Upload request received: {FileName} ({FileSize} bytes)", LogSanitizer.Sanitize(modelFile.FileName), modelFile.Length);
 
         string? userIdClaim = User?.FindFirstValue(ClaimTypes.NameIdentifier);
         bool hasUserId = Guid.TryParse(userIdClaim, out Guid userId) && userId != Guid.Empty;
@@ -91,7 +92,7 @@ public class Model3DFilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Model upload validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Model upload validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (Exception ex)
@@ -156,7 +157,7 @@ public class Model3DFilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Thumbnail replacement validation failed for model {Id}: {Message}", id, ex.Message);
+            _logger.LogWarning("Thumbnail replacement validation failed for model {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (UnauthorizedAccessException)
@@ -415,7 +416,7 @@ public class Model3DFilesController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to download file for viewer: {Path}", path);
+            _logger.LogError(ex, "Failed to download file for viewer: {Path}", LogSanitizer.Sanitize(path));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to download file");
         }
     }
@@ -527,7 +528,7 @@ public class Model3DFilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Geometry upload validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Geometry upload validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (Exception ex)
@@ -600,7 +601,7 @@ public class Model3DFilesController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create folder at {Path}", request.Path);
+            _logger.LogError(ex, "Failed to create folder at {Path}", LogSanitizer.Sanitize(request.Path));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create folder");
         }
     }

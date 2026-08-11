@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
 using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Domain;
@@ -69,7 +70,7 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Profile import validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Profile import validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (Exception ex)
@@ -242,7 +243,7 @@ public class ProfilesController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to create profile: {Message}", ex.Message);
+            _logger.LogError(ex, "Failed to create profile: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to create profile");
         }
     }
@@ -340,7 +341,7 @@ public class ProfilesController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get profiles: {Message}", ex.Message);
+            _logger.LogError(ex, "Failed to get profiles: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, "Failed to get available profiles");
         }
     }
@@ -458,7 +459,7 @@ public class ProfilesController(
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to import printer preset: {PrinterName}", printer.Name);
+                        _logger.LogWarning(ex, "Failed to import printer preset: {PrinterName}", LogSanitizer.Sanitize(printer.Name));
                         result.Warnings.Add($"Failed to import printer '{printer.Name}': {ex.Message}");
                     }
                 }
@@ -491,7 +492,7 @@ public class ProfilesController(
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to import filament preset: {FilamentName}", filament.Name);
+                        _logger.LogWarning(ex, "Failed to import filament preset: {FilamentName}", LogSanitizer.Sanitize(filament.Name));
                         result.Warnings.Add($"Failed to import filament '{filament.Name}': {ex.Message}");
                     }
                 }
@@ -524,7 +525,7 @@ public class ProfilesController(
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "Failed to import process preset: {ProcessName}", process.Name);
+                        _logger.LogWarning(ex, "Failed to import process preset: {ProcessName}", LogSanitizer.Sanitize(process.Name));
                         result.Warnings.Add($"Failed to import process '{process.Name}': {ex.Message}");
                     }
                 }
@@ -628,11 +629,11 @@ public class ProfilesController(
         {
             if (ex.StatusCode.HasValue)
             {
-                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, ex.Message);
+                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, LogSanitizer.Sanitize(ex.Message));
                 return StatusCode((int)ex.StatusCode.Value, "OrcaSlicer worker unavailable or returned an error");
             }
 
-            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
@@ -666,11 +667,11 @@ public class ProfilesController(
         {
             if (ex.StatusCode.HasValue)
             {
-                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, ex.Message);
+                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, LogSanitizer.Sanitize(ex.Message));
                 return StatusCode((int)ex.StatusCode.Value, "OrcaSlicer worker unavailable or returned an error");
             }
 
-            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
                 "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
@@ -725,18 +726,18 @@ public class ProfilesController(
         {
             if (ex.StatusCode.HasValue)
             {
-                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, ex.Message);
+                _logger.LogWarning("OrcaSlicer worker returned {StatusCode}: {Message}", ex.StatusCode, LogSanitizer.Sanitize(ex.Message));
                 return StatusCode((int)ex.StatusCode.Value, "OrcaSlicer worker unavailable or returned an error");
             }
 
-            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Failed to connect to OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return ex.Message.Contains("not found in registry", StringComparison.OrdinalIgnoreCase)
                 ? StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker not found in registry")
                 : StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable. Please ensure the worker service is running and registered.");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching profiles from OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Error fetching profiles from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -760,12 +761,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Error fetching profiles hierarchy from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -790,12 +791,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching catalog-filtered profiles from OrcaSlicer worker: {Message}", ex.Message);
+            _logger.LogError("Error fetching catalog-filtered profiles from OrcaSlicer worker: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -825,12 +826,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for {Manufacturer}/{Model}: {Message}", manufacturer, model, ex.Message);
+            _logger.LogError("Error fetching machine profiles for {Manufacturer}/{Model}: {Message}", LogSanitizer.Sanitize(manufacturer), LogSanitizer.Sanitize(model), LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -870,13 +871,13 @@ public class ProfilesController(
 
             if (orcaAliases.Count == 0)
             {
-                _logger.LogWarning("No OrcaSlicer alias configured for model {ModelName}", model.Name);
+                _logger.LogWarning("No OrcaSlicer alias configured for model {ModelName}", LogSanitizer.Sanitize(model.Name));
                 return NotFound($"No OrcaSlicer alias configured for model {model.Name}");
             }
 
             _logger.LogInformation(
                 "Fetching machine profiles for model {ModelName} using {AliasCount} OrcaSlicer aliases",
-                model.Name,
+                LogSanitizer.Sanitize(model.Name),
                 orcaAliases.Count);
 
             IReadOnlyList<MachineProfileDto> profiles = await _profilesService.GetMachineProfilesForCatalogModelAsync(
@@ -888,12 +889,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching machine profiles for model {ModelId}: {Message}", modelId, ex.Message);
+            _logger.LogError("Error fetching machine profiles for model {ModelId}: {Message}", modelId, LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -921,12 +922,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching process profiles for machines: {Message}", ex.Message);
+            _logger.LogError("Error fetching process profiles for machines: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -954,12 +955,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching filament profiles for machines: {Message}", ex.Message);
+            _logger.LogError("Error fetching filament profiles for machines: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching profiles from worker");
         }
     }
@@ -983,12 +984,12 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error fetching filament templates: {Message}", ex.Message);
+            _logger.LogError("Error fetching filament templates: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error fetching templates from worker");
         }
     }
@@ -1009,7 +1010,7 @@ public class ProfilesController(
         }
         catch (Exception ex)
         {
-            _logger.LogError("Error getting imported profile names: {Message}", ex.Message);
+            _logger.LogError("Error getting imported profile names: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(500, "Error getting imported profile names");
         }
     }
@@ -1034,7 +1035,7 @@ public class ProfilesController(
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Printer not found: {Message}", ex.Message);
+            _logger.LogWarning("Printer not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (Exception ex)
@@ -1072,12 +1073,12 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Bulk import validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Bulk import validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Printer not found: {Message}", ex.Message);
+            _logger.LogWarning("Printer not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (Exception ex)
@@ -1125,7 +1126,7 @@ public class ProfilesController(
 
             _logger.LogInformation(
                 "Importing selected profiles for model {ModelName} (manufacturer: {Manufacturer})",
-                model.Name, request.ManufacturerName);
+                LogSanitizer.Sanitize(model.Name), LogSanitizer.Sanitize(request.ManufacturerName));
 
             SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);
 
@@ -1142,7 +1143,7 @@ public class ProfilesController(
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", ex.Message);
+            _logger.LogWarning("OrcaSlicer worker unavailable: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status503ServiceUnavailable, "OrcaSlicer worker unavailable");
         }
         catch (Exception ex)
@@ -1176,12 +1177,12 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Clone validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Clone validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Machine profile or printer not found: {Message}", ex.Message);
+            _logger.LogWarning("Machine profile or printer not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (Exception ex)
@@ -1219,12 +1220,12 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Bulk import validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Bulk import validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Printer not found: {Message}", ex.Message);
+            _logger.LogWarning("Printer not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (Exception ex)
@@ -1261,12 +1262,12 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Clone profile validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Clone profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Source profile not found: {Message}", ex.Message);
+            _logger.LogWarning("Source profile not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (Exception ex)
@@ -1302,7 +1303,7 @@ public class ProfilesController(
         }
         catch (ArgumentException ex)
         {
-            _logger.LogWarning("Upload profile validation failed: {Message}", ex.Message);
+            _logger.LogWarning("Upload profile validation failed: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (Exception ex)
@@ -1364,17 +1365,17 @@ public class ProfilesController(
         }
         catch (KeyNotFoundException ex)
         {
-            _logger.LogWarning("Custom profile not found: {Message}", ex.Message);
+            _logger.LogWarning("Custom profile not found: {Message}", LogSanitizer.Sanitize(ex.Message));
             return NotFound(ex.Message);
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning("Update profile unauthorized: {Message}", ex.Message);
+            _logger.LogWarning("Update profile unauthorized: {Message}", LogSanitizer.Sanitize(ex.Message));
             return Forbid();
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogWarning("Update profile invalid operation: {Message}", ex.Message);
+            _logger.LogWarning("Update profile invalid operation: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(ex.Message);
         }
         catch (Exception ex)

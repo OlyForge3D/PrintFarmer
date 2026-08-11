@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -59,7 +60,7 @@ public class BedTypeService(
         db.BedTypes.Add(bedType);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Created bed type '{Name}' ({Id})", bedType.Name, bedType.Id);
+        logger.LogInformation("Created bed type '{Name}' ({Id})", LogSanitizer.Sanitize(bedType.Name), bedType.Id);
         return MapToDto(bedType);
     }
 
@@ -96,7 +97,7 @@ public class BedTypeService(
 
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Updated bed type '{Name}' ({Id})", bedType.Name, bedType.Id);
+        logger.LogInformation("Updated bed type '{Name}' ({Id})", LogSanitizer.Sanitize(bedType.Name), bedType.Id);
         return MapToDto(bedType);
     }
 
@@ -116,7 +117,7 @@ public class BedTypeService(
         db.BedTypes.Remove(bedType);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Deleted bed type '{Name}' ({Id})", bedType.Name, bedType.Id);
+        logger.LogInformation("Deleted bed type '{Name}' ({Id})", LogSanitizer.Sanitize(bedType.Name), bedType.Id);
     }
 
     private static BedTypeDto MapToDto(BedType bedType) => new()

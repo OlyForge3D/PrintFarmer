@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Diagnostics;
@@ -98,7 +99,7 @@ public class DiagnosticChannelService : IDiagnosticChannelService
     {
         if (!_channels.TryGetValue(channel, out ChannelEntry? entry))
         {
-            _logger.LogWarning("[Diagnostics] Unknown channel '{Channel}' — ignoring enable request", channel);
+            _logger.LogWarning("[Diagnostics] Unknown channel '{Channel}' — ignoring enable request", LogSanitizer.Sanitize(channel));
             return;
         }
 
@@ -108,7 +109,7 @@ public class DiagnosticChannelService : IDiagnosticChannelService
 
         _logger.LogWarning(
             "[Diagnostics] Channel '{Channel}' ENABLED{Expiry}",
-            channel,
+            LogSanitizer.Sanitize(channel),
             entry.ExpiresAtUtc.HasValue ? $" (auto-disables at {entry.ExpiresAtUtc.Value:HH:mm:ss} UTC)" : " (no expiry)");
     }
 
@@ -123,7 +124,7 @@ public class DiagnosticChannelService : IDiagnosticChannelService
         entry.EnabledAtUtc = null;
         entry.ExpiresAtUtc = null;
 
-        _logger.LogWarning("[Diagnostics] Channel '{Channel}' DISABLED", channel);
+        _logger.LogWarning("[Diagnostics] Channel '{Channel}' DISABLED", LogSanitizer.Sanitize(channel));
     }
 
     public IReadOnlyList<DiagnosticChannelState> GetAllChannels()

@@ -2,6 +2,7 @@
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
 using Farm.Settings;
 using Microsoft.Extensions.Logging;
@@ -84,13 +85,13 @@ public class Go2RtcService : IGo2RtcService
             string snapshotUrl = $"{baseUrl}/api/frame.jpeg?src={streamName}";
             _logger.LogInformation(
                 "[go2rtc] Registered stream {StreamName} → {RtspUrl}, snapshot: {SnapshotUrl}",
-                streamName, RedactUserInfo(rtspUrl), snapshotUrl);
+                streamName, LogSanitizer.Sanitize(RedactUserInfo(rtspUrl)), snapshotUrl);
 
             return snapshotUrl;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[go2rtc] Failed to add stream {StreamName} for {RtspUrl}", streamName, RedactUserInfo(rtspUrl));
+            _logger.LogWarning(ex, "[go2rtc] Failed to add stream {StreamName} for {RtspUrl}", streamName, LogSanitizer.Sanitize(RedactUserInfo(rtspUrl)));
             return null;
         }
     }

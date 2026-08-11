@@ -1,4 +1,6 @@
-﻿namespace PrinterDiscovery.Services;
+﻿using Farm.Infrastructure.Logging;
+
+namespace PrinterDiscovery.Services;
 
 /// <summary>
 /// Manages active discovery sessions and their cancellation tokens.
@@ -38,7 +40,7 @@ public class DiscoverySessionManager(ILogger<DiscoverySessionManager> logger) : 
         lock (_sessionsLock)
         {
             _activeSessions[sessionId] = cts;
-            _logger.LogDebug("[SESSION-MANAGER] Registered session {SessionId}", sessionId);
+            _logger.LogDebug("[SESSION-MANAGER] Registered session {SessionId}", LogSanitizer.Sanitize(sessionId));
         }
     }
 
@@ -49,7 +51,7 @@ public class DiscoverySessionManager(ILogger<DiscoverySessionManager> logger) : 
             if (_activeSessions.Remove(sessionId, out CancellationTokenSource? cts))
             {
                 cts.Dispose();
-                _logger.LogDebug("[SESSION-MANAGER] Removed session {SessionId}", sessionId);
+                _logger.LogDebug("[SESSION-MANAGER] Removed session {SessionId}", LogSanitizer.Sanitize(sessionId));
             }
         }
     }
@@ -61,12 +63,12 @@ public class DiscoverySessionManager(ILogger<DiscoverySessionManager> logger) : 
             if (_activeSessions.TryGetValue(sessionId, out CancellationTokenSource? cts))
             {
                 cts.Cancel();
-                _logger.LogInformation("[SESSION-MANAGER] Cancelled session {SessionId}", sessionId);
+                _logger.LogInformation("[SESSION-MANAGER] Cancelled session {SessionId}", LogSanitizer.Sanitize(sessionId));
                 return true;
             }
         }
 
-        _logger.LogWarning("[SESSION-MANAGER] Session {SessionId} not found for cancellation", sessionId);
+        _logger.LogWarning("[SESSION-MANAGER] Session {SessionId} not found for cancellation", LogSanitizer.Sanitize(sessionId));
         return false;
     }
 }

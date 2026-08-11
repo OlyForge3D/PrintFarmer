@@ -1,4 +1,5 @@
 ﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Normalization;
@@ -54,7 +55,7 @@ public sealed class NormalizationEventLogger(ILogger<NormalizationEventLogger> l
 
         if (counter.Count <= ThresholdPerWindow)
         {
-            _logger.LogInformation("Normalization {EntityType} normalized '{Original}' -> '{Normalized}' source={Source} count={CounterCount}", entityType, original, normalized, source ?? "unknown", counter.Count);
+            _logger.LogInformation("Normalization {EntityType} normalized '{Original}' -> '{Normalized}' source={Source} count={CounterCount}", LogSanitizer.Sanitize(entityType), LogSanitizer.Sanitize(original), LogSanitizer.Sanitize(normalized), LogSanitizer.Sanitize(source ?? "unknown"), counter.Count);
         }
     }
 }

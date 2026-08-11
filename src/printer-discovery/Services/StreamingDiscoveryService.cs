@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 
 namespace PrinterDiscovery.Services;
 
@@ -79,7 +80,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
 
         try
         {
-            _logger.LogInformation("[STREAMING-DISCOVERY] Starting scan for session {SessionId}", sessionId);
+            _logger.LogInformation("[STREAMING-DISCOVERY] Starting scan for session {SessionId}", LogSanitizer.Sanitize(sessionId));
 
             // Use provided subnets or fall back to config
             string[] subnetArray;
@@ -88,20 +89,20 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                 subnetArray = subnets.ToArray();
                 if (subnetArray.Length > 0)
                 {
-                    _logger.LogInformation("[STREAMING-DISCOVERY] Using provided subnets: {Subnets}", string.Join(", ", subnetArray));
+                    _logger.LogInformation("[STREAMING-DISCOVERY] Using provided subnets: {Subnets}", LogSanitizer.Sanitize(string.Join(", ", subnetArray)));
                 }
                 else
                 {
                     string subnetsConfig = _config["Discovery:Subnets"] ?? "10.0.0.0/24";
                     subnetArray = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                    _logger.LogInformation("[STREAMING-DISCOVERY] Using config subnets (empty provided): {Subnets}", string.Join(", ", subnetArray));
+                    _logger.LogInformation("[STREAMING-DISCOVERY] Using config subnets (empty provided): {Subnets}", LogSanitizer.Sanitize(string.Join(", ", subnetArray)));
                 }
             }
             else
             {
                 string subnetsConfig = _config["Discovery:Subnets"] ?? "10.0.0.0/24";
                 subnetArray = subnetsConfig.Split(',', StringSplitOptions.RemoveEmptyEntries);
-                _logger.LogInformation("[STREAMING-DISCOVERY] Using config subnets: {Subnets}", string.Join(", ", subnetArray));
+                _logger.LogInformation("[STREAMING-DISCOVERY] Using config subnets: {Subnets}", LogSanitizer.Sanitize(string.Join(", ", subnetArray)));
             }
 
             // Use provided timeout or fall back to config
@@ -115,7 +116,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
             // Log backends filter
             if (backends != null && backends.Any())
             {
-                _logger.LogInformation("[STREAMING-DISCOVERY] Backend filter: {Backends}", string.Join(", ", backends));
+                _logger.LogInformation("[STREAMING-DISCOVERY] Backend filter: {Backends}", LogSanitizer.Sanitize(string.Join(", ", backends)));
             }
             else
             {
@@ -125,7 +126,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
             List<string> ipAddresses = GenerateIpAddresses(subnetArray.ToList());
 
             int totalIps = ipAddresses.Count;
-            _logger.LogInformation("[STREAMING-DISCOVERY] Scanning {Count} IPs for session {SessionId}", totalIps, sessionId);
+            _logger.LogInformation("[STREAMING-DISCOVERY] Scanning {Count} IPs for session {SessionId}", totalIps, LogSanitizer.Sanitize(sessionId));
 
             // Fetch already registered printers to exclude from discovery results
             HashSet<string> registeredUrls = await _apiClient.GetRegisteredPrinterUrlsAsync(cts.Token);
@@ -180,7 +181,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                             // Check if this printer is already registered
                             if (registeredUrls.Contains(result.ServerUrl))
                             {
-                                _logger.LogDebug("[STREAMING-DISCOVERY] Skipping already registered printer at {Ip}: {Name}", ip, result.Name);
+                                _logger.LogDebug("[STREAMING-DISCOVERY] Skipping already registered printer at {Ip}: {Name}", LogSanitizer.Sanitize(ip), LogSanitizer.Sanitize(result.Name));
                                 Interlocked.Increment(ref excluded);
                                 return;
                             }
@@ -190,7 +191,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                                 discovered.Add(result);
                             }
 
-                            _logger.LogInformation("[STREAMING-DISCOVERY] Found NEW printer at {Ip}: {Name}", ip, result.Name);
+                            _logger.LogInformation("[STREAMING-DISCOVERY] Found NEW printer at {Ip}: {Name}", LogSanitizer.Sanitize(ip), LogSanitizer.Sanitize(result.Name));
 
                             // Broadcast printer found event immediately
                             await _broadcaster.BroadcastPrinterFoundAsync(
@@ -219,7 +220,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug(ex, "[STREAMING-DISCOVERY] Error probing {Ip}", ip);
+                        _logger.LogDebug(ex, "[STREAMING-DISCOVERY] Error probing {Ip}", LogSanitizer.Sanitize(ip));
                     }
                     finally
                     {
@@ -274,7 +275,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[STREAMING-DISCOVERY] Failed to register printer {Name}", printer.Name);
+                        _logger.LogWarning(ex, "[STREAMING-DISCOVERY] Failed to register printer {Name}", LogSanitizer.Sanitize(printer.Name));
                     }
                 }
             }
@@ -311,7 +312,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
 
             _logger.LogInformation(
                 "[STREAMING-DISCOVERY] Session {SessionId} completed: {Count} new printers, {Excluded} excluded in {Duration:F1}s",
-                sessionId, discovered.Count, excluded, duration.TotalSeconds);
+                LogSanitizer.Sanitize(sessionId), discovered.Count, excluded, duration.TotalSeconds);
 
             return discovered;
         }

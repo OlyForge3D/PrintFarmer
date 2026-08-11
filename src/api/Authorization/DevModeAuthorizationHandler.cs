@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using Farm.Infrastructure.Logging;
+using Microsoft.AspNetCore.Authorization;
 
 namespace Farm.Web.Api.Authorization;
 
@@ -52,8 +53,8 @@ public class DevModeAuthorizationHandler : IAuthorizationHandler
                     _logger.LogDebug(
                         "DevMode: Bypassing auth requirement {Requirement} for {Method} {Path}",
                         requirement.GetType().Name,
-                        method,
-                        httpContext.Request.Path);
+                        LogSanitizer.Sanitize(method),
+                        LogSanitizer.Sanitize(httpContext.Request.Path));
                     context.Succeed(requirement);
                 }
             }

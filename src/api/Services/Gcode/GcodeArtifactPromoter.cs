@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
@@ -716,7 +717,7 @@ public sealed class GcodeArtifactPromoter(
             _logger.LogWarning(
                 exception,
                 "Promotion {OperationId} lost a durable write race while ingesting its bytes",
-                checkpoint.OperationId);
+                LogSanitizer.Sanitize(checkpoint.OperationId));
             return Failure(StatusCodes.Status409Conflict, "promotion_conflict");
         }
 
@@ -737,7 +738,7 @@ public sealed class GcodeArtifactPromoter(
             _logger.LogWarning(
                 exception,
                 "Promotion {OperationId} lost a durable write race while committing its result",
-                checkpoint.OperationId);
+                LogSanitizer.Sanitize(checkpoint.OperationId));
             return Failure(StatusCodes.Status409Conflict, "promotion_conflict");
         }
     }
@@ -859,7 +860,7 @@ public sealed class GcodeArtifactPromoter(
             // reconciler stops retrying an acknowledgement that can never land.
             _logger.LogWarning(
                 "Promotion {OperationId} could not acknowledge its source artifact; lineage remains on the promoted file",
-                checkpoint.OperationId);
+                LogSanitizer.Sanitize(checkpoint.OperationId));
         }
 
         checkpoint.SourceAcknowledgedAtUtc = DateTime.UtcNow;

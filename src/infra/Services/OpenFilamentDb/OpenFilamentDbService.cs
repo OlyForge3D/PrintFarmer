@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.OpenFilamentDb;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -114,7 +115,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to fetch filament {Slug} from OFD", filSummary.Slug);
+                _logger.LogWarning(ex, "Failed to fetch filament {Slug} from OFD", LogSanitizer.Sanitize(filSummary.Slug));
                 continue;
             }
 
@@ -135,7 +136,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to fetch variant {Slug} from OFD", varSummary.Slug);
+                    _logger.LogWarning(ex, "Failed to fetch variant {Slug} from OFD", LogSanitizer.Sanitize(varSummary.Slug));
                     continue;
                 }
 
@@ -176,7 +177,7 @@ public class OpenFilamentDbService : IOpenFilamentDbService
 
         ReadOnlyCollection<OfdFlattenedEntry> result = entries.AsReadOnly();
         _cache.Set(cacheKey, result, CacheDuration);
-        _logger.LogDebug("Flattened {Count} entries for {Brand}/{Material} from OFD", result.Count, brandSlug, materialSlug);
+        _logger.LogDebug("Flattened {Count} entries for {Brand}/{Material} from OFD", result.Count, LogSanitizer.Sanitize(brandSlug), LogSanitizer.Sanitize(materialSlug));
         return result;
     }
 }

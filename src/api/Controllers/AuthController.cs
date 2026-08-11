@@ -2,6 +2,7 @@
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Authentication;
 using Fido2NetLib;
 using Fido2NetLib.Objects;
@@ -143,7 +144,7 @@ public class AuthController(
     {
         // For JWT tokens, logout is typically handled client-side by removing the token
         // In the future, we could implement a token blacklist for enhanced security
-        _logger.LogInformation("User {UserFindFirstValue} logged out", User.FindFirstValue(ClaimTypes.NameIdentifier));
+        _logger.LogInformation("User {UserFindFirstValue} logged out", LogSanitizer.Sanitize(User.FindFirstValue(ClaimTypes.NameIdentifier)));
 
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
@@ -153,7 +154,7 @@ public class AuthController(
     [Authorize]
     public Task<IActionResult> LogoutGetAsync()
     {
-        _logger.LogInformation("User {UserFindFirstValue} logged out (GET)", User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier));
+        _logger.LogInformation("User {UserFindFirstValue} logged out (GET)", LogSanitizer.Sanitize(User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)));
         return Task.FromResult<IActionResult>(Ok(new { message = "Logged out successfully" }));
     }
 
@@ -423,7 +424,7 @@ public class AuthController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Passkey register/begin failed for {Username}", username);
+            _logger.LogError(ex, "Passkey register/begin failed for {Username}", LogSanitizer.Sanitize(username));
             return BadRequest(new { error = ex.Message });
         }
     }
@@ -456,12 +457,12 @@ public class AuthController(
         }
         catch (PasskeyChallengeNotFoundException ex)
         {
-            _logger.LogWarning(ex, "Passkey register/complete replay or expired challenge for {Username}", username);
+            _logger.LogWarning(ex, "Passkey register/complete replay or expired challenge for {Username}", LogSanitizer.Sanitize(username));
             return BadRequest(new { error = "Challenge not found or expired. Please restart the registration." });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Passkey register/complete attestation failure for {Username}", username);
+            _logger.LogWarning(ex, "Passkey register/complete attestation failure for {Username}", LogSanitizer.Sanitize(username));
             return UnprocessableEntity(new { error = ex.Message });
         }
     }
@@ -491,7 +492,7 @@ public class AuthController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Passkey login/begin failed for {Username}", request.Username);
+            _logger.LogError(ex, "Passkey login/begin failed for {Username}", LogSanitizer.Sanitize(request.Username));
             return BadRequest(new { error = ex.Message });
         }
     }
@@ -523,12 +524,12 @@ public class AuthController(
         }
         catch (PasskeyChallengeNotFoundException ex)
         {
-            _logger.LogWarning(ex, "Passkey login/complete replay or expired challenge for {Username}", request.Username);
+            _logger.LogWarning(ex, "Passkey login/complete replay or expired challenge for {Username}", LogSanitizer.Sanitize(request.Username));
             return BadRequest(new { error = "Challenge not found or expired. Please restart the login." });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Passkey login/complete assertion failure for {Username}", request.Username);
+            _logger.LogWarning(ex, "Passkey login/complete assertion failure for {Username}", LogSanitizer.Sanitize(request.Username));
             return UnprocessableEntity(new { error = ex.Message });
         }
     }

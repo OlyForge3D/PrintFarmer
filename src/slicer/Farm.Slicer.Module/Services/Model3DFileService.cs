@@ -9,6 +9,7 @@ using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Normalization;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Services.FileManagement;
@@ -336,7 +337,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
         catch (Exception ex)
         {
-            _logger.LogError("Failed to delete model: {Id}: {Message}", id, ex.Message);
+            _logger.LogError("Failed to delete model: {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             throw;
         }
     }
@@ -527,7 +528,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             throw new InvalidOperationException("Unsafe file path generated");
         }
 
-        _logger.LogInformation("Starting model upload: {FileName} ({FileSize} bytes), ID: {ModelId}", originalName, modelFile.Length, modelId);
+        _logger.LogInformation("Starting model upload: {FileName} ({FileSize} bytes), ID: {ModelId}", LogSanitizer.Sanitize(originalName), modelFile.Length, modelId);
 
         // Use temp file pattern for safety: write to temp, then move to final location
         string tempFileName = $"{modelId}.tmp{fileExtension}";
@@ -589,7 +590,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             }
             catch (Exception analysisEx)
             {
-                _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, analysisEx.Message);
+                _logger.LogWarning("Model analysis failed for {ModelId}: {Message}", modelId, LogSanitizer.Sanitize(analysisEx.Message));
             }
 
             // Step 2b: Extract 3MF metadata (best-effort)
@@ -605,7 +606,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                     {
                         _logger.LogDebug(
                             "3MF metadata extracted for {ModelId}: Title={Title}, Designer={Designer}, AutoTags={TagCount}",
-                            modelId, threeMfMetadata.Title, threeMfMetadata.Designer, threeMfMetadata.AutoTags.Count);
+                            modelId, LogSanitizer.Sanitize(threeMfMetadata.Title), LogSanitizer.Sanitize(threeMfMetadata.Designer), threeMfMetadata.AutoTags.Count);
                     }
                 }
             }
@@ -615,7 +616,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             }
             catch (Exception metadataEx)
             {
-                _logger.LogWarning("3MF metadata extraction failed for {ModelId}: {Message}", modelId, metadataEx.Message);
+                _logger.LogWarning("3MF metadata extraction failed for {ModelId}: {Message}", modelId, LogSanitizer.Sanitize(metadataEx.Message));
             }
 
             // Step 3: Check for duplicates
@@ -681,7 +682,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             }
             catch (Exception moveEx)
             {
-                _logger.LogError("Failed to move model file from temp to final location: {MoveExMessage}", moveEx.Message);
+                _logger.LogError("Failed to move model file from temp to final location: {MoveExMessage}", LogSanitizer.Sanitize(moveEx.Message));
                 throw new InvalidOperationException("Failed to finalize model file", moveEx);
             }
 
@@ -791,7 +792,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
                 DeleteUploadArtifact(thumbnailFinalPath);
                 thumbnailFinalPath = null;
                 model.ThumbnailFileName = null;
-                _logger.LogWarning("Failed to generate thumbnail for model {ModelId}: {ThumbnailExMessage}. Continuing without thumbnail.", modelId, thumbnailEx.Message);
+                _logger.LogWarning("Failed to generate thumbnail for model {ModelId}: {ThumbnailExMessage}. Continuing without thumbnail.", modelId, LogSanitizer.Sanitize(thumbnailEx.Message));
 
                 // Don't rethrow - upload should succeed even if thumbnail generation fails
             }
@@ -1021,11 +1022,11 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
         }
         catch (IOException ex)
         {
-            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", path);
+            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", LogSanitizer.Sanitize(path));
         }
         catch (UnauthorizedAccessException ex)
         {
-            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", path);
+            _logger.LogWarning(ex, "Failed to clean upload artifact {Path}", LogSanitizer.Sanitize(path));
         }
     }
 
@@ -1091,7 +1092,7 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
 
         if (!_fileSystem.FileExists(physicalRequestedPath))
         {
-            _logger.LogWarning("[Download] File not found: {ResolvedPath}", physicalRequestedPath);
+            _logger.LogWarning("[Download] File not found: {ResolvedPath}", LogSanitizer.Sanitize(physicalRequestedPath));
             return null;
         }
 
@@ -1247,12 +1248,12 @@ public class Model3DFileService : Farm.Slicer.Module.Services.IModel3DFileServic
             await _model3dFiles.UpdateAsync(model, ct);
             await _model3dFiles.SaveChangesAsync(ct);
 
-            _logger.LogInformation("[MoveToFolder] Moved model {ModelFileName} to folder {TargetFolderPath}", model.FileName, targetFolderPath);
+            _logger.LogInformation("[MoveToFolder] Moved model {ModelFileName} to folder {TargetFolderPath}", LogSanitizer.Sanitize(model.FileName), LogSanitizer.Sanitize(targetFolderPath));
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError("[MoveToFolder] Failed to move model {ModelId}: {Message}", modelId, ex.Message);
+            _logger.LogError("[MoveToFolder] Failed to move model {ModelId}: {Message}", modelId, LogSanitizer.Sanitize(ex.Message));
             return false;
         }
     }

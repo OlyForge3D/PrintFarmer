@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Queue;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.PartsInventory;
@@ -439,9 +440,9 @@ public class JobQueueService : IJobQueueService
             {
                 _logger.LogInformation(
                     "No compatible printer found for job. Model={Model}, Material={Material}, Nozzle={Nozzle}",
-                    effectiveRequest.RequiredPrinterModel ?? "(any)",
-                    effectiveRequest.RequiredMaterialType ?? "(any)",
-                    effectiveRequest.RequiredNozzleDiameter?.ToString("F2") ?? "(any)");
+                    LogSanitizer.Sanitize(effectiveRequest.RequiredPrinterModel ?? "(any)"),
+                    LogSanitizer.Sanitize(effectiveRequest.RequiredMaterialType ?? "(any)"),
+                    LogSanitizer.Sanitize(effectiveRequest.RequiredNozzleDiameter?.ToString("F2") ?? "(any)"));
                 return null;
             }
         }
@@ -656,7 +657,7 @@ public class JobQueueService : IJobQueueService
                 _logger.LogInformation(
                     ex,
                     "[Queue] Calibration create race lost for Scope={Scope}; rereading winner",
-                    idempotencyScope);
+                    LogSanitizer.Sanitize(idempotencyScope));
                 DetachPendingCalibrationWrite(job, outboxEvent);
                 JobQueuePrintJobDto? winner = await TryResolveCalibrationReplayAsync(
                     idempotencyScope,
@@ -1585,7 +1586,7 @@ public class JobQueueService : IJobQueueService
 
         _logger.LogInformation(
             "[Queue] Invalidated bed-clear ack for job {JobId} on printer {PrinterId} ({Reason})",
-            jobId, printerId, reason);
+            jobId, printerId, LogSanitizer.Sanitize(reason));
     }
 
     private async Task AdvanceQueueRevisionAsync(
@@ -1619,7 +1620,7 @@ public class JobQueueService : IJobQueueService
             "[Queue] Advanced queue revision for printer {PrinterId} to {QueueRevision} ({Reason})",
             printerId,
             state.QueueRevision,
-            reason);
+            LogSanitizer.Sanitize(reason));
     }
 
     /// <summary>

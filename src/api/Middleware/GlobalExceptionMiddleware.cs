@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Telemetry;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -36,7 +37,7 @@ public class GlobalExceptionMiddleware(RequestDelegate next)
         {
             // Use correlationId from HttpContext.Items if available (set by TelemetryMiddleware)
             string correlationId = context.Items["CorrelationId"] as string ?? context.TraceIdentifier;
-            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}", context.Request.Method, context.Request.Path, correlationId);
+            logger.LogError(ex, "Unhandled exception occurred for {Method} {Path}. CorrelationId: {CorrelationId}", LogSanitizer.Sanitize(context.Request.Method), LogSanitizer.Sanitize(context.Request.Path), LogSanitizer.Sanitize(correlationId));
             await HandleExceptionAsync(context, ex, correlationId);
         }
     }

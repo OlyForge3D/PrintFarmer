@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.Maintenance;
@@ -212,7 +213,7 @@ public class MaintenanceAlertEngine(
             {
                 _logger.LogDebug(
                     "Task '{TaskName}' triggered: {Hours}h >= {Threshold}h (interval: {Interval}h)",
-                    taskName,
+                    LogSanitizer.Sanitize(taskName),
                     hoursSinceLast,
                     thresholdHours,
                     intervalHours.Value);
@@ -231,7 +232,7 @@ public class MaintenanceAlertEngine(
             {
                 _logger.LogDebug(
                     "Task '{TaskName}' triggered: {Days} days >= {Threshold} days (interval: {Interval} days)",
-                    taskName,
+                    LogSanitizer.Sanitize(taskName),
                     daysSinceBaseline,
                     thresholdDays,
                     intervalDays.Value);
@@ -284,7 +285,7 @@ public class MaintenanceAlertEngine(
         _logger.LogInformation(
             "Created maintenance alert for printer {PrinterId}: {Title}",
             stats.PrinterId,
-            alert.Title);
+            LogSanitizer.Sanitize(alert.Title));
 
         // Broadcasts are deferred until AFTER the batch SaveChangesAsync succeeds (issue
         // #707, review R3) so the attention feed is never invalidated for an alert that was
@@ -426,7 +427,7 @@ public class MaintenanceAlertEngine(
         _logger.LogInformation(
             "Alert {AlertId} acknowledged by {User}",
             alertId,
-            acknowledgedBy);
+            LogSanitizer.Sanitize(acknowledgedBy));
 
         // Broadcast status change
         await BroadcastAlertStatusChangedAsync(alert);
@@ -456,7 +457,7 @@ public class MaintenanceAlertEngine(
         _logger.LogInformation(
             "Alert {AlertId} resolved by {User}",
             alertId,
-            resolvedBy);
+            LogSanitizer.Sanitize(resolvedBy));
 
         // Broadcast status change
         await BroadcastAlertStatusChangedAsync(alert);
@@ -488,8 +489,8 @@ public class MaintenanceAlertEngine(
         _logger.LogInformation(
             "Alert {AlertId} dismissed by {User}: {Reason}",
             alertId,
-            dismissedBy,
-            dismissReason ?? "No reason provided");
+            LogSanitizer.Sanitize(dismissedBy),
+            LogSanitizer.Sanitize(dismissReason ?? "No reason provided"));
 
         // Broadcast status change
         await BroadcastAlertStatusChangedAsync(alert);

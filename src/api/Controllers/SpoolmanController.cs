@@ -6,6 +6,7 @@ using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
@@ -136,12 +137,12 @@ public class SpoolmanController(
         System.Security.Claims.ClaimsPrincipal user = HttpContext.User;
         if (user.Identity == null || !user.Identity.IsAuthenticated)
         {
-            _logger.LogWarning("[SpoolmanController] SetConfig: User is not authenticated. Claims: {Claims}", string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
+            _logger.LogWarning("[SpoolmanController] SetConfig: User is not authenticated. Claims: {Claims}", LogSanitizer.Sanitize(string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}"))));
         }
         else
         {
             string? name = user.Identity != null ? user.Identity.Name : "(null)";
-            _logger.LogInformation("[SpoolmanController] SetConfig: Authenticated user: {Name}. Claims: {Claims}", name, string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}")));
+            _logger.LogInformation("[SpoolmanController] SetConfig: Authenticated user: {Name}. Claims: {Claims}", LogSanitizer.Sanitize(name), LogSanitizer.Sanitize(string.Join(", ", user.Claims.Select(c => $"{c.Type}={c.Value}"))));
         }
 
         if (config is null)
@@ -254,12 +255,12 @@ public class SpoolmanController(
         }
         catch (SpoolmanApiException ex)
         {
-            _logger.LogError(ex, "Error creating spool: {Message}", ex.Message);
+            _logger.LogError(ex, "Error creating spool: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Create failed: {DescribeSpoolmanFailure(ex)}" });
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating spool: {Message}", ex.Message);
+            _logger.LogError(ex, "Error creating spool: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = "Create failed. Check server logs for details." });
         }
     }
@@ -319,7 +320,7 @@ public class SpoolmanController(
         }
         catch (SpoolmanApiException ex)
         {
-            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", request.Barcode, ex.Message);
+            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", LogSanitizer.Sanitize(request.Barcode), LogSanitizer.Sanitize(ex.Message));
             string message = $"Import failed: {DescribeSpoolmanFailure(ex)}";
             await LogBarcodeScanAsync(
                 request.Barcode.Trim(),
@@ -333,7 +334,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", request.Barcode, ex.Message);
+            _logger.LogError(ex, "Error importing spool by barcode {Barcode}: {Message}", LogSanitizer.Sanitize(request.Barcode), LogSanitizer.Sanitize(ex.Message));
             await LogBarcodeScanAsync(
                 request.Barcode.Trim(),
                 BarcodeScanAction.Import,
@@ -379,7 +380,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating spool {Id}: {Message}", id, ex.Message);
+            _logger.LogError(ex, "Error updating spool {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = "Update failed. Check server logs for details." });
         }
     }
@@ -634,7 +635,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error importing Spoolman spools from CSV: {Message}", ex.Message);
+            _logger.LogError(ex, "Error importing Spoolman spools from CSV: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Import failed: {ex.Message}" });
         }
     }
@@ -744,7 +745,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error resolving filament by barcode {Barcode}: {Message}", barcode, ex.Message);
+            _logger.LogError(ex, "Error resolving filament by barcode {Barcode}: {Message}", LogSanitizer.Sanitize(barcode), LogSanitizer.Sanitize(ex.Message));
             await LogBarcodeScanAsync(
                 barcode.Trim(),
                 BarcodeScanAction.Resolve,
@@ -818,7 +819,7 @@ public class SpoolmanController(
         }
         catch (SpoolmanApiException ex)
         {
-            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
+            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, LogSanitizer.Sanitize(ex.Message));
             string message = $"Barcode mapping failed: {DescribeSpoolmanFailure(ex)}";
             await LogBarcodeScanAsync(
                 request.Barcode.Trim(),
@@ -832,7 +833,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, ex.Message);
+            _logger.LogError(ex, "Error saving barcode mapping for filament {FilamentId}: {Message}", request.FilamentId, LogSanitizer.Sanitize(ex.Message));
             await LogBarcodeScanAsync(
                 request.Barcode.Trim(),
                 BarcodeScanAction.Mapping,
@@ -957,7 +958,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception in /api/spoolman/config (DELETE): {Message}", ex.Message);
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/config (DELETE): {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, $"Internal Server Error: {ex.Message}");
         }
     }
@@ -990,7 +991,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error creating filament: {Message}", ex.Message);
+            _logger.LogError(ex, "Error creating filament: {Message}", LogSanitizer.Sanitize(ex.Message));
             string detail = ex is SpoolmanApiException spoolmanEx
                 ? DescribeSpoolmanFailure(spoolmanEx)
                 : "Check server logs for details.";
@@ -1028,7 +1029,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error bulk-updating filaments: {Message}", ex.Message);
+            _logger.LogError(ex, "Error bulk-updating filaments: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Bulk update failed: {ex.Message}" });
         }
     }
@@ -1059,7 +1060,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error updating filament {Id}: {Message}", id, ex.Message);
+            _logger.LogError(ex, "Error updating filament {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Update failed: {ex.Message}" });
         }
     }
@@ -1084,7 +1085,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error deleting filament {Id}: {Message}", id, ex.Message);
+            _logger.LogError(ex, "Error deleting filament {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Delete failed: {ex.Message}" });
         }
     }
@@ -1117,7 +1118,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error bulk-deleting filaments: {Message}", ex.Message);
+            _logger.LogError(ex, "Error bulk-deleting filaments: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Bulk delete failed: {ex.Message}" });
         }
     }
@@ -1175,7 +1176,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error exporting Spoolman filaments to CSV: {Message}", ex.Message);
+            _logger.LogError(ex, "Error exporting Spoolman filaments to CSV: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Export failed: {ex.Message}" });
         }
     }
@@ -1319,7 +1320,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error importing Spoolman filaments from CSV: {Message}", ex.Message);
+            _logger.LogError(ex, "Error importing Spoolman filaments from CSV: {Message}", LogSanitizer.Sanitize(ex.Message));
             return BadRequest(new { message = $"Import failed: {ex.Message}" });
         }
     }
@@ -1345,7 +1346,7 @@ public class SpoolmanController(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unhandled exception in /api/spoolman/scan-network: {Message}", ex.Message);
+            _logger.LogError(ex, "Unhandled exception in /api/spoolman/scan-network: {Message}", LogSanitizer.Sanitize(ex.Message));
             return StatusCode(StatusCodes.Status500InternalServerError, new[]
             {
                 new SpoolmanDiscoveryResult(

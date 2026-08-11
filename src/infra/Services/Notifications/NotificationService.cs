@@ -6,6 +6,7 @@ using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Domain.Notifications;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Security;
@@ -435,12 +436,12 @@ public class NotificationService(
 
             logger.LogInformation(
                 "Job notification broadcast ({Type}) for job {JobId}: {Subject}",
-                type, jobId, subject);
+                type, LogSanitizer.Sanitize(jobId), LogSanitizer.Sanitize(subject));
         }
         catch (Exception ex)
         {
             // Don't let notification failures break job processing
-            logger.LogError(ex, "Error broadcasting {Type} notification for job {JobId}", type, jobId);
+            logger.LogError(ex, "Error broadcasting {Type} notification for job {JobId}", type, LogSanitizer.Sanitize(jobId));
         }
     }
 
@@ -465,7 +466,7 @@ public class NotificationService(
             };
 
             await notificationRepository.AddAsync(notification, cancellationToken);
-            logger.LogInformation("Notification sent to user {UserId}: {Subject}", userId, subject);
+            logger.LogInformation("Notification sent to user {UserId}: {Subject}", userId, LogSanitizer.Sanitize(subject));
         }
         catch (Exception ex)
         {
@@ -492,7 +493,7 @@ public class NotificationService(
     public async Task MarkAsReadAsync(string notificationId, CancellationToken cancellationToken = default)
     {
         await notificationRepository.MarkAsReadAsync(notificationId, cancellationToken);
-        logger.LogInformation("Notification {NotificationId} marked as read", notificationId);
+        logger.LogInformation("Notification {NotificationId} marked as read", LogSanitizer.Sanitize(notificationId));
     }
 
     public async Task MarkMultipleAsReadAsync(IEnumerable<string> notificationIds, CancellationToken cancellationToken = default)
@@ -504,7 +505,7 @@ public class NotificationService(
     public async Task DeleteAsync(string notificationId, CancellationToken cancellationToken = default)
     {
         await notificationRepository.DeleteAsync(notificationId, cancellationToken);
-        logger.LogInformation("Notification {NotificationId} deleted", notificationId);
+        logger.LogInformation("Notification {NotificationId} deleted", LogSanitizer.Sanitize(notificationId));
     }
 
     public async Task<int> GetUnreadCountAsync(Guid userId, CancellationToken cancellationToken = default)
@@ -1432,7 +1433,7 @@ public class NotificationService(
         EmailDispatchResult result = await emailService.SendAsync(message, cancellationToken);
         if (!result.Success)
         {
-            logger.LogWarning("Email delivery failed for user {UserId}: {Error}", user.Id, result.Error ?? result.ProviderMessage);
+            logger.LogWarning("Email delivery failed for user {UserId}: {Error}", user.Id, LogSanitizer.Sanitize(result.Error ?? result.ProviderMessage));
         }
     }
 
@@ -1486,7 +1487,7 @@ public class NotificationService(
                         ex,
                         "Error dispatching web push notification for user {UserId} endpoint {Endpoint}",
                         target.UserId,
-                        target.Endpoint);
+                        LogSanitizer.Sanitize(target.Endpoint));
                 }
             });
 
@@ -1507,8 +1508,8 @@ public class NotificationService(
             logger.LogWarning(
                 "Web push delivery failed for user {UserId} endpoint {Endpoint}: {Error}",
                 failed.UserId,
-                failed.Endpoint,
-                failed.Error);
+                LogSanitizer.Sanitize(failed.Endpoint),
+                LogSanitizer.Sanitize(failed.Error));
         }
 
         bool hasUpdates = false;
@@ -1579,7 +1580,7 @@ public class NotificationService(
                         ex,
                         "Error dispatching email notification for user {UserId} target {Email}",
                         target.User.Id,
-                        target.User.Email);
+                        LogSanitizer.Sanitize(target.User.Email));
                 }
             });
     }
@@ -1600,7 +1601,7 @@ public class NotificationService(
                         "Notification channel {Channel} delivery failed for {Type}: {Error}",
                         channel,
                         message.Type,
-                        result.Error);
+                        LogSanitizer.Sanitize(result.Error));
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1669,7 +1670,7 @@ public class NotificationService(
         {
             dbContext.PushSubscriptions.Remove(subscription);
             await dbContext.SaveChangesAsync(cancellationToken);
-            logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, endpoint);
+            logger.LogInformation("Deleted push subscription for user {UserId} endpoint {Endpoint}", userId, LogSanitizer.Sanitize(endpoint));
         }
     }
 

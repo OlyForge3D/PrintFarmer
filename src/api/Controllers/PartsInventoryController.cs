@@ -1,6 +1,7 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.PartsInventory;
 using Farm.Infrastructure.Services.Idempotency;
 using Farm.Infrastructure.Services.Interfaces;
@@ -147,7 +148,7 @@ public class PartsInventoryController(
             case PartInventoryOutcome.FeatureDisabled:
                 return OperatorFeatureProblemDetails.NotFound(featureGate, OperatorFeature.PrintedPartsInventory);
             default:
-                logger.LogError("Unexpected outcome {Outcome} creating SKU {Sku}: {Msg}", result.Outcome, request.Sku, result.Message);
+                logger.LogError("Unexpected outcome {Outcome} creating SKU {Sku}: {Msg}", result.Outcome, LogSanitizer.Sanitize(request.Sku), LogSanitizer.Sanitize(result.Message));
                 return StatusCode(500, new { message = result.Message ?? "Unexpected error." });
         }
     }
