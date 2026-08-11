@@ -31,7 +31,13 @@ public enum RoleManagementErrorCode
     SelfLockout,
 
     /// <summary>Referenced a resource:action permission pair or copy-from role that does not exist.</summary>
-    InvalidPermission
+    InvalidPermission,
+
+    /// <summary>
+    /// A concurrent request modified admin-equivalent role coverage between this request's
+    /// guardrail check and its commit. The caller should re-fetch current state and retry.
+    /// </summary>
+    ConcurrencyConflict
 }
 
 /// <summary>
@@ -44,6 +50,12 @@ public class RoleManagementException : Exception
 
     public RoleManagementException(RoleManagementErrorCode errorCode, string message)
         : base(message)
+    {
+        ErrorCode = errorCode;
+    }
+
+    public RoleManagementException(RoleManagementErrorCode errorCode, string message, Exception innerException)
+        : base(message, innerException)
     {
         ErrorCode = errorCode;
     }

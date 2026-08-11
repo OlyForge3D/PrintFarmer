@@ -78,4 +78,13 @@ public interface IRolesRepository
     /// True if the given user currently holds an active, unexpired membership in the given role.
     /// </summary>
     Task<bool> UserIsActiveMemberOfRoleAsync(Guid userId, Guid roleId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Begins a serializable database transaction. Used to protect the D9 admin-lockout
+    /// guardrail's check-then-act sequence (evaluate coverage, then mutate/delete) from a
+    /// concurrent request performing a conflicting mutation against a different
+    /// admin-equivalent role at the same time. Callers must Commit explicitly; disposing
+    /// without committing rolls back.
+    /// </summary>
+    Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginSerializableTransactionAsync(CancellationToken ct = default);
 }

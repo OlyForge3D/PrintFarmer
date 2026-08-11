@@ -70,7 +70,7 @@ public class RolesController(IRoleManagementService roleManagementService) : Con
         }
         catch (RoleManagementException ex)
         {
-            return BadRequest(new { error = ex.Message, code = ex.ErrorCode.ToString() });
+            return MapRoleManagementException(ex);
         }
     }
 
@@ -82,6 +82,7 @@ public class RolesController(IRoleManagementService roleManagementService) : Con
     [ProducesResponseType(typeof(RoleDetailDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<RoleDetailDto>> UpdateRoleAsync(Guid roleId, [FromBody] UpdateCustomRoleRequest request, CancellationToken ct)
@@ -114,6 +115,7 @@ public class RolesController(IRoleManagementService roleManagementService) : Con
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(typeof(RoleHasMembersResponse), StatusCodes.Status409Conflict)]
     public async Task<IActionResult> DeleteRoleAsync(Guid roleId, [FromQuery] Guid? reassignTo, [FromQuery] bool cascade, CancellationToken ct)
@@ -134,14 +136,28 @@ public class RolesController(IRoleManagementService roleManagementService) : Con
         }
     }
 
-    private ActionResult MapRoleManagementException(RoleManagementException ex)
+    /// <summary>
+    /// Maps a <see cref="RoleManagementException"/> to the HTTP status code that best reflects
+    /// the violated invariant: 404 when the role doesn't exist, 403 when the operation is
+    /// forbidden outright regardless of request contents (system-role protection), 409 when the
+    /// request is well-formed but conflicts with current server state (admin-lockout guardrails,
+    /// members-still-assigned, concurrent modification), and 400 for a malformed request (bad
+    /// name, unknown permission, invalid reassignment target).
+    /// </summary>
+    private ObjectResult MapRoleManagementException(RoleManagementException ex)
     {
-        return ex.ErrorCode switch
+        int statusCode = ex.ErrorCode switch
         {
-            RoleManagementErrorCode.NotFound => NotFound(new { error = ex.Message, code = ex.ErrorCode.ToString() }),
-            RoleManagementErrorCode.HasMembers => Conflict(new { error = ex.Message, code = ex.ErrorCode.ToString() }),
-            _ => BadRequest(new { error = ex.Message, code = ex.ErrorCode.ToString() })
+            RoleManagementErrorCode.NotFound => StatusCodes.Status404NotFound,
+            RoleManagementErrorCode.SystemRoleProtected => StatusCodes.Status403Forbidden,
+            RoleManagementErrorCode.HasMembers => StatusCodes.Status409Conflict,
+            RoleManagementErrorCode.LastAdminRole => StatusCodes.Status409Conflict,
+            RoleManagementErrorCode.SelfLockout => StatusCodes.Status409Conflict,
+            RoleManagementErrorCode.ConcurrencyConflict => StatusCodes.Status409Conflict,
+            _ => StatusCodes.Status400BadRequest
         };
+
+        return StatusCode(statusCode, new { error = ex.Message, code = ex.ErrorCode.ToString() });
     }
 
     private bool TryGetActingUserId(out Guid actorUserId)

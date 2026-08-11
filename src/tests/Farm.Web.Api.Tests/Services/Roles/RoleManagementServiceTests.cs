@@ -404,4 +404,88 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
 
         (await context.Roles.AnyAsync(r => r.Id == customAdminRoleId)).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task DeleteRoleAsync_AllowsSelfLockoutRoleRemovalWhenReassignTargetIsAdminEquivalent()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        RoleManagementService service = CreateService(context);
+
+        // The actor's only role is the one being deleted, and they hold no other
+        // admin-equivalent role — but since reassignTo points to another admin-equivalent
+        // role, the actor (and any other members) retain admin-equivalent access after the
+        // move, so this must NOT be treated as a self-lockout.
+        Guid customAdminRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Guid targetAdminRoleId = await CreateAdminEquivalentRoleAsync(context, "root_admins");
+        Guid actorUserId = await CreateUserAsync(context, "acting-admin");
+        await AssignRoleAsync(context, actorUserId, customAdminRoleId);
+
+        await service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: targetAdminRoleId, cascade: false, actorUserId, null);
+
+        (await context.Roles.AnyAsync(r => r.Id == customAdminRoleId)).Should().BeFalse();
+        (await context.UserRoles.AnyAsync(ur => ur.UserId == actorUserId && ur.RoleId == targetAdminRoleId && ur.IsActive)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task DeleteRoleAsync_RejectsRemovalWhenReassignTargetIsNotAdminEquivalentAndActorHasNoOtherCoverage()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        RoleManagementService service = CreateService(context);
+        Guid farmUserId = await GetRoleIdAsync(context, "farm_user");
+
+        Guid customAdminRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Guid actorUserId = await CreateUserAsync(context, "acting-admin");
+        await AssignRoleAsync(context, actorUserId, customAdminRoleId);
+
+        // farm_user is not admin-equivalent, so reassigning to it does not spare the actor
+        // from a self-lockout.
+        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: farmUserId, cascade: false, actorUserId, null);
+
+        (await act.Should().ThrowAsync<RoleManagementException>())
+            .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SelfLockout);
+    }
+
+    [Fact]
+    public async Task DeleteRoleAsync_ExpiredAdminEquivalentAssignmentDoesNotSpareActorFromSelfLockout()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        RoleManagementService service = CreateService(context);
+
+        Guid customAdminRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Guid farmAdminId = await GetRoleIdAsync(context, "farm_admin");
+        Guid actorUserId = await CreateUserAsync(context, "acting-admin");
+        await AssignRoleAsync(context, actorUserId, customAdminRoleId);
+
+        // The actor also holds farm_admin, but that assignment already expired — it must not
+        // count as "another admin-equivalent role" that would spare them from self-lockout.
+        await AssignRoleAsync(context, actorUserId, farmAdminId, expiresAt: DateTime.UtcNow.AddDays(-1));
+
+        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actorUserId, null);
+
+        (await act.Should().ThrowAsync<RoleManagementException>())
+            .Which.ErrorCode.Should().Be(RoleManagementErrorCode.SelfLockout);
+    }
+
+    [Fact]
+    public async Task DeleteRoleAsync_ExpiredAdminEquivalentMembershipDoesNotCountAsGlobalCoverage()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        RoleManagementService service = CreateService(context);
+        Guid actor = Guid.NewGuid();
+        Guid farmAdminId = await GetRoleIdAsync(context, "farm_admin");
+
+        // farm_admin has a member, but their assignment already expired, so it does not count
+        // as active global admin coverage.
+        Guid expiredAdminUserId = await CreateUserAsync(context, "expired-admin");
+        await AssignRoleAsync(context, expiredAdminUserId, farmAdminId, expiresAt: DateTime.UtcNow.AddDays(-1));
+
+        Guid customAdminRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Guid memberId = await CreateUserAsync(context, "super-admin-1");
+        await AssignRoleAsync(context, memberId, customAdminRoleId);
+
+        Func<Task> act = () => service.DeleteRoleAsync(customAdminRoleId, reassignToRoleId: null, cascade: true, actor, null);
+
+        (await act.Should().ThrowAsync<RoleManagementException>())
+            .Which.ErrorCode.Should().Be(RoleManagementErrorCode.LastAdminRole);
+    }
 }

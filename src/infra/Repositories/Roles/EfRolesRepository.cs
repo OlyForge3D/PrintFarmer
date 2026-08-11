@@ -90,10 +90,10 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
 #pragma warning restore CA1862
     }
 
-    public async Task AddRoleAsync(Role role, CancellationToken ct = default)
+    public Task AddRoleAsync(Role role, CancellationToken ct = default)
     {
         _ = _db.Roles.Add(role);
-        _ = await Task.FromResult(0);
+        return Task.CompletedTask;
     }
 
     public async Task<(Guid ResourceId, Guid ActionId)?> ResolvePermissionAsync(string resource, string action, CancellationToken ct = default)
@@ -108,7 +108,7 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
         return (resourceEntity.Id, actionEntity.Id);
     }
 
-    public async Task AddRolePermissionsAsync(Guid roleId, IEnumerable<(Guid ResourceId, Guid ActionId)> pairs, CancellationToken ct = default)
+    public Task AddRolePermissionsAsync(Guid roleId, IEnumerable<(Guid ResourceId, Guid ActionId)> pairs, CancellationToken ct = default)
     {
         foreach ((Guid resourceId, Guid actionId) in pairs)
         {
@@ -123,7 +123,7 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
             });
         }
 
-        _ = await Task.FromResult(0);
+        return Task.CompletedTask;
     }
 
     public async Task CopyRolePermissionsAsync(Guid sourceRoleId, Guid targetRoleId, CancellationToken ct = default)
@@ -197,6 +197,10 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
 
     public Task DeleteRoleAsync(Role role, CancellationToken ct = default)
     {
+        // If a caller needs cascade-delete of members too, RemoveMembersAsync must be invoked
+        // before this method (and before SaveChangesAsync) — see its comment for why: it
+        // detaches any stale tracked UserRole entries for this role so this Role removal
+        // doesn't try to cascade-delete already-gone rows and throw a concurrency exception.
         _ = _db.Roles.Remove(role);
         return Task.CompletedTask;
     }
@@ -294,5 +298,10 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
                 && ur.IsActive
                 && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow),
             ct);
+    }
+
+    public Task<Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction> BeginSerializableTransactionAsync(CancellationToken ct = default)
+    {
+        return _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
     }
 }

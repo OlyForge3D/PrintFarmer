@@ -38,6 +38,38 @@ public partial class RoleManagementService(
         string name = (request.Name ?? string.Empty).Trim().ToLowerInvariant();
         await ValidateNewNameAsync(name, ct);
 
+        // Resolve/validate everything that can fail *before* adding the role, so a bad
+        // CopyFromRoleId or an unknown permission never leaves a half-created, permission-less
+        // role committed to the database.
+        Guid? copyFromRoleId = null;
+        List<(Guid ResourceId, Guid ActionId)>? explicitPairs = null;
+
+        if (request.CopyFromRoleId is { } sourceRoleId)
+        {
+            Role? sourceRole = await _roles.GetRoleEntityAsync(sourceRoleId, ct);
+            if (sourceRole is null)
+            {
+                throw new RoleManagementException(RoleManagementErrorCode.InvalidPermission, $"Source role {sourceRoleId} for CopyFromRoleId does not exist.");
+            }
+
+            copyFromRoleId = sourceRoleId;
+        }
+        else if (request.Permissions is { Count: > 0 })
+        {
+            explicitPairs = new List<(Guid ResourceId, Guid ActionId)>();
+            foreach (string permission in request.Permissions)
+            {
+                (string resource, string action) = PrintFarmerPermissions.Split(permission);
+                (Guid ResourceId, Guid ActionId)? resolved = await _roles.ResolvePermissionAsync(resource, action, ct);
+                if (resolved is null)
+                {
+                    throw new RoleManagementException(RoleManagementErrorCode.InvalidPermission, $"Unknown permission '{permission}'.");
+                }
+
+                explicitPairs.Add(resolved.Value);
+            }
+        }
+
         Role role = new()
         {
             Id = Guid.NewGuid(),
@@ -53,32 +85,13 @@ public partial class RoleManagementService(
         await _roles.AddRoleAsync(role, ct);
         await _roles.SaveChangesAsync(ct);
 
-        if (request.CopyFromRoleId is { } sourceRoleId)
+        if (copyFromRoleId is { } source)
         {
-            Role? sourceRole = await _roles.GetRoleEntityAsync(sourceRoleId, ct);
-            if (sourceRole is null)
-            {
-                throw new RoleManagementException(RoleManagementErrorCode.InvalidPermission, $"Source role {sourceRoleId} for CopyFromRoleId does not exist.");
-            }
-
-            await _roles.CopyRolePermissionsAsync(sourceRoleId, role.Id, ct);
+            await _roles.CopyRolePermissionsAsync(source, role.Id, ct);
         }
-        else if (request.Permissions is { Count: > 0 })
+        else if (explicitPairs is { Count: > 0 })
         {
-            List<(Guid ResourceId, Guid ActionId)> pairs = new();
-            foreach (string permission in request.Permissions)
-            {
-                (string resource, string action) = PrintFarmerPermissions.Split(permission);
-                (Guid ResourceId, Guid ActionId)? resolved = await _roles.ResolvePermissionAsync(resource, action, ct);
-                if (resolved is null)
-                {
-                    throw new RoleManagementException(RoleManagementErrorCode.InvalidPermission, $"Unknown permission '{permission}'.");
-                }
-
-                pairs.Add(resolved.Value);
-            }
-
-            await _roles.AddRolePermissionsAsync(role.Id, pairs, ct);
+            await _roles.AddRolePermissionsAsync(role.Id, explicitPairs, ct);
         }
 
         await _roles.SaveChangesAsync(ct);
@@ -127,28 +140,61 @@ public partial class RoleManagementService(
             throw new RoleManagementException(RoleManagementErrorCode.SystemRoleProtected, $"System role '{role.Name}' cannot be deactivated.");
         }
 
-        if (wantsDeactivation)
+        // The D9 guardrail check and the deactivation it protects must commit as one atomic
+        // unit under serializable isolation: otherwise two concurrent requests could each pass
+        // the check against a different admin-equivalent role and both commit, leaving zero
+        // admin coverage. See issue #1448 review discussion.
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = wantsDeactivation
+            ? await _roles.BeginSerializableTransactionAsync(ct)
+            : null;
+        try
         {
-            await EnsureDeactivationDoesNotLockOutAdminsAsync(role, actorUserId, ct);
-        }
+            if (wantsDeactivation)
+            {
+                await EnsureDeactivationDoesNotLockOutAdminsAsync(role, actorUserId, membersRetainAdminAccessViaReassignment: false, ct);
+            }
 
-        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+            if (!string.IsNullOrWhiteSpace(request.DisplayName))
+            {
+                role.DisplayName = request.DisplayName.Trim();
+            }
+
+            if (request.Description is not null)
+            {
+                role.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
+            }
+
+            if (request.IsActive.HasValue)
+            {
+                role.IsActive = request.IsActive.Value;
+            }
+
+            role.UpdatedAt = DateTime.UtcNow;
+
+            try
+            {
+                await _roles.SaveChangesAsync(ct);
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex) when (transaction is not null)
+            {
+                throw new RoleManagementException(
+                    RoleManagementErrorCode.ConcurrencyConflict,
+                    "Another request changed admin role coverage concurrently. Re-check the current state and retry.",
+                    ex);
+            }
+
+            if (transaction is not null)
+            {
+                await transaction.CommitAsync(ct);
+            }
+        }
+        finally
         {
-            role.DisplayName = request.DisplayName.Trim();
+            if (transaction is not null)
+            {
+                await transaction.DisposeAsync();
+            }
         }
-
-        if (request.Description is not null)
-        {
-            role.Description = string.IsNullOrWhiteSpace(request.Description) ? null : request.Description.Trim();
-        }
-
-        if (request.IsActive.HasValue)
-        {
-            role.IsActive = request.IsActive.Value;
-        }
-
-        role.UpdatedAt = DateTime.UtcNow;
-        await _roles.SaveChangesAsync(ct);
 
         RoleDetailDto? after = await _roles.GetRoleDetailAsync(roleId, ct);
 
@@ -181,47 +227,79 @@ public partial class RoleManagementService(
 
         RoleDetailDto? before = await _roles.GetRoleDetailAsync(roleId, ct);
 
-        // D9 — evaluate the lockout guardrails against the role's current state, before any
-        // members are moved or removed.
-        if (role.IsActive)
+        // D8 — deletion is never a silent orphan: a role with members requires either an
+        // explicit reassignment target or an explicit cascade opt-in. Resolve/validate the
+        // reassignment target up front (before the D9 guardrail) so the guardrail can tell
+        // whether members — including a self-lockout-risking actor — will retain
+        // admin-equivalent access via the target role rather than lose it outright.
+        int memberCount = await _roles.CountActiveMembersAsync(roleId, ct);
+        Role? targetRole = null;
+        if (memberCount > 0 && reassignToRoleId is { } targetRoleId)
         {
-            await EnsureDeactivationDoesNotLockOutAdminsAsync(role, actorUserId, ct);
+            if (targetRoleId == roleId)
+            {
+                throw new RoleManagementException(RoleManagementErrorCode.InvalidReassignmentTarget, "Cannot reassign a role's members to itself.");
+            }
+
+            targetRole = await _roles.GetRoleEntityAsync(targetRoleId, ct);
+            if (targetRole is null || !targetRole.IsActive)
+            {
+                throw new RoleManagementException(RoleManagementErrorCode.InvalidReassignmentTarget, $"Reassignment target role {targetRoleId} does not exist or is inactive.");
+            }
         }
 
-        // D8 — deletion is never a silent orphan: a role with members requires either an
-        // explicit reassignment target or an explicit cascade opt-in.
-        int memberCount = await _roles.CountActiveMembersAsync(roleId, ct);
-        if (memberCount > 0)
+        bool membersRetainAdminAccessViaReassignment = targetRole is not null && await _roles.IsAdminEquivalentAsync(targetRole.Id, ct);
+
+        // The D9 guardrail check and the delete/reassign/cascade it protects must commit as one
+        // atomic unit under serializable isolation: otherwise two concurrent requests could each
+        // pass the check against a different admin-equivalent role and both commit, leaving zero
+        // admin coverage. See issue #1448 review discussion.
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _roles.BeginSerializableTransactionAsync(ct);
+        try
         {
-            if (reassignToRoleId is { } targetRoleId)
+            if (role.IsActive)
             {
-                if (targetRoleId == roleId)
-                {
-                    throw new RoleManagementException(RoleManagementErrorCode.InvalidReassignmentTarget, "Cannot reassign a role's members to itself.");
-                }
-
-                Role? targetRole = await _roles.GetRoleEntityAsync(targetRoleId, ct);
-                if (targetRole is null || !targetRole.IsActive)
-                {
-                    throw new RoleManagementException(RoleManagementErrorCode.InvalidReassignmentTarget, $"Reassignment target role {targetRoleId} does not exist or is inactive.");
-                }
-
-                await _roles.ReassignMembersAsync(roleId, targetRoleId, ct);
+                await EnsureDeactivationDoesNotLockOutAdminsAsync(role, actorUserId, membersRetainAdminAccessViaReassignment, ct);
             }
-            else if (cascade)
+
+            if (memberCount > 0)
             {
-                await _roles.RemoveMembersAsync(roleId, ct);
+                if (targetRole is not null)
+                {
+                    await _roles.ReassignMembersAsync(roleId, targetRole.Id, ct);
+                }
+                else if (cascade)
+                {
+                    await _roles.RemoveMembersAsync(roleId, ct);
+                }
+                else
+                {
+                    throw new RoleManagementException(
+                        RoleManagementErrorCode.HasMembers,
+                        $"Role '{role.Name}' has {memberCount} member(s). Pass reassignTo={{roleId}} or cascade=true to proceed.");
+                }
             }
-            else
+
+            await _roles.DeleteRoleAsync(role, ct);
+
+            try
+            {
+                await _roles.SaveChangesAsync(ct);
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
             {
                 throw new RoleManagementException(
-                    RoleManagementErrorCode.HasMembers,
-                    $"Role '{role.Name}' has {memberCount} member(s). Pass reassignTo={{roleId}} or cascade=true to proceed.");
+                    RoleManagementErrorCode.ConcurrencyConflict,
+                    "Another request changed admin role coverage concurrently. Re-check the current state and retry.",
+                    ex);
             }
-        }
 
-        await _roles.DeleteRoleAsync(role, ct);
-        await _roles.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        finally
+        {
+            await transaction.DisposeAsync();
+        }
 
         await _authAuditService.LogRoleManagementEventAsync(
             actorUserId,
@@ -237,12 +315,15 @@ public partial class RoleManagementService(
     /// <summary>
     /// D9 — refuses a deactivation/deletion that would leave the system with no active,
     /// admin-equivalent role held by any active user, or that would strip the acting
-    /// administrator of their own last administrative role.
+    /// administrator of their own last administrative role. <paramref name="membersRetainAdminAccessViaReassignment"/>
+    /// is true when the role's members (including a potential self-lockout-risking actor) are
+    /// being reassigned to another active, admin-equivalent role as part of the same operation,
+    /// in which case they don't actually lose admin-equivalent access and the guardrail is moot.
     /// </summary>
-    private async Task EnsureDeactivationDoesNotLockOutAdminsAsync(Role role, Guid actorUserId, CancellationToken ct)
+    private async Task EnsureDeactivationDoesNotLockOutAdminsAsync(Role role, Guid actorUserId, bool membersRetainAdminAccessViaReassignment, CancellationToken ct)
     {
         bool isAdminEquivalent = await _roles.IsAdminEquivalentAsync(role.Id, ct);
-        if (!isAdminEquivalent)
+        if (!isAdminEquivalent || membersRetainAdminAccessViaReassignment)
         {
             return;
         }
