@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Services.SmartPlug;
@@ -49,12 +50,12 @@ public sealed class KasaSmartPlugProvider : ISmartPlugProvider
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            _logger.LogWarning("Kasa GetCurrentReading timed out for {DeviceAddress}", deviceAddress);
+            _logger.LogWarning("Kasa GetCurrentReading timed out for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "Kasa GetCurrentReading failed for {DeviceAddress}", deviceAddress);
+            _logger.LogWarning(ex, "Kasa GetCurrentReading failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return null;
         }
     }
@@ -70,12 +71,12 @@ public sealed class KasaSmartPlugProvider : ISmartPlugProvider
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             // Internal read timeout expired — treat as connection failure.
-            _logger.LogDebug("Kasa TestConnection timed out for {DeviceAddress}", deviceAddress);
+            _logger.LogDebug("Kasa TestConnection timed out for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return false;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Kasa TestConnection failed for {DeviceAddress}", deviceAddress);
+            _logger.LogDebug(ex, "Kasa TestConnection failed for {DeviceAddress}", LogSanitizer.Sanitize(deviceAddress));
             return false;
         }
     }

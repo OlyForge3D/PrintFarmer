@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -35,7 +36,7 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
 
         logger.LogInformation(
             "Created quota {QuotaId} type={Type} limit={Limit} for user={UserId} group={Group}",
-            quota.Id, quota.QuotaType, quota.LimitAmount, quota.UserId, quota.GroupName);
+            quota.Id, quota.QuotaType, quota.LimitAmount, quota.UserId, LogSanitizer.Sanitize(quota.GroupName));
         return quota;
     }
 
@@ -330,7 +331,7 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
         db.UserQuotaGroupMemberships.Add(membership);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Added user {UserId} to quota group {GroupName}", userId, groupName);
+        logger.LogInformation("Added user {UserId} to quota group {GroupName}", userId, LogSanitizer.Sanitize(groupName));
         return membership;
     }
 
@@ -347,7 +348,7 @@ public sealed class PrintQuotaService(AppDbContext db, ILogger<PrintQuotaService
         db.UserQuotaGroupMemberships.Remove(membership);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("Removed user {UserId} from quota group {GroupName}", userId, groupName);
+        logger.LogInformation("Removed user {UserId} from quota group {GroupName}", userId, LogSanitizer.Sanitize(groupName));
         return true;
     }
 

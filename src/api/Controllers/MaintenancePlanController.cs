@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Maintenance;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
 using Farm.Web.Api.Controllers.Requests;
@@ -92,7 +93,7 @@ public class MaintenancePlanController(
         };
 
         await _planRepository.AddAsync(plan, ct);
-        _logger.LogInformation("Created maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+        _logger.LogInformation("Created maintenance plan {PlanId} '{PlanName}'", plan.Id, LogSanitizer.Sanitize(plan.Name));
 
         return Created($"/api/maintenance/plans/{plan.Id}", MaintenanceResponseMapper.ToPlanResponse(plan));
     }
@@ -123,7 +124,7 @@ public class MaintenancePlanController(
         plan.UpdatedAt = DateTime.UtcNow;
 
         await _planRepository.UpdateAsync(plan, ct);
-        _logger.LogInformation("Updated maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+        _logger.LogInformation("Updated maintenance plan {PlanId} '{PlanName}'", plan.Id, LogSanitizer.Sanitize(plan.Name));
 
         return Ok(MaintenanceResponseMapper.ToPlanResponse(plan));
     }
@@ -143,7 +144,7 @@ public class MaintenancePlanController(
         try
         {
             await _planRepository.DeleteAsync(plan, ct);
-            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, plan.Name);
+            _logger.LogInformation("Deleted maintenance plan {PlanId} '{PlanName}'", plan.Id, LogSanitizer.Sanitize(plan.Name));
             return NoContent();
         }
         catch (DbUpdateException)
@@ -200,7 +201,7 @@ public class MaintenancePlanController(
         }
 
         await _planRepository.AddAsync(clone, ct);
-        _logger.LogInformation("Cloned maintenance plan {SourceId} as {CloneId} '{CloneName}'", id, clone.Id, clone.Name);
+        _logger.LogInformation("Cloned maintenance plan {SourceId} as {CloneId} '{CloneName}'", id, clone.Id, LogSanitizer.Sanitize(clone.Name));
 
         // Reload to get navigation properties for the response
         MaintenancePlan? saved = await _planRepository.GetByIdAsync(clone.Id, ct);
@@ -301,7 +302,7 @@ public class MaintenancePlanController(
         });
         await _planRepository.SaveChangesAsync(ct);
 
-        _logger.LogInformation("Created task {TaskId} '{TaskName}' and linked to plan {PlanId}", task.Id, task.TaskName, planId);
+        _logger.LogInformation("Created task {TaskId} '{TaskName}' and linked to plan {PlanId}", task.Id, LogSanitizer.Sanitize(task.TaskName), planId);
 
         return Created($"/api/maintenance/plans/{planId}/tasks/{task.Id}", MaintenanceResponseMapper.ToTaskResponse(task));
     }
@@ -357,7 +358,7 @@ public class MaintenancePlanController(
         task.UpdatedAt = DateTime.UtcNow;
 
         await _taskRepository.UpdateAsync(task, ct);
-        _logger.LogInformation("Updated task {TaskId} '{TaskName}'", task.Id, task.TaskName);
+        _logger.LogInformation("Updated task {TaskId} '{TaskName}'", task.Id, LogSanitizer.Sanitize(task.TaskName));
 
         return Ok(MaintenanceResponseMapper.ToTaskResponse(task));
     }

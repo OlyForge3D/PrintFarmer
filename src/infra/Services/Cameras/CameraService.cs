@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.StorageManagement;
@@ -127,7 +128,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error finding camera with name {Name}", name);
+            _logger.LogError(ex, "Error finding camera with name {Name}", LogSanitizer.Sanitize(name));
             throw;
         }
     }
@@ -146,7 +147,7 @@ public class CameraService : ICameraService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error checking camera existence by name {Name}", name);
+            _logger.LogError(ex, "Error checking camera existence by name {Name}", LogSanitizer.Sanitize(name));
             throw;
         }
     }
@@ -200,13 +201,13 @@ public class CameraService : ICameraService
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
+            _logger.LogInformation("Created camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
             return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
-            _logger.LogError(ex, "Error creating camera {DtoName}", dto.Name);
+            _logger.LogError(ex, "Error creating camera {DtoName}", LogSanitizer.Sanitize(dto.Name));
             throw;
         }
     }
@@ -297,7 +298,7 @@ public class CameraService : ICameraService
 
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
+            _logger.LogInformation("Updated camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
             return ToDto(camera);
         }
@@ -332,7 +333,7 @@ public class CameraService : ICameraService
             _unitOfWork.Cameras.Remove(camera);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Deleted camera {CameraName} with ID {CameraId}", camera.Name, camera.Id);
+            _logger.LogInformation("Deleted camera {CameraName} with ID {CameraId}", LogSanitizer.Sanitize(camera.Name), camera.Id);
 
             return true;
         }
@@ -364,7 +365,7 @@ public class CameraService : ICameraService
 
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", camera.Name, isEnabled);
+            _logger.LogInformation("Toggled camera {CameraName} enabled status to {IsEnabled}", LogSanitizer.Sanitize(camera.Name), isEnabled);
 
             return ToDto(camera);
         }
@@ -475,13 +476,13 @@ public class CameraService : ICameraService
             _unitOfWork.Cameras.Add(camera);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            _logger.LogInformation("Created camera {CameraName} with ID {CameraId} for printer {PrinterId}", camera.Name, camera.Id, printerId);
+            _logger.LogInformation("Created camera {CameraName} with ID {CameraId} for printer {PrinterId}", LogSanitizer.Sanitize(camera.Name), camera.Id, printerId);
 
             return ToDto(camera);
         }
         catch (Exception ex) when (ex is not InvalidOperationException && ex is not ArgumentException)
         {
-            _logger.LogError(ex, "Error creating camera {DtoName} for printer {PrinterId}", dto.Name, printerId);
+            _logger.LogError(ex, "Error creating camera {DtoName} for printer {PrinterId}", LogSanitizer.Sanitize(dto.Name), printerId);
             throw;
         }
     }

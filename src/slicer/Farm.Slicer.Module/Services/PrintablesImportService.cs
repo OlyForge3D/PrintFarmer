@@ -1,4 +1,5 @@
-﻿using Farm.Slicer.Module.Dtos;
+﻿using Farm.Infrastructure.Logging;
+using Farm.Slicer.Module.Dtos;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 
@@ -30,17 +31,17 @@ public sealed class PrintablesImportService(
     {
         string modelId = ParseModelId(printablesUrl);
 
-        _logger.LogInformation("Fetching Printables preview for model ID {ModelId} from {Url}", modelId, printablesUrl);
+        _logger.LogInformation("Fetching Printables preview for model ID {ModelId} from {Url}", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(printablesUrl));
 
         try
         {
             PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, printablesUrl, ct);
-            _logger.LogInformation("Preview fetched for Printables model {ModelId}: '{Name}'", modelId, preview.Name);
+            _logger.LogInformation("Preview fetched for Printables model {ModelId}: '{Name}'", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(preview.Name));
             return preview;
         }
         catch (PrintablesApiException ex)
         {
-            _logger.LogWarning(ex, "Printables API error for model {ModelId}", modelId);
+            _logger.LogWarning(ex, "Printables API error for model {ModelId}", LogSanitizer.Sanitize(modelId));
             throw;
         }
     }
@@ -72,7 +73,7 @@ public sealed class PrintablesImportService(
             throw new ArgumentException("Source URL must not be empty.", nameof(sourceUrl));
         }
 
-        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", modelId, sourceUrl);
+        _logger.LogInformation("Importing Printables model ID {ModelId} from {Url}", LogSanitizer.Sanitize(modelId), LogSanitizer.Sanitize(sourceUrl));
 
         PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(modelId, sourceUrl, ct);
         List<PrintablesFileEntryDto> selectedFiles = SelectFilesForImport(preview, fileIds);
@@ -105,7 +106,7 @@ public sealed class PrintablesImportService(
         _logger.LogInformation(
             "Imported {ImportedCount} Printables file(s) from model {ModelId}",
             importedModels.Count,
-            modelId);
+            LogSanitizer.Sanitize(modelId));
 
         return importedModels;
     }
@@ -151,7 +152,7 @@ public sealed class PrintablesImportService(
 
         _logger.LogInformation(
             "Fetching attribution for Printables model {ModelId} to persist on file record {FileId}",
-            parsedModelId, modelId);
+            LogSanitizer.Sanitize(parsedModelId), modelId);
 
         PrintablesPreviewDto preview = await _graphQlClient.FetchPreviewAsync(parsedModelId, printablesUrl, ct);
 
@@ -165,7 +166,7 @@ public sealed class PrintablesImportService(
 
         _logger.LogInformation(
             "Attribution persisted for model record {FileId}: creator={Creator}, license={License}",
-            modelId, preview.Creator, preview.License);
+            modelId, LogSanitizer.Sanitize(preview.Creator), LogSanitizer.Sanitize(preview.License));
     }
 
     /// <inheritdoc />
