@@ -654,6 +654,47 @@ describe('ApiKeysPage', () => {
       expect(screen.getByLabelText(/^Slicing submit —/)).not.toBe(generate);
     });
 
+    // The server rejects create/update/delete/generate/publish without CalibrationRead, so the
+    // UI must state that prerequisite rather than inviting a combination it will refuse.
+    it.each([
+      ['Calibration create', /^Calibration create —/],
+      ['Calibration update', /^Calibration update —/],
+      ['Calibration delete', /^Calibration delete —/],
+      ['Calibration generate', /^Calibration generate —/],
+      ['Calibration publish', /^Calibration publish —/],
+    ])('should state the Calibration read prerequisite beside %s', async (_label, pattern) => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      expect(screen.getByLabelText(pattern)).toHaveAccessibleName(/Calibration read/i);
+    });
+
+    // Prerequisites are disclosed, not auto-selected: the operator stays in control and the
+    // server remains the authority on validity.
+    it('should not auto-select Calibration read when a dependent scope is chosen', async () => {
+      vi.mocked(apiKeysService.createApiKey).mockResolvedValue({ key: 'raw-key', id: 'new-id' });
+
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByPlaceholderText(/descriptive name/i), { target: { value: 'Publish only' } });
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+      fireEvent.click(screen.getByLabelText(/^Calibration publish —/));
+
+      expect(screen.getByLabelText(/^Calibration read —/)).not.toBeChecked();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+      await waitFor(() => {
+        expect(apiKeysService.createApiKey).toHaveBeenCalledWith(
+          'user-1',
+          expect.objectContaining({ scopeNames: ['CalibrationPublish'] })
+        );
+      });
+    });
+
     it('should send exactly the selected scope names', async () => {
       vi.mocked(apiKeysService.createApiKey).mockResolvedValue({ key: 'raw-key', id: 'new-id' });
 

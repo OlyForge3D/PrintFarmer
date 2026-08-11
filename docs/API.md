@@ -336,8 +336,9 @@ Key properties:
   or alter profile state. The anonymous passkey login ceremony is unaffected.
 - **`SlicingSubmit` reaches the profile catalog.** `slicing:submit` class-gates
   the slicer host's `ProfilesController`, so a key with this scope can read and
-  enumerate the profile catalog. That read reach is required for submission;
-  mutation is blocked as above.
+  enumerate the profile catalog, and can upload the G-code artifact for a slice
+  job it owns (`POST /api/artifacts/{jobId}`). That reach is required for
+  submission; profile-state mutation is blocked as above.
 - `queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and
   `obico:manage` are not reachable from any Desktop scope.
 

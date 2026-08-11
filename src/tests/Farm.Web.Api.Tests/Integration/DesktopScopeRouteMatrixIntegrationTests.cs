@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
@@ -234,6 +235,24 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden, because);
 
     /// <summary>
+    /// Builds a minimal but <b>bindable</b> multipart body for the artifact upload route.
+    /// </summary>
+    /// <remarks>
+    /// The slicer module's <c>RequirePermissionAttribute</c> is an action filter, so it runs
+    /// <i>after</i> model binding — unlike the main API's, which is an authorization requirement.
+    /// An empty multipart body therefore fails binding with a 400 before the permission check is
+    /// ever reached, which would make both the pinning assertion and the positive case meaningless.
+    /// </remarks>
+    private static MultipartFormDataContent CreateArtifactUploadContent()
+    {
+        MultipartFormDataContent content = [];
+        ByteArrayContent file = new([0x47, 0x32, 0x38, 0x0A]);
+        file.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        content.Add(file, "file", "artifact.gcode");
+        return content;
+    }
+
+    /// <summary>
     /// Pins that a route template really exists and really is authorization-gated, by proving a
     /// deliberately under-scoped token receives 403 there. A mistyped path yields 404 instead and
     /// fails this check, which is what stops the paired positive assertion passing vacuously.
@@ -243,7 +262,11 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
         using HttpRequestMessage request = new(method, path);
         if (method != HttpMethod.Get && method != HttpMethod.Delete)
         {
-            request.Content = JsonContent.Create(new { });
+            // The artifact upload route binds an IFormFile behind an action-filter permission
+            // check, so the body must actually bind or the 400 pre-empts the 403.
+            request.Content = path.StartsWith("/api/artifacts", StringComparison.Ordinal)
+                ? CreateArtifactUploadContent()
+                : JsonContent.Create(new { });
         }
 
         using HttpResponseMessage response = await _unscopedClient.SendAsync(request);
@@ -541,6 +564,59 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
 
     #endregion
 
+    #region Slicing artifact boundary
+
+    /// <summary>
+    /// <c>SlicingReadArtifact</c> and <c>SlicingSubmit</c> gate different halves of
+    /// <c>ArtifactsController</c>: reads require <c>slicing:read-artifact</c>, while uploading a
+    /// job's artifact requires <c>slicing:submit</c>. Neither is exercised by the calibration or
+    /// queue routes, so without this test the scope would be proven only through the map.
+    /// </summary>
+    [Fact]
+    public async Task SlicingReadArtifactScope_ClearsArtifactReadsButNotArtifactUpload()
+    {
+        using HttpClient client = await ScopedClientAsync(ApiKeyScope.SlicingReadArtifact);
+
+        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Get, $"/api/artifacts/{Guid.NewGuid()}");
+        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Get, $"/api/artifacts/job/{Guid.NewGuid()}");
+        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Get, $"/api/artifacts/{Guid.NewGuid()}/metadata");
+        await AssertRouteIsAuthorizationGatedAsync(HttpMethod.Post, $"/api/artifacts/{Guid.NewGuid()}");
+
+        using HttpResponseMessage read = await client.GetAsync($"/api/artifacts/{Guid.NewGuid()}");
+        ShouldClearAuthorization(read, "slicing:read-artifact was granted");
+
+        using HttpResponseMessage listForJob = await client.GetAsync($"/api/artifacts/job/{Guid.NewGuid()}");
+        ShouldClearAuthorization(listForJob, "slicing:read-artifact was granted");
+
+        using HttpResponseMessage metadata = await client.GetAsync($"/api/artifacts/{Guid.NewGuid()}/metadata");
+        ShouldClearAuthorization(metadata, "slicing:read-artifact was granted");
+
+        using MultipartFormDataContent uploadContent = CreateArtifactUploadContent();
+        using HttpResponseMessage upload = await client.PostAsync($"/api/artifacts/{Guid.NewGuid()}", uploadContent);
+        ShouldBeDenied(upload, "slicing:submit was not selected, and artifact upload requires it");
+    }
+
+    /// <summary>
+    /// The mirror image: a submit-only token clears artifact upload but cannot read artifacts back.
+    /// </summary>
+    [Fact]
+    public async Task SlicingSubmitScope_ClearsArtifactUploadButNotArtifactReads()
+    {
+        using HttpClient client = await ScopedClientAsync(ApiKeyScope.SlicingSubmit);
+
+        using MultipartFormDataContent uploadContent = CreateArtifactUploadContent();
+        using HttpResponseMessage upload = await client.PostAsync($"/api/artifacts/{Guid.NewGuid()}", uploadContent);
+        ShouldClearAuthorization(upload, "slicing:submit was granted, and artifact upload requires it");
+
+        using HttpResponseMessage read = await client.GetAsync($"/api/artifacts/{Guid.NewGuid()}");
+        ShouldBeDenied(read, "slicing:read-artifact was not selected");
+
+        using HttpResponseMessage listForJob = await client.GetAsync($"/api/artifacts/job/{Guid.NewGuid()}");
+        ShouldBeDenied(listForJob, "slicing:read-artifact was not selected");
+    }
+
+    #endregion
+
     #region Cross-boundary isolation
 
     /// <summary>
@@ -580,6 +656,50 @@ public class DesktopScopeRouteMatrixIntegrationTests : IAsyncLifetime
 
         using HttpResponseMessage calibrationRead = await client.GetAsync("/api/calibration-projects");
         calibrationRead.StatusCode.Should().Be(HttpStatusCode.OK, "calibration:read was granted");
+    }
+
+    /// <summary>
+    /// The mirror of the above: a queue/print-capable key carries real physical-actuation authority
+    /// but must not reach calibration at all — in particular not publish, the most consequential
+    /// calibration action.
+    /// </summary>
+    [Fact]
+    public async Task QueuePrintScopedKey_CannotReachCalibrationPublishOrAnyCalibrationRoute()
+    {
+        using HttpClient client = await ScopedClientAsync(
+            ApiKeyScope.QueueRead |
+            ApiKeyScope.QueueWrite |
+            ApiKeyScope.QueueStart |
+            ApiKeyScope.QueueCancel);
+
+        // Positive control: this key really does hold queue authority, so the calibration denials
+        // below cannot be explained by the token being rejected outright.
+        using HttpResponseMessage queueList = await client.GetAsync("/api/job-queue");
+        queueList.StatusCode.Should().Be(HttpStatusCode.OK, "queue:read was granted");
+
+        using HttpResponseMessage dispatch = await client.PostAsJsonAsync(
+            $"/api/job-queue/{Guid.NewGuid()}/dispatch", new { });
+        dispatch.StatusCode.Should().NotBe(HttpStatusCode.Forbidden, "queue:start was granted");
+        dispatch.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+
+        List<(string Description, HttpResponseMessage Response)> denied =
+        [
+            ("publish a generated calibration profile",
+                await client.PostAsJsonAsync($"/api/calibration-generated-profiles/{Guid.NewGuid()}/publish", new { })),
+            ("generate a calibration profile",
+                await client.PostAsJsonAsync($"/api/calibration-projects/{Guid.NewGuid()}/generated-profiles", new { })),
+            ("read calibration projects", await client.GetAsync("/api/calibration-projects")),
+            ("create a calibration project",
+                await client.PostAsJsonAsync("/api/calibration-projects", new { name = "denied" })),
+        ];
+
+        foreach ((string description, HttpResponseMessage response) in denied)
+        {
+            response.StatusCode.Should().Be(
+                HttpStatusCode.Forbidden,
+                $"queue scopes never imply permission to {description}");
+            response.Dispose();
+        }
     }
 
     #endregion
