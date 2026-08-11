@@ -142,6 +142,7 @@ public interface IAuthAuditService
     Task LogApiKeyExchangeFailedAsync(string reason, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// <summary>
     /// Log a role permission grant change (full-replacement) performed via the role
     /// permission API (#1449).
     /// </summary>
@@ -164,6 +165,20 @@ public interface IAuthAuditService
         string? ipAddress,
         string? correlationId = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Log a role management mutation (create, update, or delete) for the audit trail.
+    /// </summary>
+    /// <param name="actorUserId">The unique identifier of the administrator performing the change.</param>
+    /// <param name="roleId">The unique identifier of the affected role.</param>
+    /// <param name="roleName">The name (slug) of the affected role.</param>
+    /// <param name="eventType">Must be one of <see cref="AuthEventType.RoleCreated"/>, <see cref="AuthEventType.RoleUpdated"/>, or <see cref="AuthEventType.RoleDeleted"/>.</param>
+    /// <param name="beforeJson">Optional JSON snapshot of the role state before the change.</param>
+    /// <param name="afterJson">Optional JSON snapshot of the role state after the change.</param>
+    /// <param name="ipAddress">The IP address from which the change was made.</param>
+    /// <param name="correlationId">Optional correlation identifier for request tracing.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    Task LogRoleManagementEventAsync(Guid actorUserId, Guid roleId, string roleName, AuthEventType eventType, string? beforeJson, string? afterJson, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Get audit log entries for a specific user
