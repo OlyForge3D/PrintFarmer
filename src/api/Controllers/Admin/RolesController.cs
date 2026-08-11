@@ -1,6 +1,6 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Roles;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using CreateCustomRoleRequest = Farm.Infrastructure.Contracts.Roles.CreateCustomRoleRequest;
 using RoleDetailDto = Farm.Infrastructure.Contracts.Roles.RoleDetailDto;
@@ -17,7 +17,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/roles")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("roles", "admin")]
 [Tags("Admin - Roles")]
 public class RolesController(IRoleManagementService roleManagementService) : ControllerBase
 {
