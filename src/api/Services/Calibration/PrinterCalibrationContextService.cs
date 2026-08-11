@@ -470,7 +470,14 @@ public sealed class PrinterCalibrationContextService(
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
-        if (!printer.CalibrationMachineProfileId.HasValue)
+        Guid machineProfileId = printer.CalibrationMachineProfileId.GetValueOrDefault();
+        Guid processProfileId = printer.CalibrationProcessProfileId.GetValueOrDefault();
+        Guid filamentProfileId = printer.CalibrationFilamentProfileId.GetValueOrDefault();
+        bool hasMachineProfileId = machineProfileId != Guid.Empty;
+        bool hasProcessProfileId = processProfileId != Guid.Empty;
+        bool hasFilamentProfileId = filamentProfileId != Guid.Empty;
+
+        if (!hasMachineProfileId)
         {
             RejectMissing(
                 reasons,
@@ -480,7 +487,7 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer machine profile is required.");
         }
 
-        if (!printer.CalibrationProcessProfileId.HasValue)
+        if (!hasProcessProfileId)
         {
             RejectMissing(
                 reasons,
@@ -490,7 +497,7 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer process profile is required.");
         }
 
-        if (!printer.CalibrationFilamentProfileId.HasValue)
+        if (!hasFilamentProfileId)
         {
             RejectMissing(
                 reasons,
@@ -500,13 +507,13 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer filament profile is required.");
         }
 
-        return printer.CalibrationMachineProfileId.HasValue &&
-               printer.CalibrationProcessProfileId.HasValue &&
-               printer.CalibrationFilamentProfileId.HasValue
+        return hasMachineProfileId &&
+               hasProcessProfileId &&
+               hasFilamentProfileId
             ? new(
-                printer.CalibrationMachineProfileId.Value,
-                printer.CalibrationProcessProfileId.Value,
-                printer.CalibrationFilamentProfileId.Value)
+                machineProfileId,
+                processProfileId,
+                filamentProfileId)
             : null;
     }
 
