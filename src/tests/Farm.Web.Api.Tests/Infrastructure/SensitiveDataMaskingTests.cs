@@ -90,8 +90,12 @@ public class SensitiveDataMaskingTests
     [Fact]
     public void MaskEmail_WithControlCharactersInLocalPart_SanitizesLocalPart()
     {
-        string masked = SensitiveDataMasking.MaskEmail("\r@example.com");
-        masked.Should().Be("***@example.com");
+        // Local part must be longer than 2 characters to exercise the branch that
+        // interpolates local[0]/local[^1] directly (the ">2" branch); a local part
+        // of length <= 2 collapses to "***" and never emits the raw characters.
+        string masked = SensitiveDataMasking.MaskEmail("\rbc@example.com");
+        masked.Should().Be("\\r***c@example.com");
+        masked.Should().NotContain("\r");
     }
 
     [Fact]
