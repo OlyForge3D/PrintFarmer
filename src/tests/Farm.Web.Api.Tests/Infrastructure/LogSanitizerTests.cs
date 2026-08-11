@@ -24,6 +24,17 @@ public class LogSanitizerTests
     }
 
     [Fact]
+    public void Sanitize_StripsC1ControlCharacters()
+    {
+        // C1 controls (U+0080-U+009F, e.g. NEL U+0085) are Cc-category control characters
+        // just like the ASCII C0 range, and some log viewers/terminals treat them as line
+        // breaks — they must be stripped the same way as the ASCII control characters.
+        string result = LogSanitizer.Sanitize("value\u0085with\u009fc1chars")!;
+
+        result.Should().Be("valuewithc1chars");
+    }
+
+    [Fact]
     public void Sanitize_LeavesNormalTextUnchanged()
     {
         const string input = "Printer-01: status=online, temp=210.5C";

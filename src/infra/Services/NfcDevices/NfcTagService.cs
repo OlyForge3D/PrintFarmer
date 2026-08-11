@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.SignalR;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
@@ -61,14 +62,14 @@ public class NfcTagService(
                 await hub.Clients.All.SendAsync(NfcHubEvents.TagRead, payload, ct);
                 logger.LogInformation(
                     "nfctagread: tag {TagUid} → spool {SpoolId} (device {DeviceId})",
-                    tagUid, binding.SpoolId, nfcDeviceId);
+                    LogSanitizer.Sanitize(tagUid), binding.SpoolId, nfcDeviceId);
             }
             else
             {
                 EnqueueOffline(nfcDeviceId, new PendingNfcEvent(NfcHubEvents.TagRead, payload));
                 logger.LogDebug(
                     "Device {DeviceId} offline — queued nfctagread for tag {TagUid}",
-                    nfcDeviceId, tagUid);
+                    nfcDeviceId, LogSanitizer.Sanitize(tagUid));
             }
         }
         else
@@ -80,14 +81,14 @@ public class NfcTagService(
                 await hub.Clients.All.SendAsync(NfcHubEvents.TagUnknown, payload, ct);
                 logger.LogInformation(
                     "nfctagunknown: tag {TagUid} has no binding (device {DeviceId})",
-                    tagUid, nfcDeviceId);
+                    LogSanitizer.Sanitize(tagUid), nfcDeviceId);
             }
             else
             {
                 EnqueueOffline(nfcDeviceId, new PendingNfcEvent(NfcHubEvents.TagUnknown, payload));
                 logger.LogDebug(
                     "Device {DeviceId} offline — queued nfctagunknown for tag {TagUid}",
-                    nfcDeviceId, tagUid);
+                    nfcDeviceId, LogSanitizer.Sanitize(tagUid));
             }
         }
     }
@@ -133,7 +134,7 @@ public class NfcTagService(
 
                 logger.LogInformation(
                     "NFC tag {TagUid} linked → spool {SpoolId}, printer {PrinterId}",
-                    request.TagUid, request.SpoolId, request.PrinterId);
+                    LogSanitizer.Sanitize(request.TagUid), request.SpoolId, LogSanitizer.Sanitize(request.PrinterId?.ToString()));
 
                 return MapToDto(binding);
             }
@@ -142,7 +143,7 @@ public class NfcTagService(
                 // Another concurrent caller inserted first — detach the failed entity and retry
                 logger.LogDebug(
                     "Unique constraint race on TagUid {TagUid}, attempt {Attempt} — retrying",
-                    request.TagUid, attempt + 1);
+                    LogSanitizer.Sanitize(request.TagUid), attempt + 1);
 
                 db.Entry(binding).State = EntityState.Detached;
             }
@@ -165,7 +166,7 @@ public class NfcTagService(
 
         logger.LogInformation(
             "NFC tag {TagUid} linked (after race resolution) → spool {SpoolId}, printer {PrinterId}",
-            request.TagUid, request.SpoolId, request.PrinterId);
+            LogSanitizer.Sanitize(request.TagUid), request.SpoolId, LogSanitizer.Sanitize(request.PrinterId?.ToString()));
 
         return MapToDto(existing);
     }
@@ -197,7 +198,7 @@ public class NfcTagService(
         db.NfcTagBindings.Remove(binding);
         await db.SaveChangesAsync(ct);
 
-        logger.LogInformation("NFC tag binding {Id} (tag {TagUid}) deleted", id, binding.TagUid);
+        logger.LogInformation("NFC tag binding {Id} (tag {TagUid}) deleted", id, LogSanitizer.Sanitize(binding.TagUid));
         return true;
     }
 

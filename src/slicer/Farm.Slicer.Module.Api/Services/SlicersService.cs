@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Gcode;
@@ -633,7 +634,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         if (printerModelId == Guid.Empty || string.IsNullOrWhiteSpace(printerModelName) || string.IsNullOrWhiteSpace(manufacturerName))
         {
-            _logger.LogDebug("[ImportProfilesForModel] Skipping import - invalid parameters: modelId={PrinterModelId}, modelName={PrinterModelName}, manufacturer={ManufacturerName}", printerModelId, printerModelName, manufacturerName);
+            _logger.LogDebug("[ImportProfilesForModel] Skipping import - invalid parameters: modelId={PrinterModelId}, modelName={PrinterModelName}, manufacturer={ManufacturerName}", printerModelId, LogSanitizer.Sanitize(printerModelName), LogSanitizer.Sanitize(manufacturerName));
             return 0;
         }
 
@@ -642,7 +643,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         MachineModelProfile? existingProfile = await _machineModelProfileRepo.GetByPrinterModelIdAsync(printerModelId, ct);
         if (existingProfile != null)
         {
-            _logger.LogDebug("[ImportProfilesForModel] Profiles already exist for {PrinterModelName} (has machine model profile), skipping import", printerModelName);
+            _logger.LogDebug("[ImportProfilesForModel] Profiles already exist for {PrinterModelName} (has machine model profile), skipping import", LogSanitizer.Sanitize(printerModelName));
             return 0;
         }
 
@@ -656,14 +657,14 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
         if (orcaWorker == null)
         {
-            _logger.LogDebug("[ImportProfilesForModel] No OrcaSlicer worker available for profile import for {PrinterModelName}", printerModelName);
+            _logger.LogDebug("[ImportProfilesForModel] No OrcaSlicer worker available for profile import for {PrinterModelName}", LogSanitizer.Sanitize(printerModelName));
             return 0;
         }
 
         _logger.LogInformation(
             "[ImportProfilesForModel] Importing slicer profiles for {ManufacturerName} {PrinterModelName} from worker {WorkerId}",
-            manufacturerName,
-            printerModelName,
+            LogSanitizer.Sanitize(manufacturerName),
+            LogSanitizer.Sanitize(printerModelName),
             orcaWorker.Id);
 
         try
@@ -675,7 +676,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             if (!response.IsSuccessStatusCode)
             {
                 string errorContent = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogWarning("[ImportProfilesForModel] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                _logger.LogWarning("[ImportProfilesForModel] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, LogSanitizer.Sanitize(errorContent));
                 return 0;
             }
 
@@ -684,7 +685,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             if (allProfiles == null || allProfiles.ByHierarchy == null)
             {
-                _logger.LogWarning("[ImportProfilesForModel] No profiles available from worker for {PrinterModelName}", printerModelName);
+                _logger.LogWarning("[ImportProfilesForModel] No profiles available from worker for {PrinterModelName}", LogSanitizer.Sanitize(printerModelName));
                 return 0;
             }
 
@@ -922,18 +923,18 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             if (imported > 0)
             {
                 await _repo.SaveChangesAsync(ct);
-                _logger.LogInformation("[ImportProfilesForModel] Successfully imported {Imported} slicer profiles for {ManufacturerName} {PrinterModelName}", imported, manufacturerName, printerModelName);
+                _logger.LogInformation("[ImportProfilesForModel] Successfully imported {Imported} slicer profiles for {ManufacturerName} {PrinterModelName}", imported, LogSanitizer.Sanitize(manufacturerName), LogSanitizer.Sanitize(printerModelName));
             }
             else
             {
-                _logger.LogDebug("[ImportProfilesForModel] No new profiles to import for {ManufacturerName} {PrinterModelName}", manufacturerName, printerModelName);
+                _logger.LogDebug("[ImportProfilesForModel] No new profiles to import for {ManufacturerName} {PrinterModelName}", LogSanitizer.Sanitize(manufacturerName), LogSanitizer.Sanitize(printerModelName));
             }
 
             return imported;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning("[ImportProfilesForModel] Error importing profiles for {PrinterModelName}: {ExMessage}", printerModelName, ex.Message);
+            _logger.LogWarning("[ImportProfilesForModel] Error importing profiles for {PrinterModelName}: {ExMessage}", LogSanitizer.Sanitize(printerModelName), LogSanitizer.Sanitize(ex.Message));
             return 0;
         }
     }
@@ -975,13 +976,13 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
 
             // Call the worker's /api/profiles endpoint which now returns AllProfilesResponseDto with all three profile types
             string workerUrl = workerHost.TrimEnd('/');
-            _logger.LogInformation("[SeedProfilesFromWorker] Fetching profiles from worker at: {WorkerUrl}/api/profiles", workerUrl);
+            _logger.LogInformation("[SeedProfilesFromWorker] Fetching profiles from worker at: {WorkerUrl}/api/profiles", LogSanitizer.Sanitize(workerUrl));
             HttpResponseMessage response = await _httpClient.GetAsync($"{workerUrl}/api/profiles", ct);
 
             if (!response.IsSuccessStatusCode)
             {
                 string errorContent = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogWarning("[SeedProfilesFromWorker] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+                _logger.LogWarning("[SeedProfilesFromWorker] Worker /api/profiles returned {ResponseStatusCode}: {ErrorContent}", response.StatusCode, LogSanitizer.Sanitize(errorContent));
 
                 // Clear lock on error so retry can happen
                 await _settingsService.ClearLockAsync(SEED_LOCK_KEY, ct);

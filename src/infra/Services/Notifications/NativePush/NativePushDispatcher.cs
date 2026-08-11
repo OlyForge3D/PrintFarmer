@@ -3,6 +3,7 @@ using System.Globalization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain.Notifications;
 using Farm.Infrastructure.Dtos.Attention;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Notifications;
 using Farm.Infrastructure.Services.Attention;
 using Farm.Infrastructure.Services.OperatorFeatures;
@@ -443,7 +444,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         ex,
                         "[NativePush] Isolated per-owner failure for userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining owners.",
                         userId,
-                        attentionItemId);
+                        LogSanitizer.Sanitize(attentionItemId));
                 }
             }
         }
@@ -460,7 +461,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
             // A validated-options reload that throws lands here (blocker 1 B):
             // the fence + lifecycle leases still release below and PruneCaches
             // still drives bounded reclamation without inventing rate settings.
-            _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", attentionItemId);
+            _logger.LogWarning(ex, "[NativePush] Dispatch failed for attentionItemId={AttentionItemId}", LogSanitizer.Sanitize(attentionItemId));
         }
         finally
         {
@@ -686,7 +687,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                         "[NativePush] Isolated per-device failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing with remaining devices.",
                         deviceToken.Id,
                         userId,
-                        attentionItemId);
+                        LogSanitizer.Sanitize(attentionItemId));
                 }
             }
         }
@@ -741,7 +742,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 "[NativePush] Unable to resolve server identity for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; skipping this device.",
                 deviceToken.Id,
                 userId,
-                attentionItemId);
+                LogSanitizer.Sanitize(attentionItemId));
             return DeviceDispatchOutcome.Completed;
         }
 
@@ -803,7 +804,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                     "[NativePush] Isolated pre-transport sender failure for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; sibling devices continue and this device remains eligible for exact-version retry.",
                     deviceToken.Id,
                     userId,
-                    attentionItemId);
+                    LogSanitizer.Sanitize(attentionItemId));
                 return DeviceDispatchOutcome.Completed;
             }
 
@@ -851,7 +852,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 "[NativePush] Failed to persist send result for deviceTokenId={DeviceTokenId} userId={UserId} attentionItemId={AttentionItemId}; continuing.",
                 deviceToken.Id,
                 userId,
-                attentionItemId);
+                LogSanitizer.Sanitize(attentionItemId));
             return DeviceDispatchOutcome.Completed;
         }
     }
@@ -1372,7 +1373,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 _logger.LogWarning(
                     ex,
                     "[NativePush] Sender threw after transport start for attentionItemId={AttentionItemId}.",
-                    envelope.AttentionItemId);
+                    LogSanitizer.Sanitize(envelope.AttentionItemId));
                 result = NativePushDispatchResult.Transient("sender_exception");
             }
             finally
@@ -1545,7 +1546,7 @@ public sealed class NativePushDispatcher : INativePushDispatcher, IDisposable
                 logger.LogWarning(
                     ex,
                     "[NativePush] Feature-gate read failed at transport-start for attentionItemId={AttentionItemId}; failing closed and rolling back the reservation for exact-version retry.",
-                    attentionItemId);
+                    LogSanitizer.Sanitize(attentionItemId));
                 VetoAndRollback();
                 return NativePushTransportStartDecision.Veto();
             }

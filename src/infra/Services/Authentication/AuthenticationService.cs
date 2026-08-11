@@ -45,7 +45,7 @@ public class AuthenticationService(
                 // Record failed attempt even for non-existent users (prevent user enumeration)
                 await _accountLockoutService.RecordFailedLoginByUsernameAsync(username, "unknown", "User not found");
                 await _authAuditService.LogLoginFailedAsync(username, "User not found", "unknown", null);
-                _logger.LogWarning("Authentication failed for username: {Username} - user not found", username);
+                _logger.LogWarning("Authentication failed for username: {Username} - user not found", LogSanitizer.Sanitize(username));
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
@@ -54,14 +54,14 @@ public class AuthenticationService(
             {
                 DateTime? lockoutEnd = await _accountLockoutService.GetLockoutEndAsync(user.Id);
                 await _authAuditService.LogLoginFailedAsync(username, $"Account locked until {lockoutEnd}", "unknown", null);
-                _logger.LogWarning("Authentication failed for username: {Username} - account locked until {LockoutEnd}", username, lockoutEnd);
+                _logger.LogWarning("Authentication failed for username: {Username} - account locked until {LockoutEnd}", LogSanitizer.Sanitize(username), lockoutEnd);
                 return new AuthenticationResult(false, Error: $"Account is temporarily locked. Please try again later.");
             }
 
             if (!user.IsActive)
             {
                 await _authAuditService.LogLoginFailedAsync(username, "User account is disabled", "unknown", null);
-                _logger.LogWarning("Authentication failed for username: {Username} - user is inactive", username);
+                _logger.LogWarning("Authentication failed for username: {Username} - user is inactive", LogSanitizer.Sanitize(username));
                 return new AuthenticationResult(false, Error: "User account is disabled");
             }
 
@@ -70,7 +70,7 @@ public class AuthenticationService(
                 // Record failed login attempt (may trigger lockout)
                 await _accountLockoutService.RecordFailedLoginAsync(user.Id, username, "unknown", "Invalid password");
                 await _authAuditService.LogLoginFailedAsync(username, "Invalid password", "unknown", null);
-                _logger.LogWarning("Authentication failed for username: {Username} - invalid password", username);
+                _logger.LogWarning("Authentication failed for username: {Username} - invalid password", LogSanitizer.Sanitize(username));
                 return new AuthenticationResult(false, Error: "Invalid username or password");
             }
 
@@ -86,12 +86,12 @@ public class AuthenticationService(
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? userDto = await GetUserWithRolesAndPermissionsAsync(user.Id);
-            _logger.LogInformation("User {Username} authenticated successfully", username);
+            _logger.LogInformation("User {Username} authenticated successfully", LogSanitizer.Sanitize(username));
             return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), userDto);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during authentication for username: {Username}", username);
+            _logger.LogError(ex, "Error during authentication for username: {Username}", LogSanitizer.Sanitize(username));
             return new AuthenticationResult(false, Error: "Authentication service error");
         }
     }
@@ -146,12 +146,12 @@ public class AuthenticationService(
 
             string token = await GenerateJwtTokenAsync(user);
             UserDto? dto = await GetUserWithRolesAndPermissionsAsync(user.Id);
-            _logger.LogInformation("User {RequestUsername} registered successfully", request.Username);
+            _logger.LogInformation("User {RequestUsername} registered successfully", LogSanitizer.Sanitize(request.Username));
             return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), dto);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during registration for username: {RequestUsername}", request.Username);
+            _logger.LogError(ex, "Error during registration for username: {RequestUsername}", LogSanitizer.Sanitize(request.Username));
             return new AuthenticationResult(false, Error: "Registration service error");
         }
     }

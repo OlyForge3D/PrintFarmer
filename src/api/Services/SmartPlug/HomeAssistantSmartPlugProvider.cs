@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
 using Microsoft.Extensions.Configuration;
@@ -38,7 +39,7 @@ public sealed class HomeAssistantSmartPlugProvider(
         {
             logger.LogWarning(
                 "HomeAssistant token not configured or integration disabled. Skipping reading for {EntityId}",
-                entityId);
+                LogSanitizer.Sanitize(entityId));
             return null;
         }
 
@@ -49,7 +50,7 @@ public sealed class HomeAssistantSmartPlugProvider(
         {
             logger.LogWarning(
                 "HomeAssistant base URL not configured. Skipping reading for {EntityId}",
-                entityId);
+                LogSanitizer.Sanitize(entityId));
             return null;
         }
 
@@ -85,7 +86,7 @@ public sealed class HomeAssistantSmartPlugProvider(
             };
             logger.LogWarning(
                 "HomeAssistant GetCurrentReading failed for {EntityId} at {BaseUrl}: {Reason}",
-                entityId, baseUrl, reason);
+                LogSanitizer.Sanitize(entityId), LogSanitizer.Sanitize(baseUrl), LogSanitizer.Sanitize(reason));
             return null;
         }
     }
@@ -98,14 +99,14 @@ public sealed class HomeAssistantSmartPlugProvider(
 
         if (string.IsNullOrWhiteSpace(token))
         {
-            logger.LogWarning("HomeAssistant token not configured. Cannot test connection for {EntityId}", entityId);
+            logger.LogWarning("HomeAssistant token not configured. Cannot test connection for {EntityId}", LogSanitizer.Sanitize(entityId));
             return false;
         }
 
         string baseUrl = parsedBaseUrl ?? configuredBaseUrl ?? string.Empty;
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            logger.LogWarning("HomeAssistant base URL not configured. Cannot test connection for {EntityId}", entityId);
+            logger.LogWarning("HomeAssistant base URL not configured. Cannot test connection for {EntityId}", LogSanitizer.Sanitize(entityId));
             return false;
         }
 
@@ -125,7 +126,7 @@ public sealed class HomeAssistantSmartPlugProvider(
         }
         catch (Exception ex)
         {
-            logger.LogDebug(ex, "HomeAssistant TestConnection failed for {BaseUrl}", baseUrl);
+            logger.LogDebug(ex, "HomeAssistant TestConnection failed for {BaseUrl}", LogSanitizer.Sanitize(baseUrl));
             return false;
         }
     }
@@ -208,7 +209,7 @@ public sealed class HomeAssistantSmartPlugProvider(
             if (!double.TryParse(stateStr, System.Globalization.NumberStyles.Any,
                     System.Globalization.CultureInfo.InvariantCulture, out double watts))
             {
-                logger.LogWarning("HomeAssistant entity {EntityId} state '{State}' is not a numeric watt value", entityId, stateStr);
+                logger.LogWarning("HomeAssistant entity {EntityId} state '{State}' is not a numeric watt value", LogSanitizer.Sanitize(entityId), LogSanitizer.Sanitize(stateStr));
                 return null;
             }
 
@@ -258,7 +259,7 @@ public sealed class HomeAssistantSmartPlugProvider(
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Failed to parse HomeAssistant state response for entity {EntityId}", entityId);
+            logger.LogWarning(ex, "Failed to parse HomeAssistant state response for entity {EntityId}", LogSanitizer.Sanitize(entityId));
             return null;
         }
     }

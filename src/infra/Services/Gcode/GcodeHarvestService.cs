@@ -13,6 +13,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Gcode;
 using Farm.Infrastructure.Repositories.Harvest;
 using Farm.Infrastructure.Repositories.Printers;
@@ -770,7 +771,7 @@ public class GcodeHarvestService(
             return new GcodeHarvestResultDto(request.HarvestOperationId, false, "Harvest operation not found");
         }
 
-        _logger.LogInformation("Received {Length} file IDs to import: {StringJoin}", request.FileIds.Length, string.Join(", ", request.FileIds));
+        _logger.LogInformation("Received {Length} file IDs to import: {StringJoin}", request.FileIds.Length, LogSanitizer.Sanitize(string.Join(", ", request.FileIds)));
 
         // Load only IDs initially - don't load entities in main context
         // Each file will be loaded fresh within its own scoped context
@@ -1456,11 +1457,11 @@ public class GcodeHarvestService(
         byte[]? fileContent = await printersService.DownloadPrinterFileAsync(printerId, filename, ct);
         if (fileContent == null || fileContent.Length == 0)
         {
-            _logger.LogWarning("Failed to download file '{Filename}' - empty or not found", filename);
+            _logger.LogWarning("Failed to download file '{Filename}' - empty or not found", LogSanitizer.Sanitize(filename));
             return null;
         }
 
-        _logger.LogInformation("Downloaded file '{Filename}': {FileContentLength} bytes", filename, fileContent.Length);
+        _logger.LogInformation("Downloaded file '{Filename}': {FileContentLength} bytes", LogSanitizer.Sanitize(filename), fileContent.Length);
         return fileContent;
     }
 
@@ -1476,7 +1477,7 @@ public class GcodeHarvestService(
     {
         try
         {
-            _logger.LogInformation("Starting direct harvest for file '{Filename}' from printer {PrinterId}", filename, printerId);
+            _logger.LogInformation("Starting direct harvest for file '{Filename}' from printer {PrinterId}", LogSanitizer.Sanitize(filename), printerId);
 
             // Broadcast start event
             await _harvestEventBroadcaster.BroadcastSingleFileHarvestStartAsync(filename, ct);
@@ -1515,7 +1516,7 @@ public class GcodeHarvestService(
 
             // Step 4: Hand off to GcodeFileProcessingService for unified processing
             // (storage, hash, duplicate check, metadata extraction, thumbnail, entity creation, database save)
-            _logger.LogInformation("Processing file '{Filename}' via GcodeFileProcessingService", filename);
+            _logger.LogInformation("Processing file '{Filename}' via GcodeFileProcessingService", LogSanitizer.Sanitize(filename));
             GcodeFile gcodeFile;
             try
             {
@@ -1576,7 +1577,7 @@ public class GcodeHarvestService(
                     new[] { ex.Message });
             }
 
-            _logger.LogInformation("Successfully harvested file '{Filename}' with ID {GcodeFileId}", filename, gcodeFile.Id);
+            _logger.LogInformation("Successfully harvested file '{Filename}' with ID {GcodeFileId}", LogSanitizer.Sanitize(filename), gcodeFile.Id);
             await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, true, "File harvested successfully", ct);
 
             return new GcodeHarvestResultDto(
@@ -1592,7 +1593,7 @@ public class GcodeHarvestService(
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error harvesting single file '{Filename}' from printer {PrinterId}", filename, printerId);
+            _logger.LogError(ex, "Error harvesting single file '{Filename}' from printer {PrinterId}", LogSanitizer.Sanitize(filename), printerId);
             await _harvestEventBroadcaster.BroadcastSingleFileHarvestCompleteAsync(filename, false, $"Error harvesting file: {ex.Message}", ct);
             return new GcodeHarvestResultDto(
                 Guid.NewGuid(),

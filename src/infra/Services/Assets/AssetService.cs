@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Dtos.Assets;
+using Farm.Infrastructure.Logging;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Assets;
@@ -98,8 +99,8 @@ public sealed class AssetService(ILogger<AssetService> logger) : IAssetService
 
             _logger.LogInformation(
                 "[AssetService] Printer asset: {ManufacturerId}/{ModelId} -> {CoverUrl}",
-                manufacturerId,
-                modelId,
+                LogSanitizer.Sanitize(manufacturerId),
+                LogSanitizer.Sanitize(modelId),
                 asset.Cover);
 
             return Task.FromResult<PrinterAssetDto?>(asset);
@@ -109,8 +110,8 @@ public sealed class AssetService(ILogger<AssetService> logger) : IAssetService
             _logger.LogError(
                 ex,
                 "[AssetService] Error getting printer asset {ManufacturerId}/{ModelId}",
-                manufacturerId,
-                modelId);
+                LogSanitizer.Sanitize(manufacturerId),
+                LogSanitizer.Sanitize(modelId));
             return Task.FromResult<PrinterAssetDto?>(null);
         }
     }
