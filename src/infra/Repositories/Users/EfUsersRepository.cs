@@ -228,7 +228,7 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
     public async Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default)
     {
         return await _db.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .Where(ur => ur.UserId == userId && ur.IsActive && ur.Role.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .Select(ur => ur.Role.Name)
             .ToListAsync(ct);
     }
@@ -275,8 +275,11 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
 
     private async Task<List<(string Resource, string Action, bool Granted)>> GetRolePermissionRowsAsync(Guid userId, CancellationToken ct)
     {
+        // Role.IsActive is part of "active role assignment": deactivating a role via the
+        // role-management API must withdraw its permissions immediately, not leave them live
+        // until every individual assignment is separately revoked.
         return await _db.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .Where(ur => ur.UserId == userId && ur.IsActive && ur.Role.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
             .Select(rp => new ValueTuple<string, string, bool>(rp.Resource.Name, rp.Action.Name, rp.Granted))
             .ToListAsync(ct);

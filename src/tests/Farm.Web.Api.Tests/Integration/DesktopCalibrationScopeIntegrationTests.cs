@@ -168,6 +168,19 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Deactivates the <b>role itself</b> rather than the assignment — the operation the role
+    /// management API performs. Authority must be withdrawn just as promptly.
+    /// </summary>
+    private async Task DeactivateRoleAsync(Guid roleId)
+    {
+        using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Role role = await db.Roles.SingleAsync(r => r.Id == roleId);
+        role.IsActive = false;
+        await db.SaveChangesAsync();
+    }
+
     private async Task<HttpResponseMessage> ExchangeAsync(string rawKey) =>
         await _anonymousClient.PostAsJsonAsync("/api/auth/api-key/exchange", new { apiKey = rawKey });
 
@@ -290,6 +303,50 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
 
         HttpResponseMessage response = await ExchangeAsync(rawKey);
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized, "nothing survives the intersection");
+    }
+
+    /// <summary>
+    /// Deactivating the role itself — what the role-management API does — must withdraw authority
+    /// just as promptly as deactivating an individual assignment. Otherwise a disabled role would
+    /// keep authorizing Desktop keys indefinitely.
+    /// </summary>
+    [Fact]
+    public async Task DeactivatingTheRoleItself_WithdrawsScopeAuthorityOnNextExchange()
+    {
+        Guid roleId = await GrantOwnerPermissionsAsync(PrintFarmerPermissions.Calibration.Read);
+        string rawKey = await SeedApiKeyAsync(ApiKeyScope.ModelRead | ApiKeyScope.CalibrationRead);
+
+        ApiKeyExchangeResponse before = await ExchangeForBodyAsync(rawKey);
+        before.Scopes.Should().Contain("CalibrationRead");
+
+        await DeactivateRoleAsync(roleId);
+
+        ApiKeyExchangeResponse after = await ExchangeForBodyAsync(rawKey);
+        after.Scopes.Should().NotContain(
+            "CalibrationRead",
+            "a deactivated role must stop conferring authority immediately");
+        after.Scopes.Should().Contain("ModelRead", "unrelated model scopes are unaffected");
+
+        using HttpClient client = CreateBearerClient(after.Token);
+        HttpResponseMessage read = await client.GetAsync("/api/calibration-projects");
+        read.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// The same rule must hold at provisioning time, or creation would mint a key the exchange
+    /// immediately strips.
+    /// </summary>
+    [Fact]
+    public async Task DeactivatingTheRoleItself_AlsoBlocksNewKeyCreation()
+    {
+        Guid roleId = await GrantOwnerPermissionsAsync(PrintFarmerPermissions.Calibration.Read);
+        await DeactivateRoleAsync(roleId);
+
+        using HttpResponseMessage create = await _loginClient.PostAsJsonAsync(
+            $"/api/users/{_ownerId}/apikeys",
+            new { name = "deactivated-role-key", purpose = "Desktop", scopeNames = new[] { "CalibrationRead" } });
+
+        create.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     #endregion
