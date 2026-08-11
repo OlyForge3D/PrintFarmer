@@ -102,19 +102,17 @@ public sealed class EgressGuard : IEgressGuard
 
         string[] allowedRanges = GetAllowedRanges();
 
-        foreach (IPAddress address in addresses)
+        if (addresses.FirstOrDefault(address =>
+                NetworkDestinationClassifier.IsLoopbackLinkLocalOrMulticast(address) &&
+                !IsExplicitlyAllowed(address, allowedRanges)) is { } blockedAddress)
         {
-            if (NetworkDestinationClassifier.IsLoopbackLinkLocalOrMulticast(address) &&
-                !IsExplicitlyAllowed(address, allowedRanges))
-            {
-                _logger.LogWarning(
-                    "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
-                    uri.Host,
-                    address);
-                return EgressCheckResult.Deny(
-                    "Destination resolves to a loopback, link-local, or multicast address",
-                    uri);
-            }
+            _logger.LogWarning(
+                "Egress blocked to {Host} ({Address}): destination is loopback, link-local, or multicast and not covered by ALLOWED_NETWORK_RANGES",
+                uri.Host,
+                blockedAddress);
+            return EgressCheckResult.Deny(
+                "Destination resolves to a loopback, link-local, or multicast address",
+                uri);
         }
 
         // Pin the first vetted address so callers can reuse it for the actual outbound
@@ -196,14 +194,6 @@ public sealed class EgressGuard : IEgressGuard
 
     private static bool IsExplicitlyAllowed(IPAddress ip, string[] allowedRanges)
     {
-        foreach (string range in allowedRanges)
-        {
-            if (NetworkRangeHelper.IsIpInRange(ip, range))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return allowedRanges.Any(range => NetworkRangeHelper.IsIpInRange(ip, range));
     }
 }
