@@ -204,15 +204,20 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
     public async Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default)
     {
         return await _db.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .Where(ur => ur.UserId == userId && ur.IsActive && ur.Role.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .Select(ur => ur.Role.Name)
             .ToListAsync(ct);
     }
 
     public async Task<List<(string Resource, string Action)>> GetGrantedPermissionsAsync(Guid userId, CancellationToken ct = default)
     {
+        // Authority is the union of every active, unexpired role assignment's granted rows.
+        // Role.IsActive is part of that: deactivating a role via the role-management API must
+        // withdraw its permissions immediately, not leave them live until each assignment is
+        // individually revoked. Granted == false remains a role-local non-grant, never a
+        // cross-role deny.
         return await _db.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .Where(ur => ur.UserId == userId && ur.IsActive && ur.Role.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
             .SelectMany(ur => ur.Role.RolePermissions)
             .Where(rp => rp.Granted)
             .Select(rp => new ValueTuple<string, string>(rp.Resource.Name, rp.Action.Name))

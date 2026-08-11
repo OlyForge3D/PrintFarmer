@@ -59,6 +59,12 @@ export interface CreateApiKeyRequest {
    * requests that set both.
    */
   scopeNames?: ApiKeyScope[];
+  /**
+   * @deprecated Legacy packed flags string (e.g. `"ModelRead,LibrarySync"`). Still accepted by
+   * the server for existing clients, but it renders the exact value 7 as the misleading name
+   * `All`. Prefer `scopeNames`; setting both is rejected with a 400.
+   */
+  scopes?: string;
   expiresAt?: string;
 }
 
