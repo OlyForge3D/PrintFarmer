@@ -1,10 +1,10 @@
 ﻿using System.Reflection;
 using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Contracts.Roles;
 using Farm.Infrastructure.Services.Roles;
 using Farm.Web.Api.Controllers.Admin;
 using FluentAssertions;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Moq;
@@ -13,7 +13,8 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers.Admin;
 
 /// <summary>
-/// Issue #1448: every role-CRUD mutation must require <c>farm_admin</c>, and every
+/// Issue #1448: every role-CRUD mutation must require the <c>roles:admin</c> permission (which
+/// <c>farm_admin</c> holds via its seeded resource-wide grant, per issue #1451/D2), and every
 /// <see cref="RoleManagementException"/> error code must map to the HTTP status code that
 /// reflects the violated invariant (404/403/409/400) rather than a single indistinguishable
 /// code. A live-pipeline test is not possible in this unit project (no authentication handler
@@ -28,15 +29,17 @@ public sealed class RolesControllerTests
     private static readonly Guid ActorUserId = Guid.NewGuid();
 
     [Fact]
-    public void Controller_RequiresFarmAdminRole_AtClassLevel()
+    public void Controller_RequiresRolesAdminPermission_AtClassLevel()
     {
-        AuthorizeAttribute? classAuthorize = ControllerType
-            .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+        RequirePermissionAttribute? classRequirePermission = ControllerType
+            .GetCustomAttributes<RequirePermissionAttribute>(inherit: true)
             .FirstOrDefault();
 
-        classAuthorize.Should().NotBeNull("every role-management endpoint, including reads, is admin-only");
-        classAuthorize!.Roles.Should().Be("farm_admin",
-            "a non-farm_admin authenticated user must receive 403 on every /api/admin/roles endpoint");
+        classRequirePermission.Should().NotBeNull("every role-management endpoint, including reads, is admin-only");
+        classRequirePermission!.Resource.Should().Be("roles",
+            "a user without the roles:admin permission must receive 403 on every /api/admin/roles endpoint");
+        classRequirePermission.Action.Should().Be("admin",
+            "a user without the roles:admin permission must receive 403 on every /api/admin/roles endpoint");
     }
 
     [Theory]
@@ -51,9 +54,9 @@ public sealed class RolesControllerTests
         method.Should().NotBeNull();
 
         method!
-            .GetCustomAttributes<AuthorizeAttribute>(inherit: true)
+            .GetCustomAttributes<RequirePermissionAttribute>(inherit: true)
             .Should().BeEmpty(
-                $"{methodName} must rely on the class-level [Authorize(Roles = \"farm_admin\")] gate, not a weaker per-action override");
+                $"{methodName} must rely on the class-level [RequirePermission(\"roles\", \"admin\")] gate, not a weaker per-action override");
     }
 
     [Theory]

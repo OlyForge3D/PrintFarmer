@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PrintQueue;
@@ -7,7 +8,6 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Cost;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -887,7 +887,7 @@ public class JobQueueAnalyticsController(
     /// <param name="dryRun">When true (default), reports duplicates without deleting them.</param>
     /// <param name="cancellationToken">Cancellation token for async operation</param>
     [HttpPost("history/deduplicate")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("queue", "admin")]
     [ProducesResponseType(typeof(DeduplicateHistoryResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

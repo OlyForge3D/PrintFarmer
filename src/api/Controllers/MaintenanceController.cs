@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.Maintenance;
 using Farm.Infrastructure.Services.Maintenance;
@@ -23,7 +24,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/maintenance")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("maintenance", "admin")]
 public class MaintenanceController(
     ILogger<MaintenanceController> logger,
     IMaintenanceAlertRepository alertRepository,

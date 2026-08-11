@@ -1,5 +1,6 @@
 ﻿using System.Security.Claims;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Web.Api.Services.Authentication;
@@ -15,7 +16,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/users")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("users", "admin")]
 public class UsersController(
     Farm.Infrastructure.Services.Users.IUsersService usersService,
     IAuthenticationService authService,

@@ -13,7 +13,7 @@ namespace Farm.Slicer.Module.Api.Controllers.Admin;
 [ApiController]
 [Route("api/admin/slicers")]
 [Authorize]
-[RequirePermission("admin:slicers")]
+[RequirePermission("slicer_engines:admin")]
 public class SlicerManagementController(
     ISlicersService service,
     ILogger<SlicerManagementController> logger) : ControllerBase

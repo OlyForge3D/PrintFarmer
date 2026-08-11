@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.NfcDevices;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -101,7 +102,7 @@ public class NfcDevicesController(INfcDeviceService nfcDeviceService) : Controll
     /// and <see cref="HeartbeatAsync"/>, so it is restricted to farm administrators (same
     /// gate used for every other credential-issuing/administrative action in this API).
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("nfc_devices", "admin")]
     [HttpPost("{id:guid}/approve")]
     [ProducesResponseType(typeof(NfcDeviceApprovalResultDto), 200)]
     [ProducesResponseType(404)]

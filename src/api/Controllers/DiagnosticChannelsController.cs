@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Diagnostics;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Services.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -10,7 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/diagnostics/channels")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("diagnostics", "admin")]
 public class DiagnosticChannelsController(IDiagnosticChannelService channelService) : ControllerBase
 {
     private readonly IDiagnosticChannelService _channels = channelService;

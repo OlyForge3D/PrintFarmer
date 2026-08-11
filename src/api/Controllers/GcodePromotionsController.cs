@@ -1,8 +1,8 @@
 ﻿using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Security;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Calibration;
 using Farm.Web.Api.Services.Gcode;
 using Microsoft.AspNetCore.Authorization;

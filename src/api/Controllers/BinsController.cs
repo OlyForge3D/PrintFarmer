@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Logging;
@@ -94,7 +95,7 @@ public class BinsController(
 
     /// <summary>Creates a bin.</summary>
     [HttpPost]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bins", "admin")]
     [ProducesResponseType(typeof(BinResponse), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
@@ -145,7 +146,7 @@ public class BinsController(
 
     /// <summary>Updates bin metadata.</summary>
     [HttpPut("{code}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bins", "admin")]
     [ProducesResponseType(typeof(BinResponse), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<BinResponse>> UpdateAsync(
@@ -279,7 +280,7 @@ public class BinsController(
 
     /// <summary>Soft-deactivates a bin while retaining historical ledger and scan references.</summary>
     [HttpDelete("{code}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("bins", "admin")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteAsync(string code, CancellationToken ct)

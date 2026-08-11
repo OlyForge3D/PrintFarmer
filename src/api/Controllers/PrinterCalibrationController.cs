@@ -1,7 +1,7 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Calibration;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;

@@ -5,6 +5,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
@@ -21,7 +22,6 @@ using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Controllers.Requests;
-using Farm.Web.Api.Infrastructure.Authorization;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;

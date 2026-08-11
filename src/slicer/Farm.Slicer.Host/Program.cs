@@ -98,6 +98,12 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
 
+// Required so SlicerHub's [RequirePermission] (Farm.Infrastructure.Authorization) requirements
+// are actually evaluated in this standalone host. Without a registered handler, ASP.NET Core
+// leaves the requirement unsatisfied and authorization fails closed for everyone, including
+// farm_admin.
+builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
+
 Action<JsonSerializerOptions> configureJson = options =>
 {
     options.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;

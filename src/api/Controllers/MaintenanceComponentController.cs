@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.Maintenance;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Maintenance;
@@ -16,7 +17,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/maintenance/components")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("maintenance", "admin")]
 public class MaintenanceComponentController(
     ILogger<MaintenanceComponentController> logger,
     IMaintenanceComponentRepository componentRepository,

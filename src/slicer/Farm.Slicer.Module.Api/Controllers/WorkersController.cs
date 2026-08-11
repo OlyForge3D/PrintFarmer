@@ -223,7 +223,7 @@ public class WorkersController(
     /// <param name="id">The worker ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id}/reset")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("dispatch-settings:admin")]
     public async Task<IActionResult> ResetAsync(Guid id, CancellationToken ct)
     {
         Worker? worker = await _workerRepository.GetByIdAsync(id);
