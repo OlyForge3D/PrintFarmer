@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Dtos;
 using Farm.Web.Api.Services.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,7 +12,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("system_settings", "admin")]
 [Tags("Admin - Overview")]
 public sealed class AdminOverviewController(IAdminOverviewService overviewService) : ControllerBase
 {

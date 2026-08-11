@@ -13,6 +13,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Backend.Plugin.Core;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
@@ -29,7 +30,6 @@ using Farm.Infrastructure.Telemetry;
 using Farm.Web.Api.Controllers.Requests;
 using Farm.Web.Api.Controllers.Responses;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Infrastructure.Idempotency;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
@@ -299,7 +299,7 @@ public class PrintersController(
     /// <returns>Connection test result with success status and optional message.</returns>
     /// <response code="200">Connection test completed (check success field for result).</response>
     /// <response code="400">Invalid request parameters.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("test-connection")]
     [ProducesResponseType(typeof(TestConnectionResponse), 200)]
     [ProducesResponseType(400)]
@@ -771,7 +771,7 @@ public class PrintersController(
     /// <response code="200">Returns bulk import results with created printers and any errors.</response>
     /// <response code="400">If the printer data is invalid.</response>
     /// <response code="500">If there was an error creating printers.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("bulk")]
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
@@ -1269,7 +1269,7 @@ public class PrintersController(
     /// <response code="400">If the printer data is invalid or validation fails.</response>
     /// <response code="409">If a printer with the same name and URL already exists.</response>
     /// <response code="500">If there was an error creating the printer.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(PrinterDto), 201)]
     [ProducesResponseType(400)]
@@ -1348,7 +1348,7 @@ public class PrintersController(
     /// <response code="200">Successfully registered discovered printer(s).</response>
     /// <response code="400">Invalid printer data.</response>
     /// <response code="500">Server error.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("discovered")]
     [ProducesResponseType(typeof(IEnumerable<PrinterDto>), 200)]
     [ProducesResponseType(400)]
@@ -1493,7 +1493,7 @@ public class PrintersController(
     /// <response code="200">Returns the updated printer.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="500">If there was an error updating the printer.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPut("{id:guid}/maintenance")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -1580,7 +1580,7 @@ public class PrintersController(
     /// <response code="200">Returns the updated printer with camera URLs.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="500">If there was an error refreshing camera URLs.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("{id:guid}/refresh-cameras")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -1611,7 +1611,7 @@ public class PrintersController(
     /// <response code="200">Template applied successfully.</response>
     /// <response code="404">If the printer was not found.</response>
     /// <response code="500">If there was an error applying the template.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("{id:guid}/apply-template")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]
@@ -1653,7 +1653,7 @@ public class PrintersController(
     /// <returns>Summary of how many printers were updated.</returns>
     /// <response code="200">Templates applied successfully.</response>
     /// <response code="500">If there was an error applying templates.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("apply-templates")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -1699,7 +1699,7 @@ public class PrintersController(
     /// <response code="400">If the update data is invalid.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="500">If there was an error updating the printer.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -2344,7 +2344,7 @@ public class PrintersController(
     /// <response code="204">If the printer was successfully deleted.</response>
     /// <response code="404">If the printer with the specified ID was not found.</response>
     /// <response code="500">If there was an error deleting the printer.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -3054,7 +3054,6 @@ public class PrintersController(
     /// <response code="400">If the offset value is out of range.</response>
     /// <response code="404">If the printer was not found.</response>
     [HttpPost("{id:guid}/z-offset")]
-    [Authorize(Roles = "farm_admin")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
     [ProducesResponseType(typeof(CommandResult), 200)]
     [ProducesResponseType(400)]
@@ -5032,7 +5031,7 @@ public class PrintersController(
     /// <returns>Session ID for tracking discovery progress.</returns>
     /// <response code="200">Discovery started successfully.</response>
     /// <response code="500">Failed to start discovery.</response>
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [RequirePermission("printers", "admin")]
     [HttpPost("discover/stream")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -5073,7 +5072,7 @@ public class PrintersController(
     /// <summary>
     /// Registers a redacted discovery result whose network target remains server-side.
     /// </summary>
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [RequirePermission("printers", "admin")]
     [HttpPost("discover/{sessionId}/register")]
     [ProducesResponseType(typeof(PrinterDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -5145,7 +5144,7 @@ public class PrintersController(
     /// <returns>Cancellation confirmation.</returns>
     /// <response code="200">Discovery cancelled successfully.</response>
     /// <response code="500">Failed to cancel discovery.</response>
-    [Authorize(Roles = PrintFarmerPermissions.FarmAdminRole)]
+    [RequirePermission("printers", "admin")]
     [HttpPost("discover/{sessionId}/cancel")]
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(500)]
@@ -5211,7 +5210,7 @@ public class PrintersController(
     /// <response code="200">Printer assigned to location successfully.</response>
     /// <response code="404">Printer or location not found.</response>
     /// <response code="500">Failed to assign printer to location.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpPost("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(400)]
@@ -5259,7 +5258,7 @@ public class PrintersController(
     /// <response code="204">Printer unassigned from location successfully.</response>
     /// <response code="404">Printer not found.</response>
     /// <response code="500">Failed to unassign printer from location.</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     [HttpDelete("{id}/location")]
     [ProducesResponseType(typeof(PrinterDto), 200)]
     [ProducesResponseType(404)]

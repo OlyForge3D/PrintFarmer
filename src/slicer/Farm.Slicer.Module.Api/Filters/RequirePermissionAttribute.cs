@@ -107,7 +107,13 @@ public sealed class ClaimsPermissionValidator(
             return Task.FromResult(true);
         }
 
-        bool granted = httpContext.User.HasClaim(PrintFarmerPermissions.ClaimType, permission);
+        // Delegate to the shared PrintFarmerPermissions.HasPermission, which also honors the
+        // "{resource}:admin implies every other action on that resource" rule (see
+        // PrintFarmerPermissions.ImpliesViaResourceAdmin). Without this, a custom role granted
+        // only "<resource>:admin" would still be refused here, even though every other
+        // enforcement point (the MVC RequirePermissionAttribute/PermissionAuthorizationHandler,
+        // SignalR hubs, capability services) treats that grant as sufficient.
+        bool granted = PrintFarmerPermissions.HasPermission(httpContext.User, permission);
         logger.LogDebug(
             "Permission decision for {Permission}: {Granted}",
             permission,

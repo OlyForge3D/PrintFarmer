@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Repositories.SystemLogs;
 using Farm.Infrastructure.Services.SystemLogs;
@@ -11,7 +12,7 @@ namespace Farm.Web.Api.Controllers;
 
 [ApiController]
 [Route("api/system-logs")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("system_settings", "admin")]
 public class SystemLogsController(ISystemLogService systemLogService, ISystemLogRepository systemLogRepository) : ControllerBase
 {
     private readonly ISystemLogService _service = systemLogService;

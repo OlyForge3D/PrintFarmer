@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Dtos;
 using Farm.Web.Api.Services.Admin;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/permissions")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("roles", "admin")]
 [Tags("Admin - Permissions")]
 public sealed class PermissionCatalogController(IPermissionCatalogService permissionCatalogService) : ControllerBase
 {

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.PrintJobs;
 using Microsoft.AspNetCore.Authorization;
@@ -29,7 +30,7 @@ public class PrintApprovalsController(IPrintApprovalService approvalService, Far
         return Ok(dto);
     }
 
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("job_queue", "admin")]
     [HttpPost("{id:guid}/approve")]
     public async Task<IActionResult> ApproveAsync([FromRoute] Guid id)
     {
@@ -37,7 +38,7 @@ public class PrintApprovalsController(IPrintApprovalService approvalService, Far
         return !ok ? NotFound() : NoContent();
     }
 
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("job_queue", "admin")]
     [HttpPost("{id:guid}/reject")]
     public async Task<IActionResult> RejectAsync([FromRoute] Guid id)
     {

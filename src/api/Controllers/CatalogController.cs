@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Web.Api.Controllers.Requests;
-
 using Farm.Web.Api.Infrastructure.Normalization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -71,7 +71,7 @@ public class CatalogController(
     /// <response code="201">Returns the newly created manufacturer</response>
     /// <response code="400">If the manufacturer name is invalid or empty</response>
     /// <response code="409">If a manufacturer with the same name already exists</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("manufacturers")]
     [ProducesResponseType(typeof(ManufacturerDto), 201)]
     [ProducesResponseType(400)]
@@ -114,7 +114,7 @@ public class CatalogController(
         return dto is null ? NotFound() : Ok(dto);
     }
 
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("printer-models")]
     [ProducesResponseType(typeof(PrinterModelDto), 201)]
     [ProducesResponseType(400)]
@@ -158,7 +158,7 @@ public class CatalogController(
         }
     }
 
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("printer-models/{id:guid}")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(400)]
@@ -178,7 +178,7 @@ public class CatalogController(
         }
     }
 
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpDelete("printer-models/{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -238,7 +238,7 @@ public class CatalogController(
     /// <returns>Updated list of aliases</returns>
     /// <response code="200">Returns the updated aliases</response>
     /// <response code="404">Model not found</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("printer-models/{modelId:guid}/aliases")]
     [ProducesResponseType(typeof(IEnumerable<SlicerModelAliasDto>), 200)]
     [ProducesResponseType(404)]
@@ -266,7 +266,7 @@ public class CatalogController(
     /// Sets auto-dispatch defaults for a printer model.
     /// </summary>
     [HttpPut("printer-models/{id:guid}/dispatch-defaults")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [ProducesResponseType(typeof(PrinterModelDto), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<PrinterModelDto>> SetModelDispatchDefaultsAsync(
@@ -302,7 +302,7 @@ public class CatalogController(
     /// Applies a model's dispatch defaults to all existing printers of that model.
     /// </summary>
     [HttpPost("printer-models/{id:guid}/apply-defaults")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [ProducesResponseType(typeof(ApplyModelDefaultsResult), 200)]
     [ProducesResponseType(404)]
     public async Task<ActionResult<ApplyModelDefaultsResult>> ApplyModelDefaultsAsync(
@@ -440,7 +440,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new hotend model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("hotends")]
     [ProducesResponseType(typeof(HotendModelDto), 201)]
     [ProducesResponseType(400)]
@@ -470,7 +470,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing hotend model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("hotends/{id:guid}")]
     [ProducesResponseType(typeof(HotendModelDto), 200)]
     [ProducesResponseType(404)]
@@ -491,7 +491,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a hotend model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpDelete("hotends/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteHotendAsync(Guid id, CancellationToken ct)
@@ -515,7 +515,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new extruder model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("extruders")]
     [ProducesResponseType(typeof(ExtruderModelDto), 201)]
     [ProducesResponseType(400)]
@@ -545,7 +545,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing extruder model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("extruders/{id:guid}")]
     [ProducesResponseType(typeof(ExtruderModelDto), 200)]
     [ProducesResponseType(404)]
@@ -566,7 +566,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes an extruder model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpDelete("extruders/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteExtruderAsync(Guid id, CancellationToken ct)
@@ -590,7 +590,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new toolhead model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("toolheads")]
     [ProducesResponseType(typeof(ToolheadModelDto), 201)]
     [ProducesResponseType(400)]
@@ -620,7 +620,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing toolhead model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("toolheads/{id:guid}")]
     [ProducesResponseType(typeof(ToolheadModelDto), 200)]
     [ProducesResponseType(404)]
@@ -641,7 +641,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a toolhead model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpDelete("toolheads/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteToolheadAsync(Guid id, CancellationToken ct)
@@ -665,7 +665,7 @@ public class CatalogController(
     /// <summary>
     /// Creates a new nozzle model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPost("nozzles")]
     [ProducesResponseType(typeof(NozzleModelDto), 201)]
     [ProducesResponseType(400)]
@@ -695,7 +695,7 @@ public class CatalogController(
     /// <summary>
     /// Updates an existing nozzle model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpPut("nozzles/{id:guid}")]
     [ProducesResponseType(typeof(NozzleModelDto), 200)]
     [ProducesResponseType(404)]
@@ -716,7 +716,7 @@ public class CatalogController(
     /// <summary>
     /// Deletes a nozzle model definition.
     /// </summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("catalog", "admin")]
     [HttpDelete("nozzles/{id:guid}")]
     [ProducesResponseType(204)]
     public async Task<ActionResult> DeleteNozzleAsync(Guid id, CancellationToken ct)

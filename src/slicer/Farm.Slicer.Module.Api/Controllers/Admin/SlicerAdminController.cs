@@ -1,5 +1,6 @@
 ﻿using System.Collections.ObjectModel;
 using System.Text.RegularExpressions;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Contracts;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
@@ -35,7 +36,7 @@ public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
     /// <param name="request">The dry run request.</param>
     /// <returns>Validation result with rendered output and any issues.</returns>
     [HttpPost("dry-run")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     public IActionResult DryRun([FromBody] DryRunRequest request)
     {
         var result = new DryRunResult
@@ -79,7 +80,7 @@ public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
     /// Gets global slicer settings.
     /// </summary>
     [HttpGet("settings")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     public async Task<IActionResult> GetSettingsAsync(CancellationToken ct)
     {
         SlicerSettings? settings = await _db.SlicerSettings.FirstOrDefaultAsync(s => s.Id == 1, ct);
@@ -105,7 +106,7 @@ public partial class SlicerAdminController(SlicerDbContext db) : ControllerBase
     /// <param name="request">Updated settings values.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPut("settings")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     public async Task<IActionResult> UpdateSettingsAsync([FromBody] UpdateSlicerSettingsRequest request, CancellationToken ct)
     {
         SlicerSettings? settings = await _db.SlicerSettings.FirstOrDefaultAsync(s => s.Id == 1, ct);

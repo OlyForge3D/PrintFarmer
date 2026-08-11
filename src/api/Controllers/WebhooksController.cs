@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain.Webhooks;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain.Webhooks;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Webhooks;
 using Farm.Infrastructure.Services.Webhooks;
@@ -13,7 +14,7 @@ namespace Farm.Web.Api.Controllers;
 [ApiController]
 [Route("api/webhooks")]
 [Tags("Webhooks")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("webhooks", "admin")]
 public class WebhooksController(
     IWebhookRepository webhookRepository,
     IWebhookService webhookService,

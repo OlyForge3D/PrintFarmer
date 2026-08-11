@@ -1,4 +1,5 @@
 ﻿using System.ComponentModel.DataAnnotations;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.PrintQuotas;
 using Microsoft.AspNetCore.Authorization;
@@ -19,7 +20,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     // ── Quota CRUD ──────────────────────────────────────────────────────
 
     /// <summary>Returns all quotas (admin view).</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet]
     [ProducesResponseType(typeof(QuotaDto[]), 200)]
     public async Task<ActionResult<QuotaDto[]>> GetAllQuotasAsync(CancellationToken ct)
@@ -29,7 +30,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Returns quotas for a specific user.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("user/{userId:guid}")]
     [ProducesResponseType(typeof(QuotaDto[]), 200)]
     public async Task<ActionResult<QuotaDto[]>> GetQuotasForUserAsync(Guid userId, CancellationToken ct)
@@ -39,7 +40,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Returns quotas for a named group.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("group/{groupName}")]
     [ProducesResponseType(typeof(QuotaDto[]), 200)]
     public async Task<ActionResult<QuotaDto[]>> GetQuotasForGroupAsync(string groupName, CancellationToken ct)
@@ -49,7 +50,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Gets a single quota by ID.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("{id:guid}")]
     [ProducesResponseType(typeof(QuotaDto), 200)]
     [ProducesResponseType(404)]
@@ -60,7 +61,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Creates a new quota.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(QuotaDto), 201)]
     [ProducesResponseType(400)]
@@ -92,7 +93,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Updates an existing quota.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(typeof(QuotaDto), 200)]
     [ProducesResponseType(404)]
@@ -103,7 +104,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Deletes a quota.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -114,7 +115,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Checks if a user can submit a job (pre-dispatch check).</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost("check")]
     [ProducesResponseType(typeof(QuotaCheckResult), 200)]
     public async Task<ActionResult<QuotaCheckResult>> CheckQuotaAsync(CheckQuotaRequest request, CancellationToken ct)
@@ -125,7 +126,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Resets all expired quotas (admin or background job).</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost("reset-expired")]
     [ProducesResponseType(typeof(object), 200)]
     public async Task<IActionResult> ResetExpiredQuotasAsync(CancellationToken ct)
@@ -137,7 +138,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     // ── Balance ─────────────────────────────────────────────────────────
 
     /// <summary>Gets a user's balance.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("balance/{userId:guid}")]
     [ProducesResponseType(typeof(UserBalanceDto), 200)]
     public async Task<ActionResult<UserBalanceDto>> GetBalanceAsync(Guid userId, CancellationToken ct)
@@ -147,7 +148,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Credits a user's balance (admin).</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost("balance/{userId:guid}/credit")]
     [ProducesResponseType(typeof(UserBalanceDto), 200)]
     [ProducesResponseType(400)]
@@ -164,7 +165,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Debits a user's balance (admin).</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost("balance/{userId:guid}/debit")]
     [ProducesResponseType(typeof(UserBalanceDto), 200)]
     [ProducesResponseType(400)]
@@ -188,7 +189,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Gets balance transaction history for a user.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("balance/{userId:guid}/transactions")]
     [ProducesResponseType(typeof(BalanceTransactionDto[]), 200)]
     public async Task<ActionResult<BalanceTransactionDto[]>> GetTransactionsAsync(Guid userId, [FromQuery] int take = 50, CancellationToken ct = default)
@@ -200,7 +201,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     // ── Group membership ────────────────────────────────────────────────
 
     /// <summary>Lists the quota groups a user belongs to.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("user/{userId:guid}/groups")]
     [ProducesResponseType(typeof(string[]), 200)]
     public async Task<ActionResult<string[]>> GetUserGroupsAsync(Guid userId, CancellationToken ct)
@@ -210,7 +211,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Adds a user to a quota group.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpPost("user/{userId:guid}/groups")]
     [ProducesResponseType(typeof(GroupMembershipDto), 201)]
     [ProducesResponseType(400)]
@@ -235,7 +236,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Removes a user from a quota group.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpDelete("user/{userId:guid}/groups/{groupName}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -246,7 +247,7 @@ public class QuotaController(IPrintQuotaService quotaService) : ControllerBase
     }
 
     /// <summary>Lists all members of a quota group.</summary>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("quota", "admin")]
     [HttpGet("group/{groupName}/members")]
     [ProducesResponseType(typeof(GroupMembershipDto[]), 200)]
     public async Task<ActionResult<GroupMembershipDto[]>> GetGroupMembersAsync(string groupName, CancellationToken ct)

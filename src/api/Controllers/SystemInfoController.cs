@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -10,7 +11,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/system")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("system_settings", "admin")]
 public class SystemInfoController(ISystemInfoService systemInfoService) : ControllerBase
 {
     private readonly ISystemInfoService _systemInfoService = systemInfoService;

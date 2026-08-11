@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Telemetry;
+using Farm.Slicer.Module.Api.Filters;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Repositories;
 using Microsoft.AspNetCore.Authorization;
@@ -18,7 +19,7 @@ namespace Farm.Slicer.Module.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/file-consistency")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("slicer_engines:admin")]
 public class FileConsistencyController(
     IFileConsistencyRepository fileConsistencyRepo) : ControllerBase
 {

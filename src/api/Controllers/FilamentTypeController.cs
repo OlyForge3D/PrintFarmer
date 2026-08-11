@@ -2,6 +2,7 @@
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.OpenFilamentDb;
@@ -127,7 +128,7 @@ public class FilamentTypeController(
     /// <response code="201">Returns the newly created filament type</response>
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="409">If a filament type with the same name already exists</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost]
     [ProducesResponseType(typeof(FilamentTypeDto), 201)]
     [ProducesResponseType(400)]
@@ -160,7 +161,7 @@ public class FilamentTypeController(
     /// <response code="204">If the filament type was updated successfully</response>
     /// <response code="400">If the filament type data is invalid</response>
     /// <response code="404">If the filament type was not found</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPut("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -195,7 +196,7 @@ public class FilamentTypeController(
     /// <returns>No content if successful</returns>
     /// <response code="204">If the filament type was deleted successfully</response>
     /// <response code="404">If the filament type was not found</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
@@ -225,7 +226,7 @@ public class FilamentTypeController(
     /// <returns>No content if successful</returns>
     /// <response code="204">If the presets were saved successfully</response>
     /// <response code="400">If the presets data is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost("presets")]
     [ProducesResponseType(204)]
     [ProducesResponseType(400)]
@@ -255,7 +256,7 @@ public class FilamentTypeController(
     /// <response code="200">Returns the import results</response>
     /// <response code="400">If Spoolman is not configured</response>
     /// <response code="503">If system is still initializing</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost("import-from-spoolman")]
     [ProducesResponseType(typeof(SpoolmanFilamentImportResult), 200)]
     [ProducesResponseType(400)]
@@ -283,7 +284,7 @@ public class FilamentTypeController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>CSV file download</returns>
     /// <response code="200">Returns a CSV file</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpGet("export")]
     [ProducesResponseType(200)]
     public async Task<IActionResult> ExportCsvAsync(CancellationToken ct)
@@ -310,7 +311,7 @@ public class FilamentTypeController(
     /// <returns>Import result summary</returns>
     /// <response code="200">Returns import result with create/update/error counts</response>
     /// <response code="400">If no file is provided or the file is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost("import")]
     [ProducesResponseType(typeof(FilamentCsvImportResult), 200)]
     [ProducesResponseType(400)]
@@ -386,7 +387,7 @@ public class FilamentTypeController(
     /// <returns>Import result summary</returns>
     /// <response code="200">Returns import result with create/update/error counts</response>
     /// <response code="400">If the request is invalid</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost("spoolmandb/import")]
     [ProducesResponseType(typeof(SpoolmanDbImportResult), 200)]
     [ProducesResponseType(400)]
@@ -417,7 +418,7 @@ public class FilamentTypeController(
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>Sync result with create/update/error counts</returns>
     /// <response code="200">Returns sync result summary</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [HttpPost("spoolmandb/sync-materials")]
     [ProducesResponseType(typeof(SpoolmanDbImportResult), 200)]
     public async Task<ActionResult<SpoolmanDbImportResult>> SyncExternalMaterialsAsync(CancellationToken ct)
@@ -505,7 +506,7 @@ public class FilamentTypeController(
     /// Imports selected filament entries from the Open Filament Database into Spoolman.
     /// </summary>
     [HttpPost("openfilamentdb/import")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [ProducesResponseType(typeof(OfdImportResult), 200)]
     [ProducesResponseType(400)]
     public async Task<ActionResult<OfdImportResult>> ImportFromOfdAsync([FromBody] OfdImportRequest request, CancellationToken ct)

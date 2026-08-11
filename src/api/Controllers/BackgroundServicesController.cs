@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.Background;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Services.Background;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -9,7 +10,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/services")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("background_services", "admin")]
 public class BackgroundServicesController(IBackgroundServiceMonitor serviceMonitor) : ControllerBase
 {
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor;

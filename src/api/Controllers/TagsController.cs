@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Domain;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Exceptions;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Tags;
@@ -188,7 +189,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="409">Tag with this name already exists</response>
     /// <response code="500">Internal server error</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("tags", "admin")]
     [HttpPost("")]
     [ProducesResponseType(typeof(TagDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -262,7 +263,7 @@ public class TagsController(
     /// <response code="401">Unauthorized</response>
     /// <response code="404">Tag not found</response>
     /// <response code="500">Internal server error</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("tags", "admin")]
     [HttpDelete("{tagId:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -302,7 +303,7 @@ public class TagsController(
     /// <response code="404">Tag not found</response>
     /// <response code="409">Revision conflict or duplicate tag name</response>
     /// <response code="500">Internal server error</response>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("tags", "admin")]
     [HttpPut("{tagId:guid}")]
     [ProducesResponseType(typeof(TagDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]

@@ -1,9 +1,9 @@
-﻿using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.AutoDispatch;
 using Farm.Infrastructure.Services.Queue;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -404,7 +404,6 @@ public class AutoDispatchController(
     /// Enable or disable auto-dispatch for all printers at once.
     /// </summary>
     [HttpPut("enabled")]
-    [Authorize(Roles = "farm_admin")]
     [RequirePermission(PrintFarmerPermissions.DispatchSettings.Manage)]
     [ProducesResponseType(typeof(List<AutoDispatchStatusDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<AutoDispatchStatusDto>>> SetAllEnabledAsync(

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.OperatorFeatures;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.SignalR;
@@ -97,7 +98,7 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpPost]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [ProducesResponseType(typeof(FilamentFallbackGroupDto), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(403)]
@@ -130,7 +131,7 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpPut("{groupId:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [ProducesResponseType(typeof(FilamentFallbackGroupDto), 200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(403)]
@@ -164,7 +165,7 @@ public class FilamentFallbackGroupsController(
     }
 
     [HttpDelete("{groupId:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("filament_type", "admin")]
     [ProducesResponseType(204)]
     [ProducesResponseType(403)]
     [ProducesResponseType(404)]

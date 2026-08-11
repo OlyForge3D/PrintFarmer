@@ -1,4 +1,5 @@
 ﻿using System.Text.Json.Serialization;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Notifications;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Settings;
@@ -12,7 +13,7 @@ namespace Farm.Web.Api.Controllers.Admin;
 /// </summary>
 [ApiController]
 [Route("api/admin/integrations/telegram")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("telegram", "admin")]
 [Tags("Admin - Telegram Notifications")]
 public class AdminTelegramController(
     ISettingsService settingsService,

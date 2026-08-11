@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos.PartsInventory;
 using Farm.Infrastructure.Logging;
@@ -106,7 +107,7 @@ public class PartsInventoryController(
 
     /// <summary>Creates a new printed-part SKU. Records a manual ledger entry when InitialOnHand > 0.</summary>
     [HttpPost]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("parts_inventory", "admin")]
     [ProducesResponseType(typeof(PartInventoryResponse), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(409)]
@@ -155,7 +156,7 @@ public class PartsInventoryController(
 
     /// <summary>Updates a printed-part SKU's metadata and reorder threshold. Does not alter on-hand.</summary>
     [HttpPut("{sku}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("parts_inventory", "admin")]
     [ProducesResponseType(typeof(PartInventoryResponse), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(400)]
@@ -353,7 +354,7 @@ public class PartsInventoryController(
 
     /// <summary>Creates a job-output → SKU mapping.</summary>
     [HttpPost("mappings")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("parts_inventory", "admin")]
     [ProducesResponseType(typeof(PartOutputMappingResponse), 201)]
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
@@ -432,7 +433,7 @@ public class PartsInventoryController(
 
     /// <summary>Deletes a job-output → SKU mapping.</summary>
     [HttpDelete("mappings/{id:guid}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("parts_inventory", "admin")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteMappingAsync(Guid id, CancellationToken ct)
@@ -455,7 +456,7 @@ public class PartsInventoryController(
 
     /// <summary>Soft-deactivates a printed-part SKU while retaining its immutable ledger.</summary>
     [HttpDelete("{sku}")]
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("parts_inventory", "admin")]
     [ProducesResponseType(204)]
     [ProducesResponseType(404)]
     public async Task<IActionResult> DeleteAsync(string sku, CancellationToken ct)

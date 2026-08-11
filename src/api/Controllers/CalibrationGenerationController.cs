@@ -1,7 +1,7 @@
-﻿using Farm.Infrastructure.Security;
+﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Security;
 using Farm.Web.Api.Contracts;
 using Farm.Web.Api.Infrastructure;
-using Farm.Web.Api.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Calibration;
 using Farm.Web.Api.Services.Calibration.Generation;
 using Microsoft.AspNetCore.Authorization;

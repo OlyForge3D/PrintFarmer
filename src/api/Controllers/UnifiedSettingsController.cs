@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services;
@@ -106,7 +107,7 @@ public class UnifiedSettingsController(
     /// </remarks>
     /// <param name="settingsSections">Dictionary of keyName to settings object.</param>
     /// <returns>Result of save operation, including validation errors if any.</returns>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("system_settings", "admin")]
     [HttpPost]
     public async Task<ActionResult> UpdateAsync([FromBody] Dictionary<string, object> settingsSections)
     {
@@ -417,7 +418,7 @@ public class UnifiedSettingsController(
     /// <param name="keyName">The key name of the settings section.</param>
     /// <param name="settingsValues">The updated settings object for the section.</param>
     /// <returns>Result of save operation for the specified section.</returns>
-    [Authorize(Roles = "farm_admin")]
+    [RequirePermission("system_settings", "admin")]
     [HttpPost("{keyName}")]
     public async Task<ActionResult> UpdateSettingsByKeyNameAsync(string keyName, [FromBody] object settingsValues)
     {
