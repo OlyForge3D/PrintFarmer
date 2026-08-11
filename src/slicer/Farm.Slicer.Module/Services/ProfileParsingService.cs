@@ -40,7 +40,7 @@ public sealed class ProfileParsingService : IProfileParsingService, ISlicerProfi
         {
             root = JsonNode.Parse(rawJson);
         }
-        catch (Exception)
+        catch (JsonException)
         {
             // Treat invalid JSON as opaque: hash original string; settings empty; sanitized = trimmed original
             string trimmed = rawJson.Trim();
@@ -195,7 +195,12 @@ public sealed class ProfileParsingService : IProfileParsingService, ISlicerProfi
             // Fallback: try to parse as string
             return value.ToString();
         }
-        catch
+        catch (InvalidOperationException)
+        {
+            // If extraction fails, return string representation
+            return value.ToString();
+        }
+        catch (FormatException)
         {
             // If extraction fails, return string representation
             return value.ToString();

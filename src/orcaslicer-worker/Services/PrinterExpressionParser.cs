@@ -79,7 +79,7 @@ public static class PrinterExpressionParser
             ExpressionParser parser = new ExpressionParser(expression, machine);
             return parser.Parse();
         }
-        catch
+        catch (FormatException)
         {
             return false;
         }
@@ -343,7 +343,7 @@ public static class PrinterExpressionParser
             {
                 return Regex.IsMatch(value, pattern, RegexOptions.IgnoreCase);
             }
-            catch
+            catch (ArgumentException)
             {
                 return false;
             }

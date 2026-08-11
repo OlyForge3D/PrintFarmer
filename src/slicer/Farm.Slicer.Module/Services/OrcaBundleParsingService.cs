@@ -40,7 +40,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
             // Check if at least one expected section exists
             return OrcaBundleKeys.Any(key => obj.ContainsKey(key));
         }
-        catch
+        catch (JsonException)
         {
             return false;
         }
@@ -58,7 +58,7 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
         {
             root = JsonNode.Parse(bundleJson);
         }
-        catch (Exception ex)
+        catch (JsonException ex)
         {
             throw new FormatException("Invalid JSON format", ex);
         }
