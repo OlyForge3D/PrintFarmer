@@ -323,7 +323,8 @@ the three model/library scopes.
 **Dependencies.** Some scopes are useless alone and are rejected at creation with a `400`:
 `CalibrationGenerate` also requires `CalibrationRead`, `SlicingSubmit`, and `SlicingReadArtifact`;
 the other calibration scopes require `CalibrationRead`; the queue mutation scopes require
-`QueueRead`.
+`QueueRead`; and `QueueAcknowledgeBedClear` additionally requires `QueueStart`, because the
+bed-clear routes check both.
 
 ### Anti-self-escalation
 
