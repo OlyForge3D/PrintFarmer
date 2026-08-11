@@ -134,9 +134,94 @@ public static class PrintFarmerPermissions
     /// resource-level admin grant, otherwise the deny would be silently unenforceable.
     /// </summary>
     public static bool ImpliesViaResourceAdmin(ClaimsPrincipal user, string resource, string action) =>
+        ImpliesViaResourceAdminCore(
+            resource,
+            action,
+            permission => user.HasClaim(ClaimType, permission),
+            permission => user.HasClaim(DenyClaimType, permission));
+
+    /// <summary>
+    /// Permission-set overload of <see cref="ImpliesViaResourceAdmin(ClaimsPrincipal, string, string)"/>,
+    /// for callers that resolve a user's authority directly from the database rather than from a
+    /// <see cref="ClaimsPrincipal"/> — notably the Desktop API-key exchange, which must decide
+    /// authority for a key's owner who is not the current request principal.
+    /// </summary>
+    /// <remarks>
+    /// Shares <see cref="ImpliesViaResourceAdminCore"/> with the principal overload so the rule —
+    /// including the explicit-deny suppression — cannot drift between the enforcement path and the
+    /// provisioning path. Synthesizing a <see cref="ClaimsPrincipal"/> just to reuse the other
+    /// overload would be worse: it would invent a principal that never authenticated, and any
+    /// future role-sensitive change to the implication would then silently apply to a fabricated
+    /// identity.
+    /// </remarks>
+    public static bool ImpliesViaResourceAdmin(
+        IReadOnlySet<string> grantedPermissions,
+        IReadOnlySet<string> deniedPermissions,
+        string resource,
+        string action)
+    {
+        ArgumentNullException.ThrowIfNull(grantedPermissions);
+        ArgumentNullException.ThrowIfNull(deniedPermissions);
+        return ImpliesViaResourceAdminCore(
+            resource,
+            action,
+            grantedPermissions.Contains,
+            deniedPermissions.Contains);
+    }
+
+    /// <summary>
+    /// The implication rule itself, expressed once. The overloads above differ only in how they
+    /// answer "does this subject hold that permission" and "is this action explicitly denied".
+    /// </summary>
+    private static bool ImpliesViaResourceAdminCore(
+        string resource,
+        string action,
+        Func<string, bool> holdsPermission,
+        Func<string, bool> holdsDeny) =>
         !string.Equals(action, AdminAction, StringComparison.Ordinal)
-        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}")
-        && !user.HasClaim(DenyClaimType, $"{resource}:{action}");
+        && holdsPermission($"{resource}:{AdminAction}")
+        && !holdsDeny($"{resource}:{action}");
+
+    /// <summary>
+    /// Whether a resolved set of granted permissions satisfies <paramref name="permission"/>,
+    /// by exact match or by same-resource admin implication.
+    /// </summary>
+    /// <param name="grantedPermissions">
+    /// The subject's effective grants. Callers obtain these from
+    /// <c>IUsersRepository.GetGrantedPermissionsAsync</c>, which already subtracts denied pairs,
+    /// so an exact match here is inherently deny-safe.
+    /// </param>
+    /// <param name="deniedPermissions">
+    /// The subject's explicit denies, from <c>IUsersRepository.GetDeniedPermissionsAsync</c>.
+    /// Required because the admin implication would otherwise resurrect a denied action from a
+    /// <c>{resource}:admin</c> grant - the exact gap #1472 closed on the claims-based path.
+    /// </param>
+    /// <remarks>
+    /// This is the set-based counterpart of <see cref="HasPermission"/> minus the
+    /// <see cref="FarmAdminRole"/> bypass, which callers handle separately because a role is not
+    /// part of a permission set.
+    /// </remarks>
+    public static bool SetGrantsPermission(
+        IReadOnlySet<string> grantedPermissions,
+        IReadOnlySet<string> deniedPermissions,
+        string permission)
+    {
+        ArgumentNullException.ThrowIfNull(grantedPermissions);
+        ArgumentNullException.ThrowIfNull(deniedPermissions);
+
+        if (deniedPermissions.Contains(permission))
+        {
+            return false;
+        }
+
+        if (grantedPermissions.Contains(permission))
+        {
+            return true;
+        }
+
+        (string resource, string action) = Split(permission);
+        return ImpliesViaResourceAdmin(grantedPermissions, deniedPermissions, resource, action);
+    }
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(

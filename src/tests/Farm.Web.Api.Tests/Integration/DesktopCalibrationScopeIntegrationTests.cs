@@ -236,8 +236,7 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         await GrantOwnerPermissionsAsync(
             PrintFarmerPermissions.Calibration.Read,
             PrintFarmerPermissions.Calibration.Generate,
-            PrintFarmerPermissions.Slicing.Submit,
-            PrintFarmerPermissions.Slicing.ReadArtifact);
+            PrintFarmerPermissions.Slicing.Submit);
 
         using HttpClient generateOnly = await ExchangeClientAsync(
             ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationGenerate);
@@ -248,8 +247,7 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         using HttpClient full = await ExchangeClientAsync(
             ApiKeyScope.CalibrationRead |
             ApiKeyScope.CalibrationGenerate |
-            ApiKeyScope.SlicingSubmit |
-            ApiKeyScope.SlicingReadArtifact);
+            ApiKeyScope.SlicingSubmit);
         HttpResponseMessage allowed = await full.PostAsJsonAsync(
             $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
         allowed.StatusCode.Should().NotBe(
@@ -641,14 +639,12 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
         await GrantOwnerPermissionsAsync(
             PrintFarmerPermissions.Calibration.Read,
             PrintFarmerPermissions.Calibration.Generate,
-            PrintFarmerPermissions.Slicing.Submit,
-            PrintFarmerPermissions.Slicing.ReadArtifact);
+            PrintFarmerPermissions.Slicing.Submit);
 
         return await ExchangeClientAsync(
             ApiKeyScope.CalibrationRead |
             ApiKeyScope.CalibrationGenerate |
-            ApiKeyScope.SlicingSubmit |
-            ApiKeyScope.SlicingReadArtifact);
+            ApiKeyScope.SlicingSubmit);
     }
 
     /// <summary>

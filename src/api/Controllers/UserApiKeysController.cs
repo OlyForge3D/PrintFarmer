@@ -453,7 +453,19 @@ public class UserApiKeysController : ControllerBase
             .Select(p => $"{p.Resource}:{p.Action}")
             .ToHashSet(StringComparer.Ordinal);
 
-        List<string> missing = requested.Where(p => !ownerPermissions.Contains(p)).ToList();
+        List<(string Resource, string Action)> denied =
+            await _usersRepository.GetDeniedPermissionsAsync(ownerId, ct) ?? [];
+        HashSet<string> ownerDenied = denied
+            .Select(p => $"{p.Resource}:{p.Action}")
+            .ToHashSet(StringComparer.Ordinal);
+
+        // Same-resource `{resource}:admin` satisfies the mapped permission, exactly as it does at
+        // the enforcement points and at exchange time, and an explicit deny suppresses it just as
+        // it does there. Checking only for an exact match would reject a key whose owner is
+        // genuinely authorized; ignoring denies would mint one the exchange later strips.
+        List<string> missing = requested
+            .Where(p => !PrintFarmerPermissions.SetGrantsPermission(ownerPermissions, ownerDenied, p))
+            .ToList();
         if (missing.Count == 0)
         {
             return null;

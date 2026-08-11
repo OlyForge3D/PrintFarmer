@@ -474,6 +474,40 @@ public class UserApiKeysControllerTests
     }
 
     /// <summary>
+    /// A same-resource <c>{resource}:admin</c> grant authorizes the finer-grained actions at the
+    /// enforcement points, so provisioning must accept it too — otherwise creation would refuse a
+    /// key that would work perfectly well once exchanged.
+    /// </summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_OwnerWithResourceAdminGrant_IsAccepted()
+    {
+        SetOwnerAuthorization(_userId, permissions: ["calibration:admin"]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop,
+            ScopeNames: ["CalibrationRead", "CalibrationPublish"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        Assert.IsType<OkObjectResult>(result);
+        _store.Should().ContainSingle().Which.Scopes
+            .Should().Be(ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationPublish);
+    }
+
+    /// <summary>The implication is same-resource only: calibration admin buys no queue authority.</summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_ResourceAdminGrantDoesNotAuthorizeAnotherResource()
+    {
+        SetOwnerAuthorization(_userId, permissions: ["calibration:admin"]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop,
+            ScopeNames: ["QueueRead"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value!.ToString().Should().Contain("queue:read");
+        _store.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// Authorization must be resolved from the <b>target owner's</b> live database state, never
     /// from the caller's JWT: a farm_admin caller must not be able to mint a privileged key for an
     /// unprivileged user.
@@ -629,7 +663,7 @@ public class UserApiKeysControllerTests
     {
         SetOwnerAuthorization(_userId, roles: [PrintFarmerPermissions.FarmAdminRole]);
         var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop,
-            ScopeNames: ["CalibrationRead", "CalibrationGenerate", "SlicingSubmit", "SlicingReadArtifact"]);
+            ScopeNames: ["CalibrationRead", "CalibrationGenerate", "SlicingSubmit"]);
 
         IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
 

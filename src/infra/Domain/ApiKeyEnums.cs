@@ -110,7 +110,7 @@ public enum ApiKeyScope : int
     /// <summary>Grants <c>slicing:submit</c>: submit slicing jobs. Required alongside <see cref="CalibrationGenerate"/>.</summary>
     SlicingSubmit = 1 << 14,
 
-    /// <summary>Grants <c>slicing:read-artifact</c>: download sliced G-code artifacts.</summary>
+    /// <summary>Grants <c>slicing:read-artifact</c>: download sliced G-code artifacts. Not required for calibration generation, which polls orchestration instead.</summary>
     SlicingReadArtifact = 1 << 15,
 
     /// <summary>Grants <c>queue:read</c>: read the print queue.</summary>

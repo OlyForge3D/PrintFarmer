@@ -81,7 +81,7 @@ const SCOPE_GROUPS: ScopeGroup[] = [
         value: 'CalibrationGenerate',
         label: 'Calibration generate',
         description: 'Produce and export generated calibration profiles.',
-        impact: 'Also requires Calibration read, Slicing submit, and Slicing read artifact.',
+        impact: 'Also requires Calibration read and Slicing submit.',
       },
       {
         value: 'CalibrationPublish',
@@ -102,7 +102,11 @@ const SCOPE_GROUPS: ScopeGroup[] = [
         description: 'Submit slicing jobs, read the slicer profile catalog, and upload artifacts for its own jobs.',
         impact: 'Consumes slicer worker capacity. Cannot modify profiles.',
       },
-      { value: 'SlicingReadArtifact', label: 'Slicing read artifact', description: 'Download sliced G-code artifacts.' },
+      {
+        value: 'SlicingReadArtifact',
+        label: 'Slicing read artifact',
+        description: 'Download sliced G-code artifacts. Not needed for calibration generation.',
+      },
     ],
   },
   {
@@ -608,7 +612,8 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                     <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">
                       Select only what this key needs. Each option grants exactly one permission, and the
                       server will reject any scope the key&apos;s owner is not already authorized for —
-                      today that means calibration, slicing, and queue scopes require a farm admin owner.
+                      whether by an exact grant, a matching resource-admin grant, or the farm admin role.
+                      A farm admin owner is the safest choice.
                     </p>
                     {fieldErrors.scopes && (
                       <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">
