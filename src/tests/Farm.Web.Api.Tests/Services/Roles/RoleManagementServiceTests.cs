@@ -488,4 +488,52 @@ public sealed class RoleManagementServiceTests : IAsyncDisposable
         (await act.Should().ThrowAsync<RoleManagementException>())
             .Which.ErrorCode.Should().Be(RoleManagementErrorCode.LastAdminRole);
     }
+
+    [Fact]
+    public async Task ReloadRoleAsync_PicksUpAnIsActiveChangeCommittedByAConcurrentContext()
+    {
+        // Proves the mechanism DeleteRoleAsync/UpdateRoleAsync rely on to avoid making a D9
+        // guardrail decision from a role.IsActive value read before their serializable
+        // transaction started: without a reload, the tracked `role` instance below would keep
+        // reporting the value it had at load time even after another context commits a change.
+        await using AppDbContext context = await CreateSeededContextAsync();
+        EfRolesRepository repository = new(context);
+
+        Guid customRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Role role = (await repository.GetRoleEntityAsync(customRoleId))!;
+        role.IsActive.Should().BeTrue();
+
+        await using (AppDbContext concurrentContext = new(_options))
+        {
+            Role concurrentRole = await concurrentContext.Roles.SingleAsync(r => r.Id == customRoleId);
+            concurrentRole.IsActive = false;
+            await concurrentContext.SaveChangesAsync();
+        }
+
+        bool stillExists = await repository.ReloadRoleAsync(role);
+
+        stillExists.Should().BeTrue();
+        role.IsActive.Should().BeFalse("ReloadRoleAsync must overwrite the stale tracked value with the concurrently committed state");
+    }
+
+    [Fact]
+    public async Task ReloadRoleAsync_ReturnsFalse_WhenTheRoleWasDeletedByAConcurrentContext()
+    {
+        await using AppDbContext context = await CreateSeededContextAsync();
+        EfRolesRepository repository = new(context);
+
+        Guid customRoleId = await CreateAdminEquivalentRoleAsync(context, "super_admins");
+        Role role = (await repository.GetRoleEntityAsync(customRoleId))!;
+
+        await using (AppDbContext concurrentContext = new(_options))
+        {
+            Role concurrentRole = await concurrentContext.Roles.SingleAsync(r => r.Id == customRoleId);
+            concurrentContext.Roles.Remove(concurrentRole);
+            await concurrentContext.SaveChangesAsync();
+        }
+
+        bool stillExists = await repository.ReloadRoleAsync(role);
+
+        stillExists.Should().BeFalse();
+    }
 }

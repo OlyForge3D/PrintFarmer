@@ -139,24 +139,40 @@ public partial class RoleManagementService(
 
         RoleDetailDto? before = await _roles.GetRoleDetailAsync(roleId, ct);
 
-        bool wantsDeactivation = request.IsActive is false && role.IsActive;
-
-        // D6 — system roles cannot be renamed (checked above), deleted, or deactivated.
-        // DisplayName/Description remain editable for system roles.
-        if (role.IsSystemRole && wantsDeactivation)
-        {
-            throw new RoleManagementException(RoleManagementErrorCode.SystemRoleProtected, $"System role '{role.Name}' cannot be deactivated.");
-        }
+        // Whether this request *might* deactivate the role, based on the caller's intent alone
+        // (not yet on role.IsActive, which may be stale by the time a transaction opens below).
+        bool requestsDeactivation = request.IsActive is false;
 
         // The D9 guardrail check and the deactivation it protects must commit as one atomic
         // unit under serializable isolation: otherwise two concurrent requests could each pass
         // the check against a different admin-equivalent role and both commit, leaving zero
         // admin coverage. See issue #1448 review discussion.
-        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = wantsDeactivation
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = requestsDeactivation
             ? await _roles.BeginSerializableTransactionAsync(ct)
             : null;
         try
         {
+            if (requestsDeactivation)
+            {
+                // Reload role.IsActive inside the transaction: the entity above was loaded
+                // before the transaction started, so it may be stale relative to the
+                // transaction's consistent serializable snapshot (e.g. concurrently
+                // reactivated/deactivated by another request in the meantime).
+                if (!await _roles.ReloadRoleAsync(role, ct))
+                {
+                    throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
+                }
+            }
+
+            bool wantsDeactivation = requestsDeactivation && role.IsActive;
+
+            // D6 — system roles cannot be renamed (checked above), deleted, or deactivated.
+            // DisplayName/Description remain editable for system roles.
+            if (role.IsSystemRole && wantsDeactivation)
+            {
+                throw new RoleManagementException(RoleManagementErrorCode.SystemRoleProtected, $"System role '{role.Name}' cannot be deactivated.");
+            }
+
             if (wantsDeactivation)
             {
                 await EnsureDeactivationDoesNotLockOutAdminsAsync(role, actorUserId, membersRetainAdminAccessViaReassignment: false, ct);
@@ -245,6 +261,15 @@ public partial class RoleManagementService(
         Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _roles.BeginSerializableTransactionAsync(ct);
         try
         {
+            // Reload role.IsActive inside the transaction: the entity above was loaded before
+            // the transaction started, so it may be stale relative to the transaction's
+            // consistent serializable snapshot (e.g. concurrently reactivated after being read
+            // as inactive, which would otherwise let this delete skip the guardrail entirely).
+            if (!await _roles.ReloadRoleAsync(role, ct))
+            {
+                throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
+            }
+
             int memberCount = await _roles.CountActiveMembersAsync(roleId, ct);
             Role? targetRole = null;
             if (memberCount > 0 && reassignToRoleId is { } targetRoleId)

@@ -13,6 +13,15 @@ public interface IRolesRepository
 
     Task<Role?> GetRoleEntityAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>
+    /// Re-reads a tracked <see cref="Role"/> entity's current row from the database, overwriting
+    /// its in-memory property values (e.g. <c>IsActive</c>) in place. Used to guard against a
+    /// role loaded before a serializable transaction started being stale relative to that
+    /// transaction's consistent snapshot. Returns <c>false</c> if the row no longer exists
+    /// (the role was deleted by a concurrent request).
+    /// </summary>
+    Task<bool> ReloadRoleAsync(Role role, CancellationToken ct = default);
+
     Task<RoleDetailDto?> GetRoleDetailAsync(Guid id, CancellationToken ct = default);
 
     /// <summary>

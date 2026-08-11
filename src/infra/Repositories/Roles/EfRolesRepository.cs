@@ -37,6 +37,12 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
         return _db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
     }
 
+    public async Task<bool> ReloadRoleAsync(Role role, CancellationToken ct = default)
+    {
+        await _db.Entry(role).ReloadAsync(ct);
+        return _db.Entry(role).State != EntityState.Detached;
+    }
+
     public async Task<RoleDetailDto?> GetRoleDetailAsync(Guid id, CancellationToken ct = default)
     {
         Role? role = await _db.Roles
