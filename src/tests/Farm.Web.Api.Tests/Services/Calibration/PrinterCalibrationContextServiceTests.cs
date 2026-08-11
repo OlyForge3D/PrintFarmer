@@ -309,6 +309,7 @@ public sealed class PrinterCalibrationContextServiceTests
     public async Task GetContextAsync_WithSelectedPrinter_ResolvesProfilesExactlyOnce()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        await harness.AddPrinterAsync("Unselected printer");
 
         CalibrationContextDto context = await harness.GetContextAsync();
 
@@ -666,12 +667,21 @@ public sealed class PrinterCalibrationContextServiceTests
                 Times.Never);
             _profileResolver.Verify(
                 resolver => resolver.ResolveAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<CalibrationProfileAccessScope>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            _profileResolver.Verify(
+                resolver => resolver.ResolveAsync(
                     Printer.CalibrationMachineProfileId!.Value,
                     Printer.CalibrationProcessProfileId!.Value,
                     Printer.CalibrationFilamentProfileId!.Value,
                     ProfileAccess,
                     It.IsAny<CancellationToken>()),
                 Times.Once);
+            _profileResolver.VerifyNoOtherCalls();
         }
 
         public void MakeProfileResolverUnavailable(
