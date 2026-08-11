@@ -95,8 +95,20 @@ builder.Services.AddAuthorization(options =>
         _ = policy.RequireAuthenticatedUser();
         _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
     });
+
+    // Profile-state mutations require an interactive session. slicing:submit is a broad
+    // class-level permission on ProfilesController, so a Desktop-exchange token issued for
+    // calibration generation would otherwise also be able to upload, clone, and edit custom
+    // profiles. Normal login/session principals - and the standalone-mode admin principal -
+    // are unaffected.
+    options.AddPolicy(InteractiveSessionRequirement.PolicyName, policy =>
+    {
+        _ = policy.RequireAuthenticatedUser();
+        _ = policy.AddRequirements(new InteractiveSessionRequirement());
+    });
 });
 builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+builder.Services.AddSingleton<IAuthorizationHandler, InteractiveSessionAuthorizationHandler>();
 
 // Required so SlicerHub's [RequirePermission] (Farm.Infrastructure.Authorization) requirements
 // are actually evaluated in this standalone host. Without a registered handler, ASP.NET Core

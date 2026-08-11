@@ -544,4 +544,196 @@ public class DesktopCalibrationScopeIntegrationTests : IAsyncLifetime
     }
 
     #endregion
+
+    #region Queue scopes through real routes and policies
+
+    /// <summary>
+    /// Exercises the queue scopes through the real HTTP pipeline rather than only through the map,
+    /// so a scope that maps correctly but cannot actually reach its route is still caught.
+    /// </summary>
+    [Fact]
+    public async Task QueueReadScope_ReachesTheQueueListRoute()
+    {
+        await GrantOwnerPermissionsAsync(PrintFarmerPermissions.Queue.Read);
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.QueueRead);
+
+        HttpResponseMessage list = await client.GetAsync("/api/job-queue");
+        list.StatusCode.Should().Be(HttpStatusCode.OK, "queue:read was explicitly granted to this key");
+
+        HttpResponseMessage dispatch = await client.PostAsJsonAsync(
+            $"/api/job-queue/{Guid.NewGuid()}/dispatch", new { });
+        dispatch.StatusCode.Should().Be(HttpStatusCode.Forbidden, "queue:start was not selected");
+    }
+
+    [Fact]
+    public async Task TokenWithoutQueueRead_IsForbiddenOnTheQueueListRoute()
+    {
+        using HttpClient client = await ExchangeClientAsync(ApiKeyScope.ModelRead);
+
+        HttpResponseMessage list = await client.GetAsync("/api/job-queue");
+        list.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// The bed-clear route requires <c>queue:acknowledge-bed-clear</c> AND <c>queue:start</c>. A key
+    /// holding only the former is a guaranteed-dead shape, which is exactly what the creation-time
+    /// dependency rule now prevents - this proves the route really does demand both.
+    /// </summary>
+    [Fact]
+    public async Task AcknowledgeBedClearWithoutQueueStart_IsForbiddenOnTheRealRoute()
+    {
+        await GrantOwnerPermissionsAsync(
+            PrintFarmerPermissions.Queue.Read,
+            PrintFarmerPermissions.Queue.AcknowledgeBedClear);
+        using HttpClient client = await ExchangeClientAsync(
+            ApiKeyScope.QueueRead | ApiKeyScope.QueueAcknowledgeBedClear);
+
+        HttpResponseMessage ack = await client.PostAsJsonAsync(
+            $"/api/job-queue/{Guid.NewGuid()}/acknowledge-bed-clear-and-start", new { });
+        ack.StatusCode.Should().Be(HttpStatusCode.Forbidden, "queue:start is also required by this route");
+
+        HttpResponseMessage ready = await client.PostAsJsonAsync(
+            $"/api/auto-dispatch/{Guid.NewGuid()}/ready", new { });
+        ready.StatusCode.Should().Be(HttpStatusCode.Forbidden, "the auto-dispatch ready route requires the same pair");
+    }
+
+    /// <summary>
+    /// With the full trio the authorization layer is satisfied on every bed-clear route. The domain
+    /// may still reject the random job/printer id, so this asserts only that the response is not a
+    /// 403 - the authorization outcome is what is under test.
+    /// </summary>
+    [Fact]
+    public async Task FullBedClearScopeSet_ClearsAuthorizationOnEveryBedClearRoute()
+    {
+        await GrantOwnerPermissionsAsync(
+            PrintFarmerPermissions.Queue.Read,
+            PrintFarmerPermissions.Queue.Start,
+            PrintFarmerPermissions.Queue.AcknowledgeBedClear);
+        using HttpClient client = await ExchangeClientAsync(
+            ApiKeyScope.QueueRead | ApiKeyScope.QueueStart | ApiKeyScope.QueueAcknowledgeBedClear);
+
+        List<(string Route, HttpResponseMessage Response)> responses =
+        [
+            ("job-queue acknowledge-bed-clear-and-start",
+                await client.PostAsJsonAsync($"/api/job-queue/{Guid.NewGuid()}/acknowledge-bed-clear-and-start", new { })),
+            ("auto-dispatch ready",
+                await client.PostAsJsonAsync($"/api/auto-dispatch/{Guid.NewGuid()}/ready", new { })),
+            ("auto-dispatch pre-clear",
+                await client.PostAsJsonAsync($"/api/auto-dispatch/{Guid.NewGuid()}/pre-clear", new { })),
+        ];
+
+        foreach ((string route, HttpResponseMessage response) in responses)
+        {
+            response.StatusCode.Should().NotBe(
+                HttpStatusCode.Forbidden,
+                $"authorization must pass for {route} once the full scope set is granted");
+            response.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
+            response.Dispose();
+        }
+    }
+
+    #endregion
+
+    #region Slicer profile mutations are not reachable by a generation token
+
+    private async Task<HttpClient> CreateGenerationTokenClientAsync()
+    {
+        await GrantOwnerPermissionsAsync(
+            PrintFarmerPermissions.Calibration.Read,
+            PrintFarmerPermissions.Calibration.Generate,
+            PrintFarmerPermissions.Slicing.Submit,
+            PrintFarmerPermissions.Slicing.ReadArtifact);
+
+        return await ExchangeClientAsync(
+            ApiKeyScope.CalibrationRead |
+            ApiKeyScope.CalibrationGenerate |
+            ApiKeyScope.SlicingSubmit |
+            ApiKeyScope.SlicingReadArtifact);
+    }
+
+    /// <summary>
+    /// <c>CalibrationGenerate</c> mandates <c>SlicingSubmit</c>, and <c>ProfilesController</c> is
+    /// class-gated by that single broad permission - so a legitimate calibration-generation token
+    /// would otherwise also be able to upload, clone, and edit custom slicer profiles. Those
+    /// mutations now additionally require an interactive session.
+    /// </summary>
+    [Fact]
+    public async Task GenerationToken_IsForbiddenOnEverySlicerProfileMutation()
+    {
+        using HttpClient client = await CreateGenerationTokenClientAsync();
+
+        List<(string Description, HttpResponseMessage Response)> responses =
+        [
+            ("upload a custom profile", await client.PostAsJsonAsync("/api/slicer/profiles/upload", new { rawJson = "{}", profileType = "process" })),
+            ("clone a profile", await client.PostAsJsonAsync("/api/slicer/profiles/clone", new { sourceProfileId = Guid.NewGuid(), profileType = "process" })),
+            ("update a custom profile", await client.PutAsJsonAsync($"/api/slicer/profiles/custom/{Guid.NewGuid()}", new { name = "renamed" })),
+        ];
+
+        foreach ((string description, HttpResponseMessage response) in responses)
+        {
+            response.StatusCode.Should().Be(
+                HttpStatusCode.Forbidden,
+                $"a Desktop-exchange token must not be able to {description}");
+            response.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The deny must be surgical: the generation token still satisfies the authorization it was
+    /// issued for. Reads on the profile catalog remain reachable, which is disclosed in the docs
+    /// and in the UI scope description.
+    /// </summary>
+    [Fact]
+    public async Task GenerationToken_StillSatisfiesItsIntendedSlicingAuthorization()
+    {
+        using HttpClient client = await CreateGenerationTokenClientAsync();
+
+        HttpResponseMessage generate = await client.PostAsJsonAsync(
+            $"/api/calibration-projects/{Guid.NewGuid()}/attempts/{Guid.NewGuid()}/generate-job", new { });
+        generate.StatusCode.Should().NotBe(
+            HttpStatusCode.Forbidden,
+            "calibration:generate + slicing:submit are both present");
+
+        HttpResponseMessage catalogRead = await client.GetAsync("/api/slicer/profiles");
+        catalogRead.StatusCode.Should().NotBe(
+            HttpStatusCode.Forbidden,
+            "profile catalog reads stay reachable for submit, and this is disclosed");
+    }
+
+    /// <summary>
+    /// A normal login session must keep its existing behaviour on the same mutation endpoints -
+    /// the policy denies only exchange tokens, so a session holding <c>slicing:submit</c> reaches
+    /// the domain layer exactly as before.
+    /// </summary>
+    [Fact]
+    public async Task InteractiveLoginSession_StillReachesSlicerProfileMutations()
+    {
+        await GrantOwnerPermissionsAsync(PrintFarmerPermissions.Slicing.Submit);
+
+        // Re-authenticate: the client created in InitializeAsync holds a token minted before the
+        // grant, and permission claims are baked into the JWT at login.
+        using HttpClient client = await _factory.CreateAuthenticatedClientAsync(
+            "calibration-scope-owner",
+            "calibration-scope-owner@example.com",
+            "TestPassword123!");
+
+        using HttpResponseMessage upload = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/upload",
+            new { rawJson = "{}", profileType = "process" });
+        upload.StatusCode.Should().NotBe(
+            HttpStatusCode.Forbidden,
+            "an interactive session's existing access must be unchanged");
+
+        using HttpResponseMessage update = await client.PutAsJsonAsync(
+            $"/api/slicer/profiles/custom/{Guid.NewGuid()}",
+            new { name = "renamed" });
+        update.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+
+        using HttpResponseMessage clone = await client.PostAsJsonAsync(
+            "/api/slicer/profiles/clone",
+            new { sourceProfileId = Guid.NewGuid(), profileType = "process" });
+        clone.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
+    }
+
+    #endregion
 }
