@@ -119,8 +119,13 @@ public static class DesktopScopePermissionMap
                 PrintFarmerPermissions.Queue.Start, [ApiKeyScope.QueueRead]),
             new(ApiKeyScope.QueueCancel, nameof(ApiKeyScope.QueueCancel),
                 PrintFarmerPermissions.Queue.Cancel, [ApiKeyScope.QueueRead]),
+
+            // The bed-clear routes (AutoDispatchController "ready" and "pre-clear") require
+            // queue:acknowledge-bed-clear AND queue:start, because acknowledging the bed is what
+            // releases the next job. Without QueueStart this scope dead-ends.
             new(ApiKeyScope.QueueAcknowledgeBedClear, nameof(ApiKeyScope.QueueAcknowledgeBedClear),
-                PrintFarmerPermissions.Queue.AcknowledgeBedClear, [ApiKeyScope.QueueRead]),
+                PrintFarmerPermissions.Queue.AcknowledgeBedClear,
+                [ApiKeyScope.QueueRead, ApiKeyScope.QueueStart]),
         ]);
 
     private static readonly Dictionary<ApiKeyScope, DesktopScopeDefinition> DefinitionByScope =

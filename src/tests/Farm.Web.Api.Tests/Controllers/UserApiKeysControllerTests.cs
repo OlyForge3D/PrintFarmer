@@ -603,6 +603,35 @@ public class UserApiKeysControllerTests
     }
 
     /// <summary>
+    /// The bed-clear routes require <c>queue:acknowledge-bed-clear</c> AND <c>queue:start</c>,
+    /// so acknowledging without start would dead-end.
+    /// </summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_AcknowledgeBedClearWithoutQueueStart_IsRejected()
+    {
+        SetOwnerAuthorization(_userId, roles: [PrintFarmerPermissions.FarmAdminRole]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop,
+            ScopeNames: ["QueueRead", "QueueAcknowledgeBedClear"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value!.ToString().Should().Contain("QueueStart");
+    }
+
+    [Fact]
+    public async Task CreateApiKeyAsync_CompleteBedClearSelection_IsAccepted()
+    {
+        SetOwnerAuthorization(_userId, roles: [PrintFarmerPermissions.FarmAdminRole]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop,
+            ScopeNames: ["QueueRead", "QueueStart", "QueueAcknowledgeBedClear"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        Assert.IsType<OkObjectResult>(result);
+    }
+
+    /// <summary>
     /// Scopes are immutable: rotation replaces the secret only.
     /// </summary>
     [Fact]

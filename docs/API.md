@@ -346,9 +346,9 @@ Content-Type: application/json
 
 `400` is returned when the owner lacks a requested permission, when a scope's
 prerequisites are missing (`CalibrationGenerate` also needs `CalibrationRead`,
-`SlicingSubmit`, and `SlicingReadArtifact`; queue mutations need `QueueRead`),
-when an unknown or composite scope name is supplied, or when both `scopeNames`
-and `scopes` are set. See
+`SlicingSubmit`, and `SlicingReadArtifact`; queue mutations need `QueueRead`;
+`QueueAcknowledgeBedClear` also needs `QueueStart`), when an unknown or composite
+scope name is supplied, or when both `scopeNames` and `scopes` are set. See
 [`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
 for the full scope-to-permission table.
 
