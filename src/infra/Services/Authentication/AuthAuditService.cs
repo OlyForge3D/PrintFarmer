@@ -307,6 +307,39 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", LogSanitizer.Sanitize(ipAddress), LogSanitizer.Sanitize(reason));
     }
 
+    public async Task LogRoleManagementEventAsync(Guid actorUserId, Guid roleId, string roleName, AuthEventType eventType, string? beforeJson, string? afterJson, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
+    {
+        var metadata = new
+        {
+            RoleId = roleId,
+            RoleName = roleName,
+            Before = beforeJson,
+            After = afterJson
+        };
+
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = actorUserId,
+            EventType = eventType,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = null,
+            Success = true,
+            Metadata = JsonSerializer.Serialize(metadata),
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogInformation(
+            "[AuthAudit] Role {EventType} by UserId: {ActorUserId} for RoleId: {RoleId} ({RoleName}) from IP: {IpAddress}",
+            eventType,
+            actorUserId,
+            roleId,
+            LogSanitizer.Sanitize(roleName),
+            LogSanitizer.Sanitize(ipAddress));
+    }
+
     public async Task<List<AuthAuditLog>> GetUserAuditLogAsync(Guid userId, int pageSize = 50, int pageNumber = 1, CancellationToken cancellationToken = default)
     {
         return await _auditRepository.GetByUserIdAsync(userId, pageSize, pageNumber, cancellationToken);

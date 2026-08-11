@@ -55,7 +55,16 @@ public enum AuthEventType
     ApiKeyExchange = 12,
 
     /// <summary>Desktop API key exchange failed (invalid, expired, revoked, wrong purpose, or unscoped key).</summary>
-    ApiKeyExchangeFailed = 13
+    ApiKeyExchangeFailed = 13,
+
+    /// <summary>A custom role was created.</summary>
+    RoleCreated = 14,
+
+    /// <summary>A role's display name, description, or active status was updated.</summary>
+    RoleUpdated = 15,
+
+    /// <summary>A custom role was deleted.</summary>
+    RoleDeleted = 16
 }
 
 #endregion
