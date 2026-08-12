@@ -3,7 +3,13 @@ import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
+import {
+  ADMIN_HUB_PARENT,
+  canAccessDestination,
+  canAccessSettingsTab,
+  getDestinationForTab,
+  hasAccessibleDestinationWithPrefix,
+} from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
@@ -204,8 +210,18 @@ interface SettingsShellProps {
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
-  const { hasRole } = useAuth();
-  const isFarmAdmin = hasRole('farm_admin');
+  const { hasRole, hasPermission } = useAuth();
+  // Passed to adminDestinations.ts helpers so scope/tab access checks share the
+  // exact same permission semantics as the Control Center hub and nav (issue 1457).
+  const destinationAccess = useMemo(() => ({ hasRole, hasPermission }), [hasRole, hasPermission]);
+  const canReachSystemScope = useMemo(
+    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/settings'),
+    [destinationAccess],
+  );
+  const canReachAdminScope = useMemo(
+    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/manage'),
+    [destinationAccess],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
 
@@ -232,17 +248,38 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return SETTINGS_SCOPES.filter((scope) => scope.id === 'user');
     }
     if (routeScope === 'system') {
-      return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && isFarmAdmin);
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && canReachSystemScope);
     }
     if (routeScope === 'admin') {
-      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && isFarmAdmin);
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && canReachAdminScope);
     }
-    return SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin);
-  }, [isFarmAdmin, routeScope]);
+    return SETTINGS_SCOPES.filter((scope) => {
+      if (scope.id === 'system') return canReachSystemScope;
+      if (scope.id === 'admin') return canReachAdminScope;
+      return !scope.adminOnly;
+    });
+  }, [canReachAdminScope, canReachSystemScope, routeScope]);
   const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
+  // Issue 1457 (Hicks review) — filter both the category list AND each category's
+  // sub-pages by canAccessSettingsTab, not just the rendered content of the
+  // active tab. Without this, SettingsSidebar/SettingsSubTabs still listed
+  // every tab in scope regardless of permission, so a user with e.g. only
+  // `printers:admin` could see Cameras/NFC/other inaccessible Hardware
+  // sub-tabs in the nav and only find out they were denied after clicking.
+  // A category with zero remaining accessible sub-pages (or, for a
+  // no-sub-page category, an inaccessible root tab) is dropped entirely.
   const accessibleCategories = useMemo(
-    () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
-    [availableScopes],
+    () => availableScopes
+      .flatMap((scope) => getSettingsCategoriesForScope(scope.id))
+      .map((category) => ({
+        ...category,
+        subPages: category.subPages.filter((subPage) => canAccessSettingsTab(category.id, subPage.id, destinationAccess)),
+      }))
+      .filter((category) => (
+        category.subPages.length > 0
+        || canAccessSettingsTab(category.id, undefined, destinationAccess)
+      )),
+    [availableScopes, destinationAccess],
   );
 
   const resolvedRequestedTarget = useMemo(
@@ -257,9 +294,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [availableScopes, fallbackScopeId, resolvedRequestedTarget.scopeId]);
 
   const activeCategory = useMemo(() => {
-    return accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)
-      ? resolvedRequestedTarget.categoryId
-      : getDefaultCategoryForScope(activeScope);
+    if (accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)) {
+      return resolvedRequestedTarget.categoryId;
+    }
+    // Issue 1457 (Hicks round-3 review) — a bare `/admin/settings` or
+    // `/admin/manage` URL (no `?tab=`) resolved to the scope's hardcoded
+    // default category (e.g. `general`/`operations`) even when the user
+    // lacks access to it, landing them on the same "reachable nav, denied
+    // content" outcome the round-2 fix was meant to eliminate -- just via
+    // the no-tab-param path instead of clicking a nav item. Fall back to the
+    // first category this user can actually reach in the active scope;
+    // only fall back further to the hardcoded default if literally none of
+    // the scope's categories are accessible (canReachSystemScope/
+    // canReachAdminScope should already prevent that from happening).
+    const firstAccessibleInScope = accessibleCategories.find((category) => category.scopeId === activeScope);
+    return firstAccessibleInScope?.id ?? getDefaultCategoryForScope(activeScope);
   }, [accessibleCategories, activeScope, resolvedRequestedTarget.categoryId]);
 
   const shouldFocusSectionRef = useRef(false);
@@ -474,14 +523,36 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return matchingCurrentSubPageIds[0];
     }
 
-    return getDefaultSubPage(currentCategory.id);
-  }, [currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+    // Issue 1457 (Hicks round-3 review) — same bare-URL gap as `activeCategory`
+    // above: getDefaultSubPage() picks the category's first-defined sub-page
+    // regardless of permission, so landing on a tab with no explicit `?sub=`
+    // (e.g. `?tab=hardware` alone) could default to a sub-page this user
+    // can't reach and immediately show the "you don't have permission"
+    // screen. Prefer the first sub-page `accessibleCategories` says this user
+    // can reach; only fall back to the unfiltered default if the category
+    // isn't in `accessibleCategories` at all (shouldn't happen for a category
+    // the user is currently viewing) or has no accessible sub-pages.
+    const firstAccessibleSubPage = accessibleCategories
+      .find((category) => category.id === currentCategory.id)
+      ?.subPages[0]?.id;
+
+    return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
+  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0
     ? currentCategory.id
     : `${currentCategory.id}.${activeSubPage}`;
   const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
+  // Issue 1457 (Hicks review) — the sub-tab bar itself must only list sub-pages the
+  // user can actually reach, not every sub-page the category defines. Looked
+  // up from the already permission-filtered `accessibleCategories` (falls
+  // back to the unfiltered list if the category isn't present there, which
+  // shouldn't happen for a category the user can currently see at all).
+  const visibleSubPages = useMemo(
+    () => accessibleCategories.find((category) => category.id === currentCategory.id)?.subPages ?? currentCategory.subPages,
+    [accessibleCategories, currentCategory],
+  );
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const sectionAnnouncement = useMemo(() => {
@@ -581,12 +652,54 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
   useEffect(() => {
-    if (requestedScope === 'admin' && !isFarmAdmin) {
+    if (requestedScope === 'admin' && !canReachAdminScope) {
       toast.info("You don't have access to admin settings. Showing your user settings instead.");
     }
-  }, [isFarmAdmin, requestedScope]);
+    // Mirrors the 'admin' case above (issue 1457): the 'system' scope route
+    // (/admin/settings) previously had no equivalent notice — a gap that
+    // predates this change but sits right next to the code this migration
+    // touches, so it's fixed here too rather than left as a silent fallback.
+    if (requestedScope === 'system' && !canReachSystemScope) {
+      toast.info("You don't have access to system settings. Showing your user settings instead.");
+    }
+  }, [canReachAdminScope, canReachSystemScope, requestedScope]);
+
+  // Per-tab/sub-page permission gate (issue 1457). Reuses the same
+  // canAccessDestination predicate the registry's bulk filter and the
+  // Layout nav use, so a directly-linked tab honours requiredRole,
+  // requiredPermission, AND requiredPermissionAnyOf — not just one of them.
+  // That distinction matters for the one remaining role-only exception
+  // (slicing-profiles, which has no requiredPermission at all) which would
+  // otherwise render as accessible to anyone who reaches the
+  // /admin/settings scope. Tabs with no matching destination (e.g. the
+  // `user`-scope profile tabs) are not gated here at all; the server
+  // remains the actual enforcement point either way. This is a UX
+  // tightening only: previously any `farm_admin` saw every tab regardless
+  // of a hypothetical narrower permission — nobody loses access they
+  // previously had, this only prevents landing on a tab the API would
+  // refuse.
+  const activeTabDestination = useMemo(
+    () => getDestinationForTab(currentCategory.id, currentCategory.subPages.length > 0 ? activeSubPage : undefined),
+    [activeSubPage, currentCategory],
+  );
+  const canAccessActiveTab = useMemo(() => {
+    if (!activeTabDestination) {
+      return true;
+    }
+    return canAccessDestination(activeTabDestination, destinationAccess);
+  }, [activeTabDestination, destinationAccess]);
 
   const content = useMemo(() => {
+    if (!canAccessActiveTab) {
+      return (
+        <SettingsSection>
+          <div className="py-8 text-center text-pf-text-secondary">
+            <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
+          </div>
+        </SettingsSection>
+      );
+    }
+
     if (currentCategory.subPages.length === 0) {
       return SINGLE_PAGE_CONTENT[currentCategory.id] ?? (
         <SettingsSection>
@@ -602,7 +715,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [currentCategory, renderedContentKey]);
+  }, [activeSubPageLabel, canAccessActiveTab, currentCategory, renderedContentKey]);
 
   // The scope registry already names every scope, and the document title (above)
   // reads from it. The H1 used to hardcode its own strings, so the browser tab
@@ -644,10 +757,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const subTabs =
-    !hasNoMatches && currentCategory.subPages.length > 0 ? (
+    !hasNoMatches && visibleSubPages.length > 0 ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
-          subPages={currentCategory.subPages}
+          subPages={visibleSubPages}
           activeSubPage={activeSubPage}
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}

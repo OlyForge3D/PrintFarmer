@@ -30,6 +30,9 @@ export function AddModelsToCollectionModal({ isOpen, modelIds, onClose, onCreate
   const addModels = useAddModelsToCollection();
   const [checkedIds, setCheckedIds] = useState<string[]>([]);
 
+  // Justified role check, not migrated (#1457): mirrors CollectionsNav.tsx —
+  // ModelCollectionService.EnsureCanWrite checks IsFarmAdmin literally, with no
+  // corresponding resource permission to gate on instead.
   const isAdmin = hasRole('farm_admin');
 
   // Only offer collections the backend will actually let this user write to
