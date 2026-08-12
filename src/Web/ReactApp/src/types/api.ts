@@ -3814,7 +3814,17 @@ export interface RoleSummary {
   isSystemRole: boolean;
   isActive: boolean;
   memberCount: number;
+  /**
+   * Count of stored grant rows. Undercounts real authority when `hasImplicitTotalAccess` is set —
+   * that role stores one `{resource}:admin` row per resource yet effectively holds every finer
+   * action too. Present total access instead of this number for such roles.
+   */
   permissionCount: number;
+  /**
+   * True only for `farm_admin`, whose authority comes from a hard-coded role bypass rather than
+   * stored grants. Use this instead of matching on `name` (#1456).
+   */
+  hasImplicitTotalAccess: boolean;
   createdAt: string;
   updatedAt: string;
 }

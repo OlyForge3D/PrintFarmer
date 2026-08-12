@@ -497,7 +497,13 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
                       </div>
                     </TableCell>
                     <TableCell>{role.memberCount}</TableCell>
-                    <TableCell>{role.permissionCount}</TableCell>
+                    <TableCell>
+                      {role.hasImplicitTotalAccess ? (
+                        <Badge variant="primary" size="sm">All</Badge>
+                      ) : (
+                        role.permissionCount
+                      )}
+                    </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">
                         {!role.isSystemRole && (

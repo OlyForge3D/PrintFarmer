@@ -41,6 +41,7 @@ const customRole: RoleSummary = {
   isActive: true,
   memberCount: 2,
   permissionCount: 3,
+  hasImplicitTotalAccess: false,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -54,6 +55,7 @@ const systemRole: RoleSummary = {
   isActive: true,
   memberCount: 1,
   permissionCount: 10,
+  hasImplicitTotalAccess: true,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -528,6 +530,20 @@ describe('RoleManagementPage', () => {
     await user.click(within(confirmDialog2).getByRole('button', { name: 'Discard changes' }));
 
     await screen.findByText(/implicit total access/i);
+  });
+
+  it('shows "All" instead of a stored-row count for a role with implicit total access', async () => {
+    // The stored count is one row per resource ("{resource}:admin"), which reads as a small,
+    // partial number next to a role that actually holds everything.
+    renderPage();
+
+    const adminRow = (await screen.findByText('Farm Admin')).closest('tr');
+    expect(adminRow).not.toBeNull();
+    expect(within(adminRow as HTMLElement).getByText('All')).toBeInTheDocument();
+    expect(within(adminRow as HTMLElement).queryByText('10')).not.toBeInTheDocument();
+
+    const customRow = (await screen.findByText('Shift Lead')).closest('tr');
+    expect(within(customRow as HTMLElement).getByText('3')).toBeInTheDocument();
   });
 
   it('renders the farm_admin permission pane as fully read-only, with every permission shown as granted', async () => {
