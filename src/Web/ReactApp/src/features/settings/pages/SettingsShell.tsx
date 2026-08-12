@@ -5,6 +5,7 @@ import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   ADMIN_HUB_PARENT,
+  canAccessDestination,
   getDestinationForTab,
   hasAccessibleDestinationWithPrefix,
 } from '@/features/admin/registry/adminDestinations';
@@ -600,16 +601,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     if (requestedScope === 'admin' && !canReachAdminScope) {
       toast.info("You don't have access to admin settings. Showing your user settings instead.");
     }
-  }, [canReachAdminScope, requestedScope]);
+    // Mirrors the 'admin' case above (issue 1457): the 'system' scope route
+    // (/admin/settings) previously had no equivalent notice — a gap that
+    // predates this change but sits right next to the code this migration
+    // touches, so it's fixed here too rather than left as a silent fallback.
+    if (requestedScope === 'system' && !canReachSystemScope) {
+      toast.info("You don't have access to system settings. Showing your user settings instead.");
+    }
+  }, [canReachAdminScope, canReachSystemScope, requestedScope]);
 
-  // Per-tab/sub-page permission gate (issue 1457). Each admin destination's
-  // `requiredPermission` is the source of truth here — mirrors what the nav
-  // and Control Center hub already enforce, so a tab that was reachable via a
-  // direct link behaves the same as one reached by clicking a nav entry. Tabs
-  // with no matching destination (e.g. the `user`-scope profile tabs) are not
-  // gated here at all; the server remains the actual enforcement point either
-  // way. This is a UX tightening only: previously any `farm_admin` saw every
-  // tab regardless of a hypothetical narrower permission — nobody loses access
+  // Per-tab/sub-page permission gate (issue 1457). Reuses the same
+  // canAccessDestination predicate the registry's bulk filter and the
+  // Layout nav use, so a directly-linked tab honours BOTH requiredPermission
+  // AND requiredRole — not just requiredPermission. That distinction matters
+  // for the role-only exceptions (slicing-profiles, int-connections) which
+  // have no requiredPermission at all and would otherwise render as
+  // accessible to anyone who reaches the /admin/settings scope. Tabs with no
+  // matching destination (e.g. the `user`-scope profile tabs) are not gated
+  // here at all; the server remains the actual enforcement point either way.
+  // This is a UX tightening only: previously any `farm_admin` saw every tab
+  // regardless of a hypothetical narrower permission — nobody loses access
   // they previously had, this only prevents landing on a tab the API would
   // refuse.
   const activeTabDestination = useMemo(
@@ -617,11 +628,11 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     [activeSubPage, currentCategory],
   );
   const canAccessActiveTab = useMemo(() => {
-    if (!activeTabDestination?.requiredPermission) {
+    if (!activeTabDestination) {
       return true;
     }
-    return hasPermission(activeTabDestination.requiredPermission.resource, activeTabDestination.requiredPermission.action);
-  }, [activeTabDestination, hasPermission]);
+    return canAccessDestination(activeTabDestination, destinationAccess);
+  }, [activeTabDestination, destinationAccess]);
 
   const content = useMemo(() => {
     if (!canAccessActiveTab) {

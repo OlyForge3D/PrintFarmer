@@ -577,6 +577,38 @@ export interface AdminDestinationAccess {
 }
 
 /**
+ * True when the current user is allowed to reach a single destination.
+ *
+ * The default role is `farm_admin`; a destination with `requiredRole: null`
+ * is treated as accessible to any authenticated user. Shared by
+ * `filterDestinationsByAccess` (bulk filtering) and `SettingsShell`'s
+ * per-tab gate (#1457), so both apply the exact same rule — including the
+ * three role-only exceptions (`admin-home`, `slicing-profiles`,
+ * `int-connections`) that have no `requiredPermission` at all.
+ */
+export function canAccessDestination(
+  destination: AdminDestination,
+  access: AdminDestinationAccess,
+): boolean {
+  const hasPermission = access.hasPermission ?? (() => true);
+
+  const requiredRole = destination.requiredRole === undefined
+    ? DEFAULT_ADMIN_ROLE
+    : destination.requiredRole;
+
+  if (requiredRole !== null && !access.hasRole(requiredRole)) {
+    return false;
+  }
+
+  if (destination.requiredPermission
+    && !hasPermission(destination.requiredPermission.resource, destination.requiredPermission.action)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Filter destinations to those the current user is allowed to reach.
  *
  * The default role is `farm_admin`; a destination with `requiredRole: null`
@@ -586,24 +618,7 @@ export function filterDestinationsByAccess(
   destinations: readonly AdminDestination[],
   access: AdminDestinationAccess,
 ): AdminDestination[] {
-  const hasPermission = access.hasPermission ?? (() => true);
-
-  return destinations.filter((destination) => {
-    const requiredRole = destination.requiredRole === undefined
-      ? DEFAULT_ADMIN_ROLE
-      : destination.requiredRole;
-
-    if (requiredRole !== null && !access.hasRole(requiredRole)) {
-      return false;
-    }
-
-    if (destination.requiredPermission
-      && !hasPermission(destination.requiredPermission.resource, destination.requiredPermission.action)) {
-      return false;
-    }
-
-    return true;
-  });
+  return destinations.filter((destination) => canAccessDestination(destination, access));
 }
 
 /**
