@@ -44,6 +44,7 @@ import { ApiKeysPage } from '@/features/profile/pages/ApiKeysPage';
 import { NotificationPreferencesPage } from '@/features/notifications/pages/NotificationPreferencesPage';
 import { QuotaManagementPage } from '@/features/quotas/pages/QuotaManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
+import { RoleManagementPage } from '@/features/admin/pages/RoleManagementPage';
 import { PrinterGroupsPage } from '@/features/printer-groups/pages/PrinterGroupsPage';
 import { NfcBindingsPage } from '@/features/nfc/pages/NfcBindingsPage';
 import { PasskeysPage } from '@/features/profile/pages/PasskeysPage';
@@ -188,6 +189,7 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
   ),
   'users.accounts': <UserManagementPage embedded />,
   'users.audit': <LoginAuditPage embedded />,
+  'users.roles': <RoleManagementPage embedded />,
   'data.tags': <TagAdminPage embedded />,
   'data.management': <DataManagementPage embedded />,
 };
