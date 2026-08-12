@@ -13,6 +13,11 @@ const createTestQueryClient = () => new QueryClient({
 });
 
 let mockUserRole = 'farm_admin';
+// #1457: lets a test simulate a custom (non-farm_admin) role that has been
+// granted one specific admin permission, independent of mockUserRole, so the
+// Admin nav link's `requiresAnyAccessUnder` gating can be proven against a
+// real custom-role scenario rather than only the role-shaped default below.
+let mockPermissionOverride: ((resource: string, action: string) => boolean) | null = null;
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
@@ -23,8 +28,10 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     // Mirrors mockUserRole rather than a blanket `true` (#1457): the "operator"
     // test case needs hasPermission to actually deny, since the Admin nav
     // link is now gated on `requiresAnyAccessUnder` (reachable admin
-    // destinations), not a fixed role/permission pair.
-    hasPermission: () => mockUserRole === 'farm_admin',
+    // destinations), not a fixed role/permission pair. mockPermissionOverride
+    // lets a test opt into fully independent, resource/action-aware behavior.
+    hasPermission: (resource: string, action: string) =>
+      mockPermissionOverride ? mockPermissionOverride(resource, action) : mockUserRole === 'farm_admin',
   }),
 }));
 
@@ -102,6 +109,7 @@ describe('Navigation rail sections', () => {
 
   beforeEach(() => {
     mockUserRole = 'farm_admin';
+    mockPermissionOverride = null;
     localStorage.clear();
   });
 
@@ -177,6 +185,27 @@ describe('Navigation rail sections', () => {
     expect(container.querySelector('a[href="/admin"]')).toBeNull();
     expect(screen.queryByText('Admin')).not.toBeInTheDocument();
     expect(desktopNav.querySelectorAll('hr[aria-hidden="true"]')).toHaveLength(0);
+  });
+
+  it('shows the Admin nav link for a custom (non-farm_admin) role granted only printers:admin', () => {
+    // #1457 acceptance criterion: a user with a custom role granted a single
+    // admin permission (not the farm_admin role) must see the Admin nav entry
+    // via `requiresAnyAccessUnder`, because they can reach at least one
+    // destination under /admin (Printer Groups).
+    mockUserRole = 'operator';
+    mockPermissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    const { container } = renderLayout();
+
+    expect(container.querySelector('a[href="/admin"]')).not.toBeNull();
+    expect(within(getDesktopNav(container)).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+  });
+
+  it('hides the Admin nav link for a custom (non-farm_admin) role granted zero admin permissions', () => {
+    mockUserRole = 'operator';
+    mockPermissionOverride = () => false;
+    const { container } = renderLayout();
+
+    expect(container.querySelector('a[href="/admin"]')).toBeNull();
   });
 
   it('keeps the skip link and main navigation landmark available', () => {

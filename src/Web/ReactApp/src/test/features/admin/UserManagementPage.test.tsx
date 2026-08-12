@@ -4,9 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { apiClient } from '@/services/api';
 
+let hasUsersAdmin = true;
+
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   // #1457: UserManagementPage now gates on hasPermission('users', 'admin').
-  useAuth: () => ({ hasRole: (role: string) => role === 'farm_admin', hasPermission: () => true }),
+  useAuth: () => ({
+    hasRole: (role: string) => role === 'farm_admin',
+    hasPermission: (resource: string, action: string) => hasUsersAdmin && resource === 'users' && action === 'admin',
+  }),
 }));
 
 vi.mock('@/common/hooks/usePasswordPolicy', () => ({
@@ -49,6 +54,7 @@ function createDeferred() {
 describe('UserManagementPage shared admin patterns', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    hasUsersAdmin = true;
     vi.mocked(apiClient.getUsers).mockResolvedValue([]);
     vi.mocked(apiClient.getRoles).mockResolvedValue([
       {
@@ -58,6 +64,13 @@ describe('UserManagementPage shared admin patterns', () => {
         description: 'Standard user',
       },
     ]);
+  });
+
+  it('denies access and shows AdminError when the user lacks users:admin', () => {
+    hasUsersAdmin = false;
+    render(<UserManagementPage />);
+    expect(screen.getByText('Access denied')).toBeInTheDocument();
+    expect(screen.getByText('You need administrator privileges to access user management.')).toBeInTheDocument();
   });
 
   it('uses the shared loading state', () => {

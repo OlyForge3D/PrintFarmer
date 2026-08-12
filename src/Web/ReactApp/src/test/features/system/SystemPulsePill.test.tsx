@@ -62,14 +62,20 @@ const systemInfo: SystemInfo = {
   },
 };
 
+let isFarmAdmin = true;
+
 describe('SystemPulsePill', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    isFarmAdmin = true;
     useAuthMock.mockReturnValue({
-      hasRole: (role: string) => role === 'farm_admin',
+      hasRole: (role: string) => role === 'farm_admin' && isFarmAdmin,
       // #1457: SystemPulsePill now gates on hasPermission('system_settings', 'admin')
-      // rather than the role name — mirror farm_admin's implicit "yes to everything".
-      hasPermission: () => true,
+      // rather than the role name. Tie the mock to the actual resource/action pair
+      // (not a blanket true) so this proves the component checks the right
+      // permission, not merely that it renders when *some* permission is granted.
+      hasPermission: (resource: string, action: string) =>
+        isFarmAdmin && resource === 'system_settings' && action === 'admin',
     } as ReturnType<typeof useAuth>);
     useQueryMock.mockReturnValue({
       data: systemInfo,
@@ -124,14 +130,23 @@ describe('SystemPulsePill', () => {
   });
 
   it('stays hidden for non-admin users', () => {
-    useAuthMock.mockReturnValue({
-      hasRole: () => false,
-      hasPermission: () => false,
-    } as ReturnType<typeof useAuth>);
+    isFarmAdmin = false;
 
     render(<SystemPulsePill />);
 
     expect(screen.queryByRole('button', { name: /system/i })).not.toBeInTheDocument();
+  });
+
+  it('shows the pill for a custom role granted only system_settings:admin (no farm_admin role)', () => {
+    isFarmAdmin = false;
+    useAuthMock.mockReturnValue({
+      hasRole: () => false,
+      hasPermission: (resource: string, action: string) => resource === 'system_settings' && action === 'admin',
+    } as ReturnType<typeof useAuth>);
+
+    render(<SystemPulsePill />);
+
+    expect(screen.getByRole('button', { name: /system/i })).toBeInTheDocument();
   });
 
   it('renders a disabled degraded pill when system info fails to load', () => {

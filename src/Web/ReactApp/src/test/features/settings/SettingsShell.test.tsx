@@ -58,8 +58,13 @@ vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
   FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
 }));
 
-const authState = {
+const authState: { roles: string[]; permissionOverride: ((resource: string, action: string) => boolean) | null } = {
   roles: ['farm_admin'],
+  // #1457: lets a test simulate a custom (non-farm_admin) role granted one
+  // specific admin permission, independent of the role-shaped default below,
+  // so per-tab gating (`canAccessDestination`) can be proven against a real
+  // custom-role scenario rather than only farm_admin vs. nothing.
+  permissionOverride: null,
 };
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -68,7 +73,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     hasRole: (role: string) => authState.roles.includes(role),
-    hasPermission: () => authState.roles.includes('farm_admin'),
+    hasPermission: (resource: string, action: string) =>
+      authState.permissionOverride ? authState.permissionOverride(resource, action) : authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
   useAuthInternal: () => ({
@@ -76,7 +82,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     hasRole: (role: string) => authState.roles.includes(role),
-    hasPermission: () => authState.roles.includes('farm_admin'),
+    hasPermission: (resource: string, action: string) =>
+      authState.permissionOverride ? authState.permissionOverride(resource, action) : authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
 }));
@@ -152,6 +159,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   setAuthRoles(['farm_admin']);
+  authState.permissionOverride = null;
   vi.clearAllMocks();
 });
 
@@ -344,6 +352,31 @@ describe('SettingsShell', () => {
     expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Printer Groups' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('printer-groups-page')).toHaveAttribute('data-embedded', 'true');
+  });
+
+  it('lets a custom (non-farm_admin) role granted only printers:admin reach system scope and that one tab', () => {
+    // #1457 acceptance criterion: a user with a custom role granted a single
+    // resource permission (not the farm_admin role) must actually reach the
+    // matching admin destination, not merely see a nav entry that dead-ends.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
+  });
+
+  it('denies a custom (non-farm_admin) role a specific tab it lacks the requiredPermission for', () => {
+    // Same custom role as above (printers:admin only) is still refused the
+    // Cameras sub-page, which requires cameras:admin — proving
+    // canAccessDestination's per-tab gate, not just the coarser scope gate.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=cameras');
+
+    expect(screen.getByText(/don't have permission to view/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('printer-groups-page')).not.toBeInTheDocument();
   });
 
   it('matches hardware sub-pages in search results', () => {
