@@ -330,7 +330,7 @@ describe('RoleManagementPage', () => {
     await user.click(within(saveBar).getByRole('button', { name: 'Save changes' }));
 
     const confirmDialog = await screen.findByRole('dialog', { name: 'Save permission changes' });
-    expect(within(confirmDialog).getByText(/sign out 2 current member/i)).toBeInTheDocument();
+    expect(within(confirmDialog).getByText(/currently has 2 member\(s\)/i)).toBeInTheDocument();
     await user.click(within(confirmDialog).getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(apiClient.updateRolePermissions).toHaveBeenCalledWith(
@@ -352,7 +352,7 @@ describe('RoleManagementPage', () => {
     const confirmDialog = await screen.findByRole('dialog', { name: 'Save permission changes' });
     await user.click(within(confirmDialog).getByRole('button', { name: 'Save changes' }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/modified by another request/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Stale update.');
     await user.click(screen.getByRole('button', { name: 'Reload latest' }));
 
     await waitFor(() => expect(apiClient.getRolePermissions).toHaveBeenCalledTimes(2));
@@ -379,6 +379,41 @@ describe('RoleManagementPage', () => {
     expect(alert).toHaveTextContent(/last active role holding a required administrative permission/i);
     expect(alert).toHaveTextContent('printers:admin');
     expect(screen.queryByRole('button', { name: 'Reload latest' })).not.toBeInTheDocument();
+  });
+
+  it('confirms before discarding unsaved permission edits when switching roles', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.getRolePermissions).mockImplementation((roleId: string) =>
+      Promise.resolve(
+        roleId === systemRole.id
+          ? buildRolePermissions({
+              roleId: systemRole.id,
+              roleName: systemRole.name,
+              roleDisplayName: systemRole.displayName,
+              isSystemRole: true,
+              isEditable: false,
+            })
+          : buildRolePermissions(),
+      ));
+    renderPage();
+
+    await user.click(await screen.findByText('Shift Lead'));
+    await user.click(await screen.findByLabelText(/^Grant Admin/));
+
+    await user.click(await screen.findByText('Farm Admin'));
+
+    const confirmDialog = await screen.findByRole('dialog', { name: 'Discard unsaved permission changes?' });
+    expect(within(confirmDialog).getByText('You have unsaved permission changes for this role. Switching roles will discard them.')).toBeInTheDocument();
+
+    // Cancelling keeps the original role selected and the toggle still checked.
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByLabelText(/^Grant Admin/)).toBeChecked();
+
+    await user.click(await screen.findByText('Farm Admin'));
+    const confirmDialog2 = await screen.findByRole('dialog', { name: 'Discard unsaved permission changes?' });
+    await user.click(within(confirmDialog2).getByRole('button', { name: 'Discard changes' }));
+
+    await screen.findByText(/implicit total access/i);
   });
 
   it('renders the farm_admin permission pane as fully read-only', async () => {

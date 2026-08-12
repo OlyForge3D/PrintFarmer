@@ -115,8 +115,9 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [cascadeDelete, setCascadeDelete] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [pendingSaveConfirm, setPendingSaveConfirm] = useState(false);
-  const [concurrencyConflict, setConcurrencyConflict] = useState(false);
+  const [concurrencyConflict, setConcurrencyConflict] = useState<string | null>(null);
   const [lockoutViolation, setLockoutViolation] = useState<{ message: string; permissions: string[] } | null>(null);
+  const [pendingRoleSwitch, setPendingRoleSwitch] = useState<string | null>(null);
 
   const rolesQuery = useQuery<RoleSummary[]>({
     queryKey: ['admin-roles'],
@@ -144,11 +145,29 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   useEffect(() => {
     if (rolePermissionsQuery.data) {
       grantState.markPristine(buildGrantMap(rolePermissionsQuery.data));
-      setConcurrencyConflict(false);
+      setConcurrencyConflict(null);
       setLockoutViolation(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolePermissionsQuery.data]);
+
+  // Switching the selected role while the permission matrix has unsaved edits would
+  // otherwise silently discard those edits once the new role's data loads and
+  // markPristine overwrites the working set. Guard the switch behind a confirmation
+  // whenever there are unsaved changes.
+  const requestSelectRole = (roleId: string) => {
+    if (roleId === selectedRoleId) return;
+    if (grantState.isDirty) {
+      setPendingRoleSwitch(roleId);
+      return;
+    }
+    setSelectedRoleId(roleId);
+  };
+
+  const confirmRoleSwitch = () => {
+    if (pendingRoleSwitch) setSelectedRoleId(pendingRoleSwitch);
+    setPendingRoleSwitch(null);
+  };
 
   const roles = rolesQuery.data ?? [];
   const selectedRole = roles.find((r) => r.id === selectedRoleId) ?? null;
@@ -314,7 +333,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       queryClient.setQueryData(['admin-role-permissions', selectedRoleId], result.role);
       grantState.markPristine(buildGrantMap(result.role));
       setPendingSaveConfirm(false);
-      setConcurrencyConflict(false);
+      setConcurrencyConflict(null);
       setLockoutViolation(null);
       if (result.revokedSessionCount > 0) {
         adminToast.success(
@@ -332,7 +351,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
         return;
       }
       if (isApiError(error) && error.statusCode === 409) {
-        setConcurrencyConflict(true);
+        setConcurrencyConflict(error.message || 'This role was modified by another request. Reload and retry.');
         return;
       }
       adminToast.error(getErrorMessage(error, 'Could not save permission changes.'));
@@ -340,7 +359,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   });
 
   const reloadPermissions = () => {
-    setConcurrencyConflict(false);
+    setConcurrencyConflict(null);
     setLockoutViolation(null);
     void rolePermissionsQuery.refetch();
   };
@@ -425,7 +444,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
                     key={role.id}
                     isSelected={role.id === selectedRoleId}
                     isHoverable
-                    onClick={() => setSelectedRoleId(role.id)}
+                    onClick={() => requestSelectRole(role.id)}
                     className="cursor-pointer"
                   >
                     <TableCell>
@@ -699,13 +718,23 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
         title="Save permission changes"
         message={
           selectedRole && selectedRole.memberCount > 0
-            ? `This will sign out ${selectedRole.memberCount} current member(s) of this role so the new permissions take effect.`
+            ? `This role currently has ${selectedRole.memberCount} member(s). Saving may sign out any of their active sessions once the new permissions take effect.`
             : 'Save these permission changes?'
         }
         confirmButtonText="Save changes"
         isConfirming={savePermissionsMutation.isPending}
         onConfirm={() => savePermissionsMutation.mutate()}
         onCancel={() => setPendingSaveConfirm(false)}
+      />
+
+      {/* Unsaved permission changes when switching roles */}
+      <ConfirmationModal
+        isOpen={pendingRoleSwitch !== null}
+        title="Discard unsaved permission changes?"
+        message="You have unsaved permission changes for this role. Switching roles will discard them."
+        confirmButtonText="Discard changes"
+        onConfirm={confirmRoleSwitch}
+        onCancel={() => setPendingRoleSwitch(null)}
       />
     </PageTemplate>
   );
@@ -716,7 +745,7 @@ interface PermissionMatrixProps {
   catalogIndex: Map<string, PermissionCatalogEntry>;
   grants: Record<string, boolean>;
   onToggle: (permission: string, granted: boolean) => void;
-  concurrencyConflict: boolean;
+  concurrencyConflict: string | null;
   onReload: () => void;
   lockoutViolation: { message: string; permissions: string[] } | null;
 }
@@ -761,7 +790,7 @@ function PermissionMatrix({
 
       {concurrencyConflict && (
         <div role="alert" className="flex items-center justify-between gap-3 text-sm text-pf-warning-text bg-pf-warning-bg border border-pf-warning/30 rounded-md p-3">
-          <span>This role was modified by another request. Reload and retry.</span>
+          <span>{concurrencyConflict}</span>
           <Button variant="secondary" size="sm" onClick={onReload} iconLeft={<RefreshIcon className="w-3.5 h-3.5" />}>
             Reload latest
           </Button>
