@@ -153,6 +153,7 @@ export const SETTINGS_CATEGORIES: SettingsCategory[] = [
     subPages: [
       { id: 'accounts', label: 'User Accounts', description: 'Manage accounts, roles, and access levels.', keywords: ['user', 'account', 'role', 'permission', 'admin'] },
       { id: 'audit', label: 'Login Audit', description: 'Review authentication attempts and sign-in history.', keywords: ['login', 'audit', 'history', 'security', 'log'] },
+      { id: 'roles', label: 'Roles & Permissions', description: 'Create custom roles and manage their permission grants.', keywords: ['role', 'permission', 'matrix', 'grant', 'deny', 'access control'] },
     ],
   },
   {

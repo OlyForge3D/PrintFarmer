@@ -68,6 +68,10 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
   const queryClient = useQueryClient();
   const { user, hasRole, hasPermission, logout } = useAuth();
   const { theme, setTheme } = useTheme();
+  // The per-field settings palette (below) spans every settings resource at
+  // once — no single `{resource}:action}` permission can represent "any
+  // settings field", so it stays gated on the `farm_admin` role literally
+  // (#1457). This is a deliberate, justified exception, not an oversight.
   const isFarmAdmin = hasRole('farm_admin');
 
   const open = useCallback(() => setIsOpen(true), []);
@@ -165,7 +169,10 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
       });
     }
 
-    if (isFarmAdmin) {
+    // "Refresh admin overview" refreshes the AdminOverviewController's data,
+    // which is gated on `system_settings:admin` server-side — migrate this
+    // action to match rather than the blanket `farm_admin` role (#1457).
+    if (hasPermission('system_settings', 'admin')) {
       actions.push({
         id: 'action.refresh-admin-overview',
         kind: 'action',
@@ -202,7 +209,7 @@ export function GlobalCommandPaletteProvider({ children }: GlobalCommandPaletteP
     });
 
     return actions;
-  }, [user, isFarmAdmin, theme, setTheme, logout, queryClient]);
+  }, [user, hasPermission, theme, setTheme, logout, queryClient]);
 
   const items = useMemo<SettingsCommandItem[]>(
     () => [

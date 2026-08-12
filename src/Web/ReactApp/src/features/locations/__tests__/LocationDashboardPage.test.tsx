@@ -87,6 +87,11 @@ const mockStats = {
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
     hasRole: (role: string) => role === 'farm_admin' && isFarmAdmin,
+    // #1457: LocationDashboardPage now gates on hasPermission('locations', 'admin')
+    // instead of hasRole('farm_admin'). Mirror the existing isFarmAdmin toggle so
+    // this suite's admin/non-admin cases still exercise the same two states.
+    hasPermission: (resource: string, action: string) =>
+      isFarmAdmin && resource === 'locations' && action === 'admin',
   }),
 }));
 

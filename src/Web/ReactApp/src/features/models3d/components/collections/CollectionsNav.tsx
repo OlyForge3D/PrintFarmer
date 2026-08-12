@@ -57,6 +57,10 @@ export function CollectionsNav({ selectedCollectionId, onSelectCollection }: Col
   const [deleteTarget, setDeleteTarget] = useState<ModelCollection | null>(null);
   const menuTriggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
+  // Justified role check, not migrated (#1457): the server's
+  // `ModelCollectionService.EnsureCanWrite` checks `PrintFarmerPermissions.IsFarmAdmin`
+  // literally to allow admins to manage other users' collections — there is no
+  // corresponding resource permission to gate this on.
   const isAdmin = hasRole('farm_admin');
 
   const { personal, shared, otherPrivate } = useMemo(() => {

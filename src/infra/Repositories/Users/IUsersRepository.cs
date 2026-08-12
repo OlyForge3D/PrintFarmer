@@ -198,7 +198,7 @@ public interface IUsersRepository
     /// Gets all permission pairs explicitly denied (<c>Granted == false</c>) by at least
     /// one of the user's active roles, regardless of whether another active role also
     /// grants the same pair. Used to keep the resource:admin implication
-    /// (<see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.ImpliesViaResourceAdmin"/>)
+    /// (<see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.ImpliesViaResourceAdmin(System.Security.Claims.ClaimsPrincipal, string, string)"/>)
     /// from overriding an explicit per-action deny. See docs/ROLE_PERMISSION_PRECEDENCE.md.
     /// </summary>
     /// <param name="userId">The user's unique identifier.</param>

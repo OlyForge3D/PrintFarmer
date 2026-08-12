@@ -75,6 +75,22 @@ public class UnifiedSettingsController(
     /// URLs, intervals, file paths, feature flags and hostnames, and has no anonymous consumer. The
     /// printer-discovery microservice reads only a single section via the per-key endpoint, so this
     /// endpoint deliberately does not carry <c>[AllowAnonymous]</c>.
+    /// <para>
+    /// Deliberately NOT gated by <c>[RequirePermission("system_settings", "admin")]</c> (raised in
+    /// #1457 review): #950 established "any signed-in user, any role" as the intended read
+    /// boundary here — see
+    /// <c>UnifiedSettingsAnonymousAccessTests.GetRoot_AsAuthenticatedUser_Returns200</c> —
+    /// and command-palette settings search (<c>useSettingsMetadata</c>/
+    /// <c>GlobalCommandPaletteProvider</c>) depends on every authenticated user, not just admins,
+    /// being able to build the searchable index across every section, then gate individual results
+    /// by permission client-side. The actual state-changing operation is already the real
+    /// enforcement point: see <see cref="UpdateAsync"/> and
+    /// <see cref="UpdateSettingsByKeyNameAsync"/>, both of which already carry
+    /// <c>[RequirePermission("system_settings", "admin")]</c>. Adding it here would silently break
+    /// that pre-existing, tested read contract for every non-admin user rather than close any gap
+    /// #1457 introduced — #1457 only changes which nav entries the client renders, not what this
+    /// controller has ever allowed a signed-in user to read.
+    /// </para>
     /// </remarks>
     /// <returns>Dictionary of all settings sections keyed by section name.</returns>
     [HttpGet]
@@ -260,7 +276,9 @@ public class UnifiedSettingsController(
     /// Gets metadata for all settings sections, including property names, types, and descriptions.
     /// </summary>
     /// <remarks>
-    /// Used for dynamic UI generation and frontend validation.
+    /// Used for dynamic UI generation, frontend validation, and the cross-cutting command-palette
+    /// settings index. Deliberately not gated by <c>[RequirePermission("system_settings", "admin")]</c>
+    /// for the same reason as <see cref="Get"/> — see that method's remarks.
     /// </remarks>
     /// <returns>Metadata for all settings sections.</returns>
     [HttpGet("metadata")]
@@ -290,6 +308,8 @@ public class UnifiedSettingsController(
     /// <remarks>
     /// Used for organizing settings sections in the UI sidebar.
     /// Groups are defined via [SettingGroup] attributes on settings classes.
+    /// Deliberately not gated by <c>[RequirePermission("system_settings", "admin")]</c> for the same
+    /// reason as <see cref="Get"/> — see that method's remarks.
     /// </remarks>
     /// <returns>Metadata for all settings groups, ordered by their Order property.</returns>
     [HttpGet("groups")]
