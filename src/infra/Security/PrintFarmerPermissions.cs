@@ -9,6 +9,7 @@ namespace Farm.Infrastructure.Security;
 public static class PrintFarmerPermissions
 {
     public const string ClaimType = "permission";
+    public const string DenyClaimType = "permission-deny";
     public const string FarmAdminRole = "farm_admin";
 
     /// <summary>
@@ -126,10 +127,16 @@ public static class PrintFarmerPermissions
     /// extend beyond the "admin" action. This is the single source of truth for the
     /// implication so every enforcement point (the authorization handler, SignalR hubs,
     /// capability services) stays coherent.
+    ///
+    /// An explicit deny claim (<see cref="DenyClaimType"/>) for "{resource}:{action}"
+    /// always suppresses the implication: per docs/ROLE_PERMISSION_PRECEDENCE.md, an
+    /// explicit deny on a specific action must win even when the same user also holds a
+    /// resource-level admin grant, otherwise the deny would be silently unenforceable.
     /// </summary>
     public static bool ImpliesViaResourceAdmin(ClaimsPrincipal user, string resource, string action) =>
         !string.Equals(action, AdminAction, StringComparison.Ordinal)
-        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}");
+        && user.HasClaim(ClaimType, $"{resource}:{AdminAction}")
+        && !user.HasClaim(DenyClaimType, $"{resource}:{action}");
 
     public static bool TryGetUserId(ClaimsPrincipal user, out Guid userId) =>
         Guid.TryParse(
