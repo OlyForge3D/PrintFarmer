@@ -655,7 +655,10 @@ All events use **camelCase JSON** for TypeScript compatibility:
 - JWT token-based
 - Secure HttpOnly cookies
 - Token refresh mechanism
-- Role-based access control (RBAC)
+- Permission-based access control: roles are the assignment/grant vehicle,
+  but authorization checks (`[RequirePermission]`) are enforced against
+  `resource:action` permission claims, not role names. See
+  [Permission Model](./PERMISSION_MODEL.md).
 
 ### Data Protection
 - API keys encrypted at rest
