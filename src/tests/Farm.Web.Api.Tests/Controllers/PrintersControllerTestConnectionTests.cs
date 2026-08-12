@@ -60,6 +60,28 @@ public class PrintersControllerTestConnectionTests
         httpClientFactory.VerifyNoOtherCalls();
     }
 
+    [Theory]
+    [InlineData("ftp://printer.local")]
+    [InlineData("http://embedded-user:embedded-password@printer.local")]
+    public async Task TestConnectionAsync_WhenServerUrlIsUnsafe_RejectsBeforeEgressCheck(string serverUrl)
+    {
+        Mock<IHttpClientFactory> httpClientFactory = new(MockBehavior.Strict);
+        Mock<IEgressGuard> egressGuard = new(MockBehavior.Strict);
+        PrintersController controller = CreateController(httpClientFactory.Object, egressGuard.Object);
+        var request = new TestConnectionRequest(
+            ServerUrl: serverUrl,
+            Backend: PrinterBackend.Moonraker);
+
+        ActionResult<TestConnectionResponse> result = await controller.TestConnectionAsync(request, CancellationToken.None);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result.Result);
+        TestConnectionResponse response = Assert.IsType<TestConnectionResponse>(badRequest.Value);
+        response.Success.Should().BeFalse();
+        response.Message.Should().Be("Server URL must be an HTTP/HTTPS URL without embedded credentials.");
+        egressGuard.VerifyNoOtherCalls();
+        httpClientFactory.VerifyNoOtherCalls();
+    }
+
     [Fact]
     public async Task TestConnectionAsync_WhenEgressGuardResolvesAnAddress_ConnectionTargetsThePinnedIpNotTheHostname()
     {

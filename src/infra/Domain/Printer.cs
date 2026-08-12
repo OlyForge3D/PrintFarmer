@@ -68,21 +68,23 @@ public class Printer : IRevisionedEntity
 
             try
             {
-                Uri baseUri = new(ServerUrl);
+                UriBuilder baseUriBuilder = CreateCredentialFreeUriBuilder(ServerUrl);
+                Uri baseUri = baseUriBuilder.Uri;
                 int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
 
                 // Only include port in URL if it's non-standard
                 if (BackendPort == defaultPort)
                 {
-                    return baseUri.ToString().TrimEnd('/');
+                    baseUriBuilder.Port = -1;
+                    return baseUriBuilder.Uri.ToString().TrimEnd('/');
                 }
 
-                UriBuilder ub = new(baseUri) { Port = BackendPort };
-                return ub.Uri.ToString().TrimEnd('/');
+                baseUriBuilder.Port = BackendPort;
+                return baseUriBuilder.Uri.ToString().TrimEnd('/');
             }
             catch
             {
-                return ServerUrl;
+                return string.Empty;
             }
         }
     }
@@ -110,23 +112,34 @@ public class Printer : IRevisionedEntity
 
             try
             {
-                Uri baseUri = new(ServerUrl);
+                UriBuilder baseUriBuilder = CreateCredentialFreeUriBuilder(ServerUrl);
+                Uri baseUri = baseUriBuilder.Uri;
                 int defaultPort = baseUri.Scheme == "https" ? 443 : 80;
 
                 // Only include port in URL if it's non-standard
                 if (FrontendPort.Value == defaultPort)
                 {
-                    return baseUri.ToString().TrimEnd('/');
+                    baseUriBuilder.Port = -1;
+                    return baseUriBuilder.Uri.ToString().TrimEnd('/');
                 }
 
-                UriBuilder ub = new(baseUri) { Port = FrontendPort.Value };
-                return ub.Uri.ToString().TrimEnd('/');
+                baseUriBuilder.Port = FrontendPort.Value;
+                return baseUriBuilder.Uri.ToString().TrimEnd('/');
             }
             catch
             {
                 return BackendUrl; // Fall back to backend URL on error
             }
         }
+    }
+
+    private static UriBuilder CreateCredentialFreeUriBuilder(string serverUrl)
+    {
+        return new UriBuilder(serverUrl)
+        {
+            UserName = string.Empty,
+            Password = string.Empty,
+        };
     }
 
     public string? Notes { get; set; }

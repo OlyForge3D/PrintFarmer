@@ -311,9 +311,15 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Server URL is required" });
         }
 
-        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri) ||
+            serverUri.Scheme is not ("http" or "https") ||
+            !string.IsNullOrEmpty(serverUri.UserInfo))
         {
-            return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
+            return BadRequest(new TestConnectionResponse
+            {
+                Success = false,
+                Message = "Server URL must be an HTTP/HTTPS URL without embedded credentials."
+            });
         }
 
         EgressCheckResult egressCheck = await _egressGuard.CheckAsync(serverUri.ToString(), ct);

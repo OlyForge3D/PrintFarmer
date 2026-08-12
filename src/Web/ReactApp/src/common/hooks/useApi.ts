@@ -442,11 +442,16 @@ export function useUpdatePrinter() {
       }
     },
     onSuccess: (updated, { id }) => {
-      // Ensure final server response is applied
-      queryClient.setQueryData(queryKeys.printer(id), updated);
+      // Mutation responses omit client-only URL fields, so preserve them until refetch completes.
+      queryClient.setQueryData<Printer>(queryKeys.printer(id), current =>
+        current ? { ...current, ...updated } : updated
+      );
       const list = queryClient.getQueryData<Printer[]>(queryKeys.printers);
       if (list) {
-        queryClient.setQueryData(queryKeys.printers, list.map(p => p.id === id ? updated : p));
+        queryClient.setQueryData(
+          queryKeys.printers,
+          list.map(p => p.id === id ? { ...p, ...updated } : p)
+        );
       }
     },
     onSettled: (_data, _error, { id }) => {

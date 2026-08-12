@@ -54,6 +54,22 @@ public sealed class SensitiveSerializationTests
     }
 
     [Fact]
+    public void PrinterComputedUrls_RemoveEmbeddedCredentials()
+    {
+        Printer printer = new()
+        {
+            ServerUrl = "http://embedded-user:embedded-password@printer.internal:7125/path",
+            BackendPort = 7125,
+            FrontendPort = 80,
+        };
+
+        printer.BackendUrl.Should().Be("http://printer.internal:7125/path");
+        printer.FrontendUrl.Should().Be("http://printer.internal/path");
+        printer.BackendUrl.Should().NotContain("embedded-user").And.NotContain("embedded-password");
+        printer.FrontendUrl.Should().NotContain("embedded-user").And.NotContain("embedded-password");
+    }
+
+    [Fact]
     public void Serialize_SlicerEntities_DoesNotExposeEndpointsKeysInputsOrStoragePaths()
     {
         SliceJob job = new()
