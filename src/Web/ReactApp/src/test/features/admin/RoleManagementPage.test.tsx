@@ -207,6 +207,20 @@ describe('RoleManagementPage', () => {
     expect(apiClient.createAdminRole).not.toHaveBeenCalled();
   });
 
+  it('still validates the name pattern client-side when cloning from another role', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Farm Admin');
+    await user.click(screen.getByRole('button', { name: 'Clone Farm Admin' }));
+    await user.type(await screen.findByLabelText(/^Name/), 'Not A Valid Slug!');
+    await user.type(await screen.findByLabelText(/^Display name/), 'Cloned role');
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/lowercase/i);
+    expect(apiClient.createAdminRole).not.toHaveBeenCalled();
+  });
+
   it('surfaces the server error message on create failure', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.createAdminRole).mockRejectedValue(apiError(400, 'Role name already exists.'));
@@ -344,6 +358,29 @@ describe('RoleManagementPage', () => {
     await waitFor(() => expect(apiClient.getRolePermissions).toHaveBeenCalledTimes(2));
   });
 
+  it('distinguishes a 409 lockout violation from a concurrency conflict on permission save', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.updateRolePermissions).mockRejectedValue(apiError(
+      409,
+      'This change would remove the last active role holding a required administrative permission.',
+      { error: 'This change would remove the last active role holding a required administrative permission.', permissions: ['printers:admin'] },
+    ));
+    renderPage();
+
+    await user.click(await screen.findByText('Shift Lead'));
+    await user.click(await screen.findByLabelText(/^Grant Admin/));
+
+    const saveBar = screen.getByTestId('admin-save-bar');
+    await user.click(within(saveBar).getByRole('button', { name: 'Save changes' }));
+    const confirmDialog = await screen.findByRole('dialog', { name: 'Save permission changes' });
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Save changes' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/last active role holding a required administrative permission/i);
+    expect(alert).toHaveTextContent('printers:admin');
+    expect(screen.queryByRole('button', { name: 'Reload latest' })).not.toBeInTheDocument();
+  });
+
   it('renders the farm_admin permission pane as fully read-only', async () => {
     vi.mocked(apiClient.getRolePermissions).mockResolvedValue(
       buildRolePermissions({
@@ -363,5 +400,33 @@ describe('RoleManagementPage', () => {
     const toggle = screen.getByLabelText(/^Grant View/) as HTMLInputElement;
     expect(toggle).toBeDisabled();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
+  });
+
+  it('warns that saving will clear any explicitly denied permissions', async () => {
+    vi.mocked(apiClient.getRolePermissions).mockResolvedValue(
+      buildRolePermissions({
+        resources: [
+          {
+            resource: 'printers',
+            displayName: 'Printers',
+            permissions: [
+              {
+                resource: 'printers', action: 'view', permission: 'printers:view',
+                actionDisplayName: 'View', impliedByAdmin: true, status: 'Denied',
+              },
+              {
+                resource: 'printers', action: 'admin', permission: 'printers:admin',
+                actionDisplayName: 'Admin', impliedByAdmin: false, status: 'Absent',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await userEvent.setup().click(await screen.findByText('Shift Lead'));
+
+    expect(await screen.findByText(/explicitly denied for this role/i)).toBeInTheDocument();
   });
 });

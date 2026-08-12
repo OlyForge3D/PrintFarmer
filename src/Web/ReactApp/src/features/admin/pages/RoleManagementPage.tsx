@@ -116,6 +116,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [pendingSaveConfirm, setPendingSaveConfirm] = useState(false);
   const [concurrencyConflict, setConcurrencyConflict] = useState(false);
+  const [lockoutViolation, setLockoutViolation] = useState<{ message: string; permissions: string[] } | null>(null);
 
   const rolesQuery = useQuery<RoleSummary[]>({
     queryKey: ['admin-roles'],
@@ -144,6 +145,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     if (rolePermissionsQuery.data) {
       grantState.markPristine(buildGrantMap(rolePermissionsQuery.data));
       setConcurrencyConflict(false);
+      setLockoutViolation(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolePermissionsQuery.data]);
@@ -201,6 +203,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       apiClient.updateAdminRole(roleId, dto),
     onSuccess: (role: RoleDetail) => {
       void queryClient.invalidateQueries({ queryKey: ['admin-roles'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-role-permissions', role.id] });
       adminToast.success(`Role "${role.displayName}" updated.`);
       closeFormModal();
     },
@@ -215,7 +218,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
 
     if (formMode === 'create') {
       const name = formValues.name.trim();
-      if (!formValues.copyFromRoleId && !ROLE_NAME_PATTERN.test(name)) {
+      if (!ROLE_NAME_PATTERN.test(name)) {
         setFormError('Name must be lowercase letters, numbers, and underscores, starting with a letter (3-50 characters).');
         return;
       }
@@ -312,6 +315,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       grantState.markPristine(buildGrantMap(result.role));
       setPendingSaveConfirm(false);
       setConcurrencyConflict(false);
+      setLockoutViolation(null);
       if (result.revokedSessionCount > 0) {
         adminToast.success(
           `Permissions saved. ${result.revokedSessionCount} active session(s) were signed out.`,
@@ -322,6 +326,11 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
     },
     onError: (error: unknown) => {
       setPendingSaveConfirm(false);
+      if (isApiError(error) && error.statusCode === 409 && error.data && 'permissions' in (error.data as object)) {
+        const data = error.data as { error?: string; permissions: string[] };
+        setLockoutViolation({ message: data.error ?? error.message, permissions: data.permissions });
+        return;
+      }
       if (isApiError(error) && error.statusCode === 409) {
         setConcurrencyConflict(true);
         return;
@@ -332,6 +341,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   const reloadPermissions = () => {
     setConcurrencyConflict(false);
+    setLockoutViolation(null);
     void rolePermissionsQuery.refetch();
   };
 
@@ -512,6 +522,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
               onToggle={(perm, granted) => grantState.setValue(perm, granted)}
               concurrencyConflict={concurrencyConflict}
               onReload={reloadPermissions}
+              lockoutViolation={lockoutViolation}
             />
           )}
 
@@ -707,6 +718,7 @@ interface PermissionMatrixProps {
   onToggle: (permission: string, granted: boolean) => void;
   concurrencyConflict: boolean;
   onReload: () => void;
+  lockoutViolation: { message: string; permissions: string[] } | null;
 }
 
 function PermissionMatrix({
@@ -716,8 +728,12 @@ function PermissionMatrix({
   onToggle,
   concurrencyConflict,
   onReload,
+  lockoutViolation,
 }: PermissionMatrixProps) {
   const readOnly = !rolePermissions.isEditable;
+  const deniedCount = rolePermissions.resources
+    .flatMap((resource) => resource.permissions)
+    .filter((entry) => entry.status === 'Denied').length;
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -735,12 +751,33 @@ function PermissionMatrix({
         </div>
       )}
 
+      {!readOnly && deniedCount > 0 && (
+        <div className="text-sm text-pf-warning-text bg-pf-warning-bg border border-pf-warning/30 rounded-md p-3">
+          {deniedCount} permission{deniedCount === 1 ? ' is' : 's are'} explicitly denied for this role
+          (marked &ldquo;Denied&rdquo; below). Saving any change here replaces the full grant set, so those
+          explicit denies will reset to not-granted &mdash; they cannot be re-applied through this page.
+        </div>
+      )}
+
       {concurrencyConflict && (
         <div role="alert" className="flex items-center justify-between gap-3 text-sm text-pf-warning-text bg-pf-warning-bg border border-pf-warning/30 rounded-md p-3">
           <span>This role was modified by another request. Reload and retry.</span>
           <Button variant="secondary" size="sm" onClick={onReload} iconLeft={<RefreshIcon className="w-3.5 h-3.5" />}>
             Reload latest
           </Button>
+        </div>
+      )}
+
+      {lockoutViolation && (
+        <div role="alert" className="text-sm text-pf-error-text bg-pf-error-bg border border-pf-error/30 rounded-md p-3">
+          <p>{lockoutViolation.message}</p>
+          {lockoutViolation.permissions.length > 0 && (
+            <ul className="list-disc list-inside mt-1 font-mono text-xs">
+              {lockoutViolation.permissions.map((permission) => (
+                <li key={permission}>{permission}</li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
