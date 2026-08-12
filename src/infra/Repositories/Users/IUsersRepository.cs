@@ -46,12 +46,17 @@ public interface IUsersRepository
     Task AddUserAsync(User user, IEnumerable<Guid>? roleIds, CancellationToken ct = default);
 
     /// <summary>
-    /// Updates the roles assigned to a user.
+    /// Atomically replaces the roles assigned to a user: captures the user's current active role
+    /// set, deletes it, and assigns the new set, all within one serializable transaction alongside
+    /// any other pending changes tracked on this context (e.g. a caller's in-progress User field
+    /// edits). Returns the role IDs that were active immediately before the replacement, so a
+    /// caller can diff before/after without a separate, race-prone read.
     /// </summary>
     /// <param name="userId">The user's unique identifier.</param>
     /// <param name="roleIds">The new set of role IDs to assign.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default);
+    /// <returns>The role IDs that were actively assigned to the user immediately before this call.</returns>
+    Task<List<Guid>> UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a user by ID.

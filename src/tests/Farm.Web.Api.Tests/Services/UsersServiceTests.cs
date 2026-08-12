@@ -405,12 +405,10 @@ public class UsersServiceTests
 
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid>());
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .Returns(Task.CompletedTask);
-        _usersRepositoryMock.Setup(x => x.SaveChangesAsync(_cancellationToken))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync(new List<Guid>());
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
         _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
             .ReturnsAsync(new List<RoleDto> { new() { Id = roleId, Name = "operator" } });
 
@@ -480,9 +478,178 @@ public class UsersServiceTests
         _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
             .ReturnsAsync(new List<Guid> { roleId });
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
+
+        var updatedUser = new UserDto { Id = userId };
+        _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
+            .ReturnsAsync(updatedUser);
+
+        // Act
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
+
+        // Assert
+        Assert.NotNull(result);
+        _revocationServiceMock.Verify(
+            x => x.RevokeUsersAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _authAuditServiceMock.Verify(
+            x => x.LogRoleAssignmentChangedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<int>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_RemovingAllRoles_RevokesAndAuditsWithEmptyAddedList()
+    {
+        // Arrange
+        var userId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
+        var request = new UpdateUserRequest { RoleIds = Array.Empty<Guid>() };
+        var existingUser = new User { Id = userId };
+
+        _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(existingUser);
+        _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid>());
+        _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
+            .ReturnsAsync(new List<RoleDto> { new() { Id = roleId, Name = "operator" } });
+
+        _revocationServiceMock
+            .Setup(x => x.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Single() == userId),
+                _actorUserId,
+                It.IsAny<string>(),
+                null,
+                _cancellationToken))
+            .ReturnsAsync(2);
+        _authAuditServiceMock
+            .Setup(x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.Is<IReadOnlyList<string>>(added => added.Count == 0),
+                It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
+                2,
+                null,
+                null,
+                _cancellationToken))
             .Returns(Task.CompletedTask);
-        _usersRepositoryMock.Setup(x => x.SaveChangesAsync(_cancellationToken))
+
+        var updatedUser = new UserDto { Id = userId };
+        _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
+            .ReturnsAsync(updatedUser);
+
+        // Act
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
+
+        // Assert
+        Assert.NotNull(result);
+        _authAuditServiceMock.Verify(
+            x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.Is<IReadOnlyList<string>>(added => added.Count == 0),
+                It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
+                2,
+                null,
+                null,
+                _cancellationToken),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_ReplacingOneRoleWithAnother_AuditsBothAddedAndRemoved()
+    {
+        // Arrange -- a single request that both adds and removes a role must report both lists.
+        var userId = Guid.NewGuid();
+        var oldRoleId = Guid.NewGuid();
+        var newRoleId = Guid.NewGuid();
+        var request = new UpdateUserRequest { RoleIds = new[] { newRoleId } };
+        var existingUser = new User { Id = userId };
+
+        _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(existingUser);
+        _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { oldRoleId });
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { newRoleId });
+        _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
+            .ReturnsAsync(new List<RoleDto>
+            {
+                new() { Id = oldRoleId, Name = "operator" },
+                new() { Id = newRoleId, Name = "viewer" }
+            });
+
+        _revocationServiceMock
+            .Setup(x => x.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Single() == userId),
+                _actorUserId,
+                It.IsAny<string>(),
+                null,
+                _cancellationToken))
+            .ReturnsAsync(1);
+        _authAuditServiceMock
+            .Setup(x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.Is<IReadOnlyList<string>>(added => added.SequenceEqual(new[] { "viewer" })),
+                It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
+                1,
+                null,
+                null,
+                _cancellationToken))
             .Returns(Task.CompletedTask);
+
+        var updatedUser = new UserDto { Id = userId };
+        _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
+            .ReturnsAsync(updatedUser);
+
+        // Act
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
+
+        // Assert
+        Assert.NotNull(result);
+        _authAuditServiceMock.Verify(
+            x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.Is<IReadOnlyList<string>>(added => added.SequenceEqual(new[] { "viewer" })),
+                It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
+                1,
+                null,
+                null,
+                _cancellationToken),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_WithInvalidRoleIdSilentlyDropped_DoesNotRevokeSessions()
+    {
+        // Arrange -- a request containing a role ID that doesn't correspond to a real Role is
+        // silently dropped by the repository. The diff must be based on what was actually
+        // persisted (re-read after the write), not on the raw request payload, so this must not
+        // report a spurious "role added" or trigger a revocation when nothing effectively changed.
+        var userId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
+        var nonExistentRoleId = Guid.NewGuid();
+        var request = new UpdateUserRequest { RoleIds = new[] { roleId, nonExistentRoleId } };
+        var existingUser = new User { Id = userId };
+
+        _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(existingUser);
+        _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
+        // The repository silently dropped nonExistentRoleId, so the persisted set is unchanged.
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
 
         var updatedUser = new UserDto { Id = userId };
         _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))

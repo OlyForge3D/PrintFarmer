@@ -146,22 +146,29 @@ public class UsersService(
 
         user.UpdatedAt = DateTime.UtcNow;
 
-        // Capture the user's current active role assignment before mutating it, so we can tell
-        // afterward whether this update actually changed their effective permissions. A client
-        // resubmitting the same RoleIds set it already had must not trigger a revocation.
+        // If RoleIds is present, UpdateUserRolesAsync atomically captures the user's pre-update
+        // active role set and replaces it (and flushes the User field edits above) inside one
+        // serializable transaction, closing the race where two concurrent role updates for the
+        // same user could otherwise silently merge into the union of both requests. Otherwise,
+        // just persist the field edits as before.
         HashSet<Guid>? beforeRoleIds = null;
         if (request.RoleIds != null)
         {
-            List<Guid> currentRoleIds = await _users.GetActiveRoleIdsAsync(id, ct);
-            beforeRoleIds = new HashSet<Guid>(currentRoleIds);
-            await _users.UpdateUserRolesAsync(id, request.RoleIds, ct);
+            List<Guid> previousRoleIds = await _users.UpdateUserRolesAsync(id, request.RoleIds, ct);
+            beforeRoleIds = new HashSet<Guid>(previousRoleIds);
         }
-
-        await _users.SaveChangesAsync(ct);
+        else
+        {
+            await _users.SaveChangesAsync(ct);
+        }
 
         if (beforeRoleIds is not null)
         {
-            var afterRoleIds = new HashSet<Guid>(request.RoleIds!);
+            // Re-read the actually-persisted role set rather than trusting request.RoleIds verbatim --
+            // UpdateUserRolesAsync silently drops role IDs that don't correspond to a real Role, so
+            // diffing against the raw request could report a role as "added" that was never assigned.
+            List<Guid> persistedRoleIds = await _users.GetActiveRoleIdsAsync(id, ct);
+            var afterRoleIds = new HashSet<Guid>(persistedRoleIds);
             if (!beforeRoleIds.SetEquals(afterRoleIds))
             {
                 List<Guid> addedRoleIds = afterRoleIds.Except(beforeRoleIds).ToList();
@@ -177,7 +184,7 @@ public class UsersService(
                     .ToList();
 
                 int revokedSessionCount = await _revocationService.RevokeUsersAsync(
-                    new[] { id },
+                    [id],
                     actorUserId,
                     "User's role assignment changed",
                     ipAddress,

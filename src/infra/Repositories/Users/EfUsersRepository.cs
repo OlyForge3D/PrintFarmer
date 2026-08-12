@@ -72,8 +72,23 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         }
     }
 
-    public async Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
+    public async Task<List<Guid>> UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
     {
+        // The read-check-write below (capture the user's current active role assignment, then
+        // atomically replace it) commits as one unit under serializable isolation together with
+        // any other tracked changes on this context (e.g. the caller's pending User field edits),
+        // via the single SaveChangesAsync call inside the transaction. Without this, two
+        // concurrent role updates for the same user could each read a pre-conflict "before" role
+        // set, both pass diff/no-op checks, and both commit -- silently merging into the union of
+        // both requests' role sets rather than either admin's intended final state, and producing
+        // an audit trail that doesn't match what's actually persisted. Mirrors the transaction
+        // pattern RolePermissionService.UpdateRolePermissionsAsync uses for role permission
+        // changes (#1454 review discussion).
+        await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _db.Database
+            .BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
+
+        List<Guid> beforeRoleIds = await GetActiveRoleIdsAsync(userId, ct);
+
         // EF Core 10: Use ExecuteDeleteAsync for efficient bulk delete without loading entities
         await _db.UserRoles.Where(ur => ur.UserId == userId).ExecuteDeleteAsync(ct);
         foreach (Guid roleId in roleIds)
@@ -91,6 +106,11 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
                 });
             }
         }
+
+        await _db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+
+        return beforeRoleIds;
     }
 
     public async Task DeleteUserAsync(Guid id, CancellationToken ct = default)
