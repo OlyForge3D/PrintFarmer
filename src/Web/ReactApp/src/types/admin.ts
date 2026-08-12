@@ -21,7 +21,21 @@ export interface User {
 }
 
 /**
- * Role definition for role-based access control
+ * A single resource:action permission grant/deny carried by a role. Mirrors the backend's
+ * PermissionDto (camelCase: resource, action, granted).
+ */
+export interface RolePermission {
+  resource: string;
+  action: string;
+  granted: boolean;
+}
+
+/**
+ * Role definition for role-based access control.
+ *
+ * `permissions` is the server-side source of truth for what a role grants. UI code must derive
+ * behavior (e.g. "is this an administrative role") from this data rather than from matching on
+ * `name` (#1456).
  */
 export interface Role {
   id: string;
@@ -30,6 +44,7 @@ export interface Role {
   description?: string;
   isSystemRole: boolean;
   isActive: boolean;
+  permissions?: RolePermission[];
 }
 
 /**
