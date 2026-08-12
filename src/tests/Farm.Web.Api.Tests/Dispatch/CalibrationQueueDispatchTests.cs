@@ -135,12 +135,21 @@ public class CalibrationQueueDispatchTests
         // Arrange
         var jobId = Guid.NewGuid();
         var printerId = Guid.NewGuid();
+        Guid commandId = Guid.NewGuid();
+        const string KeyHash =
+            "ca74744a78571a723f2d7bcd1b080bf775e08a2dd9da280f52dacd041799a257";
         byte[] etag = [0x01, 0x02];
         var request = new AcknowledgeBedClearRequestDto { PrinterId = printerId, IdempotencyKey = "key-new" };
 
         _bedClearSvc
             .Setup(s => s.AcknowledgeAsync(It.IsAny<AcknowledgeBedClearRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AcknowledgeBedClearResult(BedClearAckOutcome.Accepted, etag, etag, null));
+            .ReturnsAsync(new AcknowledgeBedClearResult(
+                BedClearAckOutcome.Accepted,
+                etag,
+                etag,
+                null,
+                commandId,
+                KeyHash));
 
         SetIfMatchHeader("AAAA");
 
@@ -150,6 +159,17 @@ public class CalibrationQueueDispatchTests
         // Assert
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status202Accepted, status.StatusCode);
+        string response = System.Text.Json.JsonSerializer.Serialize(status.Value);
+        using System.Text.Json.JsonDocument document =
+            System.Text.Json.JsonDocument.Parse(response);
+        Assert.Equal(
+            commandId,
+            document.RootElement.GetProperty("bedClearCommandId").GetGuid());
+        Assert.Equal(
+            KeyHash,
+            document.RootElement
+                .GetProperty("bedClearIdempotencyKeySha256")
+                .GetString());
     }
 
     [Fact]
@@ -159,7 +179,8 @@ public class CalibrationQueueDispatchTests
         // Arrange
         var jobId = Guid.NewGuid();
         Guid commandId = Guid.NewGuid();
-        string keyHash = BedClearCommandCorrelation.HashIdempotencyKey("key-replay");
+        const string KeyHash =
+            "cab37eaebb1eb44420f820c759ae68bc4a6d6110c0485545c0b6fd9aec2ef357";
         byte[] etag = [0x03];
         var request = new AcknowledgeBedClearRequestDto { PrinterId = Guid.NewGuid(), IdempotencyKey = "key-replay" };
 
@@ -171,7 +192,7 @@ public class CalibrationQueueDispatchTests
                 etag,
                 null,
                 commandId,
-                keyHash));
+                KeyHash));
 
         SetIfMatchHeader("AAAA");
 
@@ -187,7 +208,7 @@ public class CalibrationQueueDispatchTests
             commandId,
             document.RootElement.GetProperty("bedClearCommandId").GetGuid());
         Assert.Equal(
-            keyHash,
+            KeyHash,
             document.RootElement
                 .GetProperty("bedClearIdempotencyKeySha256")
                 .GetString());

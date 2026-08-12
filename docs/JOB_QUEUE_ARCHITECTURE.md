@@ -260,7 +260,9 @@ When a command exists, `bedClearCommandId`, `bedClearExpiresAtUtc`, and
 hash is lower-case SHA-256 over the exact case-sensitive UTF-8 idempotency key,
 allowing a client to correlate lost-response recovery with its operation ID.
 Accepted and replayed acknowledgement responses return the same command ID and
-key hash. Actor identity, raw idempotency keys, backend details, and failure
+key hash. Replaying the exact key is safe; a different key is rejected while
+that exact command remains pending. Actor identity, raw idempotency keys,
+backend details, and failure
 text are never exposed. `bedClearState` is null only for standard or legacy
 non-calibration jobs. Clients must treat a missing or null state on a
 calibration job as unavailable, not as `None`; the acknowledgement POST

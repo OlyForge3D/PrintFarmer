@@ -231,7 +231,6 @@ public class JobQueueService : IJobQueueService
                 job,
                 job.GcodeFile?.Name ?? string.Empty,
                 job.AssignedPrinter?.Name ?? string.Empty);
-            await ApplyAuthoritativeDispatchProjectionAsync(dto, job, ct);
             dtos.Add(dto);
         }
 

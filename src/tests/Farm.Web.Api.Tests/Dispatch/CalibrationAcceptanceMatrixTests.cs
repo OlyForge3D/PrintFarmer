@@ -417,7 +417,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         r1.Outcome.Should().Be(BedClearAckOutcome.Accepted, "first ack must succeed");
         r1.BedClearCommandId.Should().NotBeNull();
         r1.BedClearIdempotencyKeySha256.Should().Be(
-            BedClearCommandCorrelation.HashIdempotencyKey(req.IdempotencyKey));
+            "1df49a8de37f3607f913f39dad6306ecee0014a306094684a7ba851b528889b1");
 
         // Replay with same key.
         await using AppDbContext ctx2 = CreateContext();
@@ -438,10 +438,144 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task G2_BedClearAck_DifferentKeyWhilePending_IsRejectedWithoutReplacingCommand()
+    {
+        await using AppDbContext seedCtx = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedCtx);
+        PrinterDispatchState state = await seedCtx.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob job = await seedCtx.PrintJobs.SingleAsync(candidate => candidate.Id == jobId);
+
+        await using (AppDbContext firstContext = CreateContext())
+        {
+            AcknowledgeBedClearResult first = await CreateAckService(firstContext)
+                .AcknowledgeAsync(new AcknowledgeBedClearRequest(
+                    jobId,
+                    printerId,
+                    "actor",
+                    "first-operation",
+                    state.RowVersion,
+                    1,
+                    job.RowVersion));
+            first.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        }
+
+        await using (AppDbContext secondContext = CreateContext())
+        {
+            PrinterDispatchState currentState = await secondContext.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            PrintJob currentJob = await secondContext.PrintJobs
+                .SingleAsync(candidate => candidate.Id == jobId);
+            AcknowledgeBedClearResult second = await CreateAckService(secondContext)
+                .AcknowledgeAsync(new AcknowledgeBedClearRequest(
+                    jobId,
+                    printerId,
+                    "actor",
+                    "different-operation",
+                    currentState.RowVersion,
+                    1,
+                    currentJob.RowVersion));
+
+            second.Outcome.Should().Be(BedClearAckOutcome.JobNotDispatchable);
+            second.BedClearCommandId.Should().BeNull();
+            second.BedClearIdempotencyKeySha256.Should().BeNull();
+        }
+
+        await using AppDbContext verifyContext = CreateContext();
+        (await verifyContext.BedClearCommandRecords.CountAsync()).Should().Be(1);
+        (await verifyContext.QueueDispatchOutbox.CountAsync(candidate =>
+            candidate.EventType == BedClearAcknowledgementService.BackendStartCommandEventType))
+            .Should().Be(1);
+        PrinterDispatchState persistedState = await verifyContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        persistedState.AcknowledgedJobId.Should().Be(jobId);
+        persistedState.AcknowledgementIdempotencyKey.Should().Be("first-operation");
+    }
+
+    [Fact]
+    public async Task G2_ReplayingStaleOlderCommand_DoesNotClearNewerPersistedAcknowledgement()
+    {
+        await using AppDbContext seedContext = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob initialJob = await seedContext.PrintJobs
+            .SingleAsync(candidate => candidate.Id == jobId);
+        var originalRequest = new AcknowledgeBedClearRequest(
+            jobId,
+            printerId,
+            "actor",
+            "older-operation",
+            initialState.RowVersion,
+            1,
+            initialJob.RowVersion);
+
+        await using (AppDbContext firstContext = CreateContext())
+        {
+            AcknowledgeBedClearResult first = await CreateAckService(firstContext)
+                .AcknowledgeAsync(originalRequest);
+            first.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        }
+
+        await using (AppDbContext mutateContext = CreateContext())
+        {
+            PrinterDispatchState state = await mutateContext.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            PrintJob job = await mutateContext.PrintJobs
+                .SingleAsync(candidate => candidate.Id == jobId);
+            DateTime now = DateTime.UtcNow;
+            state.AcknowledgedJobId = jobId;
+            state.AcknowledgementIdempotencyKey = "newer-operation";
+            state.AcknowledgedAtUtc = now;
+            state.AcknowledgementExpiresAtUtc = now.AddMinutes(5);
+            state.AcknowledgedJobRowVersion = job.RowVersion;
+            state.AcknowledgedQueueRevision = state.QueueRevision;
+            state.AcknowledgedPrinterConfigRevision = 1;
+            mutateContext.BedClearCommandRecords.Add(new BedClearCommandRecord
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printerId,
+                JobId = jobId,
+                IdempotencyKey = "newer-operation",
+                RequestSha256 = new string('f', 64),
+                ActorSubject = "actor",
+                JobRowVersion = job.RowVersion!,
+                DispatchStateRowVersion = state.RowVersion!,
+                QueueRevision = state.QueueRevision,
+                PrinterConfigRevision = 1,
+                Status = BedClearCommandStatus.Pending,
+                OutboxEventId = Guid.NewGuid(),
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                ExpiresAtUtc = now.AddMinutes(5),
+            });
+            await mutateContext.SaveChangesAsync();
+        }
+
+        await using (AppDbContext replayContext = CreateContext())
+        {
+            AcknowledgeBedClearResult replay = await CreateAckService(replayContext)
+                .AcknowledgeAsync(originalRequest);
+            replay.Outcome.Should().Be(BedClearAckOutcome.JobNotDispatchable);
+        }
+
+        await using AppDbContext verifyContext = CreateContext();
+        PrinterDispatchState persistedState = await verifyContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        persistedState.AcknowledgedJobId.Should().Be(jobId);
+        persistedState.AcknowledgementIdempotencyKey.Should().Be("newer-operation");
+        (await verifyContext.BedClearCommandRecords.SingleAsync(candidate =>
+            candidate.IdempotencyKey == "older-operation")).Status
+            .Should().Be(BedClearCommandStatus.Rejected);
+        (await verifyContext.BedClearCommandRecords.SingleAsync(candidate =>
+            candidate.IdempotencyKey == "newer-operation")).Status
+            .Should().Be(BedClearCommandStatus.Pending);
+    }
+
+    [Fact]
     public async Task G2_BedClearAck_SameKeyDifferentJob_ReturnsIdempotencyMismatch()
     {
         // IdempotencyMismatch occurs when the SAME key is used for a DIFFERENT job.
-        // (Different key, same job is a valid new acknowledgement and returns Accepted.)
         await using AppDbContext seedCtx = CreateContext();
         await seedCtx.Database.EnsureCreatedAsync();
 
@@ -1534,6 +1668,87 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         (await ackContext.QueueDispatchOutbox.CountAsync(candidate =>
             candidate.EventType ==
             BedClearAcknowledgementService.BackendStartCommandEventType)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RecoveredFilamentBlock_AcknowledgementPinsPostMutationRevisionAndCanBeClaimed()
+    {
+        const string OperationKey = "filament-recovered-operation";
+        await using AppDbContext seedContext = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        PrintJob blockedJob = await seedContext.PrintJobs
+            .SingleAsync(candidate => candidate.Id == jobId);
+        blockedJob.BlockedReasonCode = JobBlockedReasonCode.FilamentCheckFailed;
+        blockedJob.BlockedReasonJson = """{"reason":"temporary"}""";
+        await seedContext.SaveChangesAsync();
+        PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+
+        AcknowledgeBedClearResult acknowledged;
+        await using (AppDbContext acknowledgeContext = CreateContext())
+        {
+            acknowledged = await CreateAckService(acknowledgeContext)
+                .AcknowledgeAsync(new AcknowledgeBedClearRequest(
+                    jobId,
+                    printerId,
+                    "operator",
+                    OperationKey,
+                    initialState.RowVersion,
+                    1,
+                    blockedJob.RowVersion));
+            acknowledged.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        }
+
+        await using (AppDbContext readContext = CreateContext())
+        {
+            PrintJob persistedJob = await readContext.PrintJobs
+                .Include(candidate => candidate.GcodeFile)
+                .Include(candidate => candidate.AssignedPrinter)
+                .SingleAsync(candidate => candidate.Id == jobId);
+            PrinterDispatchState persistedState = await readContext.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            BedClearCommandRecord command = await readContext.BedClearCommandRecords
+                .SingleAsync();
+
+            persistedJob.BlockedReasonCode.Should().BeNull();
+            acknowledged.JobETag.Should().Equal(persistedJob.RowVersion!);
+            command.JobRowVersion.Should().Equal(persistedJob.RowVersion!);
+            persistedState.AcknowledgedJobRowVersion.Should().Equal(persistedJob.RowVersion!);
+
+            var dataService = new Mock<IQueueDataService>(MockBehavior.Strict);
+            dataService
+                .Setup(candidate => candidate.GetPrintJobByIdAsync(
+                    jobId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(persistedJob);
+            var queueService = new JobQueueService(
+                Mock.Of<IQueueRepository>(),
+                dataService.Object,
+                NullLogger<JobQueueService>.Instance,
+                db: readContext);
+
+            JobQueuePrintJobDto? projected = await queueService.GetJobAsync(
+                jobId,
+                CancellationToken.None);
+            projected.Should().NotBeNull();
+            projected!.BedClearState.Should().Be(BedClearState.Acknowledged);
+            projected.RowVersion.Should().Be(
+                Convert.ToBase64String(persistedJob.RowVersion!));
+        }
+
+        await using AppDbContext claimContext = CreateContext();
+        DispatchClaimResult claim = await CreateClaimService(
+            claimContext,
+            MakeOnlineIdleReader(printerId)).AcquireClaimAsync(
+                new DispatchClaimRequest(
+                    jobId,
+                    printerId,
+                    "operator",
+                    "BedClear",
+                    OperationKey,
+                    null,
+                    null));
+        claim.Success.Should().BeTrue();
     }
 
     [Theory]

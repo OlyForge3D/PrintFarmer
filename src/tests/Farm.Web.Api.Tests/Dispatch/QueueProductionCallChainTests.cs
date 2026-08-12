@@ -5192,6 +5192,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         PrinterDispatchState state =
             await acknowledgementContext.PrinterDispatchStates.SingleAsync(
                 candidate => candidate.PrinterId == fixture.PrinterId);
+        state.AcknowledgedJobId = null;
+        state.AcknowledgedAtUtc = null;
+        state.AcknowledgedBySubject = null;
+        state.AcknowledgementIdempotencyKey = null;
+        state.AcknowledgementExpiresAtUtc = null;
+        state.AcknowledgedJobRowVersion = null;
+        state.AcknowledgedQueueRevision = null;
+        state.AcknowledgedPrinterConfigRevision = null;
         var acknowledgement = new BedClearAcknowledgementService(
             acknowledgementContext,
             new DbOutboxSequenceAllocator(),

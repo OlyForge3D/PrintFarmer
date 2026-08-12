@@ -237,6 +237,20 @@ public sealed class BedClearAcknowledgementService(
                 "Dispatch state has changed since the request was prepared. Re-fetch and retry.");
         }
 
+        if (dispatchState.AcknowledgedJobId == request.JobId &&
+            !string.IsNullOrWhiteSpace(dispatchState.AcknowledgementIdempotencyKey) &&
+            !string.Equals(
+                dispatchState.AcknowledgementIdempotencyKey,
+                request.IdempotencyKey,
+                StringComparison.Ordinal))
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.JobNotDispatchable,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "An exact bed-clear command is already pending for this job. Replay the original operation.");
+        }
+
         // Database state cannot be overridden by a stale idle telemetry snapshot.
         bool hasDatabaseActiveJob = await _db.PrintJobs
             .WhereOccupiesPrinter()
@@ -466,10 +480,12 @@ public sealed class BedClearAcknowledgementService(
             }
         }
 
+        byte[] persistedJobRevision = effectiveJobRevision;
         if (job.BlockedReasonCode == JobBlockedReasonCode.FilamentCheckFailed)
         {
             job.BlockedReasonCode = null;
             job.BlockedReasonJson = null;
+            persistedJobRevision = RevisionETag.EncodeBytes(checked(job.Revision + 1));
         }
 
         // =========================================================================
@@ -621,7 +637,7 @@ public sealed class BedClearAcknowledgementService(
         dispatchState.AcknowledgedBySubject = request.ActorSubject;
         dispatchState.AcknowledgementIdempotencyKey = request.IdempotencyKey;
         dispatchState.AcknowledgementExpiresAtUtc = now + DefaultAcknowledgementTtl;
-        dispatchState.AcknowledgedJobRowVersion = effectiveJobRevision.ToArray();
+        dispatchState.AcknowledgedJobRowVersion = persistedJobRevision.ToArray();
         dispatchState.AcknowledgedQueueRevision = dispatchState.QueueRevision;
         dispatchState.AcknowledgedPrinterConfigRevision =
             request.ExpectedPrinterConfigRevision.Value;
@@ -635,7 +651,7 @@ public sealed class BedClearAcknowledgementService(
             Sequence = 0, // Allocated inside the retry loop below.
             AggregateType = nameof(PrintJob),
             AggregateId = request.JobId,
-            AggregateRowVersion = job.RowVersion,
+            AggregateRowVersion = persistedJobRevision,
             DispatchStateRowVersion = dispatchState.RowVersion,
             BedClearState = "Acknowledged",
             PrinterId = request.PrinterId,
@@ -666,7 +682,7 @@ public sealed class BedClearAcknowledgementService(
             IdempotencyKey = request.IdempotencyKey,
             RequestSha256 = requestSha256,
             ActorSubject = request.ActorSubject,
-            JobRowVersion = effectiveJobRevision.ToArray(),
+            JobRowVersion = persistedJobRevision.ToArray(),
             DispatchStateRowVersion = request.IfMatchDispatchState.ToArray(),
             QueueRevision = dispatchState.QueueRevision,
             PrinterConfigRevision = request.ExpectedPrinterConfigRevision.Value,
@@ -688,7 +704,7 @@ public sealed class BedClearAcknowledgementService(
             resourceId: request.JobId,
             printerId: request.PrinterId,
             printJobId: request.JobId,
-            jobRowVersion: job.RowVersion,
+            jobRowVersion: persistedJobRevision,
             dispatchStateRowVersion: dispatchState.RowVersion,
             idempotencyKey: request.IdempotencyKey,
             detail: new
@@ -710,7 +726,7 @@ public sealed class BedClearAcknowledgementService(
                 aggregateId: job.Id,
                 printerId: request.PrinterId,
                 attemptId: null,
-                aggregateRowVersion: job.RowVersion,
+                aggregateRowVersion: persistedJobRevision,
                 failureCode: null,
                 payloadJson: System.Text.Json.JsonSerializer.Serialize(new
                 {
@@ -857,7 +873,8 @@ public sealed class BedClearAcknowledgementService(
             BedClearCommandRecord? command = await _db.BedClearCommandRecords
                 .Where(candidate =>
                     candidate.PrinterId == printerId &&
-                    candidate.JobId == acknowledgedJobId)
+                    candidate.JobId == acknowledgedJobId &&
+                    candidate.IdempotencyKey == dispatchState.AcknowledgementIdempotencyKey)
                 .OrderByDescending(candidate => candidate.CreatedAtUtc)
                 .FirstOrDefaultAsync(ct);
             if (acknowledgedJob is not null && command is not null)
@@ -907,7 +924,11 @@ public sealed class BedClearAcknowledgementService(
             startCommand.CompletedAtUtc = now;
         }
 
-        ClearAcknowledgement(state);
+        if (AcknowledgementMatchesCommand(state, command))
+        {
+            ClearAcknowledgement(state);
+        }
+
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
         string eventType = expired
@@ -952,6 +973,16 @@ public sealed class BedClearAcknowledgementService(
         state.AcknowledgedQueueRevision = null;
         state.AcknowledgedPrinterConfigRevision = null;
     }
+
+    private static bool AcknowledgementMatchesCommand(
+        PrinterDispatchState state,
+        BedClearCommandRecord command) =>
+        state.PrinterId == command.PrinterId &&
+        state.AcknowledgedJobId == command.JobId &&
+        string.Equals(
+            state.AcknowledgementIdempotencyKey,
+            command.IdempotencyKey,
+            StringComparison.Ordinal);
 
     private static bool IsExplicitlyIdle(string? state) =>
         !string.IsNullOrWhiteSpace(state) &&

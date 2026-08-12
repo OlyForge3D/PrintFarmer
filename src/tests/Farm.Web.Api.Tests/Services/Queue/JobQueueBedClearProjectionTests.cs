@@ -16,6 +16,9 @@ namespace Farm.Web.Api.Tests.Services.Queue;
 
 public sealed class JobQueueBedClearProjectionTests
 {
+    private const string ProjectionOperationHash =
+        "1db171168f8040a82e0f527120678708649fb0c5e3f2b621bb97babd8d684531";
+
     [Fact]
     public async Task GetJobAsync_CalibrationWithoutCommand_ProjectsNoneAndLineage()
     {
@@ -51,9 +54,7 @@ public sealed class JobQueueBedClearProjectionTests
 
         result.BedClearState.Should().Be(BedClearState.Acknowledged);
         result.BedClearCommandId.Should().Be(command.Id);
-        result.BedClearIdempotencyKeySha256.Should().Be(
-            BedClearCommandCorrelation.HashIdempotencyKey(
-                command.IdempotencyKey));
+        result.BedClearIdempotencyKeySha256.Should().Be(ProjectionOperationHash);
         result.BedClearExpiresAtUtc.Should().Be(command.ExpiresAtUtc);
 
         JsonSerializerOptions options = new(JsonSerializerDefaults.Web)
@@ -73,9 +74,8 @@ public sealed class JobQueueBedClearProjectionTests
             .Should().Be(fixture.Job.PinnedPrinterConfigRevision);
         root.GetProperty("bedClearState").GetString().Should().Be("Acknowledged");
         root.GetProperty("bedClearCommandId").GetGuid().Should().Be(command.Id);
-        root.GetProperty("bedClearIdempotencyKeySha256").GetString().Should().Be(
-            BedClearCommandCorrelation.HashIdempotencyKey(
-                command.IdempotencyKey));
+        root.GetProperty("bedClearIdempotencyKeySha256").GetString()
+            .Should().Be(ProjectionOperationHash);
         root.GetProperty("bedClearExpiresAtUtc").GetDateTime()
             .Should().Be(command.ExpiresAtUtc);
         root.GetProperty("revision").GetInt64().Should().Be(fixture.Job.Revision);
@@ -109,9 +109,7 @@ public sealed class JobQueueBedClearProjectionTests
 
         result.BedClearState.Should().Be(BedClearState.Consumed);
         result.BedClearCommandId.Should().Be(command.Id);
-        result.BedClearIdempotencyKeySha256.Should().Be(
-            BedClearCommandCorrelation.HashIdempotencyKey(
-                command.IdempotencyKey));
+        result.BedClearIdempotencyKeySha256.Should().Be(ProjectionOperationHash);
         result.BedClearExpiresAtUtc.Should().Be(command.ExpiresAtUtc);
     }
 
@@ -136,9 +134,7 @@ public sealed class JobQueueBedClearProjectionTests
 
         result.BedClearState.Should().Be(BedClearState.Invalidated);
         result.BedClearCommandId.Should().Be(command.Id);
-        result.BedClearIdempotencyKeySha256.Should().Be(
-            BedClearCommandCorrelation.HashIdempotencyKey(
-                command.IdempotencyKey));
+        result.BedClearIdempotencyKeySha256.Should().Be(ProjectionOperationHash);
         result.BedClearExpiresAtUtc.Should().Be(command.ExpiresAtUtc);
     }
 
@@ -337,11 +333,14 @@ public sealed class JobQueueBedClearProjectionTests
     public void HashIdempotencyKey_IsCaseSensitiveLowerCaseSha256()
     {
         string upperCase = BedClearCommandCorrelation.HashIdempotencyKey(
-            "Operation-ABC");
+            "Operation-Key");
         string lowerCase = BedClearCommandCorrelation.HashIdempotencyKey(
-            "operation-abc");
+            "operation-key");
 
-        upperCase.Should().HaveLength(64);
+        upperCase.Should().Be(
+            "2067020c26d9ea1325101a132957f73f004564fa98e917aada048f0955c83ea9");
+        lowerCase.Should().Be(
+            "f9a170739cf356f6c28eaa79041de03a0463cb196136bf24c74a5d4b165d5371");
         upperCase.Should().MatchRegex("^[0-9a-f]{64}$");
         upperCase.Should().NotBe(lowerCase);
     }
@@ -439,7 +438,7 @@ public sealed class JobQueueBedClearProjectionTests
         public async Task<BedClearCommandRecord> AcknowledgeAsync()
         {
             DateTime now = DateTime.UtcNow;
-            string idempotencyKey = $"bed-clear-{Guid.NewGuid():N}";
+            const string idempotencyKey = "projection-operation";
             DispatchState.AcknowledgedJobId = Job.Id;
             DispatchState.AcknowledgedAtUtc = now;
             DispatchState.AcknowledgedBySubject = "subject-not-for-wire";
