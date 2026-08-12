@@ -259,9 +259,11 @@ public sealed class DispatchClaimService(
         // symptom of that incompleteness.
         BedClearCommandRecord? bedClearCommand = null;
         QueueDispatchOutbox? backendStartCommand = null;
-        if (job.JobKind == JobKind.FilamentCalibration)
+        DispatchClaimResult? acknowledgementFailure = null;
+        if (job.JobKind == JobKind.FilamentCalibration ||
+            request.AcknowledgementIdempotencyKey is not null)
         {
-            (DispatchClaimResult? acknowledgementFailure, BedClearCommandRecord? command) =
+            (acknowledgementFailure, BedClearCommandRecord? command) =
                 await EvaluateAcknowledgementGatesAsync(
                     job,
                     printer,
@@ -269,6 +271,10 @@ public sealed class DispatchClaimService(
                     request,
                     ct);
             bedClearCommand = command;
+        }
+
+        if (job.JobKind == JobKind.FilamentCalibration)
+        {
             DispatchClaimResult? calibrationGate =
                 DispatchSafetyGates.EvaluateCalibrationCompatibility(job, printer);
             calibrationGate ??= acknowledgementFailure;
@@ -283,29 +289,39 @@ public sealed class DispatchClaimService(
                 await WriteDeniedAuditAsync(request, calibrationGate, job, dispatchState, ct);
                 return calibrationGate;
             }
+        }
+        else if (acknowledgementFailure is not null)
+        {
+            await WriteDeniedAuditAsync(
+                request,
+                acknowledgementFailure,
+                job,
+                dispatchState,
+                ct);
+            return acknowledgementFailure;
+        }
 
-            if (bedClearCommand is not null)
+        if (bedClearCommand is not null)
+        {
+            backendStartCommand = await _db.QueueDispatchOutbox
+                .SingleOrDefaultAsync(
+                    command =>
+                        command.Id == bedClearCommand.OutboxEventId &&
+                        command.EventType ==
+                            BedClearAcknowledgementService.BackendStartCommandEventType,
+                    ct);
+            if (backendStartCommand is null)
             {
-                backendStartCommand = await _db.QueueDispatchOutbox
-                    .SingleOrDefaultAsync(
-                        command =>
-                            command.Id == bedClearCommand.OutboxEventId &&
-                            command.EventType ==
-                                BedClearAcknowledgementService.BackendStartCommandEventType,
-                        ct);
-                if (backendStartCommand is null)
-                {
-                    DispatchClaimResult missingCommand = DispatchClaimResult.Fail(
-                        "bed_clear_command_invalid",
-                        "The durable bed-clear start command is missing.");
-                    await WriteDeniedAuditAsync(
-                        request,
-                        missingCommand,
-                        job,
-                        dispatchState,
-                        ct);
-                    return missingCommand;
-                }
+                DispatchClaimResult missingCommand = DispatchClaimResult.Fail(
+                    "bed_clear_command_invalid",
+                    "The durable bed-clear start command is missing.");
+                await WriteDeniedAuditAsync(
+                    request,
+                    missingCommand,
+                    job,
+                    dispatchState,
+                    ct);
+                return missingCommand;
             }
         }
 

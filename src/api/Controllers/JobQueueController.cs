@@ -1184,6 +1184,8 @@ public class JobQueueController(
             message,
             jobETag = result.JobETag is not null ? Convert.ToBase64String(result.JobETag) : null,
             dispatchStateETag = result.DispatchStateETag is not null ? Convert.ToBase64String(result.DispatchStateETag) : null,
+            bedClearCommandId = result.BedClearCommandId,
+            bedClearIdempotencyKeySha256 = result.BedClearIdempotencyKeySha256,
         };
 
     private ObjectResult MapDispatchResponse(QueuedPrintJobDto result) =>
@@ -1208,7 +1210,8 @@ public class JobQueueController(
     private static byte[]? DecodeEtag(string? value) =>
         string.IsNullOrWhiteSpace(value)
             ? null
-            : Convert.FromBase64String(value.Trim('"', ' '));
+            : Convert.FromBase64String(
+                value.Trim().TrimStart('W', '/').Trim('"'));
 
     private string GetActorSubject() => QueueActorIdentity.Resolve(User);
 }
