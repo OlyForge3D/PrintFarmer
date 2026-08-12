@@ -77,6 +77,9 @@ repository are intentionally omitted.
 - [Operator Feature Gates](./OPERATOR_FEATURE_GATES.md) - Feature availability
 - [Operator Native Push](./OPERATOR_NATIVE_PUSH.md) - Native push setup
 - [Offline Write Replay](./OFFLINE_WRITE_REPLAY.md) - Offline mutation replay
+- [Permission Model](./PERMISSION_MODEL.md) - Resource:action permissions,
+  the `admin` implication, deny precedence, the `farm_admin` bypass, and how
+  to add a new enforced permission
 - [Role Permission Precedence](./ROLE_PERMISSION_PRECEDENCE.md) - Grant/deny
   precedence rule for `RolePermission.Granted`
 

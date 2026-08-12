@@ -224,7 +224,7 @@ DELETE /api/printers/{id}/location       # Unassign printer from location
 
 - Hierarchy support (nested locations)
 - Location-based statistics and alerts
-- Role-based access control by location
+- Location-based permission scoping
 - Location history and audit logs
 - Bulk operations (move multiple printers)
 - Location-specific printer health reports
@@ -507,7 +507,8 @@ exist.
 
 ## User Authentication
 
-Secure multi-user access with role-based permissions.
+Secure multi-user access with fine-grained, permission-based access control.
+See [Permission Model](./PERMISSION_MODEL.md) for the full model.
 
 ### Initial Setup
 
@@ -519,9 +520,14 @@ On first run, you'll be prompted to create an administrator account:
 
 ### User Roles
 
-- **Administrator** - Full system access, user management
-- **Operator** - View status, control printers, manage jobs
-- **Viewer** - Read-only access to status
+Two system roles are seeded by default, and custom roles with any combination
+of permissions can be created by an administrator:
+
+- **farm_admin** - Full system access via a bypass, plus explicit
+  `{resource}:admin` grants on every resource
+- **farm_user** - Standard user access to printers and print operations
+- **Custom roles** - Created with a specific, editable set of granted
+  permissions (see [Permission Model](./PERMISSION_MODEL.md))
 
 ### Password Policy
 
