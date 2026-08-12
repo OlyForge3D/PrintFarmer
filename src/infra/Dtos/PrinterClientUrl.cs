@@ -6,6 +6,16 @@ namespace Farm.Infrastructure;
 public static class PrinterClientUrl
 {
     /// <summary>
+    /// Returns whether a printer URL is an absolute HTTP(S) URL without embedded credentials.
+    /// </summary>
+    public static bool IsSafeInput(string? value)
+    {
+        return Uri.TryCreate(value, UriKind.Absolute, out Uri? uri) &&
+            uri.Scheme is "http" or "https" &&
+            string.IsNullOrEmpty(uri.UserInfo);
+    }
+
+    /// <summary>
     /// Returns a normalized HTTP(S) URL without embedded credentials, query parameters, or fragments.
     /// </summary>
     public static string? Create(string? value)

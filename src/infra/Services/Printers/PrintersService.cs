@@ -4539,6 +4539,11 @@ public class PrintersService(
             try
             {
                 CreatePrinterFromDiscoveryDto printerDto = printers[i];
+                if (!PrinterClientUrl.IsSafeInput(printerDto.ServerUrl))
+                {
+                    throw new ArgumentException("Server URL must be an HTTP/HTTPS URL without embedded credentials.");
+                }
+
                 string status = "Imported";
                 string? reason = null;
                 PrinterDto? createdDto = null;

@@ -311,9 +311,8 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Server URL is required" });
         }
 
-        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri) ||
-            serverUri.Scheme is not ("http" or "https") ||
-            !string.IsNullOrEmpty(serverUri.UserInfo))
+        if (!PrinterClientUrl.IsSafeInput(request.ServerUrl) ||
+            !Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
         {
             return BadRequest(new TestConnectionResponse
             {
@@ -1791,9 +1790,7 @@ public class PrintersController(
         // Only resolve hostname if a new ServerUrl is provided
         if (!string.IsNullOrWhiteSpace(dto.ServerUrl))
         {
-            if (!Uri.TryCreate(dto.ServerUrl, UriKind.Absolute, out Uri? serverUri) ||
-                serverUri.Scheme is not ("http" or "https") ||
-                !string.IsNullOrEmpty(serverUri.UserInfo))
+            if (!PrinterClientUrl.IsSafeInput(dto.ServerUrl))
             {
                 return BadRequest("Server URL must be an HTTP/HTTPS URL without embedded credentials.");
             }

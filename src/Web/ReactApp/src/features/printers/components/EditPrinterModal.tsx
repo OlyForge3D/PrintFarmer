@@ -579,12 +579,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FormField
                 label="Server URL"
+                htmlFor="printer-server-url"
                 required
                 error={validationErrors.serverUrl?.[0]}
               >
                 <Input
+                  id="printer-server-url"
                   type="text"
-                  value={formData.serverUrl}
+                  value={formData.serverUrl ?? ''}
                   onChange={e => handleInputChange('serverUrl', e.target.value)}
                   placeholder="https://printer.local"
                   title="Printer server URL"

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Discovery;
+using Farm.Infrastructure;
+using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using FluentValidation;
 
@@ -51,21 +52,7 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterFromDiscove
 
     private static bool BeValidUrl(string url)
     {
-        if (string.IsNullOrWhiteSpace(url))
-        {
-            return false;
-        }
-
-        try
-        {
-            Uri uri = new(url);
-            return uri.Scheme is "http" or "https" &&
-                string.IsNullOrEmpty(uri.UserInfo);
-        }
-        catch
-        {
-            return false;
-        }
+        return PrinterClientUrl.IsSafeInput(url);
     }
 
     private static bool NotContainSqlInjectionPatterns(string input)
