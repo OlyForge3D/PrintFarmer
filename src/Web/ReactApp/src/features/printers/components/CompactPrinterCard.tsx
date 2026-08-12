@@ -40,6 +40,7 @@ import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
+import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
 
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
@@ -99,6 +100,9 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 }: CompactPrinterCardProps) {
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
+  const browserUrl = printer.frontendUrl && isSafeHttpUrl(printer.frontendUrl)
+    ? toSafeHref(printer.frontendUrl)
+    : undefined;
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -535,17 +539,31 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                     History
                   </Button>
                 )}
-                <a
-                  href={printer.frontendUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex w-full items-center gap-2 px-3 py-2 text-pf-text-secondary hover:text-pf-text-primary hover:bg-white/5"
-                  aria-label={`Open printer ${printer.name} in new tab`}
-                  onClick={() => setShowMenu(false)}
-                >
-                  <ExternalLinkIcon className="h-4 w-4 shrink-0" />
-                  Open in Browser
-                </a>
+                {browserUrl ? (
+                  <a
+                    href={browserUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex w-full items-center gap-2 px-3 py-2 text-pf-text-secondary hover:text-pf-text-primary hover:bg-white/5"
+                    aria-label={`Open in Browser for printer ${printer.name} in new tab`}
+                    onClick={() => setShowMenu(false)}
+                  >
+                    <ExternalLinkIcon className="h-4 w-4 shrink-0" />
+                    Open in Browser
+                  </a>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary"
+                    disabled
+                    title="Printer browser URL is unavailable"
+                    iconLeft={<ExternalLinkIcon className="h-4 w-4 shrink-0" />}
+                  >
+                    Open in Browser
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"

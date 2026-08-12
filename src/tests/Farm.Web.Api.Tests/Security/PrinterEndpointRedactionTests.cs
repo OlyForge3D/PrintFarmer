@@ -17,6 +17,9 @@ public sealed class PrinterEndpointRedactionTests
         using var factory = new CustomWebApplicationFactory();
         await factory.ResetDatabaseAsync();
         using HttpClient client = await factory.CreateAdminClientAsync();
+        using HttpClient viewOnlyClient = await factory.CreateAuthenticatedClientAsync(
+            username: "printer-viewer",
+            email: "printer-viewer@example.com");
         Guid printerId = Guid.NewGuid();
 
         await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
@@ -37,7 +40,7 @@ public sealed class PrinterEndpointRedactionTests
             {
                 Id = printerId,
                 Name = "private printer",
-                ServerUrl = "http://printer.internal:7125",
+                ServerUrl = "http://embedded-user:embedded-password@printer.internal:7125?token=printer-token#private",
                 OriginalServerUrl = "http://printer-original.internal:7125",
                 ApiKey = "printer-api-key",
                 Username = "printer-user",
@@ -72,23 +75,38 @@ public sealed class PrinterEndpointRedactionTests
             await client.GetAsync($"/api/printers/{printerId:D}/camera/url");
         HttpResponseMessage cameraListResponse =
             await client.GetAsync("/api/printers/camera-urls");
+        HttpResponseMessage printerListResponse =
+            await client.GetAsync("/api/printers");
+        HttpResponseMessage viewOnlyDetailsResponse =
+            await viewOnlyClient.GetAsync($"/api/printers/{printerId:D}/details");
 
         _ = configResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = detailsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = cameraResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         _ = cameraListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = printerListResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        _ = viewOnlyDetailsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        string combinedJson = string.Join(
+        string redactedRoutesJson = string.Join(
             Environment.NewLine,
             await configResponse.Content.ReadAsStringAsync(),
-            await detailsResponse.Content.ReadAsStringAsync(),
             await cameraResponse.Content.ReadAsStringAsync(),
             await cameraListResponse.Content.ReadAsStringAsync());
-        AssertSecretsAreAbsent(combinedJson);
-        _ = combinedJson.Should().Contain("\"serverConfigured\":true");
-        _ = combinedJson.Should().Contain("\"apiKeyConfigured\":true");
-        _ = combinedJson.Should().Contain($"/api/printers/{printerId:D}/camera/stream");
-        _ = combinedJson.Should().Contain($"/api/printers/{printerId:D}/camera/snapshot");
+        string detailsJson = await detailsResponse.Content.ReadAsStringAsync();
+        string printerListJson = await printerListResponse.Content.ReadAsStringAsync();
+        string viewOnlyDetailsJson = await viewOnlyDetailsResponse.Content.ReadAsStringAsync();
+
+        AssertSecretsAreAbsent(redactedRoutesJson, includePrinterHost: true);
+        AssertSecretsAreAbsent(detailsJson, includePrinterHost: false);
+        AssertSecretsAreAbsent(printerListJson, includePrinterHost: false);
+        _ = redactedRoutesJson.Should().Contain("\"serverConfigured\":true");
+        _ = redactedRoutesJson.Should().Contain("\"apiKeyConfigured\":true");
+        _ = redactedRoutesJson.Should().Contain($"/api/printers/{printerId:D}/camera/stream");
+        _ = redactedRoutesJson.Should().Contain($"/api/printers/{printerId:D}/camera/snapshot");
+        _ = detailsJson.Should().Contain("\"serverUrl\":\"http://printer.internal:7125\"");
+        _ = printerListJson.Should().Contain("\"frontendUrl\":\"http://printer.internal:7125\"");
+        _ = viewOnlyDetailsJson.Should().NotContain("\"serverUrl\"");
+        _ = viewOnlyDetailsJson.Should().NotContain("printer.internal");
     }
 
     [Fact]
@@ -104,18 +122,26 @@ public sealed class PrinterEndpointRedactionTests
         _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
-    private static void AssertSecretsAreAbsent(string json)
+    private static void AssertSecretsAreAbsent(string json, bool includePrinterHost)
     {
-        string[] secrets =
+        List<string> secrets =
         [
-            "printer.internal",
             "printer-original.internal",
             "printer-api-key",
             "printer-user",
             "printer-password",
+            "embedded-user",
+            "embedded-password",
+            "printer-token",
+            "#private",
             "camera.internal",
             "camera-secret",
         ];
+        if (includePrinterHost)
+        {
+            secrets.Add("printer.internal");
+        }
+
         foreach (string secret in secrets)
         {
             _ = json.Should().NotContain(secret);

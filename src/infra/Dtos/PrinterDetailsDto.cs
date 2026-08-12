@@ -10,7 +10,7 @@ namespace Farm.Infrastructure;
 public record PrinterDetailsDto(
     Guid Id,
     string Name,
-    string ServerUrl,
+    string? ServerUrl,
     string? Notes,
     Guid? ManufacturerId,
     string? ManufacturerName,

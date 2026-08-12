@@ -59,7 +59,8 @@ public class CreatePrinterValidator : AbstractValidator<CreatePrinterFromDiscove
         try
         {
             Uri uri = new(url);
-            return uri.Scheme is "http" or "https";
+            return uri.Scheme is "http" or "https" &&
+                string.IsNullOrEmpty(uri.UserInfo);
         }
         catch
         {

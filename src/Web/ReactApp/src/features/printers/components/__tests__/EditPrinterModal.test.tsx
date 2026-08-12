@@ -126,6 +126,27 @@ describe('EditPrinterModal', () => {
     expect(await screen.findByDisplayValue('http://qp4-1.local')).toBeInTheDocument();
   });
 
+  it('rejects a non-HTTP server URL', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const serverUrl = await screen.findByDisplayValue('http://qp4-1.local');
+    await user.clear(serverUrl);
+    await user.type(serverUrl, 'javascript:alert(1)');
+    await user.click(screen.getByRole('button', { name: /save changes/i }));
+
+    expect(screen.getByText('Please enter a valid HTTP/HTTPS URL')).toBeInTheDocument();
+    expect(mutateAsync).not.toHaveBeenCalled();
+  });
+
   it('submits obicoEnabled when saving after toggle', async () => {
     const user = userEvent.setup();
 

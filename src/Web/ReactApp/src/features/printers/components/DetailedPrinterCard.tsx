@@ -71,6 +71,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
+import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
 
 // Interaction-only: the Z-offset calibration wizard is a modal only opened
 // via an explicit "Calibrate Z-Offset" click, so it's lazy-loaded out of the
@@ -94,6 +95,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
+  const browserUrl = printer.frontendUrl && isSafeHttpUrl(printer.frontendUrl)
+    ? toSafeHref(printer.frontendUrl)
+    : undefined;
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -503,16 +507,29 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         {/* Action buttons row */}
         <div className="flex w-full items-center justify-between gap-2" role="toolbar" aria-label="Printer actions">
           <div className="flex items-center gap-1">
-            <a
-              href={printer.frontendUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
-              aria-label={`Open printer ${printer.name} in new tab`}
-              title={`Open printer ${printer.name}`}
-            >
-              <ExternalLinkIcon className="h-4 w-4" />
-            </a>
+            {browserUrl ? (
+              <a
+                href={browserUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-pf-text-secondary hover:text-pf-text-primary shrink-0 h-8 w-8 inline-flex items-center justify-center rounded-xs"
+                aria-label={`Open printer ${printer.name} in new tab`}
+                title={`Open printer ${printer.name}`}
+              >
+                <ExternalLinkIcon className="h-4 w-4" />
+              </a>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled
+                className="h-8 w-8 p-0 text-pf-text-secondary"
+                aria-label={`Printer browser URL unavailable for ${printer.name}`}
+                title="Printer browser URL is unavailable"
+                iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
+              />
+            )}
 
             <Button
               type="button"
