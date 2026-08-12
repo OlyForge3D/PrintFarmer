@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   areCompactPrinterCardPropsEqual,
@@ -288,6 +289,40 @@ describe('CompactPrinterCard memoization', () => {
 
     expect(screen.getByTestId('print-progress')).toHaveTextContent('11');
     expect(progressBarRender).toHaveBeenCalledTimes(2);
+  });
+
+  it('links Open in Browser to the printer frontend URL', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.getByRole('link', { name: /open in browser for printer printer 1 in new tab/i }))
+      .toHaveAttribute('href', 'http://printer-1.local');
+  });
+
+  it('does not render an unsafe browser URL as a link', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ frontendUrl: 'javascript:alert(1)' })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open in Browser' })).toBeDisabled();
   });
 
   it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {

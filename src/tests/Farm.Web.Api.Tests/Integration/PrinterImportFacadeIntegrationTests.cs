@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -119,6 +120,25 @@ public sealed class PrinterImportFacadeIntegrationTests(CustomWebApplicationFact
             using (Stream stream = file.OpenReadStream())
             { await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None); }
         });
+    }
+
+    [Fact]
+    public async Task ImportFromFileAsync_WithEmbeddedCredentials_DoesNotPersistPrinter()
+    {
+        IPrintersService printersService = _factory.Services.CreateAsyncScope().ServiceProvider
+            .GetRequiredService<IPrintersService>();
+        string printerName = $"CredentialImport-{Guid.NewGuid():N}";
+        string jsonContent =
+            $$"""[{"name":"{{printerName}}","serverUrl":"http://user:password@printer.local","backend":"Moonraker"}]""";
+        IFormFile file = CreateJsonFormFile("credential-printer.json", jsonContent);
+
+        using (Stream stream = file.OpenReadStream())
+        {
+            _ = await printersService.ImportFromStreamAsync(stream, file.FileName, "skip", CancellationToken.None);
+        }
+
+        bool persisted = await _dbContext.Printers.AnyAsync(printer => printer.Name == printerName);
+        persisted.Should().BeFalse();
     }
 
     [Fact]
@@ -304,4 +324,3 @@ Printer2,192.168.1.101,PrusaLink,Test2,Prusa,Mk3S+,key456,false,8008,http://cam2
         result.Should().NotBeNull();
     }
 }
-

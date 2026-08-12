@@ -51,7 +51,6 @@ public record CompletePrinterDto(
     PrinterSpoolInfoDto? SpoolInfo,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? BackendUrl = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? FrontendUrl = null,
     LocationSummaryDto? Location = null,
     bool ObicoEnabled = false,

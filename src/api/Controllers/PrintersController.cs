@@ -311,9 +311,14 @@ public class PrintersController(
             return BadRequest(new TestConnectionResponse { Success = false, Message = "Server URL is required" });
         }
 
-        if (!Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        if (!PrinterClientUrl.IsSafeInput(request.ServerUrl) ||
+            !Uri.TryCreate(request.ServerUrl, UriKind.Absolute, out Uri? serverUri))
         {
-            return BadRequest(new TestConnectionResponse { Success = false, Message = "Invalid server URL format" });
+            return BadRequest(new TestConnectionResponse
+            {
+                Success = false,
+                Message = "Server URL must be an HTTP/HTTPS URL without embedded credentials."
+            });
         }
 
         EgressCheckResult egressCheck = await _egressGuard.CheckAsync(serverUri.ToString(), ct);
@@ -1133,6 +1138,12 @@ public class PrintersController(
             return NotFound();
         }
 
+        // ServerUrl is editable configuration, so callers with view-only group access
+        // receive the rest of the details payload without the internal network address.
+        string? clientServerUrl = PrintFarmerPermissions.HasPermission(User, "printers:admin")
+            ? PrinterClientUrl.Create(p.ServerUrl)
+            : null;
+
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
 
@@ -1215,7 +1226,7 @@ public class PrintersController(
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
-            p.ServerUrl,
+            clientServerUrl,
             p.Notes,
             p.ManufacturerId,
             p.Manufacturer?.Name,
@@ -1779,6 +1790,11 @@ public class PrintersController(
         // Only resolve hostname if a new ServerUrl is provided
         if (!string.IsNullOrWhiteSpace(dto.ServerUrl))
         {
+            if (!PrinterClientUrl.IsSafeInput(dto.ServerUrl))
+            {
+                return BadRequest("Server URL must be an HTTP/HTTPS URL without embedded credentials.");
+            }
+
             // Delegate normalization and optional hostname resolution to the PrintersService
             PrinterBackend backendForResolve = dto.Backend ?? (PrinterBackend)p.Backend;
             ResolveHostnameResponse resolveResp = await _printersService.ResolveHostnameAsync(dto.ServerUrl, backendForResolve, ct);

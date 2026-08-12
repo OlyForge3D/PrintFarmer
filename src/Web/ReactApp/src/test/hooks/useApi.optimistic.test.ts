@@ -4,7 +4,7 @@ import React from 'react';
 import { renderHook } from '@testing-library/react';
 import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { useCreatePrinter, useQueuePrintJob, queryKeys } from '@/common/hooks/useApi';
+import { useCreatePrinter, useQueuePrintJob, useUpdatePrinter, queryKeys } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { PrinterBackend, Printer, QueuedPrintJobWithFileMetaDto } from '@/types/api';
 
@@ -111,6 +111,51 @@ describe('optimistic printer create', () => {
       // success if list gone or no temp items remain
       const hasTemp = postList?.some(p => p.id.startsWith('temp-')) ?? false;
       expect(hasTemp).toBe(false);
+    });
+  });
+});
+
+describe('optimistic printer update', () => {
+  it('preserves client URL fields omitted from the mutation response', async () => {
+    const client = createTestClient();
+    const wrapper = wrapperFactory(client);
+    const existing = {
+      id: 'printer-1',
+      name: 'Original name',
+      frontendUrl: 'http://printer.local',
+      backendUrl: 'http://printer.local:7125',
+      backend: PrinterBackend.Moonraker,
+    } as Printer;
+    const updated = {
+      id: 'printer-1',
+      name: 'Updated name',
+      backend: PrinterBackend.Moonraker,
+    } as Printer;
+
+    client.setQueryData(queryKeys.printers, [existing]);
+    client.setQueryData(queryKeys.printer(existing.id), existing);
+    vi.spyOn(apiClient, 'updatePrinter').mockResolvedValue(updated);
+
+    const { result } = renderHook(() => useUpdatePrinter(), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: existing.id,
+        printer: { name: updated.name, backend: PrinterBackend.Moonraker },
+        reviewedRowVersion: 'reviewed-version',
+      });
+    });
+
+    const listPrinter = client.getQueryData<Printer[]>(queryKeys.printers)?.[0];
+    const detailPrinter = client.getQueryData<Printer>(queryKeys.printer(existing.id));
+    expect(listPrinter).toMatchObject({
+      name: 'Updated name',
+      frontendUrl: existing.frontendUrl,
+      backendUrl: existing.backendUrl,
+    });
+    expect(detailPrinter).toMatchObject({
+      name: 'Updated name',
+      frontendUrl: existing.frontendUrl,
+      backendUrl: existing.backendUrl,
     });
   });
 });

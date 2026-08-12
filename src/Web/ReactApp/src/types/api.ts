@@ -1296,7 +1296,7 @@ export interface PrinterDetails {
   id: string;
   rowVersion?: string | null;
   name: string;
-  serverUrl: string;
+  serverUrl?: string | null;
   notes?: string;
   manufacturerId?: string;
   manufacturerName?: string;

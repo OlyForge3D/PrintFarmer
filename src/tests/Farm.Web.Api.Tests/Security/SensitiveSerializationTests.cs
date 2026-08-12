@@ -54,6 +54,22 @@ public sealed class SensitiveSerializationTests
     }
 
     [Fact]
+    public void PrinterComputedUrls_RemoveEmbeddedCredentials()
+    {
+        Printer printer = new()
+        {
+            ServerUrl = "http://embedded-user:embedded-password@printer.internal:7125/path",
+            BackendPort = 7125,
+            FrontendPort = 80,
+        };
+
+        printer.BackendUrl.Should().Be("http://printer.internal:7125/path");
+        printer.FrontendUrl.Should().Be("http://printer.internal/path");
+        printer.BackendUrl.Should().NotContain("embedded-user").And.NotContain("embedded-password");
+        printer.FrontendUrl.Should().NotContain("embedded-user").And.NotContain("embedded-password");
+    }
+
+    [Fact]
     public void Serialize_SlicerEntities_DoesNotExposeEndpointsKeysInputsOrStoragePaths()
     {
         SliceJob job = new()
@@ -110,7 +126,7 @@ public sealed class SensitiveSerializationTests
     }
 
     [Fact]
-    public void Serialize_PrinterResponseDtos_DoesNotExposeCredentialsOrNetworkDetails()
+    public void Serialize_PrinterResponseDtos_ExposesUiUrlsWithoutCredentialsOrBackendNetworkDetails()
     {
         var recordCases = new Dictionary<Type, IReadOnlyDictionary<string, string>>
         {
@@ -121,7 +137,6 @@ public sealed class SensitiveSerializationTests
                 ["ThumbnailUrl"] = "http://complete.internal/private-thumbnail.png",
                 ["CameraStreamUrl"] = "http://complete-camera.internal",
                 ["BackendUrl"] = "http://complete-backend.internal",
-                ["FrontendUrl"] = "http://complete-frontend.internal",
             },
             [typeof(PrinterFastDto)] = new Dictionary<string, string>
             {
@@ -141,7 +156,6 @@ public sealed class SensitiveSerializationTests
             },
             [typeof(PrinterDetailsDto)] = new Dictionary<string, string>
             {
-                ["ServerUrl"] = "http://details.internal",
                 ["ApiKey"] = "details-api-key",
                 ["CameraStreamUrl"] = "http://details-camera.internal/stream",
                 ["CameraSnapshotUrl"] = "http://details-camera.internal/snapshot",
@@ -157,6 +171,22 @@ public sealed class SensitiveSerializationTests
             string json = JsonSerializer.Serialize(dto, type);
             AssertSensitiveValuesAreAbsent(json, values.Values.ToArray());
         }
+
+        var complete = (CompletePrinterDto)CreateRecord(
+            typeof(CompletePrinterDto),
+            new Dictionary<string, string>
+            {
+                ["FrontendUrl"] = "http://complete-frontend.internal",
+            });
+        var details = (PrinterDetailsDto)CreateRecord(
+            typeof(PrinterDetailsDto),
+            new Dictionary<string, string>
+            {
+                ["ServerUrl"] = "http://details.internal",
+            });
+
+        _ = JsonSerializer.Serialize(complete).Should().Contain("http://complete-frontend.internal");
+        _ = JsonSerializer.Serialize(details).Should().Contain("http://details.internal");
     }
 
     [Fact]

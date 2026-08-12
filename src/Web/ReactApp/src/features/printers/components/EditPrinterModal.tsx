@@ -14,6 +14,7 @@ import { printerBackendStringToEnum, getMotionTypeName } from '@/common/utils/en
 import { useSlicer } from '@/hooks/useSlicer';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
+import { isSafeHttpUrl } from '@/common/utils/validation';
 
 export interface EditPrinterModalProps {
   printerId: string | null;
@@ -383,9 +384,7 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     const errors: Record<string, string[]> = {};
     if (!formData.name?.trim()) errors.name = ['Name is required'];
     if (!formData.serverUrl?.trim()) errors.serverUrl = ['Server URL is required'];
-    else {
-      try { new URL(formData.serverUrl); } catch { errors.serverUrl = ['Invalid URL']; }
-    }
+    else if (!isSafeHttpUrl(formData.serverUrl)) errors.serverUrl = ['Please enter a valid HTTP/HTTPS URL'];
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -442,12 +441,8 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
     if (!formData.serverUrl?.trim()) {
       errors.serverUrl = ['Server URL is required'];
-    } else {
-      try {
-        new URL(formData.serverUrl);
-      } catch {
-        errors.serverUrl = ['Please enter a valid HTTP/HTTPS URL'];
-      }
+    } else if (!isSafeHttpUrl(formData.serverUrl)) {
+      errors.serverUrl = ['Please enter a valid HTTP/HTTPS URL'];
     }
 
     // Check authentication requirements per backend
@@ -584,12 +579,14 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FormField
                 label="Server URL"
+                htmlFor="printer-server-url"
                 required
                 error={validationErrors.serverUrl?.[0]}
               >
                 <Input
+                  id="printer-server-url"
                   type="text"
-                  value={formData.serverUrl}
+                  value={formData.serverUrl ?? ''}
                   onChange={e => handleInputChange('serverUrl', e.target.value)}
                   placeholder="https://printer.local"
                   title="Printer server URL"
