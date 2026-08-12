@@ -120,6 +120,84 @@ public class EfPrintJobManagementRepositoryTests
             .UseInMemoryDatabase($"{testName}_{Guid.NewGuid():N}")
             .Options;
 
+    [Theory]
+    [InlineData(ReadOnlyPrintJobQuery.JobDetails)]
+    [InlineData(ReadOnlyPrintJobQuery.FilteredQueue)]
+    [InlineData(ReadOnlyPrintJobQuery.PrinterQueue)]
+    [InlineData(ReadOnlyPrintJobQuery.History)]
+    [InlineData(ReadOnlyPrintJobQuery.Timeline)]
+    [InlineData(ReadOnlyPrintJobQuery.StateHistory)]
+    [InlineData(ReadOnlyPrintJobQuery.CompletedAnalytics)]
+    public async Task ReadOnlyQuery_WhenRowsMaterialize_LeavesChangeTrackerEmpty(
+        ReadOnlyPrintJobQuery query)
+    {
+        DbContextOptions<AppDbContext> options =
+            CreateInMemoryOptions(nameof(ReadOnlyQuery_WhenRowsMaterialize_LeavesChangeTrackerEmpty));
+        Guid printerId = Guid.NewGuid();
+        PrintJob queued = new PrintJobBuilder()
+            .WithAssignedPrinterId(printerId)
+            .Build();
+        PrintJob completed = new PrintJobBuilder()
+            .WithAssignedPrinterId(printerId)
+            .AsCompleted()
+            .Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.AddRange(queued, completed);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        int resultCount = query switch
+        {
+            ReadOnlyPrintJobQuery.JobDetails =>
+                (await repository.GetByIdWithGcodeFileAsync(queued.Id)) is null ? 0 : 1,
+            ReadOnlyPrintJobQuery.FilteredQueue =>
+                (await repository.GetFilteredJobsAsync()).Count,
+            ReadOnlyPrintJobQuery.PrinterQueue =>
+                (await repository.GetJobsByPrinterAsync(printerId)).Count,
+            ReadOnlyPrintJobQuery.History =>
+                (await repository.GetHistoryAsync()).jobs.Count,
+            ReadOnlyPrintJobQuery.Timeline =>
+                (await repository.GetTimelineJobsAsync()).Count,
+            ReadOnlyPrintJobQuery.StateHistory =>
+                (await repository.GetJobWithStateHistoryAsync(queued.Id)) is null ? 0 : 1,
+            ReadOnlyPrintJobQuery.CompletedAnalytics =>
+                (await repository.GetCompletedJobsForAnalyticsAsync()).Count,
+            _ => throw new ArgumentOutOfRangeException(nameof(query), query, null),
+        };
+
+        Assert.True(resultCount > 0);
+        Assert.Empty(queryContext.ChangeTracker.Entries());
+    }
+
+    [Fact]
+    public async Task GetByIdWithRelationsAsync_WhenRowMaterializes_TracksEntityForMutation()
+    {
+        DbContextOptions<AppDbContext> options =
+            CreateInMemoryOptions(nameof(GetByIdWithRelationsAsync_WhenRowMaterializes_TracksEntityForMutation));
+        PrintJob job = new PrintJobBuilder().Build();
+
+        await using (AppDbContext seedContext = new(options))
+        {
+            seedContext.PrintJobs.Add(job);
+            await seedContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext queryContext = new(options);
+        EfPrintJobManagementRepository repository = new(queryContext);
+
+        PrintJob? loaded = await repository.GetByIdWithRelationsAsync(job.Id);
+
+        Assert.NotNull(loaded);
+        Assert.Contains(
+            queryContext.ChangeTracker.Entries<PrintJob>(),
+            entry => entry.Entity.Id == job.Id);
+    }
+
     [Fact]
     public async Task GetPrinterQueueSummariesAsync_NoActiveJobs_ReturnsEmptyList()
     {
@@ -432,5 +510,16 @@ public class EfPrintJobManagementRepositoryTests
 
             return base.ReaderExecutingAsync(command, eventData, result, cancellationToken);
         }
+    }
+
+    public enum ReadOnlyPrintJobQuery
+    {
+        JobDetails,
+        FilteredQueue,
+        PrinterQueue,
+        History,
+        Timeline,
+        StateHistory,
+        CompletedAnalytics,
     }
 }

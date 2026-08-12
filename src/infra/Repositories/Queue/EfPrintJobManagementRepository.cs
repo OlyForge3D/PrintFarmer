@@ -32,6 +32,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public async Task<PrintJob?> GetByIdWithGcodeFileAsync(Guid id, CancellationToken ct = default)
     {
         return await _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
@@ -110,6 +111,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
@@ -194,6 +196,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public async Task<List<PrintJob>> GetJobsByPrinterAsync(Guid printerId, int limit = 50, CancellationToken ct = default)
     {
         return await _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
@@ -367,6 +370,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
                 .ThenInclude(p => p!.Model)
@@ -456,6 +460,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.AssignedPrinter)
             .AsQueryable();
@@ -489,6 +494,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
     public async Task<PrintJob?> GetJobWithStateHistoryAsync(Guid jobId, CancellationToken ct = default)
     {
         return await _context.PrintJobs
+            .AsNoTracking()
             .Include(pj => pj.GcodeFile)
             .Include(pj => pj.StateHistory)
             .FirstOrDefaultAsync(pj => pj.Id == jobId, ct);
@@ -501,6 +507,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
         CancellationToken ct = default)
     {
         IQueryable<PrintJob> query = _context.PrintJobs
+            .AsNoTracking()
             .Where(pj => pj.Status == PrintJobStatus.Completed && pj.ActualEndTime.HasValue);
 
         if (printerId.HasValue)
