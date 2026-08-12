@@ -401,8 +401,11 @@ A key can never grant more authority than its owner has.
 >
 > **Revocation latency differs by token type.** An exchanged Desktop token is capped at 15 minutes,
 > so a permission change takes effect on the next exchange. An ordinary login JWT carries its
-> permission claims for up to 7 days; #1445 covers the `ALL_TOKENS_` revocation path for that case.
-> Nothing in this feature extends the exchange token's lifetime.
+> permission claims for up to 7 days, but it is not left stale: changing a role's permission grants
+> ([#1471](https://github.com/OlyForge3D/PrintFarmer/pull/1471)) or a user's role assignments
+> ([#1475](https://github.com/OlyForge3D/PrintFarmer/pull/1475)) revokes the affected users' live
+> tokens through the shared `ALL_TOKENS_` path, forcing re-authentication. Nothing in this feature
+> extends the exchange token's lifetime.
 
 ### Credential management requires an interactive session
 
