@@ -425,7 +425,6 @@ describe('BedClearBanner', () => {
     });
     const existingPrinter = { id: 'printer-1', name: 'MK4', state: 'Idle' };
     queryClient.setQueryData(['printers'], [existingPrinter]);
-    queryClient.setQueryData(['auto-dispatch', 'all-statuses'], [{ ...baseStatus, printerName: 'MK4' }]);
     queryClient.setQueryData(['auto-dispatch', 'status', 'printer-1'], { ...baseStatus, printerName: 'MK4' });
     queryClient.setQueryData(['auto-dispatch', 'global-status'], {
       globalEnabled: true,
@@ -449,8 +448,8 @@ describe('BedClearBanner', () => {
     const updatedList = queryClient.getQueryData<Array<{ id: string; state: string }>>(['printers']);
     expect(updatedList?.[0]?.state).toBe('Idle');
 
-    const updatedStatusList = queryClient.getQueryData<AutoDispatchStatus[]>(['auto-dispatch', 'all-statuses']);
-    expect(updatedStatusList?.[0]).toMatchObject({
+    const updatedGlobalStatus = queryClient.getQueryData<{ printers: AutoDispatchStatus[] }>(['auto-dispatch', 'global-status']);
+    expect(updatedGlobalStatus?.printers?.[0]).toMatchObject({
       printerId: 'printer-1',
       state: 'None',
       queueDepth: 0,
