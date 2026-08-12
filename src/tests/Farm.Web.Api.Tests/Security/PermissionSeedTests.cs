@@ -72,17 +72,29 @@ public sealed class PermissionSeedTests
                 .Should().Be(1);
         }
 
+        // Issue #1453: farm_user's grants must be reconciled against
+        // PrintFarmerPermissions.CalibrationFoundation, the single source of truth for the
+        // calibration/queue/slicing/dispatch-settings permissions #945 introduced. Previously
+        // this assertion required farm_user to have *none* of these grants, which is exactly
+        // the gap #1453 closes: those 15 permissions were enforced in code but reachable by no
+        // role except the farm_admin bypass. See PermissionGrantPathTests for the general guard
+        // that every enforced [RequirePermission] has a real grant path.
         Guid farmUserRoleId = await context.Roles
             .Where(role => role.Name == "farm_user")
             .Select(role => role.Id)
             .SingleAsync();
-        string[] foundationResources = ["calibration", "queue", "slicing", "dispatch-settings"];
-        bool farmUserHasImplicitFoundationGrant = await context.RolePermissions
-            .AnyAsync(permission =>
-                permission.RoleId == farmUserRoleId
-                && permission.Granted
-                && foundationResources.Contains(permission.Resource.Name));
-        _ = farmUserHasImplicitFoundationGrant.Should().BeFalse();
+        var farmUserGrantedPermissions = await context.RolePermissions
+            .Where(permission => permission.RoleId == farmUserRoleId && permission.Granted)
+            .Select(permission => permission.Resource.Name + ":" + permission.Action.Name)
+            .ToListAsync();
+
+        foreach (string permission in PrintFarmerPermissions.CalibrationFoundation)
+        {
+            _ = farmUserGrantedPermissions.Should().Contain(
+                permission,
+                $"farm_user must hold {permission} — #945 enforced it in code without ever " +
+                "granting it to any non-admin role");
+        }
     }
 
     [Fact]

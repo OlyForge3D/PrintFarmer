@@ -268,16 +268,16 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             new { Name = "printers", DisplayName = "Printers", ResourceType = "printer", Description = "3D printer management" },
             new { Name = "gcode_harvest", DisplayName = "G-code Harvest", ResourceType = "harvest", Description = "G-code file harvesting operations" },
             new { Name = "gcode_library", DisplayName = "G-code Library", ResourceType = "library", Description = "G-code file library management" },
-            new { Name = "job_queue", DisplayName = "Print Job Queue", ResourceType = "queue", Description = "Print job queue management" },
-            new { Name = "slicer_engines", DisplayName = "Slicer Engines", ResourceType = "slicer", Description = "Slicer integration and management" },
+            new { Name = "job_queue", DisplayName = "Print Job Queue (legacy admin overrides)", ResourceType = "queue", Description = "Administrative print-job retry/approval overrides (RetriesController, PrintApprovalsController). Distinct from \"queue\", which gates the calibration/dispatch queue actions that farm_user can hold; job_queue is farm_admin-only by design." },
+            new { Name = "slicer_engines", DisplayName = "Slicer Engines (admin management)", ResourceType = "slicer", Description = "Administrative slicer worker/engine management (Slicer host admin endpoints, SlicerHub). Distinct from \"slicing\", which gates the farm_user-reachable slice-submit/artifact/promote actions; slicer_engines is farm_admin-only by design." },
             new { Name = "users", DisplayName = "Users", ResourceType = "system", Description = "User account management" },
             new { Name = "roles", DisplayName = "Roles", ResourceType = "system", Description = "Role and permission management" },
             new { Name = "system_settings", DisplayName = "System Settings", ResourceType = "system", Description = "Application configuration and settings" },
             new { Name = "spoolman", DisplayName = "Spoolman Integration", ResourceType = "integration", Description = "Spoolman filament management integration" },
             new { Name = "network_discovery", DisplayName = "Network Discovery", ResourceType = "system", Description = "Printer network discovery and management" },
             new { Name = "calibration", DisplayName = "Printer Calibration", ResourceType = "calibration", Description = "Printer calibration projects and generation" },
-            new { Name = "queue", DisplayName = "Calibration Queue", ResourceType = "queue", Description = "Authorized queue operations" },
-            new { Name = "slicing", DisplayName = "Slicing", ResourceType = "slicer", Description = "Authorized slicing and artifact operations" },
+            new { Name = "queue", DisplayName = "Print Queue Operations", ResourceType = "queue", Description = "Farm-user-reachable queue actions: read/write/start/cancel/acknowledge-bed-clear/reconcile (AutoDispatchController, PrintersController, JobQueueAnalyticsController). Distinct from \"job_queue\", which gates farm_admin-only retry/approval overrides." },
+            new { Name = "slicing", DisplayName = "Slicing Submission & Artifacts", ResourceType = "slicer", Description = "Farm-user-reachable slicing actions: submit/read-artifact/promote (CalibrationGenerationController, GcodePromotionsController). Distinct from \"slicer_engines\", which gates farm_admin-only slicer worker/engine management." },
             new { Name = "dispatch-settings", DisplayName = "Dispatch Settings", ResourceType = "system", Description = "Dispatch configuration management" },
             new { Name = "obico", DisplayName = "Obico Integration", ResourceType = "integration", Description = "Obico ML failure-detection server management and connectivity probes" },
             new { Name = "catalog", DisplayName = "Catalog", ResourceType = "catalog", Description = "Manufacturer, machine, and material catalog management" },
@@ -387,7 +387,31 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 ("gcode_library", "create"),
                 ("job_queue", "read"),
                 ("job_queue", "create"),
-                ("spoolman", "read")
+                ("spoolman", "read"),
+
+                // Issue #1453: #945 added the calibration/queue/slicing resources, their
+                // actions, and [RequirePermission] attributes, but never extended this list —
+                // leaving 15 permissions enforceable in code but unreachable by any role except
+                // via the farm_admin bypass. Reconciled against
+                // PrintFarmerPermissions.CalibrationFoundation, which is the single source of
+                // truth for this permission set. Purely additive: existing deployments only
+                // gain these grants for farm_user, never lose any.
+                ("calibration", "create"),
+                ("calibration", "read"),
+                ("calibration", "update"),
+                ("calibration", "delete"),
+                ("calibration", "generate"),
+                ("calibration", "publish"),
+                ("queue", "read"),
+                ("queue", "write"),
+                ("queue", "start"),
+                ("queue", "cancel"),
+                ("queue", "acknowledge-bed-clear"),
+                ("queue", "reconcile"),
+                ("slicing", "submit"),
+                ("slicing", "read-artifact"),
+                ("slicing", "promote"),
+                ("dispatch-settings", "manage"),
             };
             foreach ((string? resourceName, string? actionName) in userPermissions)
             {
