@@ -46,5 +46,13 @@ public sealed class SlicerHostServiceProviderScopeTests
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<Farm.Infrastructure.Data.AppDbContext>>());
         Assert.NotNull(
             scope.ServiceProvider.GetRequiredService<IDbContextFactory<SlicerDbContext>>());
+
+        // Confirms the #1469 DI chain (IAuthAuditLogRepository -> EfAuthAuditLogRepository,
+        // IAuthAuditService -> AuthAuditService, ITokenRevocationService -> TokenRevocationService
+        // wrapped by CachingTokenRevocationService) resolves under ValidateOnBuild/ValidateScopes,
+        // so a broken registration fails the build instead of silently no-oping like #1460 did.
+        Assert.NotNull(
+            scope.ServiceProvider
+                .GetRequiredService<Farm.Infrastructure.Services.Authentication.ITokenRevocationService>());
     }
 }

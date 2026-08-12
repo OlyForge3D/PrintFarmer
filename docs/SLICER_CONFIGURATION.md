@@ -273,10 +273,11 @@ The distinction is load-bearing for a desktop client:
 | All the owner's tokens force-revoked (`ALL_TOKENS_` marker) | `401` | Exchange again; the key itself is unaffected. |
 | Token valid but the key lacks the required scope/permission | `403` | Stop retrying — the key was never granted that authority. |
 
-The `ALL_TOKENS_` row describes the main API. The standalone slicer host does not check the
-revocation marker ([#1469](https://github.com/OlyForge3D/PrintFarmer/issues/1469)), so in a split
-deployment a revoked token keeps working on slicer-host routes until it expires — at most 15
-minutes for an exchange token.
+The standalone slicer host also checks the `ALL_TOKENS_` revocation marker
+([#1469](https://github.com/OlyForge3D/PrintFarmer/issues/1469)), so in a split deployment a
+force-revoked token is rejected on slicer-host routes as well, subject to a short-lived
+(5-second TTL) in-memory cache of the revocation check to avoid a database round trip on every
+streamed request.
 
 Re-exchange succeeds only while both the key and its owner remain valid: a deactivated key, an
 expired key, a deactivated owner, or an owner who has lost every mapped permission all return the
@@ -409,12 +410,13 @@ A key can never grant more authority than its owner has.
 > permission claims for up to 7 days, but it is not left stale: changing a role's permission grants
 > ([#1471](https://github.com/OlyForge3D/PrintFarmer/pull/1471)) or a user's role assignments
 > ([#1475](https://github.com/OlyForge3D/PrintFarmer/pull/1475)) revokes the affected users' live
-> tokens through the shared `ALL_TOKENS_` path. **That revocation is enforced by the main API
-> only.** The standalone slicer host does not check the revocation marker, so in a split deployment
-> a revoked token keeps working on slicer-host routes until it expires — tracked as
-> [#1469](https://github.com/OlyForge3D/PrintFarmer/issues/1469). Capping the exchange token at 15
-> minutes bounds that window for Desktop clients; a login JWT reaching those routes is bounded only
-> by its own expiry. Nothing in this feature extends the exchange token's lifetime.
+> tokens through the shared `ALL_TOKENS_` path. **That revocation is enforced by both the main API
+> and the standalone slicer host** ([#1469](https://github.com/OlyForge3D/PrintFarmer/issues/1469)),
+> so in a split deployment a revoked token is rejected on slicer-host routes as well, subject to a
+> short-lived (5-second TTL) in-memory cache of the revocation check on the slicer host. Capping the
+> exchange token at 15 minutes still bounds worst-case staleness for Desktop clients; a login JWT
+> reaching those routes is bounded only by its own expiry. Nothing in this feature extends the
+> exchange token's lifetime.
 
 ### Credential management requires an interactive session
 
