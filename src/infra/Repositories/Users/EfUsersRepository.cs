@@ -72,18 +72,21 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         }
     }
 
-    public async Task<List<Guid>> UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
+    public async Task<RoleAssignmentDiff> UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default)
     {
-        // The read-check-write below (capture the user's current active role assignment, then
-        // atomically replace it) commits as one unit under serializable isolation together with
-        // any other tracked changes on this context (e.g. the caller's pending User field edits),
-        // via the single SaveChangesAsync call inside the transaction. Without this, two
-        // concurrent role updates for the same user could each read a pre-conflict "before" role
-        // set, both pass diff/no-op checks, and both commit -- silently merging into the union of
-        // both requests' role sets rather than either admin's intended final state, and producing
-        // an audit trail that doesn't match what's actually persisted. Mirrors the transaction
-        // pattern RolePermissionService.UpdateRolePermissionsAsync uses for role permission
-        // changes (#1454 review discussion).
+        // The read-check-write-reread below (capture the user's current active role assignment,
+        // replace it, then re-read the resulting active role assignment) commits as one unit
+        // under serializable isolation together with any other tracked changes on this context
+        // (e.g. the caller's pending User field edits), via the single SaveChangesAsync call
+        // inside the transaction. Without this, two concurrent role updates for the same user
+        // could each read a pre-conflict "before" role set, both pass diff/no-op checks, and both
+        // commit -- silently merging into the union of both requests' role sets rather than
+        // either admin's intended final state. The "after" state is also read from inside this
+        // same transaction (before commit) rather than by the caller afterwards, so a third,
+        // unrelated concurrent update to this user's roles can't be attributed to this request's
+        // diff/audit entry. Mirrors the transaction pattern
+        // RolePermissionService.UpdateRolePermissionsAsync uses for role permission changes
+        // (#1454 review discussion).
         await using Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction = await _db.Database
             .BeginTransactionAsync(System.Data.IsolationLevel.Serializable, ct);
 
@@ -108,9 +111,10 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         }
 
         await _db.SaveChangesAsync(ct);
+        List<Guid> afterRoleIds = await GetActiveRoleIdsAsync(userId, ct);
         await transaction.CommitAsync(ct);
 
-        return beforeRoleIds;
+        return new RoleAssignmentDiff(beforeRoleIds, afterRoleIds);
     }
 
     public async Task DeleteUserAsync(Guid id, CancellationToken ct = default)

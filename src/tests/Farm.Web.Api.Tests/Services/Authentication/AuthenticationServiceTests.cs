@@ -549,7 +549,7 @@ public class AuthenticationServiceTests
         _mockUsersRepository.Setup(r => r.GetRoleByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Role { Id = Guid.NewGuid(), Name = "farm_user" });
         _mockUsersRepository.Setup(r => r.UpdateUserRolesAsync(It.IsAny<Guid>(), It.IsAny<IEnumerable<Guid>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<Guid>());
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid>(), new List<Guid>()));
         _mockUsersRepository.Setup(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         _mockAuthAuditService.Setup(s => s.LogRegisterAsync(

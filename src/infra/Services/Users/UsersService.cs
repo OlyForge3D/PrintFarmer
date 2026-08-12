@@ -147,28 +147,25 @@ public class UsersService(
         user.UpdatedAt = DateTime.UtcNow;
 
         // If RoleIds is present, UpdateUserRolesAsync atomically captures the user's pre-update
-        // active role set and replaces it (and flushes the User field edits above) inside one
-        // serializable transaction, closing the race where two concurrent role updates for the
-        // same user could otherwise silently merge into the union of both requests. Otherwise,
-        // just persist the field edits as before.
-        HashSet<Guid>? beforeRoleIds = null;
+        // and post-update active role sets and replaces the assignment (also flushing the User
+        // field edits above) inside one serializable transaction, closing both the race where two
+        // concurrent role updates for the same user could otherwise silently merge into the union
+        // of both requests, and the separate race where a post-commit re-read here could pick up
+        // a third, unrelated concurrent update. Otherwise, just persist the field edits as before.
+        RoleAssignmentDiff? roleDiff = null;
         if (request.RoleIds != null)
         {
-            List<Guid> previousRoleIds = await _users.UpdateUserRolesAsync(id, request.RoleIds, ct);
-            beforeRoleIds = new HashSet<Guid>(previousRoleIds);
+            roleDiff = await _users.UpdateUserRolesAsync(id, request.RoleIds, ct);
         }
         else
         {
             await _users.SaveChangesAsync(ct);
         }
 
-        if (beforeRoleIds is not null)
+        if (roleDiff is not null)
         {
-            // Re-read the actually-persisted role set rather than trusting request.RoleIds verbatim --
-            // UpdateUserRolesAsync silently drops role IDs that don't correspond to a real Role, so
-            // diffing against the raw request could report a role as "added" that was never assigned.
-            List<Guid> persistedRoleIds = await _users.GetActiveRoleIdsAsync(id, ct);
-            var afterRoleIds = new HashSet<Guid>(persistedRoleIds);
+            var beforeRoleIds = new HashSet<Guid>(roleDiff.BeforeRoleIds);
+            var afterRoleIds = new HashSet<Guid>(roleDiff.AfterRoleIds);
             if (!beforeRoleIds.SetEquals(afterRoleIds))
             {
                 List<Guid> addedRoleIds = afterRoleIds.Except(beforeRoleIds).ToList();

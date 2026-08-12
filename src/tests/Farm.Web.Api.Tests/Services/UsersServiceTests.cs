@@ -406,9 +406,7 @@ public class UsersServiceTests
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .ReturnsAsync(new List<Guid>());
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid>(), new List<Guid> { roleId }));
         _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
             .ReturnsAsync(new List<RoleDto> { new() { Id = roleId, Name = "operator" } });
 
@@ -475,10 +473,8 @@ public class UsersServiceTests
 
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid> { roleId }, new List<Guid> { roleId }));
 
         var updatedUser = new UserDto { Id = userId };
         _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
@@ -517,9 +513,7 @@ public class UsersServiceTests
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid>());
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid> { roleId }, new List<Guid>()));
         _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
             .ReturnsAsync(new List<RoleDto> { new() { Id = roleId, Name = "operator" } });
 
@@ -530,14 +524,14 @@ public class UsersServiceTests
                 It.IsAny<string>(),
                 null,
                 _cancellationToken))
-            .ReturnsAsync(2);
+            .ReturnsAsync(1);
         _authAuditServiceMock
             .Setup(x => x.LogRoleAssignmentChangedAsync(
                 _actorUserId,
                 userId,
                 It.Is<IReadOnlyList<string>>(added => added.Count == 0),
                 It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
-                2,
+                1,
                 null,
                 null,
                 _cancellationToken))
@@ -558,7 +552,7 @@ public class UsersServiceTests
                 userId,
                 It.Is<IReadOnlyList<string>>(added => added.Count == 0),
                 It.Is<IReadOnlyList<string>>(removed => removed.SequenceEqual(new[] { "operator" })),
-                2,
+                1,
                 null,
                 null,
                 _cancellationToken),
@@ -578,9 +572,7 @@ public class UsersServiceTests
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { oldRoleId });
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { newRoleId });
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid> { oldRoleId }, new List<Guid> { newRoleId }));
         _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
             .ReturnsAsync(new List<RoleDto>
             {
@@ -645,11 +637,10 @@ public class UsersServiceTests
 
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
+        // The repository silently dropped nonExistentRoleId, so the persisted "after" set is
+        // unchanged from "before" -- no revocation/audit should be triggered.
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
-        // The repository silently dropped nonExistentRoleId, so the persisted set is unchanged.
-        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
-            .ReturnsAsync(new List<Guid> { roleId });
+            .ReturnsAsync(new RoleAssignmentDiff(new List<Guid> { roleId }, new List<Guid> { roleId }));
 
         var updatedUser = new UserDto { Id = userId };
         _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
