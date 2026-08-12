@@ -3126,7 +3126,11 @@ public sealed class CalibrationProjectService(
             "printer_configuration_changed" => CalibrationApiResult<T>.Failure(
                 StatusCodes.Status409Conflict,
                 "printer_configuration_changed"),
-            "profile_service_unavailable" or "status_unavailable" => CalibrationApiResult<T>.Failure(
+            string code when code.StartsWith("profile_service_", StringComparison.Ordinal) =>
+                CalibrationApiResult<T>.Failure(
+                    StatusCodes.Status503ServiceUnavailable,
+                    "storage_or_dependency_unavailable"),
+            "status_unavailable" => CalibrationApiResult<T>.Failure(
                 StatusCodes.Status503ServiceUnavailable,
                 "storage_or_dependency_unavailable"),
             _ => Validation<T>(contextResult.ErrorCode ?? "printer_context_invalid"),

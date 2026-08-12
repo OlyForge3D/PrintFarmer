@@ -119,7 +119,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task CalibrationRoutes_InMicroservicesDeployment_ReturnProfileServiceUnavailable()
+    public async Task CalibrationRoutes_InMicroservicesDeployment_KeepCandidatesIndependentOfProfiles()
     {
         await using SlicerDisabledWebApplicationFactory microservicesFactory = new(
             "microservices",
@@ -130,21 +130,23 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
             });
         using HttpClient client = microservicesFactory.CreateClient();
 
-        foreach (string route in new[]
-                 {
-                     "/api/printers/calibration-candidates",
-                     $"/api/printers/{Guid.NewGuid()}/calibration-context?slicerType=OrcaSlicer",
-                 })
+        HttpResponseMessage candidates =
+            await client.GetAsync("/api/printers/calibration-candidates");
+        string candidatesBody = await candidates.Content.ReadAsStringAsync();
+        _ = candidates.StatusCode.Should().Be(HttpStatusCode.OK, candidatesBody);
+        using (JsonDocument document = JsonDocument.Parse(candidatesBody))
         {
-            HttpResponseMessage response = await client.GetAsync(route);
-            string body = await response.Content.ReadAsStringAsync();
+            _ = document.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+        }
 
-            _ = response.StatusCode.Should().Be(
-                HttpStatusCode.ServiceUnavailable,
-                body);
-            using JsonDocument document = JsonDocument.Parse(body);
+        HttpResponseMessage context = await client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/calibration-context?slicerType=OrcaSlicer");
+        string contextBody = await context.Content.ReadAsStringAsync();
+        _ = context.StatusCode.Should().Be(HttpStatusCode.NotFound, contextBody);
+        using (JsonDocument document = JsonDocument.Parse(contextBody))
+        {
             _ = document.RootElement.GetProperty("code").GetString()
-                .Should().Be("profile_service_unavailable");
+                .Should().Be("printer_not_found");
         }
 
         using JsonDocument capabilities =
@@ -174,6 +176,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         {
             JsonElement candidate = candidates.RootElement.EnumerateArray().Single();
             _ = candidate.GetProperty("id").GetGuid().Should().Be(printerId);
+            _ = candidate.GetProperty("profilesEvaluated").GetBoolean().Should().BeFalse();
             _ = candidate.GetProperty("eligible").GetBoolean().Should().BeTrue();
             _ = candidate.GetProperty("firmware").GetProperty("family").GetString()
                 .Should().Be("Klipper");
@@ -188,6 +191,7 @@ public sealed class PrinterCalibrationControllerTests : IAsyncLifetime
         _ = contextResponse.StatusCode.Should().Be(HttpStatusCode.OK, contextBody);
         using JsonDocument context = JsonDocument.Parse(contextBody);
         JsonElement root = context.RootElement;
+        _ = root.GetProperty("profilesEvaluated").GetBoolean().Should().BeTrue();
         _ = root.GetProperty("eligible").GetBoolean().Should().BeTrue();
         _ = root.GetProperty("capturedBySubject").GetString()
             .Should().Be(subjectId.ToString());

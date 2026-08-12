@@ -108,7 +108,10 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             AnonymousScope,
             CancellationToken.None);
 
-        _ = await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>();
+        CalibrationProfileResolverUnavailableException exception =
+            (await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>())
+            .Which;
+        _ = exception.ErrorCode.Should().Be("profile_service_authentication_failed");
         _ = handler.Requests.Should().BeEmpty();
         _ = logger.Messages.Should().NotContain(message =>
             message.Contains(BearerToken, StringComparison.Ordinal));
@@ -204,13 +207,15 @@ public sealed class SlicerHostCalibrationProfileResolverTests
     }
 
     [Theory]
-    [InlineData(HttpStatusCode.Unauthorized)]
-    [InlineData(HttpStatusCode.Forbidden)]
-    [InlineData(HttpStatusCode.NotFound)]
-    [InlineData(HttpStatusCode.ServiceUnavailable)]
-    [InlineData(HttpStatusCode.InternalServerError)]
-    [InlineData(HttpStatusCode.BadRequest)]
-    public async Task ResolveAsync_WithRefusedResponse_ReportsResolverUnavailable(HttpStatusCode statusCode)
+    [InlineData(HttpStatusCode.Unauthorized, "profile_service_authentication_failed")]
+    [InlineData(HttpStatusCode.Forbidden, "profile_service_authorization_failed")]
+    [InlineData(HttpStatusCode.NotFound, "profile_service_configuration_error")]
+    [InlineData(HttpStatusCode.ServiceUnavailable, "profile_service_unavailable")]
+    [InlineData(HttpStatusCode.InternalServerError, "profile_service_unavailable")]
+    [InlineData(HttpStatusCode.BadRequest, "profile_service_configuration_error")]
+    public async Task ResolveAsync_WithRefusedResponse_ReturnsTypedFailure(
+        HttpStatusCode statusCode,
+        string expectedErrorCode)
     {
         RecordingHandler handler = new(Responses.Status(statusCode));
         SlicerHostCalibrationProfileResolver resolver = CreateResolver(handler, out _);
@@ -222,7 +227,10 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             AnonymousScope,
             CancellationToken.None);
 
-        _ = await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>();
+        CalibrationProfileResolverUnavailableException exception =
+            (await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>())
+            .Which;
+        _ = exception.ErrorCode.Should().Be(expectedErrorCode);
     }
 
     [Fact]
@@ -238,7 +246,10 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             AnonymousScope,
             CancellationToken.None);
 
-        _ = await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>();
+        CalibrationProfileResolverUnavailableException exception =
+            (await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>())
+            .Which;
+        _ = exception.ErrorCode.Should().Be("profile_service_unavailable");
     }
 
     [Fact]
@@ -255,7 +266,10 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             AnonymousScope,
             CancellationToken.None);
 
-        _ = await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>();
+        CalibrationProfileResolverUnavailableException exception =
+            (await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>())
+            .Which;
+        _ = exception.ErrorCode.Should().Be("profile_service_unavailable");
     }
 
     [Fact]
@@ -312,7 +326,10 @@ public sealed class SlicerHostCalibrationProfileResolverTests
             AnonymousScope,
             CancellationToken.None);
 
-        _ = await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>();
+        CalibrationProfileResolverUnavailableException exception =
+            (await resolve.Should().ThrowAsync<CalibrationProfileResolverUnavailableException>())
+            .Which;
+        _ = exception.ErrorCode.Should().Be("profile_service_timeout");
     }
 
     [Fact]

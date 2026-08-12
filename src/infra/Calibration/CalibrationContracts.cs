@@ -191,6 +191,8 @@ public class CalibrationCandidateDto
     public CalibrationSlicerIdentityDto Slicer { get; init; } =
         new(null, null, null, null);
 
+    public bool ProfilesEvaluated { get; init; }
+
     public bool Eligible { get; init; }
 
     public IReadOnlyList<string> MissingInputs { get; init; } = [];
@@ -242,6 +244,7 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
         MaxChamberTemperature = candidate.MaxChamberTemperature;
         Firmware = candidate.Firmware;
         Slicer = candidate.Slicer;
+        ProfilesEvaluated = true;
         Eligible = candidate.Eligible;
         MissingInputs = candidate.MissingInputs;
         RejectionReasons = candidate.RejectionReasons;
@@ -433,11 +436,13 @@ public sealed class CalibrationProfileResolverUnavailableException : Exception
     public CalibrationProfileResolverUnavailableException()
         : base("The calibration profile resolver is unavailable.")
     {
+        ErrorCode = "profile_service_unavailable";
     }
 
     public CalibrationProfileResolverUnavailableException(string message)
         : base(message)
     {
+        ErrorCode = "profile_service_unavailable";
     }
 
     public CalibrationProfileResolverUnavailableException(
@@ -445,7 +450,19 @@ public sealed class CalibrationProfileResolverUnavailableException : Exception
         Exception innerException)
         : base(message, innerException)
     {
+        ErrorCode = "profile_service_unavailable";
     }
+
+    public CalibrationProfileResolverUnavailableException(
+        string message,
+        string errorCode,
+        Exception? innerException = null)
+        : base(message, innerException)
+    {
+        ErrorCode = errorCode;
+    }
+
+    public string ErrorCode { get; }
 }
 
 /// <summary>Resolves explicitly selected profiles without exposing an internal service address.</summary>

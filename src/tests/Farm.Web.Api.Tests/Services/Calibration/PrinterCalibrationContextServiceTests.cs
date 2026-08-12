@@ -26,6 +26,7 @@ public sealed class PrinterCalibrationContextServiceTests
 
         _ = result.ErrorCode.Should().BeNull();
         CalibrationCandidateDto candidate = result.Value.Should().ContainSingle().Which;
+        _ = candidate.ProfilesEvaluated.Should().BeFalse();
         _ = candidate.Eligible.Should().BeTrue();
         _ = candidate.RejectionReasons.Should().BeEmpty();
         _ = candidate.Firmware.Family.Should().Be("Klipper");
@@ -248,7 +249,7 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
-    public async Task GetCandidatesAsync_WithProfileMismatches_ReturnsTypedReasons()
+    public async Task GetContextAsync_WithProfileMismatches_ReturnsTypedReasons()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Profiles = harness.Profiles with
@@ -264,10 +265,9 @@ public sealed class PrinterCalibrationContextServiceTests
             },
         };
 
-        CalibrationCandidateDto candidate =
-            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
-            .Value.Should().ContainSingle().Which;
+        CalibrationContextDto candidate = await harness.GetContextAsync();
 
+        _ = candidate.ProfilesEvaluated.Should().BeTrue();
         _ = candidate.Eligible.Should().BeFalse();
         _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
             "profile_hash_mismatch",
@@ -276,7 +276,7 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
-    public async Task GetCandidatesAsync_WithUnavailableProfileStore_ReturnsStableServiceError()
+    public async Task GetCandidatesAsync_WithUnavailableProfileStore_ReturnsCandidatesWithoutResolverCalls()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.MakeProfileResolverUnavailable();
@@ -284,8 +284,179 @@ public sealed class PrinterCalibrationContextServiceTests
         CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>> result =
             await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None);
 
+        _ = result.ErrorCode.Should().BeNull();
+        _ = result.Value.Should().ContainSingle();
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithMultiplePrinters_MakesZeroProfileResolverCalls()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        await harness.AddPrinterAsync("Alpha printer");
+        await harness.AddPrinterAsync("Zulu printer");
+
+        CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>> result =
+            await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None);
+
+        _ = result.Value.Should().NotBeNull();
+        _ = result.Value!.Select(candidate => candidate.Name).Should().Equal(
+            "Alpha printer",
+            "Explicit Klipper printer",
+            "Zulu printer");
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetCandidatesAsync_WithMissingOrEmptyProfileIds_ReturnsTypedReasonsWithoutResolverCalls(
+        bool useEmptyIds)
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        Guid? profileId = useEmptyIds ? Guid.Empty : null;
+        harness.Printer.CalibrationMachineProfileId = profileId;
+        harness.Printer.CalibrationProcessProfileId = profileId;
+        harness.Printer.CalibrationFilamentProfileId = profileId;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "machine_profile_missing",
+            "process_profile_missing",
+            "filament_profile_missing");
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithSelectedPrinter_ResolvesProfilesExactlyOnce()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        await harness.AddPrinterAsync("Unselected printer");
+
+        CalibrationContextDto context = await harness.GetContextAsync();
+
+        _ = context.Id.Should().Be(harness.Printer.Id);
+        harness.VerifySingleProfileResolution();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithChangedRevision_DoesNotResolveProfiles()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await harness.Service.GetContextAsync(
+                harness.Printer.Id,
+                harness.Printer.ConfigurationRevision + 1,
+                "test-subject",
+                ProfileAccess,
+                CancellationToken.None);
+
+        _ = result.ErrorCode.Should().Be("printer_configuration_changed");
+        _ = result.CurrentConfigurationRevision.Should()
+            .Be(harness.Printer.ConfigurationRevision);
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithUnavailableProfileStore_ReturnsStableServiceError()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.MakeProfileResolverUnavailable();
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await harness.Service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
         _ = result.Value.Should().BeNull();
         _ = result.ErrorCode.Should().Be("profile_service_unavailable");
+        harness.VerifySingleProfileResolution();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithoutRegisteredProfileResolver_ReturnsStableServiceError()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        PrinterCalibrationContextService service = harness.CreateService(profileResolver: null);
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
+        _ = result.Value.Should().BeNull();
+        _ = result.ErrorCode.Should().Be("profile_service_unavailable");
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetContextAsync_WithoutResolverAndMissingOrEmptyProfileIds_ReturnsAuthoritativeTypedReasons(
+        bool useEmptyIds)
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        Guid? profileId = useEmptyIds ? Guid.Empty : null;
+        harness.Printer.CalibrationMachineProfileId = profileId;
+        harness.Printer.CalibrationProcessProfileId = profileId;
+        harness.Printer.CalibrationFilamentProfileId = profileId;
+        _ = await harness.Db.SaveChangesAsync();
+        PrinterCalibrationContextService service = harness.CreateService(profileResolver: null);
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
+        _ = result.ErrorCode.Should().BeNull();
+        _ = result.Value.Should().NotBeNull();
+        CalibrationContextDto context = result.Value!;
+        _ = context.ProfilesEvaluated.Should().BeTrue();
+        _ = context.Eligible.Should().BeFalse();
+        _ = context.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "machine_profile_missing",
+            "process_profile_missing",
+            "filament_profile_missing");
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Theory]
+    [InlineData("profile_service_authentication_failed")]
+    [InlineData("profile_service_authorization_failed")]
+    [InlineData("profile_service_configuration_error")]
+    [InlineData("profile_service_timeout")]
+    public async Task GetContextAsync_WithTypedResolverFailure_PreservesFailureCode(
+        string errorCode)
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.MakeProfileResolverUnavailable(errorCode);
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await harness.Service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
+        _ = result.Value.Should().BeNull();
+        _ = result.ErrorCode.Should().Be(errorCode);
+        harness.VerifySingleProfileResolution();
     }
 
     [Theory]
@@ -293,7 +464,7 @@ public sealed class PrinterCalibrationContextServiceTests
     [InlineData("vendor-fork", "orca-json", "profile_distribution_unsupported")]
     [InlineData("upstream", null, "profile_format_missing")]
     [InlineData("upstream", "vendor-json", "profile_format_unsupported")]
-    public async Task GetCandidatesAsync_WithUnverifiedProfileIdentity_ReturnsTypedReason(
+    public async Task GetContextAsync_WithUnverifiedProfileIdentity_ReturnsTypedReason(
         string? distribution,
         string? profileFormat,
         string expectedCode)
@@ -308,9 +479,7 @@ public sealed class PrinterCalibrationContextServiceTests
             },
         };
 
-        CalibrationCandidateDto candidate =
-            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
-            .Value.Should().ContainSingle().Which;
+        CalibrationContextDto candidate = await harness.GetContextAsync();
 
         _ = candidate.Eligible.Should().BeFalse();
         _ = candidate.RejectionReasons.Select(reason => reason.Code)
@@ -318,16 +487,14 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
-    public async Task GetCandidatesAsync_WithHeatedBedProfileForColdBed_ReturnsTypedReason()
+    public async Task GetContextAsync_WithHeatedBedProfileForColdBed_ReturnsTypedReason()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Printer.CalibrationHasHeatedBed = false;
         harness.Printer.MaxBedTemp = null;
         _ = await harness.Db.SaveChangesAsync();
 
-        CalibrationCandidateDto candidate =
-            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
-            .Value.Should().ContainSingle().Which;
+        CalibrationContextDto candidate = await harness.GetContextAsync();
 
         _ = candidate.Eligible.Should().BeFalse();
         _ = candidate.RejectionReasons.Select(reason => reason.Code)
@@ -335,15 +502,13 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
-    public async Task GetCandidatesAsync_WithUnsupportedFilamentMaterial_ReturnsTypedReason()
+    public async Task GetContextAsync_WithUnsupportedFilamentMaterial_ReturnsTypedReason()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Printer.Toolheads.Single().SupportedMaterials = ["PETG"];
         _ = await harness.Db.SaveChangesAsync();
 
-        CalibrationCandidateDto candidate =
-            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
-            .Value.Should().ContainSingle().Which;
+        CalibrationContextDto candidate = await harness.GetContextAsync();
 
         _ = candidate.Eligible.Should().BeFalse();
         _ = candidate.RejectionReasons.Select(reason => reason.Code)
@@ -520,13 +685,8 @@ public sealed class PrinterCalibrationContextServiceTests
                     ["Calibration:HardwareMetadataStaleAfterSeconds"] = "2592000",
                 })
                 .Build();
-            Service = new PrinterCalibrationContextService(
-                Db,
-                _statusReader.Object,
-                _capabilityFactory.Object,
-                configuration,
-                new FixedTimeProvider(Now),
-                _profileResolver.Object);
+            Configuration = configuration;
+            Service = CreateService(_profileResolver.Object);
         }
 
         public AppDbContext Db { get; }
@@ -537,13 +697,82 @@ public sealed class PrinterCalibrationContextServiceTests
 
         public PrinterCalibrationContextService Service { get; }
 
+        private IConfiguration Configuration { get; }
+
         public BackendCapabilities Capabilities { get; set; }
 
         public PrinterStatusSnapshot? Status { get; set; }
 
         public ResolvedCalibrationProfiles Profiles { get; set; }
 
-        public void MakeProfileResolverUnavailable()
+        public PrinterCalibrationContextService CreateService(
+            ICalibrationProfileResolver? profileResolver) =>
+            new(
+                Db,
+                _statusReader.Object,
+                _capabilityFactory.Object,
+                Configuration,
+                new FixedTimeProvider(Now),
+                profileResolver);
+
+        public async Task AddPrinterAsync(string name)
+        {
+            Printer printer = CreatePrinter(Now.UtcDateTime);
+            printer.Name = name;
+            _ = Db.Printers.Add(printer);
+            _ = await Db.SaveChangesAsync();
+        }
+
+        public async Task<CalibrationContextDto> GetContextAsync() =>
+            (await Service.GetContextAsync(
+                Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None))
+            .Value ?? throw new InvalidOperationException("Missing calibration context.");
+
+        public void VerifyNoProfileResolverCalls()
+        {
+            _profileResolver.Verify(
+                resolver => resolver.IsAvailableAsync(It.IsAny<CancellationToken>()),
+                Times.Never);
+            _profileResolver.Verify(
+                resolver => resolver.ResolveAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<CalibrationProfileAccessScope>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+
+        public void VerifySingleProfileResolution()
+        {
+            _profileResolver.Verify(
+                resolver => resolver.IsAvailableAsync(It.IsAny<CancellationToken>()),
+                Times.Never);
+            _profileResolver.Verify(
+                resolver => resolver.ResolveAsync(
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<CalibrationProfileAccessScope>(),
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            _profileResolver.Verify(
+                resolver => resolver.ResolveAsync(
+                    Printer.CalibrationMachineProfileId!.Value,
+                    Printer.CalibrationProcessProfileId!.Value,
+                    Printer.CalibrationFilamentProfileId!.Value,
+                    ProfileAccess,
+                    It.IsAny<CancellationToken>()),
+                Times.Once);
+            _profileResolver.VerifyNoOtherCalls();
+        }
+
+        public void MakeProfileResolverUnavailable(
+            string errorCode = "profile_service_unavailable")
         {
             _ = _profileResolver
                 .Setup(resolver => resolver.IsAvailableAsync(It.IsAny<CancellationToken>()))
@@ -555,7 +784,9 @@ public sealed class PrinterCalibrationContextServiceTests
                     It.IsAny<Guid>(),
                     It.IsAny<CalibrationProfileAccessScope>(),
                     It.IsAny<CancellationToken>()))
-                .ThrowsAsync(new CalibrationProfileResolverUnavailableException());
+                .ThrowsAsync(new CalibrationProfileResolverUnavailableException(
+                    "The calibration profile resolver failed.",
+                    errorCode));
         }
 
         public static async Task<CalibrationHarness> CreateAsync()

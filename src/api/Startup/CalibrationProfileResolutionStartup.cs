@@ -14,8 +14,8 @@ namespace Farm.Web.Api.Startup;
 /// </para>
 /// <para>
 /// Split and microservices hosts deliberately do not load the slicer module, which previously left
-/// <see cref="ICalibrationProfileResolver"/> unregistered. Calibration candidate and context requests
-/// then short-circuited to <c>503 profile_service_unavailable</c> and
+/// <see cref="ICalibrationProfileResolver"/> unregistered. Selected-printer context requests then
+/// short-circuited to <c>503 profile_service_unavailable</c> and
 /// <c>calibrationContextEnabled</c> stayed false. Here the API instead talks to the slicer host that
 /// owns the profile store, over an authenticated internal HTTP hop.
 /// </para>

@@ -522,7 +522,8 @@ alongside the `scope` claim. A key without that scope, and every legacy or model
 cannot reach this endpoint; such clients must use a normal login/session token. As of
 [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473) a stock `farm_user` is seeded
 with `calibration:read`, so the owner need not be a `farm_admin` member — see
-[Scopes and permissions](#scopes-and-permissions). See
+[Scopes and permissions](#scopes-and-permissions). The slicer host enforces that permission
+identically for normal login/session tokens and Desktop exchange tokens. See
 `docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and verification steps.
 
 ## Support

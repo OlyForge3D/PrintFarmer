@@ -59,12 +59,6 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
-        if (profileResolver is null ||
-            !await profileResolver.IsAvailableAsync(cancellationToken))
-        {
-            return new(null, "profile_service_unavailable");
-        }
-
         List<Printer> printers = await dbContext.Printers
             .AsNoTracking()
             .Where(printer => printer.IsEnabled)
@@ -77,17 +71,11 @@ public sealed class PrinterCalibrationContextService(
         List<CalibrationCandidateDto> candidates = new(printers.Count);
         foreach (Printer printer in printers)
         {
-            CalibrationEvaluation evaluation;
-            try
-            {
-                evaluation =
-                    await EvaluateAsync(printer, profileAccessScope, cancellationToken);
-            }
-            catch (CalibrationProfileResolverUnavailableException)
-            {
-                return new(null, "profile_service_unavailable");
-            }
-
+            CalibrationEvaluation evaluation = await EvaluateAsync(
+                printer,
+                profileAccessScope,
+                resolveProfiles: false,
+                cancellationToken);
             candidates.Add(evaluation.Candidate);
         }
 
@@ -101,12 +89,6 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
-        if (profileResolver is null ||
-            !await profileResolver.IsAvailableAsync(cancellationToken))
-        {
-            return new(null, "profile_service_unavailable");
-        }
-
         Printer? printer = await dbContext.Printers
             .AsNoTracking()
             .Where(candidate => candidate.Id == printerId && candidate.IsEnabled)
@@ -130,12 +112,15 @@ public sealed class PrinterCalibrationContextService(
         CalibrationEvaluation evaluation;
         try
         {
-            evaluation =
-                await EvaluateAsync(printer, profileAccessScope, cancellationToken);
+            evaluation = await EvaluateAsync(
+                printer,
+                profileAccessScope,
+                resolveProfiles: true,
+                cancellationToken);
         }
-        catch (CalibrationProfileResolverUnavailableException)
+        catch (CalibrationProfileResolverUnavailableException exception)
         {
-            return new(null, "profile_service_unavailable");
+            return new(null, exception.ErrorCode);
         }
 
         DateTime capturedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
@@ -259,6 +244,7 @@ public sealed class PrinterCalibrationContextService(
     private async Task<CalibrationEvaluation> EvaluateAsync(
         Printer printer,
         CalibrationProfileAccessScope profileAccessScope,
+        bool resolveProfiles,
         CancellationToken cancellationToken)
     {
         List<CalibrationRejectionReasonDto> reasons = [];
@@ -396,15 +382,20 @@ public sealed class PrinterCalibrationContextService(
             nowUtc,
             reasons,
             missingInputs);
+        CalibrationProfileSelection? profileSelection =
+            ValidateProfileSelection(printer, reasons, missingInputs);
 
         CalibrationProfileEvaluation profileEvaluation =
-            await EvaluateProfilesAsync(
+            resolveProfiles && profileSelection is not null
+            ? await EvaluateProfilesAsync(
                 printer,
+                profileSelection,
                 physicalToolheads,
                 reasons,
                 missingInputs,
                 profileAccessScope,
-                cancellationToken);
+                cancellationToken)
+            : CalibrationProfileEvaluation.Empty;
 
         CalibrationCandidateDto candidate = new()
         {
@@ -453,6 +444,7 @@ public sealed class PrinterCalibrationContextService(
             MaxChamberTemperature = printer.MaxChamberTemp,
             Firmware = MapFirmware(printer),
             Slicer = MapSlicer(printer),
+            ProfilesEvaluated = resolveProfiles,
             Eligible = reasons.Count == 0,
             MissingInputs = missingInputs.Order(StringComparer.Ordinal).ToArray(),
             RejectionReasons = reasons
@@ -469,15 +461,19 @@ public sealed class PrinterCalibrationContextService(
             profileEvaluation.FilamentProducts);
     }
 
-    private async Task<CalibrationProfileEvaluation> EvaluateProfilesAsync(
+    private static CalibrationProfileSelection? ValidateProfileSelection(
         Printer printer,
-        List<Toolhead> physicalToolheads,
         List<CalibrationRejectionReasonDto> reasons,
-        HashSet<string> missingInputs,
-        CalibrationProfileAccessScope profileAccessScope,
-        CancellationToken cancellationToken)
+        HashSet<string> missingInputs)
     {
-        if (!printer.CalibrationMachineProfileId.HasValue)
+        Guid machineProfileId = printer.CalibrationMachineProfileId.GetValueOrDefault();
+        Guid processProfileId = printer.CalibrationProcessProfileId.GetValueOrDefault();
+        Guid filamentProfileId = printer.CalibrationFilamentProfileId.GetValueOrDefault();
+        bool hasMachineProfileId = machineProfileId != Guid.Empty;
+        bool hasProcessProfileId = processProfileId != Guid.Empty;
+        bool hasFilamentProfileId = filamentProfileId != Guid.Empty;
+
+        if (!hasMachineProfileId)
         {
             RejectMissing(
                 reasons,
@@ -487,7 +483,7 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer machine profile is required.");
         }
 
-        if (!printer.CalibrationProcessProfileId.HasValue)
+        if (!hasProcessProfileId)
         {
             RejectMissing(
                 reasons,
@@ -497,7 +493,7 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer process profile is required.");
         }
 
-        if (!printer.CalibrationFilamentProfileId.HasValue)
+        if (!hasFilamentProfileId)
         {
             RejectMissing(
                 reasons,
@@ -507,17 +503,31 @@ public sealed class PrinterCalibrationContextService(
                 "An explicit upstream OrcaSlicer filament profile is required.");
         }
 
-        if (!printer.CalibrationMachineProfileId.HasValue ||
-            !printer.CalibrationProcessProfileId.HasValue ||
-            !printer.CalibrationFilamentProfileId.HasValue)
-        {
-            return CalibrationProfileEvaluation.Empty;
-        }
+        return hasMachineProfileId &&
+               hasProcessProfileId &&
+               hasFilamentProfileId
+            ? new(
+                machineProfileId,
+                processProfileId,
+                filamentProfileId)
+            : null;
+    }
 
-        ResolvedCalibrationProfiles resolved = await profileResolver!.ResolveAsync(
-            printer.CalibrationMachineProfileId.Value,
-            printer.CalibrationProcessProfileId.Value,
-            printer.CalibrationFilamentProfileId.Value,
+    private async Task<CalibrationProfileEvaluation> EvaluateProfilesAsync(
+        Printer printer,
+        CalibrationProfileSelection profileSelection,
+        List<Toolhead> physicalToolheads,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs,
+        CalibrationProfileAccessScope profileAccessScope,
+        CancellationToken cancellationToken)
+    {
+        ICalibrationProfileResolver resolver = profileResolver
+            ?? throw new CalibrationProfileResolverUnavailableException();
+        ResolvedCalibrationProfiles resolved = await resolver.ResolveAsync(
+            profileSelection.MachineProfileId,
+            profileSelection.ProcessProfileId,
+            profileSelection.FilamentProfileId,
             profileAccessScope,
             cancellationToken);
 
@@ -1834,6 +1844,11 @@ public sealed class PrinterCalibrationContextService(
         CalibrationBaselineSettingsDto BaselineSettings,
         CalibrationRawEffectiveSettingsDto RawEffectiveSettings,
         IReadOnlyList<CalibrationFilamentProductChoiceDto> FilamentProducts);
+
+    private sealed record CalibrationProfileSelection(
+        Guid MachineProfileId,
+        Guid ProcessProfileId,
+        Guid FilamentProfileId);
 
     private sealed record CalibrationProfileEvaluation(
         CalibrationProfileSetDto Profiles,

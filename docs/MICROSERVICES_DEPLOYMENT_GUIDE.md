@@ -144,10 +144,19 @@ After deployment, access PrintFarmer at:
 
 ## Calibration Profile Resolution (split deployments)
 
-`GET /api/printers/calibration-candidates` and
-`GET /api/printers/{id}/calibration-context?slicerType=OrcaSlicer` need a reachable calibration
-profile store. In a split deployment that store lives behind `slicer-host`, so both the API and the
-slicer host must be configured for the hop:
+`GET /api/printers/calibration-candidates` lists enabled printers from API-owned status, firmware,
+adapter, geometry, slicer identity, and hardware metadata. It does not contact the profile store, so
+operators can still choose a printer while `slicer-host` is unavailable. Candidate entries set
+`profilesEvaluated: false`; their eligibility is preliminary and does not assert profile visibility,
+compatibility, or safety.
+
+After selection,
+`GET /api/printers/{id}/calibration-context?slicerType=OrcaSlicer` resolves that printer's exact
+machine, process, and filament profile identifiers in one bounded request. In a split deployment the
+profile store lives behind `slicer-host`, so both the API and slicer host must be configured for this
+request. A successful context sets `profilesEvaluated: true` and is the authoritative eligibility
+result required before calibration project creation or mutation.
+Configure the selected-context hop as follows:
 
 | Service | Setting | Value |
 | --- | --- | --- |
@@ -159,9 +168,9 @@ slicer host must be configured for the hop:
 
 Optional bounds (`SlicerHost__ResolveTimeoutSeconds`, `SlicerHost__HealthTimeoutSeconds`,
 `SlicerHost__MaxResponseBytes`) have safe defaults; an out-of-range or malformed value fails the API
-startup rather than degrading silently. Leaving `SlicerHost__BaseUrl` unset keeps the previous
-fail-closed behaviour: calibration discovery answers `503 profile_service_unavailable` and
-`calibrationContextEnabled` stays `false`.
+startup rather than degrading silently. Leaving `SlicerHost__BaseUrl` unset keeps selected-context
+resolution fail-closed with `503 profile_service_unavailable`, while candidate listing remains
+available and `calibrationContextEnabled` stays `false`.
 
 ### Rollout
 
@@ -184,7 +193,7 @@ fail-closed behaviour: calibration discovery answers `503 profile_service_unavai
    curl -fsS http://<host>:5245/api/system/capabilities | jq '.deploymentMode, .calibrationContextEnabled'
    # Expect: "split" and true
 
-   # Authenticated discovery (token from a normal login/session, not a Desktop exchange token).
+   # Authenticated discovery (JWT must carry calibration:read).
    curl -fsS -H "Authorization: Bearer <session-jwt>" \
      http://<host>:5245/api/printers/calibration-candidates | jq 'length'
    ```
@@ -197,9 +206,11 @@ Candidate and context requests require an authenticated JWT carrying `calibratio
 `farm_admin` role). A Desktop API-key exchange token satisfies this **only when its key was
 explicitly created with the `CalibrationRead` scope and its owner independently holds
 `calibration:read`** — the exchange then emits the mapped permission claim alongside the scope
-claim (see `docs/SLICER_CONFIGURATION.md`). Keys created before those scopes existed, and any key
-without `CalibrationRead`, carry no permission claims and cannot read calibration candidates; those
-clients must use a normal login/session token or be reissued a calibration-scoped key.
+claim (see `docs/SLICER_CONFIGURATION.md`). The slicer host enforces `calibration:read` identically
+for normal login/session tokens and Desktop exchange tokens. Keys created before those scopes
+existed, and any key without `CalibrationRead`, carry no permission claims and cannot read
+calibration candidates; those clients must use a normal login/session token or be reissued a
+calibration-scoped key.
 
 ### Environment correction
 

@@ -64,7 +64,7 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task GetCandidates_ReachesTheSlicerHostOverHttpAndReportsAnEligiblePrinter()
+    public async Task GetCandidates_ListsEligiblePrinterWithoutRequiringTheSlicerHost()
     {
         CalibrationPrinterSeeder.SeededPrinter seeded =
             await CalibrationPrinterSeeder.SeedAsync(_factory.Services);
@@ -171,8 +171,10 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Capabilities_FallBackToUnavailableWhenTheSlicerHostStopsAnswering()
+    public async Task Capabilities_ReportContextUnavailableWhileCandidatesRemainAvailable()
     {
+        CalibrationPrinterSeeder.SeededPrinter seeded =
+            await CalibrationPrinterSeeder.SeedAsync(_factory.Services);
         using HttpClient client = CreateCalibrationReaderClient();
         await _slicerHost!.DisposeAsync();
         _slicerHost = null;
@@ -188,13 +190,29 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
             .Select(reason => reason.GetProperty("code").GetString())
             .Should().Contain("profile_service_unavailable");
 
+        _factory.ResetSlicerHostRequestCount();
         HttpResponseMessage candidates =
             await client.GetAsync("/api/printers/calibration-candidates");
         string body = await candidates.Content.ReadAsStringAsync();
-        _ = candidates.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
-        using JsonDocument problem = JsonDocument.Parse(body);
+        _ = candidates.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using JsonDocument candidateList = JsonDocument.Parse(body);
+        JsonElement candidate = candidateList.RootElement.EnumerateArray()
+            .Single(element => element.GetProperty("id").GetGuid() == seeded.PrinterId);
+        _ = candidate.GetProperty("profilesEvaluated").GetBoolean().Should().BeFalse();
+        _ = _factory.SlicerHostRequestCount.Should().Be(
+            0,
+            "candidate listing must not contact the unavailable slicer host");
+
+        HttpResponseMessage context = await client.GetAsync(
+            $"/api/printers/{seeded.PrinterId}/calibration-context?slicerType=OrcaSlicer");
+        string contextBody = await context.Content.ReadAsStringAsync();
+        _ = context.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, contextBody);
+        using JsonDocument problem = JsonDocument.Parse(contextBody);
         _ = problem.RootElement.GetProperty("code").GetString()
             .Should().Be("profile_service_unavailable");
+        _ = _factory.SlicerHostRequestCount.Should().Be(
+            1,
+            "selected context must make exactly one resolver request");
     }
 
     private HttpClient CreateCalibrationReaderClient(Guid? userId = null) =>
@@ -238,6 +256,7 @@ internal sealed class SplitCalibrationWebApplicationFactory : CustomWebApplicati
 
     private readonly string? _originalDeploymentMode;
     private readonly string? _originalSlicerHostUrl;
+    private int _slicerHostRequestCount;
 
     public SplitCalibrationWebApplicationFactory()
         : base(new Dictionary<string, string?>
@@ -259,6 +278,12 @@ internal sealed class SplitCalibrationWebApplicationFactory : CustomWebApplicati
     /// <summary>Transport the registered resolver adapter dials; set before the first request.</summary>
     public HttpMessageHandler? SlicerHostHandler { get; set; }
 
+    public int SlicerHostRequestCount => Volatile.Read(ref _slicerHostRequestCount);
+
+    public void ResetSlicerHostRequestCount() => Interlocked.Exchange(
+        ref _slicerHostRequestCount,
+        0);
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
@@ -268,8 +293,9 @@ internal sealed class SplitCalibrationWebApplicationFactory : CustomWebApplicati
 
                 // Resolved per request, because the API host boots (and may probe the resolver)
                 // before the test server that answers it exists.
-                .ConfigurePrimaryHttpMessageHandler(() =>
-                    new DeferredSlicerHostHandler(() => SlicerHostHandler))
+                .ConfigurePrimaryHttpMessageHandler(() => new DeferredSlicerHostHandler(
+                    () => SlicerHostHandler,
+                    () => Interlocked.Increment(ref _slicerHostRequestCount)))
                 .SetHandlerLifetime(Timeout.InfiniteTimeSpan));
     }
 
@@ -288,13 +314,16 @@ internal sealed class SplitCalibrationWebApplicationFactory : CustomWebApplicati
     /// Forwards to the currently attached slicer-host test server, or fails the request the way an
     /// unreachable slicer host would.
     /// </summary>
-    private sealed class DeferredSlicerHostHandler(Func<HttpMessageHandler?> provider)
+    private sealed class DeferredSlicerHostHandler(
+        Func<HttpMessageHandler?> provider,
+        Action onRequest)
         : HttpMessageHandler
     {
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
+            onRequest();
             HttpMessageHandler inner = provider()
                 ?? throw new HttpRequestException("The slicer host is not reachable.");
             using HttpMessageInvoker invoker = new(inner, disposeHandler: false);
