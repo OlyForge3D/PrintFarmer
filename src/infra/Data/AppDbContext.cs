@@ -1099,6 +1099,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             if (job is not null)
             {
                 eventEntry.Entity.JobRevision = job.Revision;
+                eventEntry.Entity.AggregateRowVersion =
+                    RevisionETag.EncodeBytes(job.Revision);
             }
 
             if (eventEntry.Entity.PrinterId.HasValue)
@@ -1111,6 +1113,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 if (state is not null)
                 {
                     eventEntry.Entity.DispatchStateRevision = state.Revision;
+                    eventEntry.Entity.DispatchStateRowVersion =
+                        RevisionETag.EncodeBytes(state.Revision);
                 }
             }
         }

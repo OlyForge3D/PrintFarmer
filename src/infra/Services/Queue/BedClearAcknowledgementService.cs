@@ -4,6 +4,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -138,12 +139,15 @@ public sealed class BedClearAcknowledgementService(
                 ct);
         if (priorCommand is not null)
         {
-            return await ResolveExistingCommandAsync(
-                priorCommand,
-                job,
-                dispatchState,
-                requestSha256,
-                ct);
+            return await ResolveExistingCommandCoherentlyAsync(
+                       request,
+                       requestSha256,
+                       ct)
+                   ?? new AcknowledgeBedClearResult(
+                       BedClearAckOutcome.DispatchRevisionConflict,
+                       job.RowVersion,
+                       dispatchState.RowVersion,
+                       "The prior command changed while the replay was being resolved. Re-fetch and retry.");
         }
 
         if (!effectiveJobRevision.SequenceEqual(job.RowVersion ?? []))
@@ -702,29 +706,14 @@ public sealed class BedClearAcknowledgementService(
         catch (DbUpdateException)
         {
             _db.ChangeTracker.Clear();
-            BedClearCommandRecord? winner = await _db.BedClearCommandRecords
-                .FirstOrDefaultAsync(
-                    record =>
-                        record.PrinterId == request.PrinterId &&
-                        record.IdempotencyKey == request.IdempotencyKey,
+            AcknowledgeBedClearResult? replay =
+                await ResolveExistingCommandCoherentlyAsync(
+                    request,
+                    requestSha256,
                     ct);
-            if (winner is not null)
+            if (replay is not null)
             {
-                PrintJob? currentJob = await _db.PrintJobs
-                    .SingleOrDefaultAsync(candidate => candidate.Id == request.JobId, ct);
-                PrinterDispatchState? currentDispatchState = await _db.PrinterDispatchStates
-                    .SingleOrDefaultAsync(
-                        candidate => candidate.PrinterId == request.PrinterId,
-                        ct);
-                if (currentJob is not null && currentDispatchState is not null)
-                {
-                    return await ResolveExistingCommandAsync(
-                        winner,
-                        currentJob,
-                        currentDispatchState,
-                        requestSha256,
-                        ct);
-                }
+                return replay;
             }
 
             throw;
@@ -1040,6 +1029,142 @@ public sealed class BedClearAcknowledgementService(
             command.Id,
             BedClearCommandCorrelation.HashIdempotencyKey(
                 command.IdempotencyKey));
+    }
+
+    private async Task<AcknowledgeBedClearResult?> ResolveExistingCommandCoherentlyAsync(
+        AcknowledgeBedClearRequest request,
+        string requestSha256,
+        CancellationToken ct)
+    {
+        const int MaxConcurrencyAttempts = 3;
+        for (int attempt = 1; attempt <= MaxConcurrencyAttempts; attempt++)
+        {
+            try
+            {
+                return await _db.Database.CreateExecutionStrategy().ExecuteAsync(
+                    () => ResolveExistingCommandAttemptAsync(
+                        request,
+                        requestSha256,
+                        ct));
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                LogLevel level = attempt < MaxConcurrencyAttempts
+                    ? LogLevel.Debug
+                    : LogLevel.Warning;
+                _logger.Log(
+                    level,
+                    ex,
+                    "[BedClearAck] Retrying replay resolution after concurrency conflict for Job={JobId}",
+                    request.JobId);
+                if (attempt == MaxConcurrencyAttempts)
+                {
+                    break;
+                }
+            }
+            catch (DbUpdateException ex)
+                when (ex.InnerException is SqliteException
+                {
+                    SqliteErrorCode: 5 or 6,
+                })
+            {
+                LogLevel level = attempt < MaxConcurrencyAttempts
+                    ? LogLevel.Debug
+                    : LogLevel.Warning;
+                _logger.Log(
+                    level,
+                    ex,
+                    "[BedClearAck] Retrying replay resolution after SQLite lock conflict for Job={JobId}",
+                    request.JobId);
+                if (attempt == MaxConcurrencyAttempts)
+                {
+                    break;
+                }
+            }
+            catch (SqliteException ex)
+                when (ex.SqliteErrorCode is 5 or 6)
+            {
+                LogLevel level = attempt < MaxConcurrencyAttempts
+                    ? LogLevel.Debug
+                    : LogLevel.Warning;
+                _logger.Log(
+                    level,
+                    ex,
+                    "[BedClearAck] Retrying replay resolution after SQLite lock conflict for Job={JobId}",
+                    request.JobId);
+                if (attempt == MaxConcurrencyAttempts)
+                {
+                    break;
+                }
+            }
+        }
+
+        _db.ChangeTracker.Clear();
+        long? jobRevision = await _db.PrintJobs
+            .AsNoTracking()
+            .Where(candidate => candidate.Id == request.JobId)
+            .Select(candidate => (long?)candidate.Revision)
+            .SingleOrDefaultAsync(ct);
+        long? dispatchRevision = await _db.PrinterDispatchStates
+            .AsNoTracking()
+            .Where(candidate => candidate.PrinterId == request.PrinterId)
+            .Select(candidate => (long?)candidate.Revision)
+            .SingleOrDefaultAsync(ct);
+        byte[]? currentJobRevision = jobRevision.HasValue
+            ? RevisionETag.EncodeBytes(jobRevision.Value)
+            : null;
+        byte[]? currentDispatchRevision = dispatchRevision.HasValue
+            ? RevisionETag.EncodeBytes(dispatchRevision.Value)
+            : null;
+        return new AcknowledgeBedClearResult(
+            BedClearAckOutcome.DispatchRevisionConflict,
+            currentJobRevision,
+            currentDispatchRevision,
+            "The prior command changed while the replay was being resolved. Re-fetch and retry.");
+    }
+
+    private async Task<AcknowledgeBedClearResult?>
+        ResolveExistingCommandAttemptAsync(
+            AcknowledgeBedClearRequest request,
+            string requestSha256,
+            CancellationToken ct)
+    {
+        _db.ChangeTracker.Clear();
+        await using ProviderSafeSerializableTransactionScope transaction =
+            await ProviderSafeSerializableTransaction.BeginAsync(_db, ct);
+
+        BedClearCommandRecord? command = await _db.BedClearCommandRecords
+            .FirstOrDefaultAsync(
+                record =>
+                    record.PrinterId == request.PrinterId &&
+                    record.IdempotencyKey == request.IdempotencyKey,
+                ct);
+        if (command is null)
+        {
+            await transaction.CommitAsync(ct);
+            return null;
+        }
+
+        PrintJob? job = await _db.PrintJobs
+            .FirstOrDefaultAsync(candidate => candidate.Id == request.JobId, ct);
+        PrinterDispatchState? dispatchState =
+            await _db.PrinterDispatchStates.FirstOrDefaultAsync(
+                candidate => candidate.PrinterId == request.PrinterId,
+                ct);
+        if (job is null || dispatchState is null)
+        {
+            await transaction.CommitAsync(ct);
+            return null;
+        }
+
+        AcknowledgeBedClearResult result = await ResolveExistingCommandAsync(
+            command,
+            job,
+            dispatchState,
+            requestSha256,
+            ct);
+        await transaction.CommitAsync(ct);
+        return result;
     }
 
     private static string BuildCommandRequestSha256(
