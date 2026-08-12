@@ -482,8 +482,10 @@ configuration as the main API - see `Jwt__Key`, `Jwt__Issuer`, and `Jwt__Audienc
 `Farm.Slicer.Host/Program.cs` reads `Jwt:Key` and throws at startup when it is absent, then
 registers JWT bearer authentication unconditionally. There is no length-based fallback and no
 auto-admin standalone principal - earlier revisions of this guide described one, but no such code
-path exists. The compose template still defaults `Jwt__Key` to empty, tracked separately in
-[#1478](https://github.com/OlyForge3D/PrintFarmer/issues/1478); set it explicitly.
+path exists. The compose template enforces this with Docker Compose's required-variable
+interpolation (`${Jwt__Key:?...}`), so rendering the compose file with `Jwt__Key` unset fails fast
+with a clear error instead of silently starting the container without a signing key; set it
+explicitly to the same value as the `api` service.
 
 **Security note:** never set `Jwt__Key` in either service to the well-known placeholder value that
 appears anywhere in this repository's committed example configuration - a shared or known signing
