@@ -276,6 +276,59 @@ describe('RoleManagementPage', () => {
     expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument();
   });
 
+  it('saves permissions using the pre-refetch updatedAt when a same-role metadata edit refetched newer data while dirty', async () => {
+    const user = userEvent.setup();
+    const updated: RoleDetail = { ...customRole, displayName: 'Shift Lead (updated)', permissions: [] };
+    vi.mocked(apiClient.updateAdminRole).mockResolvedValue(updated);
+
+    // The metadata-edit's cache invalidation triggers a background refetch of
+    // `getRolePermissions`. Simulate that refetch resolving with a newer `updatedAt`
+    // (as if another actor also touched this role concurrently) while the admin still
+    // has unsaved permission-matrix edits.
+    let getRolePermissionsCalls = 0;
+    vi.mocked(apiClient.getRolePermissions).mockImplementation(() => {
+      getRolePermissionsCalls += 1;
+      return Promise.resolve(
+        buildRolePermissions(
+          getRolePermissionsCalls > 1 ? { updatedAt: '2026-06-01T00:00:00Z' } : {},
+        ),
+      );
+    });
+    const response: UpdateRolePermissionsResponse = {
+      role: buildRolePermissions(),
+      revokedSessionCount: 0,
+    };
+    vi.mocked(apiClient.updateRolePermissions).mockResolvedValue(response);
+
+    renderPage();
+
+    await user.click(await screen.findByText('Shift Lead'));
+    await user.click(await screen.findByLabelText(/^Grant Admin/));
+
+    await user.click(screen.getByRole('button', { name: 'Edit Shift Lead' }));
+    const displayNameInput = await screen.findByLabelText(/^Display name/);
+    await user.clear(displayNameInput);
+    await user.type(displayNameInput, 'Shift Lead (updated)');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    // Wait for the background refetch (triggered by the metadata-edit's cache
+    // invalidation) to resolve with the newer `updatedAt`.
+    await waitFor(() => expect(getRolePermissionsCalls).toBeGreaterThan(1));
+
+    const saveBar = screen.getByTestId('admin-save-bar');
+    await user.click(within(saveBar).getByRole('button', { name: 'Save changes' }));
+    const confirmDialog = await screen.findByRole('dialog', { name: 'Save permission changes' });
+    await user.click(within(confirmDialog).getByRole('button', { name: 'Save changes' }));
+
+    // The save must use the pre-refetch `updatedAt` that the working permission edits
+    // were actually based on, not the newer token fetched in the background — otherwise
+    // a genuine concurrent conflict would be silently masked instead of surfaced as 409.
+    await waitFor(() => expect(apiClient.updateRolePermissions).toHaveBeenCalledWith(
+      customRole.id,
+      expect.objectContaining({ updatedAt: '2026-01-01T00:00:00Z' }),
+    ));
+  });
+
   it('does not offer edit or delete actions for a system role', async () => {
     renderPage();
     await screen.findByText('Farm Admin');
