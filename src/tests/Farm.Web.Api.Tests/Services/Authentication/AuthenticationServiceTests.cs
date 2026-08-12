@@ -669,6 +669,34 @@ public class AuthenticationServiceTests
         principal.FindFirst(ClaimTypes.Email)?.Value.Should().Be(user.Email);
     }
 
+    [Fact]
+    public async Task GetPrincipalFromTokenAsync_WithDeniedPermissions_TokenCarriesDenyClaims()
+    {
+        // Regression test for the #1450 review finding: GenerateJwtTokenAsync must embed a
+        // "permission-deny" claim for every pair returned by GetDeniedPermissionsAsync, alongside
+        // the existing "permission" grant claims, or PrintFarmerPermissions.ImpliesViaResourceAdmin
+        // has nothing to check and a resource:admin grant would silently override an explicit
+        // per-action deny. This exercises the real token-issuance and parsing path end-to-end,
+        // rather than injecting claims directly as PermissionAuthorizationHandlerTests does.
+        User user = CreateTestUser();
+        _mockUsersRepository.Setup(r => r.GetActiveRoleNamesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<string> { "farm_user" });
+        _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)> { ("printers", "admin") });
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)> { ("printers", "delete") });
+
+        string token = await _service.GenerateJwtTokenAsync(user);
+
+        // Act
+        ClaimsPrincipal? principal = await _service.GetPrincipalFromTokenAsync(token);
+
+        // Assert
+        principal.Should().NotBeNull();
+        principal!.FindAll(Farm.Infrastructure.Security.PrintFarmerPermissions.ClaimType).Select(c => c.Value).Should().BeEquivalentTo(new[] { "printers:admin" });
+        principal.FindAll(Farm.Infrastructure.Security.PrintFarmerPermissions.DenyClaimType).Select(c => c.Value).Should().BeEquivalentTo(new[] { "printers:delete" });
+    }
+
     #endregion
 
     #region ChangePasswordAsync Tests
