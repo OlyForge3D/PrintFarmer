@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services;
@@ -59,7 +60,7 @@ public class SettingsController(
 
     /// <summary>Updates farm-wide settings. Requires farm_admin role.</summary>
     [HttpPut("farm")]
-    [Authorize(Policy = "RequireAdmin")]
+    [RequirePermission("system_settings", "admin")]
     [ProducesResponseType(typeof(FarmSettingsResponse), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]

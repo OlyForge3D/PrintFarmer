@@ -71,32 +71,15 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("farm_admin", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
-
-    // Desktop exchange tokens remain scope-gated; regular JWTs pass these policies.
-    options.AddPolicy("ModelRead", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelRead"));
-    });
-    options.AddPolicy("ModelWrite", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelWrite"));
-    });
-    options.AddPolicy("LibrarySync", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
-    });
-});
-builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+// NOTE: A "farm_admin" role-backed policy alias (policy.RequireRole("farm_admin")) used to be
+// registered here for ProfilesController. Issue #1467 migrated every
+// [Authorize(Policy = "farm_admin")] site in this host to [RequirePermission(...)] and removed
+// the alias; do not reintroduce a policy that resolves to RequireRole(...) here.
+//
+// Extracted to AddSlicerHostAuthorization (Farm.Slicer.Module.Api) so
+// AuthorizeRolesGateArchitectureTests can build the exact same AuthorizationOptions this host
+// uses without spinning up the full web application.
+builder.Services.AddSlicerHostAuthorization();
 
 // Required so SlicerHub's [RequirePermission] (Farm.Infrastructure.Authorization) requirements
 // are actually evaluated in this standalone host. Without a registered handler, ASP.NET Core

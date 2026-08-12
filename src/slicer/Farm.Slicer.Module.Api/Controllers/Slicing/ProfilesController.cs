@@ -43,7 +43,7 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <returns>201 Created if profile is new; 200 OK if profile already exists and was updated.</returns>
     [HttpPost("import")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(ProcessProfileExtendedDto), StatusCodes.Status201Created)]
     [ProducesResponseType(typeof(ProcessProfileExtendedDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -86,7 +86,7 @@ public class ProfilesController(
     /// <param name="id">Unique identifier of the process profile to export.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("{id:guid}/export")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(ProcessProfileExportDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> ExportProfileAsync(Guid id, CancellationToken ct)
@@ -115,7 +115,7 @@ public class ProfilesController(
     /// <param name="id">Unique identifier of the profile to set as default.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("{id:guid}/set-default")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> SetDefaultProfileAsync(Guid id, CancellationToken ct)
@@ -195,7 +195,7 @@ public class ProfilesController(
     /// </summary>
     /// <param name="request">Profile creation request.</param>
     [HttpPost]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(ProcessProfileResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CreateProfileAsync([FromBody] CreateProcessProfileDto? request)
@@ -266,7 +266,7 @@ public class ProfilesController(
     /// </summary>
     /// <param name="id">Unique identifier of the profile to delete.</param>
     [HttpDelete("{id:guid}")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DeleteProfileAsync(Guid id)
@@ -288,7 +288,7 @@ public class ProfilesController(
     /// <param name="profileIds">Collection of profile IDs to delete.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("bulk-delete")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(BulkDeleteResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> BulkDeleteProfilesAsync(
@@ -353,7 +353,7 @@ public class ProfilesController(
     /// <param name="orcaParsingService">OrcaSlicer bundle parsing service.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("import/orca/preview")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(OrcaBundlePreviewDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public IActionResult PreviewOrcaBundle(
@@ -402,7 +402,7 @@ public class ProfilesController(
     /// <param name="orcaParsingService">OrcaSlicer bundle parsing service.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("import/orca")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(ImportOrcaBundleResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult<ImportOrcaBundleResultDto>> ImportOrcaBundleAsync(
@@ -557,7 +557,7 @@ public class ProfilesController(
     /// <param name="exportService">OrcaSlicer bundle export service.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("export/orca")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(string), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [Produces("application/json")]
@@ -591,7 +591,7 @@ public class ProfilesController(
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("system/orca")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ListSystemOrcaProfilesAsync(CancellationToken ct)
     {
@@ -613,7 +613,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("system/orca/seed-from-worker")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> SeedSystemProfilesFromWorkerAsync(
@@ -651,7 +651,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("system/orca/force-reseed-from-worker")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> ForceReseedSystemProfilesFromWorkerAsync(
@@ -688,7 +688,7 @@ public class ProfilesController(
     /// </summary>
     /// <param name="ct">Cancellation token.</param>
     [HttpDelete("system/cleanup")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<IActionResult> DeleteAllSystemProfilesAsync(CancellationToken ct)
     {
@@ -710,7 +710,7 @@ public class ProfilesController(
     /// <param name="httpClient">HTTP client for worker communication.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("available-from-worker")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<IActionResult> GetAvailableProfilesFromWorkerAsync(
@@ -1021,7 +1021,7 @@ public class ProfilesController(
     /// <param name="printerId">The registered printer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet("available-for-printer/{printerId}")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(IEnumerable<SlicerProfileListItemDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> GetAvailableProfilesForPrinterAsync(
@@ -1052,7 +1052,7 @@ public class ProfilesController(
     /// <param name="request">Bulk import request.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("bulk-import-for-printer/{printerId}")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(BulkProfileImportResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1096,7 +1096,7 @@ public class ProfilesController(
     /// <param name="request">Selective import request with selected profiles.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("import-selected-for-model/{modelId:guid}")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(SelectiveProfileImportResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1159,7 +1159,7 @@ public class ProfilesController(
     /// <param name="request">Clone request with source and target details.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("clone-from-template")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(CloneProfilesResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1199,7 +1199,7 @@ public class ProfilesController(
     /// <param name="request">Bulk import request with profile data from worker.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpPost("bulk-import-from-worker/{printerId}")]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("slicer_engines:admin")]
     [ProducesResponseType(typeof(BulkImportFromWorkerResultDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

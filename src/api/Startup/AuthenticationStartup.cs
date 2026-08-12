@@ -124,24 +124,16 @@ public static class AuthenticationStartup
                 .Build();
 
             options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
-            options.AddPolicy("RequireAdmin", policy =>
-            {
-                _ = policy.RequireAuthenticatedUser();
-                _ = policy.RequireRole("farm_admin");
-            });
 
-            // Historical policy name used across controllers. Keep an alias so existing
-            // controllers using [Authorize(Policy = "farm_admin")] continue to work.
-            options.AddPolicy("farm_admin", policy =>
-            {
-                _ = policy.RequireAuthenticatedUser();
-                _ = policy.RequireRole("farm_admin");
-            });
-            options.AddPolicy("CanViewSliceQueue", policy =>
-            {
-                _ = policy.RequireAuthenticatedUser();
-                _ = policy.RequireRole("farm_admin");
-            });
+            // NOTE: "RequireAdmin", "farm_admin", and "CanViewSliceQueue" were role-backed
+            // policy aliases (policy.RequireRole("farm_admin")) that were functionally
+            // equivalent to [Authorize(Roles = "farm_admin")] — a gate a custom role can never
+            // satisfy no matter which permissions it holds. Issue #1451 migrated every literal
+            // [Authorize(Roles = ...)] site to [RequirePermission(resource, action)]; issue
+            // #1467 closed the same gap for these policy aliases by migrating every controller
+            // that referenced them and removing the policies themselves. Do not reintroduce a
+            // policy here that resolves to RequireRole(...) — add a [RequirePermission] grant
+            // instead. AuthorizeRolesGateArchitectureTests enforces this for both spellings.
 
             // Desktop API-key exchange scope policies (issue #838). A normal login/session
             // token is unaffected (DesktopScopeAuthorizationHandler passes it through); only
