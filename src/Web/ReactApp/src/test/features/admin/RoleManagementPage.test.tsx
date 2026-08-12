@@ -253,6 +253,29 @@ describe('RoleManagementPage', () => {
     ));
   });
 
+  it('does not discard unsaved permission edits when an unrelated metadata edit refetches the same role', async () => {
+    const user = userEvent.setup();
+    const updated: RoleDetail = { ...customRole, displayName: 'Shift Lead (updated)', permissions: [] };
+    vi.mocked(apiClient.updateAdminRole).mockResolvedValue(updated);
+    renderPage();
+
+    await user.click(await screen.findByText('Shift Lead'));
+    await user.click(await screen.findByLabelText(/^Grant Admin/));
+    expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Edit Shift Lead' }));
+    const displayNameInput = await screen.findByLabelText(/^Display name/);
+    await user.clear(displayNameInput);
+    await user.type(displayNameInput, 'Shift Lead (updated)');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(apiClient.updateAdminRole).toHaveBeenCalled());
+    // The permission-save bar (and the toggle's checked state) must survive the
+    // background refetch triggered by the metadata-edit's cache invalidation.
+    expect(await screen.findByLabelText(/^Grant Admin/)).toBeChecked();
+    expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument();
+  });
+
   it('does not offer edit or delete actions for a system role', async () => {
     renderPage();
     await screen.findByText('Farm Admin');

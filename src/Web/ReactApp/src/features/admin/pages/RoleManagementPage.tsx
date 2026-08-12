@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import type { EmbeddablePageProps } from '@/common/components/EmbeddablePageProps';
@@ -141,12 +141,19 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   // The hook does not auto-sync on prop changes (by design, so in-flight edits are
   // never silently discarded); reset the baseline explicitly whenever the selected
-  // role's data settles, and whenever the selection changes.
+  // role's data settles. A background refetch of the SAME role (e.g. triggered by an
+  // unrelated metadata edit invalidating this query) must not clobber unsaved matrix
+  // edits, so only force-sync when the role actually changed; otherwise skip syncing
+  // while the admin has unsaved changes.
+  const lastSyncedRoleIdRef = useRef<string | null>(null);
   useEffect(() => {
-    if (rolePermissionsQuery.data) {
+    if (!rolePermissionsQuery.data) return;
+    const isNewRole = lastSyncedRoleIdRef.current !== rolePermissionsQuery.data.roleId;
+    if (isNewRole || !grantState.isDirty) {
       grantState.markPristine(buildGrantMap(rolePermissionsQuery.data));
       setConcurrencyConflict(null);
       setLockoutViolation(null);
+      lastSyncedRoleIdRef.current = rolePermissionsQuery.data.roleId;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolePermissionsQuery.data]);
