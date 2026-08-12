@@ -15,13 +15,14 @@ const createTestQueryClient = () => new QueryClient({
 let mockUserRole = 'farm_admin';
 // #1457: lets a test simulate a custom (non-farm_admin) role that has been
 // granted one specific admin permission, independent of mockUserRole, so the
-// Admin nav link's `requiresAnyAccessUnder` gating can be proven against a
-// real custom-role scenario rather than only the role-shaped default below.
+// Admin nav link's `requiresAnyAccessibleHubTile` gating can be proven against
+// a real custom-role scenario rather than only the role-shaped default below.
 let mockPermissionOverride: ((resource: string, action: string) => boolean) | null = null;
 // #1457 round-3 (Bishop review) — lets a test simulate a signed-out visitor,
-// proving the unauthenticated nav filter also excludes `requiresAnyAccessUnder`
-// destinations (previously only requiredRole/requiredPermission were checked,
-// so the Admin nav link leaked to signed-out users).
+// proving the unauthenticated nav filter also excludes
+// `requiresAnyAccessUnder`/`requiresAnyAccessibleHubTile` destinations
+// (previously only requiredRole/requiredPermission were checked, so the
+// Admin nav link leaked to signed-out users).
 let mockIsAuthenticated = true;
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -32,7 +33,7 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     hasRole: (role: string) => mockIsAuthenticated && role === mockUserRole,
     // Mirrors mockUserRole rather than a blanket `true` (#1457): the "operator"
     // test case needs hasPermission to actually deny, since the Admin nav
-    // link is now gated on `requiresAnyAccessUnder` (reachable admin
+    // link is now gated on `requiresAnyAccessibleHubTile` (reachable hub-tile
     // destinations), not a fixed role/permission pair. mockPermissionOverride
     // lets a test opt into fully independent, resource/action-aware behavior.
     hasPermission: (resource: string, action: string) =>
@@ -196,8 +197,8 @@ describe('Navigation rail sections', () => {
   it('shows the Admin nav link for a custom (non-farm_admin) role granted only printers:admin', () => {
     // #1457 acceptance criterion: a user with a custom role granted a single
     // admin permission (not the farm_admin role) must see the Admin nav entry
-    // via `requiresAnyAccessUnder`, because they can reach at least one
-    // destination under /admin (Printer Groups).
+    // via `requiresAnyAccessibleHubTile`, because they can reach at least one
+    // hub-tile destination (Printer Groups).
     mockUserRole = 'operator';
     mockPermissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
     const { container } = renderLayout();
@@ -214,12 +215,32 @@ describe('Navigation rail sections', () => {
     expect(container.querySelector('a[href="/admin"]')).toBeNull();
   });
 
+  it('shows the Admin nav link for a custom role whose only accessible hub tile lives outside /admin (#1457 round-3, Bishop review)', () => {
+    // The Admin Control Center hub renders `isHubTile` destinations
+    // regardless of their `path` prefix -- several (e.g. Maintenance at
+    // `/maintenance`, Analytics at `/analytics`, Locations at `/locations`)
+    // intentionally live outside `/admin`. A user whose only admin
+    // permission unlocks one of those tiles can reach and use the hub page,
+    // but a path-prefix check (`requiresAnyAccessUnder: '/admin'`) would
+    // incorrectly hide the nav link pointing at it -- the inverse of the
+    // round-2 signed-out-leak bug: usable but invisible instead of visible
+    // but denied.
+    mockUserRole = 'operator';
+    mockPermissionOverride = (resource, action) => resource === 'maintenance' && action === 'admin';
+    const { container } = renderLayout();
+
+    expect(container.querySelector('a[href="/admin"]')).not.toBeNull();
+    expect(within(getDesktopNav(container)).getByRole('link', { name: 'Admin' })).toHaveAttribute('href', '/admin');
+  });
+
   it('hides the Admin nav link (requiresAnyAccessUnder) for a signed-out visitor (#1457 round-3, Bishop review)', () => {
     // Before this fix, the unauthenticated nav filter only excluded items
     // gated by `requiredRole`/`requiredPermission`; it didn't know about
-    // `requiresAnyAccessUnder`, so the Admin nav link (gated only by
-    // `requiresAnyAccessUnder: '/admin'`) was visible to signed-out users
-    // even though every destination under /admin needs a role or permission.
+    // `requiresAnyAccessUnder`, so the Admin nav link (gated only by that
+    // field at the time) was visible to signed-out users even though every
+    // destination under /admin needs a role or permission. The Admin nav
+    // link is now gated on `requiresAnyAccessibleHubTile` instead (round-3,
+    // Bishop review), which is equally unsatisfiable while signed out.
     mockIsAuthenticated = false;
     const { container } = renderLayout();
 

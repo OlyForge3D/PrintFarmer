@@ -726,6 +726,26 @@ export function canAccessSettingsTab(
 }
 
 /**
+ * True when the current user can reach at least one hub-tile destination —
+ * i.e. the Admin Control Center page would render something for them.
+ *
+ * The hub renders `isHubTile` destinations regardless of their `path`
+ * prefix (several, e.g. `/maintenance`, `/analytics`, `/locations`, live
+ * outside `/admin` itself — see `getHubGroupedDestinations`). A path-prefix
+ * check like `hasAccessibleDestinationWithPrefix(access, '/admin')` therefore
+ * misses users whose only accessible hub tile is one of those: the hub page
+ * itself would be genuinely useful to them, but the nav link pointing at it
+ * would incorrectly hide (#1457 round-3, Bishop review — the inverse of the
+ * round-2 signed-out-leak bug: usable but invisible instead of visible but
+ * denied). Used by `Layout.tsx`'s Admin nav entry instead of a path-prefix
+ * check.
+ */
+export function hasAccessibleHubTile(access: AdminDestinationAccess): boolean {
+  return filterDestinationsByAccess(ADMIN_DESTINATIONS, access)
+    .some((destination) => destination.isHubTile);
+}
+
+/**
  * Get the destinations flagged as hub tiles, grouped for the Control Center.
  *
  * Each entry is a `{ group, destinations }` tuple in the canonical group order.

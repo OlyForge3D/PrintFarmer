@@ -30,7 +30,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
-import { hasAccessibleDestinationWithPrefix } from '@/features/admin/registry/adminDestinations';
+import { hasAccessibleDestinationWithPrefix, hasAccessibleHubTile } from '@/features/admin/registry/adminDestinations';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
@@ -80,6 +80,18 @@ interface NavigationItem {
    * anything underneath them.
    */
   requiresAnyAccessUnder?: string;
+  /**
+   * Visible only if at least one hub-tile destination (`isHubTile: true` in
+   * the admin destination registry) is reachable given the user's
+   * role/permissions (#1457 round-3, Bishop review). Unlike
+   * `requiresAnyAccessUnder`, this does not require the destination's `path`
+   * to share a prefix with `href` — several hub tiles (e.g. `/maintenance`,
+   * `/analytics`, `/locations`) intentionally live outside `/admin` itself,
+   * so a path-prefix check would hide the Admin nav link for a user whose
+   * only accessible hub tile is one of those, even though the hub page
+   * would render something useful for them.
+   */
+  requiresAnyAccessibleHubTile?: boolean;
   requiresSlicer?: boolean;
   /** Hide when platform-level slicing is disabled (ARM / Raspberry Pi) */
   requiresSlicingCapability?: boolean;
@@ -253,10 +265,13 @@ const navigation: NavigationElement[] = [
     // The Admin Control Center hub itself is not gated on a single role or
     // resource permission (#1457) — it self-filters tiles to whatever the
     // user's own permissions unlock. But the nav *entry* should still hide
-    // for a user who can't reach anything under /admin at all, so it's
-    // gated on "any accessible destination under this prefix" instead of a
-    // literal `hasRole('farm_admin')` check.
-    requiresAnyAccessUnder: '/admin',
+    // for a user who can't reach anything the hub would show them. Gated on
+    // "any accessible hub tile" rather than "any accessible destination
+    // under /admin" (round-3, Bishop review): several hub tiles live outside
+    // /admin (e.g. /maintenance, /analytics, /locations), so a path-prefix
+    // check hid the nav link for a user whose only accessible hub tile was
+    // one of those, even though the hub page would render it for them.
+    requiresAnyAccessibleHubTile: true,
     anchored: true,
     matches: (pathname) => pathname === '/admin' || pathname.startsWith('/admin/')
   },
@@ -432,12 +447,19 @@ export function Layout() {
       return navigationItems.filter((item) => {
         if (isHiddenByCapabilities(item)) return false;
         if (item.requiresSlicer && !isSlicerAvailable) return false;
-        // A signed-out user can never satisfy requiresAnyAccessUnder (every
-        // destination under it needs a role/permission), so treat it the
-        // same as requiredRole/requiredPermission here. Missed in the round-2
-        // #1457 fix -- Bishop review: the Admin nav link (gated only via
-        // requiresAnyAccessUnder: '/admin') was visible to signed-out users.
-        return !item.requiredRole && !item.requiredPermission && !item.requiresAnyAccessUnder;
+        // A signed-out user can never satisfy requiresAnyAccessUnder or
+        // requiresAnyAccessibleHubTile (every destination/hub tile needs a
+        // role/permission), so treat them the same as
+        // requiredRole/requiredPermission here. requiresAnyAccessUnder was
+        // missed in the round-2 #1457 fix -- Bishop review: the Admin nav
+        // link (gated only via requiresAnyAccessUnder: '/admin' at the time)
+        // was visible to signed-out users.
+        return (
+          !item.requiredRole
+          && !item.requiredPermission
+          && !item.requiresAnyAccessUnder
+          && !item.requiresAnyAccessibleHubTile
+        );
       });
     }
 
@@ -447,6 +469,12 @@ export function Layout() {
       if (
         item.requiresAnyAccessUnder &&
         !hasAccessibleDestinationWithPrefix({ hasRole: canRole, hasPermission: canPermission }, item.requiresAnyAccessUnder)
+      ) {
+        return false;
+      }
+      if (
+        item.requiresAnyAccessibleHubTile &&
+        !hasAccessibleHubTile({ hasRole: canRole, hasPermission: canPermission })
       ) {
         return false;
       }
