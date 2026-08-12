@@ -169,6 +169,16 @@ public interface IUsersRepository
     Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets the role IDs of all active role assignments for a user. Used to detect whether a
+    /// role assignment change actually alters the user's effective permissions (#1454), so a
+    /// no-op RoleIds resubmission does not trigger a session revocation.
+    /// </summary>
+    /// <param name="userId">The user's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of role IDs assigned to the user.</returns>
+    Task<List<Guid>> GetActiveRoleIdsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets all granted permissions for a user based on their roles. Explicit deny wins:
     /// if any active role denies a (resource, action) pair, it is excluded here even if
     /// another active role grants it. See docs/ROLE_PERMISSION_PRECEDENCE.md.

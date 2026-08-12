@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -20,15 +21,25 @@ public class UsersServiceTests
     private readonly Mock<IUsersRepository> _usersRepositoryMock;
     private readonly Mock<IAuthenticationService> _authenticationServiceMock;
     private readonly Mock<IPasswordHashingService> _passwordHashingServiceMock;
+    private readonly Mock<IEffectivePermissionsRevocationService> _revocationServiceMock;
+    private readonly Mock<IAuthAuditService> _authAuditServiceMock;
     private readonly IUsersService _usersService;
     private readonly CancellationToken _cancellationToken = CancellationToken.None;
+    private readonly Guid _actorUserId = Guid.NewGuid();
 
     public UsersServiceTests()
     {
         _usersRepositoryMock = new Mock<IUsersRepository>(MockBehavior.Strict);
         _authenticationServiceMock = new Mock<IAuthenticationService>(MockBehavior.Strict);
         _passwordHashingServiceMock = new Mock<IPasswordHashingService>(MockBehavior.Strict);
-        _usersService = new UsersService(_usersRepositoryMock.Object, _authenticationServiceMock.Object, _passwordHashingServiceMock.Object);
+        _revocationServiceMock = new Mock<IEffectivePermissionsRevocationService>(MockBehavior.Strict);
+        _authAuditServiceMock = new Mock<IAuthAuditService>(MockBehavior.Strict);
+        _usersService = new UsersService(
+            _usersRepositoryMock.Object,
+            _authenticationServiceMock.Object,
+            _passwordHashingServiceMock.Object,
+            _revocationServiceMock.Object,
+            _authAuditServiceMock.Object);
     }
 
     #region GetUsersAsync Tests
@@ -306,7 +317,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUserDto);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -325,7 +336,7 @@ public class UsersServiceTests
             .ReturnsAsync((User?)null);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.Null(result);
@@ -350,7 +361,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -376,7 +387,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
@@ -394,6 +405,80 @@ public class UsersServiceTests
 
         _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
             .ReturnsAsync(existingUser);
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid>());
+        _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
+            .Returns(Task.CompletedTask);
+        _usersRepositoryMock.Setup(x => x.SaveChangesAsync(_cancellationToken))
+            .Returns(Task.CompletedTask);
+        _usersRepositoryMock.Setup(x => x.GetRolesAsync(_cancellationToken))
+            .ReturnsAsync(new List<RoleDto> { new() { Id = roleId, Name = "operator" } });
+
+        _revocationServiceMock
+            .Setup(x => x.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Single() == userId),
+                _actorUserId,
+                It.IsAny<string>(),
+                null,
+                _cancellationToken))
+            .ReturnsAsync(1);
+        _authAuditServiceMock
+            .Setup(x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.Is<IReadOnlyList<string>>(added => added.SequenceEqual(new[] { "operator" })),
+                It.Is<IReadOnlyList<string>>(removed => removed.Count == 0),
+                1,
+                null,
+                null,
+                _cancellationToken))
+            .Returns(Task.CompletedTask);
+
+        var updatedUser = new UserDto { Id = userId };
+        _authenticationServiceMock.Setup(x => x.GetUserWithRolesAndPermissionsAsync(userId))
+            .ReturnsAsync(updatedUser);
+
+        // Act
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
+
+        // Assert
+        Assert.NotNull(result);
+        _usersRepositoryMock.Verify(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken), Times.Once);
+        _revocationServiceMock.Verify(
+            x => x.RevokeUsersAsync(
+                It.Is<IReadOnlyCollection<Guid>>(ids => ids.Single() == userId),
+                _actorUserId,
+                It.IsAny<string>(),
+                null,
+                _cancellationToken),
+            Times.Once);
+        _authAuditServiceMock.Verify(
+            x => x.LogRoleAssignmentChangedAsync(
+                _actorUserId,
+                userId,
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                1,
+                null,
+                null,
+                _cancellationToken),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdateUserAsync_WithSameRoleIdsResubmitted_DoesNotRevokeSessions()
+    {
+        // Arrange -- resubmitting the user's existing role set is a no-op and must not
+        // trigger a session revocation or audit event (only an actual role add/remove should).
+        var userId = Guid.NewGuid();
+        var roleId = Guid.NewGuid();
+        var request = new UpdateUserRequest { RoleIds = new[] { roleId } };
+        var existingUser = new User { Id = userId };
+
+        _usersRepositoryMock.Setup(x => x.GetUserEntityAsync(userId, _cancellationToken))
+            .ReturnsAsync(existingUser);
+        _usersRepositoryMock.Setup(x => x.GetActiveRoleIdsAsync(userId, _cancellationToken))
+            .ReturnsAsync(new List<Guid> { roleId });
         _usersRepositoryMock.Setup(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken))
             .Returns(Task.CompletedTask);
         _usersRepositoryMock.Setup(x => x.SaveChangesAsync(_cancellationToken))
@@ -404,11 +489,24 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);
-        _usersRepositoryMock.Verify(x => x.UpdateUserRolesAsync(userId, request.RoleIds, _cancellationToken), Times.Once);
+        _revocationServiceMock.Verify(
+            x => x.RevokeUsersAsync(It.IsAny<IReadOnlyCollection<Guid>>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        _authAuditServiceMock.Verify(
+            x => x.LogRoleAssignmentChangedAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<Guid>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<IReadOnlyList<string>>(),
+                It.IsAny<int>(),
+                It.IsAny<string?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]
@@ -429,7 +527,7 @@ public class UsersServiceTests
             .ReturnsAsync(updatedUser);
 
         // Act
-        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _cancellationToken);
+        UserDto? result = await _usersService.UpdateUserAsync(userId, request, _actorUserId, ipAddress: null, _cancellationToken);
 
         // Assert
         Assert.NotNull(result);

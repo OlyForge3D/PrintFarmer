@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
@@ -28,15 +29,21 @@ namespace Farm.Infrastructure.Services.Users;
 /// <param name="users">Repository for user data persistence and retrieval</param>
 /// <param name="authService">Service for authentication operations and token management</param>
 /// <param name="passwordHashingService">Service for secure password hashing and verification</param>
+/// <param name="revocationService">Shared helper to revoke a user's active sessions when their effective permissions change</param>
+/// <param name="authAuditService">Service for recording authentication and authorization audit events</param>
 /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
 public class UsersService(
     IUsersRepository users,
     IAuthenticationService authService,
-    IPasswordHashingService passwordHashingService) : IUsersService
+    IPasswordHashingService passwordHashingService,
+    IEffectivePermissionsRevocationService revocationService,
+    IAuthAuditService authAuditService) : IUsersService
 {
     private readonly IUsersRepository _users = users ?? throw new ArgumentNullException(nameof(users));
     private readonly IAuthenticationService _authService = authService ?? throw new ArgumentNullException(nameof(authService));
     private readonly IPasswordHashingService _passwordHashingService = passwordHashingService ?? throw new ArgumentNullException(nameof(passwordHashingService));
+    private readonly IEffectivePermissionsRevocationService _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
+    private readonly IAuthAuditService _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
 
     /// <summary>
     /// Retrieves all user accounts from the system.
@@ -93,6 +100,8 @@ public class UsersService(
     /// </summary>
     /// <param name="id">Unique identifier of the user to update</param>
     /// <param name="request">Update request containing optional fields: FirstName, LastName, IsActive, RoleIds</param>
+    /// <param name="actorUserId">The administrator performing the update; attributed on any resulting session revocation and audit event.</param>
+    /// <param name="ipAddress">The IP address the request was made from.</param>
     /// <param name="ct">Cancellation token for async operation</param>
     /// <returns>Updated UserDto with current account information and roles; null if user not found</returns>
     /// <remarks>
@@ -104,8 +113,15 @@ public class UsersService(
     ///
     /// The update timestamp is automatically set to current UTC time. Role updates trigger a reload of the
     /// user's complete profile including permissions. Returns null if the specified user ID does not exist.
+    ///
+    /// If RoleIds actually changes the user's active role membership (a role was added or removed --
+    /// resubmitting the same set is a no-op), this revokes all of the user's active tokens through
+    /// <see cref="IEffectivePermissionsRevocationService"/> -- the same shared fan-out path used when a
+    /// role's own permission grants change (#1471) -- and records a <see cref="AuthEventType.RoleAssignmentChanged"/>
+    /// audit event (#1454). Revocation happens only after the role change has committed, so a failed
+    /// save cannot leave a role change applied without its corresponding fan-out.
     /// </remarks>
-    public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken ct)
+    public async Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid actorUserId, string? ipAddress, CancellationToken ct)
     {
         User? user = await _users.GetUserEntityAsync(id, ct);
         if (user == null)
@@ -130,12 +146,53 @@ public class UsersService(
 
         user.UpdatedAt = DateTime.UtcNow;
 
+        // Capture the user's current active role assignment before mutating it, so we can tell
+        // afterward whether this update actually changed their effective permissions. A client
+        // resubmitting the same RoleIds set it already had must not trigger a revocation.
+        HashSet<Guid>? beforeRoleIds = null;
         if (request.RoleIds != null)
         {
+            List<Guid> currentRoleIds = await _users.GetActiveRoleIdsAsync(id, ct);
+            beforeRoleIds = new HashSet<Guid>(currentRoleIds);
             await _users.UpdateUserRolesAsync(id, request.RoleIds, ct);
         }
 
         await _users.SaveChangesAsync(ct);
+
+        if (beforeRoleIds is not null)
+        {
+            var afterRoleIds = new HashSet<Guid>(request.RoleIds!);
+            if (!beforeRoleIds.SetEquals(afterRoleIds))
+            {
+                List<Guid> addedRoleIds = afterRoleIds.Except(beforeRoleIds).ToList();
+                List<Guid> removedRoleIds = beforeRoleIds.Except(afterRoleIds).ToList();
+
+                IReadOnlyList<RoleDto> allRoles = await _users.GetRolesAsync(ct);
+                Dictionary<Guid, string> roleNameById = allRoles.ToDictionary(r => r.Id, r => r.Name);
+                List<string> addedRoleNames = addedRoleIds
+                    .Select(roleId => roleNameById.TryGetValue(roleId, out string? name) ? name : roleId.ToString())
+                    .ToList();
+                List<string> removedRoleNames = removedRoleIds
+                    .Select(roleId => roleNameById.TryGetValue(roleId, out string? name) ? name : roleId.ToString())
+                    .ToList();
+
+                int revokedSessionCount = await _revocationService.RevokeUsersAsync(
+                    new[] { id },
+                    actorUserId,
+                    "User's role assignment changed",
+                    ipAddress,
+                    ct).ConfigureAwait(false);
+
+                await _authAuditService.LogRoleAssignmentChangedAsync(
+                    actorUserId,
+                    id,
+                    addedRoleNames,
+                    removedRoleNames,
+                    revokedSessionCount,
+                    ipAddress,
+                    cancellationToken: ct).ConfigureAwait(false);
+            }
+        }
 
         return await _authService.GetUserWithRolesAndPermissionsAsync(user.Id);
     }

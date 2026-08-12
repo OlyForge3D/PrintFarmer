@@ -37,6 +37,7 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
     private readonly DbContextOptions<AppDbContext> _options;
     private readonly Mock<IAuthAuditService> _authAuditServiceMock = new(MockBehavior.Strict);
     private readonly Mock<ITokenRevocationService> _tokenRevocationServiceMock = new(MockBehavior.Strict);
+    private readonly IEffectivePermissionsRevocationService _revocationService;
     private readonly List<RouteEndpoint> _endpoints = [];
 
     public RolePermissionServiceTests()
@@ -44,6 +45,7 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
         _connection = new SqliteConnection("Data Source=:memory:");
         _connection.Open();
         _options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options;
+        _revocationService = new EffectivePermissionsRevocationService(_tokenRevocationServiceMock.Object);
     }
 
     public async ValueTask DisposeAsync()
@@ -470,7 +472,7 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
 
         RolePermissionService serviceA = CreateService(db);
         await using AppDbContext dbB = await CreateContextAsync();
-        RolePermissionService serviceB = new(dbB, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), dbB), _authAuditServiceMock.Object, _tokenRevocationServiceMock.Object);
+        RolePermissionService serviceB = new(dbB, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), dbB), _authAuditServiceMock.Object, _revocationService);
 
         RolePermissionUpdateResult resultA = await serviceA.UpdateRolePermissionsAsync(
             role.Id,
@@ -521,7 +523,7 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
     }
 
     private RolePermissionService CreateService(AppDbContext db) =>
-        new(db, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), db), _authAuditServiceMock.Object, _tokenRevocationServiceMock.Object);
+        new(db, new PermissionCatalogService(new FakeEndpointDataSource(_endpoints), db), _authAuditServiceMock.Object, _revocationService);
 
     private async Task<AppDbContext> CreateContextAsync()
     {

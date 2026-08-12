@@ -209,6 +209,15 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
             .ToListAsync(ct);
     }
 
+    public async Task<List<Guid>> GetActiveRoleIdsAsync(Guid userId, CancellationToken ct = default)
+    {
+        return await _db.UserRoles
+            .AsNoTracking()
+            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .Select(ur => ur.RoleId)
+            .ToListAsync(ct);
+    }
+
     public async Task<List<(string Resource, string Action)>> GetGrantedPermissionsAsync(Guid userId, CancellationToken ct = default)
     {
         // Grant/deny precedence: an explicit deny (Granted == false) on any of the user's

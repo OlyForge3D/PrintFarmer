@@ -439,6 +439,11 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IAuthAuditService, Farm.Infrastructure.Services.Authentication.AuthAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ILoginAuditService, Farm.Infrastructure.Services.Authentication.LoginAuditService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.ITokenRevocationService, Farm.Infrastructure.Services.Authentication.TokenRevocationService>();
+
+        // Shared fan-out for "a set of users' effective permissions just changed, kill their
+        // live tokens" (#1454) -- used by both the role-permissions-changed path (#1471) and
+        // the role-assignment-changed path so there is exactly one revocation code path.
+        _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IEffectivePermissionsRevocationService, Farm.Infrastructure.Services.Authentication.EffectivePermissionsRevocationService>();
         _ = services.AddHostedService<Services.Authentication.TokenRevocationCleanupService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Users.IUsersService, Farm.Infrastructure.Services.Users.UsersService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Authentication.IPasskeyService, Farm.Infrastructure.Services.Authentication.PasskeyService>();
