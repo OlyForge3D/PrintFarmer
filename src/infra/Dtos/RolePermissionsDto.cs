@@ -23,6 +23,17 @@ public record RolePermissionsDto
     public required bool IsEditable { get; init; }
 
     /// <summary>
+    /// True only for <c>farm_admin</c>, whose authority comes from a hard-coded role bypass
+    /// (<c>PrintFarmerPermissions.IsFarmAdmin</c>) rather than from <c>RolePermission</c> rows.
+    /// When set, every entry in <see cref="Resources"/> reports
+    /// <see cref="RolePermissionGrantStatus.Granted"/> regardless of which rows happen to exist,
+    /// because that is the role's true effective authority. Reporting the raw rows instead made
+    /// the management UI render the superuser role as holding almost nothing, directly
+    /// contradicting its own "implicit total access" notice.
+    /// </summary>
+    public required bool HasImplicitTotalAccess { get; init; }
+
+    /// <summary>
     /// Optimistic concurrency token. Callers must echo this value back on
     /// <c>PUT /api/admin/roles/{roleId}/permissions</c>; a mismatch returns <c>409</c>.
     /// </summary>
@@ -67,7 +78,12 @@ public record RolePermissionEntryDto
     /// <summary>Whether <c>{resource}:admin</c> subsumes this permission.</summary>
     public required bool ImpliedByAdmin { get; init; }
 
-    /// <summary>This role's current grant status for this permission.</summary>
+    /// <summary>
+    /// This role's effective grant status for this permission. For a role with
+    /// <see cref="RolePermissionsDto.HasImplicitTotalAccess"/> this is always
+    /// <see cref="RolePermissionGrantStatus.Granted"/>; otherwise it reflects the role's
+    /// <c>RolePermission</c> row, or <see cref="RolePermissionGrantStatus.Absent"/> when none exists.
+    /// </summary>
     public required RolePermissionGrantStatus Status { get; init; }
 }
 

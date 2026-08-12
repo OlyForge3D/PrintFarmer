@@ -22,7 +22,20 @@ public class RoleSummaryDto
 
     public int MemberCount { get; set; }
 
+    /// <summary>
+    /// Number of granted <c>RolePermission</c> rows. For a role with
+    /// <see cref="HasImplicitTotalAccess"/> this undercounts real authority — that role holds one
+    /// row per resource (<c>{resource}:admin</c>) yet effectively holds every finer action too —
+    /// so present <see cref="HasImplicitTotalAccess"/> rather than this number for such roles.
+    /// </summary>
     public int PermissionCount { get; set; }
+
+    /// <summary>
+    /// True only for <c>farm_admin</c>, whose authority comes from a hard-coded role bypass
+    /// rather than from stored grants. Lets clients present total access without matching on
+    /// <see cref="Name"/> (#1456).
+    /// </summary>
+    public bool HasImplicitTotalAccess { get; set; }
 
     public DateTime CreatedAt { get; set; }
 

@@ -26,7 +26,8 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
                 CreatedAt = r.CreatedAt,
                 UpdatedAt = r.UpdatedAt,
                 MemberCount = r.UserRoles.Count(ur => ur.IsActive),
-                PermissionCount = r.RolePermissions.Count(rp => rp.Granted)
+                PermissionCount = r.RolePermissions.Count(rp => rp.Granted),
+                HasImplicitTotalAccess = r.Name == PrintFarmerPermissions.FarmAdminRole
             })
             .OrderBy(r => r.Name)
             .ToListAsync(ct);
@@ -73,6 +74,7 @@ public class EfRolesRepository(AppDbContext db) : IRolesRepository
             UpdatedAt = role.UpdatedAt,
             MemberCount = memberCount,
             PermissionCount = role.RolePermissions.Count(rp => rp.Granted),
+            HasImplicitTotalAccess = string.Equals(role.Name, PrintFarmerPermissions.FarmAdminRole, StringComparison.Ordinal),
             Permissions = role.RolePermissions.Select(rp => new PermissionDto
             {
                 Resource = rp.Resource.Name,

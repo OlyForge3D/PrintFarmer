@@ -41,6 +41,7 @@ const customRole: RoleSummary = {
   isActive: true,
   memberCount: 2,
   permissionCount: 3,
+  hasImplicitTotalAccess: false,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -54,6 +55,7 @@ const systemRole: RoleSummary = {
   isActive: true,
   memberCount: 1,
   permissionCount: 10,
+  hasImplicitTotalAccess: true,
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
 };
@@ -94,6 +96,7 @@ function buildRolePermissions(overrides: Partial<RolePermissions> = {}): RolePer
     roleDisplayName: customRole.displayName,
     isSystemRole: false,
     isEditable: true,
+    hasImplicitTotalAccess: false,
     updatedAt: '2026-01-01T00:00:00Z',
     resources: [
       {
@@ -529,7 +532,27 @@ describe('RoleManagementPage', () => {
     await screen.findByText(/implicit total access/i);
   });
 
-  it('renders the farm_admin permission pane as fully read-only', async () => {
+  it('shows "All" instead of a stored-row count for a role with implicit total access', async () => {
+    // The stored count is one row per resource ("{resource}:admin"), which reads as a small,
+    // partial number next to a role that actually holds everything.
+    renderPage();
+
+    const adminRow = (await screen.findByText('Farm Admin')).closest('tr');
+    expect(adminRow).not.toBeNull();
+    expect(within(adminRow as HTMLElement).getByText('All')).toBeInTheDocument();
+    expect(within(adminRow as HTMLElement).queryByText('10')).not.toBeInTheDocument();
+
+    const customRow = (await screen.findByText('Shift Lead')).closest('tr');
+    expect(within(customRow as HTMLElement).getByText('3')).toBeInTheDocument();
+  });
+
+  it('maps a granted permission to a checked, disabled toggle when the role is read-only', async () => {
+    // Scope note: this covers the CLIENT half only — that a 'Granted' status renders as a checked
+    // toggle, and that read-only fixes it on rather than off. It deliberately does NOT guard
+    // #1490, whose defect was server-side in RolePermissionService.BuildDto; the statuses below
+    // are mock input, so this test would still pass with that fix reverted. The regression itself
+    // is guarded by RolePermissionServiceTests
+    // .GetRolePermissionsAsync_FarmAdmin_ReportsEveryPermissionGrantedDespiteOnlyAdminRows.
     vi.mocked(apiClient.getRolePermissions).mockResolvedValue(
       buildRolePermissions({
         roleId: systemRole.id,
@@ -537,6 +560,31 @@ describe('RoleManagementPage', () => {
         roleDisplayName: systemRole.displayName,
         isSystemRole: true,
         isEditable: false,
+        hasImplicitTotalAccess: true,
+        resources: [
+          {
+            resource: 'printers',
+            displayName: 'Printers',
+            permissions: [
+              {
+                resource: 'printers',
+                action: 'view',
+                permission: 'printers:view',
+                actionDisplayName: 'View',
+                impliedByAdmin: true,
+                status: 'Granted',
+              },
+              {
+                resource: 'printers',
+                action: 'admin',
+                permission: 'printers:admin',
+                actionDisplayName: 'Admin',
+                impliedByAdmin: false,
+                status: 'Granted',
+              },
+            ],
+          },
+        ],
       }),
     );
     const user = userEvent.setup();
@@ -545,8 +593,14 @@ describe('RoleManagementPage', () => {
     await user.click(await screen.findByText('Farm Admin'));
 
     expect(await screen.findByText(/implicit total access/i)).toBeInTheDocument();
-    const toggle = screen.getByLabelText(/^Grant View/) as HTMLInputElement;
-    expect(toggle).toBeDisabled();
+
+    const viewToggle = screen.getByLabelText(/^Grant View/) as HTMLInputElement;
+    const adminToggle = screen.getByLabelText(/^Grant Admin/) as HTMLInputElement;
+    expect(viewToggle).toBeDisabled();
+    expect(adminToggle).toBeDisabled();
+    expect(viewToggle).toBeChecked();
+    expect(adminToggle).toBeChecked();
+    expect(screen.queryByText('Not granted')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
   });
 

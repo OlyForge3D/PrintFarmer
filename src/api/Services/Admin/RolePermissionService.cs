@@ -348,6 +348,14 @@ public sealed class RolePermissionService : IRolePermissionService
 
     private static RolePermissionsDto BuildDto(Role role, PermissionCatalogDto catalog, Dictionary<string, bool> grantStatus)
     {
+        // farm_admin's authority comes from the hard-coded role bypass in
+        // PrintFarmerPermissions.IsFarmAdmin, not from RolePermission rows. Seeding gives it only
+        // "{resource}:admin" per resource (the admin action implies every other action on that
+        // resource), so reporting raw row status here rendered every finer action as "Not granted"
+        // and made the UI contradict its own "implicit total access" notice. Report the effective
+        // authority instead: for this role every enforced permission genuinely is granted.
+        bool hasImplicitTotalAccess = string.Equals(role.Name, FarmAdminRoleName, StringComparison.Ordinal);
+
         List<RolePermissionResourceGroupDto> resourceGroups = catalog.Resources
             .Select(group => new RolePermissionResourceGroupDto
             {
@@ -362,9 +370,11 @@ public sealed class RolePermissionService : IRolePermissionService
                     ActionDisplayName = entry.ActionDisplayName,
                     ActionDescription = entry.ActionDescription,
                     ImpliedByAdmin = entry.ImpliedByAdmin,
-                    Status = grantStatus.TryGetValue(entry.Permission, out bool granted)
-                        ? (granted ? RolePermissionGrantStatus.Granted : RolePermissionGrantStatus.Denied)
-                        : RolePermissionGrantStatus.Absent,
+                    Status = hasImplicitTotalAccess
+                        ? RolePermissionGrantStatus.Granted
+                        : grantStatus.TryGetValue(entry.Permission, out bool granted)
+                            ? (granted ? RolePermissionGrantStatus.Granted : RolePermissionGrantStatus.Denied)
+                            : RolePermissionGrantStatus.Absent,
                 }).ToList(),
             })
             .ToList();
@@ -375,7 +385,8 @@ public sealed class RolePermissionService : IRolePermissionService
             RoleName = role.Name,
             RoleDisplayName = role.DisplayName,
             IsSystemRole = role.IsSystemRole,
-            IsEditable = !string.Equals(role.Name, FarmAdminRoleName, StringComparison.Ordinal),
+            IsEditable = !hasImplicitTotalAccess,
+            HasImplicitTotalAccess = hasImplicitTotalAccess,
             UpdatedAt = role.UpdatedAt,
             Resources = resourceGroups,
         };
