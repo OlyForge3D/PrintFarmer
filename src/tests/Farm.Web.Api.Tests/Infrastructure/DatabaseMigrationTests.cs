@@ -44,7 +44,8 @@ public sealed class DatabaseMigrationTests
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
-            "20260808162833_AddPowerReadingCompositeIndex");
+            "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -307,7 +308,8 @@ public sealed class DatabaseMigrationTests
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
-            "20260808162833_AddPowerReadingCompositeIndex");
+            "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken");
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
 
@@ -657,6 +659,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023649_UsePortableRevisionConcurrency",
                 "20260808052051_AddNfcDeviceApproval",
                 "20260808162502_AddPowerReadingCompositeIndex",
+                "20260811230934_AddRoleUpdatedAtConcurrencyToken",
             ]
             :
             [
@@ -665,6 +668,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023652_UsePortableRevisionConcurrency",
                 "20260808052059_AddNfcDeviceApproval",
                 "20260808162518_AddPowerReadingCompositeIndex",
+                "20260811230948_AddRoleUpdatedAtConcurrencyToken",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");

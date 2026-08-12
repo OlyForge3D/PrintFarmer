@@ -328,6 +328,10 @@ public static class FeatureServicesStartup
         // Permission catalog derived from EndpointDataSource (issue #1446). Read-only; does
         // not seed or mutate the database catalog.
         services.AddScoped<Farm.Web.Api.Services.Admin.IPermissionCatalogService, Farm.Web.Api.Services.Admin.PermissionCatalogService>();
+
+        // Role permission grant read/write API (issue #1449). Reads/writes RolePermission
+        // rows, validated against the permission catalog above.
+        services.AddScoped<Farm.Web.Api.Services.Admin.IRolePermissionService, Farm.Web.Api.Services.Admin.RolePermissionService>();
         services.AddHttpClient("MonitoringHealth", client =>
         {
             client.Timeout = TimeSpan.FromSeconds(5);

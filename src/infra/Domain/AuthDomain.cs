@@ -64,7 +64,10 @@ public enum AuthEventType
     RoleUpdated = 15,
 
     /// <summary>A custom role was deleted.</summary>
-    RoleDeleted = 16
+    RoleDeleted = 16,
+
+    /// <summary>An admin replaced a role's permission grants via the role permission API (#1449).</summary>
+    RolePermissionsChanged = 17
 }
 
 #endregion

@@ -307,6 +307,45 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
         _logging.LogWarning("[AuthAudit] API key exchange failed from IP: {IpAddress} - Reason: {Reason}", LogSanitizer.Sanitize(ipAddress), LogSanitizer.Sanitize(reason));
     }
 
+    public async Task LogRolePermissionsChangedAsync(
+        Guid actingUserId,
+        Guid roleId,
+        string roleName,
+        IReadOnlyList<string> permissionsAdded,
+        IReadOnlyList<string> permissionsRemoved,
+        int revokedSessionCount,
+        string? ipAddress,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var metadata = new
+        {
+            RoleId = roleId,
+            RoleName = roleName,
+            Added = permissionsAdded,
+            Removed = permissionsRemoved,
+            RevokedSessionCount = revokedSessionCount
+        };
+
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = actingUserId,
+            EventType = AuthEventType.RolePermissionsChanged,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = null,
+            Success = true,
+            Metadata = JsonSerializer.Serialize(metadata),
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogWarning(
+            "[AuthAudit] Role permissions changed for RoleId: {RoleId} ({RoleName}) by UserId: {ActingUserId}. Added: {AddedCount}, Removed: {RemovedCount}, SessionsRevoked: {RevokedSessionCount}",
+            roleId, LogSanitizer.Sanitize(roleName), actingUserId, permissionsAdded.Count, permissionsRemoved.Count, revokedSessionCount);
+    }
+
     public async Task LogRoleManagementEventAsync(Guid actorUserId, Guid roleId, string roleName, AuthEventType eventType, string? beforeJson, string? afterJson, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
         var metadata = new
