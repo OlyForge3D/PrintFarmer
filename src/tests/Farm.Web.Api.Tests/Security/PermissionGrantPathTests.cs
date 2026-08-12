@@ -234,17 +234,23 @@ public sealed class PermissionGrantPathTests
     /// (calibration/queue/slicing/dispatch-settings/obico) that <c>SeedRolePermissionsAsync</c>
     /// never writes a row for?
     ///
-    /// This deliberately evaluates authority with
-    /// <see cref="PrintFarmerPermissions.SetGrantsPermission"/> — the row-only path that has NO
-    /// <see cref="PrintFarmerPermissions.FarmAdminRole"/> bypass — because that is the strictest
-    /// enforcement path in the system and the one used by Desktop API-key exchange
-    /// (<c>DesktopScopePermissionMap</c>, <c>UserApiKeysController</c>), where a farm_admin owner
-    /// deliberately does not lend a token its implicit admin bypass.
+    /// This evaluates authority with <see cref="PrintFarmerPermissions.SetGrantsPermission"/> —
+    /// the row-only rule, which has NO <see cref="PrintFarmerPermissions.FarmAdminRole"/> bypass —
+    /// so the answer rests solely on the seeded rows and the same-resource admin implication.
     ///
-    /// If the seeded rows alone satisfy every enforced permission here, they satisfy it on every
-    /// weaker path too (the role bypass in <c>PermissionAuthorizationHandler</c>, hubs, and
-    /// capability services all short-circuit earlier). Seeding the 17 redundant rows would then be
-    /// pure duplication that must be repeated for every resource added later.
+    /// That is deliberately stricter than any live path. Every enforcement point short-circuits on
+    /// the farm_admin role first: <c>PermissionAuthorizationHandler</c>, <c>HasPermission</c>,
+    /// SignalR hubs, the capability services, and — verified during review — both Desktop API-key
+    /// paths, where <c>DesktopScopePermissionMap.ResolveEffectiveScopes</c> tests
+    /// <c>isOwnerFarmAdmin</c> before <c>SetGrantsPermission</c> and
+    /// <c>UserApiKeysController.ValidateOwnerScopeAuthorizationAsync</c> authorizes a farm_admin
+    /// owner before it loads denies. So no production path depends on this rule for farm_admin.
+    ///
+    /// Asserting it anyway is the point: it proves the seeded rows are sufficient on their own
+    /// merits, independent of the bypass. The guarantee therefore survives the bypass being
+    /// narrowed or removed, and it pins the claim that the 17 missing rows are redundant rather
+    /// than merely masked by a role check. Seeding them would be duplication that must be repeated
+    /// for every resource added later.
     /// </summary>
     [Fact]
     public async Task SeededFarmAdminRows_SatisfyEveryEnforcedPermission_WithoutTheRoleBypass()

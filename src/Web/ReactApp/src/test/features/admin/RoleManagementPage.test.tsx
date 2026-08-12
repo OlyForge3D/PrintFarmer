@@ -546,10 +546,13 @@ describe('RoleManagementPage', () => {
     expect(within(customRow as HTMLElement).getByText('3')).toBeInTheDocument();
   });
 
-  it('renders the farm_admin permission pane as fully read-only, with every permission shown as granted', async () => {
-    // Regression: farm_admin is seeded only "{resource}:admin", so rendering raw grant rows
-    // showed every finer action as an unchecked "Not granted" toggle — directly contradicting
-    // the "implicit total access" notice on the same pane and reading as a lockout.
+  it('maps a granted permission to a checked, disabled toggle when the role is read-only', async () => {
+    // Scope note: this covers the CLIENT half only — that a 'Granted' status renders as a checked
+    // toggle, and that read-only fixes it on rather than off. It deliberately does NOT guard
+    // #1490, whose defect was server-side in RolePermissionService.BuildDto; the statuses below
+    // are mock input, so this test would still pass with that fix reverted. The regression itself
+    // is guarded by RolePermissionServiceTests
+    // .GetRolePermissionsAsync_FarmAdmin_ReportsEveryPermissionGrantedDespiteOnlyAdminRows.
     vi.mocked(apiClient.getRolePermissions).mockResolvedValue(
       buildRolePermissions({
         roleId: systemRole.id,
