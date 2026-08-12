@@ -3,6 +3,24 @@
 namespace Farm.Infrastructure.Services.Authentication;
 
 /// <summary>
+/// Scope/permission detail recorded alongside a successful Desktop API-key exchange.
+/// </summary>
+/// <param name="RequestedScopes">Canonical names of every scope stored on the exchanged key.</param>
+/// <param name="EffectiveScopes">Canonical names of the scopes that survived the live owner-authorization intersection.</param>
+/// <param name="DroppedScopes">Canonical names of the scopes removed because the owner no longer holds their permission.</param>
+/// <param name="GrantedPermissions">The permission claim values embedded in the issued token.</param>
+/// <remarks>
+/// Every field is derived from compile-time constants in
+/// <see cref="Farm.Infrastructure.Authorization.DesktopScopePermissionMap"/>. The raw API key, its
+/// hash, and the issued token are never included.
+/// </remarks>
+public sealed record ApiKeyExchangeScopeAudit(
+    IReadOnlyList<string> RequestedScopes,
+    IReadOnlyList<string> EffectiveScopes,
+    IReadOnlyList<string> DroppedScopes,
+    IReadOnlyList<string> GrantedPermissions);
+
+/// <summary>
 /// Service for logging authentication and authorization events for security audit trail
 /// </summary>
 public interface IAuthAuditService
@@ -126,9 +144,13 @@ public interface IAuthAuditService
     /// <param name="apiKeyId">The unique identifier of the API key that was exchanged.</param>
     /// <param name="ipAddress">The IP address from which the exchange occurred.</param>
     /// <param name="userAgent">The user agent string of the client application.</param>
+    /// <param name="scopeAudit">
+    /// Optional scope/permission detail for the exchange. Contains only canonical scope names and
+    /// permission values - never the raw key, its hash, or the issued token.
+    /// </param>
     /// <param name="correlationId">Optional correlation identifier for request tracing.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, string? correlationId = null, CancellationToken cancellationToken = default);
+    Task LogApiKeyExchangeAsync(Guid userId, Guid apiKeyId, string? ipAddress, string? userAgent, ApiKeyExchangeScopeAudit? scopeAudit = null, string? correlationId = null, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Log a failed Desktop API key exchange attempt. The reason is a safe, generic
