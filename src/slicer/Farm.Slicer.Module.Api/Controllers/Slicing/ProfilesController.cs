@@ -1240,7 +1240,14 @@ public class ProfilesController(
     /// </summary>
     /// <param name="request">Clone request with source profile ID and type.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// Requires an interactive session: this controller is class-gated by the broad
+    /// <c>slicing:submit</c> permission, which a Desktop-exchange token legitimately holds in order
+    /// to submit calibration slice jobs. Profile-state mutation is not part of that intent, so
+    /// exchange tokens are denied here while normal sessions are unaffected.
+    /// </remarks>
     [HttpPost("clone")]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CloneSingleProfileResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1282,7 +1289,9 @@ public class ProfilesController(
     /// </summary>
     /// <param name="request">Upload request with raw JSON and profile type.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>.</remarks>
     [HttpPost("upload")]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadCustomProfileAsync(
@@ -1341,7 +1350,9 @@ public class ProfilesController(
     /// <param name="id">ID of the custom profile to update.</param>
     /// <param name="request">Update request with optional new values.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>.</remarks>
     [HttpPut("custom/{id:guid}")]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

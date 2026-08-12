@@ -289,6 +289,69 @@ final class APIClientTests: XCTestCase {
         XCTAssertNotNil(captured?.capturedHTTPBody())
     }
 
+    func testLoginResponseDecodesTimezoneBearingFractionalTimestamps() async throws {
+        mockAPIClient.stubResponse(json: """
+        {
+            "success": true,
+            "token": "test-token",
+            "expiresAt": "2026-08-19T04:37:44.138661Z",
+            "user": {
+                "id": "aab2c3d4-e5f6-7890-abcd-ef1234567890",
+                "username": "admin",
+                "email": "admin@printfarmer.local",
+                "firstName": "Admin",
+                "lastName": "User",
+                "isActive": true,
+                "emailConfirmed": true,
+                "lastLogin": "2026-08-12T04:37:44.138661Z",
+                "createdAt": "2026-08-01T01:02:03.456789Z",
+                "roles": ["farm_admin"],
+                "permissions": []
+            }
+        }
+        """)
+
+        let request = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
+        let response: AuthResponse = try await apiClient.post("/api/auth/login", body: request)
+        let user = try XCTUnwrap(response.user)
+        let lastLogin = try XCTUnwrap(user.lastLogin)
+        let expiresAt = try XCTUnwrap(response.expiresAt)
+
+        XCTAssertEqual(
+            user.createdAt.timeIntervalSince1970,
+            1_785_546_123.456,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            lastLogin.timeIntervalSince1970,
+            1_786_509_464.138,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            expiresAt.timeIntervalSince1970,
+            1_787_114_264.138,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testLoginResponseRejectsTimezoneLessCreatedAt() async {
+        let response = TestJSON.authResponseSuccess.replacingOccurrences(
+            of: #""createdAt": "2025-01-01T00:00:00Z""#,
+            with: #""createdAt": "2025-01-01T00:00:00""#
+        )
+        mockAPIClient.stubResponse(json: response)
+
+        do {
+            let request = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
+            let _: AuthResponse = try await apiClient.post("/api/auth/login", body: request)
+            XCTFail("Expected timezone-less createdAt to be rejected")
+        } catch NetworkError.decodingFailed {
+            // Expected.
+        } catch {
+            XCTFail("Expected .decodingFailed, got \(error)")
+        }
+    }
+
     func testPostVoidRequestUsesCorrectMethod() async throws {
         mockAPIClient.stubEmptySuccess()
 

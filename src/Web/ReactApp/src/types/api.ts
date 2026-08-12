@@ -3801,6 +3801,152 @@ export interface RoleDto {
   permissions?: PermissionDto[];
 }
 
+// ============ Role Management Types (#1455) ============
+// Mirrors Farm.Infrastructure.Contracts.Roles.RoleSummaryDto / RoleDetailDto and
+// Farm.Infrastructure.Dtos.{PermissionCatalogDto,RolePermissionsDto} exactly (camelCase).
+
+/** Summary view of a role for list endpoints. `GET /api/admin/roles`. */
+export interface RoleSummary {
+  id: string;
+  name: string;
+  displayName: string;
+  description?: string;
+  isSystemRole: boolean;
+  isActive: boolean;
+  memberCount: number;
+  permissionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Full detail view of a single role, including its resolved permission grants. */
+export interface RoleDetail extends RoleSummary {
+  permissions: PermissionDto[];
+}
+
+/** Minimal permission shape used inside `RoleDetail.permissions`. */
+export interface PermissionDto {
+  resource: string;
+  action: string;
+  permission: string;
+}
+
+/** Request to create a new custom role. `POST /api/admin/roles`. */
+export interface CreateCustomRoleRequest {
+  /** Immutable slug, must match `^[a-z][a-z0-9_]{2,49}$`, unique, no `farm_` prefix. */
+  name: string;
+  displayName: string;
+  description?: string;
+  /** Initial permissions in `resource:action` format. Ignored if `copyFromRoleId` is set. */
+  permissions?: string[];
+  /** Clone an existing role's permission set instead of using `permissions`. */
+  copyFromRoleId?: string;
+}
+
+/** Request to update an existing role. `PUT /api/admin/roles/{id}`. Name is immutable. */
+export interface UpdateCustomRoleRequest {
+  /** Optional echo-check only — a mismatch against the current name is rejected. */
+  name?: string;
+  displayName?: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+/** 409 response body when deleting a role that still has members. */
+export interface RoleHasMembersError {
+  error: string;
+  memberCount: number;
+}
+
+/** Tri-state grant status of a single permission for a single role. */
+export type RolePermissionGrantStatus = 'Absent' | 'Granted' | 'Denied';
+
+/** A single HTTP route gated by a permission. */
+export interface PermissionRoute {
+  method: string;
+  template: string;
+}
+
+/** A single enforced `resource:action` permission and the routes it gates. */
+export interface PermissionCatalogEntry {
+  resource: string;
+  action: string;
+  permission: string;
+  actionDisplayName?: string;
+  actionDescription?: string;
+  /** Whether `{resource}:admin` subsumes this permission. Always false for `admin` itself. */
+  impliedByAdmin: boolean;
+  routes: PermissionRoute[];
+}
+
+/** A single resource and the enforced permissions gating operations on it. */
+export interface PermissionResourceGroup {
+  resource: string;
+  displayName?: string;
+  description?: string;
+  permissions: PermissionCatalogEntry[];
+}
+
+/** A resource/action row present in the DB catalog with no enforcing endpoint. */
+export interface OrphanedPermissionEntry {
+  resource: string;
+  action: string;
+  permission: string;
+  resourceDisplayName?: string;
+  actionDisplayName?: string;
+}
+
+/** Full enforced-permission catalog. `GET /api/admin/permissions/catalog`. */
+export interface PermissionCatalog {
+  generatedAt: string;
+  resources: PermissionResourceGroup[];
+  orphanedCatalogEntries: OrphanedPermissionEntry[];
+}
+
+/** A single enforced permission and this role's grant status for it. */
+export interface RolePermissionEntry {
+  resource: string;
+  action: string;
+  permission: string;
+  actionDisplayName?: string;
+  actionDescription?: string;
+  impliedByAdmin: boolean;
+  status: RolePermissionGrantStatus;
+}
+
+/** A single resource and this role's grant status for each permission gating it. */
+export interface RolePermissionResourceGroup {
+  resource: string;
+  displayName?: string;
+  description?: string;
+  permissions: RolePermissionEntry[];
+}
+
+/** A role's current permission grants joined against the derived catalog. */
+export interface RolePermissions {
+  roleId: string;
+  roleName: string;
+  roleDisplayName: string;
+  isSystemRole: boolean;
+  /** False only for `farm_admin`, whose access is implicit and cannot be edited. */
+  isEditable: boolean;
+  /** Optimistic concurrency token — echo back on `PUT`; a mismatch returns 409. */
+  updatedAt: string;
+  resources: RolePermissionResourceGroup[];
+}
+
+/** Full-replacement request body for `PUT /api/admin/roles/{id}/permissions`. */
+export interface UpdateRolePermissionsRequest {
+  updatedAt: string;
+  permissions: string[];
+}
+
+/** Response for a successful role-permissions update. */
+export interface UpdateRolePermissionsResponse {
+  role: RolePermissions;
+  revokedSessionCount: number;
+}
+
 // ============ Bed Type Types ============
 
 /**

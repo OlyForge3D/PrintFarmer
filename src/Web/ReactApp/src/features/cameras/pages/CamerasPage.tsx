@@ -43,7 +43,9 @@ export function CamerasPage({ embedded = false }: EmbeddablePageProps) {
   const [isDeletingCamera, setIsDeletingCamera] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
-  const canManageCameras = auth.hasRole('farm_admin');
+  // Matches the CamerasController manage endpoints' `[RequirePermission("cameras", "admin")]`
+  // and the `hw-cameras` adminDestinations.ts entry (#1457).
+  const canManageCameras = auth.hasPermission('cameras', 'admin');
   const activeTab = useMemo<'view' | 'manage'>(() => {
     const requestedTab = searchParams.get('cameraTab');
     if (requestedTab === 'manage' && canManageCameras) return 'manage';

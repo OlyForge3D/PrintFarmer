@@ -209,13 +209,14 @@ function UsageMeter({ label, value, details, icon }: UsageMeterProps) {
 }
 
 export function SystemPulsePill({ onClick, className, compact = false }: SystemPulsePillProps = {}) {
-  const { hasRole } = useAuth();
+  const { hasPermission } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const dialogTitleId = useId();
   const dialogId = useId();
-  const isFarmAdmin = hasRole('farm_admin');
+  // Backed by SystemInfoController, `[RequirePermission("system_settings", "admin")]` (#1457).
+  const isFarmAdmin = hasPermission('system_settings', 'admin');
   const usesExternalAction = typeof onClick === 'function';
 
   const { data, error } = useQuery({

@@ -580,10 +580,20 @@ public class AuthenticationService(
             LastName = user.LastName,
             IsActive = user.IsActive,
             EmailConfirmed = user.EmailConfirmed,
-            LastLogin = user.LastLogin,
-            CreatedAt = user.CreatedAt,
+            LastLogin = NormalizeUtc(user.LastLogin),
+            CreatedAt = NormalizeUtc(user.CreatedAt),
             Roles = roles.ToList(),
             Permissions = permissions.ToList()
         };
     }
+
+    private static DateTime NormalizeUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
+
+    private static DateTime? NormalizeUtc(DateTime? value) =>
+        value.HasValue ? NormalizeUtc(value.Value) : null;
 }

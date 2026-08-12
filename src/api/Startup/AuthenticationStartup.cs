@@ -153,12 +153,22 @@ public static class AuthenticationStartup
                 _ = policy.RequireAuthenticatedUser();
                 _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
             });
+
+            // Credential management must come from a real interactive session: a Desktop-exchange
+            // token is a short-lived scoped bearer credential and must never be usable to mint a
+            // long-lived API key. Normal login/session principals are unaffected.
+            options.AddPolicy(InteractiveSessionRequirement.PolicyName, policy =>
+            {
+                _ = policy.RequireAuthenticatedUser();
+                _ = policy.AddRequirements(new InteractiveSessionRequirement());
+            });
         });
 
         // Register authorization handlers
         services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DevModeAuthorizationHandler>();
         services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, InteractiveSessionAuthorizationHandler>();
         services.AddSingleton<IAuthorizationMiddlewareResultHandler, AuthorizationProblemDetailsResultHandler>();
 
         return services;
