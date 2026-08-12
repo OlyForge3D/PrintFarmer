@@ -145,7 +145,17 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   // unrelated metadata edit invalidating this query) must not clobber unsaved matrix
   // edits, so only force-sync when the role actually changed; otherwise skip syncing
   // while the admin has unsaved changes.
+  //
+  // Skipping the sync means `rolePermissionsQuery.data` can advance to a newer
+  // `updatedAt` (fetched in the background) while `grantState` is still built from an
+  // older snapshot. If the save mutation read the concurrency token straight off the
+  // live query data, it would silently send the *newer* token together with the
+  // *stale* working values, masking a genuine conflict instead of tripping the 409
+  // path. `syncedBaselineRef` pins the save's concurrency token to the exact snapshot
+  // `grantState` was last synced from, so a save always reflects what the admin
+  // actually saw and edited.
   const lastSyncedRoleIdRef = useRef<string | null>(null);
+  const syncedBaselineRef = useRef<RolePermissions | null>(null);
   useEffect(() => {
     if (!rolePermissionsQuery.data) return;
     const isNewRole = lastSyncedRoleIdRef.current !== rolePermissionsQuery.data.roleId;
@@ -154,6 +164,7 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
       setConcurrencyConflict(null);
       setLockoutViolation(null);
       lastSyncedRoleIdRef.current = rolePermissionsQuery.data.roleId;
+      syncedBaselineRef.current = rolePermissionsQuery.data;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rolePermissionsQuery.data]);
@@ -325,12 +336,17 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   const savePermissionsMutation = useMutation({
     mutationFn: () => {
-      if (!rolePermissions) throw new Error('No role selected.');
+      // Use the pinned baseline the working set was synced from, not the live query
+      // data — a background refetch of the same role may have advanced `updatedAt`
+      // past what `grantState` was actually built from while edits were dirty (see the
+      // sync effect above). Sending the live token would mask a genuine conflict.
+      const baseline = syncedBaselineRef.current;
+      if (!baseline) throw new Error('No role selected.');
       const permissions = Object.entries(grantState.values)
         .filter(([, granted]) => granted)
         .map(([permission]) => permission);
-      return apiClient.updateRolePermissions(rolePermissions.roleId, {
-        updatedAt: rolePermissions.updatedAt,
+      return apiClient.updateRolePermissions(baseline.roleId, {
+        updatedAt: baseline.updatedAt,
         permissions,
       });
     },
