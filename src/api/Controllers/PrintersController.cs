@@ -839,7 +839,7 @@ public class PrintersController(
     [ProducesResponseType(200)]
     [ProducesResponseType(400)]
     [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> ImportFromFileAsync(
         [FromForm] IFormFile file,
         [FromQuery] string? duplicateHandling = "skip",
@@ -4728,7 +4728,7 @@ public class PrintersController(
     [HttpGet("export")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
     [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> ExportPrintersAsync(CancellationToken ct)
     {
         byte[] bytes = await _printersService.BuildExportCsvAsync(null, ct);
@@ -4745,7 +4745,7 @@ public class PrintersController(
     [HttpPost("export")]
     [ProducesResponseType(typeof(PrinterWithCapabilitiesDto[]), 200)]
     [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> ExportPrintersByIdsAsync([FromBody] Guid[]? ids, CancellationToken ct)
     {
         try
@@ -4770,7 +4770,7 @@ public class PrintersController(
     [HttpPost("export/file")]
     [ProducesResponseType(200)]
     [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> StreamExportAsync([FromBody] Guid[]? ids, [FromQuery] string format = "csv", CancellationToken ct = default)
     {
         try
@@ -4831,7 +4831,7 @@ public class PrintersController(
     [ProducesResponseType(typeof(object), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    [Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> GetPrinterConfigAsync(Guid id, CancellationToken ct)
     {
         try
@@ -4901,7 +4901,7 @@ public class PrintersController(
     [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    [Microsoft.AspNetCore.Authorization.Authorize(Policy = "farm_admin")]
+    [RequirePermission("printers", "admin")]
     public async Task<IActionResult> UpdatePrinterConfigAsync(
         Guid id,
         [FromBody] object? config,

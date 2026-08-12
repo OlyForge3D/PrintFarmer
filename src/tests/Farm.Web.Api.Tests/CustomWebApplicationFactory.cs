@@ -451,7 +451,10 @@ public class CustomWebApplicationFactory : WebApplicationFactory<Program>, IAsyn
 
     /// <summary>
     /// Creates an authenticated HTTP client with farm_admin role.
-    /// Use for testing endpoints that require [Authorize(Policy = "farm_admin")].
+    /// Use for testing endpoints that require admin-only [RequirePermission(resource, "admin")]
+    /// gates — the farm_admin role satisfies every permission check via
+    /// PrintFarmerPermissions.IsFarmAdmin, so this remains valid after issue #1467 removed the
+    /// role-backed "farm_admin"/"RequireAdmin" policy aliases those endpoints used to reference.
     /// </summary>
     public async Task<HttpClient> CreateAdminClientAsync(
         string username = "test-admin",

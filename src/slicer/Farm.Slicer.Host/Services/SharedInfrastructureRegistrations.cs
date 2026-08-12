@@ -2,10 +2,12 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Normalization;
+using Farm.Infrastructure.Repositories.Authentication;
 using Farm.Infrastructure.Repositories.Catalog;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Repositories.Tags;
 using Farm.Infrastructure.Repositories.UnitOfWork;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Infrastructure.Services.Catalog;
 using Farm.Infrastructure.Services.Catalog.Caching;
 using Farm.Infrastructure.Services.FileManagement;
@@ -47,6 +49,7 @@ public static class SharedInfrastructureRegistrations
         AddFileServices(services);
         AddCatalogServices(services);
         AddSettingsAndAliasServices(services);
+        AddTokenRevocationServices(services);
 
         return services;
     }
@@ -155,6 +158,34 @@ public static class SharedInfrastructureRegistrations
             return opts;
         });
         services.AddSingleton<Farm.Infrastructure.Services.RateLimiting.IRateLimitService, InMemoryRateLimitService>();
+    }
+
+    /// <summary>
+    /// Registers the dependency chain <see cref="ITokenRevocationService"/> needs so the JWT
+    /// bearer pipeline in this host can honour forced token revocation (#1469). The naive fix
+    /// attempted in #1460 was reverted because this chain was never registered here - resolving
+    /// <see cref="ITokenRevocationService"/> with <c>GetService</c> silently returned null and the
+    /// revocation check no-oped. Callers here (and in <c>Program.cs</c>) must resolve with
+    /// <c>GetRequiredService</c> so a future regression fails loudly instead of silently.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="TokenRevocationService"/> is registered under its own concrete type so
+    /// <see cref="CachingTokenRevocationService"/> can wrap it; only the wrapped
+    /// <see cref="ITokenRevocationService"/> is resolvable by consumers. The cache requires
+    /// <see cref="IMemoryCache"/>, which <c>AddCrossDomainLookupServices</c> already registers in
+    /// this host - <c>AddMemoryCache</c> is idempotent, so registering it again here keeps this
+    /// method self-contained regardless of call order.
+    /// </remarks>
+    private static void AddTokenRevocationServices(IServiceCollection services)
+    {
+        services.AddMemoryCache();
+
+        services.AddScoped<IAuthAuditLogRepository, EfAuthAuditLogRepository>();
+        services.AddScoped<IAuthAuditService, AuthAuditService>();
+        services.AddScoped<TokenRevocationService>();
+        services.AddScoped<ITokenRevocationService>(sp => new CachingTokenRevocationService(
+            sp.GetRequiredService<TokenRevocationService>(),
+            sp.GetRequiredService<IMemoryCache>()));
     }
 
     /// <summary>

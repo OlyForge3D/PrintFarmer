@@ -5,12 +5,12 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Controllers;
 using Farm.Web.Api.Services;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -63,13 +63,17 @@ public class SpoolmanControllerTests
     [InlineData(nameof(SpoolmanController.ScanNetworkAsync))]
     public void PrivilegedNetworkAndConfigurationActions_RequireAdmin(string methodName)
     {
-        AuthorizeAttribute attribute = Assert.Single(
+        // Issue #1467: these actions used to be gated by the "RequireAdmin" role-backed policy
+        // alias; migrated to [RequirePermission("spoolman", "admin")] like the other admin-only
+        // gates in this controller.
+        RequirePermissionAttribute attribute = Assert.Single(
             typeof(SpoolmanController)
                 .GetMethod(methodName)!
-                .GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true)
-                .Cast<AuthorizeAttribute>());
+                .GetCustomAttributes(typeof(RequirePermissionAttribute), inherit: true)
+                .Cast<RequirePermissionAttribute>());
 
-        Assert.Equal("RequireAdmin", attribute.Policy);
+        Assert.Equal("spoolman", attribute.Resource);
+        Assert.Equal("admin", attribute.Action);
     }
 
     [Fact]

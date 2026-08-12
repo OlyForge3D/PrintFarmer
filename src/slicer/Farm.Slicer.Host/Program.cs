@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.PrinterCalibration;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -68,47 +69,44 @@ builder.Services
 
                 return Task.CompletedTask;
             },
+
+            // Checks whether the caller's token has been force-revoked (e.g. admin "revoke all
+            // tokens"). Resolved with GetRequiredService (never GetService) so that if the
+            // dependency chain registered by AddTokenRevocationServices below is ever broken, this
+            // fails loudly instead of silently no-oping as the reverted #1460 attempt did.
+            // ITokenRevocationService wraps this check in a short-TTL cache (#1469) so this does
+            // not add a database round-trip to every request, including streamed /api/artifacts
+            // downloads and /hubs/slicer SignalR traffic.
+            OnTokenValidated = async context =>
+            {
+                string? token = context.SecurityToken is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt
+                    ? jwt.EncodedToken
+                    : null;
+                if (string.IsNullOrEmpty(token))
+                {
+                    return;
+                }
+
+                ITokenRevocationService tokenRevocationService =
+                    context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+                bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token, context.HttpContext.RequestAborted);
+                if (isRevoked)
+                {
+                    context.Fail("This token has been revoked.");
+                }
+            },
         };
     });
 
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy("farm_admin", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.RequireRole("farm_admin");
-    });
-
-    // Desktop exchange tokens remain scope-gated; regular JWTs pass these policies.
-    options.AddPolicy("ModelRead", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelRead"));
-    });
-    options.AddPolicy("ModelWrite", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("ModelWrite"));
-    });
-    options.AddPolicy("LibrarySync", policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
-    });
-
-    // Profile-state mutations require an interactive session. slicing:submit is a broad
-    // class-level permission on ProfilesController, so a Desktop-exchange token issued for
-    // calibration generation would otherwise also be able to upload, clone, and edit custom
-    // profiles. Normal login/session principals - and the standalone-mode admin principal -
-    // are unaffected.
-    options.AddPolicy(InteractiveSessionRequirement.PolicyName, policy =>
-    {
-        _ = policy.RequireAuthenticatedUser();
-        _ = policy.AddRequirements(new InteractiveSessionRequirement());
-    });
-});
-builder.Services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
-builder.Services.AddSingleton<IAuthorizationHandler, InteractiveSessionAuthorizationHandler>();
+// NOTE: A "farm_admin" role-backed policy alias (policy.RequireRole("farm_admin")) used to be
+// registered here for ProfilesController. Issue #1467 migrated every
+// [Authorize(Policy = "farm_admin")] site in this host to [RequirePermission(...)] and removed
+// the alias; do not reintroduce a policy that resolves to RequireRole(...) here.
+//
+// Extracted to AddSlicerHostAuthorization (Farm.Slicer.Module.Api) so
+// AuthorizeRolesGateArchitectureTests can build the exact same AuthorizationOptions this host
+// uses without spinning up the full web application.
+builder.Services.AddSlicerHostAuthorization();
 
 // Required so SlicerHub's [RequirePermission] (Farm.Infrastructure.Authorization) requirements
 // are actually evaluated in this standalone host. Without a registered handler, ASP.NET Core
@@ -176,6 +174,17 @@ using (IServiceScope scope = app.Services.CreateScope())
             $"Slicer:PluginsPath={pluginsPath}. Ensure the container image includes " +
             "Farm.Slicers.OrcaSlicer.v2_4_0.dll / v2_3_1.dll in the plugins directory.");
     }
+}
+
+// ── Token revocation dependency check (issue #1469) ───────────────────────────
+// The naive fix attempted in #1460 was reverted because ITokenRevocationService was never
+// registered in this host: resolving it with GetService returned null and the OnTokenValidated
+// check silently no-oped, so a "revoke all tokens" action never took effect on this host. Fail
+// fast at startup with GetRequiredService so a future regression to that dependency chain crashes
+// the host instead of silently disabling the revocation check again.
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    _ = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
 }
 
 app.UseCors();
