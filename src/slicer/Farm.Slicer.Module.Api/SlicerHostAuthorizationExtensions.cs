@@ -15,7 +15,8 @@ public static class SlicerHostAuthorizationExtensions
 {
     /// <summary>
     /// Adds the slicer host's non-authentication-dependent authorization policies: the Desktop
-    /// API-key exchange scope policies (issue #838). Does not register JWT bearer
+    /// API-key exchange scope policies (issue #838) and the interactive-session gate (issue
+    /// #1470-adjacent InteractiveSessionRequirement). Does not register JWT bearer
     /// authentication — callers that need real authentication should still call
     /// <c>AddAuthentication().AddJwtBearer(...)</c> separately, as <c>Farm.Slicer.Host/Program.cs</c>
     /// does.
@@ -40,8 +41,20 @@ public static class SlicerHostAuthorizationExtensions
                 _ = policy.RequireAuthenticatedUser();
                 _ = policy.AddRequirements(new DesktopScopeRequirement("LibrarySync"));
             });
+
+            // Profile-state mutations require an interactive session. slicing:submit is a broad
+            // class-level permission on ProfilesController, so a Desktop-exchange token issued
+            // for calibration generation would otherwise also be able to upload, clone, and edit
+            // custom profiles. Normal login/session principals - and the standalone-mode admin
+            // principal - are unaffected.
+            options.AddPolicy(InteractiveSessionRequirement.PolicyName, policy =>
+            {
+                _ = policy.RequireAuthenticatedUser();
+                _ = policy.AddRequirements(new InteractiveSessionRequirement());
+            });
         });
         services.AddSingleton<IAuthorizationHandler, DesktopScopeAuthorizationHandler>();
+        services.AddSingleton<IAuthorizationHandler, InteractiveSessionAuthorizationHandler>();
 
         return services;
     }
