@@ -14,6 +14,18 @@ namespace Farm.Web.Api.Tests.Security;
 
 public sealed class PermissionSeedTests
 {
+    /// <summary>
+    /// The two CalibrationFoundation permissions deliberately excluded from farm_user's default
+    /// grants: both gate unscoped, farm-wide administrative actions (see
+    /// PermissionGrantPathTests.AdminOnlyAllowlist for the full written rationale) and remain
+    /// farm_admin-only by design.
+    /// </summary>
+    private static readonly HashSet<string> DeliberatelyAdminOnly = new(StringComparer.Ordinal)
+    {
+        PrintFarmerPermissions.Queue.Reconcile,
+        PrintFarmerPermissions.DispatchSettings.Manage,
+    };
+
     [Fact]
     public async Task SeedAllAsync_SeedsCalibrationPermissionsIdempotently()
     {
@@ -96,15 +108,9 @@ public sealed class PermissionSeedTests
             .Select(permission => permission.Resource.Name + ":" + permission.Action.Name)
             .ToListAsync();
 
-        HashSet<string> deliberatelyAdminOnly = new(StringComparer.Ordinal)
-        {
-            PrintFarmerPermissions.Queue.Reconcile,
-            PrintFarmerPermissions.DispatchSettings.Manage,
-        };
-
         foreach (string permission in PrintFarmerPermissions.CalibrationFoundation)
         {
-            if (deliberatelyAdminOnly.Contains(permission))
+            if (DeliberatelyAdminOnly.Contains(permission))
             {
                 _ = farmUserGrantedPermissions.Should().NotContain(
                     permission,
@@ -215,14 +221,9 @@ public sealed class PermissionSeedTests
         // ...and every non-admin-only CalibrationFoundation permission was re-added by the
         // additive reseed, proving this isn't merely idempotent-from-empty but genuinely
         // additive against a stale pre-existing deployment.
-        HashSet<string> deliberatelyAdminOnlyForUpgrade = new(StringComparer.Ordinal)
-        {
-            PrintFarmerPermissions.Queue.Reconcile,
-            PrintFarmerPermissions.DispatchSettings.Manage,
-        };
         foreach (string permission in PrintFarmerPermissions.CalibrationFoundation)
         {
-            if (deliberatelyAdminOnlyForUpgrade.Contains(permission))
+            if (DeliberatelyAdminOnly.Contains(permission))
             {
                 continue;
             }

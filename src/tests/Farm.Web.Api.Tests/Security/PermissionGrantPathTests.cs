@@ -161,11 +161,13 @@ public sealed class PermissionGrantPathTests
 
         // Joint satisfiability: for every member (class or method) gated by more than one
         // [RequirePermission], confirm a single non-admin role can hold every permission in the
-        // group at once (exact match or resource-admin per permission), or that every permission
-        // in the group is individually allowlisted admin-only (so the whole member is, correctly,
-        // farm_admin-only). A mix of "some reachable by farm_user, one allowlisted admin-only"
-        // makes the member unreachable by any non-admin role even though each permission looks
-        // fine in isolation.
+        // group at once, or that every permission in the group is individually admin-action or
+        // allowlisted admin-only (so the whole member is, correctly, farm_admin-only). A mixed
+        // group — some permissions reachable by farm_user, one that is admin-action or
+        // allowlisted admin-only — makes the member unreachable by any non-admin role even
+        // though each permission looks fine in isolation, so it must NOT be treated as
+        // satisfied: the per-permission check below deliberately does not special-case
+        // admin-action or the allowlist, only real non-admin RolePermission rows count.
         foreach (IGrouping<string, PermissionSite> group in sites.GroupBy(site => site.Member, StringComparer.Ordinal))
         {
             (string Resource, string Action)[] permissions = group
@@ -191,11 +193,9 @@ public sealed class PermissionGrantPathTests
                 .Select(row => row.RoleId)
                 .Distinct()
                 .Any(roleId => permissions.All(p =>
-                    string.Equals(p.Action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal)
-                    || nonAdminRoleGrantRows.Any(row => row.RoleId == roleId
+                    nonAdminRoleGrantRows.Any(row => row.RoleId == roleId
                         && row.Resource == p.Resource
-                        && (row.Action == p.Action || row.Action == PrintFarmerPermissions.AdminAction))
-                    || AdminOnlyAllowlist.ContainsKey($"{p.Resource}:{p.Action}")));
+                        && (row.Action == p.Action || row.Action == PrintFarmerPermissions.AdminAction))));
 
             if (!satisfiableBySingleRole)
             {
