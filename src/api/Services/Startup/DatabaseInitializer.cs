@@ -391,11 +391,20 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
 
                 // Issue #1453: #945 added the calibration/queue/slicing resources, their
                 // actions, and [RequirePermission] attributes, but never extended this list —
-                // leaving 15 permissions enforceable in code but unreachable by any role except
-                // via the farm_admin bypass. Reconciled against
-                // PrintFarmerPermissions.CalibrationFoundation, which is the single source of
-                // truth for this permission set. Purely additive: existing deployments only
-                // gain these grants for farm_user, never lose any.
+                // leaving permissions enforceable in code but unreachable by any role except via
+                // the farm_admin bypass. Reconciled against
+                // PrintFarmerPermissions.CalibrationFoundation, the single source of truth for
+                // this permission set. Purely additive: existing deployments only gain these
+                // grants for farm_user, never lose any.
+                //
+                // "queue:reconcile" and "dispatch-settings:manage" are deliberately NOT granted
+                // here: reviewer feedback (issue #1453 PR discussion) flagged both as farm-wide,
+                // unscoped administrative actions with no per-printer/per-group authorization —
+                // "queue:reconcile" triggers a farm-wide orphaned-job sync
+                // (JobQueueController.SyncOrphanedJobsAsync) and "dispatch-settings:manage" gates
+                // the singleton system-wide auto-dispatch configuration
+                // (DispatchSettingsController). Both remain farm_admin-only by design and are
+                // documented in PermissionGrantPathTests.AdminOnlyAllowlist.
                 ("calibration", "create"),
                 ("calibration", "read"),
                 ("calibration", "update"),
@@ -407,11 +416,9 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 ("queue", "start"),
                 ("queue", "cancel"),
                 ("queue", "acknowledge-bed-clear"),
-                ("queue", "reconcile"),
                 ("slicing", "submit"),
                 ("slicing", "read-artifact"),
                 ("slicing", "promote"),
-                ("dispatch-settings", "manage"),
             };
             foreach ((string? resourceName, string? actionName) in userPermissions)
             {

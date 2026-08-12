@@ -19,7 +19,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// #945 added the <c>calibration</c>/<c>queue</c>/<c>slicing</c> resources, their actions, and
 /// the corresponding <c>[RequirePermission]</c> attributes, but never extended <c>farm_user</c>'s
 /// seeded grants (<see cref="DatabaseInitializer"/>'s <c>SeedRolePermissionsAsync</c>). The result
-/// was 15 permissions enforceable in code with zero role able to ever hold them — reachable only
+/// was permissions enforceable in code with zero role able to ever hold them — reachable only
 /// through the <c>farm_admin</c> role's blanket bypass (<see cref="PrintFarmerPermissions.IsFarmAdmin"/>),
 /// which is not a grant path. No test or startup check noticed.
 ///
@@ -38,9 +38,17 @@ namespace Farm.Web.Api.Tests.Security;
 /// non-admin grant path" requirement: <c>SeedRolePermissionsAsync</c> grants <c>farm_admin</c> the
 /// <c>admin</c> action on every seeded resource by design (that is what makes farm_admin an
 /// administrator), so every <c>resource:admin</c> permission is trivially reachable through that
-/// role's ordinary — not bypass — grants. This test still asserts the resource itself is a known
-/// seeded <see cref="Resource"/>, so a typo'd resource name on an admin-only endpoint (which would
-/// silently fail to receive the blanket grant) is still caught.
+/// role's ordinary — not bypass — grants.
+///
+/// Every enforced permission — including allowlisted ones — must still name a real seeded
+/// <see cref="Resource"/>, so a typo'd resource name (which would silently fail to receive even
+/// the farm_admin blanket grant) is always caught, regardless of whether the permission is
+/// otherwise expected to be admin-only.
+///
+/// This also verifies joint satisfiability: ASP.NET Core combines multiple
+/// <c>[RequirePermission]</c> attributes declared on the same class/method with AND semantics, so
+/// a member gated by two permissions is only actually usable if a single role can hold both
+/// simultaneously — reachability of each permission individually is not sufficient.
 /// </summary>
 public sealed class PermissionGrantPathTests
 {
@@ -55,6 +63,16 @@ public sealed class PermissionGrantPathTests
             "Managing the Obico ML failure-detection integration (server credentials, " +
             "connectivity probes) is an administrative surface by design; see " +
             "PrintFarmerPermissions.Integrations.ManageObico's own doc comment.",
+
+        [PrintFarmerPermissions.Queue.Reconcile] =
+            "Triggers a farm-wide orphaned-job sync (JobQueueController.SyncOrphanedJobsAsync) " +
+            "with no per-printer/per-group authorization scoping — reviewed and deliberately " +
+            "kept farm_admin-only during issue #1453's grant-path reconciliation.",
+
+        [PrintFarmerPermissions.DispatchSettings.Manage] =
+            "Gates the singleton, system-wide auto-dispatch configuration " +
+            "(DispatchSettingsController) with no per-printer/per-group scoping — reviewed and " +
+            "deliberately kept farm_admin-only during issue #1453's grant-path reconciliation.",
     };
 
     private static readonly Assembly[] ScannedAssemblies =
@@ -67,8 +85,11 @@ public sealed class PermissionGrantPathTests
     [Fact]
     public async Task EveryEnforcedPermission_HasAGrantPathOrDocumentedAllowlistEntry()
     {
-        HashSet<(string Resource, string Action)> enforced = DiscoverEnforcedPermissions();
-        enforced.Should().NotBeEmpty("the scanned assemblies are expected to contain live [RequirePermission] attributes");
+        List<PermissionSite> sites = DiscoverEnforcedPermissionSites();
+        sites.Should().NotBeEmpty("the scanned assemblies are expected to contain live [RequirePermission] attributes");
+
+        HashSet<(string Resource, string Action)> enforced = new(
+            sites.Select(site => (site.Resource, site.Action)));
 
         await using SqliteConnection connection = new("Data Source=:memory:");
         await connection.OpenAsync();
@@ -93,31 +114,38 @@ public sealed class PermissionGrantPathTests
             .Select(role => role.Id)
             .SingleAsync();
 
-        // Every (resource, action) granted, for any *non-admin* role. A row here is a real grant
-        // path: some role other than farm_admin's blanket bypass can hold it.
-        HashSet<(string Resource, string Action)> nonAdminRoleGrants = new(
+        // Every (resource, action) granted, per non-admin role. Grouped by role so joint
+        // satisfiability (below) can ask "can any *single* role hold this whole set?" rather than
+        // "is each permission reachable by *some* role, possibly a different one for each".
+        List<(Guid RoleId, string Resource, string Action)> nonAdminRoleGrantRows =
             (await context.RolePermissions
                 .Where(rp => rp.RoleId != adminRoleId && rp.Granted)
-                .Select(rp => new { rp.Resource.Name, ActionName = rp.Action.Name })
+                .Select(rp => new { rp.RoleId, rp.Resource.Name, ActionName = rp.Action.Name })
                 .ToListAsync())
-                .Select(x => (x.Name, x.ActionName)));
+                .Select(x => (x.RoleId, x.Name, x.ActionName))
+                .ToList();
+
+        HashSet<(string Resource, string Action)> nonAdminRoleGrants = new(
+            nonAdminRoleGrantRows.Select(row => (row.Resource, row.Action)));
 
         List<string> missingGrantPath = [];
         List<string> unknownResource = [];
+        List<string> unsatisfiableCombinations = [];
 
         foreach ((string resource, string action) in enforced)
         {
             string permission = $"{resource}:{action}";
 
+            if (!seededResourceNames.Contains(resource))
+            {
+                unknownResource.Add(permission);
+            }
+
             if (string.Equals(action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal))
             {
                 // farm_admin's blanket per-resource "admin" grant (seeded for every resource)
-                // makes this trivially reachable — but only if the resource itself is real.
-                if (!seededResourceNames.Contains(resource))
-                {
-                    unknownResource.Add(permission);
-                }
-
+                // makes this trivially reachable, so no further check is needed once the
+                // resource itself is confirmed real (checked above for every permission).
                 continue;
             }
 
@@ -128,6 +156,52 @@ public sealed class PermissionGrantPathTests
             if (!hasNonAdminGrant && !isDocumentedAdminOnly)
             {
                 missingGrantPath.Add(permission);
+            }
+        }
+
+        // Joint satisfiability: for every member (class or method) gated by more than one
+        // [RequirePermission], confirm a single non-admin role can hold every permission in the
+        // group at once (exact match or resource-admin per permission), or that every permission
+        // in the group is individually allowlisted admin-only (so the whole member is, correctly,
+        // farm_admin-only). A mix of "some reachable by farm_user, one allowlisted admin-only"
+        // makes the member unreachable by any non-admin role even though each permission looks
+        // fine in isolation.
+        foreach (IGrouping<string, PermissionSite> group in sites.GroupBy(site => site.Member, StringComparer.Ordinal))
+        {
+            (string Resource, string Action)[] permissions = group
+                .Select(site => (site.Resource, site.Action))
+                .Distinct()
+                .ToArray();
+
+            if (permissions.Length < 2)
+            {
+                continue;
+            }
+
+            bool allAdminOnlyByAllowlist = permissions.All(p =>
+                string.Equals(p.Action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal)
+                || AdminOnlyAllowlist.ContainsKey($"{p.Resource}:{p.Action}"));
+
+            if (allAdminOnlyByAllowlist)
+            {
+                continue;
+            }
+
+            bool satisfiableBySingleRole = nonAdminRoleGrantRows
+                .Select(row => row.RoleId)
+                .Distinct()
+                .Any(roleId => permissions.All(p =>
+                    string.Equals(p.Action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal)
+                    || nonAdminRoleGrantRows.Any(row => row.RoleId == roleId
+                        && row.Resource == p.Resource
+                        && (row.Action == p.Action || row.Action == PrintFarmerPermissions.AdminAction))
+                    || AdminOnlyAllowlist.ContainsKey($"{p.Resource}:{p.Action}")));
+
+            if (!satisfiableBySingleRole)
+            {
+                unsatisfiableCombinations.Add(
+                    $"{group.Key} requires [{string.Join(", ", permissions.Select(p => $"{p.Resource}:{p.Action}"))}] " +
+                    "together, but no single non-admin role can hold every permission in that set");
             }
         }
 
@@ -145,36 +219,53 @@ public sealed class PermissionGrantPathTests
             "Fix: add a (resource, action) grant for farm_user in DatabaseInitializer." +
             "SeedRolePermissionsAsync (additive — never remove an existing grant), or add a " +
             $"reasoned AdminOnlyAllowlist entry. Missing grant path: {string.Join(", ", missingGrantPath)}");
+
+        unsatisfiableCombinations.Should().BeEmpty(
+            "ASP.NET Core combines multiple [RequirePermission] attributes on the same member " +
+            "with AND semantics, so every permission required by one member must be holdable by " +
+            "a single role at once, not merely reachable individually by possibly-different " +
+            "roles. Fix: grant the missing permission(s) in the combination to the same role " +
+            "(usually farm_user), or allowlist every permission in the group as admin-only if " +
+            $"the whole member should be farm_admin-only. Unsatisfiable: {string.Join("; ", unsatisfiableCombinations)}");
     }
 
-    private static HashSet<(string Resource, string Action)> DiscoverEnforcedPermissions()
+    private static List<PermissionSite> DiscoverEnforcedPermissionSites()
     {
-        HashSet<(string, string)> enforced = new();
+        List<PermissionSite> sites = [];
 
         foreach (Assembly assembly in ScannedAssemblies)
         {
             foreach (Type type in assembly.GetTypes())
             {
-                CollectPermissions(type, enforced);
+                string typeDisplayName = type.FullName ?? type.Name;
+                CollectPermissions(type, typeDisplayName, sites);
 
                 foreach (MethodInfo method in type.GetMethods(
                     BindingFlags.Public | BindingFlags.NonPublic
                     | BindingFlags.Instance | BindingFlags.Static
                     | BindingFlags.DeclaredOnly))
                 {
-                    CollectPermissions(method, enforced);
+                    // Class-level and method-level [RequirePermission] attributes both gate the
+                    // same routed method (ASP.NET Core AND-combines requirements across the
+                    // whole authorization pipeline for one action), so a method's group must
+                    // include any permission declared on its declaring type as well.
+                    string memberDisplayName = $"{typeDisplayName}.{method.Name}";
+                    CollectPermissions(type, memberDisplayName, sites);
+                    CollectPermissions(method, memberDisplayName, sites);
                 }
             }
         }
 
-        return enforced;
+        return sites;
     }
 
-    private static void CollectPermissions(MemberInfo member, HashSet<(string, string)> enforced)
+    private static void CollectPermissions(MemberInfo member, string memberDisplayName, List<PermissionSite> sites)
     {
         foreach (RequirePermissionAttribute attribute in member.GetCustomAttributes<RequirePermissionAttribute>(inherit: false))
         {
-            _ = enforced.Add((attribute.Resource, attribute.Action));
+            sites.Add(new PermissionSite(memberDisplayName, attribute.Resource, attribute.Action));
         }
     }
+
+    private sealed record PermissionSite(string Member, string Resource, string Action);
 }
