@@ -384,7 +384,17 @@ export function RoleManagementPage({ embedded = false }: EmbeddablePageProps) {
   const reloadPermissions = () => {
     setConcurrencyConflict(null);
     setLockoutViolation(null);
-    void rolePermissionsQuery.refetch();
+    // The admin explicitly asked to discard their stale working set and reload latest —
+    // unlike the passive same-role background-refetch guard above, this must force a
+    // resync even while dirty, or the working set (and its pinned concurrency token)
+    // stays stale and the very next save just resends the same rejected token, looping
+    // on 409 forever.
+    void rolePermissionsQuery.refetch().then((result) => {
+      if (!result.data) return;
+      grantState.markPristine(buildGrantMap(result.data));
+      lastSyncedRoleIdRef.current = result.data.roleId;
+      syncedBaselineRef.current = result.data;
+    });
   };
 
   // ── Rendering ─────────────────────────────────────────────────────────────

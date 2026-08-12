@@ -415,9 +415,41 @@ describe('RoleManagementPage', () => {
     ));
   });
 
-  it('shows a reload-and-retry banner on a 409 concurrency conflict', async () => {
+  it('shows a reload-and-retry banner on a 409 concurrency conflict and resyncs the working set on reload', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.updateRolePermissions).mockRejectedValue(apiError(409, 'Stale update.'));
+    let getRolePermissionsCalls = 0;
+    vi.mocked(apiClient.getRolePermissions).mockImplementation(() => {
+      getRolePermissionsCalls += 1;
+      // The second call simulates "Reload latest" fetching another actor's concurrent
+      // change: the admin permission is now Denied server-side, not what this admin's
+      // stale local toggle showed.
+      return Promise.resolve(
+        buildRolePermissions(
+          getRolePermissionsCalls > 1
+            ? {
+                updatedAt: '2026-06-01T00:00:00Z',
+                resources: [
+                  {
+                    resource: 'printers',
+                    displayName: 'Printers',
+                    permissions: [
+                      {
+                        resource: 'printers', action: 'view', permission: 'printers:view',
+                        actionDisplayName: 'View', impliedByAdmin: true, status: 'Granted',
+                      },
+                      {
+                        resource: 'printers', action: 'admin', permission: 'printers:admin',
+                        actionDisplayName: 'Admin', impliedByAdmin: false, status: 'Absent',
+                      },
+                    ],
+                  },
+                ],
+              }
+            : {},
+        ),
+      );
+    });
     renderPage();
 
     await user.click(await screen.findByText('Shift Lead'));
@@ -432,6 +464,11 @@ describe('RoleManagementPage', () => {
     await user.click(screen.getByRole('button', { name: 'Reload latest' }));
 
     await waitFor(() => expect(apiClient.getRolePermissions).toHaveBeenCalledTimes(2));
+    // Reload must force-resync the working set to the freshly fetched data even though
+    // it was dirty — otherwise the stale toggle (and its rejected concurrency token)
+    // would persist and the next save would just resend the same token, looping on 409.
+    await waitFor(() => expect(screen.getByLabelText(/^Grant Admin/)).not.toBeChecked());
+    expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
   });
 
   it('distinguishes a 409 lockout violation from a concurrency conflict on permission save', async () => {
