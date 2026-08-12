@@ -19,11 +19,26 @@ import {
 } from 'lucide-react';
 import { apiClient } from '@/services/api';
 import { DeleteIcon, SearchIcon, EditIcon, LockIcon } from '@/common/components/icons/MdiIcons';
-import { Button, Input, Select, FormField, Alert, Checkbox } from '@/common/components/ui';
+import { Button, Input, FormField, Alert, Checkbox } from '@/common/components/ui';
 import { Modal } from '@/common/components/modals/Modal';
 import { ConfirmationModal } from '@/common/components/modals/ConfirmationModal';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import type { User, Role } from '@/types/admin';
+
+/**
+ * A role is "administrative" when its permission set grants both `roles:admin` and
+ * `users:admin` — the same definition the backend uses (see `IRolesRepository.IsAdminEquivalentAsync`)
+ * to decide whether removing it would leave an account (or the whole system) with no admin
+ * access. UI code must derive this from role permission data rather than matching on role
+ * name (#1456) — a newly created custom role with the same grants must behave identically to
+ * a built-in admin role, and a renamed/rebuilt system role must not.
+ */
+function isAdministrativeRole(role: Role | undefined): boolean {
+  if (!role?.permissions) return false;
+  const grants = (resource: string) =>
+    role.permissions!.some(p => p.resource === resource && p.action === 'admin' && p.granted);
+  return grants('roles') && grants('users');
+}
 
 const APPLICATION_AREAS = [
   { id: 'printers', name: 'Printers', description: 'View and manage printer configurations' },
@@ -74,11 +89,11 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const { data: passwordPolicy } = usePasswordPolicy();
   const createForm = useDirtyState({
     user: EMPTY_NEW_USER,
-    roleId: '',
+    roleIds: [] as string[],
     permissions: [] as string[],
   });
   const newUser = createForm.values.user;
-  const selectedRoleId = createForm.values.roleId;
+  const selectedRoleIds = createForm.values.roleIds;
   const selectedPermissions = createForm.values.permissions;
   type AvailabilityStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
   const [usernameStatus, setUsernameStatus] = useState<AvailabilityStatus>('idle');
@@ -87,9 +102,6 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   const [createErrors, setCreateErrors] = useState<Record<string, string>>({});
   const [isCreating, setIsCreating] = useState(false);
   const DEBOUNCE_MS = 450;
-
-  // Helper: Check if a role is admin role
-  const isAdminRole = (roleName: string | undefined) => roleName === 'farm_admin';
 
   const passwordMeetsPolicyValue = (password: string) => {
     if (!passwordPolicy) return true; // don't block while loading
@@ -149,7 +161,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   }, [newUser.username, newUser.email, showCreateModal]);
 
   const validateForm = () => {
-    const errs: CreateUserFormState['errors'] = {};
+    const errs: Record<string, string> = {};
     if (!newUser.username.trim()) errs.username = 'Username is required';
     if (!newUser.email.trim()) errs.email = 'Email is required';
     else if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(newUser.email.trim())) errs.email = 'Invalid email format';
@@ -176,7 +188,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
         password: newUser.password,
         firstName: newUser.firstName.trim() || undefined,
         lastName: newUser.lastName.trim() || undefined,
-        roleIds: selectedRoleId ? [selectedRoleId] : [],
+        roleIds: selectedRoleIds,
         accessibleAreas: selectedPermissions
       });
 
@@ -185,7 +197,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       adminToast.success('User created');
       createForm.markPristine({
         user: EMPTY_NEW_USER,
-        roleId: '',
+        roleIds: [],
         permissions: [],
       });
       setShowCreateModal(false);
@@ -206,10 +218,10 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   };
 
   const openCreateUser = () => {
-    const farmUserRole = roles.find(r => r.name === 'farm_user');
+    const defaultRole = roles.find(r => r.isSystemRole && r.isActive && !isAdministrativeRole(r));
     createForm.markPristine({
       user: EMPTY_NEW_USER,
-      roleId: farmUserRole ? farmUserRole.id : '',
+      roleIds: defaultRole ? [defaultRole.id] : [],
       permissions: [],
     });
     setShowCreateModal(true);
@@ -234,15 +246,30 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
 
   const saveSelectedUser = async () => {
     if (!selectedUser || isSavingUser) return;
+    // The backend replaces a user's entire active role set on save (see
+    // EfUsersRepository.UpdateUserRolesAsync), so any role name here that fails
+    // to resolve to an id would otherwise be silently dropped from membership.
+    // Fail loud instead of guessing, so an unrelated edit (e.g. changing an
+    // email) can never quietly strip a role assignment.
+    const unresolvedRoleNames = selectedUser.roles.filter(
+      name => !roles.some(role => role.name === name),
+    );
+    if (unresolvedRoleNames.length > 0) {
+      adminToast.error(
+        `Could not resolve role(s): ${unresolvedRoleNames.join(', ')}. Refresh the page and try again to avoid losing role assignments.`,
+      );
+      return;
+    }
     setIsSavingUser(true);
     try {
+      const roleIds = selectedUser.roles.map(name => roles.find(r => r.name === name)!.id);
       await apiClient.updateUser(selectedUser.id, {
         firstName: selectedUser.firstName,
         lastName: selectedUser.lastName,
         email: selectedUser.email,
         isActive: selectedUser.isActive,
-        roles: selectedUser.roles,
-        permissions: selectedUser.permissions,
+        roleIds,
+        accessibleAreas: selectedUser.permissions,
       });
       editForm.markPristine({ user: selectedUser });
       adminToast.success('User updated successfully');
@@ -250,8 +277,9 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
       setShowEditModal(false);
     } catch (err) {
       const error = err as { response?: { data?: Record<string, unknown> } };
-      const message = (error.response?.data as Record<string, unknown> | undefined)?.message as string || 'Failed to update user';
-      adminToast.error(message);
+      const data = error.response?.data as Record<string, unknown> | undefined;
+      const message = (data?.error || data?.message || data?.title) as string | undefined;
+      adminToast.error(message || 'Failed to update user');
     } finally {
       setIsSavingUser(false);
     }
@@ -350,15 +378,11 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     });
   };
 
-  const getRoleBadgeColor = (roleName: string) => {
-    switch (roleName) {
-      case 'farm_admin':
-        return 'bg-pf-error/10 text-pf-error border-pf-error/30';
-      case 'farm_user':
-        return 'bg-pf-accent-bg/15 text-pf-accent border-pf-accent/30';
-      default:
-        return 'bg-pf-bg-1 text-pf-text-primary border-pf-border';
-    }
+  const getRoleBadgeColor = (role: Role | undefined) => {
+    if (!role) return 'bg-pf-bg-1 text-pf-text-primary border-pf-border';
+    if (isAdministrativeRole(role)) return 'bg-pf-error/10 text-pf-error border-pf-error/30';
+    if (role.isSystemRole) return 'bg-pf-accent-bg/15 text-pf-accent border-pf-accent/30';
+    return 'bg-pf-bg-1 text-pf-text-primary border-pf-border';
   };
 
   // Genuinely admin-only surface (#1457) — user account management is gated on
@@ -366,6 +390,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
   // adminDestinations.ts entry and the server's UserManagementController),
   // not the `farm_admin` role literally, so a custom role granted that
   // permission can actually use the page it was just given nav access to.
+  // Early access check AFTER hooks to avoid conditional hook usage.
   if (!hasPermission('users', 'admin')) {
     return (
       <PageTemplate
@@ -474,14 +499,17 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex flex-wrap gap-1">
-                      {user.roles.map((role) => (
-                        <span
-                          key={role}
-                          className={`inline-flex px-2 py-1 text-xs rounded-xs border ${getRoleBadgeColor(role)}`}
-                        >
-                          {roles.find(r => r.name === role)?.displayName || role}
-                        </span>
-                      ))}
+                      {user.roles.map((roleName) => {
+                        const role = roles.find(r => r.name === roleName);
+                        return (
+                          <span
+                            key={roleName}
+                            className={`inline-flex px-2 py-1 text-xs rounded-xs border ${getRoleBadgeColor(role)}`}
+                          >
+                            {role?.displayName || roleName}
+                          </span>
+                        );
+                      })}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -594,7 +622,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 changeCount={createForm.changedCount}
                 changedLabels={createForm.changedKeys.map(key => ({
                   user: 'User details',
-                  roleId: 'Role',
+                  roleIds: 'Roles',
                   permissions: 'Application access',
                 })[key])}
                 onDiscard={() => {
@@ -735,36 +763,47 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 )}
               </FormField>
 
-              <FormField 
-                label="Role" 
+              <FormField
+                label="Roles"
                 required
               >
-                <Select
-                  value={selectedRoleId}
-                  onChange={(e) => {
-                    createForm.setValue('roleId', e.target.value);
-                    const selectedRole = roles.find(r => r.id === e.target.value);
-                    if (selectedRole?.name === 'farm_admin') {
-                      createForm.setValue('permissions', APPLICATION_AREAS.map(a => a.id));
-                    } else if (selectedRole?.name === 'farm_user') {
-                      createForm.setValue('permissions', ['printers', 'files', 'jobs', 'spools']);
-                    } else {
-                      createForm.setValue('permissions', []);
-                    }
-                  }}
-                >
-                  <option value="">Select a role...</option>
-                  {roles.map(role => (
-                    <option key={role.id} value={role.id}>
-                      {role.displayName}
-                    </option>
-                  ))}
-                </Select>
-                {selectedRoleId && (
-                  <p className="mt-2 text-xs text-pf-text-secondary">
-                    {roles.find(r => r.id === selectedRoleId)?.description}
-                  </p>
-                )}
+                <div className="space-y-2 p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
+                  {roles.filter(role => role.isActive).map(role => {
+                    const checked = selectedRoleIds.includes(role.id);
+                    return (
+                      <label key={role.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded-sm cursor-pointer transition">
+                        <Checkbox
+                          checked={checked}
+                          onChange={() => {
+                            createForm.setValue(
+                              'roleIds',
+                              checked
+                                ? selectedRoleIds.filter(id => id !== role.id)
+                                : [...selectedRoleIds, role.id],
+                            );
+                          }}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-pf-text-primary">{role.displayName}</span>
+                            {role.isSystemRole && (
+                              <span className="inline-flex px-1.5 py-0.5 text-xs rounded-xs border bg-pf-bg-1 text-pf-text-secondary border-pf-border">System</span>
+                            )}
+                            {isAdministrativeRole(role) && (
+                              <span className="inline-flex px-1.5 py-0.5 text-xs rounded-xs border bg-pf-error/10 text-pf-error border-pf-error/30">Administrative</span>
+                            )}
+                          </div>
+                          {role.description && (
+                            <div className="text-xs text-pf-text-secondary">{role.description}</div>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {roles.length === 0 && (
+                    <p className="text-xs text-pf-text-tertiary p-2">No roles available.</p>
+                  )}
+                </div>
               </FormField>
 
               <div>
@@ -776,8 +815,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 </p>
                 <div className="space-y-3">
                   {APPLICATION_AREAS.map(area => {
-                    const isAdmin = isAdminRole(roles.find(r => r.id === selectedRoleId)?.name);
-                    const isDisabled = isAdmin;
+                    const isDisabled = selectedRoleIds.some(id => isAdministrativeRole(roles.find(r => r.id === id)));
 
                     return (
                       <label key={area.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-2 rounded-sm cursor-pointer transition">
@@ -876,39 +914,50 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
                 />
               </FormField>
 
-              <FormField label="Role" required>
-                <Select
-                  value={selectedUser.roles[0] || ''}
-                  disabled={isSavingUser}
-                  onChange={(e) => {
-                    updateSelectedUser(user => {
-                      const newRole = e.target.value;
-                      let newPermissions = user.permissions;
-                      if (newRole === 'farm_admin') {
-                        newPermissions = APPLICATION_AREAS.map(a => a.id);
-                      } else if (newRole === 'farm_user' && !newPermissions.includes('printers')) {
-                        newPermissions = ['printers', 'files', 'jobs', 'spools'];
-                      }
-                      return {
-                        ...user,
-                        roles: newRole ? [newRole] : [],
-                        permissions: newPermissions
-                      };
-                    });
-                  }}
-                >
-                  <option value="">Select a role...</option>
-                  {roles.map(role => (
-                    <option key={role.id} value={role.name}>
-                      {role.displayName}
-                    </option>
-                  ))}
-                </Select>
-                {selectedUser.roles[0] && (
-                  <p className="mt-2 text-xs text-pf-text-secondary">
-                    {roles.find(r => r.name === selectedUser.roles[0])?.description}
-                  </p>
-                )}
+              <FormField label="Roles" required>
+                <div className="space-y-2 p-3 bg-pf-bg-0 rounded-sm border border-pf-border">
+                  {roles.filter(role => role.isActive).map(role => {
+                    const checked = selectedUser.roles.includes(role.name);
+                    return (
+                      <label key={role.id} className="flex items-start gap-3 p-2 hover:bg-pf-bg-1 rounded-sm cursor-pointer transition">
+                        <Checkbox
+                          checked={checked}
+                          disabled={isSavingUser}
+                          onChange={() => {
+                            updateSelectedUser(user => ({
+                              ...user,
+                              roles: checked
+                                ? user.roles.filter(name => name !== role.name)
+                                : [...user.roles, role.name],
+                            }));
+                          }}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-pf-text-primary">{role.displayName}</span>
+                            {role.isSystemRole && (
+                              <span className="inline-flex px-1.5 py-0.5 text-xs rounded-xs border bg-pf-bg-1 text-pf-text-secondary border-pf-border">System</span>
+                            )}
+                            {isAdministrativeRole(role) && (
+                              <span className="inline-flex px-1.5 py-0.5 text-xs rounded-xs border bg-pf-error/10 text-pf-error border-pf-error/30">Administrative</span>
+                            )}
+                          </div>
+                          {role.description && (
+                            <div className="text-xs text-pf-text-secondary">{role.description}</div>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })}
+                  {roles.length === 0 && (
+                    <p className="text-xs text-pf-text-tertiary p-2">No roles available.</p>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-pf-warning">
+                  Saving role changes immediately revokes this user&apos;s active sessions
+                  (they will be signed out). Role membership is fully replaced on save, and any
+                  prior expiration on a removed role is not preserved if it is re-added later.
+                </p>
               </FormField>
 
               <div>
@@ -981,9 +1030,7 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
               </p>
               <div className="space-y-3 bg-pf-bg-0 p-4 rounded-sm border border-pf-border">
                 {APPLICATION_AREAS.map(area => {
-                  const userRole = selectedUser.roles[0];
-                  const isAdmin = userRole === 'farm_admin';
-                  const isDisabled = isAdmin;
+                  const isDisabled = selectedUser.roles.some(name => isAdministrativeRole(roles.find(r => r.name === name)));
                   const hasAccess = permissionForm.values.permissions.includes(area.id);
 
                   return (

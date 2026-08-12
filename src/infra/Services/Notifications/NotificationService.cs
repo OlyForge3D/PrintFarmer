@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Data;
 using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Contracts.Auth;
@@ -15,9 +14,7 @@ using Farm.Infrastructure.Services.Notifications.NativePush;
 using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Notifications;
@@ -1130,93 +1127,10 @@ public class NotificationService(
     /// </summary>
     internal const int AttentionCategoryCumulativeJsonBytes = AttentionPushCategoryPreferences.MaxSerializedUtf8Bytes;
 
-    private static async Task<PreferenceTransactionScope> BeginPreferenceTransactionAsync(
+    private static Task<ProviderSafeSerializableTransactionScope> BeginPreferenceTransactionAsync(
         AppDbContext context,
-        CancellationToken cancellationToken)
-    {
-        if (string.Equals(
-            context.Database.ProviderName,
-            "Microsoft.EntityFrameworkCore.Sqlite",
-            StringComparison.Ordinal))
-        {
-            bool closeConnection = context.Database.GetDbConnection().State != ConnectionState.Open;
-            if (closeConnection)
-            {
-                await context.Database.OpenConnectionAsync(cancellationToken);
-            }
-
-            SqliteTransaction? nativeTransaction = null;
-            try
-            {
-                var connection = (SqliteConnection)context.Database.GetDbConnection();
-#pragma warning disable CA1849 // Microsoft.Data.Sqlite has no asynchronous deferred-transaction overload.
-                nativeTransaction = connection.BeginTransaction(
-                    IsolationLevel.Serializable,
-                    deferred: true);
-#pragma warning restore CA1849
-                IDbContextTransaction transaction = await context.Database
-                    .UseTransactionAsync(nativeTransaction, cancellationToken)
-                    ?? throw new InvalidOperationException("Unable to enlist the SQLite preference transaction.");
-                return new PreferenceTransactionScope(
-                    context,
-                    transaction,
-                    nativeTransaction,
-                    closeConnection);
-            }
-            catch
-            {
-                if (nativeTransaction is not null)
-                {
-                    await nativeTransaction.DisposeAsync();
-                }
-
-                if (closeConnection)
-                {
-                    await context.Database.CloseConnectionAsync();
-                }
-
-                throw;
-            }
-        }
-
-        IDbContextTransaction relationalTransaction = await context.Database.BeginTransactionAsync(
-            IsolationLevel.Serializable,
-            cancellationToken);
-        return new PreferenceTransactionScope(
-            context,
-            relationalTransaction,
-            nativeTransaction: null,
-            closeConnection: false);
-    }
-
-#pragma warning disable IDISP007 // This scope receives and owns transactions created by BeginPreferenceTransactionAsync.
-    private sealed class PreferenceTransactionScope(
-        AppDbContext context,
-        IDbContextTransaction transaction,
-        SqliteTransaction? nativeTransaction,
-        bool closeConnection) : IAsyncDisposable
-    {
-        public Task CommitAsync(CancellationToken cancellationToken)
-            => transaction.CommitAsync(cancellationToken);
-
-        public Task RollbackAsync(CancellationToken cancellationToken)
-            => transaction.RollbackAsync(cancellationToken);
-
-        public async ValueTask DisposeAsync()
-        {
-            await transaction.DisposeAsync();
-            if (nativeTransaction is not null)
-            {
-                await nativeTransaction.DisposeAsync();
-            }
-
-            if (closeConnection)
-            {
-                await context.Database.CloseConnectionAsync();
-            }
-        }
-    }
-#pragma warning restore IDISP007
+        CancellationToken cancellationToken) =>
+        ProviderSafeSerializableTransaction.BeginAsync(context, cancellationToken);
 
     private static void ApplyLegacyJobCells(
         NotificationPreferences preferences,

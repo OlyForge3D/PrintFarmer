@@ -486,6 +486,18 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 _ = entity.Property(r => r.IdempotencyKey).UseCollation(caseSensitiveCollation);
             });
 
+            _ = modelBuilder.Entity<BedClearCommandRecord>(entity =>
+                entity.Property(record => record.IdempotencyKey)
+                    .UseCollation(caseSensitiveCollation));
+
+            _ = modelBuilder.Entity<PrintJob>(entity =>
+            {
+                _ = entity.Property(job => job.IdempotencyScope)
+                    .UseCollation(caseSensitiveCollation);
+                _ = entity.Property(job => job.IdempotencyKey)
+                    .UseCollation(caseSensitiveCollation);
+            });
+
             // Printed-part SKU catalog: Sku is the client-owned identity behind the unique
             // index IX_PartInventories_Sku (Hicks r5 blocker 1 — Hiragana vs Katakana SKUs
             // resolving to one physical row under Kana-insensitive collation).
@@ -655,6 +667,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<BedClearCommandRecord>()
             .HasIndex(record => new { record.Status, record.ExpiresAtUtc })
             .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.JobId, record.CreatedAtUtc, record.Id })
+            .IsDescending(false, true, true)
+            .HasDatabaseName("IX_BedClearCommandRecords_Job_Created_Id");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => record.OutboxEventId)
+            .IsUnique()
+            .HasDatabaseName("UX_BedClearCommandRecords_OutboxEventId");
 
         _ = modelBuilder.Entity<QueuePositionState>()
             .HasKey(state => state.ScopeId);
@@ -1077,6 +1099,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             if (job is not null)
             {
                 eventEntry.Entity.JobRevision = job.Revision;
+                eventEntry.Entity.AggregateRowVersion =
+                    RevisionETag.EncodeBytes(job.Revision);
             }
 
             if (eventEntry.Entity.PrinterId.HasValue)
@@ -1089,6 +1113,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 if (state is not null)
                 {
                     eventEntry.Entity.DispatchStateRevision = state.Revision;
+                    eventEntry.Entity.DispatchStateRowVersion =
+                        RevisionETag.EncodeBytes(state.Revision);
                 }
             }
         }

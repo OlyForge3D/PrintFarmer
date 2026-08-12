@@ -298,7 +298,27 @@ public class JobQueuePrintJobDto
 
     public Guid? CalibrationProjectId { get; set; }
 
+    public Guid? CalibrationAttemptId { get; set; }
+
+    public Guid? CalibrationOrchestrationId { get; set; }
+
     public long? PinnedPrinterConfigRevision { get; set; }
+
+    /// <summary>
+    /// Authoritative exact-job bed-clear lifecycle. Null only for non-calibration jobs.
+    /// </summary>
+    public BedClearState? BedClearState { get; set; }
+
+    /// <summary>Durable exact-job command identity, when a command exists.</summary>
+    public Guid? BedClearCommandId { get; set; }
+
+    /// <summary>
+    /// Lower-case SHA-256 of the exact case-sensitive UTF-8 idempotency key, when a command exists.
+    /// </summary>
+    public string? BedClearIdempotencyKeySha256 { get; set; }
+
+    /// <summary>UTC expiry of the exact-job acknowledgement, when a command exists.</summary>
+    public DateTime? BedClearExpiresAtUtc { get; set; }
 
     public bool IsIdempotentReplay { get; set; }
 
