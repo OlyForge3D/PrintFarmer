@@ -84,6 +84,7 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
         result.Should().NotBeNull();
         result!.RoleId.Should().Be(role.Id);
         result.IsEditable.Should().BeTrue();
+        result.HasImplicitTotalAccess.Should().BeFalse();
         result.UpdatedAt.Should().Be(role.UpdatedAt);
 
         Dictionary<string, RolePermissionGrantStatus> statusByPermission = result.Resources
@@ -92,6 +93,49 @@ public sealed class RolePermissionServiceTests : IAsyncDisposable
         statusByPermission[QueueReadPermission].Should().Be(RolePermissionGrantStatus.Granted);
         statusByPermission[QueueWritePermission].Should().Be(RolePermissionGrantStatus.Denied);
         statusByPermission["printers:read"].Should().Be(RolePermissionGrantStatus.Absent);
+    }
+
+    [Fact]
+    public async Task GetRolePermissionsAsync_FarmAdmin_ReportsEveryPermissionGrantedDespiteOnlyAdminRows()
+    {
+        // farm_admin is seeded only "{resource}:admin" because that action implies every other
+        // action on the resource. Reporting raw rows made the management UI show the superuser
+        // role as holding almost nothing, contradicting its own "implicit total access" notice.
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "write", "Write");
+        await SeedCatalogAsync(db, "printers", "Printers", "read", "Read");
+        Role farmAdmin = await CreateRoleAsync(db, "farm_admin");
+
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionsDto? result = await service.GetRolePermissionsAsync(farmAdmin.Id);
+
+        result.Should().NotBeNull();
+        result!.IsEditable.Should().BeFalse();
+        result.HasImplicitTotalAccess.Should().BeTrue();
+        result.Resources.SelectMany(g => g.Permissions)
+            .Should().NotBeEmpty()
+            .And.OnlyContain(p => p.Status == RolePermissionGrantStatus.Granted);
+    }
+
+    [Fact]
+    public async Task GetRolePermissionsAsync_FarmAdmin_ReportsGrantedEvenWhenARowExplicitlyDenies()
+    {
+        // The role bypass ignores RolePermission rows entirely, so a stray deny row must not be
+        // shown as if it restricted the superuser — the server would still allow the action.
+        await using AppDbContext db = await CreateContextAsync();
+        await SeedCatalogAsync(db, "queue", "Calibration Queue", "read", "Read");
+        Role farmAdmin = await CreateRoleAsync(db, "farm_admin");
+        await GrantAsync(db, farmAdmin, "queue", "read", granted: false);
+
+        RolePermissionService service = CreateService(db);
+
+        RolePermissionsDto? result = await service.GetRolePermissionsAsync(farmAdmin.Id);
+
+        result!.Resources.SelectMany(g => g.Permissions)
+            .Single(p => p.Permission == QueueReadPermission)
+            .Status.Should().Be(RolePermissionGrantStatus.Granted);
     }
 
     [Fact]

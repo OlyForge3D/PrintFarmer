@@ -41,6 +41,7 @@ public class RolePermissionsControllerTests
         RoleDisplayName = "Operators",
         IsSystemRole = false,
         IsEditable = true,
+        HasImplicitTotalAccess = false,
         UpdatedAt = DateTime.UtcNow,
         Resources = [],
     };

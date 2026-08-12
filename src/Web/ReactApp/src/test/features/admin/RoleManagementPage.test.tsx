@@ -94,6 +94,7 @@ function buildRolePermissions(overrides: Partial<RolePermissions> = {}): RolePer
     roleDisplayName: customRole.displayName,
     isSystemRole: false,
     isEditable: true,
+    hasImplicitTotalAccess: false,
     updatedAt: '2026-01-01T00:00:00Z',
     resources: [
       {
@@ -529,7 +530,10 @@ describe('RoleManagementPage', () => {
     await screen.findByText(/implicit total access/i);
   });
 
-  it('renders the farm_admin permission pane as fully read-only', async () => {
+  it('renders the farm_admin permission pane as fully read-only, with every permission shown as granted', async () => {
+    // Regression: farm_admin is seeded only "{resource}:admin", so rendering raw grant rows
+    // showed every finer action as an unchecked "Not granted" toggle — directly contradicting
+    // the "implicit total access" notice on the same pane and reading as a lockout.
     vi.mocked(apiClient.getRolePermissions).mockResolvedValue(
       buildRolePermissions({
         roleId: systemRole.id,
@@ -537,6 +541,31 @@ describe('RoleManagementPage', () => {
         roleDisplayName: systemRole.displayName,
         isSystemRole: true,
         isEditable: false,
+        hasImplicitTotalAccess: true,
+        resources: [
+          {
+            resource: 'printers',
+            displayName: 'Printers',
+            permissions: [
+              {
+                resource: 'printers',
+                action: 'view',
+                permission: 'printers:view',
+                actionDisplayName: 'View',
+                impliedByAdmin: true,
+                status: 'Granted',
+              },
+              {
+                resource: 'printers',
+                action: 'admin',
+                permission: 'printers:admin',
+                actionDisplayName: 'Admin',
+                impliedByAdmin: false,
+                status: 'Granted',
+              },
+            ],
+          },
+        ],
       }),
     );
     const user = userEvent.setup();
@@ -545,8 +574,14 @@ describe('RoleManagementPage', () => {
     await user.click(await screen.findByText('Farm Admin'));
 
     expect(await screen.findByText(/implicit total access/i)).toBeInTheDocument();
-    const toggle = screen.getByLabelText(/^Grant View/) as HTMLInputElement;
-    expect(toggle).toBeDisabled();
+
+    const viewToggle = screen.getByLabelText(/^Grant View/) as HTMLInputElement;
+    const adminToggle = screen.getByLabelText(/^Grant Admin/) as HTMLInputElement;
+    expect(viewToggle).toBeDisabled();
+    expect(adminToggle).toBeDisabled();
+    expect(viewToggle).toBeChecked();
+    expect(adminToggle).toBeChecked();
+    expect(screen.queryByText('Not granted')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
   });
 

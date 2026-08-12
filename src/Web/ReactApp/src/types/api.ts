@@ -3930,6 +3930,12 @@ export interface RolePermissions {
   isSystemRole: boolean;
   /** False only for `farm_admin`, whose access is implicit and cannot be edited. */
   isEditable: boolean;
+  /**
+   * True only for `farm_admin`, whose authority comes from a hard-coded role bypass rather than
+   * from stored grants. When true, every entry in `resources` reports `Granted` because that is
+   * the role's real effective authority.
+   */
+  hasImplicitTotalAccess: boolean;
   /** Optimistic concurrency token — echo back on `PUT`; a mismatch returns 409. */
   updatedAt: string;
   resources: RolePermissionResourceGroup[];

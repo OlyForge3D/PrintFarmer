@@ -809,7 +809,10 @@ function PermissionMatrix({
       {readOnly && (
         <div className="text-sm text-pf-text-secondary bg-pf-bg-1 border border-pf-border rounded-md p-3">
           The <span className="font-mono">farm_admin</span> role has implicit total access to every
-          permission and cannot be edited.
+          permission and cannot be edited. Its authority comes from a built-in bypass rather than
+          from stored grants, so every permission below is shown as granted &mdash; that is why the
+          toggles are fixed on. To adjust what someone can do, edit another role, or move the user
+          to one.
         </div>
       )}
 
