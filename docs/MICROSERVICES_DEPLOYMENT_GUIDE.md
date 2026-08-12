@@ -194,9 +194,12 @@ fail-closed behaviour: calibration discovery answers `503 profile_service_unavai
 ### Caller permissions
 
 Candidate and context requests require an authenticated JWT carrying `calibration:read` (or the
-`farm_admin` role). Desktop API-key exchange tokens deliberately carry only `scope` claims and no
-permission claims (see `docs/SLICER_CONFIGURATION.md`), so they cannot read calibration candidates —
-PrintFarmerDesktop must use a normal login/session token for calibration discovery.
+`farm_admin` role). A Desktop API-key exchange token satisfies this **only when its key was
+explicitly created with the `CalibrationRead` scope and its owner independently holds
+`calibration:read`** — the exchange then emits the mapped permission claim alongside the scope
+claim (see `docs/SLICER_CONFIGURATION.md`). Keys created before those scopes existed, and any key
+without `CalibrationRead`, carry no permission claims and cannot read calibration candidates; those
+clients must use a normal login/session token or be reissued a calibration-scoped key.
 
 ### Environment correction
 
