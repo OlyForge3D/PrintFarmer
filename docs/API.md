@@ -299,6 +299,84 @@ scope are checked after permission checks; identifier-based direct and binary
 reads cannot bypass them. The `farm_admin` bypass is explicit and audited.
 Ordinary users receive no calibration-foundation permissions implicitly.
 
+### Desktop API keys and calibration permissions
+
+A **Desktop**-purpose API key can be issued with explicitly selected calibration,
+slicing, and queue scopes. Exchanging it (`POST /api/auth/api-key/exchange`)
+yields a short-lived JWT carrying one `permission` claim per selected scope, so
+it reaches the routes above through exactly the same permission check as a login
+session. The exchange request body is unchanged (`{ "apiKey": "..." }`).
+
+Key properties:
+
+- **Opt-in only.** Each scope maps to exactly one permission. `ModelRead`,
+  `ModelWrite`, and `LibrarySync` map to none, so every key issued before these
+  scopes existed — including any stored as the frozen aggregate `All` (`7`) —
+  yields zero calibration, slicing, and queue permissions. Scopes are immutable
+  and rotation preserves them, so **using them requires issuing a new key**.
+- **Owner authority follows the same rules as enforcement.** Selected scopes
+  are validated at creation against the target owner's live roles and grants,
+  and re-intersected on every exchange. An exact permission grant satisfies the
+  check, as does a same-resource `{resource}:admin` grant (`calibration:admin`
+  implies every `calibration:*` action) — the implication never crosses
+  resources. An explicit deny on any active role wins over both, matching
+  [`docs/ROLE_PERMISSION_PRECEDENCE.md`](ROLE_PERMISSION_PRECEDENCE.md). Losing
+  a permission drops only the affected scopes; unrelated model/library scopes
+  are retained.
+- **A stock `farm_user` now holds these permissions.** As of
+  [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473), `DatabaseInitializer`
+  seeds `farm_user` with the calibration, queue, and slicing permissions these
+  scopes map to, so an ordinary user can own a working Desktop calibration key.
+  Two enforced permissions are deliberately **not** reachable through any scope
+  defined here, because no scope maps to them: `queue:reconcile` and
+  `dispatch-settings:manage`. They are also not seeded to `farm_user`, though an
+  administrator can still grant them to a custom role through the role-permission
+  API — that grant reaches those routes through a normal session, never through a
+  Desktop key. The owner intersection is unconditional either way — a user whose
+  role lacks a permission, or who is explicitly denied it, still gets `400` at
+  creation and has the scope dropped at exchange — and an admin-owned exchanged
+  token still carries no role claim.
+- **No role claim.** An exchanged token never carries `farm_admin`, even when its
+  owner is an administrator, so the audited admin bypass never applies to it.
+- **Not a credential-management token.** Desktop-exchange tokens are rejected
+  with `403` on `/api/users/{userId}/apikeys`, `/api/apikeys/settings`, the
+  passkey registration and credential-management endpoints
+  (`/api/auth/passkey/register/*`, `/api/auth/passkey/credentials*`), and the
+  non-admin slicer profile mutations (`/api/slicer/profiles/upload`, `.../clone`,
+  `PUT .../custom/{id}`), so a stolen token cannot bootstrap a durable credential
+  or alter profile state. The anonymous passkey login ceremony is unaffected.
+- **`SlicingSubmit` reaches the profile catalog.** `slicing:submit` class-gates
+  the slicer host's `ProfilesController`, so a key with this scope can read and
+  enumerate the profile catalog, and can upload the G-code artifact for a slice
+  job it owns (`POST /api/artifacts/{jobId}`). That reach is required for
+  submission; profile-state mutation is blocked as above.
+- `queue:reconcile`, `slicing:promote`, `dispatch-settings:manage`, and
+  `obico:manage` are not reachable from any Desktop scope.
+
+Create a key with the canonical `scopeNames` array (preferred over the legacy
+`scopes` flags field, which renders the exact value `7` as the misleading single
+name `All`):
+
+```http
+POST /api/users/{userId}/apikeys
+Content-Type: application/json
+
+{
+  "name": "Desktop calibration client",
+  "purpose": "Desktop",
+  "scopeNames": ["ModelRead", "CalibrationRead", "SlicingSubmit"]
+}
+```
+
+`400` is returned when the owner lacks a requested permission, when a scope's
+prerequisites are missing (`CalibrationGenerate` also needs `CalibrationRead`
+and `SlicingSubmit`; queue mutations need `QueueRead`;
+`QueueAcknowledgeBedClear` also needs `QueueStart`), when an unknown or composite
+scope name is supplied, or when both `scopeNames` and `scopes` are set.
+`SlicingReadArtifact` is not a generation prerequisite — a generating client polls
+orchestration rather than downloading artifact bytes. See[`docs/SLICER_CONFIGURATION.md`](SLICER_CONFIGURATION.md#scopes-and-permissions)
+for the full scope-to-permission table.
+
 ### Calibration generation core
 
 The deterministic generation services live in
