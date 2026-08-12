@@ -1167,9 +1167,20 @@ public class AutoDispatchService(
 
         // Score every unassigned job once, up front (J scorer calls total, not P x J). Each
         // scorer call already returns scores for ALL enabled printers, so the same result set
-        // can be reused for every printer's per-printer eligibility check below.
-        UnassignedJobScoringContext scoringContext =
-            await BuildUnassignedJobScoringContextAsync(includeGcodeFile: false, ct);
+        // can be reused for every printer's per-printer eligibility check below. A failure here
+        // (DB/scorer error) must not abort the whole endpoint: fall back to an empty context so
+        // each printer's own try/catch below still reports a degraded-but-present status, matching
+        // the pre-refactor per-printer failure isolation.
+        UnassignedJobScoringContext scoringContext;
+        try
+        {
+            scoringContext = await BuildUnassignedJobScoringContextAsync(includeGcodeFile: false, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to build unassigned-job scoring context for auto-dispatch status");
+            scoringContext = new UnassignedJobScoringContext([], [], MinimumScoreThreshold: 0);
+        }
 
         bool globalEnabled = printers.Any(p => p.AutoDispatchEnabled);
         List<AutoDispatchStatusDto> statuses = [];
