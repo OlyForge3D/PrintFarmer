@@ -27,18 +27,18 @@ public sealed class RolePermissionService : IRolePermissionService
     private readonly AppDbContext _context;
     private readonly IPermissionCatalogService _permissionCatalogService;
     private readonly IAuthAuditService _authAuditService;
-    private readonly ITokenRevocationService _tokenRevocationService;
+    private readonly IEffectivePermissionsRevocationService _revocationService;
 
     public RolePermissionService(
         AppDbContext context,
         IPermissionCatalogService permissionCatalogService,
         IAuthAuditService authAuditService,
-        ITokenRevocationService tokenRevocationService)
+        IEffectivePermissionsRevocationService revocationService)
     {
         _context = context ?? throw new ArgumentNullException(nameof(context));
         _permissionCatalogService = permissionCatalogService ?? throw new ArgumentNullException(nameof(permissionCatalogService));
         _authAuditService = authAuditService ?? throw new ArgumentNullException(nameof(authAuditService));
-        _tokenRevocationService = tokenRevocationService ?? throw new ArgumentNullException(nameof(tokenRevocationService));
+        _revocationService = revocationService ?? throw new ArgumentNullException(nameof(revocationService));
     }
 
     public async Task<RolePermissionsDto?> GetRolePermissionsAsync(Guid roleId, CancellationToken cancellationToken = default)
@@ -328,22 +328,12 @@ public sealed class RolePermissionService : IRolePermissionService
             .ToListAsync(cancellationToken)
             .ConfigureAwait(false);
 
-        int revokedUserCount = 0;
-        foreach (Guid userId in affectedUserIds)
-        {
-            int revokedTokenCount = await _tokenRevocationService.RevokeAllUserTokensAsync(
-                userId,
-                actingUserId,
-                $"Role '{roleName}' permissions changed",
-                ipAddress,
-                cancellationToken).ConfigureAwait(false);
-            if (revokedTokenCount > 0)
-            {
-                revokedUserCount++;
-            }
-        }
-
-        return revokedUserCount;
+        return await _revocationService.RevokeUsersAsync(
+            affectedUserIds,
+            actingUserId,
+            $"Role '{roleName}' permissions changed",
+            ipAddress,
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<Dictionary<string, bool>> LoadGrantStatusAsync(Guid roleId, CancellationToken cancellationToken)

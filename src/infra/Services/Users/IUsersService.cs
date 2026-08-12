@@ -19,8 +19,13 @@ public interface IUsersService
     Task<UserDto> CreateUserAsync(CreateUserRequest request, CancellationToken ct);
 
     /// <summary>Updates an existing user's profile.</summary>
+    /// <param name="id">User to update.</param>
+    /// <param name="request">Update payload.</param>
+    /// <param name="actorUserId">The administrator performing the update, used to attribute any resulting session revocation and audit event.</param>
+    /// <param name="ipAddress">The IP address the request was made from.</param>
+    /// <param name="ct">Cancellation token.</param>
     /// <returns>The updated user, or null if not found.</returns>
-    Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken ct);
+    Task<UserDto?> UpdateUserAsync(Guid id, UpdateUserRequest request, Guid actorUserId, string? ipAddress, CancellationToken ct);
 
     /// <summary>Deletes a user account.</summary>
     /// <returns>True if deleted; false if not found.</returns>

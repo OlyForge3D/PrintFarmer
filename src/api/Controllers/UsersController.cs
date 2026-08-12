@@ -101,13 +101,20 @@ public class UsersController(
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        UserDto? updated = await _users.UpdateUserAsync(id, request, ct);
+        string? currentUserIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(currentUserIdClaim) || !Guid.TryParse(currentUserIdClaim, out Guid currentUserId))
+        {
+            return Unauthorized();
+        }
+
+        string? ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        UserDto? updated = await _users.UpdateUserAsync(id, request, currentUserId, ipAddress, ct);
         if (updated is null)
         {
             return NotFound();
         }
 
-        string? currentUserId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         _logger.LogInformation("User {CurrentUserId} updated user {Id}", currentUserId, id);
         return Ok(updated);
     }

@@ -67,7 +67,10 @@ public enum AuthEventType
     RoleDeleted = 16,
 
     /// <summary>An admin replaced a role's permission grants via the role permission API (#1449).</summary>
-    RolePermissionsChanged = 17
+    RolePermissionsChanged = 17,
+
+    /// <summary>A user's role assignment(s) changed (role added/removed), triggering a session revocation (#1454).</summary>
+    RoleAssignmentChanged = 18
 }
 
 #endregion
