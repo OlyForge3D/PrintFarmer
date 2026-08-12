@@ -209,7 +209,7 @@ public sealed class RolePermissionService : IRolePermissionService
             // lockout-guarded permission rows) between our read and our write. This is the
             // normal path: SaveChangesAsync wraps provider errors (including the concurrency
             // token's affected-rows check) in DbUpdateException.
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            await TryRollbackAsync(transaction, cancellationToken).ConfigureAwait(false);
             return new RolePermissionUpdateResult.ConcurrencyConflict();
         }
         catch (PostgresException ex) when (ex.SqlState is "40001" or "40P01")
@@ -217,14 +217,14 @@ public sealed class RolePermissionService : IRolePermissionService
             // Postgres can defer detecting a SERIALIZABLE write-skew conflict (40001) or
             // deadlock (40P01) until CommitAsync, which is a raw ADO.NET call that EF Core does
             // not wrap in DbUpdateException the way it wraps SaveChangesAsync's SQL execution.
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            await TryRollbackAsync(transaction, cancellationToken).ConfigureAwait(false);
             return new RolePermissionUpdateResult.ConcurrencyConflict();
         }
         catch (SqlException ex) when (ex.Number is 1205 or 3960)
         {
             // Same reasoning for SQL Server: deadlock (1205) or snapshot/serializable update
             // conflict (3960) can surface at commit time, outside SaveChangesAsync's wrapping.
-            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+            await TryRollbackAsync(transaction, cancellationToken).ConfigureAwait(false);
             return new RolePermissionUpdateResult.ConcurrencyConflict();
         }
 
@@ -249,6 +249,29 @@ public sealed class RolePermissionService : IRolePermissionService
             Role = dto,
             RevokedSessionCount = revokedSessionCount,
         });
+    }
+
+    /// <summary>
+    /// Best-effort rollback after a failed commit. When <see cref="Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction.CommitAsync"/>
+    /// throws (e.g. a SERIALIZABLE conflict or deadlock detected at commit time), the underlying
+    /// provider transaction may already be broken or auto-rolled-back server-side, so calling
+    /// <c>RollbackAsync</c> again can itself throw (e.g. SqlClient's "This SqlTransaction has
+    /// completed; it is no longer usable" <see cref="InvalidOperationException"/>). The commit
+    /// already failed either way, so nothing was persisted; swallowing a failed rollback here
+    /// avoids masking the intended 409 with an unrelated 500, and the surrounding <c>await
+    /// using</c> disposes the transaction/connection regardless.
+    /// </summary>
+    private static async Task TryRollbackAsync(Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction transaction, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Intentionally swallowed -- see method summary. The commit already failed, so no
+            // data was persisted regardless of whether this explicit rollback succeeds.
+        }
     }
 
     /// <summary>

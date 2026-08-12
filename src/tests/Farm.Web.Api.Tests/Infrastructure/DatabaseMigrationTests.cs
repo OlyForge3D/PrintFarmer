@@ -44,7 +44,8 @@ public sealed class DatabaseMigrationTests
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
-            "20260808162833_AddPowerReadingCompositeIndex");
+            "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -307,7 +308,8 @@ public sealed class DatabaseMigrationTests
             "20260806232640_CanonicalizePrintJobPriority",
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
-            "20260808162833_AddPowerReadingCompositeIndex");
+            "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken");
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
 
