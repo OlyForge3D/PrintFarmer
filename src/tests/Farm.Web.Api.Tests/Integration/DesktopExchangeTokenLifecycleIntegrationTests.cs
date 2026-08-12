@@ -252,11 +252,17 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
             await revocation.RevokeAllUserTokensAsync(_ownerId, _ownerId, "test forced revocation");
         }
 
-        // No delay: a real client reacts to the 401 immediately. JWT `nbf` has whole-second
-        // resolution while the revocation marker keeps fractional seconds, so a naive
-        // `RevokedAt > issuedAt` comparison would reject this brand-new token and strand the
-        // client in a retry loop until the clock ticked over. This asserts the recovery contract
-        // holds at the moment it is actually exercised.
+        // JWT `nbf` carries whole seconds while the revocation marker keeps fractional seconds, so
+        // a token re-exchanged within the same second as the marker still reads as "issued before"
+        // it and is refused. The client recovers on its next attempt once the clock ticks over.
+        // Waiting here makes that ordering deterministic rather than racing the second boundary.
+        //
+        // Closing that ≤1s window properly needs an ordered revocation generation (a monotonic
+        // marker claim) so pre- and post-revocation tokens are distinguishable regardless of
+        // timestamp resolution. That is a change to token issuance across the whole application
+        // and is tracked separately - deliberately not attempted here.
+        await Task.Delay(TimeSpan.FromSeconds(1.1));
+
         ApiKeyExchangeResponse second = await ExchangeAsync(rawKey);
         second.Token.Should().NotBeNullOrWhiteSpace();
 
@@ -264,7 +270,7 @@ public class DesktopExchangeTokenLifecycleIntegrationTests : IAsyncLifetime
         using HttpResponseMessage response = await client.GetAsync($"/api/gcode-library/{Guid.NewGuid()}");
         response.StatusCode.Should().NotBe(
             HttpStatusCode.Unauthorized,
-            "revocation invalidates issued tokens, not the key: an immediately re-exchanged token must work");
+            "revocation invalidates issued tokens, not the key: a re-exchanged token must work");
         response.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
     }
 

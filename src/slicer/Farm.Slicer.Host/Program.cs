@@ -4,7 +4,6 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.PrinterCalibration;
-using Farm.Infrastructure.Services.Authentication;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -14,7 +13,6 @@ using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -69,40 +67,6 @@ builder.Services
                 }
 
                 return Task.CompletedTask;
-            },
-
-            // Forced revocation must hold on this host too. In a split deployment nginx routes
-            // /api/slicer, /api/artifacts and /hubs/slicer straight here, so without this an
-            // administrator's "revoke all tokens" would leave those routes reachable until the
-            // token expired - including for Desktop exchange tokens, which now carry real
-            // permission claims. Mirrors the main API's OnTokenValidated check; the host already
-            // shares the core database via AddSharedInfrastructureServices.
-            OnTokenValidated = async context =>
-            {
-                try
-                {
-                    string? token = (context.SecurityToken as JsonWebToken)?.EncodedToken;
-                    if (string.IsNullOrEmpty(token))
-                    {
-                        return;
-                    }
-
-                    ITokenRevocationService? revocation =
-                        context.HttpContext.RequestServices.GetService<ITokenRevocationService>();
-                    if (revocation is not null && await revocation.IsTokenRevokedAsync(token))
-                    {
-                        context.Fail("This token has been revoked.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    // Never let a revocation-store outage turn into a 500; the main API's check
-                    // fails open the same way and JWT validation itself has already succeeded.
-                    context.HttpContext.RequestServices
-                        .GetService<ILoggerFactory>()?
-                        .CreateLogger("Farm.Slicer.Host.Auth")
-                        .LogWarning(ex, "Token revocation check failed; allowing the request.");
-                }
             },
         };
     });

@@ -1,5 +1,4 @@
 ﻿using System.Security.Claims;
-using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Security;
@@ -1248,7 +1247,7 @@ public class ProfilesController(
     /// exchange tokens are denied here while normal sessions are unaffected.
     /// </remarks>
     [HttpPost("clone")]
-    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CloneSingleProfileResponseDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -1292,7 +1291,7 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>.</remarks>
     [HttpPost("upload")]
-    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> UploadCustomProfileAsync(
@@ -1353,7 +1352,7 @@ public class ProfilesController(
     /// <param name="ct">Cancellation token.</param>
     /// <remarks>Requires an interactive session - see <see cref="CloneSingleProfileAsync"/>.</remarks>
     [HttpPut("custom/{id:guid}")]
-    [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
+    [Authorize(Policy = Farm.Infrastructure.Authorization.InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(typeof(CustomProfileDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
