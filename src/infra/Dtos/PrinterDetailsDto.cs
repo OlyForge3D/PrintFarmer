@@ -10,7 +10,6 @@ namespace Farm.Infrastructure;
 public record PrinterDetailsDto(
     Guid Id,
     string Name,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string ServerUrl,
     string? Notes,
     Guid? ManufacturerId,

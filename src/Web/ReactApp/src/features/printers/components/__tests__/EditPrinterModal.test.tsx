@@ -113,6 +113,19 @@ describe('EditPrinterModal', () => {
     });
   });
 
+  it('displays the configured server URL', async () => {
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    expect(await screen.findByDisplayValue('http://qp4-1.local')).toBeInTheDocument();
+  });
+
   it('submits obicoEnabled when saving after toggle', async () => {
     const user = userEvent.setup();
 
