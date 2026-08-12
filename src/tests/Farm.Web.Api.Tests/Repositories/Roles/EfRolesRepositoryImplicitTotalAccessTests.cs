@@ -11,7 +11,7 @@ namespace Farm.Web.Api.Tests.Repositories.Roles;
 
 /// <summary>
 /// Covers <see cref="RoleSummaryDto.HasImplicitTotalAccess"/> on both repository read paths
-/// (issue #1490).
+/// (issue #1490), and pins the two predicates against drifting apart.
 ///
 /// The role list previously rendered <c>PermissionCount</c> — a raw count of granted
 /// <c>RolePermission</c> rows — for every role. For <c>farm_admin</c> that is one row per resource
@@ -109,9 +109,18 @@ public sealed class EfRolesRepositoryImplicitTotalAccessTests : IAsyncDisposable
     [Fact]
     public async Task BothReadPaths_AgreeOnImplicitTotalAccess_ForTheSameRole()
     {
-        // GetRoleSummariesAsync computes the flag in an EF projection translated to SQL equality,
-        // while GetRoleDetailAsync evaluates it in memory with StringComparison.Ordinal. Pin the
-        // two together so the list badge and the detail view can never disagree about a role.
+        // Guards the two predicates against drifting apart: GetRoleSummariesAsync computes the
+        // flag in an EF projection translated to SQL equality, GetRoleDetailAsync evaluates it in
+        // memory with StringComparison.Ordinal. Rewriting either one alone (say, to key off
+        // IsSystemRole) fails here.
+        //
+        // Scope limit, stated precisely because the alternative is a comment that outruns its
+        // test: this does NOT cover collation divergence. The two predicates can only disagree on
+        // a case-variant name under a case-insensitive collation (SQL Server/MySQL default), and
+        // these tests run on SQLite, whose BINARY collation already agrees with Ordinal for every
+        // input. Reproducing that would need SQL Server with the seeder suppressed, to reach a
+        // state RoleConfiguration's unique index on Name plus the seeded farm_admin row make
+        // unconstructable anyway.
         await using AppDbContext context = await CreateContextAsync();
         Guid adminRoleId = await CreateRoleAsync(context, PrintFarmerPermissions.FarmAdminRole, isSystemRole: true);
         Guid customRoleId = await CreateRoleAsync(context, "shift_lead", isSystemRole: false);
