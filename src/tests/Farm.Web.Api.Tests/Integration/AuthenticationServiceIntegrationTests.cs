@@ -1,4 +1,6 @@
-﻿using System.Security.Claims;
+﻿using System.Net.Http.Json;
+using System.Security.Claims;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Data;
@@ -83,6 +85,29 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         result.User.Should().NotBeNull();
         result.User?.Id.Should().Be(user.Id);
         result.User?.Username.Should().Be(user.Username);
+    }
+
+    [Fact]
+    public async Task LoginAsync_WithSqliteUser_SerializesAllAuthenticationTimestampsAsUtc()
+    {
+        User user = await CreateTestUserAsync("auth-wire-date-user", "auth-wire-date@test.com");
+        using HttpClient client = _factory.CreateClient();
+
+        HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/auth/login",
+            new { usernameOrEmail = user.Username, password = "TestPassword123!", rememberMe = true });
+
+        response.EnsureSuccessStatusCode();
+        using JsonDocument payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement root = payload.RootElement;
+        string expiresAt = root.GetProperty("expiresAt").GetString()!;
+        JsonElement responseUser = root.GetProperty("user");
+        string lastLogin = responseUser.GetProperty("lastLogin").GetString()!;
+        string createdAt = responseUser.GetProperty("createdAt").GetString()!;
+
+        expiresAt.Should().EndWith("Z");
+        lastLogin.Should().EndWith("Z");
+        createdAt.Should().EndWith("Z");
     }
 
     [Fact]

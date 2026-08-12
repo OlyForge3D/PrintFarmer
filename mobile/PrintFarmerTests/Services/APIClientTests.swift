@@ -289,6 +289,38 @@ final class APIClientTests: XCTestCase {
         XCTAssertNotNil(captured?.capturedHTTPBody())
     }
 
+    func testLoginResponseDecodesTimezoneBearingFractionalTimestamps() async throws {
+        mockAPIClient.stubResponse(json: """
+        {
+            "success": true,
+            "token": "test-token",
+            "expiresAt": "2026-08-19T04:37:44.138661Z",
+            "user": {
+                "id": "aab2c3d4-e5f6-7890-abcd-ef1234567890",
+                "username": "admin",
+                "email": "admin@printfarmer.local",
+                "firstName": "Admin",
+                "lastName": "User",
+                "isActive": true,
+                "emailConfirmed": true,
+                "lastLogin": "2026-08-12T04:37:44.138661Z",
+                "createdAt": "2026-08-01T01:02:03.456789Z",
+                "roles": ["farm_admin"],
+                "permissions": []
+            }
+        }
+        """)
+
+        let request = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
+        let response: AuthResponse = try await apiClient.post("/api/auth/login", body: request)
+        let user = try XCTUnwrap(response.user)
+        let lastLogin = try XCTUnwrap(user.lastLogin)
+        let expiresAt = try XCTUnwrap(response.expiresAt)
+
+        XCTAssertLessThan(user.createdAt, lastLogin)
+        XCTAssertLessThan(lastLogin, expiresAt)
+    }
+
     func testPostVoidRequestUsesCorrectMethod() async throws {
         mockAPIClient.stubEmptySuccess()
 
