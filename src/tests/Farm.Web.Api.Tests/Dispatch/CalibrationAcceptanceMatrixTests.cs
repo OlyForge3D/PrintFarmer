@@ -116,7 +116,8 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
 
     private async Task<(Guid PrinterId, Guid JobId, Guid GcodeId)> SeedFullCalibrationJobAsync(
         AppDbContext db,
-        bool setAck = false)
+        bool setAck = false,
+        JobKind? jobKind = JobKind.FilamentCalibration)
     {
         await db.Database.EnsureCreatedAsync();
 
@@ -289,7 +290,7 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
             AssignedPrinterId = printer.Id,
             Status = PrintJobStatus.Assigned,
             Priority = (int)PrintJobPriority.High,
-            JobKind = JobKind.FilamentCalibration,
+            JobKind = jobKind,
             RequiredFirmwareFamily = PrinterFirmwareFamily.Klipper,
             RequiredGcodeDialect = PrinterGcodeDialect.Klipper,
             RequiredSlicerEngine = "OrcaSlicer",
@@ -435,6 +436,161 @@ public class CalibrationAcceptanceMatrixTests : IAsyncDisposable
         int cmdCount = await verifyCtx.QueueDispatchOutbox
             .CountAsync(e => e.EventType == BedClearAcknowledgementService.BackendStartCommandEventType);
         cmdCount.Should().Be(1, "replay must not create a second BackendStartCommand");
+    }
+
+    [Theory]
+    [InlineData(JobKind.Standard)]
+    [InlineData(null)]
+    public async Task G2_BedClearAck_StandardOrLegacyExactReplay_PreservesAcceptedCommand(
+        JobKind? jobKind)
+    {
+        await using AppDbContext seedContext = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(
+            seedContext,
+            jobKind: jobKind);
+        PrintJob seededJob = await seedContext.PrintJobs
+            .SingleAsync(candidate => candidate.Id == jobId);
+
+        PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        string idempotencyKey =
+            $"standard-replay-{jobKind?.ToString() ?? "legacy"}";
+        var request = new AcknowledgeBedClearRequest(
+            jobId,
+            printerId,
+            "actor",
+            idempotencyKey,
+            initialState.RowVersion,
+            1,
+            seededJob.RowVersion);
+
+        await using (AppDbContext firstContext = CreateContext())
+        {
+            AcknowledgeBedClearResult first = await CreateAckService(firstContext)
+                .AcknowledgeAsync(request);
+            first.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+        }
+
+        await using (AppDbContext replayContext = CreateContext())
+        {
+            PrinterDispatchState currentState = await replayContext.PrinterDispatchStates
+                .SingleAsync(candidate => candidate.PrinterId == printerId);
+            PrintJob currentJob = await replayContext.PrintJobs
+                .SingleAsync(candidate => candidate.Id == jobId);
+            AcknowledgeBedClearResult replay = await CreateAckService(replayContext)
+                .AcknowledgeAsync(request with
+                {
+                    IfMatchDispatchState = currentState.RowVersion,
+                    IfMatchJob = currentJob.RowVersion,
+                });
+
+            replay.Outcome.Should().Be(BedClearAckOutcome.Replayed);
+        }
+
+        await using (AppDbContext pendingContext = CreateContext())
+        {
+            BedClearCommandRecord command = await pendingContext.BedClearCommandRecords
+                .SingleAsync(candidate => candidate.JobId == jobId);
+            command.Status.Should().Be(BedClearCommandStatus.Pending);
+            QueueDispatchOutbox outbox = await pendingContext.QueueDispatchOutbox
+                .SingleAsync(candidate => candidate.Id == command.OutboxEventId);
+            outbox.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        }
+
+        await using (AppDbContext claimContext = CreateContext())
+        {
+            DispatchClaimResult claim = await CreateClaimService(
+                claimContext,
+                MakeOnlineIdleReader(printerId)).AcquireClaimAsync(
+                    new DispatchClaimRequest(
+                        jobId,
+                        printerId,
+                        "actor",
+                        "Manual",
+                        idempotencyKey,
+                        null,
+                        null));
+            claim.Success.Should().BeTrue();
+        }
+
+        await using AppDbContext verifyContext = CreateContext();
+        BedClearCommandRecord claimedCommand = await verifyContext.BedClearCommandRecords
+            .SingleAsync(candidate => candidate.JobId == jobId);
+        claimedCommand.Status.Should().Be(BedClearCommandStatus.Claimed);
+        claimedCommand.DispatchAttemptId.Should().NotBeNull();
+        PrinterDispatchState claimedState = await verifyContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        claimedState.AcknowledgedJobId.Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData(BedClearCommandStatus.Rejected, BedClearAckOutcome.JobNotDispatchable, false)]
+    [InlineData(BedClearCommandStatus.Expired, BedClearAckOutcome.JobNotDispatchable, false)]
+    [InlineData(BedClearCommandStatus.Claimed, BedClearAckOutcome.AlreadyStartingOrPrinting, true)]
+    [InlineData(BedClearCommandStatus.Accepted, BedClearAckOutcome.AlreadyStartingOrPrinting, true)]
+    [InlineData(BedClearCommandStatus.Unknown, BedClearAckOutcome.AlreadyStartingOrPrinting, true)]
+    public async Task G2_BedClearAck_ExistingCommandLifecycle_DeterminesReplayOutcome(
+        BedClearCommandStatus commandStatus,
+        BedClearAckOutcome expectedOutcome,
+        bool exposesCorrelation)
+    {
+        await using AppDbContext seedContext = CreateContext();
+        (Guid printerId, Guid jobId, _) = await SeedFullCalibrationJobAsync(seedContext);
+        PrinterDispatchState initialState = await seedContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob initialJob = await seedContext.PrintJobs
+            .SingleAsync(candidate => candidate.Id == jobId);
+        var request = new AcknowledgeBedClearRequest(
+            jobId,
+            printerId,
+            "actor",
+            $"lifecycle-{commandStatus}",
+            initialState.RowVersion,
+            1,
+            initialJob.RowVersion);
+
+        Guid commandId;
+        await using (AppDbContext firstContext = CreateContext())
+        {
+            AcknowledgeBedClearResult first = await CreateAckService(firstContext)
+                .AcknowledgeAsync(request);
+            first.Outcome.Should().Be(BedClearAckOutcome.Accepted);
+            first.BedClearCommandId.Should().NotBeNull();
+            commandId = first.BedClearCommandId!.Value;
+        }
+
+        await using (AppDbContext mutateContext = CreateContext())
+        {
+            BedClearCommandRecord command = await mutateContext.BedClearCommandRecords
+                .SingleAsync(candidate => candidate.Id == commandId);
+            command.Status = commandStatus;
+            command.UpdatedAtUtc = DateTime.UtcNow;
+            await mutateContext.SaveChangesAsync();
+        }
+
+        await using AppDbContext replayContext = CreateContext();
+        PrinterDispatchState currentState = await replayContext.PrinterDispatchStates
+            .SingleAsync(candidate => candidate.PrinterId == printerId);
+        PrintJob currentJob = await replayContext.PrintJobs
+            .SingleAsync(candidate => candidate.Id == jobId);
+        AcknowledgeBedClearResult replay = await CreateAckService(replayContext)
+            .AcknowledgeAsync(request with
+            {
+                IfMatchDispatchState = currentState.RowVersion,
+                IfMatchJob = currentJob.RowVersion,
+            });
+
+        replay.Outcome.Should().Be(expectedOutcome);
+        if (exposesCorrelation)
+        {
+            replay.BedClearCommandId.Should().Be(commandId);
+            replay.BedClearIdempotencyKeySha256.Should().NotBeNull();
+        }
+        else
+        {
+            replay.BedClearCommandId.Should().BeNull();
+            replay.BedClearIdempotencyKeySha256.Should().BeNull();
+        }
     }
 
     [Fact]

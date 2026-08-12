@@ -23,7 +23,6 @@ internal static class BedClearCommandValidity
         ArgumentNullException.ThrowIfNull(dispatchState);
 
         return command.Status == BedClearCommandStatus.Pending &&
-               job.JobKind == JobKind.FilamentCalibration &&
                job.Status is PrintJobStatus.Queued or PrintJobStatus.Assigned &&
                job.AssignedPrinterId == command.PrinterId &&
                dispatchState.PrinterId == command.PrinterId &&

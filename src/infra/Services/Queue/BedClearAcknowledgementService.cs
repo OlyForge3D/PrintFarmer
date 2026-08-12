@@ -138,86 +138,12 @@ public sealed class BedClearAcknowledgementService(
                 ct);
         if (priorCommand is not null)
         {
-            if (!string.Equals(
-                    priorCommand.RequestSha256,
-                    requestSha256,
-                    StringComparison.Ordinal))
-            {
-                return new AcknowledgeBedClearResult(
-                    BedClearAckOutcome.IdempotencyMismatch,
-                    job.RowVersion,
-                    dispatchState.RowVersion,
-                    "Idempotency key was previously used with different job or revision inputs.");
-            }
-
-            if (priorCommand.Status is BedClearCommandStatus.Rejected or
-                BedClearCommandStatus.Expired)
-            {
-                return new AcknowledgeBedClearResult(
-                    BedClearAckOutcome.JobNotDispatchable,
-                    job.RowVersion,
-                    dispatchState.RowVersion,
-                    "The prior bed-clear command is terminal and cannot be replayed. Use a new idempotency key.");
-            }
-
-            if (priorCommand.Status == BedClearCommandStatus.Pending)
-            {
-                Guid? currentHeadId = await _db.PrintJobs
-                    .AsNoTracking()
-                    .Where(candidate =>
-                        candidate.AssignedPrinterId == request.PrinterId &&
-                        (candidate.Status == PrintJobStatus.Queued ||
-                         candidate.Status == PrintJobStatus.Assigned))
-                    .OrderByPriorityDescending()
-                    .Select(candidate => (Guid?)candidate.Id)
-                    .FirstOrDefaultAsync(ct);
-                long? currentPrinterRevision = await _db.Printers
-                    .AsNoTracking()
-                    .Where(printer => printer.Id == request.PrinterId)
-                    .Select(printer => (long?)printer.ConfigurationRevision)
-                    .SingleOrDefaultAsync(ct);
-                DateTime utcNow = DateTime.UtcNow;
-                bool pendingIsStale = !BedClearCommandValidity.IsCurrent(
-                    priorCommand,
-                    job,
-                    dispatchState,
-                    currentHeadId,
-                    currentPrinterRevision,
-                    utcNow);
-                if (pendingIsStale)
-                {
-                    await PersistBedClearTerminalAsync(
-                        priorCommand,
-                        job,
-                        dispatchState,
-                        expired: BedClearCommandValidity.IsExpired(
-                            priorCommand,
-                            dispatchState,
-                            utcNow),
-                        "pending_inputs_changed",
-                        ct);
-                    return new AcknowledgeBedClearResult(
-                        BedClearAckOutcome.JobNotDispatchable,
-                        job.RowVersion,
-                        dispatchState.RowVersion,
-                        "The pending bed-clear command expired or its exact queue inputs changed. Use a new idempotency key.");
-                }
-            }
-
-            BedClearAckOutcome replayOutcome =
-                priorCommand.Status is BedClearCommandStatus.Claimed or
-                    BedClearCommandStatus.Accepted or
-                    BedClearCommandStatus.Unknown
-                    ? BedClearAckOutcome.AlreadyStartingOrPrinting
-                    : BedClearAckOutcome.Replayed;
-            return new AcknowledgeBedClearResult(
-                replayOutcome,
-                job.RowVersion,
-                dispatchState.RowVersion,
-                null,
-                priorCommand.Id,
-                BedClearCommandCorrelation.HashIdempotencyKey(
-                    priorCommand.IdempotencyKey));
+            return await ResolveExistingCommandAsync(
+                priorCommand,
+                job,
+                dispatchState,
+                requestSha256,
+                ct);
         }
 
         if (!effectiveJobRevision.SequenceEqual(job.RowVersion ?? []))
@@ -777,7 +703,6 @@ public sealed class BedClearAcknowledgementService(
         {
             _db.ChangeTracker.Clear();
             BedClearCommandRecord? winner = await _db.BedClearCommandRecords
-                .AsNoTracking()
                 .FirstOrDefaultAsync(
                     record =>
                         record.PrinterId == request.PrinterId &&
@@ -785,26 +710,21 @@ public sealed class BedClearAcknowledgementService(
                     ct);
             if (winner is not null)
             {
-                bool isReplay = string.Equals(
-                    winner.RequestSha256,
-                    requestSha256,
-                    StringComparison.Ordinal);
-                string? replayError = isReplay
-                    ? null
-                    : "Idempotency key was concurrently used with different inputs.";
-                string? winnerKeyHash = isReplay
-                    ? BedClearCommandCorrelation.HashIdempotencyKey(
-                        winner.IdempotencyKey)
-                    : null;
-                return new AcknowledgeBedClearResult(
-                    isReplay
-                        ? BedClearAckOutcome.Replayed
-                        : BedClearAckOutcome.IdempotencyMismatch,
-                    null,
-                    null,
-                    replayError,
-                    isReplay ? winner.Id : null,
-                    winnerKeyHash);
+                PrintJob? currentJob = await _db.PrintJobs
+                    .SingleOrDefaultAsync(candidate => candidate.Id == request.JobId, ct);
+                PrinterDispatchState? currentDispatchState = await _db.PrinterDispatchStates
+                    .SingleOrDefaultAsync(
+                        candidate => candidate.PrinterId == request.PrinterId,
+                        ct);
+                if (currentJob is not null && currentDispatchState is not null)
+                {
+                    return await ResolveExistingCommandAsync(
+                        winner,
+                        currentJob,
+                        currentDispatchState,
+                        requestSha256,
+                        ct);
+                }
             }
 
             throw;
@@ -1031,6 +951,95 @@ public sealed class BedClearAcknowledgementService(
             job.RowVersion,
             dispatchState.RowVersion,
             detail);
+    }
+
+    private async Task<AcknowledgeBedClearResult> ResolveExistingCommandAsync(
+        BedClearCommandRecord command,
+        PrintJob job,
+        PrinterDispatchState dispatchState,
+        string requestSha256,
+        CancellationToken ct)
+    {
+        if (!string.Equals(
+                command.RequestSha256,
+                requestSha256,
+                StringComparison.Ordinal))
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.IdempotencyMismatch,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "Idempotency key was previously used with different job, printer, actor, or configuration inputs.");
+        }
+
+        if (command.Status is BedClearCommandStatus.Rejected or
+            BedClearCommandStatus.Expired)
+        {
+            return new AcknowledgeBedClearResult(
+                BedClearAckOutcome.JobNotDispatchable,
+                job.RowVersion,
+                dispatchState.RowVersion,
+                "The prior bed-clear command is terminal and cannot be replayed. Use a new idempotency key.");
+        }
+
+        if (command.Status == BedClearCommandStatus.Pending)
+        {
+            Guid? currentHeadId = await _db.PrintJobs
+                .AsNoTracking()
+                .Where(candidate =>
+                    candidate.AssignedPrinterId == command.PrinterId &&
+                    (candidate.Status == PrintJobStatus.Queued ||
+                     candidate.Status == PrintJobStatus.Assigned))
+                .OrderByPriorityDescending()
+                .Select(candidate => (Guid?)candidate.Id)
+                .FirstOrDefaultAsync(ct);
+            long? currentPrinterRevision = await _db.Printers
+                .AsNoTracking()
+                .Where(printer => printer.Id == command.PrinterId)
+                .Select(printer => (long?)printer.ConfigurationRevision)
+                .SingleOrDefaultAsync(ct);
+            DateTime utcNow = DateTime.UtcNow;
+            bool pendingIsStale = !BedClearCommandValidity.IsCurrent(
+                command,
+                job,
+                dispatchState,
+                currentHeadId,
+                currentPrinterRevision,
+                utcNow);
+            if (pendingIsStale)
+            {
+                await PersistBedClearTerminalAsync(
+                    command,
+                    job,
+                    dispatchState,
+                    expired: BedClearCommandValidity.IsExpired(
+                        command,
+                        dispatchState,
+                        utcNow),
+                    "pending_inputs_changed",
+                    ct);
+                return new AcknowledgeBedClearResult(
+                    BedClearAckOutcome.JobNotDispatchable,
+                    job.RowVersion,
+                    dispatchState.RowVersion,
+                    "The pending bed-clear command expired or its exact queue inputs changed. Use a new idempotency key.");
+            }
+        }
+
+        BedClearAckOutcome replayOutcome =
+            command.Status is BedClearCommandStatus.Claimed or
+                BedClearCommandStatus.Accepted or
+                BedClearCommandStatus.Unknown
+                ? BedClearAckOutcome.AlreadyStartingOrPrinting
+                : BedClearAckOutcome.Replayed;
+        return new AcknowledgeBedClearResult(
+            replayOutcome,
+            job.RowVersion,
+            dispatchState.RowVersion,
+            null,
+            command.Id,
+            BedClearCommandCorrelation.HashIdempotencyKey(
+                command.IdempotencyKey));
     }
 
     private static string BuildCommandRequestSha256(

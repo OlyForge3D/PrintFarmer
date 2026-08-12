@@ -10,7 +10,7 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Infrastructure.Idempotency;
 
 /// <summary>
-/// Model-configuration guard for the #715 remediation (Kane r1 + Frost r6). Every
+/// Model-configuration guard for the #715 and #1465 remediations. Every
 /// client-owned identity / idempotency column that backs a unique index MUST carry the
 /// binary, culture-invariant, case-sensitive SQL Server collation
 /// <c>Latin1_General_100_BIN2</c> so that byte-exact store comparison matches the
@@ -32,9 +32,8 @@ namespace Farm.Web.Api.Tests.Infrastructure.Idempotency;
 /// DB-collation <em>behaviour</em> cannot be exercised over the SQLite / InMemory test
 /// providers (each has its own collation), so this asserts the model metadata directly
 /// under a SQL Server model. Building the model does not open a connection. The
-/// end-to-end DDL + runtime behaviour is proven by the SQL Server migration
-/// (<c>ExtendCaseSensitiveCollationToSkuAndOperationKey</c>) against LocalDB and by both
-/// providers' <c>has-pending-model-changes</c> checks.
+/// end-to-end DDL + runtime behaviour is proven by provider-specific migrations and
+/// <c>has-pending-model-changes</c> checks.
 /// </para>
 /// </summary>
 public sealed class CaseSensitiveCollationModelTests
@@ -81,6 +80,8 @@ public sealed class CaseSensitiveCollationModelTests
     [InlineData(typeof(IdempotencyRecord), nameof(IdempotencyRecord.IdempotencyKey))]
     [InlineData(typeof(IdempotencyRecord), nameof(IdempotencyRecord.UserId))]
     [InlineData(typeof(BedClearCommandRecord), nameof(BedClearCommandRecord.IdempotencyKey))]
+    [InlineData(typeof(PrintJob), nameof(PrintJob.IdempotencyScope))]
+    [InlineData(typeof(PrintJob), nameof(PrintJob.IdempotencyKey))]
     public void CaseSensitiveIdentityColumns_UseBinaryCollation_OnSqlServer(
         Type entityType,
         string propertyName)
@@ -102,6 +103,8 @@ public sealed class CaseSensitiveCollationModelTests
     [InlineData(typeof(PartInventoryAdjustment), nameof(PartInventoryAdjustment.OperationKey))]
     [InlineData(typeof(PrintJob), nameof(PrintJob.HarvestOperationKey))]
     [InlineData(typeof(BedClearCommandRecord), nameof(BedClearCommandRecord.IdempotencyKey))]
+    [InlineData(typeof(PrintJob), nameof(PrintJob.IdempotencyScope))]
+    [InlineData(typeof(PrintJob), nameof(PrintJob.IdempotencyKey))]
     public void CaseSensitiveIdentityColumns_DoNotPinSqlServerCollation_OnNonSqlServerProviders(
         Type entityType,
         string propertyName)
@@ -120,5 +123,27 @@ public sealed class CaseSensitiveCollationModelTests
             "{0}.{1} must not carry the SQL-Server-specific BIN2 collation on a non-SQL-Server provider",
             entityType.Name,
             propertyName);
+    }
+
+    [Fact]
+    public void BedClearCommandIndexes_SupportAuthoritativeAndOutboxLookups()
+    {
+        IModel model = BuildSqlServerModel();
+        IEntityType entity = model.FindEntityType(typeof(BedClearCommandRecord))
+            ?? throw new InvalidOperationException("BedClearCommandRecord is missing from the model.");
+
+        IIndex jobLookup = entity.GetIndexes().Single(index =>
+            index.GetDatabaseName() == "IX_BedClearCommandRecords_Job_Created_Id");
+        jobLookup.Properties.Select(property => property.Name).Should().Equal(
+            nameof(BedClearCommandRecord.JobId),
+            nameof(BedClearCommandRecord.CreatedAtUtc),
+            nameof(BedClearCommandRecord.Id));
+        jobLookup.IsDescending.Should().Equal(false, true, true);
+
+        IIndex outboxLookup = entity.GetIndexes().Single(index =>
+            index.GetDatabaseName() == "UX_BedClearCommandRecords_OutboxEventId");
+        outboxLookup.Properties.Select(property => property.Name).Should().Equal(
+            nameof(BedClearCommandRecord.OutboxEventId));
+        outboxLookup.IsUnique.Should().BeTrue();
     }
 }

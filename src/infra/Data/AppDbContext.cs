@@ -490,6 +490,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 entity.Property(record => record.IdempotencyKey)
                     .UseCollation(caseSensitiveCollation));
 
+            _ = modelBuilder.Entity<PrintJob>(entity =>
+            {
+                _ = entity.Property(job => job.IdempotencyScope)
+                    .UseCollation(caseSensitiveCollation);
+                _ = entity.Property(job => job.IdempotencyKey)
+                    .UseCollation(caseSensitiveCollation);
+            });
+
             // Printed-part SKU catalog: Sku is the client-owned identity behind the unique
             // index IX_PartInventories_Sku (Hicks r5 blocker 1 — Hiragana vs Katakana SKUs
             // resolving to one physical row under Kana-insensitive collation).
@@ -659,6 +667,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         _ = modelBuilder.Entity<BedClearCommandRecord>()
             .HasIndex(record => new { record.Status, record.ExpiresAtUtc })
             .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => new { record.JobId, record.CreatedAtUtc, record.Id })
+            .IsDescending(false, true, true)
+            .HasDatabaseName("IX_BedClearCommandRecords_Job_Created_Id");
+
+        _ = modelBuilder.Entity<BedClearCommandRecord>()
+            .HasIndex(record => record.OutboxEventId)
+            .IsUnique()
+            .HasDatabaseName("UX_BedClearCommandRecords_OutboxEventId");
 
         _ = modelBuilder.Entity<QueuePositionState>()
             .HasKey(state => state.ScopeId);

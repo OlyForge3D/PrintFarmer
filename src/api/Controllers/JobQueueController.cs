@@ -1210,7 +1210,8 @@ public class JobQueueController(
     private static byte[]? DecodeEtag(string? value) =>
         string.IsNullOrWhiteSpace(value)
             ? null
-            : Convert.FromBase64String(value.Trim('"', ' '));
+            : Convert.FromBase64String(
+                value.Trim().TrimStart('W', '/').Trim('"'));
 
     private string GetActorSubject() => QueueActorIdentity.Resolve(User);
 }

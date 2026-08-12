@@ -109,6 +109,43 @@ public class CalibrationQueueDispatchTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task AcknowledgeBedClear_WeakEtags_AreDecodedBeforeServiceCall()
+    {
+        byte[] expectedEtag = [0x01, 0x02];
+        var request = new AcknowledgeBedClearRequestDto
+        {
+            PrinterId = Guid.NewGuid(),
+            IdempotencyKey = "weak-etag",
+        };
+        AcknowledgeBedClearRequest? capturedRequest = null;
+        _bedClearSvc
+            .Setup(service => service.AcknowledgeAsync(
+                It.IsAny<AcknowledgeBedClearRequest>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AcknowledgeBedClearRequest, CancellationToken>(
+                (captured, _) => capturedRequest = captured)
+            .ReturnsAsync(new AcknowledgeBedClearResult(
+                BedClearAckOutcome.JobNotFound,
+                null,
+                null,
+                "Not found"));
+        _controller.ControllerContext.HttpContext.Request.Headers["If-Match"] = "W/\"AQI=\"";
+        _controller.ControllerContext.HttpContext.Request.Headers[
+            "X-Dispatch-State-If-Match"] = "W/\"AQI=\"";
+
+        IActionResult result = await _controller.AcknowledgeBedClearAndStartAsync(
+            Guid.NewGuid(),
+            request,
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(expectedEtag, capturedRequest.IfMatchJob);
+        Assert.Equal(expectedEtag, capturedRequest.IfMatchDispatchState);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task AcknowledgeBedClear_JobNotFound_Returns404()
     {
         // Arrange

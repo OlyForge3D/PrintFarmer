@@ -363,12 +363,20 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OutboxEventId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearCommandRecords_OutboxEventId");
+
                     b.HasIndex("PrinterId", "IdempotencyKey")
                         .IsUnique()
                         .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
 
                     b.HasIndex("Status", "ExpiresAtUtc")
                         .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+                    b.HasIndex("JobId", "CreatedAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_BedClearCommandRecords_Job_Created_Id");
 
                     b.ToTable("BedClearCommandRecords");
                 });
@@ -5288,7 +5296,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("IdempotencyKey")
                         .HasMaxLength(512)
-                        .HasColumnType("nvarchar(512)");
+                        .HasColumnType("nvarchar(512)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<string>("IdempotencyRequestSha256")
                         .HasMaxLength(64)
@@ -5296,7 +5305,8 @@ namespace Farm.Migrations.SqlServer.Migrations
 
                     b.Property<string>("IdempotencyScope")
                         .HasMaxLength(256)
-                        .HasColumnType("nvarchar(256)");
+                        .HasColumnType("nvarchar(256)")
+                        .UseCollation("Latin1_General_100_BIN2");
 
                     b.Property<bool>("IsExternalPrint")
                         .HasColumnType("bit");
