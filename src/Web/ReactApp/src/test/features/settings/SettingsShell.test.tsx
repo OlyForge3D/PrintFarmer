@@ -58,8 +58,13 @@ vi.mock('@/features/settings/components/FarmSettingsSection', () => ({
   FarmSettingsSection: () => <div data-testid="farm-settings-section">Farm Settings Section</div>,
 }));
 
-const authState = {
+const authState: { roles: string[]; permissionOverride: ((resource: string, action: string) => boolean) | null } = {
   roles: ['farm_admin'],
+  // #1457: lets a test simulate a custom (non-farm_admin) role granted one
+  // specific admin permission, independent of the role-shaped default below,
+  // so per-tab gating (`canAccessDestination`) can be proven against a real
+  // custom-role scenario rather than only farm_admin vs. nothing.
+  permissionOverride: null,
 };
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
@@ -68,7 +73,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     hasRole: (role: string) => authState.roles.includes(role),
-    hasPermission: () => authState.roles.includes('farm_admin'),
+    hasPermission: (resource: string, action: string) =>
+      authState.permissionOverride ? authState.permissionOverride(resource, action) : authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
   useAuthInternal: () => ({
@@ -76,7 +82,8 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     isAuthenticated: true,
     isLoading: false,
     hasRole: (role: string) => authState.roles.includes(role),
-    hasPermission: () => authState.roles.includes('farm_admin'),
+    hasPermission: (resource: string, action: string) =>
+      authState.permissionOverride ? authState.permissionOverride(resource, action) : authState.roles.includes('farm_admin'),
     logout: vi.fn(),
   }),
 }));
@@ -152,6 +159,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   setAuthRoles(['farm_admin']);
+  authState.permissionOverride = null;
   vi.clearAllMocks();
 });
 
@@ -344,6 +352,93 @@ describe('SettingsShell', () => {
     expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Printer Groups' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('printer-groups-page')).toHaveAttribute('data-embedded', 'true');
+  });
+
+  it('lets a custom (non-farm_admin) role granted only printers:admin reach system scope and that one tab', () => {
+    // #1457 acceptance criterion: a user with a custom role granted a single
+    // resource permission (not the farm_admin role) must actually reach the
+    // matching admin destination, not merely see a nav entry that dead-ends.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
+  });
+
+  it('denies a custom (non-farm_admin) role a specific tab it lacks the requiredPermission for', () => {
+    // Same custom role as above (printers:admin only) is still refused the
+    // Cameras sub-page, which requires cameras:admin — proving
+    // canAccessDestination's per-tab gate, not just the coarser scope gate.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=cameras');
+
+    expect(screen.getByText(/don't have permission to view/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('printer-groups-page')).not.toBeInTheDocument();
+  });
+
+  it('hides Hardware sub-tabs the user cannot access, showing only the ones their permission unlocks (#1457, Hicks review)', () => {
+    // A user with printers:admin and nfc_devices:admin reaches Printer
+    // Groups, NFC Devices, and NFC Bindings. Before this fix, SettingsSubTabs
+    // rendered every Hardware sub-page (including Cameras and Custom Fields)
+    // regardless of permission, and the user only learned they lacked access
+    // after clicking one. The sub-tab bar itself must now only list what
+    // canAccessSettingsTab allows.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) =>
+      (resource === 'printers' || resource === 'nfc_devices') && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(screen.getByRole('tab', { name: /^Printer Groups/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^NFC Devices/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^NFC Bindings/ })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Cameras/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Custom Fields/ })).not.toBeInTheDocument();
+  });
+
+
+  it('hides an entire settings category from the sidebar when none of its tabs are reachable (#1457, Hicks review)', () => {
+    // Integrations' only sub-page (`connections`) is gated by
+    // requiredPermissionAnyOf (spoolman/home_assistant/telegram admin). A user
+    // with only printers:admin holds none of those, so the whole Integrations
+    // category must disappear from the sidebar rather than appear and dead-end.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(screen.queryByRole('button', { name: /^Integrations/ })).not.toBeInTheDocument();
+  });
+
+  it('lands a partial-permission user on their first reachable category, not the hardcoded scope default, on a bare tab-less URL (#1457 round-3, Hicks review)', () => {
+    // Before this fix, a bare `/admin/settings` (no `?tab=`) always resolved
+    // to the system scope's hardcoded default category (`general`), which
+    // requires system_settings:admin. A user with only printers:admin can
+    // reach the system scope at all (via Hardware/Printer Groups) but landed
+    // on General anyway and was immediately denied -- the same "reachable
+    // nav, denied content" bug the round-2 fix eliminated for explicit nav
+    // clicks, just reintroduced via the no-tab-param path. The fallback must
+    // pick the first category this user can actually reach (Hardware) instead.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system');
+
+    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the Integrations category and its connections tab once the user holds any one of the bundled permissions (#1457)', () => {
+    // Mirrors the `requiredPermissionAnyOf` OR semantics: telegram:admin alone
+    // is enough to unlock `connections`, even without spoolman or
+    // home_assistant admin.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'telegram' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=integrations&sub=connections');
+
+    expect(getCategoryButton('Integrations')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
   });
 
   it('matches hardware sub-pages in search results', () => {

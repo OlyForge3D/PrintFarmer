@@ -385,7 +385,12 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     return 'bg-pf-bg-1 text-pf-text-primary border-pf-border';
   };
 
-  // Early access check AFTER hooks to avoid conditional hook usage
+  // Genuinely admin-only surface (#1457) — user account management is gated on
+  // the `users:admin` resource permission (matching the `users-accounts`
+  // adminDestinations.ts entry and the server's UserManagementController),
+  // not the `farm_admin` role literally, so a custom role granted that
+  // permission can actually use the page it was just given nav access to.
+  // Early access check AFTER hooks to avoid conditional hook usage.
   if (!hasPermission('users', 'admin')) {
     return (
       <PageTemplate
