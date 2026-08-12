@@ -306,6 +306,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const hasRole = useCallback((role: string): boolean => {
     if (!user || !user.roles) return false;
+    // `farm_admin` is a deliberate superuser bypass: it satisfies every role
+    // check, not just literal `hasRole('farm_admin')` calls. Kept intentionally
+    // (#1457) — a farm admin must still pass any role gate a custom role might
+    // reasonably be excluded from. Do NOT use `hasRole` as the primary gate for
+    // anything a custom role should be able to reach via a granted permission;
+    // use `hasPermission` for that (see below). `hasRole` should only remain the
+    // gate for surfaces that are genuinely role-scoped rather than
+    // permission-scoped (see the call sites justified in adminDestinations.ts,
+    // CollectionsNav.tsx, and AddModelsToCollectionModal.tsx).
     return user.roles.includes(role) || user.roles.includes('farm_admin');
   }, [user]);
 
@@ -321,7 +330,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // A resource-level admin grant implies every finer-grained action on that same
     // resource (e.g. "calibration:admin" implies "calibration:read"). This never
-    // crosses resources and does not extend beyond the "admin" action.
+    // crosses resources and does not extend beyond the "admin" action. This
+    // mirrors the server's `PrintFarmerPermissions.ImpliesViaResourceAdmin` rule
+    // (see `PermissionAuthorizationHandler` and the slicer module's
+    // `ClaimsPermissionValidator`) so client-side nav/destination gating
+    // matches server behavior in the common case (#1457).
+    //
+    // Known gap (Vasquez review, #1457): the server rule also honours an
+    // explicit per-action "permission-deny" claim, which suppresses this
+    // implication even when the resource-level admin grant is present (see
+    // docs/ROLE_PERMISSION_PRECEDENCE.md). `UserDto`/`hasPermission` currently
+    // only exposes granted permissions, not denies, so a user with a deny
+    // claim on one action could see a client-side control this implication
+    // grants that the server would then refuse. This cannot be fixed
+    // client-side without the API exposing deny claims — tracked as a
+    // follow-up, not addressed by this issue's scope. It is not a new risk:
+    // this implication and this gap both predate #1457 and the same
+    // asymmetry already existed for every previously-role-gated destination
+    // this PR migrates. The server remains the actual enforcement point
+    // regardless, so this is a UX staleness gap, not a security hole.
     if (action !== 'admin' && user.permissions.includes(`${resource}:admin`)) return true;
 
     return false;

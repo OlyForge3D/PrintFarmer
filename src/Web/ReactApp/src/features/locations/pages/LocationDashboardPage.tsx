@@ -108,8 +108,10 @@ export const LocationDashboardPage: React.FC = () => {
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(null);
   const [manageMode, setManageMode] = useState(false);
   const [createToken, setCreateToken] = useState(0);
-  const { hasRole } = useAuth();
-  const isFarmAdmin = hasRole('farm_admin');
+  const { hasPermission } = useAuth();
+  // Backed by LocationsController's write endpoints, `[RequirePermission("locations", "admin")]`
+  // — matches the `hw-locations` adminDestinations.ts entry and Layout.tsx nav entry (#1457).
+  const isFarmAdmin = hasPermission('locations', 'admin');
   const { data: tree = [], isLoading: treeLoading, error: treeError } = useLocationTree();
   const { stats, isLoading: statsLoading } = useLocationStats(selectedLocationId);
   const { data: subtreePrinters = [], isLoading: printersLoading } = useLocationPrinters(selectedLocationId);

@@ -39,8 +39,9 @@ interface AlertItem {
 export function CriticalAlertsBanner() {
   const { alerts, isLoading: alertsLoading } = useMaintenanceAlerts();
   const { data: components = [], isLoading: componentsLoading } = useMaintenanceComponents();
-  const { hasRole } = useAuth();
-  const isAdmin = hasRole('farm_admin');
+  const { hasPermission } = useAuth();
+  // Backed by BackgroundServicesController, class-level `[RequirePermission("background_services", "admin")]` (#1457).
+  const isAdmin = hasPermission('background_services', 'admin');
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
   const { data: summaries } = usePrinterSummary();
   const { printerStatuses } = usePrinterStatusUpdates();
