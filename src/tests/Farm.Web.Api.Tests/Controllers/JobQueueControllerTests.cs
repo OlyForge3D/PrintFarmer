@@ -486,6 +486,10 @@ public class JobQueueControllerTests
         var jobDto = new JobQueuePrintJobDto
         {
             Id = jobId,
+            RowVersion = "job-row-version",
+            Revision = 9,
+            DispatchStateRowVersion = "dispatch-row-version",
+            DispatchStateRevision = 14,
             GcodeFileId = Guid.NewGuid(),
             GcodeFileName = "test.gcode",
             Status = PrintJobStatus.Queued,
@@ -506,6 +510,10 @@ public class JobQueueControllerTests
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         OkObjectResult okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
         Assert.Equal(jobDto, okResult.Value);
+        Assert.Equal("\"job-row-version\"", _controller.Response.Headers.ETag);
+        Assert.Equal(
+            "\"dispatch-row-version\"",
+            _controller.Response.Headers["X-Dispatch-State-ETag"]);
     }
 
     [Fact]
@@ -524,6 +532,34 @@ public class JobQueueControllerTests
         // Assert
         ActionResult<JobQueuePrintJobDto> actionResult = Assert.IsType<ActionResult<JobQueuePrintJobDto>>(result);
         Assert.IsType<NotFoundObjectResult>(actionResult.Result);
+    }
+
+    [Fact]
+    public async Task GetJobAsync_InaccessibleResource_ReturnsHiddenNotFound()
+    {
+        await using var db = new AppDbContext(
+            new DbContextOptionsBuilder<AppDbContext>()
+                .UseInMemoryDatabase(Guid.NewGuid().ToString())
+                .Options);
+        Guid jobId = Guid.NewGuid();
+        Mock<IQueueResourceAuthorizationService> authorization = new();
+        authorization
+            .Setup(service => service.CanAccessJobAsync(
+                It.IsAny<ClaimsPrincipal>(),
+                jobId,
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        JobQueueController controller = CreateController(db, authorization.Object);
+
+        ActionResult<JobQueuePrintJobDto> result = await controller.GetJobAsync(jobId);
+
+        _ = Assert.IsType<NotFoundResult>(result.Result);
+        _queueServiceMock.Verify(
+            service => service.GetJobAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

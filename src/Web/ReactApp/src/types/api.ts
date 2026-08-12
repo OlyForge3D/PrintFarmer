@@ -3778,7 +3778,18 @@ export interface SetAccessRulesRequest {
 }
 
 /**
- * Role DTO for access control UI
+ * A single resource:action permission grant/deny carried by a role (camelCase mirror of the
+ * backend's PermissionDto).
+ */
+export interface PermissionDto {
+  resource: string;
+  action: string;
+  granted: boolean;
+}
+
+/**
+ * Role DTO for access control UI. `permissions` is the server-side source of truth for what a
+ * role grants; consumers must derive behavior from this data rather than from `name` (#1456).
  */
 export interface RoleDto {
   id: string;
@@ -3787,6 +3798,7 @@ export interface RoleDto {
   description?: string;
   isSystemRole: boolean;
   isActive: boolean;
+  permissions?: PermissionDto[];
 }
 
 // ============ Role Management Types (#1455) ============

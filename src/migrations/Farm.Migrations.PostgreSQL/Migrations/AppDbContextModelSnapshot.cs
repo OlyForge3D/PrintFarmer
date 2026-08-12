@@ -362,12 +362,20 @@ namespace Farm.Migrations.PostgreSQL.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("OutboxEventId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_BedClearCommandRecords_OutboxEventId");
+
                     b.HasIndex("PrinterId", "IdempotencyKey")
                         .IsUnique()
                         .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
 
                     b.HasIndex("Status", "ExpiresAtUtc")
                         .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
+
+                    b.HasIndex("JobId", "CreatedAtUtc", "Id")
+                        .IsDescending(false, true, true)
+                        .HasDatabaseName("IX_BedClearCommandRecords_Job_Created_Id");
 
                     b.ToTable("BedClearCommandRecords");
                 });

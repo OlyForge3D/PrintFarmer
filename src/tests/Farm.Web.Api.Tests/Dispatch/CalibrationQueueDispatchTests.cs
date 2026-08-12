@@ -109,6 +109,43 @@ public class CalibrationQueueDispatchTests
 
     [Fact]
     [Trait("Category", "Unit")]
+    public async Task AcknowledgeBedClear_WeakEtags_AreDecodedBeforeServiceCall()
+    {
+        byte[] expectedEtag = [0x01, 0x02];
+        var request = new AcknowledgeBedClearRequestDto
+        {
+            PrinterId = Guid.NewGuid(),
+            IdempotencyKey = "weak-etag",
+        };
+        AcknowledgeBedClearRequest? capturedRequest = null;
+        _bedClearSvc
+            .Setup(service => service.AcknowledgeAsync(
+                It.IsAny<AcknowledgeBedClearRequest>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<AcknowledgeBedClearRequest, CancellationToken>(
+                (captured, _) => capturedRequest = captured)
+            .ReturnsAsync(new AcknowledgeBedClearResult(
+                BedClearAckOutcome.JobNotFound,
+                null,
+                null,
+                "Not found"));
+        _controller.ControllerContext.HttpContext.Request.Headers["If-Match"] = "W/\"AQI=\"";
+        _controller.ControllerContext.HttpContext.Request.Headers[
+            "X-Dispatch-State-If-Match"] = "W/\"AQI=\"";
+
+        IActionResult result = await _controller.AcknowledgeBedClearAndStartAsync(
+            Guid.NewGuid(),
+            request,
+            CancellationToken.None);
+
+        Assert.IsType<NotFoundObjectResult>(result);
+        Assert.NotNull(capturedRequest);
+        Assert.Equal(expectedEtag, capturedRequest.IfMatchJob);
+        Assert.Equal(expectedEtag, capturedRequest.IfMatchDispatchState);
+    }
+
+    [Fact]
+    [Trait("Category", "Unit")]
     public async Task AcknowledgeBedClear_JobNotFound_Returns404()
     {
         // Arrange
@@ -135,12 +172,21 @@ public class CalibrationQueueDispatchTests
         // Arrange
         var jobId = Guid.NewGuid();
         var printerId = Guid.NewGuid();
+        Guid commandId = Guid.NewGuid();
+        const string KeyHash =
+            "ca74744a78571a723f2d7bcd1b080bf775e08a2dd9da280f52dacd041799a257";
         byte[] etag = [0x01, 0x02];
         var request = new AcknowledgeBedClearRequestDto { PrinterId = printerId, IdempotencyKey = "key-new" };
 
         _bedClearSvc
             .Setup(s => s.AcknowledgeAsync(It.IsAny<AcknowledgeBedClearRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AcknowledgeBedClearResult(BedClearAckOutcome.Accepted, etag, etag, null));
+            .ReturnsAsync(new AcknowledgeBedClearResult(
+                BedClearAckOutcome.Accepted,
+                etag,
+                etag,
+                null,
+                commandId,
+                KeyHash));
 
         SetIfMatchHeader("AAAA");
 
@@ -150,6 +196,17 @@ public class CalibrationQueueDispatchTests
         // Assert
         var status = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status202Accepted, status.StatusCode);
+        string response = System.Text.Json.JsonSerializer.Serialize(status.Value);
+        using System.Text.Json.JsonDocument document =
+            System.Text.Json.JsonDocument.Parse(response);
+        Assert.Equal(
+            commandId,
+            document.RootElement.GetProperty("bedClearCommandId").GetGuid());
+        Assert.Equal(
+            KeyHash,
+            document.RootElement
+                .GetProperty("bedClearIdempotencyKeySha256")
+                .GetString());
     }
 
     [Fact]
@@ -158,12 +215,21 @@ public class CalibrationQueueDispatchTests
     {
         // Arrange
         var jobId = Guid.NewGuid();
+        Guid commandId = Guid.NewGuid();
+        const string KeyHash =
+            "cab37eaebb1eb44420f820c759ae68bc4a6d6110c0485545c0b6fd9aec2ef357";
         byte[] etag = [0x03];
         var request = new AcknowledgeBedClearRequestDto { PrinterId = Guid.NewGuid(), IdempotencyKey = "key-replay" };
 
         _bedClearSvc
             .Setup(s => s.AcknowledgeAsync(It.IsAny<AcknowledgeBedClearRequest>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AcknowledgeBedClearResult(BedClearAckOutcome.Replayed, etag, etag, null));
+            .ReturnsAsync(new AcknowledgeBedClearResult(
+                BedClearAckOutcome.Replayed,
+                etag,
+                etag,
+                null,
+                commandId,
+                KeyHash));
 
         SetIfMatchHeader("AAAA");
 
@@ -171,7 +237,18 @@ public class CalibrationQueueDispatchTests
         IActionResult result = await _controller.AcknowledgeBedClearAndStartAsync(jobId, request, CancellationToken.None);
 
         // Assert
-        Assert.IsType<OkObjectResult>(result);
+        OkObjectResult ok = Assert.IsType<OkObjectResult>(result);
+        string response = System.Text.Json.JsonSerializer.Serialize(ok.Value);
+        using System.Text.Json.JsonDocument document =
+            System.Text.Json.JsonDocument.Parse(response);
+        Assert.Equal(
+            commandId,
+            document.RootElement.GetProperty("bedClearCommandId").GetGuid());
+        Assert.Equal(
+            KeyHash,
+            document.RootElement
+                .GetProperty("bedClearIdempotencyKeySha256")
+                .GetString());
     }
 
     [Fact]
