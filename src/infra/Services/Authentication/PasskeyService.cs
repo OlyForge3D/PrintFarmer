@@ -178,8 +178,11 @@ public class PasskeyService(
             },
             ct);
 
+        DateTime nowUtc = DateTime.UtcNow;
         credential.SignCount = assertionResult.SignCount;
-        credential.LastUsedAt = DateTime.UtcNow;
+        credential.LastUsedAt = nowUtc;
+        credential.User.LastLogin = nowUtc;
+        credential.User.UpdatedAt = nowUtc;
         await db.SaveChangesAsync(ct);
 
         string token = await authenticationService.GenerateJwtTokenAsync(credential.User);
@@ -190,15 +193,9 @@ public class PasskeyService(
             Convert.ToBase64String(credential.CredentialId),
             assertionResult.SignCount);
 
-        User user = credential.User;
-        Contracts.Auth.UserDto userDto = new()
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email ?? string.Empty,
-            FirstName = user.FirstName,
-            LastName = user.LastName,
-        };
+        Contracts.Auth.UserDto userDto =
+            await authenticationService.GetUserWithRolesAndPermissionsAsync(credential.User.Id)
+            ?? throw new InvalidOperationException("Authenticated user could not be loaded.");
 
         return new AuthenticationResult(true, token, DateTime.UtcNow.AddDays(7), userDto);
     }
