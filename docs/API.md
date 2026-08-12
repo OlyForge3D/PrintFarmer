@@ -319,15 +319,15 @@ Key properties:
   and re-intersected on every exchange. An exact permission grant satisfies the
   check, as does a same-resource `{resource}:admin` grant (`calibration:admin`
   implies every `calibration:*` action) — the implication never crosses
-  resources. Losing a permission drops only the affected scopes; unrelated
-  model/library scopes are retained.
-- **`farm_admin` ownership is the safe production path.** Role CRUD exists, but
-  the per-permission grant UI does not yet (epic #1445), so prefer a
-  `farm_admin` owner and treat custom-role ownership as advanced configuration.
-  A stock `farm_user` holds none of these permissions: creation returns `400`,
-  and an already-issued key would have those scopes dropped at exchange. The
-  owner intersection is unconditional either way, and an admin-owned exchanged
-  token still carries no role claim.
+  resources. An explicit deny on any active role wins over both, matching
+  [`docs/ROLE_PERMISSION_PRECEDENCE.md`](ROLE_PERMISSION_PRECEDENCE.md). Losing
+  a permission drops only the affected scopes; unrelated model/library scopes
+  are retained.
+- **A stock `farm_user` holds none of these permissions**, so creation returns
+  `400` until the role's permissions are granted through the role-permission
+  API, and an already-issued key would have those scopes dropped at exchange.
+  The owner intersection is unconditional, and an admin-owned exchanged token
+  still carries no role claim.
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
