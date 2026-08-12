@@ -436,12 +436,12 @@ main API in `AuthenticationStartup`, and the standalone slicer host in `Farm.Sli
 so the deny holds in monolithic and microservices deployments alike.
 
 Normal login sessions — including the admin UI — are unaffected: the rule denies only principals
-carrying `token_use=desktop_exchange`, and every other principal passes through untouched,
-including the slicer host's standalone-mode principal. The handler calls `Fail()` rather than
-merely declining to succeed, so the Development-only `Security:DevModeBypassAuth` GET bypass cannot
-re-open these endpoints. The passkey **login** ceremony (`passkey/login/begin` and `.../complete`)
-stays anonymous, since the signed assertion is itself the credential being verified. Password
-change is not affected because it already requires the current password.
+carrying `token_use=desktop_exchange`, and every other principal passes through untouched. The
+handler calls `Fail()` rather than merely declining to succeed, so the Development-only
+`Security:DevModeBypassAuth` GET bypass cannot re-open these endpoints. The passkey **login**
+ceremony (`passkey/login/begin` and `.../complete`) stays anonymous, since the signed assertion is
+itself the credential being verified. Password change is not affected because it already requires
+the current password.
 
 ### Authorization Policies
 
@@ -478,17 +478,16 @@ body is unchanged (`{ "apiKey": "..." }`), so no desktop client change is requir
 
 To accept Desktop-exchanged tokens, the standalone slicer host needs the same JWT signing
 configuration as the main API - see `Jwt__Key`, `Jwt__Issuer`, and `Jwt__Audience` in
-`scripts/docker/compose-templates/docker-compose.slicer-host.yml`. If `Jwt__Key` is not configured
-(or shorter than 32 characters), the slicer host runs in its existing standalone mode: no JWT
-Bearer scheme is registered and every request authenticates as an admin, exactly as before this
-feature was added.
+`scripts/docker/compose-templates/docker-compose.slicer-host.yml`. **`Jwt__Key` is required.**
+`Farm.Slicer.Host/Program.cs` reads `Jwt:Key` and throws at startup when it is absent, then
+registers JWT bearer authentication unconditionally. There is no length-based fallback and no
+auto-admin standalone principal - earlier revisions of this guide described one, but no such code
+path exists. The compose template still defaults `Jwt__Key` to empty, tracked separately in
+[#1478](https://github.com/OlyForge3D/PrintFarmer/issues/1478); set it explicitly.
 
-**Security note:** unlike the main API (which refuses to start without an explicit `Jwt__Key`),
-the slicer-host compose template deliberately ships with `Jwt__Key` **unset by default** so
-standalone-only deployments keep working with zero JWT configuration. Never set `Jwt__Key` in
-either service to the well-known placeholder value that appears anywhere in this repository's
-committed example configuration - a shared/known signing key lets anyone mint their own valid
-`ModelWrite`/`LibrarySync`-scoped tokens. Always generate a real random secret (e.g.
+**Security note:** never set `Jwt__Key` in either service to the well-known placeholder value that
+appears anywhere in this repository's committed example configuration - a shared or known signing
+key lets anyone mint their own valid tokens. Always generate a real random secret (e.g.
 `openssl rand -base64 48`) and set the identical value for both the `api` and `slicer-host`
 services via environment variables or a secrets manager, never by committing it to source
 control.
