@@ -177,6 +177,8 @@ public class AuthenticationServiceTests
             .ReturnsAsync(new List<string> { "farm_user" });
         _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(string Resource, string Action)> { ("printers", "read") });
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)>());
 
         // Act
         AuthenticationResult result = await _service.AuthenticateAsync("testuser", "correctpassword");
@@ -557,6 +559,8 @@ public class AuthenticationServiceTests
             .ReturnsAsync(new List<string> { "farm_user" });
         _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(string Resource, string Action)>());
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)>());
 
         // Act
         AuthenticationResult result = await _service.RegisterAsync(request);
@@ -601,6 +605,8 @@ public class AuthenticationServiceTests
                 ("printers", "read"),
                 ("printers", "write")
             });
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)>());
 
         // Act
         string token = await _service.GenerateJwtTokenAsync(user);
@@ -622,6 +628,8 @@ public class AuthenticationServiceTests
         _mockUsersRepository.Setup(r => r.GetActiveRoleNamesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<string> { "farm_user" });
         _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)>());
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(string Resource, string Action)>());
 
         string token = await _service.GenerateJwtTokenAsync(user);
@@ -646,6 +654,8 @@ public class AuthenticationServiceTests
             .ReturnsAsync(new List<string> { "farm_user" });
         _mockUsersRepository.Setup(r => r.GetGrantedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<(string Resource, string Action)> { ("printers", "read") });
+        _mockUsersRepository.Setup(r => r.GetDeniedPermissionsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<(string Resource, string Action)>());
 
         string token = await _service.GenerateJwtTokenAsync(user);
 

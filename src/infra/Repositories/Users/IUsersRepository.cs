@@ -169,12 +169,26 @@ public interface IUsersRepository
     Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>
-    /// Gets all granted permissions for a user based on their roles.
+    /// Gets all granted permissions for a user based on their roles. Explicit deny wins:
+    /// if any active role denies a (resource, action) pair, it is excluded here even if
+    /// another active role grants it. See docs/ROLE_PERMISSION_PRECEDENCE.md.
     /// </summary>
     /// <param name="userId">The user's unique identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>List of resource-action permission tuples.</returns>
     Task<List<(string Resource, string Action)>> GetGrantedPermissionsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Gets all permission pairs explicitly denied (<c>Granted == false</c>) by at least
+    /// one of the user's active roles, regardless of whether another active role also
+    /// grants the same pair. Used to keep the resource:admin implication
+    /// (<see cref="Farm.Infrastructure.Security.PrintFarmerPermissions.ImpliesViaResourceAdmin"/>)
+    /// from overriding an explicit per-action deny. See docs/ROLE_PERMISSION_PRECEDENCE.md.
+    /// </summary>
+    /// <param name="userId">The user's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of resource-action permission tuples that are explicitly denied.</returns>
+    Task<List<(string Resource, string Action)>> GetDeniedPermissionsAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>
     /// Updates a user's password after verifying the current password.

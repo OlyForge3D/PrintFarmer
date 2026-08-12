@@ -4,6 +4,7 @@ using Farm.Infrastructure.Contracts.Auth;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Repositories.Users;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Email;
 using Farm.Infrastructure.Services.RateLimiting;
 using Microsoft.Extensions.Configuration;
@@ -171,6 +172,7 @@ public class AuthenticationService(
         SigningCredentials creds = new(key, SecurityAlgorithms.HmacSha256);
         List<string> roles = await _usersRepository.GetActiveRoleNamesAsync(user.Id);
         List<(string Resource, string Action)> permissions = await _usersRepository.GetGrantedPermissionsAsync(user.Id);
+        List<(string Resource, string Action)> deniedPermissions = await _usersRepository.GetDeniedPermissionsAsync(user.Id);
         List<Claim> claims = new()
         {
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
@@ -180,7 +182,12 @@ public class AuthenticationService(
             new("family_name", user.LastName ?? string.Empty)
         };
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));
-        claims.AddRange(permissions.Select(p => new Claim("permission", $"{p.Resource}:{p.Action}")));
+        claims.AddRange(permissions.Select(p => new Claim(PrintFarmerPermissions.ClaimType, $"{p.Resource}:{p.Action}")));
+
+        // Explicit deny claims keep the resource:admin implication from silently overriding
+        // a per-action deny. See PrintFarmerPermissions.ImpliesViaResourceAdmin and
+        // docs/ROLE_PERMISSION_PRECEDENCE.md.
+        claims.AddRange(deniedPermissions.Select(p => new Claim(PrintFarmerPermissions.DenyClaimType, $"{p.Resource}:{p.Action}")));
 
         SecurityTokenDescriptor tokenDescriptor = new()
         {

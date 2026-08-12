@@ -217,4 +217,163 @@ public sealed class EfUsersRepositoryPermissionPrecedenceTests : IAsyncDisposabl
         permissions.Should().ContainSingle(p => p.Resource == "printers" && p.Action == "read");
         permissions.Should().NotContain(p => p.Resource == "printers" && p.Action == "write");
     }
+
+    [Fact]
+    public async Task GetGrantedPermissionsAsync_SamePermissionGrantedByTwoRoles_ReturnedExactlyOnce()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "double-grant-user");
+        Guid roleA = await CreateRoleAsync(context, "role_double_a");
+        Guid roleB = await CreateRoleAsync(context, "role_double_b");
+
+        await AddRolePermissionAsync(context, roleA, "printers", "read", granted: true);
+        await AddRolePermissionAsync(context, roleB, "printers", "read", granted: true);
+
+        await AssignRoleAsync(context, userId, roleA);
+        await AssignRoleAsync(context, userId, roleB);
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> permissions = await repository.GetGrantedPermissionsAsync(userId);
+
+        permissions.Should().BeEquivalentTo(new[] { ("printers", "read") });
+    }
+
+    [Fact]
+    public async Task GetGrantedPermissionsAsync_DenyFromInactiveRole_DoesNotSuppressGrant()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "inactive-deny-user");
+        Guid grantingRoleId = await CreateRoleAsync(context, "role_active_granter");
+        Guid denyingRoleId = await CreateRoleAsync(context, "role_inactive_denier");
+
+        await AddRolePermissionAsync(context, grantingRoleId, "printers", "write", granted: true);
+        await AddRolePermissionAsync(context, denyingRoleId, "printers", "write", granted: false);
+
+        await AssignRoleAsync(context, userId, grantingRoleId);
+
+        // Deny comes from a role assignment that is inactive; it must not count.
+        context.UserRoles.Add(new UserRole
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            RoleId = denyingRoleId,
+            AssignedAt = DateTime.UtcNow,
+            IsActive = false
+        });
+        await context.SaveChangesAsync();
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> permissions = await repository.GetGrantedPermissionsAsync(userId);
+
+        permissions.Should().ContainSingle(p => p.Resource == "printers" && p.Action == "write");
+    }
+
+    [Fact]
+    public async Task GetGrantedPermissionsAsync_DenyFromExpiredRole_DoesNotSuppressGrant()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "expired-deny-user");
+        Guid grantingRoleId = await CreateRoleAsync(context, "role_active_granter_2");
+        Guid denyingRoleId = await CreateRoleAsync(context, "role_expired_denier");
+
+        await AddRolePermissionAsync(context, grantingRoleId, "printers", "write", granted: true);
+        await AddRolePermissionAsync(context, denyingRoleId, "printers", "write", granted: false);
+
+        await AssignRoleAsync(context, userId, grantingRoleId);
+
+        // Deny comes from a role assignment that expired in the past; it must not count.
+        context.UserRoles.Add(new UserRole
+        {
+            Id = Guid.NewGuid(),
+            UserId = userId,
+            RoleId = denyingRoleId,
+            AssignedAt = DateTime.UtcNow.AddDays(-30),
+            ExpiresAt = DateTime.UtcNow.AddDays(-1),
+            IsActive = true
+        });
+        await context.SaveChangesAsync();
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> permissions = await repository.GetGrantedPermissionsAsync(userId);
+
+        permissions.Should().ContainSingle(p => p.Resource == "printers" && p.Action == "write");
+    }
+
+    [Fact]
+    public async Task GetGrantedPermissionsAsync_UserWithNoRoles_ReturnsEmpty()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "no-roles-user");
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> permissions = await repository.GetGrantedPermissionsAsync(userId);
+
+        permissions.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetDeniedPermissionsAsync_GrantOnly_IsExcluded()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "denied-grant-only-user");
+        Guid roleId = await CreateRoleAsync(context, "role_denied_grant_only");
+        await AddRolePermissionAsync(context, roleId, "printers", "read", granted: true);
+        await AssignRoleAsync(context, userId, roleId);
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> denied = await repository.GetDeniedPermissionsAsync(userId);
+
+        denied.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetDeniedPermissionsAsync_DenyOnly_IsIncluded()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "denied-deny-only-user");
+        Guid roleId = await CreateRoleAsync(context, "role_denied_deny_only");
+        await AddRolePermissionAsync(context, roleId, "printers", "delete", granted: false);
+        await AssignRoleAsync(context, userId, roleId);
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> denied = await repository.GetDeniedPermissionsAsync(userId);
+
+        denied.Should().BeEquivalentTo(new[] { ("printers", "delete") });
+    }
+
+    [Fact]
+    public async Task GetDeniedPermissionsAsync_GrantAndDenySamePermission_IsStillIncluded()
+    {
+        // GetDeniedPermissionsAsync surfaces every pair with at least one deny row, even if
+        // another active role also grants the same pair — callers use this list purely to
+        // suppress the resource:admin implication, so the deny must always be visible here
+        // regardless of what GetGrantedPermissionsAsync ultimately resolves to.
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "denied-conflict-user");
+        Guid grantingRoleId = await CreateRoleAsync(context, "role_denied_granter");
+        Guid denyingRoleId = await CreateRoleAsync(context, "role_denied_denier");
+
+        await AddRolePermissionAsync(context, grantingRoleId, "printers", "write", granted: true);
+        await AddRolePermissionAsync(context, denyingRoleId, "printers", "write", granted: false);
+
+        await AssignRoleAsync(context, userId, grantingRoleId);
+        await AssignRoleAsync(context, userId, denyingRoleId);
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> denied = await repository.GetDeniedPermissionsAsync(userId);
+
+        denied.Should().BeEquivalentTo(new[] { ("printers", "write") });
+    }
+
+    [Fact]
+    public async Task GetDeniedPermissionsAsync_UserWithNoRoles_ReturnsEmpty()
+    {
+        await using AppDbContext context = await CreateContextAsync();
+        Guid userId = await CreateUserAsync(context, "denied-no-roles-user");
+
+        EfUsersRepository repository = new(context);
+        List<(string Resource, string Action)> denied = await repository.GetDeniedPermissionsAsync(userId);
+
+        denied.Should().BeEmpty();
+    }
 }

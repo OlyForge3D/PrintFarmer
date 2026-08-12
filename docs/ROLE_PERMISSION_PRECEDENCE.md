@@ -55,5 +55,33 @@ role B's explicit deny overrides role A's grant.
 ## Test coverage
 
 See `src/tests/Farm.Web.Api.Tests/Repositories/Users/EfUsersRepositoryPermissionPrecedenceTests.cs`
-for scenarios covering: grant-only, deny-only, grant+deny conflict on the same permission, and
-multi-role inheritance where one role grants and another denies.
+for scenarios covering: grant-only, deny-only, grant+deny conflict on the same permission,
+multi-role inheritance where one role grants and another denies, deduplication across roles that
+grant the same pair, denies from inactive/expired role assignments (which must not count), and a
+user with no roles.
+
+## Interaction with the `resource:admin` implication
+
+[Issue #1447](https://github.com/OlyForge3D/PrintFarmer/issues/1447) added an implication where a
+`{resource}:admin` claim satisfies every finer-grained action check on that same resource (see
+`PrintFarmerPermissions.ImpliesViaResourceAdmin`). Without further changes, that implication could
+silently defeat an explicit deny: if role A grants `printers:admin` and role B denies
+`printers:delete`, the deny-wins rule above correctly excludes the `printers:delete` *grant*
+claim, but the JWT would still carry `printers:admin`, and the admin implication would authorize
+`printers:delete` anyway.
+
+To close this gap, `AuthenticationService.GenerateJwtTokenAsync` also embeds a **deny claim**
+(`PrintFarmerPermissions.DenyClaimType`, `"permission-deny"`) for every (resource, action) pair
+returned by `EfUsersRepository.GetDeniedPermissionsAsync` (a mirror of
+`GetGrantedPermissionsAsync` that returns any pair with at least one deny row across the user's
+active roles). `ImpliesViaResourceAdmin` requires the *absence* of a matching deny claim before
+implying access, so an explicit per-action deny always wins over a resource-level admin grant,
+consistent with the "deny wins" rule.
+
+The `farm_admin` role bypass (`PrintFarmerPermissions.IsFarmAdmin`) is a separate, coarser,
+role-name-based "break glass" mechanism that predates `RolePermission` rows entirely and is
+intentionally left unaffected by this change.
+
+See `src/tests/Farm.Web.Api.Tests/Security/PermissionAuthorizationHandlerTests.cs` for coverage
+proving a deny claim suppresses the admin implication for the denied action only (not other
+actions on the same resource, and not other resources).

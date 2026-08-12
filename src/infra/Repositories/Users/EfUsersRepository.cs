@@ -214,17 +214,39 @@ public class EfUsersRepository(AppDbContext db) : IUsersRepository
         // Grant/deny precedence: an explicit deny (Granted == false) on any of the user's
         // active roles suppresses a permission even if another active role grants it.
         // See docs/ROLE_PERMISSION_PRECEDENCE.md and issue #1450.
-        List<(string Resource, string Action, bool Granted)> rows = await _db.UserRoles
-            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
-            .SelectMany(ur => ur.Role.RolePermissions)
-            .Select(rp => new ValueTuple<string, string, bool>(rp.Resource.Name, rp.Action.Name, rp.Granted))
-            .ToListAsync(ct);
+        List<(string Resource, string Action, bool Granted)> rows = await GetRolePermissionRowsAsync(userId, ct);
 
         return rows
             .GroupBy(rp => (rp.Resource, rp.Action))
             .Where(g => g.All(rp => rp.Granted))
             .Select(g => (g.Key.Resource, g.Key.Action))
             .ToList();
+    }
+
+    public async Task<List<(string Resource, string Action)>> GetDeniedPermissionsAsync(Guid userId, CancellationToken ct = default)
+    {
+        // Mirror of GetGrantedPermissionsAsync: a (resource, action) pair is explicitly
+        // denied when at least one of the user's active roles has Granted == false for it,
+        // regardless of whether another active role also grants it (the deny still wins,
+        // per docs/ROLE_PERMISSION_PRECEDENCE.md). Callers use this to keep the
+        // resource:admin implication (PrintFarmerPermissions.ImpliesViaResourceAdmin) from
+        // silently overriding an explicit per-action deny.
+        List<(string Resource, string Action, bool Granted)> rows = await GetRolePermissionRowsAsync(userId, ct);
+
+        return rows
+            .GroupBy(rp => (rp.Resource, rp.Action))
+            .Where(g => g.Any(rp => !rp.Granted))
+            .Select(g => (g.Key.Resource, g.Key.Action))
+            .ToList();
+    }
+
+    private async Task<List<(string Resource, string Action, bool Granted)>> GetRolePermissionRowsAsync(Guid userId, CancellationToken ct)
+    {
+        return await _db.UserRoles
+            .Where(ur => ur.UserId == userId && ur.IsActive && (ur.ExpiresAt == null || ur.ExpiresAt > DateTime.UtcNow))
+            .SelectMany(ur => ur.Role.RolePermissions)
+            .Select(rp => new ValueTuple<string, string, bool>(rp.Resource.Name, rp.Action.Name, rp.Granted))
+            .ToListAsync(ct);
     }
 
     public async Task<bool> UpdatePasswordAsync(Guid userId, string currentPassword, string newPasswordHash, CancellationToken ct = default)

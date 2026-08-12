@@ -169,13 +169,79 @@ public sealed class PermissionAuthorizationHandlerTests
         context.HasSucceeded.Should().BeTrue("the farm_admin role bypass must remain unaffected by the resource-admin implication");
     }
 
-    private static AuthorizationHandlerContext CreateContext(string resource, string action, string grantedPermission)
+    [Fact]
+    public async Task HandleRequirementAsync_ExplicitDeny_SuppressesResourceAdminImplication()
+    {
+        // Regression test for the gap found during #1450 review: a resource:admin grant must
+        // not silently override an explicit per-action deny recorded via RolePermission.Granted
+        // (see docs/ROLE_PERMISSION_PRECEDENCE.md). Without the deny claim, this would incorrectly
+        // succeed via ImpliesViaResourceAdmin even though the specific action was denied.
+        AuthorizationHandlerContext context = CreateContext(
+            resource: "printers",
+            action: "delete",
+            grantedPermission: "printers:admin",
+            deniedPermission: "printers:delete");
+
+        var handler = new PermissionAuthorizationHandler(NullLogger<PermissionAuthorizationHandler>.Instance);
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.Should().BeFalse(
+            "an explicit deny on 'printers:delete' must win over the 'printers:admin' implication");
+    }
+
+    [Fact]
+    public async Task HandleRequirementAsync_ExplicitDenyOnDifferentAction_DoesNotSuppressAdminImplication()
+    {
+        // The deny claim only suppresses the implication for the exact denied action; other
+        // actions on the same resource remain covered by the admin grant.
+        AuthorizationHandlerContext context = CreateContext(
+            resource: "printers",
+            action: "read",
+            grantedPermission: "printers:admin",
+            deniedPermission: "printers:delete");
+
+        var handler = new PermissionAuthorizationHandler(NullLogger<PermissionAuthorizationHandler>.Instance);
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.Should().BeTrue(
+            "a deny on 'printers:delete' must not suppress the admin implication for 'printers:read'");
+    }
+
+    [Fact]
+    public async Task HandleRequirementAsync_ExplicitDenyOnDifferentResource_DoesNotSuppressAdminImplication()
+    {
+        // The deny claim must be scoped to its own resource and never leak into another
+        // resource's admin implication.
+        AuthorizationHandlerContext context = CreateContext(
+            resource: "printers",
+            action: "delete",
+            grantedPermission: "printers:admin",
+            deniedPermission: "queue:delete");
+
+        var handler = new PermissionAuthorizationHandler(NullLogger<PermissionAuthorizationHandler>.Instance);
+        await handler.HandleAsync(context);
+
+        context.HasSucceeded.Should().BeTrue(
+            "a deny on 'queue:delete' must not suppress the 'printers:admin' implication for 'printers:delete'");
+    }
+
+    private static AuthorizationHandlerContext CreateContext(
+        string resource,
+        string action,
+        string grantedPermission,
+        string? deniedPermission = null)
     {
         var requirement = new RequirePermissionAttribute(resource, action);
-        var identity = new ClaimsIdentity(
+        List<Claim> claims =
         [
             new Claim(PrintFarmerPermissions.ClaimType, grantedPermission),
-        ], authenticationType: "TestAuth");
+        ];
+        if (deniedPermission is not null)
+        {
+            claims.Add(new Claim(PrintFarmerPermissions.DenyClaimType, deniedPermission));
+        }
+
+        var identity = new ClaimsIdentity(claims, authenticationType: "TestAuth");
         var principal = new ClaimsPrincipal(identity);
         return new AuthorizationHandlerContext([requirement], principal, resource: null);
     }
