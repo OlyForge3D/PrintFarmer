@@ -45,6 +45,7 @@ public sealed class DatabaseMigrationTests
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
             "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken",
             "20260812020851_HardenBedClearReplayStorage");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
@@ -309,6 +310,7 @@ public sealed class DatabaseMigrationTests
             "20260807023655_UsePortableRevisionConcurrency",
             "20260808054302_AddNfcDeviceApproval",
             "20260808162833_AddPowerReadingCompositeIndex",
+            "20260811235527_AddRoleUpdatedAtConcurrencyToken",
             "20260812020851_HardenBedClearReplayStorage");
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -659,6 +661,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023649_UsePortableRevisionConcurrency",
                 "20260808052051_AddNfcDeviceApproval",
                 "20260808162502_AddPowerReadingCompositeIndex",
+                "20260811230934_AddRoleUpdatedAtConcurrencyToken",
                 "20260812020851_HardenBedClearReplayStorage",
             ]
             :
@@ -668,6 +671,7 @@ public sealed class DatabaseMigrationTests
                 "20260807023652_UsePortableRevisionConcurrency",
                 "20260808052059_AddNfcDeviceApproval",
                 "20260808162518_AddPowerReadingCompositeIndex",
+                "20260811230948_AddRoleUpdatedAtConcurrencyToken",
                 "20260812011119_UseBinaryBedClearIdempotencyKeys",
                 "20260812020851_HardenBedClearReplayStorage",
             ];

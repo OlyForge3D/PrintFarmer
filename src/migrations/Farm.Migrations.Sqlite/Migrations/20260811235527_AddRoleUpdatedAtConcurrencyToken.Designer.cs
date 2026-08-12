@@ -3,6 +3,7 @@ using System;
 using Farm.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Farm.Migrations.Sqlite.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260811235527_AddRoleUpdatedAtConcurrencyToken")]
+    partial class AddRoleUpdatedAtConcurrencyToken
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "10.0.10");
@@ -353,20 +356,12 @@ namespace Farm.Migrations.Sqlite.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("OutboxEventId")
-                        .IsUnique()
-                        .HasDatabaseName("UX_BedClearCommandRecords_OutboxEventId");
-
                     b.HasIndex("PrinterId", "IdempotencyKey")
                         .IsUnique()
                         .HasDatabaseName("UX_BedClearCommandRecords_Printer_Key");
 
                     b.HasIndex("Status", "ExpiresAtUtc")
                         .HasDatabaseName("IX_BedClearCommandRecords_Status_Expiry");
-
-                    b.HasIndex("JobId", "CreatedAtUtc", "Id")
-                        .IsDescending(false, true, true)
-                        .HasDatabaseName("IX_BedClearCommandRecords_Job_Created_Id");
 
                     b.ToTable("BedClearCommandRecords");
                 });
