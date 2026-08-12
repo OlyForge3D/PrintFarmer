@@ -559,27 +559,31 @@ export class PrinterSignalRService {
     } catch {
       // ignore cache failures
     }
-    // Expose on window for quick inspection (best-effort)
+    // Expose on window for quick inspection — opt-in only (best-effort).
+    // `printerSignalRVerbose` is a separate flag from `printerSignalR` (which the
+    // other debug gates in this file read) so this block can no longer self-enable
+    // production console logging by writing to the same key it's gated on.
     try {
       const win = window as unknown as {
         PrintFarmerDebug?: Record<string, unknown>;
       };
-      if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
-      win.PrintFarmerDebug.lastPrinterUpdate = status as unknown as Record<
-        string,
-        unknown
-      >;
-      win.PrintFarmerDebug.printerSignalR = {
-        connectionId: this.connectionId,
-        isConnected: this.isConnected,
-        lastStatuses: Array.from(this.lastStatuses.entries()).reduce(
-          (acc, [k, v]) => {
-            acc[k] = v;
-            return acc;
-          },
-          {} as Record<string, unknown>
-        ),
-      };
+      if (win.PrintFarmerDebug?.printerSignalRVerbose) {
+        win.PrintFarmerDebug.lastPrinterUpdate = status as unknown as Record<
+          string,
+          unknown
+        >;
+        win.PrintFarmerDebug.printerSignalR = {
+          connectionId: this.connectionId,
+          isConnected: this.isConnected,
+          lastStatuses: Array.from(this.lastStatuses.entries()).reduce(
+            (acc, [k, v]) => {
+              acc[k] = v;
+              return acc;
+            },
+            {} as Record<string, unknown>
+          ),
+        };
+      }
     } catch {
       // ignore debug exposure failures
     }
