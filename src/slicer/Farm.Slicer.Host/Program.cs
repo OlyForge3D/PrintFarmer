@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.PrinterCalibration;
+using Farm.Infrastructure.Services.Authentication;
 using Farm.Slicer.Host;
 using Farm.Slicer.Host.Services;
 using Farm.Slicer.Module;
@@ -67,6 +68,32 @@ builder.Services
                 }
 
                 return Task.CompletedTask;
+            },
+
+            // Checks whether the caller's token has been force-revoked (e.g. admin "revoke all
+            // tokens"). Resolved with GetRequiredService (never GetService) so that if the
+            // dependency chain registered by AddTokenRevocationServices below is ever broken, this
+            // fails loudly instead of silently no-oping as the reverted #1460 attempt did.
+            // ITokenRevocationService wraps this check in a short-TTL cache (#1469) so this does
+            // not add a database round-trip to every request, including streamed /api/artifacts
+            // downloads and /hubs/slicer SignalR traffic.
+            OnTokenValidated = async context =>
+            {
+                string? token = context.SecurityToken is Microsoft.IdentityModel.JsonWebTokens.JsonWebToken jwt
+                    ? jwt.EncodedToken
+                    : null;
+                if (string.IsNullOrEmpty(token))
+                {
+                    return;
+                }
+
+                ITokenRevocationService tokenRevocationService =
+                    context.HttpContext.RequestServices.GetRequiredService<ITokenRevocationService>();
+                bool isRevoked = await tokenRevocationService.IsTokenRevokedAsync(token, context.HttpContext.RequestAborted);
+                if (isRevoked)
+                {
+                    context.Fail("This token has been revoked.");
+                }
             },
         };
     });
@@ -176,6 +203,17 @@ using (IServiceScope scope = app.Services.CreateScope())
             $"Slicer:PluginsPath={pluginsPath}. Ensure the container image includes " +
             "Farm.Slicers.OrcaSlicer.v2_4_0.dll / v2_3_1.dll in the plugins directory.");
     }
+}
+
+// ── Token revocation dependency check (issue #1469) ───────────────────────────
+// The naive fix attempted in #1460 was reverted because ITokenRevocationService was never
+// registered in this host: resolving it with GetService returned null and the OnTokenValidated
+// check silently no-oped, so a "revoke all tokens" action never took effect on this host. Fail
+// fast at startup with GetRequiredService so a future regression to that dependency chain crashes
+// the host instead of silently disabling the revocation check again.
+using (IServiceScope scope = app.Services.CreateScope())
+{
+    _ = scope.ServiceProvider.GetRequiredService<ITokenRevocationService>();
 }
 
 app.UseCors();
