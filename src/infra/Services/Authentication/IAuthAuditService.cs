@@ -166,6 +166,30 @@ public interface IAuthAuditService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Log a user's role assignment change (role(s) added/removed from a user) performed via
+    /// the users management API, completing the propagation started by
+    /// <see cref="LogRolePermissionsChangedAsync"/> (#1471) for the other direction: a user's
+    /// own role membership changing rather than a role's permission grants changing (#1454).
+    /// </summary>
+    /// <param name="actingUserId">The unique identifier of the administrator who made the change.</param>
+    /// <param name="targetUserId">The unique identifier of the user whose role assignment changed.</param>
+    /// <param name="rolesAdded">Role names newly assigned to the user.</param>
+    /// <param name="rolesRemoved">Role names no longer assigned to the user.</param>
+    /// <param name="revokedSessionCount">Number of users (0 or 1) whose active sessions were revoked as a result.</param>
+    /// <param name="ipAddress">The IP address from which the change was made.</param>
+    /// <param name="correlationId">Optional correlation identifier for request tracing.</param>
+    /// <param name="cancellationToken">A token to cancel the operation.</param>
+    Task LogRoleAssignmentChangedAsync(
+        Guid actingUserId,
+        Guid targetUserId,
+        IReadOnlyList<string> rolesAdded,
+        IReadOnlyList<string> rolesRemoved,
+        int revokedSessionCount,
+        string? ipAddress,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Log a role management mutation (create, update, or delete) for the audit trail.
     /// </summary>
     /// <param name="actorUserId">The unique identifier of the administrator performing the change.</param>

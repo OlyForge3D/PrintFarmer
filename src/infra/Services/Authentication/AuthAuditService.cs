@@ -346,6 +346,43 @@ public class AuthAuditService(IAuthAuditLogRepository auditRepository, ILogger<A
             roleId, LogSanitizer.Sanitize(roleName), actingUserId, permissionsAdded.Count, permissionsRemoved.Count, revokedSessionCount);
     }
 
+    public async Task LogRoleAssignmentChangedAsync(
+        Guid actingUserId,
+        Guid targetUserId,
+        IReadOnlyList<string> rolesAdded,
+        IReadOnlyList<string> rolesRemoved,
+        int revokedSessionCount,
+        string? ipAddress,
+        string? correlationId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var metadata = new
+        {
+            TargetUserId = targetUserId,
+            Added = rolesAdded,
+            Removed = rolesRemoved,
+            RevokedSessionCount = revokedSessionCount
+        };
+
+        AuthAuditLog auditLog = new()
+        {
+            Id = Guid.NewGuid(),
+            UserId = actingUserId,
+            EventType = AuthEventType.RoleAssignmentChanged,
+            Timestamp = DateTime.UtcNow,
+            IpAddress = ipAddress,
+            UserAgent = null,
+            Success = true,
+            Metadata = JsonSerializer.Serialize(metadata),
+            CorrelationId = correlationId
+        };
+
+        await SaveAuditAsync(auditLog, cancellationToken);
+        _logging.LogWarning(
+            "[AuthAudit] Role assignment changed for UserId: {TargetUserId} by UserId: {ActingUserId}. Added: {AddedCount}, Removed: {RemovedCount}, SessionsRevoked: {RevokedSessionCount}",
+            targetUserId, actingUserId, rolesAdded.Count, rolesRemoved.Count, revokedSessionCount);
+    }
+
     public async Task LogRoleManagementEventAsync(Guid actorUserId, Guid roleId, string roleName, AuthEventType eventType, string? beforeJson, string? afterJson, string? ipAddress, string? correlationId = null, CancellationToken cancellationToken = default)
     {
         var metadata = new

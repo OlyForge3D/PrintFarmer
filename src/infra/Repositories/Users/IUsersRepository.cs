@@ -46,12 +46,18 @@ public interface IUsersRepository
     Task AddUserAsync(User user, IEnumerable<Guid>? roleIds, CancellationToken ct = default);
 
     /// <summary>
-    /// Updates the roles assigned to a user.
+    /// Atomically replaces the roles assigned to a user: captures the user's current active role
+    /// set, deletes it, assigns the new set, and re-reads the resulting active role set, all
+    /// within one serializable transaction alongside any other pending changes tracked on this
+    /// context (e.g. a caller's in-progress User field edits). Returns both the before and after
+    /// role sets captured from within that same transaction, so a caller can diff them without a
+    /// separate post-commit read that could race against a third concurrent update.
     /// </summary>
     /// <param name="userId">The user's unique identifier.</param>
     /// <param name="roleIds">The new set of role IDs to assign.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default);
+    /// <returns>The role IDs actively assigned to the user immediately before and after this call.</returns>
+    Task<RoleAssignmentDiff> UpdateUserRolesAsync(Guid userId, IEnumerable<Guid> roleIds, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a user by ID.
@@ -169,6 +175,16 @@ public interface IUsersRepository
     Task<List<string>> GetActiveRoleNamesAsync(Guid userId, CancellationToken ct = default);
 
     /// <summary>
+    /// Gets the role IDs of all active role assignments for a user. Used to detect whether a
+    /// role assignment change actually alters the user's effective permissions (#1454), so a
+    /// no-op RoleIds resubmission does not trigger a session revocation.
+    /// </summary>
+    /// <param name="userId">The user's unique identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of role IDs assigned to the user.</returns>
+    Task<List<Guid>> GetActiveRoleIdsAsync(Guid userId, CancellationToken ct = default);
+
+    /// <summary>
     /// Gets all granted permissions for a user based on their roles. Explicit deny wins:
     /// if any active role denies a (resource, action) pair, it is excluded here even if
     /// another active role grants it. See docs/ROLE_PERMISSION_PRECEDENCE.md.
@@ -223,3 +239,12 @@ public interface IUsersRepository
     /// <returns>The user if the token is valid, otherwise null.</returns>
     Task<User?> GetByEmailConfirmationTokenAsync(string token, CancellationToken ct = default);
 }
+
+/// <summary>
+/// The active role IDs assigned to a user immediately before and after a
+/// <see cref="IUsersRepository.UpdateUserRolesAsync"/> replacement, both captured from within the
+/// same serializable transaction so a caller can diff them without a separate, race-prone read.
+/// </summary>
+/// <param name="BeforeRoleIds">Role IDs active immediately before the replacement.</param>
+/// <param name="AfterRoleIds">Role IDs active immediately after the replacement.</param>
+public sealed record RoleAssignmentDiff(List<Guid> BeforeRoleIds, List<Guid> AfterRoleIds);
