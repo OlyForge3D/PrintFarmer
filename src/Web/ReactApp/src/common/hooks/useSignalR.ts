@@ -114,11 +114,10 @@ export function usePrinterStatusUpdates(
 
     const handleStatusUpdate = (status: PrinterStatusUpdate) => {
       try {
-        // Expose debug info for live inspection in browser console (guarded)
-          const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
-          if (!win.PrintFarmerDebug) win.PrintFarmerDebug = {};
-          (win.PrintFarmerDebug as Record<string, unknown>).lastPrinterUpdate = status as unknown as Record<string, unknown>;
+        // Expose debug info for live inspection in browser console — opt-in only
+        const win = window as unknown as { PrintFarmerDebug?: Record<string, unknown> };
         if (win.PrintFarmerDebug?.usePrinterStatusUpdates) {
+          (win.PrintFarmerDebug as Record<string, unknown>).lastPrinterUpdate = status as unknown as Record<string, unknown>;
           console.debug('[usePrinterStatusUpdates] received status update', status.id, status.state, status.isOnline, status.hotendTemp, status.bedTemp);
         }
       } catch {

@@ -18,7 +18,13 @@ declare global {
     
     // Signal/Communication
     printerSignalR?: boolean;
+    // Opt-in only: enables the O(P) lastStatuses snapshot + lastPrinterUpdate
+    // exposure in printer-signalr.ts's applyStatusUpdate. Deliberately a
+    // separate flag from printerSignalR so enabling it can't self-enable the
+    // console.debug gates that read printerSignalR.
+    printerSignalRVerbose?: boolean;
     harvestSignalR?: boolean;
+    usePrinterStatusUpdates?: boolean;
     
     // Pages and features
     setupWizard?: boolean;

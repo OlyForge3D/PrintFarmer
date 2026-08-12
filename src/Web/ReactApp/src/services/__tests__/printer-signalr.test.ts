@@ -121,6 +121,118 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
     });
   });
 
+  describe('PrinterSignalRService debug exposure gating', () => {
+    const flushMicrotasks = async () => {
+      for (let index = 0; index < 12; index++) {
+        await Promise.resolve();
+      }
+    };
+
+    beforeEach(() => {
+      vi.resetModules();
+      vi.clearAllMocks();
+      signalRTestState.connectionHandlers.clear();
+      signalRTestState.connection.state = 'Disconnected';
+      signalRTestState.connection.start.mockImplementation(async () => {
+        signalRTestState.connection.state = 'Connected';
+      });
+      signalRTestState.connection.stop.mockImplementation(async () => {
+        signalRTestState.connection.state = 'Disconnected';
+      });
+      signalRTestState.connection.invoke.mockResolvedValue(undefined);
+      signalRTestState.getSettings.mockResolvedValue({
+        logLevel: 'Information',
+        consoleLoggingEnabled: false,
+      });
+      signalRTestState.getQueueChanges.mockResolvedValue({
+        afterSequence: 0,
+        nextSequence: 0,
+        hasMore: false,
+        events: [],
+      });
+      localStorage.clear();
+      window.PrintFarmerDebug = undefined;
+    });
+
+    it('does not populate window.PrintFarmerDebug.printerSignalR by default on printerupdated', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      signalRTestState.connectionHandlers.get('printerupdated')?.({
+        id: 'printer-1',
+        state: 'Printing',
+        isOnline: true,
+      });
+      await flushMicrotasks();
+
+      expect(window.PrintFarmerDebug?.printerSignalR).toBeUndefined();
+      expect(window.PrintFarmerDebug?.lastPrinterUpdate).toBeUndefined();
+      printerSignalRService.dispose();
+    });
+
+    it('does not console.debug on printerupdated by default (no self-enable)', async () => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      // Fire multiple updates — the bug caused the first message to flip the
+      // shared flag on, enabling logging from the second message onward.
+      signalRTestState.connectionHandlers.get('printerupdated')?.({
+        id: 'printer-1',
+        state: 'Printing',
+        isOnline: true,
+      });
+      signalRTestState.connectionHandlers.get('printerupdated')?.({
+        id: 'printer-1',
+        state: 'Idle',
+        isOnline: true,
+      });
+      await flushMicrotasks();
+
+      expect(debugSpy).not.toHaveBeenCalled();
+      printerSignalRService.dispose();
+      debugSpy.mockRestore();
+    });
+
+    it('populates window.PrintFarmerDebug.printerSignalR when printerSignalRVerbose is explicitly opted in', async () => {
+      window.PrintFarmerDebug = { printerSignalRVerbose: true };
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      signalRTestState.connectionHandlers.get('printerupdated')?.({
+        id: 'printer-1',
+        state: 'Printing',
+        isOnline: true,
+      });
+      await flushMicrotasks();
+
+      expect(window.PrintFarmerDebug?.printerSignalR).toBeDefined();
+      expect(
+        (window.PrintFarmerDebug?.printerSignalR as { lastStatuses: Record<string, unknown> })
+          .lastStatuses['printer-1']
+      ).toBeDefined();
+      printerSignalRService.dispose();
+    });
+
+    it('still caches statuses (offline debounce logic) when the debug flag is off', async () => {
+      const { printerSignalRService } = await import('../printer-signalr');
+      await flushMicrotasks();
+
+      signalRTestState.connectionHandlers.get('printerupdated')?.({
+        id: 'printer-1',
+        state: 'Printing',
+        isOnline: true,
+      });
+      await flushMicrotasks();
+
+      expect(printerSignalRService.getLastStatus('printer-1')).toMatchObject({
+        id: 'printer-1',
+        isOnline: true,
+      });
+      printerSignalRService.dispose();
+    });
+  });
+
   describe('PrinterSignalRService queue reconciliation', () => {
     const flushMicrotasks = async () => {
       for (let index = 0; index < 12; index++) {
