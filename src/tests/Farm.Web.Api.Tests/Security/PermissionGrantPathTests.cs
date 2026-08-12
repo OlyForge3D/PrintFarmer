@@ -229,6 +229,86 @@ public sealed class PermissionGrantPathTests
             $"the whole member should be farm_admin-only. Unsatisfiable: {string.Join("; ", unsatisfiableCombinations)}");
     }
 
+    /// <summary>
+    /// Answers directly: does <c>farm_admin</c> actually hold the 17 finer-grained permissions
+    /// (calibration/queue/slicing/dispatch-settings/obico) that <c>SeedRolePermissionsAsync</c>
+    /// never writes a row for?
+    ///
+    /// This deliberately evaluates authority with
+    /// <see cref="PrintFarmerPermissions.SetGrantsPermission"/> — the row-only path that has NO
+    /// <see cref="PrintFarmerPermissions.FarmAdminRole"/> bypass — because that is the strictest
+    /// enforcement path in the system and the one used by Desktop API-key exchange
+    /// (<c>DesktopScopePermissionMap</c>, <c>UserApiKeysController</c>), where a farm_admin owner
+    /// deliberately does not lend a token its implicit admin bypass.
+    ///
+    /// If the seeded rows alone satisfy every enforced permission here, they satisfy it on every
+    /// weaker path too (the role bypass in <c>PermissionAuthorizationHandler</c>, hubs, and
+    /// capability services all short-circuit earlier). Seeding the 17 redundant rows would then be
+    /// pure duplication that must be repeated for every resource added later.
+    /// </summary>
+    [Fact]
+    public async Task SeededFarmAdminRows_SatisfyEveryEnforcedPermission_WithoutTheRoleBypass()
+    {
+        List<PermissionSite> sites = DiscoverEnforcedPermissionSites();
+        HashSet<(string Resource, string Action)> enforced = new(
+            sites.Select(site => (site.Resource, site.Action)));
+
+        // Guard against a vacuous pass: this test exists for the finer-grained actions that have
+        // no farm_admin row at all. If those ever stop being discovered, the assertion below would
+        // trivially hold over nothing but ':admin' permissions and prove nothing.
+        enforced.Where(e => !string.Equals(e.Action, PrintFarmerPermissions.AdminAction, StringComparison.Ordinal))
+            .Should().NotBeEmpty("the finer-grained actions are the entire point of this test");
+        enforced.Should().Contain(("queue", "read"));
+        enforced.Should().Contain(("calibration", "create"));
+
+        await using SqliteConnection connection = new("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+        await using AppDbContext context = new(options);
+        _ = await context.Database.EnsureCreatedAsync();
+        var dataSeedService = new Mock<IDataSeedService>(MockBehavior.Loose);
+        DatabaseInitializer initializer = new(
+            context,
+            NullLogger<DatabaseInitializer>.Instance,
+            dataSeedService.Object);
+        await initializer.SeedAllAsync();
+
+        Guid adminRoleId = await context.Roles
+            .Where(role => role.Name == PrintFarmerPermissions.FarmAdminRole)
+            .Select(role => role.Id)
+            .SingleAsync();
+
+        List<(string Resource, string Action, bool Granted)> adminRows =
+            (await context.RolePermissions
+                .Where(rp => rp.RoleId == adminRoleId)
+                .Select(rp => new { rp.Resource.Name, ActionName = rp.Action.Name, rp.Granted })
+                .ToListAsync())
+                .Select(x => (x.Name, x.ActionName, x.Granted))
+                .ToList();
+
+        HashSet<string> granted = new(
+            adminRows.Where(r => r.Granted).Select(r => $"{r.Resource}:{r.Action}"),
+            StringComparer.Ordinal);
+        HashSet<string> denied = new(
+            adminRows.Where(r => !r.Granted).Select(r => $"{r.Resource}:{r.Action}"),
+            StringComparer.Ordinal);
+
+        List<string> notSatisfied = enforced
+            .Select(e => $"{e.Resource}:{e.Action}")
+            .Where(permission => !PrintFarmerPermissions.SetGrantsPermission(granted, denied, permission))
+            .OrderBy(permission => permission, StringComparer.Ordinal)
+            .ToList();
+
+        notSatisfied.Should().BeEmpty(
+            "farm_admin's seeded '{resource}:admin' rows must satisfy every enforced permission " +
+            "through the same-resource admin implication, on the strictest row-only path that " +
+            "ignores the farm_admin role bypass. A permission listed here is one an administrator " +
+            "genuinely cannot exercise via a Desktop API key, and would need either a real seeded " +
+            $"row or a documented reason. Not satisfied: {string.Join(", ", notSatisfied)}");
+    }
+
     private static List<PermissionSite> DiscoverEnforcedPermissionSites()
     {
         List<PermissionSite> sites = [];
