@@ -85,19 +85,28 @@ public class JobQueueAnalyticsController(
                 return Ok(jobs);
             }
 
-            var authorized = new List<QueuedPrintJobWithFileMetaDto>(jobs.Count);
-            foreach (QueuedPrintJobWithFileMetaDto job in jobs)
+            // Zero-query fast path: claims-based farm-admin check, mirroring
+            // CanAccessJobAsync's short-circuit before falling back to the
+            // DB-backed batched authorization check below.
+            if (PrintFarmerPermissions.IsFarmAdmin(User))
             {
-                if (Guid.TryParse(job.Job.Id, out Guid id) &&
-                    await resourceAuthorization.CanAccessJobAsync(
-                        User,
-                        id,
-                        PrinterGroupAccessLevel.View,
-                        cancellationToken))
-                {
-                    authorized.Add(job);
-                }
+                return Ok(jobs);
             }
+
+            Guid[] jobIds = jobs
+                .Select(job => Guid.TryParse(job.Job.Id, out Guid id) ? id : (Guid?)null)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .ToArray();
+            IReadOnlySet<Guid> authorizedJobIds =
+                await resourceAuthorization.FilterActorAccessibleJobIdsAsync(
+                    QueueActorIdentity.Resolve(User),
+                    jobIds,
+                    PrinterGroupAccessLevel.View,
+                    cancellationToken);
+            List<QueuedPrintJobWithFileMetaDto> authorized = jobs
+                .Where(job => Guid.TryParse(job.Job.Id, out Guid id) && authorizedJobIds.Contains(id))
+                .ToList();
 
             return Ok(authorized);
         }
