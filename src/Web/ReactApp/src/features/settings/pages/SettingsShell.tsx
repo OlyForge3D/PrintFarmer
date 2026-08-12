@@ -292,9 +292,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [availableScopes, fallbackScopeId, resolvedRequestedTarget.scopeId]);
 
   const activeCategory = useMemo(() => {
-    return accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)
-      ? resolvedRequestedTarget.categoryId
-      : getDefaultCategoryForScope(activeScope);
+    if (accessibleCategories.some((category) => category.id === resolvedRequestedTarget.categoryId)) {
+      return resolvedRequestedTarget.categoryId;
+    }
+    // Issue 1457 (Hicks round-3 review) — a bare `/admin/settings` or
+    // `/admin/manage` URL (no `?tab=`) resolved to the scope's hardcoded
+    // default category (e.g. `general`/`operations`) even when the user
+    // lacks access to it, landing them on the same "reachable nav, denied
+    // content" outcome the round-2 fix was meant to eliminate -- just via
+    // the no-tab-param path instead of clicking a nav item. Fall back to the
+    // first category this user can actually reach in the active scope;
+    // only fall back further to the hardcoded default if literally none of
+    // the scope's categories are accessible (canReachSystemScope/
+    // canReachAdminScope should already prevent that from happening).
+    const firstAccessibleInScope = accessibleCategories.find((category) => category.scopeId === activeScope);
+    return firstAccessibleInScope?.id ?? getDefaultCategoryForScope(activeScope);
   }, [accessibleCategories, activeScope, resolvedRequestedTarget.categoryId]);
 
   const shouldFocusSectionRef = useRef(false);
@@ -509,8 +521,21 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return matchingCurrentSubPageIds[0];
     }
 
-    return getDefaultSubPage(currentCategory.id);
-  }, [currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
+    // Issue 1457 (Hicks round-3 review) — same bare-URL gap as `activeCategory`
+    // above: getDefaultSubPage() picks the category's first-defined sub-page
+    // regardless of permission, so landing on a tab with no explicit `?sub=`
+    // (e.g. `?tab=hardware` alone) could default to a sub-page this user
+    // can't reach and immediately show the "you don't have permission"
+    // screen. Prefer the first sub-page `accessibleCategories` says this user
+    // can reach; only fall back to the unfiltered default if the category
+    // isn't in `accessibleCategories` at all (shouldn't happen for a category
+    // the user is currently viewing) or has no accessible sub-pages.
+    const firstAccessibleSubPage = accessibleCategories
+      .find((category) => category.id === currentCategory.id)
+      ?.subPages[0]?.id;
+
+    return firstAccessibleSubPage ?? getDefaultSubPage(currentCategory.id);
+  }, [accessibleCategories, currentCategory, isFiltering, matchingCurrentSubPageIds, resolvedRequestedTarget.categoryId, resolvedRequestedTarget.subPageId]);
 
   const hasSubTabs = currentCategory.subPages.length >= 2;
   const renderedContentKey = currentCategory.subPages.length === 0

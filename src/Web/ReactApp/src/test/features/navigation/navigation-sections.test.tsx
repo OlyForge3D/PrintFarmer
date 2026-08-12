@@ -18,20 +18,25 @@ let mockUserRole = 'farm_admin';
 // Admin nav link's `requiresAnyAccessUnder` gating can be proven against a
 // real custom-role scenario rather than only the role-shaped default below.
 let mockPermissionOverride: ((resource: string, action: string) => boolean) | null = null;
+// #1457 round-3 (Bishop review) — lets a test simulate a signed-out visitor,
+// proving the unauthenticated nav filter also excludes `requiresAnyAccessUnder`
+// destinations (previously only requiredRole/requiredPermission were checked,
+// so the Admin nav link leaked to signed-out users).
+let mockIsAuthenticated = true;
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
   useAuth: () => ({
-    user: { id: '1', email: 'admin@test.com', role: mockUserRole, isActive: true, username: 'admin' },
+    user: mockIsAuthenticated ? { id: '1', email: 'admin@test.com', role: mockUserRole, isActive: true, username: 'admin' } : null,
     logout: vi.fn(),
-    isAuthenticated: true,
-    hasRole: (role: string) => role === mockUserRole,
+    isAuthenticated: mockIsAuthenticated,
+    hasRole: (role: string) => mockIsAuthenticated && role === mockUserRole,
     // Mirrors mockUserRole rather than a blanket `true` (#1457): the "operator"
     // test case needs hasPermission to actually deny, since the Admin nav
     // link is now gated on `requiresAnyAccessUnder` (reachable admin
     // destinations), not a fixed role/permission pair. mockPermissionOverride
     // lets a test opt into fully independent, resource/action-aware behavior.
     hasPermission: (resource: string, action: string) =>
-      mockPermissionOverride ? mockPermissionOverride(resource, action) : mockUserRole === 'farm_admin',
+      mockIsAuthenticated && (mockPermissionOverride ? mockPermissionOverride(resource, action) : mockUserRole === 'farm_admin'),
   }),
 }));
 
@@ -110,6 +115,7 @@ describe('Navigation rail sections', () => {
   beforeEach(() => {
     mockUserRole = 'farm_admin';
     mockPermissionOverride = null;
+    mockIsAuthenticated = true;
     localStorage.clear();
   });
 
@@ -206,6 +212,19 @@ describe('Navigation rail sections', () => {
     const { container } = renderLayout();
 
     expect(container.querySelector('a[href="/admin"]')).toBeNull();
+  });
+
+  it('hides the Admin nav link (requiresAnyAccessUnder) for a signed-out visitor (#1457 round-3, Bishop review)', () => {
+    // Before this fix, the unauthenticated nav filter only excluded items
+    // gated by `requiredRole`/`requiredPermission`; it didn't know about
+    // `requiresAnyAccessUnder`, so the Admin nav link (gated only by
+    // `requiresAnyAccessUnder: '/admin'`) was visible to signed-out users
+    // even though every destination under /admin needs a role or permission.
+    mockIsAuthenticated = false;
+    const { container } = renderLayout();
+
+    expect(container.querySelector('a[href="/admin"]')).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Admin' })).not.toBeInTheDocument();
   });
 
   it('keeps the skip link and main navigation landmark available', () => {

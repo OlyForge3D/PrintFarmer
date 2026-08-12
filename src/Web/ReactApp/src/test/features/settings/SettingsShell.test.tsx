@@ -411,6 +411,24 @@ describe('SettingsShell', () => {
     expect(screen.queryByRole('button', { name: /^Integrations/ })).not.toBeInTheDocument();
   });
 
+  it('lands a partial-permission user on their first reachable category, not the hardcoded scope default, on a bare tab-less URL (#1457 round-3, Hicks review)', () => {
+    // Before this fix, a bare `/admin/settings` (no `?tab=`) always resolved
+    // to the system scope's hardcoded default category (`general`), which
+    // requires system_settings:admin. A user with only printers:admin can
+    // reach the system scope at all (via Hardware/Printer Groups) but landed
+    // on General anyway and was immediately denied -- the same "reachable
+    // nav, denied content" bug the round-2 fix eliminated for explicit nav
+    // clicks, just reintroduced via the no-tab-param path. The fallback must
+    // pick the first category this user can actually reach (Hardware) instead.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system');
+
+    expect(getCategoryButton('Hardware')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('printer-groups-page')).toBeInTheDocument();
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
+  });
+
   it('shows the Integrations category and its connections tab once the user holds any one of the bundled permissions (#1457)', () => {
     // Mirrors the `requiredPermissionAnyOf` OR semantics: telegram:admin alone
     // is enough to unlock `connections`, even without spoolman or

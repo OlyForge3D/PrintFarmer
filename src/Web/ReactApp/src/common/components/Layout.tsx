@@ -432,7 +432,12 @@ export function Layout() {
       return navigationItems.filter((item) => {
         if (isHiddenByCapabilities(item)) return false;
         if (item.requiresSlicer && !isSlicerAvailable) return false;
-        return !item.requiredRole && !item.requiredPermission;
+        // A signed-out user can never satisfy requiresAnyAccessUnder (every
+        // destination under it needs a role/permission), so treat it the
+        // same as requiredRole/requiredPermission here. Missed in the round-2
+        // #1457 fix -- Bishop review: the Admin nav link (gated only via
+        // requiresAnyAccessUnder: '/admin') was visible to signed-out users.
+        return !item.requiredRole && !item.requiredPermission && !item.requiresAnyAccessUnder;
       });
     }
 
