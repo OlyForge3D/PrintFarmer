@@ -109,11 +109,6 @@ public sealed class PrinterCalibrationContextService(
                 printer.ConfigurationRevision);
         }
 
-        if (profileResolver is null)
-        {
-            return new(null, "profile_service_unavailable");
-        }
-
         CalibrationEvaluation evaluation;
         try
         {
@@ -527,7 +522,9 @@ public sealed class PrinterCalibrationContextService(
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
-        ResolvedCalibrationProfiles resolved = await profileResolver!.ResolveAsync(
+        ICalibrationProfileResolver resolver = profileResolver
+            ?? throw new CalibrationProfileResolverUnavailableException();
+        ResolvedCalibrationProfiles resolved = await resolver.ResolveAsync(
             profileSelection.MachineProfileId,
             profileSelection.ProcessProfileId,
             profileSelection.FilamentProfileId,

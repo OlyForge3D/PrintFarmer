@@ -402,6 +402,40 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetContextAsync_WithoutResolverAndMissingOrEmptyProfileIds_ReturnsAuthoritativeTypedReasons(
+        bool useEmptyIds)
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        Guid? profileId = useEmptyIds ? Guid.Empty : null;
+        harness.Printer.CalibrationMachineProfileId = profileId;
+        harness.Printer.CalibrationProcessProfileId = profileId;
+        harness.Printer.CalibrationFilamentProfileId = profileId;
+        _ = await harness.Db.SaveChangesAsync();
+        PrinterCalibrationContextService service = harness.CreateService(profileResolver: null);
+
+        CalibrationServiceResult<CalibrationContextDto> result =
+            await service.GetContextAsync(
+                harness.Printer.Id,
+                configurationRevision: null,
+                capturedBySubject: "test-subject",
+                profileAccessScope: ProfileAccess,
+                cancellationToken: CancellationToken.None);
+
+        _ = result.ErrorCode.Should().BeNull();
+        _ = result.Value.Should().NotBeNull();
+        CalibrationContextDto context = result.Value!;
+        _ = context.ProfilesEvaluated.Should().BeTrue();
+        _ = context.Eligible.Should().BeFalse();
+        _ = context.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "machine_profile_missing",
+            "process_profile_missing",
+            "filament_profile_missing");
+        harness.VerifyNoProfileResolverCalls();
+    }
+
+    [Theory]
     [InlineData("profile_service_authentication_failed")]
     [InlineData("profile_service_authorization_failed")]
     [InlineData("profile_service_configuration_error")]
