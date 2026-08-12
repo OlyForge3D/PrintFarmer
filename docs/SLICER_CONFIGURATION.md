@@ -392,8 +392,9 @@ A key can never grant more authority than its owner has.
 >   [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473), so an ordinary user can
 >   own a working Desktop calibration key. A user whose role lacks a permission — or who is
 >   explicitly denied it — still gets `400` at creation and has that scope dropped at
->   exchange. `queue:reconcile` and `dispatch-settings:manage` stay `farm_admin`-only and
->   are not reachable through any scope here.
+>   exchange. `queue:reconcile` and `dispatch-settings:manage` are not seeded to `farm_user`
+>   and no scope maps to them, so a Desktop key can never reach those routes; an
+>   administrator may still grant them to a custom role for use through a normal session.
 >
 > An admin-owned exchanged token still carries no role claim and only the scopes explicitly
 > selected on that key.

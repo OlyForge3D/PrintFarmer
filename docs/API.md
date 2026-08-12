@@ -327,12 +327,15 @@ Key properties:
   [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473), `DatabaseInitializer`
   seeds `farm_user` with the calibration, queue, and slicing permissions these
   scopes map to, so an ordinary user can own a working Desktop calibration key.
-  Two enforced permissions remain `farm_admin`-only by design and are *not*
-  reachable through any scope here: `queue:reconcile` and
-  `dispatch-settings:manage`. The owner intersection is unconditional either way —
-  a user whose role lacks a permission, or who is explicitly denied it, still gets
-  `400` at creation and has the scope dropped at exchange — and an admin-owned
-  exchanged token still carries no role claim.
+  Two enforced permissions are deliberately **not** reachable through any scope
+  defined here, because no scope maps to them: `queue:reconcile` and
+  `dispatch-settings:manage`. They are also not seeded to `farm_user`, though an
+  administrator can still grant them to a custom role through the role-permission
+  API — that grant reaches those routes through a normal session, never through a
+  Desktop key. The owner intersection is unconditional either way — a user whose
+  role lacks a permission, or who is explicitly denied it, still gets `400` at
+  creation and has the scope dropped at exchange — and an admin-owned exchanged
+  token still carries no role claim.
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
