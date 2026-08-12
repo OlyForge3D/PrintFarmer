@@ -613,7 +613,7 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                       Select only what this key needs. Each option grants exactly one permission, and the
                       server will reject any scope the key&apos;s owner is not already authorized for —
                       whether by an exact grant, a matching resource-admin grant, or the farm admin role.
-                      A farm admin owner is the safest choice.
+                      An explicit deny on any of the owner&apos;s roles always wins.
                     </p>
                     {fieldErrors.scopes && (
                       <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">

@@ -376,20 +376,23 @@ A key can never grant more authority than its owner has.
 > **Who can own a calibration-scoped key.** The owner-authority intersection above is mandatory and
 > unconditional. Which users satisfy it depends on how roles are provisioned:
 >
-> - **`farm_admin` members** always do, and remain the safe production path until the
->   permission-grant UI in epic #1445 is complete.
+> - **`farm_admin` members** always do.
 > - **A custom role** carrying the exact mapped permission (e.g. `calibration:read`) also
 >   satisfies it, as does a same-resource **`{resource}:admin`** grant — `calibration:admin`
 >   implies every `calibration:*` action, exactly as it does at the enforcement points. The
 >   implication never crosses resources: `calibration:admin` grants no queue or slicing scope.
+>   Roles and their permission grants are managed through the role and role-permission APIs.
+> - **An explicit deny wins.** If any of the owner's active roles denies a `resource:action` pair,
+>   the corresponding scope is refused at creation and dropped at exchange, even when another role
+>   grants it and even when the owner holds `{resource}:admin`. See
+>   [`docs/ROLE_PERMISSION_PRECEDENCE.md`](ROLE_PERMISSION_PRECEDENCE.md). The `farm_admin` role
+>   bypass is deliberately not subject to this.
 > - **A stock `farm_user`** holds none of the calibration, slicing, or queue permissions, so
->   creating such a key for one returns `400`, and an already-issued key would have those scopes
->   dropped at exchange.
+>   creating such a key for one returns `400` until the permissions are granted, and an
+>   already-issued key would have those scopes dropped at exchange.
 >
-> Since role CRUD exists but the per-permission grant UI does not yet, prefer a `farm_admin` owner
-> in production and treat custom-role ownership as advanced configuration. Either way an
-> admin-owned exchanged token still carries no role claim and only the scopes explicitly selected
-> on that key.
+> An admin-owned exchanged token still carries no role claim and only the scopes explicitly
+> selected on that key.
 >
 > **Revocation latency differs by token type.** An exchanged Desktop token is capped at 15 minutes,
 > so a permission change takes effect on the next exchange. An ordinary login JWT carries its

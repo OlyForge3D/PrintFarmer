@@ -196,6 +196,7 @@ public static class PrintFarmerPermissions
     /// Required because the admin implication would otherwise resurrect a denied action from a
     /// <c>{resource}:admin</c> grant - the exact gap #1472 closed on the claims-based path.
     /// </param>
+    /// <param name="permission">The <c>resource:action</c> permission being tested.</param>
     /// <remarks>
     /// This is the set-based counterpart of <see cref="HasPermission"/> minus the
     /// <see cref="FarmAdminRole"/> bypass, which callers handle separately because a role is not
