@@ -17,6 +17,8 @@ namespace Farm.Web.Api.Tests.Security;
 /// </summary>
 public class DesktopScopePermissionMapTests
 {
+    /// <summary>An owner with no explicit denies — the ordinary case.</summary>
+    private static readonly IReadOnlySet<string> NoDenies = new HashSet<string>(StringComparer.Ordinal);
     [Fact]
     public void Definitions_ContainOnlySingleBitFlags()
     {
@@ -218,7 +220,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationDelete,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read });
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
         result.Dropped.Should().Be(ApiKeyScope.CalibrationDelete);
@@ -239,7 +242,8 @@ public class DesktopScopePermissionMapTests
                 PrintFarmerPermissions.Calibration.Read,
                 PrintFarmerPermissions.Calibration.Delete,
                 PrintFarmerPermissions.Queue.Start,
-            });
+            },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
         DesktopScopePermissionMap.GetPermissions(result.Effective).Should().Equal(PrintFarmerPermissions.Calibration.Read);
@@ -254,7 +258,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead | ApiKeyScope.QueueStart,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal));
+            new HashSet<string>(StringComparer.Ordinal),
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.None);
         result.Dropped.Should().Be(ApiKeyScope.CalibrationRead | ApiKeyScope.QueueStart);
@@ -269,7 +274,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.ModelRead | ApiKeyScope.LibrarySync | ApiKeyScope.CalibrationRead,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal));
+            new HashSet<string>(StringComparer.Ordinal),
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.ModelRead | ApiKeyScope.LibrarySync);
         result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
@@ -281,7 +287,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead,
             isOwnerFarmAdmin: true,
-            new HashSet<string>(StringComparer.Ordinal));
+            new HashSet<string>(StringComparer.Ordinal),
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
         result.Dropped.Should().Be(ApiKeyScope.None);
@@ -298,7 +305,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.ModelRead | ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationDelete,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read });
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read },
+            NoDenies);
 
         IReadOnlyList<string> scopeNames = DesktopScopePermissionMap.GetScopeNames(result.Effective);
         IReadOnlyList<string> permissions = DesktopScopePermissionMap.GetPermissions(result.Effective);
@@ -331,7 +339,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             scope,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" });
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" },
+            NoDenies);
 
         result.Effective.Should().Be(scope);
         result.Dropped.Should().Be(ApiKeyScope.None);
@@ -346,7 +355,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" });
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
         DesktopScopePermissionMap.GetPermissions(result.Effective)
@@ -364,7 +374,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             scope,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { "queue:admin" });
+            new HashSet<string>(StringComparer.Ordinal) { "queue:admin" },
+            NoDenies);
 
         result.Effective.Should().Be(scope);
     }
@@ -377,7 +388,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             scope,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { "slicing:admin" });
+            new HashSet<string>(StringComparer.Ordinal) { "slicing:admin" },
+            NoDenies);
 
         result.Effective.Should().Be(scope);
     }
@@ -397,7 +409,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             everyPrivilegedScope,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { adminGrant });
+            new HashSet<string>(StringComparer.Ordinal) { adminGrant },
+            NoDenies);
 
         string resource = adminGrant.Split(':')[0];
         foreach (DesktopScopeDefinition definition in DesktopScopePermissionMap.Definitions
@@ -425,7 +438,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { grant });
+            new HashSet<string>(StringComparer.Ordinal) { grant },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.None);
         result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
@@ -441,7 +455,8 @@ public class DesktopScopePermissionMapTests
             {
                 PrintFarmerPermissions.Calibration.Read,
                 "queue:admin",
-            });
+            },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.CalibrationRead | ApiKeyScope.QueueRead);
         result.Dropped.Should().Be(ApiKeyScope.None);
@@ -453,7 +468,8 @@ public class DesktopScopePermissionMapTests
         EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
             ApiKeyScope.CalibrationRead,
             isOwnerFarmAdmin: false,
-            new HashSet<string>(StringComparer.Ordinal) { "queue:admin", PrintFarmerPermissions.Slicing.Submit });
+            new HashSet<string>(StringComparer.Ordinal) { "queue:admin", PrintFarmerPermissions.Slicing.Submit },
+            NoDenies);
 
         result.Effective.Should().Be(ApiKeyScope.None);
         result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
@@ -475,8 +491,73 @@ public class DesktopScopePermissionMapTests
             [new Claim(PrintFarmerPermissions.ClaimType, "calibration:admin")],
             "TestAuth"));
 
-        PrintFarmerPermissions.ImpliesViaResourceAdmin(permissions, resource, action).Should().Be(expected);
+        PrintFarmerPermissions.ImpliesViaResourceAdmin(permissions, NoDenies, resource, action).Should().Be(expected);
         PrintFarmerPermissions.ImpliesViaResourceAdmin(principal, resource, action).Should().Be(expected);
+    }
+
+    /// <summary>
+    /// Explicit deny wins over the same-resource admin implication, on the set-based path exactly
+    /// as it does on the claims-based path (#1472 / docs/ROLE_PERMISSION_PRECEDENCE.md). Without
+    /// this, a Desktop key could be provisioned with an action its owner was explicitly denied.
+    /// </summary>
+    [Fact]
+    public void ResolveEffectiveScopes_ExplicitDeny_SuppressesTheResourceAdminImplication()
+    {
+        HashSet<string> denies = new(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Delete };
+
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationDelete,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin" },
+            denies);
+
+        result.Effective.Should().Be(ApiKeyScope.CalibrationRead, "the deny removes only the denied action");
+        result.Dropped.Should().Be(ApiKeyScope.CalibrationDelete);
+    }
+
+    /// <summary>An explicit deny also beats an exact grant, matching the resolved-permission rule.</summary>
+    [Fact]
+    public void ResolveEffectiveScopes_ExplicitDeny_BeatsAnExactGrant()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read },
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read });
+
+        result.Effective.Should().Be(ApiKeyScope.None);
+        result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
+    }
+
+    /// <summary>A deny on one resource must not suppress another resource's admin implication.</summary>
+    [Fact]
+    public void ResolveEffectiveScopes_ExplicitDeny_DoesNotCrossResources()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead | ApiKeyScope.QueueRead,
+            isOwnerFarmAdmin: false,
+            new HashSet<string>(StringComparer.Ordinal) { "calibration:admin", "queue:admin" },
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read });
+
+        result.Effective.Should().Be(ApiKeyScope.QueueRead);
+        result.Dropped.Should().Be(ApiKeyScope.CalibrationRead);
+    }
+
+    /// <summary>
+    /// The <c>farm_admin</c> role bypass is deliberately left untouched by #1472, so it still
+    /// authorizes even against an explicit deny. Pinned so the behaviour is a decision, not a
+    /// surprise.
+    /// </summary>
+    [Fact]
+    public void ResolveEffectiveScopes_FarmAdminOwner_IsUnaffectedByExplicitDeny()
+    {
+        EffectiveDesktopScopes result = DesktopScopePermissionMap.ResolveEffectiveScopes(
+            ApiKeyScope.CalibrationRead,
+            isOwnerFarmAdmin: true,
+            new HashSet<string>(StringComparer.Ordinal),
+            new HashSet<string>(StringComparer.Ordinal) { PrintFarmerPermissions.Calibration.Read });
+
+        result.Effective.Should().Be(ApiKeyScope.CalibrationRead);
     }
 
     #endregion
