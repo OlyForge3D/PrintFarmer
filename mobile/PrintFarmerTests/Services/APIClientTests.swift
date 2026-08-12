@@ -317,8 +317,39 @@ final class APIClientTests: XCTestCase {
         let lastLogin = try XCTUnwrap(user.lastLogin)
         let expiresAt = try XCTUnwrap(response.expiresAt)
 
-        XCTAssertLessThan(user.createdAt, lastLogin)
-        XCTAssertLessThan(lastLogin, expiresAt)
+        XCTAssertEqual(
+            user.createdAt.timeIntervalSince1970,
+            1_785_546_123.456,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            lastLogin.timeIntervalSince1970,
+            1_786_509_464.138,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            expiresAt.timeIntervalSince1970,
+            1_787_114_264.138,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testLoginResponseRejectsTimezoneLessCreatedAt() async {
+        let response = TestJSON.authResponseSuccess.replacingOccurrences(
+            of: #""createdAt": "2025-01-01T00:00:00Z""#,
+            with: #""createdAt": "2025-01-01T00:00:00""#
+        )
+        mockAPIClient.stubResponse(json: response)
+
+        do {
+            let request = LoginRequest(usernameOrEmail: "admin", password: "pass", rememberMe: true)
+            let _: AuthResponse = try await apiClient.post("/api/auth/login", body: request)
+            XCTFail("Expected timezone-less createdAt to be rejected")
+        } catch NetworkError.decodingFailed {
+            // Expected.
+        } catch {
+            XCTFail("Expected .decodingFailed, got \(error)")
+        }
     }
 
     func testPostVoidRequestUsesCorrectMethod() async throws {

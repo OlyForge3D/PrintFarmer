@@ -1,4 +1,5 @@
-﻿using System.Net.Http.Json;
+﻿using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using Farm.Infrastructure;
@@ -88,7 +89,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task LoginAsync_WithSqliteUser_SerializesAllAuthenticationTimestampsAsUtc()
+    public async Task LoginAndCurrentUser_WithSqliteUser_SerializeAuthenticationTimestampsAsUtc()
     {
         User user = await CreateTestUserAsync("auth-wire-date-user", "auth-wire-date@test.com");
         using HttpClient client = _factory.CreateClient();
@@ -100,6 +101,7 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         response.EnsureSuccessStatusCode();
         using JsonDocument payload = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         JsonElement root = payload.RootElement;
+        string token = root.GetProperty("token").GetString()!;
         string expiresAt = root.GetProperty("expiresAt").GetString()!;
         JsonElement responseUser = root.GetProperty("user");
         string lastLogin = responseUser.GetProperty("lastLogin").GetString()!;
@@ -108,6 +110,16 @@ public class AuthenticationServiceIntegrationTests : IAsyncLifetime
         expiresAt.Should().EndWith("Z");
         lastLogin.Should().EndWith("Z");
         createdAt.Should().EndWith("Z");
+
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        HttpResponseMessage currentUserResponse = await client.GetAsync("/api/auth/me");
+
+        currentUserResponse.EnsureSuccessStatusCode();
+        using JsonDocument currentUserPayload =
+            JsonDocument.Parse(await currentUserResponse.Content.ReadAsStringAsync());
+        string persistedLastLogin =
+            currentUserPayload.RootElement.GetProperty("lastLogin").GetString()!;
+        persistedLastLogin.Should().EndWith("Z");
     }
 
     [Fact]
