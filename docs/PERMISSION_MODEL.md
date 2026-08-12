@@ -27,8 +27,11 @@ grants or denies a specific `(Resource, Action)` pair to a specific `Role`
 
 Stable, compile-time-checked permission name constants live in `PrintFarmerPermissions`
 (`src/infra/Security/PrintFarmerPermissions.cs`), grouped by resource
-(`PrintFarmerPermissions.Calibration.Read`, `PrintFarmerPermissions.Queue.Cancel`, etc.) so
-controller code never hardcodes a permission string.
+(`PrintFarmerPermissions.Calibration.Read`, `PrintFarmerPermissions.Queue.Cancel`, etc.). Newer
+resources added under this model (e.g. calibration, queue, slicing, the Obico integration) use
+these constants instead of hardcoding the string at the call site; many earlier controllers
+still pass resource/action string literals directly to `[RequirePermission("resource",
+"action")]`.
 
 ### `RequirePermission` binds an endpoint to a claim
 
@@ -127,9 +130,10 @@ other systems (audit logs, seed scripts, external references) can rely on a role
 moving out from under them. `DisplayName`, `Description`, permission grants, and active status
 remain editable.
 
-Deactivating or deleting a role is refused if it would leave the system with no active role
-still holding both `roles:admin` and `users:admin` (the "last admin" guardrail), or if it would
-strip the acting administrator of their own last administrative role (self-lockout guardrail).
+Deactivating or deleting a role is refused if it would leave the system with no active role,
+held by at least one active user, still granting both `roles:admin` and `users:admin` (the
+"last admin" guardrail), or if it would strip the acting administrator of their own last
+administrative role (self-lockout guardrail).
 
 ## Operating guide
 
@@ -166,8 +170,12 @@ matter what it's granted. To pass that drift guard when adding a new permission:
    class) rather than hardcoding the string at the call site.
 3. **Apply `[RequirePermission(resource, action)]`** to the controller, action method, or hub
    method that should enforce it. Multiple `[RequirePermission]` attributes on the same member
-   are combined with AND semantics - every permission in the group must be satisfiable by a
-   single role simultaneously.
+   are combined with AND semantics: the authorization handler checks the caller's claims, which
+   are the union of every active role the user holds, so any combination of roles that together
+   cover all the required permissions will pass. `PermissionGrantPathTests`'s joint-satisfiability
+   check is a stricter guardrail than this runtime behavior: it fails unless a *single* seeded
+   non-admin role can hold every permission in the group at once, so a real user is never left
+   needing two different custom roles to reach one endpoint.
 4. **Give a non-`farm_admin` role a real grant path**, one of:
    - Add the `(resource, action)` pair to `farm_user`'s grants in
      `DatabaseInitializer.SeedRolePermissionsAsync` (purely additive - never remove an existing
