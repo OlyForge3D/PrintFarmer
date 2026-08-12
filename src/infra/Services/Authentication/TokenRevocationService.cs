@@ -158,24 +158,9 @@ public class TokenRevocationService(
             {
                 DateTime tokenIssuedAt = GetTokenIssuedAt(token);
 
-                // JWT `nbf`/`iat` are whole seconds, but RevokedAt keeps sub-second precision.
-                // Comparing them directly means a marker written at 10:00:00.500 outranks a token
-                // issued at 10:00:00.800 (which reads back as 10:00:00.000), so a client that
-                // reacts to the 401 by immediately re-exchanging gets its brand-new token rejected
-                // and spins in a retry loop until the clock ticks over. Revoke only tokens issued
-                // in a strictly earlier second: because tokenIssuedAt is already whole-second,
-                // "second(RevokedAt) > second(issued)" is exactly "RevokedAt >= issued + 1s".
-                //
-                // The trade-off is deliberate: a token issued earlier within the same second as the
-                // revocation survives it. That exposure is bounded by one second and by the token's
-                // own lifetime, whereas the alternative is an unbounded authentication loop for a
-                // client doing exactly what the recovery contract tells it to do.
-                DateTime revocationCutoff = tokenIssuedAt == DateTime.MinValue
-                    ? DateTime.MinValue
-                    : tokenIssuedAt.AddSeconds(1);
-
+                // Check if there's a revocation marker issued after this token
                 bool hasRevocationMarker = await _context.RevokedTokens
-                    .Where(rt => rt.UserId == userId.Value && rt.RevokedAt >= revocationCutoff)
+                    .Where(rt => rt.UserId == userId.Value && rt.RevokedAt > tokenIssuedAt)
                     .AnyAsync(rt => rt.TokenHash.StartsWith("ALL_TOKENS_"), cancellationToken);
 
                 if (hasRevocationMarker)
