@@ -486,6 +486,10 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                 _ = entity.Property(r => r.IdempotencyKey).UseCollation(caseSensitiveCollation);
             });
 
+            _ = modelBuilder.Entity<BedClearCommandRecord>(entity =>
+                entity.Property(record => record.IdempotencyKey)
+                    .UseCollation(caseSensitiveCollation));
+
             // Printed-part SKU catalog: Sku is the client-owned identity behind the unique
             // index IX_PartInventories_Sku (Hicks r5 blocker 1 — Hiragana vs Katakana SKUs
             // resolving to one physical row under Kana-insensitive collation).

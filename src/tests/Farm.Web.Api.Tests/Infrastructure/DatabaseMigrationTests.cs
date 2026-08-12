@@ -665,9 +665,10 @@ public sealed class DatabaseMigrationTests
                 "20260807023652_UsePortableRevisionConcurrency",
                 "20260808052059_AddNfcDeviceApproval",
                 "20260808162518_AddPowerReadingCompositeIndex",
+                "20260812011119_UseBinaryBedClearIdempotencyKeys",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
-            $"the {provider} core migration set must apply in the exact recorded order, including the NfcDevice approval columns from #1252");
+            $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
 
         string[] expectedSlicerMigrations = provider == "postgres"
             ?

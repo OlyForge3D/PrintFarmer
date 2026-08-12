@@ -80,7 +80,8 @@ public sealed class CaseSensitiveCollationModelTests
     [InlineData(typeof(IdempotencyRecord), nameof(IdempotencyRecord.RouteKey))]
     [InlineData(typeof(IdempotencyRecord), nameof(IdempotencyRecord.IdempotencyKey))]
     [InlineData(typeof(IdempotencyRecord), nameof(IdempotencyRecord.UserId))]
-    public void PartInventoryIdentityColumns_UseBinaryCaseSensitiveCollation_OnSqlServer(
+    [InlineData(typeof(BedClearCommandRecord), nameof(BedClearCommandRecord.IdempotencyKey))]
+    public void CaseSensitiveIdentityColumns_UseBinaryCollation_OnSqlServer(
         Type entityType,
         string propertyName)
     {
@@ -100,7 +101,8 @@ public sealed class CaseSensitiveCollationModelTests
     [InlineData(typeof(Bin), nameof(Bin.Code))]
     [InlineData(typeof(PartInventoryAdjustment), nameof(PartInventoryAdjustment.OperationKey))]
     [InlineData(typeof(PrintJob), nameof(PrintJob.HarvestOperationKey))]
-    public void PartInventoryIdentityColumns_DoNotPinSqlServerCollation_OnNonSqlServerProviders(
+    [InlineData(typeof(BedClearCommandRecord), nameof(BedClearCommandRecord.IdempotencyKey))]
+    public void CaseSensitiveIdentityColumns_DoNotPinSqlServerCollation_OnNonSqlServerProviders(
         Type entityType,
         string propertyName)
     {
