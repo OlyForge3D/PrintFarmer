@@ -156,12 +156,24 @@ public class TokenRevocationService(
             Guid? userId = GetUserIdFromToken(token);
             if (userId.HasValue)
             {
+                // The JWT "nbf" claim (token issued-at) only carries whole-second resolution -
+                // JsonWebTokenHandler floors it when writing the token. RevokedAt is stored with
+                // full sub-second precision, so a strict ">" comparison between the two is
+                // ambiguous whenever both events fall in the same second: a revocation marker
+                // created at, say, 12:00:00.000000 exactly ties with a token's floored nbf of
+                // 12:00:00, and the tie fails the strict ">" check even though the token should
+                // be revoked. Truncate RevokedAt down to the same second-level granularity as
+                // nbf and use ">=" so same-second ties deterministically resolve to "revoked"
+                // (fail-safe) instead of depending on where the marker lands within the second.
                 DateTime tokenIssuedAt = GetTokenIssuedAt(token);
 
-                // Check if there's a revocation marker issued after this token
-                bool hasRevocationMarker = await _context.RevokedTokens
-                    .Where(rt => rt.UserId == userId.Value && rt.RevokedAt > tokenIssuedAt)
-                    .AnyAsync(rt => rt.TokenHash.StartsWith("ALL_TOKENS_"), cancellationToken);
+                List<DateTime> revocationMarkerTimestamps = await _context.RevokedTokens
+                    .Where(rt => rt.UserId == userId.Value && rt.TokenHash.StartsWith("ALL_TOKENS_"))
+                    .Select(rt => rt.RevokedAt)
+                    .ToListAsync(cancellationToken);
+
+                bool hasRevocationMarker = revocationMarkerTimestamps
+                    .Any(revokedAt => TruncateToSecond(revokedAt) >= tokenIssuedAt);
 
                 if (hasRevocationMarker)
                 {
@@ -271,4 +283,12 @@ public class TokenRevocationService(
             return DateTime.MinValue;
         }
     }
+
+    /// <summary>
+    /// Truncates a DateTime down to whole-second precision, matching the resolution of a JWT
+    /// "nbf"/"iat" claim, so revocation-marker timestamps can be compared against token
+    /// issued-at times without sub-second ambiguity.
+    /// </summary>
+    private static DateTime TruncateToSecond(DateTime value) =>
+        new(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
 }
