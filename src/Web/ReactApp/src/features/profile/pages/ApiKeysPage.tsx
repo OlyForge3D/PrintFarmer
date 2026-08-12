@@ -610,10 +610,13 @@ export function ApiKeysPage({ embedded = false }: ApiKeysPageProps) {
                       Scopes <span className="text-pf-error" aria-hidden="true">*</span>
                     </legend>
                     <p id="apikey-scopes-helper" className="text-xs text-pf-text-muted">
-                      Select only what this key needs. Each option grants exactly one permission, and the
-                      server will reject any scope the key&apos;s owner is not already authorized for —
-                      whether by an exact grant, a matching resource-admin grant, or the farm admin role.
-                      An explicit deny on any of the owner&apos;s roles always wins.
+                      Select only what this key needs. Model library options carry no permission
+                      claim; every calibration, slicing, and print queue option grants exactly one
+                      permission. The server rejects any permission-backed scope the key&apos;s owner
+                      is not already authorized for — whether by an exact grant, a matching
+                      resource-admin grant, or the farm admin role. For a non-admin owner, an
+                      explicit deny on any of their roles overrides a matching grant; a farm admin
+                      owner is not subject to denies.
                     </p>
                     {fieldErrors.scopes && (
                       <p id="apikey-scopes-error" role="alert" className="text-xs text-pf-error-text">

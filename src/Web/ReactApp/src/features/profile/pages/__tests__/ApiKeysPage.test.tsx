@@ -672,6 +672,24 @@ describe('ApiKeysPage', () => {
       expect(screen.getByLabelText(pattern)).toHaveAccessibleName(/Calibration read/i);
     });
 
+    // The helper text must not overstate the model: library scopes emit no permission claim at all,
+    // and a farm admin owner is deliberately not subject to explicit denies. Overstating either
+    // would send an operator hunting for a deny that is not being applied.
+    it('should describe permission-backed scopes and the farm admin deny exemption accurately', async () => {
+      renderPage();
+
+      fireEvent.click(await screen.findByRole('button', { name: /Create New API Key/i }));
+      fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'Desktop' } });
+
+      const helper = document.getElementById('apikey-scopes-helper');
+      expect(helper).toBeInTheDocument();
+      expect(helper).toHaveTextContent(/Model library options carry no permission claim/i);
+      expect(helper).toHaveTextContent(/calibration, slicing, and print queue option grants exactly one permission/i);
+      expect(helper).toHaveTextContent(/farm admin owner is not subject to denies/i);
+      // The previous copy claimed denies "always" win, which is false for a farm admin owner.
+      expect(helper).not.toHaveTextContent(/always wins/i);
+    });
+
     // Prerequisites are disclosed, not auto-selected: the operator stays in control and the
     // server remains the authority on validity.
     it('should not auto-select Calibration read when a dependent scope is chosen', async () => {

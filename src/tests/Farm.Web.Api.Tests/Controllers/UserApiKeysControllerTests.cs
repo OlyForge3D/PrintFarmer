@@ -421,7 +421,11 @@ public class UserApiKeysControllerTests
     /// Stubs the <b>target owner's</b> live database authorization. Deliberately keyed by user id
     /// so a test can prove the caller's own claims are irrelevant.
     /// </summary>
-    private void SetOwnerAuthorization(Guid ownerId, IEnumerable<string>? roles = null, IEnumerable<string>? permissions = null)
+    private void SetOwnerAuthorization(
+        Guid ownerId,
+        IEnumerable<string>? roles = null,
+        IEnumerable<string>? permissions = null,
+        IEnumerable<string>? denied = null)
     {
         _usersRepositoryMock
             .Setup(r => r.GetActiveRoleNamesAsync(ownerId, It.IsAny<CancellationToken>()))
@@ -429,6 +433,13 @@ public class UserApiKeysControllerTests
         _usersRepositoryMock
             .Setup(r => r.GetGrantedPermissionsAsync(ownerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([.. (permissions ?? []).Select(p =>
+            {
+                (string resource, string action) = PrintFarmerPermissions.Split(p);
+                return (resource, action);
+            })]);
+        _usersRepositoryMock
+            .Setup(r => r.GetDeniedPermissionsAsync(ownerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([.. (denied ?? []).Select(p =>
             {
                 (string resource, string action) = PrintFarmerPermissions.Split(p);
                 return (resource, action);
@@ -505,6 +516,50 @@ public class UserApiKeysControllerTests
         BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
         badRequest.Value!.ToString().Should().Contain("queue:read");
         _store.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Deny wiring is load-bearing <b>here</b>, not only in the shared map: creation must query the
+    /// owner's explicit denies so a <c>{resource}:admin</c> grant cannot reauthorize an action the
+    /// operator denied. Dropping <c>GetDeniedPermissionsAsync</c> from this controller would
+    /// otherwise mint a key that the exchange later strips - a silently dead key.
+    /// </summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_ResourceAdminGrantWithExplicitDeny_IsRejectedAndNotPersisted()
+    {
+        SetOwnerAuthorization(
+            _userId,
+            permissions: ["calibration:admin"],
+            denied: [PrintFarmerPermissions.Calibration.Read]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop, ScopeNames: ["CalibrationRead"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        BadRequestObjectResult badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        badRequest.Value!.ToString().Should().Contain(PrintFarmerPermissions.Calibration.Read);
+        _store.Should().BeEmpty();
+        _usersRepositoryMock.Verify(
+            r => r.GetDeniedPermissionsAsync(_userId, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    /// <summary>
+    /// A deny suppresses only the denied action. The neighboring scope the same admin grant covers
+    /// must still be accepted, so the deny check cannot be implemented as a blanket rejection.
+    /// </summary>
+    [Fact]
+    public async Task CreateApiKeyAsync_ExplicitDenyOnOneScope_StillAcceptsAnUndeniedNeighbor()
+    {
+        SetOwnerAuthorization(
+            _userId,
+            permissions: ["calibration:admin"],
+            denied: [PrintFarmerPermissions.Calibration.Publish]);
+        var req = new CreateApiKeyRequest("desktop", ApiKeyPurpose.Desktop, ScopeNames: ["CalibrationRead"]);
+
+        IActionResult result = await _controller.CreateApiKeyAsync(_userId, req);
+
+        Assert.IsType<OkObjectResult>(result);
+        _store.Should().ContainSingle().Which.Scopes.Should().Be(ApiKeyScope.CalibrationRead);
     }
 
     /// <summary>

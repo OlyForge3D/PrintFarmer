@@ -405,7 +405,11 @@ public class ApiKeyExchangeServiceTests
     /// Stubs the owner's live authorization. Roles/grants are only queried on the exchange path,
     /// so tests covering legacy model-only keys never need to set these up.
     /// </summary>
-    private void SetOwnerAuthorization(Guid userId, IEnumerable<string>? roles = null, IEnumerable<string>? permissions = null)
+    private void SetOwnerAuthorization(
+        Guid userId,
+        IEnumerable<string>? roles = null,
+        IEnumerable<string>? permissions = null,
+        IEnumerable<string>? denied = null)
     {
         _mockUsersRepository
             .Setup(r => r.GetActiveRoleNamesAsync(userId, It.IsAny<CancellationToken>()))
@@ -413,6 +417,13 @@ public class ApiKeyExchangeServiceTests
         _mockUsersRepository
             .Setup(r => r.GetGrantedPermissionsAsync(userId, It.IsAny<CancellationToken>()))
             .ReturnsAsync([.. (permissions ?? []).Select(p =>
+            {
+                (string resource, string action) = PrintFarmerPermissions.Split(p);
+                return (resource, action);
+            })]);
+        _mockUsersRepository
+            .Setup(r => r.GetDeniedPermissionsAsync(userId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([.. (denied ?? []).Select(p =>
             {
                 (string resource, string action) = PrintFarmerPermissions.Split(p);
                 return (resource, action);
@@ -469,6 +480,34 @@ public class ApiKeyExchangeServiceTests
         PermissionClaims(jwt).Should().Equal(expectedPermission);
         result.Scopes.Should().Equal(expectedScopeName);
         jwt.Claims.Should().NotContain(c => c.Type == System.Security.Claims.ClaimTypes.Role);
+    }
+
+    /// <summary>
+    /// Deny wiring is load-bearing on the <b>exchange</b> path too. An owner whose
+    /// <c>calibration:admin</c> grant is overridden by an explicit deny on one action must lose
+    /// exactly that scope - in both claim families - while the neighboring scope the same admin
+    /// grant covers survives. Removing <c>GetDeniedPermissionsAsync</c> from this service would
+    /// mint <c>calibration:publish</c> against an operator's explicit deny.
+    /// </summary>
+    [Fact]
+    public void ExchangeApiKeyAsync_ResourceAdminOwnerWithExplicitDeny_DropsOnlyTheDeniedScope()
+    {
+        Guid userId = Guid.NewGuid();
+        SetOwnerAuthorization(
+            userId,
+            permissions: ["calibration:admin"],
+            denied: [PrintFarmerPermissions.Calibration.Publish]);
+
+        (JsonWebToken jwt, ApiKeyExchangeResult result) = ExchangeAndRead(
+            CreateDesktopKey(ApiKeyScope.CalibrationRead | ApiKeyScope.CalibrationPublish, userId),
+            CreateActiveOwner(userId));
+
+        ScopeClaims(jwt).Should().Equal("CalibrationRead");
+        PermissionClaims(jwt).Should().Equal(PrintFarmerPermissions.Calibration.Read);
+        result.Scopes.Should().Equal("CalibrationRead");
+        _mockUsersRepository.Verify(
+            r => r.GetDeniedPermissionsAsync(userId, It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     /// <summary>
