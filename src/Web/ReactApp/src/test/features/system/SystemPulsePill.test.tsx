@@ -67,6 +67,9 @@ describe('SystemPulsePill', () => {
     vi.clearAllMocks();
     useAuthMock.mockReturnValue({
       hasRole: (role: string) => role === 'farm_admin',
+      // #1457: SystemPulsePill now gates on hasPermission('system_settings', 'admin')
+      // rather than the role name — mirror farm_admin's implicit "yes to everything".
+      hasPermission: () => true,
     } as ReturnType<typeof useAuth>);
     useQueryMock.mockReturnValue({
       data: systemInfo,
@@ -123,6 +126,7 @@ describe('SystemPulsePill', () => {
   it('stays hidden for non-admin users', () => {
     useAuthMock.mockReturnValue({
       hasRole: () => false,
+      hasPermission: () => false,
     } as ReturnType<typeof useAuth>);
 
     render(<SystemPulsePill />);

@@ -159,6 +159,13 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin',
     icon: HomeIcon,
     group: 'overview',
+    // Left on the default `farm_admin` role gate (#1457): this is a registry
+    // *entry* used by hub-tile/palette lookups, not the `/admin` route guard
+    // itself — the route (see App.tsx) no longer hard-gates on `farm_admin`,
+    // so every authenticated user can still load the Control Center and see
+    // whatever destinations their own permissions unlock. Leaving this entry
+    // role-gated just keeps a self-referential "Admin Home" tile from
+    // appearing inside the hub it points back to.
     keywords: ['admin', 'home', 'control center', 'dashboard', 'overview'],
     isHubTile: true,
   },
@@ -171,6 +178,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=operations&sub=status',
     icon: ServerIcon,
     group: 'operations',
+    // Backed by AdminOverviewController / SystemInfoController / SystemLogsController,
+    // all `[RequirePermission("system_settings", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['status', 'health', 'uptime', 'cpu', 'memory', 'disk', 'database', 'services', 'monitoring'],
     isHubTile: true,
   },
@@ -181,6 +192,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=operations&sub=workers',
     icon: DashboardIcon,
     group: 'operations',
+    // Backed by the slicer module's WorkersController, `[RequirePermission("dispatch-settings:manage")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'dispatch-settings', action: 'manage' },
     keywords: ['workers', 'slicer', 'jobs', 'queue', 'processing', 'background'],
     isHubTile: true,
   },
@@ -191,6 +205,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/maintenance',
     icon: WrenchIcon,
     group: 'operations',
+    // MaintenanceController is class-level `[RequirePermission("maintenance", "admin")]`
+    // for every endpoint, including reads.
+    requiredRole: null,
+    requiredPermission: { resource: 'maintenance', action: 'admin' },
     keywords: ['maintenance', 'schedule', 'task', 'reminder', 'service'],
     isHubTile: true,
   },
@@ -201,6 +219,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/analytics',
     icon: TrendingUpIcon,
     group: 'operations',
+    // Backed by JobQueueAnalyticsController, `[RequirePermission(Queue.Read)]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'queue', action: 'read' },
     keywords: ['analytics', 'statistics', 'production', 'cost', 'utilization', 'reporting', 'metrics'],
     isHubTile: true,
   },
@@ -211,6 +232,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/auto-dispatch',
     icon: PlayIcon,
     group: 'operations',
+    // Backed by AutoDispatchController, whose read endpoints require `[RequirePermission(Queue.Read)]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'queue', action: 'read' },
     keywords: ['auto-dispatch', 'dispatch', 'automation', 'jobs'],
     isHubTile: true,
   },
@@ -223,6 +247,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=users&sub=accounts',
     icon: UsersIcon,
     group: 'users',
+    // Genuinely admin-only: UsersController is class-level `[RequirePermission("users", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'users', action: 'admin' },
     keywords: ['user', 'account', 'role', 'permission', 'admin', 'staff'],
     isHubTile: true,
   },
@@ -233,6 +260,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=users&sub=audit',
     icon: AlertIcon,
     group: 'users',
+    // Backed by SecurityAuditController, `[RequirePermission("system_settings", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['login', 'audit', 'history', 'security', 'log', 'sign-in'],
     isHubTile: true,
   },
@@ -245,6 +275,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=data&sub=tags',
     icon: TagIcon,
     group: 'data',
+    // Backed by TagsController, `[RequirePermission("tags", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'tags', action: 'admin' },
     keywords: ['tag', 'label', 'category', 'metadata'],
     isHubTile: true,
   },
@@ -255,6 +288,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=data&sub=management',
     icon: DatabaseIcon,
     group: 'data',
+    // Backed by AdminDataController, `[RequirePermission("data_management", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'data_management', action: 'admin' },
     keywords: ['backup', 'export', 'import', 'cleanup', 'storage', 'restore'],
     isHubTile: true,
   },
@@ -265,6 +301,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/catalog',
     icon: LayersIcon,
     group: 'data',
+    // Backed by CatalogController, class-level `[RequirePermission("catalog", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'catalog', action: 'admin' },
     keywords: ['catalog', 'manufacturer', 'model', 'filament', 'reference'],
     isHubTile: true,
   },
@@ -277,6 +316,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/locations',
     icon: LocationIcon,
     group: 'hardware',
+    // LocationsController gates writes on `[RequirePermission("locations", "admin")]`;
+    // gate the nav entry the same way since this is the "manage" destination.
+    requiredRole: null,
+    requiredPermission: { resource: 'locations', action: 'admin' },
     keywords: ['location', 'zone', 'room', 'floor', 'placement', 'physical'],
     isHubTile: true,
   },
@@ -287,6 +330,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=hardware&sub=printer-groups',
     icon: PrinterIcon,
     group: 'hardware',
+    // Backed by PrinterGroupsController, which uses the `printers` resource, not `printer_groups`.
+    requiredRole: null,
+    requiredPermission: { resource: 'printers', action: 'admin' },
     keywords: ['printer', 'group', 'grouping', 'cluster'],
     isHubTile: true,
   },
@@ -297,8 +343,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=hardware&sub=cameras',
     icon: CameraIcon,
     group: 'hardware',
+    // Backed by CamerasController's manage endpoints, `[RequirePermission("cameras", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'cameras', action: 'admin' },
     keywords: ['camera', 'webcam', 'stream', 'video', 'monitoring'],
-    isHubTile: true,
   },
   {
     id: 'hw-nfc',
@@ -307,6 +355,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=hardware&sub=nfc',
     icon: NfcIcon,
     group: 'hardware',
+    // Backed by NfcDevicesController, `[RequirePermission("nfc_devices", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'nfc_devices', action: 'admin' },
     keywords: ['nfc', 'reader', 'rfid', 'device'],
   },
   {
@@ -316,6 +367,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=hardware&sub=nfc-bindings',
     icon: NfcIcon,
     group: 'hardware',
+    // Same NFC hardware surface as `hw-nfc`; gated on the same resource for consistency.
+    requiredRole: null,
+    requiredPermission: { resource: 'nfc_devices', action: 'admin' },
     keywords: ['nfc', 'binding', 'bind', 'tag', 'assignment'],
   },
   {
@@ -325,6 +379,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=hardware&sub=custom-fields',
     icon: LayersTripleOutlineIcon,
     group: 'hardware',
+    // Backed by CustomFieldsController, `[RequirePermission("custom_fields", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'custom_fields', action: 'admin' },
     keywords: ['custom', 'field', 'attribute', 'metadata', 'extend'],
   },
   {
@@ -334,6 +391,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/power-monitors',
     icon: ServerIcon,
     group: 'hardware',
+    // Backed by AdminPowerMonitorsController, `[RequirePermission("power_monitors", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'power_monitors', action: 'admin' },
     keywords: ['power', 'monitor', 'plug', 'smart', 'energy'],
   },
 
@@ -345,6 +405,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=slicing&sub=defaults',
     icon: LayersTripleOutlineIcon,
     group: 'slicing',
+    // Rendered from the generic settings-class editor backed by
+    // UnifiedSettingsController, `[RequirePermission("system_settings", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['slicer', 'default', 'process', 'print settings', 'nozzle', 'speed'],
     isHubTile: true,
   },
@@ -355,6 +419,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=slicing&sub=bed-types',
     icon: LayersIcon,
     group: 'slicing',
+    // Backed by BedTypeController, `[RequirePermission("bed_type", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'bed_type', action: 'admin' },
     keywords: ['bed', 'type', 'surface', 'plate', 'build plate'],
   },
   {
@@ -364,6 +431,13 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=slicing&sub=profiles',
     icon: FolderOpenIcon,
     group: 'slicing',
+    // Genuinely admin-only, left on `requiredRole: 'farm_admin'` (the default): the
+    // backing `Farm.Slicer.Module.Api` ProfilesController gates every mutating
+    // endpoint with `[Authorize(Policy = "farm_admin")]` directly, not a resource
+    // permission — there is no `slicing_profiles:admin`-shaped grant a custom role
+    // could hold that the server would actually honour here. Gating the client on a
+    // permission that doesn't exist server-side would show the nav entry to nobody
+    // useful and mislead a custom-role user into a page that immediately 403s.
     keywords: ['profile', 'slicer', 'orcaslicer', 'prusaslicer', 'process', 'library'],
   },
 
@@ -375,6 +449,12 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=integrations&sub=connections',
     icon: SettingsIcon,
     group: 'integrations',
+    // Left on `requiredRole: 'farm_admin'` (the default): this single destination
+    // bundles three independently-permissioned integrations (`spoolman:admin`,
+    // `home_assistant:admin`, `telegram:admin`) behind one settings tab, and
+    // `requiredPermission` only expresses a single resource/action pair. Picking
+    // any one of the three would incorrectly hide or show the whole tab based on
+    // an unrelated permission. Revisit if this tab is ever split per-integration.
     keywords: ['spoolman', 'home assistant', 'telegram', 'slicer', 'octoprint', 'integration', 'external'],
     isHubTile: true,
   },
@@ -385,6 +465,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=integrations&sub=webhooks',
     icon: SettingsIcon,
     group: 'integrations',
+    // Backed by WebhooksController, `[RequirePermission("webhooks", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'webhooks', action: 'admin' },
     keywords: ['webhook', 'endpoint', 'automation', 'callback'],
   },
 
@@ -396,6 +479,10 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=general&sub=farm',
     icon: GearIcon,
     group: 'general',
+    // Rendered from the generic settings-class editor backed by
+    // UnifiedSettingsController, `[RequirePermission("system_settings", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['farm', 'name', 'identity', 'timezone', 'appearance', 'branding'],
     isHubTile: true,
   },
@@ -406,6 +493,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=general&sub=system',
     icon: ServerIcon,
     group: 'general',
+    // Same generic settings-class editor as `gen-farm`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['database', 'logging', 'network', 'discovery', 'files', 'system'],
   },
 
@@ -417,6 +507,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=general&sub=automation',
     icon: KeyIcon,
     group: 'automation',
+    // Same generic settings-class editor as `gen-farm`/`gen-system`.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
     keywords: ['automation', 'cost', 'tracking', 'failure', 'obico', 'auto-tag', 'rule'],
     isHubTile: true,
   },
@@ -429,6 +522,9 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=quotas',
     icon: AlertIcon,
     group: 'quotas',
+    // Backed by QuotaController, class-level `[RequirePermission("quota", "admin")]`.
+    requiredRole: null,
+    requiredPermission: { resource: 'quota', action: 'admin' },
     keywords: ['quota', 'limit', 'allowance', 'budget', 'policy'],
     isHubTile: true,
   },
@@ -525,6 +621,40 @@ export function getDestinationById(id: string): AdminDestination | undefined {
  */
 export function getDestinationsByGroup(group: AdminDestinationGroup): AdminDestination[] {
   return ADMIN_DESTINATIONS.filter((destination) => destination.group === group);
+}
+
+/**
+ * True when at least one destination whose `path` starts with `pathPrefix` is
+ * reachable by the current user.
+ *
+ * Used by `SettingsShell` (#1457) to decide whether the `system`/`admin`
+ * settings scopes should be offered at all — replacing a blanket
+ * `hasRole('farm_admin')` scope gate with "does this user hold any permission
+ * that unlocks something under this scope's path". Individual tabs within an
+ * available scope are still gated on their own `requiredPermission` (see
+ * `getDestinationForTab`), so this only controls whether the scope itself is
+ * worth offering.
+ */
+export function hasAccessibleDestinationWithPrefix(
+  access: AdminDestinationAccess,
+  pathPrefix: string,
+): boolean {
+  return filterDestinationsByAccess(ADMIN_DESTINATIONS, access)
+    .some((destination) => destination.path.startsWith(pathPrefix));
+}
+
+/**
+ * Find the destination that backs a given `SettingsShell` tab/sub-page pair.
+ *
+ * Destinations under `/admin/settings` and `/admin/manage` encode their tab
+ * (and, when present, sub-page) as `tab=<category>&sub=<subPage>` query
+ * parameters — see the path conventions documented above `ADMIN_DESTINATIONS`.
+ * Returns `undefined` for categories with no matching destination (e.g. the
+ * `user`-scope profile tabs, which aren't admin destinations at all).
+ */
+export function getDestinationForTab(categoryId: string, subPageId?: string): AdminDestination | undefined {
+  const suffix = subPageId ? `tab=${categoryId}&sub=${subPageId}` : `tab=${categoryId}`;
+  return ADMIN_DESTINATIONS.find((destination) => destination.path.includes(suffix));
 }
 
 /**

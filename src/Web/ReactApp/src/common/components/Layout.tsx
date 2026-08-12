@@ -30,6 +30,7 @@ import {
 } from '@/common/components/icons/MdiIcons';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
 import { useAuth } from '@/features/auth/hooks/useAuth';
+import { hasAccessibleDestinationWithPrefix } from '@/features/admin/registry/adminDestinations';
 import { useSlicer } from '@/hooks/useSlicer';
 import { useSystemCapabilities } from '@/common/hooks/useSystemCapabilities';
 import { hasResolvedQueryData } from '@/common/utils/queryState';
@@ -71,6 +72,14 @@ interface NavigationItem {
   icon: React.ComponentType<{ className?: string }>;
   requiredPermission?: { resource: string; action: string };
   requiredRole?: string;
+  /**
+   * Visible only if at least one destination under `href` is reachable given
+   * the user's role/permissions (#1457) — used for hub-style links (like the
+   * Admin Control Center) that don't correspond to a single resource
+   * permission themselves but should stay hidden from a user who can't reach
+   * anything underneath them.
+   */
+  requiresAnyAccessUnder?: string;
   requiresSlicer?: boolean;
   /** Hide when platform-level slicing is disabled (ARM / Raspberry Pi) */
   requiresSlicingCapability?: boolean;
@@ -175,13 +184,14 @@ const navigation: NavigationElement[] = [
 
 
 
-  { name: 'Admin', icon: SettingsIcon, isSectionHeader: true, requiredRole: 'farm_admin' },
+  { name: 'Admin', icon: SettingsIcon, isSectionHeader: true },
   {
     id: 'maintenance',
     name: 'Maintenance',
     href: '/maintenance',
     icon: WrenchIcon,
-    requiredRole: 'farm_admin',
+    // MaintenanceController is class-level `[RequirePermission("maintenance", "admin")]` (#1457).
+    requiredPermission: { resource: 'maintenance', action: 'admin' },
     anchored: true,
     matches: (pathname) => pathname === '/maintenance' || pathname.endsWith('/maintenance')
   },
@@ -190,7 +200,8 @@ const navigation: NavigationElement[] = [
     name: 'Printed Parts',
     href: '/parts-inventory',
     icon: PackageIcon,
-    requiredRole: 'farm_admin',
+    // PartsInventoryController, `[RequirePermission("parts_inventory", "admin")]` (#1457).
+    requiredPermission: { resource: 'parts_inventory', action: 'admin' },
     anchored: true,
     matches: (pathname) => pathname === '/parts-inventory' || pathname.startsWith('/parts-inventory/')
   },
@@ -199,7 +210,8 @@ const navigation: NavigationElement[] = [
     name: 'Locations',
     href: '/locations',
     icon: LocationIcon,
-    requiredRole: 'farm_admin',
+    // LocationsController write endpoints require `[RequirePermission("locations", "admin")]` (#1457).
+    requiredPermission: { resource: 'locations', action: 'admin' },
     anchored: true,
     matches: (pathname) => pathname.startsWith('/locations')
   },
@@ -208,7 +220,8 @@ const navigation: NavigationElement[] = [
     name: 'Analytics',
     href: '/analytics',
     icon: TrendingUpIcon,
-    requiredRole: 'farm_admin',
+    // Backed by JobQueueAnalyticsController, `[RequirePermission(Queue.Read)]` (#1457).
+    requiredPermission: { resource: 'queue', action: 'read' },
     anchored: true,
     matches: (pathname) => pathname.startsWith('/analytics')
   },
@@ -217,7 +230,8 @@ const navigation: NavigationElement[] = [
     name: 'Auto-Dispatch',
     href: '/auto-dispatch',
     icon: PlayIcon,
-    requiredRole: 'farm_admin',
+    // AutoDispatchController read endpoints require `[RequirePermission(Queue.Read)]` (#1457).
+    requiredPermission: { resource: 'queue', action: 'read' },
     anchored: true,
     matches: (pathname) => pathname.startsWith('/auto-dispatch')
   },
@@ -226,7 +240,8 @@ const navigation: NavigationElement[] = [
     name: 'Catalog',
     href: '/catalog',
     icon: LayersIcon,
-    requiredRole: 'farm_admin',
+    // CatalogController is class-level `[RequirePermission("catalog", "admin")]` (#1457).
+    requiredPermission: { resource: 'catalog', action: 'admin' },
     anchored: true,
     matches: (pathname) => pathname.startsWith('/catalog')
   },
@@ -235,7 +250,13 @@ const navigation: NavigationElement[] = [
     name: 'Admin',
     href: '/admin',
     icon: SettingsIcon,
-    requiredRole: 'farm_admin',
+    // The Admin Control Center hub itself is not gated on a single role or
+    // resource permission (#1457) — it self-filters tiles to whatever the
+    // user's own permissions unlock. But the nav *entry* should still hide
+    // for a user who can't reach anything under /admin at all, so it's
+    // gated on "any accessible destination under this prefix" instead of a
+    // literal `hasRole('farm_admin')` check.
+    requiresAnyAccessUnder: '/admin',
     anchored: true,
     matches: (pathname) => pathname === '/admin' || pathname.startsWith('/admin/')
   },
@@ -418,6 +439,12 @@ export function Layout() {
     return navigationItems.filter((item) => {
       if (item.requiredRole && !canRole(item.requiredRole)) return false;
       if (item.requiredPermission && !canPermission(item.requiredPermission.resource, item.requiredPermission.action)) return false;
+      if (
+        item.requiresAnyAccessUnder &&
+        !hasAccessibleDestinationWithPrefix({ hasRole: canRole, hasPermission: canPermission }, item.requiresAnyAccessUnder)
+      ) {
+        return false;
+      }
       if (isHiddenByCapabilities(item)) return false;
       if (item.requiresSlicer && !isSlicerAvailable) return false;
       return true;

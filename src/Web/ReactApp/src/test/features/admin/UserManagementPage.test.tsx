@@ -5,7 +5,8 @@ import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { apiClient } from '@/services/api';
 
 vi.mock('@/features/auth/hooks/useAuth', () => ({
-  useAuth: () => ({ hasRole: (role: string) => role === 'farm_admin' }),
+  // #1457: UserManagementPage now gates on hasPermission('users', 'admin').
+  useAuth: () => ({ hasRole: (role: string) => role === 'farm_admin', hasPermission: () => true }),
 }));
 
 vi.mock('@/common/hooks/usePasswordPolicy', () => ({

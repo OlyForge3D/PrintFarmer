@@ -306,6 +306,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const hasRole = useCallback((role: string): boolean => {
     if (!user || !user.roles) return false;
+    // `farm_admin` is a deliberate superuser bypass: it satisfies every role
+    // check, not just literal `hasRole('farm_admin')` calls. Kept intentionally
+    // (#1457) — a farm admin must still pass any role gate a custom role might
+    // reasonably be excluded from. Do NOT use `hasRole` as the primary gate for
+    // anything a custom role should be able to reach via a granted permission;
+    // use `hasPermission` for that (see below). `hasRole` should only remain the
+    // gate for surfaces that are genuinely role-scoped rather than
+    // permission-scoped (see the call sites justified in adminDestinations.ts,
+    // CollectionsNav.tsx, and AddModelsToCollectionModal.tsx).
     return user.roles.includes(role) || user.roles.includes('farm_admin');
   }, [user]);
 
@@ -321,7 +330,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // A resource-level admin grant implies every finer-grained action on that same
     // resource (e.g. "calibration:admin" implies "calibration:read"). This never
-    // crosses resources and does not extend beyond the "admin" action.
+    // crosses resources and does not extend beyond the "admin" action. This
+    // mirrors the server's `PrintFarmerPermissions.ImpliesViaResourceAdmin` rule
+    // (see `PermissionAuthorizationHandler` and the slicer module's
+    // `ClaimsPermissionValidator`) so client-side nav/destination gating never
+    // hides something the server would actually allow, and never shows
+    // something the server would actually refuse (#1457).
     if (action !== 'admin' && user.permissions.includes(`${resource}:admin`)) return true;
 
     return false;

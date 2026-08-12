@@ -49,7 +49,7 @@ const EMPTY_PASSWORD_FORM = {
 };
 
 export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
-  const { hasRole } = useAuth();
+  const { hasPermission } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [loading, setLoading] = useState(true);
@@ -361,8 +361,12 @@ export function UserManagementPage({ embedded = false }: EmbeddablePageProps) {
     }
   };
 
-  // Early access check AFTER hooks to avoid conditional hook usage
-  if (!hasRole('farm_admin')) {
+  // Genuinely admin-only surface (#1457) — user account management is gated on
+  // the `users:admin` resource permission (matching the `users-accounts`
+  // adminDestinations.ts entry and the server's UserManagementController),
+  // not the `farm_admin` role literally, so a custom role granted that
+  // permission can actually use the page it was just given nav access to.
+  if (!hasPermission('users', 'admin')) {
     return (
       <PageTemplate
         title="User Management"

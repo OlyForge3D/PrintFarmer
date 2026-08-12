@@ -266,7 +266,7 @@ function AuthenticatedAppRoutes() {
         <Route path="printers" element={lazyRoute(<LazyPrintersPage />)} />
         <Route path="printers/:printerId" element={lazyRoute(<LazyPrintersPage />)} />
         <Route path="printers/:printerId/maintenance" element={lazyRoute(<LazyPrinterMaintenancePage />)} />
-        <Route path="printer-groups" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
+        <Route path="printer-groups" element={<ProtectedRoute requiredPermission={{ resource: 'printers', action: 'admin' }}>{lazyRoute(<LazyPrinterGroupsPage />)}</ProtectedRoute>} />
         <Route path="printQueue" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
         <Route path="printQueue/:tabId" element={lazyRoute(<LazyPrintQueueDashboardPage />)} />
         <Route path="files/*" element={lazyRoute(<LazyFilesPage />)} />
@@ -275,15 +275,15 @@ function AuthenticatedAppRoutes() {
         <Route path="spools/:tabId" element={lazyRoute(<LazyFilamentManagementPage />)} />
         <Route path="nfc-bindings" element={lazyRoute(<LazyNfcBindingsPage />)} />
         <Route path="maintenance" element={lazyRoute(<LazyMaintenanceDashboardPage />)} />
-        <Route path="parts-inventory" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
-        <Route path="parts-inventory/:tabId" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
+        <Route path="parts-inventory" element={<ProtectedRoute requiredPermission={{ resource: 'parts_inventory', action: 'admin' }}>{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
+        <Route path="parts-inventory/:tabId" element={<ProtectedRoute requiredPermission={{ resource: 'parts_inventory', action: 'admin' }}>{lazyRoute(<LazyPartsInventoryPage />)}</ProtectedRoute>} />
         <Route path="auto-dispatch" element={lazyRoute(<LazyAutoDispatchDashboardPage />)} />
         <Route path="analytics" element={lazyRoute(<LazyAnalyticsHubPage />)} />
         <Route path="scheduling" element={lazyRoute(<LazySchedulingPage />)} />
         <Route path="locations" element={<Outlet />}>
           <Route index element={lazyRoute(<LazyLocationDashboardPage />)} />
         </Route>
-        <Route path="catalog" element={<ProtectedRoute requiredRole="farm_admin">{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
+        <Route path="catalog" element={<ProtectedRoute requiredPermission={{ resource: 'catalog', action: 'admin' }}>{lazyRoute(<LazyCatalogPage />)}</ProtectedRoute>} />
         <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
         {/*
          * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
@@ -295,7 +295,16 @@ function AuthenticatedAppRoutes() {
         <Route path="profile/api-keys" element={lazyRoute(<LazyApiKeysPage />)} />
         <Route path="profile/notifications" element={lazyRoute(<LazyNotificationPreferencesPage />)} />
         <Route path="profile/passkeys" element={lazyRoute(<LazyPasskeysPage />)} />
-        <Route path="admin" element={<ProtectedRoute requiredRole="farm_admin"><Outlet /></ProtectedRoute>}>
+        {/*
+         * The `/admin` outlet itself is intentionally NOT role-gated (#1457):
+         * a custom role granted a specific resource permission (e.g.
+         * `printers:admin`) must be able to reach `/admin/settings?tab=...`
+         * even though it can't reach every admin surface. The Control Center
+         * hub, SettingsShell's scope/tab gating, and each admin destination's
+         * own `requiredPermission` are what actually enforce access from here
+         * down. The server remains the real enforcement point regardless.
+         */}
+        <Route path="admin" element={<Outlet />}>
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
           <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />

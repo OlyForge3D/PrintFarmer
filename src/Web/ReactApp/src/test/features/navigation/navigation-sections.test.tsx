@@ -20,7 +20,11 @@ vi.mock('@/features/auth/hooks/useAuth', () => ({
     logout: vi.fn(),
     isAuthenticated: true,
     hasRole: (role: string) => role === mockUserRole,
-    hasPermission: () => true,
+    // Mirrors mockUserRole rather than a blanket `true` (#1457): the "operator"
+    // test case needs hasPermission to actually deny, since the Admin nav
+    // link is now gated on `requiresAnyAccessUnder` (reachable admin
+    // destinations), not a fixed role/permission pair.
+    hasPermission: () => mockUserRole === 'farm_admin',
   }),
 }));
 

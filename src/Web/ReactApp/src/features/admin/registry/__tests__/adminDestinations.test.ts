@@ -108,6 +108,41 @@ describe('adminDestinations registry', () => {
       expect(allowed, `destination ${destination.id} has non-admin role: ${String(role)}`).toBe(true);
     }
   });
+
+  // #1457 — permission-based gating. Every destination whose page is backed by
+  // a real controller permission must set `requiredPermission` and clear the
+  // role gate (`requiredRole: null`); the server permission is then the sole
+  // client-side gate, matching the actual API enforcement. A handful of
+  // destinations have no equivalent server permission (or, for `admin-home`,
+  // exist only to avoid a self-referential hub tile) and stay on the default
+  // `farm_admin` role gate instead — each documented inline in the registry.
+  const ROLE_ONLY_EXCEPTIONS = new Set(['admin-home', 'slicing-profiles', 'int-connections']);
+
+  it('sets requiredPermission (and clears requiredRole) on every migrated destination', () => {
+    for (const destination of ADMIN_DESTINATIONS) {
+      if (destination.requiredPermission) {
+        expect(destination.requiredRole, `${destination.id} is permission-backed but still role-gated`).toBeNull();
+        expect(destination.requiredPermission.resource.length).toBeGreaterThan(0);
+        expect(destination.requiredPermission.action.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it('gates most of the registry on a permission rather than the farm_admin role name', () => {
+    const permissionBacked = ADMIN_DESTINATIONS.filter((d) => d.requiredPermission);
+    // 27 total destinations: 24 permission-backed, 3 documented role-only
+    // exceptions (admin-home, slicing-profiles, int-connections).
+    expect(permissionBacked.length).toBe(ADMIN_DESTINATIONS.length - ROLE_ONLY_EXCEPTIONS.size);
+  });
+
+  it('the documented role-only exceptions have no requiredPermission and stay on the default role gate', () => {
+    for (const id of ROLE_ONLY_EXCEPTIONS) {
+      const destination = getDestinationById(id);
+      expect(destination, `expected ${id} to exist in the registry`).toBeDefined();
+      expect(destination?.requiredPermission).toBeUndefined();
+      expect(destination?.requiredRole === undefined || destination?.requiredRole === 'farm_admin').toBe(true);
+    }
+  });
 });
 
 describe('filterDestinationsByAccess', () => {
@@ -158,6 +193,22 @@ describe('filterDestinationsByAccess', () => {
     );
     expect(withPermission).toHaveLength(1);
   });
+
+  it('#1457 — a custom (non-admin) role granted only the matching permission reaches that destination', () => {
+    const destination = getDestinationById('hw-cameras');
+    expect(destination?.requiredPermission).toEqual({ resource: 'cameras', action: 'admin' });
+
+    // Non-admin role, and hasPermission is scoped to exactly `cameras:admin`.
+    const result = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
+      hasRole: () => false,
+      hasPermission: (resource, action) => resource === 'cameras' && action === 'admin',
+    });
+
+    const ids = result.map((d) => d.id);
+    expect(ids).toContain('hw-cameras');
+    // A destination gated on a different permission must stay hidden.
+    expect(ids).not.toContain('hw-nfc');
+  });
 });
 
 describe('registry lookup helpers', () => {
@@ -203,7 +254,16 @@ describe('registry lookup helpers', () => {
   });
 
   it('getHubGroupedDestinations returns nothing for a user without admin access', () => {
-    const grouped = getHubGroupedDestinations(accessAs('operator'));
+    // accessAs('operator') defaults hasPermission to true for any resource/action
+    // it isn't explicitly told to deny (see the helper above) — a convenience for
+    // tests that only care about role gating. That default is unrealistic for
+    // this test post-#1457: most destinations are now permission-backed, so an
+    // operator who (unrealistically) holds every permission legitimately sees
+    // them. Use an access object with no granted permissions at all to assert
+    // the real invariant: a user with neither the farm_admin role nor any
+    // resource permission sees nothing.
+    const noAccess = { hasRole: () => false, hasPermission: () => false };
+    const grouped = getHubGroupedDestinations(noAccess);
     expect(grouped).toHaveLength(0);
   });
 });

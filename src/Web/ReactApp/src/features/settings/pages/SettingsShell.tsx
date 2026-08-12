@@ -3,7 +3,11 @@ import { useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { SearchIcon } from '@/common/components/icons/MdiIcons';
 import { PageTemplate } from '@/common/components/PageTemplate';
-import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
+import {
+  ADMIN_HUB_PARENT,
+  getDestinationForTab,
+  hasAccessibleDestinationWithPrefix,
+} from '@/features/admin/registry/adminDestinations';
 import { ThemeSwitcher } from '@/common/components/ThemeSwitcher';
 import { FormSkeleton } from '@/common/components/skeletons/FormSkeleton';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
@@ -202,8 +206,18 @@ interface SettingsShellProps {
 }
 
 export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
-  const { hasRole } = useAuth();
-  const isFarmAdmin = hasRole('farm_admin');
+  const { hasRole, hasPermission } = useAuth();
+  // Passed to adminDestinations.ts helpers so scope/tab access checks share the
+  // exact same permission semantics as the Control Center hub and nav (issue 1457).
+  const destinationAccess = useMemo(() => ({ hasRole, hasPermission }), [hasRole, hasPermission]);
+  const canReachSystemScope = useMemo(
+    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/settings'),
+    [destinationAccess],
+  );
+  const canReachAdminScope = useMemo(
+    () => hasAccessibleDestinationWithPrefix(destinationAccess, '/admin/manage'),
+    [destinationAccess],
+  );
   const [searchParams, setSearchParams] = useSearchParams();
   const { open: openCommandPalette } = useCommandPalette();
 
@@ -230,13 +244,17 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
       return SETTINGS_SCOPES.filter((scope) => scope.id === 'user');
     }
     if (routeScope === 'system') {
-      return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && isFarmAdmin);
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'system' && canReachSystemScope);
     }
     if (routeScope === 'admin') {
-      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && isFarmAdmin);
+      return SETTINGS_SCOPES.filter((scope) => scope.id === 'admin' && canReachAdminScope);
     }
-    return SETTINGS_SCOPES.filter((scope) => !scope.adminOnly || isFarmAdmin);
-  }, [isFarmAdmin, routeScope]);
+    return SETTINGS_SCOPES.filter((scope) => {
+      if (scope.id === 'system') return canReachSystemScope;
+      if (scope.id === 'admin') return canReachAdminScope;
+      return !scope.adminOnly;
+    });
+  }, [canReachAdminScope, canReachSystemScope, routeScope]);
   const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
   const accessibleCategories = useMemo(
     () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
@@ -579,12 +597,43 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   }, [currentCategory.id, hasSubTabs, activeSubPage]);
 
   useEffect(() => {
-    if (requestedScope === 'admin' && !isFarmAdmin) {
+    if (requestedScope === 'admin' && !canReachAdminScope) {
       toast.info("You don't have access to admin settings. Showing your user settings instead.");
     }
-  }, [isFarmAdmin, requestedScope]);
+  }, [canReachAdminScope, requestedScope]);
+
+  // Per-tab/sub-page permission gate (issue 1457). Each admin destination's
+  // `requiredPermission` is the source of truth here — mirrors what the nav
+  // and Control Center hub already enforce, so a tab that was reachable via a
+  // direct link behaves the same as one reached by clicking a nav entry. Tabs
+  // with no matching destination (e.g. the `user`-scope profile tabs) are not
+  // gated here at all; the server remains the actual enforcement point either
+  // way. This is a UX tightening only: previously any `farm_admin` saw every
+  // tab regardless of a hypothetical narrower permission — nobody loses access
+  // they previously had, this only prevents landing on a tab the API would
+  // refuse.
+  const activeTabDestination = useMemo(
+    () => getDestinationForTab(currentCategory.id, currentCategory.subPages.length > 0 ? activeSubPage : undefined),
+    [activeSubPage, currentCategory],
+  );
+  const canAccessActiveTab = useMemo(() => {
+    if (!activeTabDestination?.requiredPermission) {
+      return true;
+    }
+    return hasPermission(activeTabDestination.requiredPermission.resource, activeTabDestination.requiredPermission.action);
+  }, [activeTabDestination, hasPermission]);
 
   const content = useMemo(() => {
+    if (!canAccessActiveTab) {
+      return (
+        <SettingsSection>
+          <div className="py-8 text-center text-pf-text-secondary">
+            <p className="text-sm">You don't have permission to view {activeSubPageLabel ?? currentCategory.label}.</p>
+          </div>
+        </SettingsSection>
+      );
+    }
+
     if (currentCategory.subPages.length === 0) {
       return SINGLE_PAGE_CONTENT[currentCategory.id] ?? (
         <SettingsSection>
@@ -600,7 +649,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
         <p className="text-sm">Content not found for {renderedContentKey}</p>
       </div>
     );
-  }, [currentCategory, renderedContentKey]);
+  }, [activeSubPageLabel, canAccessActiveTab, currentCategory, renderedContentKey]);
 
   // The scope registry already names every scope, and the document title (above)
   // reads from it. The H1 used to hardcode its own strings, so the browser tab
