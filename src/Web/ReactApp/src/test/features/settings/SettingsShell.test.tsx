@@ -379,6 +379,50 @@ describe('SettingsShell', () => {
     expect(screen.queryByTestId('printer-groups-page')).not.toBeInTheDocument();
   });
 
+  it('hides Hardware sub-tabs the user cannot access, showing only the ones their permission unlocks (#1457, Hicks review)', () => {
+    // A user with printers:admin and nfc_devices:admin reaches Printer
+    // Groups, NFC Devices, and NFC Bindings. Before this fix, SettingsSubTabs
+    // rendered every Hardware sub-page (including Cameras and Custom Fields)
+    // regardless of permission, and the user only learned they lacked access
+    // after clicking one. The sub-tab bar itself must now only list what
+    // canAccessSettingsTab allows.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) =>
+      (resource === 'printers' || resource === 'nfc_devices') && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(screen.getByRole('tab', { name: /^Printer Groups/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^NFC Devices/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^NFC Bindings/ })).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Cameras/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /^Custom Fields/ })).not.toBeInTheDocument();
+  });
+
+
+  it('hides an entire settings category from the sidebar when none of its tabs are reachable (#1457, Hicks review)', () => {
+    // Integrations' only sub-page (`connections`) is gated by
+    // requiredPermissionAnyOf (spoolman/home_assistant/telegram admin). A user
+    // with only printers:admin holds none of those, so the whole Integrations
+    // category must disappear from the sidebar rather than appear and dead-end.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'printers' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=hardware&sub=printer-groups');
+
+    expect(screen.queryByRole('button', { name: /^Integrations/ })).not.toBeInTheDocument();
+  });
+
+  it('shows the Integrations category and its connections tab once the user holds any one of the bundled permissions (#1457)', () => {
+    // Mirrors the `requiredPermissionAnyOf` OR semantics: telegram:admin alone
+    // is enough to unlock `connections`, even without spoolman or
+    // home_assistant admin.
+    setAuthRoles(['farm_user']);
+    authState.permissionOverride = (resource, action) => resource === 'telegram' && action === 'admin';
+    renderSettings('/admin/settings?scope=system&tab=integrations&sub=connections');
+
+    expect(getCategoryButton('Integrations')).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByText(/don't have permission to view/i)).not.toBeInTheDocument();
+  });
+
   it('matches hardware sub-pages in search results', () => {
     renderSettings('/settings?q= binding ');
     expect(getCategoryButton(/^Hardware/)).toHaveAttribute('aria-current', 'page');

@@ -85,6 +85,17 @@ export interface AdminDestination {
    * gating semantics — checked in addition to `requiredRole`.
    */
   requiredPermission?: AdminDestinationPermission;
+  /**
+   * Optional OR-capable permission gate for destinations that bundle several
+   * independently-permissioned features behind one tab (e.g. `int-connections`,
+   * which surfaces Spoolman/Home Assistant/Telegram settings). Access is
+   * granted when the user holds **any one** of these permissions — unlike
+   * `requiredPermission`, which requires the single named grant. Mutually
+   * exclusive with `requiredPermission`; if both are set, `requiredPermission`
+   * is checked first and `requiredPermissionAnyOf` second (both must pass),
+   * so in practice only set one of the two.
+   */
+  requiredPermissionAnyOf?: AdminDestinationPermission[];
   /** Search terms for the Ctrl+K palette fuzzy matcher. */
   keywords?: string[];
   /**
@@ -449,12 +460,21 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/settings?tab=integrations&sub=connections',
     icon: SettingsIcon,
     group: 'integrations',
-    // Left on `requiredRole: 'farm_admin'` (the default): this single destination
-    // bundles three independently-permissioned integrations (`spoolman:admin`,
-    // `home_assistant:admin`, `telegram:admin`) behind one settings tab, and
-    // `requiredPermission` only expresses a single resource/action pair. Picking
-    // any one of the three would incorrectly hide or show the whole tab based on
-    // an unrelated permission. Revisit if this tab is ever split per-integration.
+    // Bundles three independently-permissioned integrations behind one settings
+    // tab: SpoolmanController, AdminHomeAssistantController, and
+    // AdminTelegramController each gate on `[RequirePermission("<resource>",
+    // "admin")]` for their own resource. A custom role granted only one of the
+    // three must still be able to reach this tab (#1457 — this was previously
+    // left on `requiredRole: 'farm_admin'`, which reproduced the exact bug the
+    // issue asks to fix). `requiredPermissionAnyOf` grants access to any one of
+    // the three; the page itself still shows/hides each integration's controls
+    // per-permission once loaded.
+    requiredRole: null,
+    requiredPermissionAnyOf: [
+      { resource: 'spoolman', action: 'admin' },
+      { resource: 'home_assistant', action: 'admin' },
+      { resource: 'telegram', action: 'admin' },
+    ],
     keywords: ['spoolman', 'home assistant', 'telegram', 'slicer', 'octoprint', 'integration', 'external'],
     isHubTile: true,
   },
@@ -583,8 +603,10 @@ export interface AdminDestinationAccess {
  * is treated as accessible to any authenticated user. Shared by
  * `filterDestinationsByAccess` (bulk filtering) and `SettingsShell`'s
  * per-tab gate (#1457), so both apply the exact same rule — including the
- * three role-only exceptions (`admin-home`, `slicing-profiles`,
- * `int-connections`) that have no `requiredPermission` at all.
+ * two role-only exceptions (`admin-home`, `slicing-profiles`) that have no
+ * `requiredPermission`/`requiredPermissionAnyOf` at all, and `int-connections`,
+ * which uses `requiredPermissionAnyOf` (any one of its three bundled
+ * integration permissions unlocks the tab).
  */
 export function canAccessDestination(
   destination: AdminDestination,
@@ -602,6 +624,11 @@ export function canAccessDestination(
 
   if (destination.requiredPermission
     && !hasPermission(destination.requiredPermission.resource, destination.requiredPermission.action)) {
+    return false;
+  }
+
+  if (destination.requiredPermissionAnyOf
+    && !destination.requiredPermissionAnyOf.some((permission) => hasPermission(permission.resource, permission.action))) {
     return false;
   }
 
@@ -670,6 +697,32 @@ export function hasAccessibleDestinationWithPrefix(
 export function getDestinationForTab(categoryId: string, subPageId?: string): AdminDestination | undefined {
   const suffix = subPageId ? `tab=${categoryId}&sub=${subPageId}` : `tab=${categoryId}`;
   return ADMIN_DESTINATIONS.find((destination) => destination.path.includes(suffix));
+}
+
+/**
+ * True when the current user can reach a `SettingsShell` tab/sub-page pair.
+ *
+ * Looks up the backing destination via `getDestinationForTab` and applies
+ * `canAccessDestination` to it. A tab/sub-page with **no** matching
+ * destination (e.g. the `user`-scope profile tabs, which aren't admin
+ * destinations at all) is treated as accessible — the server remains the
+ * actual enforcement point for those either way.
+ *
+ * Used by `SettingsShell` (#1457) both to gate the rendered content of the
+ * active tab AND to filter the sidebar categories / sub-tab lists it hands to
+ * `SettingsSidebar`/`SettingsSubTabs`, so a partial-permission user only ever
+ * sees nav entries they can actually open — not just a denial after clicking.
+ */
+export function canAccessSettingsTab(
+  categoryId: string,
+  subPageId: string | undefined,
+  access: AdminDestinationAccess,
+): boolean {
+  const destination = getDestinationForTab(categoryId, subPageId);
+  if (!destination) {
+    return true;
+  }
+  return canAccessDestination(destination, access);
 }
 
 /**

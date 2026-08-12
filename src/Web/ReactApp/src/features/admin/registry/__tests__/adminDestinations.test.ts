@@ -110,13 +110,15 @@ describe('adminDestinations registry', () => {
   });
 
   // #1457 — permission-based gating. Every destination whose page is backed by
-  // a real controller permission must set `requiredPermission` and clear the
-  // role gate (`requiredRole: null`); the server permission is then the sole
-  // client-side gate, matching the actual API enforcement. A handful of
-  // destinations have no equivalent server permission (or, for `admin-home`,
-  // exist only to avoid a self-referential hub tile) and stay on the default
-  // `farm_admin` role gate instead — each documented inline in the registry.
-  const ROLE_ONLY_EXCEPTIONS = new Set(['admin-home', 'slicing-profiles', 'int-connections']);
+  // a real controller permission must set `requiredPermission` (or
+  // `requiredPermissionAnyOf` for destinations backed by more than one
+  // independent permission) and clear the role gate (`requiredRole: null`);
+  // the server permission is then the sole client-side gate, matching the
+  // actual API enforcement. A handful of destinations have no equivalent
+  // server permission (or, for `admin-home`, exist only to avoid a
+  // self-referential hub tile) and stay on the default `farm_admin` role gate
+  // instead — each documented inline in the registry.
+  const ROLE_ONLY_EXCEPTIONS = new Set(['admin-home', 'slicing-profiles']);
 
   it('sets requiredPermission (and clears requiredRole) on every migrated destination', () => {
     for (const destination of ADMIN_DESTINATIONS) {
@@ -128,10 +130,24 @@ describe('adminDestinations registry', () => {
     }
   });
 
+  it('sets requiredPermissionAnyOf (and clears requiredRole) on every OR-permission-backed destination', () => {
+    for (const destination of ADMIN_DESTINATIONS) {
+      if (destination.requiredPermissionAnyOf) {
+        expect(destination.requiredRole, `${destination.id} is permission-backed but still role-gated`).toBeNull();
+        expect(destination.requiredPermissionAnyOf.length).toBeGreaterThan(1);
+        for (const permission of destination.requiredPermissionAnyOf) {
+          expect(permission.resource.length).toBeGreaterThan(0);
+          expect(permission.action.length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+
   it('gates most of the registry on a permission rather than the farm_admin role name', () => {
-    const permissionBacked = ADMIN_DESTINATIONS.filter((d) => d.requiredPermission);
-    // 27 total destinations: 24 permission-backed, 3 documented role-only
-    // exceptions (admin-home, slicing-profiles, int-connections).
+    const permissionBacked = ADMIN_DESTINATIONS.filter((d) => d.requiredPermission || d.requiredPermissionAnyOf);
+    // 27 total destinations: 25 permission-backed (24 single-permission +
+    // int-connections's requiredPermissionAnyOf), 2 documented role-only
+    // exceptions (admin-home, slicing-profiles).
     expect(permissionBacked.length).toBe(ADMIN_DESTINATIONS.length - ROLE_ONLY_EXCEPTIONS.size);
   });
 
@@ -140,6 +156,7 @@ describe('adminDestinations registry', () => {
       const destination = getDestinationById(id);
       expect(destination, `expected ${id} to exist in the registry`).toBeDefined();
       expect(destination?.requiredPermission).toBeUndefined();
+      expect(destination?.requiredPermissionAnyOf).toBeUndefined();
       expect(destination?.requiredRole === undefined || destination?.requiredRole === 'farm_admin').toBe(true);
     }
   });
@@ -208,6 +225,56 @@ describe('filterDestinationsByAccess', () => {
     expect(ids).toContain('hw-cameras');
     // A destination gated on a different permission must stay hidden.
     expect(ids).not.toContain('hw-nfc');
+  });
+
+  it('respects requiredPermissionAnyOf: any one of several permissions unlocks the destination', () => {
+    const gated: AdminDestination = {
+      ...ADMIN_DESTINATIONS[1],
+      id: 'gated-any-of',
+      requiredRole: null,
+      requiredPermission: undefined,
+      requiredPermissionAnyOf: [
+        { resource: 'spoolman', action: 'admin' },
+        { resource: 'telegram', action: 'admin' },
+      ],
+    };
+
+    const noneGranted = filterDestinationsByAccess([gated], {
+      hasRole: () => false,
+      hasPermission: () => false,
+    });
+    expect(noneGranted).toHaveLength(0);
+
+    const onlyFirstGranted = filterDestinationsByAccess([gated], {
+      hasRole: () => false,
+      hasPermission: (resource, action) => resource === 'spoolman' && action === 'admin',
+    });
+    expect(onlyFirstGranted).toHaveLength(1);
+
+    const onlySecondGranted = filterDestinationsByAccess([gated], {
+      hasRole: () => false,
+      hasPermission: (resource, action) => resource === 'telegram' && action === 'admin',
+    });
+    expect(onlySecondGranted).toHaveLength(1);
+  });
+
+  it('#1457 — a custom (non-admin) role granted only ONE of int-connections\' three bundled permissions still reaches it', () => {
+    const destination = getDestinationById('int-connections');
+    expect(destination?.requiredRole).toBeNull();
+    expect(destination?.requiredPermissionAnyOf).toEqual(
+      expect.arrayContaining([
+        { resource: 'spoolman', action: 'admin' },
+        { resource: 'home_assistant', action: 'admin' },
+        { resource: 'telegram', action: 'admin' },
+      ]),
+    );
+
+    const result = filterDestinationsByAccess(ADMIN_DESTINATIONS, {
+      hasRole: () => false,
+      hasPermission: (resource, action) => resource === 'telegram' && action === 'admin',
+    });
+
+    expect(result.map((d) => d.id)).toContain('int-connections');
   });
 });
 

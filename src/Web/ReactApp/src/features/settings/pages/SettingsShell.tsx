@@ -6,6 +6,7 @@ import { PageTemplate } from '@/common/components/PageTemplate';
 import {
   ADMIN_HUB_PARENT,
   canAccessDestination,
+  canAccessSettingsTab,
   getDestinationForTab,
   hasAccessibleDestinationWithPrefix,
 } from '@/features/admin/registry/adminDestinations';
@@ -257,9 +258,26 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     });
   }, [canReachAdminScope, canReachSystemScope, routeScope]);
   const fallbackScopeId = availableScopes[0]?.id ?? DEFAULT_SCOPE;
+  // Issue 1457 (Hicks review) — filter both the category list AND each category's
+  // sub-pages by canAccessSettingsTab, not just the rendered content of the
+  // active tab. Without this, SettingsSidebar/SettingsSubTabs still listed
+  // every tab in scope regardless of permission, so a user with e.g. only
+  // `printers:admin` could see Cameras/NFC/other inaccessible Hardware
+  // sub-tabs in the nav and only find out they were denied after clicking.
+  // A category with zero remaining accessible sub-pages (or, for a
+  // no-sub-page category, an inaccessible root tab) is dropped entirely.
   const accessibleCategories = useMemo(
-    () => availableScopes.flatMap((scope) => getSettingsCategoriesForScope(scope.id)),
-    [availableScopes],
+    () => availableScopes
+      .flatMap((scope) => getSettingsCategoriesForScope(scope.id))
+      .map((category) => ({
+        ...category,
+        subPages: category.subPages.filter((subPage) => canAccessSettingsTab(category.id, subPage.id, destinationAccess)),
+      }))
+      .filter((category) => (
+        category.subPages.length > 0
+        || canAccessSettingsTab(category.id, undefined, destinationAccess)
+      )),
+    [availableScopes, destinationAccess],
   );
 
   const resolvedRequestedTarget = useMemo(
@@ -499,6 +517,15 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
     ? currentCategory.id
     : `${currentCategory.id}.${activeSubPage}`;
   const activeSubPageLabel = currentCategory.subPages.find((subPage) => subPage.id === activeSubPage)?.label;
+  // Issue 1457 (Hicks review) — the sub-tab bar itself must only list sub-pages the
+  // user can actually reach, not every sub-page the category defines. Looked
+  // up from the already permission-filtered `accessibleCategories` (falls
+  // back to the unfiltered list if the category isn't present there, which
+  // shouldn't happen for a category the user can currently see at all).
+  const visibleSubPages = useMemo(
+    () => accessibleCategories.find((category) => category.id === currentCategory.id)?.subPages ?? currentCategory.subPages,
+    [accessibleCategories, currentCategory],
+  );
   const sectionHeadingRef = useRef<HTMLHeadingElement>(null);
 
   const sectionAnnouncement = useMemo(() => {
@@ -612,16 +639,17 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
 
   // Per-tab/sub-page permission gate (issue 1457). Reuses the same
   // canAccessDestination predicate the registry's bulk filter and the
-  // Layout nav use, so a directly-linked tab honours BOTH requiredPermission
-  // AND requiredRole — not just requiredPermission. That distinction matters
-  // for the role-only exceptions (slicing-profiles, int-connections) which
-  // have no requiredPermission at all and would otherwise render as
-  // accessible to anyone who reaches the /admin/settings scope. Tabs with no
-  // matching destination (e.g. the `user`-scope profile tabs) are not gated
-  // here at all; the server remains the actual enforcement point either way.
-  // This is a UX tightening only: previously any `farm_admin` saw every tab
-  // regardless of a hypothetical narrower permission — nobody loses access
-  // they previously had, this only prevents landing on a tab the API would
+  // Layout nav use, so a directly-linked tab honours requiredRole,
+  // requiredPermission, AND requiredPermissionAnyOf — not just one of them.
+  // That distinction matters for the one remaining role-only exception
+  // (slicing-profiles, which has no requiredPermission at all) which would
+  // otherwise render as accessible to anyone who reaches the
+  // /admin/settings scope. Tabs with no matching destination (e.g. the
+  // `user`-scope profile tabs) are not gated here at all; the server
+  // remains the actual enforcement point either way. This is a UX
+  // tightening only: previously any `farm_admin` saw every tab regardless
+  // of a hypothetical narrower permission — nobody loses access they
+  // previously had, this only prevents landing on a tab the API would
   // refuse.
   const activeTabDestination = useMemo(
     () => getDestinationForTab(currentCategory.id, currentCategory.subPages.length > 0 ? activeSubPage : undefined),
@@ -702,10 +730,10 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   );
 
   const subTabs =
-    !hasNoMatches && currentCategory.subPages.length > 0 ? (
+    !hasNoMatches && visibleSubPages.length > 0 ? (
       <div className="border-b border-pf-border px-4 pt-4 md:px-6">
         <SettingsSubTabs
-          subPages={currentCategory.subPages}
+          subPages={visibleSubPages}
           activeSubPage={activeSubPage}
           onSubPageChange={handleSubPageChange}
           matchingSubPageIds={matchingCurrentSubPageIds}
