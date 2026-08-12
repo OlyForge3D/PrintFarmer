@@ -315,6 +315,17 @@ public class AutoDispatchService(
 
     private sealed record QueuedJobSelection(PrintJob? NextJob, int QueueDepth);
 
+    /// <summary>
+    /// Pre-computed scoring context for the unassigned-queued-job pool, shared across every
+    /// printer's eligibility check in a single request. Each unassigned job is scored exactly
+    /// once (via <see cref="IDispatchScorer.ScorePrintersForJobAsync"/>, which already scores
+    /// every enabled printer per call), instead of once per (printer, job) pair.
+    /// </summary>
+    private sealed record UnassignedJobScoringContext(
+        List<PrintJob> UnassignedJobs,
+        Dictionary<Guid, Dictionary<Guid, DispatchScore>> ScoresByJobId,
+        double MinimumScoreThreshold);
+
     private sealed record OccupyingJobSelection(
         Guid PrinterId,
         string? Name,
@@ -1154,13 +1165,31 @@ public class AutoDispatchService(
         Dictionary<Guid, OccupyingJobSelection> currentJobs =
             await GetCurrentJobsByPrinterAsync(printers.Select(p => p.Id), ct);
 
+        // Score every unassigned job once, up front (J scorer calls total, not P x J). Each
+        // scorer call already returns scores for ALL enabled printers, so the same result set
+        // can be reused for every printer's per-printer eligibility check below. A failure here
+        // (DB/scorer error) must not abort the whole endpoint: fall back to an empty context so
+        // each printer's own try/catch below still reports a degraded-but-present status, matching
+        // the pre-refactor per-printer failure isolation.
+        UnassignedJobScoringContext scoringContext;
+        try
+        {
+            scoringContext = await BuildUnassignedJobScoringContextAsync(includeGcodeFile: false, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to build unassigned-job scoring context for auto-dispatch status");
+            scoringContext = new UnassignedJobScoringContext([], [], MinimumScoreThreshold: 0);
+        }
+
         bool globalEnabled = printers.Any(p => p.AutoDispatchEnabled);
         List<AutoDispatchStatusDto> statuses = [];
         foreach (Printer printer in printers)
         {
             try
             {
-                QueuedJobSelection queuedJobs = await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, ct);
+                QueuedJobSelection queuedJobs =
+                    await GetQueuedJobSelectionAsync(printer.Id, includeGcodeFile: false, scoringContext, ct);
                 statuses.Add(BuildStatusDto(
                     printer,
                     queuedJobs.QueueDepth,
@@ -1563,6 +1592,21 @@ public class AutoDispatchService(
 
     private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(Guid printerId, bool includeGcodeFile, CancellationToken ct)
     {
+        UnassignedJobScoringContext scoringContext = await BuildUnassignedJobScoringContextAsync(includeGcodeFile, ct);
+        return await GetQueuedJobSelectionAsync(printerId, includeGcodeFile, scoringContext, ct);
+    }
+
+    /// <summary>
+    /// Builds a printer's queued-job selection using a scoring context shared across every
+    /// printer in the request (see <see cref="UnassignedJobScoringContext"/>). Only the
+    /// printer-scoped assigned-job query and DispatchSettings/scorer lookups.
+    /// </summary>
+    private async Task<QueuedJobSelection> GetQueuedJobSelectionAsync(
+        Guid printerId,
+        bool includeGcodeFile,
+        UnassignedJobScoringContext scoringContext,
+        CancellationToken ct)
+    {
         // Ready-head selection MUST use the single shared ordering selector so the job the
         // operator sees at the head of the queue is exactly the job that gets dispatched.
         IQueryable<PrintJob> assignedQuery = db.PrintJobs
@@ -1570,15 +1614,9 @@ public class AutoDispatchService(
             .Where(j => j.AssignedPrinterId == printerId && j.Status == PrintJobStatus.Queued)
             .OrderByPriorityDescending();
 
-        IQueryable<PrintJob> unassignedQuery = db.PrintJobs
-            .AsNoTracking()
-            .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
-            .OrderByPriorityDescending();
-
         if (includeGcodeFile)
         {
             assignedQuery = assignedQuery.Include(j => j.GcodeFile);
-            unassignedQuery = unassignedQuery.Include(j => j.GcodeFile);
         }
 
         List<PrintJob> eligibleJobs = await assignedQuery.ToListAsync(ct);
@@ -1590,15 +1628,16 @@ public class AutoDispatchService(
                 eligibleJobs.Count);
         }
 
-        DispatchSettings? settings = await db.DispatchSettings.AsNoTracking().FirstOrDefaultAsync(ct);
-        double minimumScoreThreshold = settings?.MinimumScoreThreshold ?? 0;
-
-        foreach (PrintJob job in await unassignedQuery.ToListAsync(ct))
+        foreach (PrintJob job in scoringContext.UnassignedJobs)
         {
-            DispatchScore? printerScore = (await dispatchScorer.ScorePrintersForJobAsync(job.Id, ct))
-                .FirstOrDefault(score => score.PrinterId == printerId);
+            if (!scoringContext.ScoresByJobId.TryGetValue(job.Id, out Dictionary<Guid, DispatchScore>? printerScores))
+            {
+                continue;
+            }
 
-            if (printerScore is null || printerScore.Eliminated || printerScore.TotalScore < minimumScoreThreshold)
+            printerScores.TryGetValue(printerId, out DispatchScore? printerScore);
+
+            if (printerScore is null || printerScore.Eliminated || printerScore.TotalScore < scoringContext.MinimumScoreThreshold)
             {
                 continue;
             }
@@ -1609,6 +1648,47 @@ public class AutoDispatchService(
         return new QueuedJobSelection(
             eligibleJobs.OrderByPriorityDescending().FirstOrDefault(),
             eligibleJobs.Count);
+    }
+
+    /// <summary>
+    /// Fetches the unassigned-queued-job pool once and scores each job exactly once against
+    /// every enabled printer (<see cref="IDispatchScorer.ScorePrintersForJobAsync"/> already
+    /// returns per-printer scores in a single call), and reads <see cref="DispatchSettings"/>
+    /// once. The resulting context is reused for every printer's eligibility check instead of
+    /// re-querying and re-scoring per printer.
+    /// </summary>
+    private async Task<UnassignedJobScoringContext> BuildUnassignedJobScoringContextAsync(
+        bool includeGcodeFile,
+        CancellationToken ct)
+    {
+        IQueryable<PrintJob> unassignedQuery = db.PrintJobs
+            .AsNoTracking()
+            .Where(j => j.AssignedPrinterId == null && j.Status == PrintJobStatus.Queued)
+            .OrderByPriorityDescending();
+
+        if (includeGcodeFile)
+        {
+            unassignedQuery = unassignedQuery.Include(j => j.GcodeFile);
+        }
+
+        List<PrintJob> unassignedJobs = await unassignedQuery.ToListAsync(ct);
+
+        if (dispatchScorer is null)
+        {
+            return new UnassignedJobScoringContext(unassignedJobs, [], MinimumScoreThreshold: 0);
+        }
+
+        DispatchSettings? settings = await db.DispatchSettings.AsNoTracking().FirstOrDefaultAsync(ct);
+        double minimumScoreThreshold = settings?.MinimumScoreThreshold ?? 0;
+
+        Dictionary<Guid, Dictionary<Guid, DispatchScore>> scoresByJobId = [];
+        foreach (PrintJob job in unassignedJobs)
+        {
+            List<DispatchScore> scores = await dispatchScorer.ScorePrintersForJobAsync(job.Id, ct);
+            scoresByJobId[job.Id] = scores.ToDictionary(score => score.PrinterId);
+        }
+
+        return new UnassignedJobScoringContext(unassignedJobs, scoresByJobId, minimumScoreThreshold);
     }
 
     private async Task<FilamentCheckResult> CheckFilamentAsync(Printer printer, PrintJob nextJob, CancellationToken ct)

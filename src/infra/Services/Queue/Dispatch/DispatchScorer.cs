@@ -165,7 +165,7 @@ public class DispatchScorer(
             return b.TotalScore.CompareTo(a.TotalScore);
         });
 
-        logger.LogInformation(
+        logger.LogDebug(
             "Dispatch scorer: job {JobId} scored {Count} printers, {Eliminated} eliminated",
             jobId, results.Count, results.Count(r => r.Eliminated));
 
