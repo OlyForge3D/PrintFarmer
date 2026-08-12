@@ -66,6 +66,14 @@ import {
   SystemInfo,
   ResolveHostnameRequest,
   RoleDto,
+  RoleSummary,
+  RoleDetail,
+  CreateCustomRoleRequest,
+  UpdateCustomRoleRequest,
+  PermissionCatalog,
+  RolePermissions,
+  UpdateRolePermissionsRequest,
+  UpdateRolePermissionsResponse,
   SetAccessRulesRequest,
   StartDiscoveryRequest,
   ResolveHostnameResponse,
@@ -1428,6 +1436,75 @@ export class ApiClient {
 
   async getRoles(): Promise<RoleDto[]> {
     const response = await this.client.get<RoleDto[]>("/users/roles");
+    return response.data;
+  }
+
+  // ============ Role Management API methods (#1455) ============
+  // Distinct from getRoles()/`/users/roles` above (the thin access-control role list) —
+  // these consume the richer admin role-management + permission-catalog APIs (#1446/#1448/#1449).
+
+  async getAdminRoles(): Promise<RoleSummary[]> {
+    const response = await this.client.get<RoleSummary[]>("/admin/roles");
+    return response.data ?? [];
+  }
+
+  async getAdminRole(roleId: string): Promise<RoleDetail> {
+    const response = await this.client.get<RoleDetail>(`/admin/roles/${roleId}`);
+    return response.data;
+  }
+
+  async createAdminRole(dto: CreateCustomRoleRequest): Promise<RoleDetail> {
+    const response = await this.client.post<RoleDetail>("/admin/roles", dto);
+    return response.data;
+  }
+
+  async updateAdminRole(roleId: string, dto: UpdateCustomRoleRequest): Promise<RoleDetail> {
+    const response = await this.client.put<RoleDetail>(`/admin/roles/${roleId}`, dto);
+    return response.data;
+  }
+
+  /**
+   * Deletes a custom role. If the role still has members, the server rejects with a
+   * structured 409 `{ error, memberCount }` (surfaced via `ApiError.data`) unless
+   * `reassignTo` or `cascade` is provided.
+   */
+  async deleteAdminRole(
+    roleId: string,
+    options?: { reassignTo?: string; cascade?: boolean },
+  ): Promise<void> {
+    await this.client.delete(`/admin/roles/${roleId}`, {
+      params: {
+        reassignTo: options?.reassignTo,
+        cascade: options?.cascade,
+      },
+    });
+  }
+
+  /** Full enforced-permission catalog, used to render the permission matrix. */
+  async getPermissionCatalog(): Promise<PermissionCatalog> {
+    const response = await this.client.get<PermissionCatalog>("/admin/permissions/catalog");
+    return response.data;
+  }
+
+  /** A role's current permission grants joined against the derived catalog. */
+  async getRolePermissions(roleId: string): Promise<RolePermissions> {
+    const response = await this.client.get<RolePermissions>(`/admin/roles/${roleId}/permissions`);
+    return response.data;
+  }
+
+  /**
+   * Full-replacement update of a role's permission grants. `dto.updatedAt` must equal the
+   * role's last-observed `updatedAt`, or the server rejects with a structured 409
+   * `{ error }` concurrency conflict (surfaced via `ApiError.message`).
+   */
+  async updateRolePermissions(
+    roleId: string,
+    dto: UpdateRolePermissionsRequest,
+  ): Promise<UpdateRolePermissionsResponse> {
+    const response = await this.client.put<UpdateRolePermissionsResponse>(
+      `/admin/roles/${roleId}/permissions`,
+      dto,
+    );
     return response.data;
   }
 

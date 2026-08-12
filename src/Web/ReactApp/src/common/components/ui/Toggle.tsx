@@ -79,12 +79,15 @@ export const Toggle: React.FC<ToggleProps> = ({
     return (
       <div className="inline-flex items-center gap-2">
         {toggle}
-        <span className={clsx(
-          'text-sm text-pf-text-primary select-none',
-          disabled && 'opacity-50'
-        )}>
+        <label
+          htmlFor={inputId}
+          className={clsx(
+            'text-sm text-pf-text-primary select-none cursor-pointer',
+            disabled && 'opacity-50 cursor-not-allowed'
+          )}
+        >
           {label}
-        </span>
+        </label>
       </div>
     );
   }
