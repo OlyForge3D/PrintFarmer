@@ -285,6 +285,7 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     path: '/admin/manage?tab=users&sub=roles',
     icon: ShieldIcon,
     group: 'users',
+    requiredRole: null,
     requiredPermission: { resource: 'roles', action: 'admin' },
     keywords: ['role', 'permission', 'matrix', 'grant', 'deny', 'access control'],
     isHubTile: true,
