@@ -111,8 +111,14 @@ public sealed class EfRolesRepositoryImplicitTotalAccessTests : IAsyncDisposable
     {
         // Guards the two predicates against drifting apart: GetRoleSummariesAsync computes the
         // flag in an EF projection translated to SQL equality, GetRoleDetailAsync evaluates it in
-        // memory with StringComparison.Ordinal. Rewriting either one alone (say, to key off
-        // IsSystemRole) fails here.
+        // memory with StringComparison.Ordinal. Rewriting either one alone — to key off
+        // IsSystemRole, or to match a different role name — fails here.
+        //
+        // farm_user is in the fixture specifically to make that true. With only farm_admin (a
+        // system role) and shift_lead (not one), "IsSystemRole" and "name equals farm_admin" are
+        // indistinguishable, so that rewrite would agree on both paths and slip through — and the
+        // detail path has no other test covering it. A second system role separates the two
+        // predicates, so either path drifting to IsSystemRole now disagrees and fails.
         //
         // Scope limit, stated precisely because the alternative is a comment that outruns its
         // test: this does NOT cover collation divergence. The two predicates can only disagree on
@@ -123,13 +129,14 @@ public sealed class EfRolesRepositoryImplicitTotalAccessTests : IAsyncDisposable
         // unconstructable anyway.
         await using AppDbContext context = await CreateContextAsync();
         Guid adminRoleId = await CreateRoleAsync(context, PrintFarmerPermissions.FarmAdminRole, isSystemRole: true);
+        Guid systemUserRoleId = await CreateRoleAsync(context, "farm_user", isSystemRole: true);
         Guid customRoleId = await CreateRoleAsync(context, "shift_lead", isSystemRole: false);
 
         EfRolesRepository repository = new(context);
 
         List<RoleSummaryDto> summaries = await repository.GetRoleSummariesAsync();
 
-        foreach (Guid roleId in new[] { adminRoleId, customRoleId })
+        foreach (Guid roleId in new[] { adminRoleId, systemUserRoleId, customRoleId })
         {
             RoleDetailDto? detail = await repository.GetRoleDetailAsync(roleId);
             detail.Should().NotBeNull();
