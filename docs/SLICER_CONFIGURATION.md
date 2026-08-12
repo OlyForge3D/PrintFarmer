@@ -387,9 +387,13 @@ A key can never grant more authority than its owner has.
 >   grants it and even when the owner holds `{resource}:admin`. See
 >   [`docs/ROLE_PERMISSION_PRECEDENCE.md`](ROLE_PERMISSION_PRECEDENCE.md). The `farm_admin` role
 >   bypass is deliberately not subject to this.
-> - **A stock `farm_user`** holds none of the calibration, slicing, or queue permissions, so
->   creating such a key for one returns `400` until the permissions are granted, and an
->   already-issued key would have those scopes dropped at exchange.
+> - **A stock `farm_user`** holds the calibration, slicing, and queue permissions these
+>   scopes map to, seeded by `DatabaseInitializer` as of
+>   [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473), so an ordinary user can
+>   own a working Desktop calibration key. A user whose role lacks a permission — or who is
+>   explicitly denied it — still gets `400` at creation and has that scope dropped at
+>   exchange. `queue:reconcile` and `dispatch-settings:manage` stay `farm_admin`-only and
+>   are not reachable through any scope here.
 >
 > An admin-owned exchanged token still carries no role claim and only the scopes explicitly
 > selected on that key.
@@ -499,9 +503,10 @@ explicitly provisioned with the `CalibrationRead` scope *and* the key's owner st
 `calibration:read` at exchange time — the exchange then emits the mapped `permission` claim
 alongside the `scope` claim. A key without that scope, and every legacy or model/library-only key
 (including any stored as the frozen aggregate `All`/`7`), carries **no** permission claims and
-cannot reach this endpoint; such clients must use a normal login/session token. Near term, because
-there is no permission-grant API or UI yet (epic #1445), the owner must be a `farm_admin` member —
-see [Scopes and permissions](#scopes-and-permissions). See
+cannot reach this endpoint; such clients must use a normal login/session token. As of
+[#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473) a stock `farm_user` is seeded
+with `calibration:read`, so the owner need not be a `farm_admin` member — see
+[Scopes and permissions](#scopes-and-permissions). See
 `docs/MICROSERVICES_DEPLOYMENT_GUIDE.md` for the full rollout and verification steps.
 
 ## Support

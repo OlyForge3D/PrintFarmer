@@ -323,11 +323,16 @@ Key properties:
   [`docs/ROLE_PERMISSION_PRECEDENCE.md`](ROLE_PERMISSION_PRECEDENCE.md). Losing
   a permission drops only the affected scopes; unrelated model/library scopes
   are retained.
-- **A stock `farm_user` holds none of these permissions**, so creation returns
-  `400` until the role's permissions are granted through the role-permission
-  API, and an already-issued key would have those scopes dropped at exchange.
-  The owner intersection is unconditional, and an admin-owned exchanged token
-  still carries no role claim.
+- **A stock `farm_user` now holds these permissions.** As of
+  [#1473](https://github.com/OlyForge3D/PrintFarmer/pull/1473), `DatabaseInitializer`
+  seeds `farm_user` with the calibration, queue, and slicing permissions these
+  scopes map to, so an ordinary user can own a working Desktop calibration key.
+  Two enforced permissions remain `farm_admin`-only by design and are *not*
+  reachable through any scope here: `queue:reconcile` and
+  `dispatch-settings:manage`. The owner intersection is unconditional either way —
+  a user whose role lacks a permission, or who is explicitly denied it, still gets
+  `400` at creation and has the scope dropped at exchange — and an admin-owned
+  exchanged token still carries no role claim.
 - **No role claim.** An exchanged token never carries `farm_admin`, even when its
   owner is an administrator, so the audited admin bypass never applies to it.
 - **Not a credential-management token.** Desktop-exchange tokens are rejected
