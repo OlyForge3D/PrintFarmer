@@ -308,7 +308,18 @@ function AuthenticatedAppRoutes() {
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
           <Route path="manage" element={lazyRoute(<LazySettingsShell routeScope="admin" />)} />
-          <Route path="power-monitors" element={lazyRoute(<LazyPowerMonitorSettingsPage />)} />
+          {/*
+           * Unlike settings/manage (which route through SettingsShell's own
+           * scope/tab gating), power-monitors renders directly, so it needs
+           * its own ProtectedRoute now that the /admin outlet no longer
+           * blanket-gates on farm_admin (Vasquez review, #1457): without
+           * this, any authenticated user could mount the page and fire its
+           * admin queries client-side before the server 403s them.
+           */}
+          <Route
+            path="power-monitors"
+            element={<ProtectedRoute requiredPermission={{ resource: 'power_monitors', action: 'admin' }}>{lazyRoute(<LazyPowerMonitorSettingsPage />)}</ProtectedRoute>}
+          />
         </Route>
         <Route path="slicer" element={<FeatureGate feature="slicing"><RouteSuspense><LazyNewSliceJobPage /></RouteSuspense></FeatureGate>} />
         <Route path="profiles/import" element={lazyRoute(<LazyProfileImportWizardPage />)} />
