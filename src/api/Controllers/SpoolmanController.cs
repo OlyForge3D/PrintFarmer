@@ -45,7 +45,7 @@ public class SpoolmanController(
     /// <returns>JSON object { success, normalizedUrl?, endpointTried?, statusCode?, version?, message? }</returns>
     /// <response code="200">Returns probe result (success may be true/false)</response>
     [HttpPost("test")]
-    [Authorize(Policy = "RequireAdmin")]
+    [RequirePermission("spoolman", "admin")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     public async Task<IActionResult> TestAsync([FromBody] SpoolmanConfigDto? request, CancellationToken ct)
     {
@@ -127,7 +127,7 @@ public class SpoolmanController(
     /// <response code="204">If the configuration was successfully updated</response>
     /// <response code="400">If the configuration data is invalid</response>
     [HttpPost("config")]
-    [Authorize(Policy = "RequireAdmin")]
+    [RequirePermission("spoolman", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> SetConfigAsync(
@@ -941,7 +941,7 @@ public class SpoolmanController(
     /// <param name="ct">Cancellation token.</param>
     /// <returns>No content</returns>
     [HttpDelete("config")]
-    [Authorize(Policy = "RequireAdmin")]
+    [RequirePermission("spoolman", "admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     public async Task<IActionResult> ClearConfigAsync(CancellationToken ct = default)
     {
@@ -1334,7 +1334,7 @@ public class SpoolmanController(
     /// <returns>List of discovered Spoolman instances</returns>
     /// <response code="200">Returns list of discovered Spoolman instances</response>
     [HttpPost("scan-network")]
-    [Authorize(Policy = "RequireAdmin")]
+    [RequirePermission("spoolman", "admin")]
     [ProducesResponseType(typeof(IEnumerable<SpoolmanDiscoveryResult>), StatusCodes.Status200OK)]
     public async Task<IActionResult> ScanNetworkAsync(CancellationToken ct)
     {

@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
@@ -641,7 +642,7 @@ app.MapHealthChecks("/api/health", new Microsoft.AspNetCore.Diagnostics.HealthCh
 // Network discovery settings now available via UnifiedSettingsController:
 // GET /api/settings/network-discovery
 // POST /api/settings/network-discovery
-app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "RequireAdmin")] ([FromBody] NetworkDiscoverySettings body) =>
+app.MapPost("/api/network-discovery/settings/validate", [RequirePermission("network_discovery", "admin")] ([FromBody] NetworkDiscoverySettings body) =>
 {
     NetworkValidationResult validation = NetworkValidationService.ValidateSettings(body);
     return Results.Ok(new
@@ -656,8 +657,8 @@ app.MapPost("/api/network-discovery/settings/validate", [Authorize(Policy = "Req
 // SignalR settings now available via UnifiedSettingsController:
 // GET /api/settings/signalr
 // POST /api/settings/signalr
-app.MapPost("/api/network-discovery/auto-detect", [Authorize(Policy = "RequireAdmin")] () => ProgramHelpers.AutoDetectNetworkRanges());
-app.MapPost("/api/network-discovery/settings/apply-env", [Authorize(Policy = "RequireAdmin")] ([FromServices] ISettingsService settingsService) =>
+app.MapPost("/api/network-discovery/auto-detect", [RequirePermission("network_discovery", "admin")] () => ProgramHelpers.AutoDetectNetworkRanges());
+app.MapPost("/api/network-discovery/settings/apply-env", [RequirePermission("network_discovery", "admin")] ([FromServices] ISettingsService settingsService) =>
 {
     // Allows re-applying environment driven defaults from DISCOVERY_RANGES / DISCOVERY_PORTS
     string? rangesEnv = Environment.GetEnvironmentVariable("DISCOVERY_RANGES");

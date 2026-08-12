@@ -1,7 +1,15 @@
 ﻿using System.Reflection;
+using Farm.Slicer.Module.Api;
+using Farm.Web.Api.Startup;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Moq;
 
 namespace Farm.Web.Api.Tests.Security;
 
@@ -17,38 +25,36 @@ namespace Farm.Web.Api.Tests.Security;
 /// role-name gate is a surface a custom role can never reach, no matter which permissions it
 /// holds, so new ones must not accumulate.
 ///
-/// <b>Scope, deliberately matching issue #1452's ask:</b> this checks
-/// <see cref="AuthorizeAttribute.Roles"/> only, on REST controllers in the main API
-/// (<c>Farm.Web.Api</c>) and slicer host (<c>Farm.Slicer.Module.Api</c>) assemblies. It does
-/// <em>not</em> cover two related, pre-existing surfaces found during review, which are
-/// deliberately left out of this test's scope rather than being silently swept into its
-/// allowlist:
-/// <list type="bullet">
-/// <item>Policy-based role aliases such as <c>[Authorize(Policy = "farm_admin")]</c> or
-/// <c>[Authorize(Policy = "RequireAdmin")]</c> (registered via <c>policy.RequireRole(...)</c> in
-/// <c>AuthenticationStartup.cs</c>) are functionally equivalent role-name gates, but are a much
-/// larger, pre-existing surface that #1451 did not migrate. Closing that gap needs its own
-/// migration effort and is tracked as follow-up issue #1467, not folded into this test's
-/// allowlist.</item>
-/// <item>SignalR Hub methods (e.g. <c>HarvestHub</c>) are not <see cref="ControllerBase"/>
-/// -derived and are out of scope for "API controllers" as the issue describes them.</item>
-/// </list>
+/// Issue #1467 extended this file with a second guard,
+/// <see cref="NoApiController_HasPolicyBasedRoleGate"/>, for the functionally-equivalent bypass
+/// Vasquez found during #1452's review: a policy alias such as
+/// <c>[Authorize(Policy = "farm_admin")]</c> or <c>[Authorize(Policy = "RequireAdmin")]</c> is
+/// just as unreachable by a custom role as a literal <c>Roles = "farm_admin"</c> gate once the
+/// named policy resolves (via <c>AuthorizationOptions.GetPolicy</c>) to a requirement set
+/// containing a <see cref="RolesAuthorizationRequirement"/> — regardless of what the policy is
+/// named. That guard builds the real <see cref="AuthorizationOptions"/> for both the main API
+/// (<see cref="AuthenticationStartup.AddPrintFarmerAuthentication"/>) and the slicer host
+/// (<see cref="SlicerHostAuthorizationExtensions.AddSlicerHostAuthorization"/>) so it evaluates
+/// exactly what each running host would.
+///
+/// <b>Scope, deliberately matching issue #1452's ask:</b> both guards check REST controllers in
+/// the main API (<c>Farm.Web.Api</c>) and slicer host (<c>Farm.Slicer.Module.Api</c>) assemblies.
+/// SignalR Hub methods (e.g. <c>HarvestHub</c>) are not <see cref="ControllerBase"/>-derived and
+/// are out of scope for "API controllers" as the issue describes them.
 /// </summary>
 public sealed class AuthorizeRolesGateArchitectureTests
 {
     /// <summary>
-    /// Explicit, minimal allowlist for genuine exceptions. Each entry MUST carry a written
-    /// reason as an inline comment explaining why a role-name gate (not a
-    /// <c>[RequirePermission]</c> permission gate) is correct for that member. Entries are
-    /// "Namespace.Type" for a type-level gate, or "Namespace.Type.Method(paramType1,paramType2)"
-    /// for a method-level gate (parameter types are required to disambiguate overloads).
+    /// Explicit, minimal allowlist for genuine policy-alias exceptions — analogous to
+    /// <see cref="AllowedRoleGates"/> but for <see cref="NoApiController_HasPolicyBasedRoleGate"/>.
+    /// Each entry MUST carry a written reason as an inline comment.
     /// </summary>
-    private static readonly HashSet<string> AllowedRoleGates = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> AllowedPolicyRoleGates = new(StringComparer.Ordinal)
     {
-        // Intentionally empty: issue #1451 removed every role-name gate from the API and
-        // slicer host controllers. Add an entry here only with a written reason if a genuine
-        // exception is ever needed (e.g. a gate that must remain role-based because it predates
-        // or bootstraps the permission system itself), and keep the list as small as possible.
+        // Intentionally empty: issue #1467 removed every role-backed policy alias
+        // (RequireAdmin/farm_admin/CanViewSliceQueue) from the API and slicer host controllers,
+        // and deleted the alias registrations themselves. Add an entry here only with a written
+        // reason if a genuine exception is ever needed, and keep the list as small as possible.
     };
 
     private static readonly Assembly[] ScannedAssemblies =
@@ -110,6 +116,146 @@ public sealed class AuthorizeRolesGateArchitectureTests
             "documented, reasoned entry to AllowedRoleGates if a genuine exception applies. " +
             $"Offenders: {string.Join(", ", offenders)}");
     }
+
+    /// <summary>
+    /// Issue #1467: guards against <em>policy-based</em> role aliases such as
+    /// <c>[Authorize(Policy = "farm_admin")]</c> — functionally identical to a literal
+    /// <c>Roles = "farm_admin"</c> gate, just spelled differently. Builds the real
+    /// <see cref="AuthorizationOptions"/> for each scanned assembly's host and flags any
+    /// <c>[Authorize(Policy = X)]</c> whose named policy <c>X</c> resolves to a requirement set
+    /// containing a <see cref="RolesAuthorizationRequirement"/>. An unrecognized policy name
+    /// (one that does not resolve via <see cref="AuthorizationOptions.GetPolicy(string)"/>) is
+    /// not flagged here — that is a wiring bug the app would surface at startup/runtime, not a
+    /// role-name-gate bypass.
+    /// </summary>
+    [Fact]
+    public void NoApiController_HasPolicyBasedRoleGate()
+    {
+        AuthorizationOptions mainApiOptions = BuildMainApiAuthorizationOptions();
+        AuthorizationOptions slicerHostOptions = BuildSlicerHostAuthorizationOptions();
+
+        List<string> offenders = [];
+
+        foreach (Assembly assembly in ScannedAssemblies)
+        {
+            AuthorizationOptions options = assembly == typeof(Farm.Web.Api.Controllers.PrintersController).Assembly
+                ? mainApiOptions
+                : slicerHostOptions;
+
+            foreach (Type type in assembly.GetTypes())
+            {
+                if (!typeof(ControllerBase).IsAssignableFrom(type))
+                {
+                    continue;
+                }
+
+                string typeDisplayName = type.FullName ?? type.Name;
+
+                CollectPolicyRoleGateOffenses(type, typeDisplayName, options, offenders);
+
+                foreach (MethodInfo method in type.GetMethods(
+                    BindingFlags.Public | BindingFlags.NonPublic
+                    | BindingFlags.Instance | BindingFlags.Static
+                    | BindingFlags.DeclaredOnly))
+                {
+                    string parameterSignature = string.Join(
+                        ',',
+                        method.GetParameters().Select(p => p.ParameterType.Name));
+                    CollectPolicyRoleGateOffenses(
+                        method,
+                        $"{typeDisplayName}.{method.Name}({parameterSignature})",
+                        options,
+                        offenders);
+                }
+            }
+        }
+
+        offenders.Should().BeEmpty(
+            "issue #1467 requires every API controller to gate access with " +
+            "[RequirePermission(resource, action)] rather than a policy-based role alias such " +
+            "as [Authorize(Policy = \"farm_admin\")] or [Authorize(Policy = \"RequireAdmin\")] " +
+            "— these resolve to a RolesAuthorizationRequirement and are just as unreachable by " +
+            "a custom role as a literal [Authorize(Roles = ...)] gate. Replace the policy-based " +
+            "gate with [RequirePermission(resource, action)] on the offending member(s), or add " +
+            "a documented, reasoned entry to AllowedPolicyRoleGates if a genuine exception " +
+            $"applies. Offenders: {string.Join(", ", offenders)}");
+    }
+
+    private static void CollectPolicyRoleGateOffenses(
+        MemberInfo member,
+        string memberDisplayName,
+        AuthorizationOptions options,
+        List<string> offenders)
+    {
+        if (AllowedPolicyRoleGates.Contains(memberDisplayName))
+        {
+            return;
+        }
+
+        foreach (AuthorizeAttribute attribute in member.GetCustomAttributes<AuthorizeAttribute>(inherit: false))
+        {
+            if (string.IsNullOrWhiteSpace(attribute.Policy))
+            {
+                continue;
+            }
+
+            AuthorizationPolicy? policy = options.GetPolicy(attribute.Policy);
+            if (policy is null)
+            {
+                continue;
+            }
+
+            if (policy.Requirements.Any(r => r is RolesAuthorizationRequirement))
+            {
+                offenders.Add($"{memberDisplayName} (policy: {attribute.Policy})");
+                break;
+            }
+        }
+    }
+
+    private static AuthorizationOptions BuildMainApiAuthorizationOptions()
+    {
+        ServiceCollection services = new();
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Jwt:Key"] = "0123456789abcdef0123456789abcdef",
+                ["Jwt:Issuer"] = "PrintFarmer",
+                ["Jwt:Audience"] = "PrintFarmer",
+            })
+            .Build();
+        Mock<IWebHostEnvironment> environment = new();
+        environment.SetupGet(e => e.EnvironmentName).Returns("Production");
+
+        services.AddLogging();
+        services.AddPrintFarmerAuthentication(configuration, environment.Object);
+        using ServiceProvider provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<AuthorizationOptions>>().Value;
+    }
+
+    private static AuthorizationOptions BuildSlicerHostAuthorizationOptions()
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        services.AddSlicerHostAuthorization();
+        using ServiceProvider provider = services.BuildServiceProvider();
+        return provider.GetRequiredService<IOptions<AuthorizationOptions>>().Value;
+    }
+
+    /// <summary>
+    /// Explicit, minimal allowlist for genuine exceptions. Each entry MUST carry a written
+    /// reason as an inline comment explaining why a role-name gate (not a
+    /// <c>[RequirePermission]</c> permission gate) is correct for that member. Entries are
+    /// "Namespace.Type" for a type-level gate, or "Namespace.Type.Method(paramType1,paramType2)"
+    /// for a method-level gate (parameter types are required to disambiguate overloads).
+    /// </summary>
+    private static readonly HashSet<string> AllowedRoleGates = new(StringComparer.Ordinal)
+    {
+        // Intentionally empty: issue #1451 removed every role-name gate from the API and
+        // slicer host controllers. Add an entry here only with a written reason if a genuine
+        // exception is ever needed (e.g. a gate that must remain role-based because it predates
+        // or bootstraps the permission system itself), and keep the list as small as possible.
+    };
 
     private static void CollectRoleGateOffenses(
         MemberInfo member,
