@@ -156,13 +156,11 @@ public class ObicoServerController : ControllerBase
 
         // Validate URL format if changed
         bool urlChanged = dto.Url != null && dto.Url != server.Url;
-        if (urlChanged)
+        if (urlChanged &&
+            (!Uri.TryCreate(dto.Url, UriKind.Absolute, out Uri? uri) ||
+             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)))
         {
-            if (!Uri.TryCreate(dto.Url, UriKind.Absolute, out Uri? uri) ||
-                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
-            {
-                return BadRequest("URL must be a valid HTTP or HTTPS URL");
-            }
+            return BadRequest("URL must be a valid HTTP or HTTPS URL");
         }
 
         // Check for duplicate names if changed

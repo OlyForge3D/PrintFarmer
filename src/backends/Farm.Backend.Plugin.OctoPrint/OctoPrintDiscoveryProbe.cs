@@ -54,21 +54,18 @@ public class OctoPrintDiscoveryProbe : INetworkDiscoveryProbe
 
             // Check for Moonraker in text field (compatibility mode)
             // If Moonraker is detected, return confidence 0 to let Moonraker probe take precedence
-            if (root.TryGetProperty("text", out JsonElement textElem))
+            if (root.TryGetProperty("text", out JsonElement textElem) && textElem.ValueKind == JsonValueKind.String)
             {
-                if (textElem.ValueKind == JsonValueKind.String)
+                string? textStr = textElem.GetString();
+                if (textStr?.Contains("Moonraker", StringComparison.OrdinalIgnoreCase) == true)
                 {
-                    string? textStr = textElem.GetString();
-                    if (textStr?.Contains("Moonraker", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        return Task.FromResult((false, 0, "Moonraker detected in text field - let Moonraker probe handle"));
-                    }
+                    return Task.FromResult((false, 0, "Moonraker detected in text field - let Moonraker probe handle"));
+                }
 
-                    // Check for explicit OctoPrint string for higher confidence
-                    if (textStr?.Contains("OctoPrint", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        return Task.FromResult((true, 100, "OctoPrint detected (text field confirms)"));
-                    }
+                // Check for explicit OctoPrint string for higher confidence
+                if (textStr?.Contains("OctoPrint", StringComparison.OrdinalIgnoreCase) == true)
+                {
+                    return Task.FromResult((true, 100, "OctoPrint detected (text field confirms)"));
                 }
             }
 

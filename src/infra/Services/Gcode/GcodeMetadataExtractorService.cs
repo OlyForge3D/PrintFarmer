@@ -244,13 +244,11 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             else if (printTimePriority < 1 &&
                      line.Contains("estimated printing time", StringComparison.OrdinalIgnoreCase) &&
                      !line.Contains("remaining", StringComparison.OrdinalIgnoreCase) &&
-                     !line.Contains("first layer", StringComparison.OrdinalIgnoreCase))
+                     !line.Contains("first layer", StringComparison.OrdinalIgnoreCase) &&
+                     TryParsePrintTime(line, out double minutes))
             {
-                if (TryParsePrintTime(line, out double minutes))
-                {
-                    metadata.EstimatedPrintTimeMinutes = minutes;
-                    printTimePriority = 1;
-                }
+                metadata.EstimatedPrintTimeMinutes = minutes;
+                printTimePriority = 1;
             }
 
             // --- Filament Length ---
@@ -713,18 +711,15 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
                             continue;
                         }
 
-                        if (line.Contains("end", StringComparison.OrdinalIgnoreCase))
+                        if (line.Contains("end", StringComparison.OrdinalIgnoreCase) && inThumbnail)
                         {
-                            if (inThumbnail)
-                            {
-                                // Store this thumbnail block with all its metadata
-                                thumbnailBlocks.Add((currentThumbnailFormat!, currentWidth, currentHeight, new List<string>(currentThumbnailLines)));
-                                _logger.LogDebug("ExtractThumbnail: {CurrentThumbnailFormat} thumbnail block ended ({CurrentWidth}x{CurrentHeight}), collected {CurrentThumbnailLinesCount} lines", currentThumbnailFormat, currentWidth, currentHeight, currentThumbnailLines.Count);
-                                inThumbnail = false;
-                                currentThumbnailFormat = null;
-                                currentWidth = 0;
-                                currentHeight = 0;
-                            }
+                            // Store this thumbnail block with all its metadata
+                            thumbnailBlocks.Add((currentThumbnailFormat!, currentWidth, currentHeight, new List<string>(currentThumbnailLines)));
+                            _logger.LogDebug("ExtractThumbnail: {CurrentThumbnailFormat} thumbnail block ended ({CurrentWidth}x{CurrentHeight}), collected {CurrentThumbnailLinesCount} lines", currentThumbnailFormat, currentWidth, currentHeight, currentThumbnailLines.Count);
+                            inThumbnail = false;
+                            currentThumbnailFormat = null;
+                            currentWidth = 0;
+                            currentHeight = 0;
                         }
                     }
                 }

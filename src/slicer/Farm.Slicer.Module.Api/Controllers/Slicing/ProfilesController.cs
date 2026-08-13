@@ -1130,13 +1130,11 @@ public class ProfilesController(
 
             SelectiveProfileImportResultDto result = await _profilesService.ImportSelectedProfilesForModelAsync(modelId, request, ct);
 
-            if (!string.IsNullOrEmpty(result.Error))
+            if (!string.IsNullOrEmpty(result.Error) &&
+                result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
+                result.Error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
             {
-                if (result.Error.Contains("worker", StringComparison.OrdinalIgnoreCase) &&
-                    result.Error.Contains("unavailable", StringComparison.OrdinalIgnoreCase))
-                {
-                    return StatusCode(StatusCodes.Status503ServiceUnavailable, result.Error);
-                }
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, result.Error);
             }
 
             return Ok(result);

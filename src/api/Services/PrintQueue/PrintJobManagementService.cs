@@ -814,12 +814,9 @@ public class PrintJobManagementService(
                 }
             }
 
-            if (!string.IsNullOrEmpty(request.Status))
+            if (!string.IsNullOrEmpty(request.Status) && Enum.TryParse<PrintJobStatus>(request.Status, ignoreCase: true, out PrintJobStatus newStatus))
             {
-                if (Enum.TryParse<PrintJobStatus>(request.Status, ignoreCase: true, out PrintJobStatus newStatus))
-                {
-                    job.Status = newStatus;
-                }
+                job.Status = newStatus;
             }
 
             if (!string.IsNullOrEmpty(request.FailureReason))
