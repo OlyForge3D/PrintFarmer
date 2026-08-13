@@ -18,7 +18,11 @@ import type {
 const KEYS = {
   all: ['auto-dispatch'] as const,
   status: (printerId: string) => [...KEYS.all, 'status', printerId] as const,
-  allStatuses: ['auto-dispatch', 'all-statuses'] as const,
+  // Single cache key for the full AutoDispatchGlobalStatus payload. Both the
+  // per-printer/all-printers list views and the dashboard's global status view
+  // derive from this one cached value via `select`, so there is only one
+  // request to GET /api/auto-dispatch/status per poll interval regardless of
+  // how many consumers are mounted.
   globalStatus: ['auto-dispatch', 'global-status'] as const,
 };
 
@@ -58,9 +62,6 @@ function upsertStatus<T extends AutoDispatchStatus>(statuses: T[], nextStatus: A
 }
 
 function syncAutoDispatchCaches(queryClient: QueryClient, nextStatus: AutoDispatchStatus) {
-  queryClient.setQueryData<AutoDispatchStatus[]>(KEYS.allStatuses, (existing = []) =>
-    upsertStatus(existing, nextStatus),
-  );
   queryClient.setQueryData<AutoDispatchStatus | undefined>(KEYS.status(nextStatus.printerId), (existing) =>
     mergeStatusSnapshot(existing, nextStatus),
   );
@@ -152,11 +153,6 @@ async function handleMutationError(
       queryClient.invalidateQueries({ queryKey: ['job-queue'] }),
       queryClient.invalidateQueries({ queryKey: queueSummariesFleetQueryKey }),
       queryClient.refetchQueries({
-        queryKey: KEYS.allStatuses,
-        exact: true,
-        type: 'active',
-      }),
-      queryClient.refetchQueries({
         queryKey: KEYS.globalStatus,
         exact: true,
         type: 'active',
@@ -178,11 +174,6 @@ function ensureAutoDispatchSignalRSubscription() {
       syncAutoDispatchCaches(queryClient, status);
     });
   });
-}
-
-async function getAutoDispatchStatuses(): Promise<AutoDispatchStatus[]> {
-  const { printers = [] } = await apiClient.getAutoDispatchStatus();
-  return printers;
 }
 
 function useAutoDispatchSignalRSync() {
@@ -215,15 +206,16 @@ export function useAutoDispatchGlobalStatus() {
 }
 
 /**
- * Per-printer auto-dispatch status derived from the bulk endpoint.
+ * Per-printer auto-dispatch status derived from the shared global-status query.
  * Uses `select` so all cards share one query instead of N+1 individual calls.
  */
 export function useAutoDispatchStatus(printerId: string) {
   useAutoDispatchSignalRSync();
   return useQuery({
-    queryKey: KEYS.allStatuses,
-    queryFn: getAutoDispatchStatuses,
-    select: (data: AutoDispatchStatus[]) => data.find(s => s.printerId === printerId),
+    queryKey: KEYS.globalStatus,
+    queryFn: () => apiClient.getAutoDispatchStatus(),
+    select: (data: AutoDispatchGlobalStatus) =>
+      data.printers.find(s => s.printerId === printerId),
     enabled: !!printerId,
     refetchInterval: 10_000,
     staleTime: 8_000,
@@ -252,7 +244,6 @@ export function useSetAutoDispatchEnabled() {
       );
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
     onError: (error, variables) =>
@@ -265,12 +256,18 @@ export function useSetAutoDispatchEnabled() {
   });
 }
 
+/**
+ * Derives the flat printer-status list from the shared global-status query via
+ * `select`, so this hook shares one cached request with useAutoDispatchGlobalStatus
+ * instead of polling GET /api/auto-dispatch/status a second time.
+ */
 export function useAllAutoDispatchStatuses() {
   const qc = useQueryClient();
   useAutoDispatchSignalRSync();
-  const query = useQuery<AutoDispatchStatus[]>({
-    queryKey: KEYS.allStatuses,
-    queryFn: getAutoDispatchStatuses,
+  const query = useQuery({
+    queryKey: KEYS.globalStatus,
+    queryFn: () => apiClient.getAutoDispatchStatus(),
+    select: (data: AutoDispatchGlobalStatus) => data.printers ?? [],
     refetchInterval: 10_000,
   });
 
@@ -364,7 +361,6 @@ export function useConfirmBedClear() {
         syncAutoDispatchCaches(qc, data.result.status);
       }
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
-      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       qc.invalidateQueries({ queryKey: ['job-queue'] });
       // Confirming bed-clear dispatches the next queued job, changing that
@@ -501,7 +497,6 @@ export function useSkipNextJob() {
     },
     onSuccess: (_data, status) => {
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
-      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
     onError: (error) =>
@@ -520,7 +515,6 @@ export function useCancelAutoDispatch() {
     },
     onSuccess: (_data, status) => {
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
-      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
     onError: (error) =>
@@ -538,7 +532,6 @@ export function usePreClearBed() {
       ),
     onSuccess: (result, status) => {
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
-      qc.invalidateQueries({ queryKey: KEYS.allStatuses });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       if (result.bedPreConfirmed) {
         toast.success('Bed pre-cleared — ready for immediate dispatch');
