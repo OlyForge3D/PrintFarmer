@@ -347,4 +347,31 @@ public class DataImportServiceTests
         (await _context.Locations.Select(location => location.Name).ToListAsync()).Should().Contain("Merged Location");
         (await _context.Printers.Select(printer => printer.Name).ToListAsync()).Should().Contain("Merged Printer");
     }
+
+    [Fact]
+    public async Task ImportFullBackupAsync_LocationNameContainsSlash_RejectsLocationAndContinuesImportingOthers()
+    {
+        // A '/' in Name would be indistinguishable from a path separator in the materialized
+        // Path, letting this location be misidentified as a descendant of an unrelated location
+        // during subtree Path-prefix matching (EfLocationRepository.GetDescendantsAsync et al.).
+        // LocationService.CreateLocationAsync/UpdateLocationAsync reject this for API-created
+        // locations; ImportLocationsAsync must reject it too since it writes directly to the
+        // DbContext, bypassing those service-layer guards.
+        var backup = new FullBackupExportDto
+        {
+            Locations =
+            [
+                new LocationExportDto { Name = "Foo/Bar" },
+                new LocationExportDto { Name = "Valid Location" },
+            ],
+            Printers = new List<PrinterExportDto>(),
+        };
+
+        ImportResponseDto result = await _importService.ImportFullBackupAsync(backup, ImportMode.Merge);
+
+        result.Errors.Should().Contain(error => error.Contains("Foo/Bar") && error.Contains("cannot contain"));
+        List<string> locationNames = await _context.Locations.Select(location => location.Name).ToListAsync();
+        locationNames.Should().NotContain("Foo/Bar");
+        locationNames.Should().Contain("Valid Location");
+    }
 }

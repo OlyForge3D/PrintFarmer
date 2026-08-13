@@ -634,6 +634,17 @@ public class DataImportService : IDataImportService
         {
             try
             {
+                if (dto.Name.Contains('/', StringComparison.Ordinal))
+                {
+                    // A '/' in Name would be indistinguishable from a path separator in the
+                    // materialized Path, letting this location be misidentified as a descendant
+                    // of an unrelated location during subtree Path-prefix matching. Reject it
+                    // here the same way LocationService.CreateLocationAsync/UpdateLocationAsync
+                    // do for API-created locations.
+                    errors.Add($"Failed to import location '{dto.Name}': location name cannot contain '/'.");
+                    continue;
+                }
+
                 Location? existing = await _context.Locations
                     .FirstOrDefaultAsync(l => l.Name == dto.Name, ct);
 
