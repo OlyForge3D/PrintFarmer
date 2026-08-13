@@ -103,7 +103,6 @@ public sealed class SlicerHostCalibrationProfileResolver(
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(options.ResolveTimeout);
 
-        HttpResponseMessage? response = null;
         try
         {
             using HttpRequestMessage request = new(
@@ -119,7 +118,7 @@ public sealed class SlicerHostCalibrationProfileResolver(
             };
             request.Headers.Authorization = new AuthenticationHeaderValue(BearerScheme, bearerToken);
 
-            response = await httpClient.SendAsync(
+            using HttpResponseMessage response = await httpClient.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 timeoutSource.Token);
@@ -163,10 +162,6 @@ public sealed class SlicerHostCalibrationProfileResolver(
                 "The calibration profile resolver did not respond in time.",
                 "profile_service_timeout",
                 exception);
-        }
-        finally
-        {
-            response?.Dispose();
         }
     }
 
