@@ -4028,18 +4028,29 @@ configure_additional() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
         print_info "Using configured environment: $ENVIRONMENT"
-        if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ]; then
-            INCLUDE_MONITORING=true
-            print_info "Monitoring stack enabled via CLI flag"
+        if [ -n "${CLI_INCLUDE_MONITORING:-}" ]; then
+            # --include-monitoring or --exclude-monitoring was explicitly passed;
+            # CLI_INCLUDE_MONITORING is only ever set (to "true" or "false") in
+            # that case, so honor it as-is rather than re-defaulting it.
+            INCLUDE_MONITORING="$CLI_INCLUDE_MONITORING"
+            if [ "$INCLUDE_MONITORING" = "true" ]; then
+                print_info "Monitoring stack enabled via CLI flag"
+            else
+                print_info "Monitoring stack disabled via CLI flag"
+            fi
         else
             # Mirror the interactive path's monitoring/telemetry-enabled-by-default
             # posture so INCLUDE_MONITORING is always assigned before later
             # references (e.g. generate_deployment_config) expand it under `set -u`.
             INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
         fi
-        if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "true" ]; then
-            INCLUDE_TELEMETRY=true
-            print_info "Telemetry/observability enabled via CLI flag"
+        if [ -n "${CLI_INCLUDE_TELEMETRY:-}" ]; then
+            INCLUDE_TELEMETRY="$CLI_INCLUDE_TELEMETRY"
+            if [ "$INCLUDE_TELEMETRY" = "true" ]; then
+                print_info "Telemetry/observability enabled via CLI flag"
+            else
+                print_info "Telemetry/observability disabled via CLI flag"
+            fi
         else
             INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
         fi
