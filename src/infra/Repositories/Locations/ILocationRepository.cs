@@ -105,6 +105,18 @@ public interface ILocationRepository
     Task<int> GetPrinterCountAsync(Guid locationId, CancellationToken ct);
 
     /// <summary>
+    /// Gets all printers assigned to a location or any of its descendants (subtree), in a
+    /// single set-based query using the location's materialized Path.
+    /// </summary>
+    Task<List<Printer>> GetPrintersInSubtreeAsync(Guid locationId, CancellationToken ct);
+
+    /// <summary>
+    /// Gets the total count of printers assigned to a location or any of its descendants
+    /// (subtree), in a single aggregate query using the location's materialized Path.
+    /// </summary>
+    Task<int> GetPrinterCountInSubtreeAsync(Guid locationId, CancellationToken ct);
+
+    /// <summary>
     /// Persists changes to the database.
     /// </summary>
     Task SaveChangesAsync(CancellationToken ct);

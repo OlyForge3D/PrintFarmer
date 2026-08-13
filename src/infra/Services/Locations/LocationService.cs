@@ -459,14 +459,9 @@ public class LocationService : ILocationService
             int count = await _unitOfWork.Locations.GetPrinterCountAsync(locationId, ct);
             location.PrinterCount = count;
 
-            // Calculate TotalPrinterCount (this location + all descendants)
-            List<Location> descendants = await _unitOfWork.Locations.GetDescendantsAsync(locationId, ct);
-            int totalCount = count;
-            foreach (Location desc in descendants)
-            {
-                totalCount += await _unitOfWork.Locations.GetPrinterCountAsync(desc.Id, ct);
-            }
-
+            // Single aggregate query: total printer count for this location + all descendants
+            // (was: GetDescendantsAsync BFS + one GetPrinterCountAsync per descendant).
+            int totalCount = await _unitOfWork.Locations.GetPrinterCountInSubtreeAsync(locationId, ct);
             location.TotalPrinterCount = totalCount;
 
             await _unitOfWork.Locations.UpdateAsync(location, ct);
@@ -705,27 +700,10 @@ public class LocationService : ILocationService
                 return [];
             }
 
-            // Collect all location IDs in the subtree: the root + all descendants
-            List<Location> descendants = await _unitOfWork.Locations.GetDescendantsAsync(locationId, ct);
-            var allLocations = new Dictionary<Guid, string>(descendants.Count + 1)
-            {
-                [location.Id] = location.Name,
-            };
-
-            foreach (Location descendant in descendants)
-            {
-                allLocations[descendant.Id] = descendant.Name;
-            }
-
-            // Single query: all printers whose LocationId is in the subtree
-            List<Guid> locationIds = [.. allLocations.Keys];
-            List<Printer> printers = [];
-
-            foreach (Guid locId in locationIds)
-            {
-                List<Printer> locationPrinters = await _unitOfWork.Locations.GetPrintersInLocationAsync(locId, ct);
-                printers.AddRange(locationPrinters);
-            }
+            // Single set-based query: all printers whose LocationId is the target location or
+            // any descendant location, matched via the materialized Path prefix (was: N
+            // GetPrintersInLocationAsync calls, one per location in the subtree).
+            List<Printer> printers = await _unitOfWork.Locations.GetPrintersInSubtreeAsync(locationId, ct);
 
             // Enrich with real-time status from cache
             IReadOnlyDictionary<Guid, PrinterStatusDto> cachedStatuses = _statusCache.GetAllStatuses();
@@ -742,7 +720,7 @@ public class LocationService : ILocationService
                     PrinterId: printer.Id,
                     PrinterName: printer.Name,
                     LocationId: printer.LocationId!.Value,
-                    LocationName: allLocations[printer.LocationId!.Value],
+                    LocationName: printer.Location?.Name ?? location.Name,
                     IsOnline: isOnline,
                     Status: state,
                     CurrentJobName: jobName));

@@ -163,23 +163,17 @@ public class EfLocationRepository : ILocationRepository
 
     public async Task<List<Location>> GetDescendantsAsync(Guid id, CancellationToken ct)
     {
-        var descendants = new List<Location>();
-        var queue = new Queue<Guid>();
-        queue.Enqueue(id);
-
-        while (queue.Count > 0)
+        Location? parentLocation = await FindByIdAsync(id, ct);
+        if (parentLocation is null)
         {
-            Guid currentId = queue.Dequeue();
-            List<Location> children = await GetChildrenAsync(currentId, ct);
-
-            foreach (Location child in children)
-            {
-                descendants.Add(child);
-                queue.Enqueue(child.Id);
-            }
+            return [];
         }
 
-        return descendants;
+        string prefix = GetSubtreePathPrefix(parentLocation);
+
+        return await _dbContext.Locations
+            .Where(l => l.IsActive && l.Path.StartsWith(prefix))
+            .ToListAsync(ct);
     }
 
     public async Task<bool> IsDescendantOfAsync(Guid locationId, Guid potentialAncestorId, CancellationToken ct)
@@ -241,8 +235,55 @@ public class EfLocationRepository : ILocationRepository
             .CountAsync(ct);
     }
 
+    public async Task<List<Printer>> GetPrintersInSubtreeAsync(Guid locationId, CancellationToken ct)
+    {
+        Location? location = await FindByIdAsync(locationId, ct);
+        if (location is null)
+        {
+            return [];
+        }
+
+        string prefix = GetSubtreePathPrefix(location);
+
+        // Single set-based query: printers assigned directly to the location, or to any
+        // descendant location (matched via the materialized Path prefix), instead of one
+        // GetPrintersInLocationAsync call per location in the subtree.
+        return await _dbContext.Printers
+            .Include(p => p.Location)
+            .Where(p => p.LocationId == locationId
+                || (p.Location != null && p.Location.IsActive && p.Location.Path.StartsWith(prefix)))
+            .OrderBy(p => p.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<int> GetPrinterCountInSubtreeAsync(Guid locationId, CancellationToken ct)
+    {
+        Location? location = await FindByIdAsync(locationId, ct);
+        if (location is null)
+        {
+            return 0;
+        }
+
+        string prefix = GetSubtreePathPrefix(location);
+
+        // Single aggregate query: total printer count for the location + all descendants,
+        // instead of one GetPrinterCountAsync call per descendant.
+        return await _dbContext.Printers
+            .Where(p => p.LocationId == locationId
+                || (p.Location != null && p.Location.IsActive && p.Location.Path.StartsWith(prefix)))
+            .CountAsync(ct);
+    }
+
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         await _dbContext.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Builds the materialized-Path prefix used to match all descendants of the given location.
+    /// </summary>
+    private static string GetSubtreePathPrefix(Location location)
+    {
+        return location.Path.EndsWith('/') ? location.Path : location.Path + "/";
     }
 }
