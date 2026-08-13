@@ -368,14 +368,9 @@ public partial class SliceJobController(
         if (PrintFarmerPermissions.IsFarmAdmin(User))
         {
             LogAdminBypass("slice-job-list", Guid.Empty);
-            if (!string.IsNullOrEmpty(status))
-            {
-                jobs = await _jobRepository.GetByStatusAsync(status, limit, ct);
-            }
-            else
-            {
-                jobs = await _jobRepository.GetQueuedJobsAsync(limit, ct);
-            }
+            jobs = !string.IsNullOrEmpty(status)
+                ? await _jobRepository.GetByStatusAsync(status, limit, ct)
+                : await _jobRepository.GetQueuedJobsAsync(limit, ct);
         }
         else
         {

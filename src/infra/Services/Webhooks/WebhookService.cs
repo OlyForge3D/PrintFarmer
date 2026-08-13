@@ -285,14 +285,9 @@ public sealed class WebhookService(
         }
 
         IPAddress[] addresses;
-        if (IPAddress.TryParse(uri.Host, out IPAddress? directIp))
-        {
-            addresses = [directIp];
-        }
-        else
-        {
-            addresses = await Dns.GetHostAddressesAsync(uri.Host, ct);
-        }
+        addresses = IPAddress.TryParse(uri.Host, out IPAddress? directIp)
+            ? [directIp]
+            : await Dns.GetHostAddressesAsync(uri.Host, ct);
 
         return addresses.Length > 0 && addresses.All(ip => !NetworkDestinationClassifier.IsPrivateOrReserved(ip));
     }

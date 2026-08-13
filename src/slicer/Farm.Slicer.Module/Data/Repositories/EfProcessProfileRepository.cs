@@ -138,14 +138,9 @@ public class EfProcessProfileRepository(SlicerDbContext db) : IProcessProfileRep
     public async Task SetDefaultAsync(ProcessProfile profile, Guid? userId, CancellationToken ct = default)
     {
         IQueryable<ProcessProfile> scope = _db.ProcessProfiles.Where(p => p.SlicerType == profile.SlicerType && p.Id != profile.Id && p.IsDefault);
-        if (userId.HasValue)
-        {
-            scope = scope.Where(p => p.CreatedByUserId == userId);
-        }
-        else
-        {
-            scope = scope.Where(p => p.CreatedByUserId == null);
-        }
+        scope = userId.HasValue
+            ? scope.Where(p => p.CreatedByUserId == userId)
+            : scope.Where(p => p.CreatedByUserId == null);
 
         foreach (ProcessProfile existing in await scope.ToListAsync(ct))
         {

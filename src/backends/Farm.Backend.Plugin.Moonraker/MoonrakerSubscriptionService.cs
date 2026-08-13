@@ -2008,14 +2008,9 @@ public sealed class MoonrakerSubscriptionService(
                     colorElem.ValueKind == JsonValueKind.Number)
                 {
                     int colorIdx = colorElem.GetInt32();
-                    if (state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex))
-                    {
-                        state.MmuGateColor![i] = colorHex;
-                    }
-                    else
-                    {
-                        state.MmuGateColor![i] = "#808080";
-                    }
+                    state.MmuGateColor![i] = state.QidiboxColorDict.TryGetValue(colorIdx, out string? colorHex)
+                        ? colorHex
+                        : "#808080";
                 }
             }
         }

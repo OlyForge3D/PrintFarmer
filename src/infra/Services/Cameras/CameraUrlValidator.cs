@@ -125,14 +125,7 @@ internal static class CameraUrlValidator
             return false;
         }
 
-        if (is6to4)
-        {
-            embeddedIpv4 = new IPAddress(bytes[2..6]);
-        }
-        else
-        {
-            embeddedIpv4 = new IPAddress(bytes[12..16]);
-        }
+        embeddedIpv4 = is6to4 ? new IPAddress(bytes[2..6]) : new IPAddress(bytes[12..16]);
 
         return true;
     }

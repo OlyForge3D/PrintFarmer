@@ -4773,15 +4773,9 @@ public class PrintersService(
         {
             CreatePrinterFromDiscoveryDto[] printers;
 
-            if (fileExtension == ".csv")
-            {
-                printers = await ParseCsvStreamAsync(stream, ct);
-            }
-            else
-            {
-                // JSON format
-                printers = await ParseJsonStreamAsync(stream, ct);
-            }
+            printers = fileExtension == ".csv"
+                ? await ParseCsvStreamAsync(stream, ct)
+                : await ParseJsonStreamAsync(stream, ct);
 
             if (printers == null || printers.Length == 0)
             {

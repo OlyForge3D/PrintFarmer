@@ -377,14 +377,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
 
             // Safely extract filename — Uri.LocalPath throws on relative URIs
             string fileName;
-            if (Uri.TryCreate(url, UriKind.Absolute, out Uri? parsedUri))
-            {
-                fileName = Path.GetFileName(parsedUri.LocalPath);
-            }
-            else
-            {
-                fileName = string.Empty;
-            }
+            fileName = Uri.TryCreate(url, UriKind.Absolute, out Uri? parsedUri)
+                ? Path.GetFileName(parsedUri.LocalPath)
+                : string.Empty;
 
             if (string.IsNullOrEmpty(fileName))
             {

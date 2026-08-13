@@ -198,15 +198,9 @@ public class EfWorkerRepository(SlicerDbContext context) : IWorkerRepository
                 worker.FailedJobs++;
             }
 
-            if (worker.AverageProcessingTimeSeconds == null)
-            {
-                worker.AverageProcessingTimeSeconds = processingTimeSeconds;
-            }
-            else
-            {
-                worker.AverageProcessingTimeSeconds =
-                    (0.2 * processingTimeSeconds) + (0.8 * worker.AverageProcessingTimeSeconds.Value);
-            }
+            worker.AverageProcessingTimeSeconds = worker.AverageProcessingTimeSeconds == null
+                ? processingTimeSeconds
+                : (0.2 * processingTimeSeconds) + (0.8 * worker.AverageProcessingTimeSeconds.Value);
 
             if (worker.FreeSlots > 0 && worker.Status == WorkerStatus.Busy && !worker.IsDisabled)
             {
