@@ -4,6 +4,7 @@ import {
   copyFile,
   mkdtemp,
   mkdir,
+  readFile,
   rm,
   truncate,
   writeFile,
@@ -1003,5 +1004,48 @@ test('validateDependencyLicenses accepts only the reviewed legacy NuGet license 
     assert.ok(hasCode(changedErrors, 'LICENSE_UNREVIEWED'));
   } finally {
     await rm(fixture.root, { force: true, recursive: true });
+  }
+});
+
+
+test('reviewed npm license fallbacks are pinned to LF checkout in .gitattributes', async () => {
+  // Regression coverage for OlyForge3D/PrintFarmer#1526: on Windows, Git
+  // converted compliance/licenses/npm/*.txt to CRLF because .gitattributes
+  // only pinned eol=lf for files directly inside compliance/licenses/, not
+  // its subdirectories. create-npm-notices.mjs hashes the checked-out bytes
+  // and compares them against the LF-normalized sha256 recorded here, so a
+  // CRLF checkout breaks the pinned-hash integrity check. This test asserts
+  // the .gitattributes rule itself covers every reviewed fallback file
+  // (platform-independent: it checks the attribute, not the current OS's
+  // checkout bytes) and that the working tree bytes still match the pinned
+  // hash.
+  const policyPath = path.join(repositoryRoot, 'compliance', 'dependency-license-policy.json');
+  const policy = JSON.parse(await readFile(policyPath, 'utf8'));
+  const fallbacks = policy.npm?.licenseTextFallbacks ?? [];
+  assert.ok(fallbacks.length > 0, 'expected at least one reviewed npm license fallback to check');
+
+  for (const fallback of fallbacks) {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['check-attr', 'text', 'eol', '--', fallback.licenseFile],
+      { cwd: repositoryRoot },
+    );
+    assert.match(
+      stdout,
+      /: text: set/,
+      `${fallback.licenseFile} must be marked "text" in .gitattributes so Git normalizes its line endings`,
+    );
+    assert.match(
+      stdout,
+      /: eol: lf/,
+      `${fallback.licenseFile} must be pinned to eol=lf in .gitattributes (glob likely doesn't match its directory)`,
+    );
+
+    const fileBytes = await readFile(path.join(repositoryRoot, fallback.licenseFile));
+    assert.equal(
+      sha256(fileBytes),
+      fallback.sha256,
+      `${fallback.licenseFile} checked-out bytes no longer match the reviewed policy sha256`,
+    );
   }
 });
