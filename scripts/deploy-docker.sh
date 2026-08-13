@@ -4028,28 +4028,73 @@ configure_additional() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
         print_info "Using configured environment: $ENVIRONMENT"
-        if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ]; then
-            INCLUDE_MONITORING=true
-            print_info "Monitoring stack enabled via CLI flag"
+        if [ -n "${CLI_INCLUDE_MONITORING:-}" ]; then
+            # --include-monitoring or --exclude-monitoring was explicitly passed;
+            # CLI_INCLUDE_MONITORING is only ever set (to "true" or "false") in
+            # that case, so honor it as-is rather than re-defaulting it.
+            INCLUDE_MONITORING="$CLI_INCLUDE_MONITORING"
+            if [ "$INCLUDE_MONITORING" = "true" ]; then
+                print_info "Monitoring stack enabled via CLI flag"
+            else
+                print_info "Monitoring stack disabled via CLI flag"
+            fi
+        else
+            # Mirror the interactive path's monitoring/telemetry-enabled-by-default
+            # posture so INCLUDE_MONITORING is always assigned before later
+            # references (e.g. generate_deployment_config) expand it under `set -u`.
+            INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
         fi
-        if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "true" ]; then
-            INCLUDE_TELEMETRY=true
-            print_info "Telemetry/observability enabled via CLI flag"
+        if [ -n "${CLI_INCLUDE_TELEMETRY:-}" ]; then
+            INCLUDE_TELEMETRY="$CLI_INCLUDE_TELEMETRY"
+            if [ "$INCLUDE_TELEMETRY" = "true" ]; then
+                print_info "Telemetry/observability enabled via CLI flag"
+            else
+                print_info "Telemetry/observability disabled via CLI flag"
+            fi
+        else
+            INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
         fi
         if [ "${CLI_INCLUDE_SECURITY:-false}" = "true" ]; then
             INCLUDE_SECURITY=true
             print_info "Security configurations enabled via CLI flag"
+        else
+            INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
         fi
         if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ]; then
             INCLUDE_REGISTRY=true
             print_info "Local Docker registry enabled via CLI flag"
+        else
+            INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
         fi
         if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
             INCLUDE_DISCOVERY=true
             ENABLE_DISCOVERY=true
             ALLOW_LOCAL_NETWORK=true
             print_info "Network printer discovery enabled via CLI flag"
+        else
+            # Optional discovery was not requested via --include-discovery. Give these
+            # variables safe defaults here so downstream config persistence
+            # (save_deployment_config) and env-file generation can reference them
+            # under `set -u` without aborting with an unbound-variable error.
+            INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
+            ENABLE_DISCOVERY=${ENABLE_DISCOVERY:-false}
+            ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-false}
         fi
+        NETWORK_RANGES=${NETWORK_RANGES:-}
+
+        # ENABLE_SWAGGER/ENABLE_DETAILED_LOGGING are only assigned by the
+        # interactive Development/Production branch below. Mirror that same
+        # environment-based default here so the non-interactive path never
+        # leaves them unset before save_deployment_config and env-file
+        # generation expand them under `set -u`.
+        if [ "$ENVIRONMENT" = "Development" ]; then
+            ENABLE_SWAGGER=${ENABLE_SWAGGER:-true}
+            ENABLE_DETAILED_LOGGING=${ENABLE_DETAILED_LOGGING:-true}
+        else
+            ENABLE_SWAGGER=${ENABLE_SWAGGER:-false}
+            ENABLE_DETAILED_LOGGING=${ENABLE_DETAILED_LOGGING:-false}
+        fi
+        DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
 
         return 0
     fi
