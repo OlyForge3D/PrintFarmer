@@ -163,23 +163,26 @@ public class EfLocationRepository : ILocationRepository
 
     public async Task<List<Location>> GetDescendantsAsync(Guid id, CancellationToken ct)
     {
-        var descendants = new List<Location>();
-        var queue = new Queue<Guid>();
-        queue.Enqueue(id);
-
-        while (queue.Count > 0)
+        Location? parentLocation = await FindByIdAsync(id, ct);
+        if (parentLocation is null)
         {
-            Guid currentId = queue.Dequeue();
-            List<Location> children = await GetChildrenAsync(currentId, ct);
-
-            foreach (Location child in children)
-            {
-                descendants.Add(child);
-                queue.Enqueue(child.Id);
-            }
+            return [];
         }
 
-        return descendants;
+        if (IsUnrootedPath(parentLocation.Path))
+        {
+            // Path has never been materialized for this location (e.g. legacy/imported data
+            // that predates path computation). A blanket prefix match against "/" would
+            // incorrectly match every active location in the table, so fall back to a
+            // ParentId-based traversal for this location only.
+            return await GetDescendantsByParentIdAsync(id, ct);
+        }
+
+        string prefix = GetSubtreePathPrefix(parentLocation);
+
+        return await _dbContext.Locations
+            .Where(l => l.IsActive && l.Path.StartsWith(prefix))
+            .ToListAsync(ct);
     }
 
     public async Task<bool> IsDescendantOfAsync(Guid locationId, Guid potentialAncestorId, CancellationToken ct)
@@ -241,8 +244,123 @@ public class EfLocationRepository : ILocationRepository
             .CountAsync(ct);
     }
 
+    public async Task<List<Printer>> GetPrintersInSubtreeAsync(Guid locationId, CancellationToken ct)
+    {
+        Location? location = await FindByIdAsync(locationId, ct);
+        if (location is null)
+        {
+            return [];
+        }
+
+        if (IsUnrootedPath(location.Path))
+        {
+            HashSet<Guid> subtreeIds = await GetSubtreeIdsByParentIdAsync(locationId, ct);
+            return await _dbContext.Printers
+                .Include(p => p.Location)
+                .Where(p => p.LocationId.HasValue && subtreeIds.Contains(p.LocationId.Value))
+                .OrderBy(p => p.Name)
+                .ToListAsync(ct);
+        }
+
+        string prefix = GetSubtreePathPrefix(location);
+
+        // Single set-based query: printers assigned directly to the location, or to any
+        // descendant location (matched via the materialized Path prefix), instead of one
+        // GetPrintersInLocationAsync call per location in the subtree.
+        return await _dbContext.Printers
+            .Include(p => p.Location)
+            .Where(p => p.LocationId == locationId
+                || (p.Location != null && p.Location.IsActive && p.Location.Path.StartsWith(prefix)))
+            .OrderBy(p => p.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<int> GetPrinterCountInSubtreeAsync(Guid locationId, CancellationToken ct)
+    {
+        Location? location = await FindByIdAsync(locationId, ct);
+        if (location is null)
+        {
+            return 0;
+        }
+
+        if (IsUnrootedPath(location.Path))
+        {
+            HashSet<Guid> subtreeIds = await GetSubtreeIdsByParentIdAsync(locationId, ct);
+            return await _dbContext.Printers
+                .Where(p => p.LocationId.HasValue && subtreeIds.Contains(p.LocationId.Value))
+                .CountAsync(ct);
+        }
+
+        string prefix = GetSubtreePathPrefix(location);
+
+        // Single aggregate query: total printer count for the location + all descendants,
+        // instead of one GetPrinterCountAsync call per descendant.
+        return await _dbContext.Printers
+            .Where(p => p.LocationId == locationId
+                || (p.Location != null && p.Location.IsActive && p.Location.Path.StartsWith(prefix)))
+            .CountAsync(ct);
+    }
+
     public async Task SaveChangesAsync(CancellationToken ct)
     {
         await _dbContext.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// Builds the materialized-Path prefix used to match all descendants of the given location.
+    /// </summary>
+    private static string GetSubtreePathPrefix(Location location)
+    {
+        return location.Path.EndsWith('/') ? location.Path : location.Path + "/";
+    }
+
+    /// <summary>
+    /// A location's Path is considered "unrooted" if it is still at the entity default ("/")
+    /// or otherwise empty. No real location produced by <c>LocationService</c> ever has this
+    /// value (roots are materialized as "/{Name}"), so this only happens for legacy/imported
+    /// data that predates path computation. A prefix match against "/" would match every
+    /// active location in the table, so callers must fall back to ParentId-based traversal
+    /// instead.
+    /// </summary>
+    private static bool IsUnrootedPath(string path) => string.IsNullOrEmpty(path) || path == "/";
+
+    /// <summary>
+    /// ParentId-based BFS fallback used only when a location's Path has not been materialized.
+    /// </summary>
+    private async Task<List<Location>> GetDescendantsByParentIdAsync(Guid id, CancellationToken ct)
+    {
+        var result = new List<Location>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(id);
+
+        while (queue.Count > 0)
+        {
+            Guid currentId = queue.Dequeue();
+            List<Location> children = await _dbContext.Locations
+                .Where(l => l.IsActive && l.ParentId == currentId)
+                .ToListAsync(ct);
+
+            foreach (Location child in children)
+            {
+                result.Add(child);
+                queue.Enqueue(child.Id);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns the location's own ID plus all descendant IDs, via ParentId-based traversal.
+    /// Used only when the location's Path has not been materialized.
+    /// </summary>
+    private async Task<HashSet<Guid>> GetSubtreeIdsByParentIdAsync(Guid id, CancellationToken ct)
+    {
+        List<Location> descendants = await GetDescendantsByParentIdAsync(id, ct);
+        var ids = new HashSet<Guid>(descendants.Select(d => d.Id))
+        {
+            id
+        };
+        return ids;
     }
 }
