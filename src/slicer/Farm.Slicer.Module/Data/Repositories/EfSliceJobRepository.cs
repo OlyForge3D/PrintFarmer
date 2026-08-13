@@ -11,6 +11,18 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
 {
     private readonly SlicerDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
 
+    /// <summary>Worker/service statuses that count as available for dispatch.</summary>
+    private static readonly string[] ActiveWorkerStatuses = [WorkerStatus.Online, WorkerStatus.Busy];
+
+    /// <summary>Recognized <see cref="SlicerType"/> values, stored as their raw int form for EF comparisons.</summary>
+    private static readonly int[] KnownSlicerTypeInts =
+    [
+        (int)SlicerType.OrcaSlicer,
+        (int)SlicerType.PrusaSlicer,
+        (int)SlicerType.SuperSlicer,
+        (int)SlicerType.Cura,
+    ];
+
     /// <inheritdoc/>
     public async Task AddAsync(SliceJob job, CancellationToken ct = default)
     {
@@ -146,12 +158,9 @@ public class EfSliceJobRepository(SlicerDbContext db) : ISliceJobRepository
                 !worker.IsDisabled &&
                 worker.LastHeartbeat >= workerHeartbeatCutoffUtc &&
                 service.LastSeen >= workerHeartbeatCutoffUtc &&
-                (worker.Status == WorkerStatus.Online || worker.Status == WorkerStatus.Busy) &&
-                (service.Status == WorkerStatus.Online || service.Status == WorkerStatus.Busy) &&
-                (service.SlicerType == (int)SlicerType.OrcaSlicer ||
-                 service.SlicerType == (int)SlicerType.PrusaSlicer ||
-                 service.SlicerType == (int)SlicerType.SuperSlicer ||
-                 service.SlicerType == (int)SlicerType.Cura)
+                ActiveWorkerStatuses.Contains(worker.Status) &&
+                ActiveWorkerStatuses.Contains(service.Status) &&
+                KnownSlicerTypeInts.Contains(service.SlicerType)
             group worker by
                 service.SlicerType == (int)SlicerType.PrusaSlicer
                     ? SlicerEngineType.PrusaSlicer
