@@ -126,6 +126,48 @@ describe('EditPrinterModal', () => {
     expect(await screen.findByDisplayValue('http://qp4-1.local')).toBeInTheDocument();
   });
 
+  it('reveals the stored PrusaLink password when the eye button is activated', async () => {
+    const user = userEvent.setup();
+    mockUsePrinterDetails.mockReturnValue({
+      data: {
+        rowVersion: 'printer-v1',
+        name: 'prusalink-1',
+        serverUrl: 'http://prusalink-1.local',
+        originalServerUrl: 'http://prusalink-1.local',
+        notes: '',
+        manufacturerId: 'manufacturer-1',
+        modelId: 'model-1',
+        backend: 'PrusaLink',
+        apiKey: '',
+        username: 'maker',
+        password: 'stored-printer-password',
+        capabilities: {},
+        backendPort: 80,
+        frontendPort: 80,
+        obicoEnabled: false,
+        toolheads: [],
+      },
+    });
+
+    render(
+      <EditPrinterModal
+        printerId="printer-1"
+        isOpen
+        onClose={vi.fn()}
+        onSuccess={vi.fn()}
+      />
+    );
+
+    const passwordInput = await screen.findByTitle('PrusaLink password from printer settings');
+    expect(passwordInput).toHaveAttribute('type', 'password');
+    expect(passwordInput).toHaveValue('stored-printer-password');
+
+    await user.click(screen.getByRole('button', { name: 'Show password' }));
+
+    expect(passwordInput).toHaveAttribute('type', 'text');
+    expect(passwordInput).toHaveValue('stored-printer-password');
+  });
+
   it('rejects a non-HTTP server URL', async () => {
     const user = userEvent.setup();
 

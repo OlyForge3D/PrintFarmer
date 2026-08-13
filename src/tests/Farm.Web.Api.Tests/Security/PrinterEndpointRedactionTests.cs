@@ -12,7 +12,7 @@ namespace Farm.Web.Api.Tests.Security;
 public sealed class PrinterEndpointRedactionTests
 {
     [Fact]
-    public async Task PrinterConfigurationAndCameraRoutes_DoNotExposeStoredSecrets()
+    public async Task PrinterConfigurationAndCameraRoutes_ExposePasswordOnlyInAdminDetails()
     {
         using var factory = new CustomWebApplicationFactory();
         await factory.ResetDatabaseAsync();
@@ -97,13 +97,15 @@ public sealed class PrinterEndpointRedactionTests
         string viewOnlyDetailsJson = await viewOnlyDetailsResponse.Content.ReadAsStringAsync();
 
         AssertSecretsAreAbsent(redactedRoutesJson, includePrinterHost: true);
-        AssertSecretsAreAbsent(detailsJson, includePrinterHost: false);
+        AssertSecretsAreAbsent(detailsJson, includePrinterHost: false, allowPrinterPassword: true);
         AssertSecretsAreAbsent(printerListJson, includePrinterHost: false);
+        AssertSecretsAreAbsent(viewOnlyDetailsJson, includePrinterHost: false);
         _ = redactedRoutesJson.Should().Contain("\"serverConfigured\":true");
         _ = redactedRoutesJson.Should().Contain("\"apiKeyConfigured\":true");
         _ = redactedRoutesJson.Should().Contain($"/api/printers/{printerId:D}/camera/stream");
         _ = redactedRoutesJson.Should().Contain($"/api/printers/{printerId:D}/camera/snapshot");
         _ = detailsJson.Should().Contain("\"serverUrl\":\"http://printer.internal:7125\"");
+        _ = detailsJson.Should().Contain("\"password\":\"printer-password\"");
         _ = printerListJson.Should().Contain("\"frontendUrl\":\"http://printer.internal:7125\"");
         _ = viewOnlyDetailsJson.Should().NotContain("\"serverUrl\"");
         _ = viewOnlyDetailsJson.Should().NotContain("printer.internal");
@@ -122,7 +124,10 @@ public sealed class PrinterEndpointRedactionTests
         _ = response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
-    private static void AssertSecretsAreAbsent(string json, bool includePrinterHost)
+    private static void AssertSecretsAreAbsent(
+        string json,
+        bool includePrinterHost,
+        bool allowPrinterPassword = false)
     {
         List<string> secrets =
         [
@@ -140,6 +145,11 @@ public sealed class PrinterEndpointRedactionTests
         if (includePrinterHost)
         {
             secrets.Add("printer.internal");
+        }
+
+        if (allowPrinterPassword)
+        {
+            _ = secrets.Remove("printer-password");
         }
 
         foreach (string secret in secrets)

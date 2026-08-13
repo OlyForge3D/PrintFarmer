@@ -126,7 +126,7 @@ public sealed class SensitiveSerializationTests
     }
 
     [Fact]
-    public void Serialize_PrinterResponseDtos_ExposesUiUrlsWithoutCredentialsOrBackendNetworkDetails()
+    public void Serialize_PrinterResponseDtos_ExposesOnlyExplicitlyEditableSensitiveDetails()
     {
         var recordCases = new Dictionary<Type, IReadOnlyDictionary<string, string>>
         {
@@ -161,7 +161,6 @@ public sealed class SensitiveSerializationTests
                 ["CameraSnapshotUrl"] = "http://details-camera.internal/snapshot",
                 ["OriginalServerUrl"] = "http://details-original.internal",
                 ["Username"] = "details-user",
-                ["Password"] = "details-password",
             },
         };
 
@@ -183,10 +182,13 @@ public sealed class SensitiveSerializationTests
             new Dictionary<string, string>
             {
                 ["ServerUrl"] = "http://details.internal",
+                ["Password"] = "details-password",
             });
 
         _ = JsonSerializer.Serialize(complete).Should().Contain("http://complete-frontend.internal");
-        _ = JsonSerializer.Serialize(details).Should().Contain("http://details.internal");
+        _ = JsonSerializer.Serialize(details)
+            .Should().Contain("http://details.internal")
+            .And.Contain("details-password");
     }
 
     [Fact]

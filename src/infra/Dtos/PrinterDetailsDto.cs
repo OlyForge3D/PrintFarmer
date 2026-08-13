@@ -36,7 +36,6 @@ public record PrinterDetailsDto(
     ToolheadDto[]? Toolheads = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? Username = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? Password = null,
     bool ObicoEnabled = false,
     string? ObicoServerName = null,

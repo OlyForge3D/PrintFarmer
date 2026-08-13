@@ -1138,11 +1138,11 @@ public class PrintersController(
             return NotFound();
         }
 
-        // ServerUrl is editable configuration, so callers with view-only group access
-        // receive the rest of the details payload without the internal network address.
-        string? clientServerUrl = PrintFarmerPermissions.HasPermission(User, "printers:admin")
-            ? PrinterClientUrl.Create(p.ServerUrl)
-            : null;
+        // Internal connection settings are editable configuration. Only printer
+        // administrators receive the server URL or decrypted password.
+        bool canAdministerPrinters = PrintFarmerPermissions.HasPermission(User, "printers:admin");
+        string? clientServerUrl = canAdministerPrinters ? PrinterClientUrl.Create(p.ServerUrl) : null;
+        string? clientPassword = canAdministerPrinters ? p.Password : null;
 
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
@@ -1247,7 +1247,7 @@ public class PrintersController(
             capabilitiesDto,
             toolheadDtos,
             p.Username,
-            p.Password,
+            clientPassword,
             p.ObicoEnabled,
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
