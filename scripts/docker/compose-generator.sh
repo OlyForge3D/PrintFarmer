@@ -109,6 +109,25 @@ log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1" >&2; }
 log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1" >&2; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
+# Resolve a Python interpreter that actually executes, not just one that is
+# present on PATH. On Windows Git Bash, `python3` can resolve to the
+# non-functional Microsoft Store app-execution alias: `command -v python3`
+# finds it, but invoking it prints "Python was not found; run without
+# arguments to install from the Microsoft Store..." and exits non-zero. Try
+# each candidate in order and confirm it can actually run before accepting it.
+resolve_python_cmd() {
+    local candidate
+    for candidate in python3 python py; do
+        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PYTHON_CMD="$(resolve_python_cmd || true)"
+
 # Get the host IP for Docker extra_hosts configuration
 get_host_ip() {
     # Try to get primary host IP address
@@ -323,10 +342,16 @@ inject_health_check_anchors() {
     fi
     
     log_info "Extracting and injecting health check anchors from docker-compose.common.yml"
-    
+
+    if [[ -z "$PYTHON_CMD" ]]; then
+        log_error "No working Python interpreter found (tried python3, python, py)"
+        log_error "       A runnable Python 3 interpreter is required for health check anchor injection"
+        return 1
+    fi
+
     # Extract full anchor definitions with their content (can be multi-line) using Python
     local temp_injected=$(mktemp)
-    python3 - "$common_file" "$compose_file" "$temp_injected" <<'PY'
+    "$PYTHON_CMD" - "$common_file" "$compose_file" "$temp_injected" <<'PY'
 import sys
 import re
 
@@ -441,10 +466,10 @@ merge_addon_services() {
         local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks temp_combined
         
         # If ruamel.yaml based merge helper exists, use it for robust YAML-aware merging
-        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import ruamel.yaml" >/dev/null 2>&1; then
+        if [[ -n "$PYTHON_CMD" ]] && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && "$PYTHON_CMD" -c "import ruamel.yaml" >/dev/null 2>&1; then
             # Use YAML-aware merge helper (ruamel.yaml must be available)
             temp_combined=$(mktemp)
-            python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
+            "$PYTHON_CMD" "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
             mv "$temp_combined" "$compose_file"
         else
             # Fallback to the original (conservative) merging approach
@@ -465,8 +490,13 @@ merge_addon_services() {
             # Simplified safe append of services (no dedupe)
             if [[ -s "$temp_addon_services" ]]; then
                 # Filter out any addon services that already exist in the base compose
+                if [[ -z "$PYTHON_CMD" ]]; then
+                    log_error "No working Python interpreter found (tried python3, python, py)"
+                    log_error "       A runnable Python 3 interpreter is required for addon service merging"
+                    return 1
+                fi
                 temp_filtered_services="$(mktemp)"
-                python3 - "$temp_addon_services" "$compose_file" "$temp_filtered_services" <<'PY'
+                "$PYTHON_CMD" - "$temp_addon_services" "$compose_file" "$temp_filtered_services" <<'PY'
 import sys,re
 addon_file=sys.argv[1]; base_file=sys.argv[2]; out_file=sys.argv[3]
 addon_lines=open(addon_file,'r').read().splitlines()
@@ -641,9 +671,13 @@ generate_compose() {
     fi
     
     # CRITICAL: Check for required dependencies BEFORE attempting any replacements
-    # Python3 is required to properly handle YAML structure and indentation
-    if ! command -v python3 >/dev/null 2>&1; then
-        log_error "FATAL: python3 is required for database service configuration"
+    # A runnable Python 3 interpreter is required to properly handle YAML structure and indentation.
+    # Note: this checks that the interpreter actually executes, not just that a `python3`
+    # name is present on PATH -- on Windows Git Bash `python3` can resolve to a
+    # non-functional Microsoft Store app-execution alias (see issue #1524).
+    if [[ -z "$PYTHON_CMD" ]]; then
+        log_error "FATAL: a working Python 3 interpreter is required for database service configuration"
+        log_error "       Tried python3, python, py -- none of them executed successfully"
         log_error "       Please install Python 3 to continue"
         log_error "       Installation: apt-get install python3 (Debian/Ubuntu) or equivalent"
         return 1
@@ -651,7 +685,7 @@ generate_compose() {
     
     # CRITICAL: ruamel.yaml is required for proper YAML handling
     # Check if the Python module is available
-    if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+    if ! "$PYTHON_CMD" -c "from ruamel.yaml import YAML" 2>/dev/null; then
         log_error "FATAL: Python module 'ruamel.yaml' is not installed"
         log_error "       This module is REQUIRED for proper Docker Compose YAML generation"
         log_error "       Installation: pip install ruamel.yaml"
@@ -672,7 +706,7 @@ generate_compose() {
     temp_replaced="$(mktemp)"
     py_error="$(mktemp)"
     
-    if ! python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
+    if ! "$PYTHON_CMD" "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
         log_error "FATAL: Failed to generate database configuration"
         log_error "       Error details:"
         cat "$py_error" | sed 's/^/         /' >&2
@@ -871,7 +905,13 @@ generate_compose() {
     # API stays on bridge network for service discovery by hostname.
     log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
-    python3 - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
+    if [[ -z "$PYTHON_CMD" ]]; then
+        log_error "No working Python interpreter found (tried python3, python, py)"
+        log_error "       A runnable Python 3 interpreter is required for microservices port adjustments"
+        return 1
+    fi
+
+    "$PYTHON_CMD" - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
 import sys
 path = sys.argv[1]
 host_ip = sys.argv[2]

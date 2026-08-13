@@ -738,6 +738,68 @@ test_ruamel_yaml_dependency_check() {
     pass_test
 }
 
+# Regression test for issue #1524: on Windows Git Bash, `python3` can resolve
+# to the non-functional Microsoft Store app-execution alias, which passes
+# `command -v` but exits non-zero (with a Store-install message) when actually
+# invoked. Simulate this by prepending a fake bin directory to PATH containing
+# a broken `python3` shim and a working `python` wrapper that delegates to the
+# real interpreter, then verify the generator still succeeds via fallback.
+test_python3_broken_alias_fallback() {
+    start_test "python3 broken Windows app-alias falls back to python"
+
+    # Find a real Python 3 interpreter to delegate to (mirrors what a real
+    # working `python`/`py` would be on the affected Windows machine).
+    local real_python=""
+    for candidate in python3 python; do
+        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+            real_python="$(command -v "$candidate")"
+            break
+        fi
+    done
+
+    if [[ -z "$real_python" ]]; then
+        test_info "SKIPPED: no working Python interpreter available in test environment to use as fallback target"
+        pass_test
+        return 0
+    fi
+
+    local fake_bin_dir="$TEST_TEMP_DIR/fake-bin"
+    mkdir -p "$fake_bin_dir"
+
+    # Broken python3: present on PATH (satisfies `command -v`), but exits
+    # non-zero with the real Windows Store app-alias message when invoked.
+    cat > "$fake_bin_dir/python3" <<'SHIM'
+#!/bin/bash
+echo "Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Manage App Execution Aliases." >&2
+exit 9009
+SHIM
+    chmod +x "$fake_bin_dir/python3"
+
+    # Working python fallback: delegates to the real interpreter found above.
+    cat > "$fake_bin_dir/python" <<SHIM
+#!/bin/bash
+exec "$real_python" "\$@"
+SHIM
+    chmod +x "$fake_bin_dir/python"
+
+    local outdir="$TEST_TEMP_DIR/python3-alias-fallback"
+    mkdir -p "$outdir"
+
+    # Prepend the fake bin directory so the broken python3 shim is found
+    # first, exactly as it would be ahead of a real interpreter on the
+    # affected Windows PATH.
+    assert_command_success "PATH=\"$fake_bin_dir:$PATH\" $COMPOSE_GENERATOR --db-provider postgres --output-dir $outdir" \
+        "compose-generator.sh should succeed by falling back to 'python' when 'python3' is a broken alias"
+
+    assert_file_exists "$outdir/docker-compose.yml" "Should generate compose file despite broken python3 alias"
+
+    local compose_content=$(cat "$outdir/docker-compose.yml")
+    assert_contains "$compose_content" "x-api-healthcheck:" "Health check anchors should still be injected via python fallback"
+    assert_contains "$compose_content" "database:" "Database service configuration should still be generated via python fallback"
+
+    pass_test
+}
+
 # Test: generated_compose_file_is_valid_yaml (PHASE 1 - HIGH PRIORITY)
 test_generated_compose_file_is_valid_yaml() {
     start_test "generated compose file is valid YAML"
@@ -1744,6 +1806,7 @@ run_all_tests() {
     # CRITICAL: Check dependencies FIRST
     # If ruamel.yaml is missing, all microservices/microservices tests will fail
     test_ruamel_yaml_dependency_check
+    test_python3_broken_alias_fallback
     
     test_help_output
     test_standard_generation
