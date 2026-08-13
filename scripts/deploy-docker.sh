@@ -4928,6 +4928,63 @@ EOF
     print_success "React production environment configured: $react_dir/.env.production"
 }
 
+# Detect the Docker Desktop / BuildKit containerd snapshot corruption signature described in
+# issue #1527: a cached BuildKit layer references a containerd snapshot key that no longer
+# exists in the local snapshotter store (typically left behind by a prior interrupted or failed
+# build attempt sharing the same builder cache). This is an upstream BuildKit/containerd defect,
+# not a repository build-stage ordering or COPY-path problem — see docs/DOCKER_DEPLOYMENT.md
+# "BuildKit Snapshot Corruption Recovery (issue #1527)" for details. Matching is deliberately
+# OS-agnostic: the same containerd snapshotter architecture can hit this on Linux Docker Engine
+# too, not just Docker Desktop on Windows/macOS.
+is_buildkit_snapshot_corruption() {
+    local log_file="$1"
+    grep -Eq 'failed to commit [A-Za-z0-9_-]+ to [A-Za-z0-9_-]+ during finalize' "$log_file" && \
+        grep -Eq 'failed to stat active key during commit' "$log_file" && \
+        grep -Eq 'snapshot [A-Za-z0-9_-]+ does not exist: not found' "$log_file"
+}
+
+# Run a `docker compose build` invocation, and if it fails with the BuildKit/containerd snapshot
+# corruption signature above, automatically retry once with --no-cache.
+#
+# This is a narrow, non-destructive repair: it does not run `docker builder prune` and does not
+# remove any unrelated images or volumes. It only forces this one build invocation to bypass the
+# poisoned cache layer so the affected stage recompiles from scratch. If the build succeeds (the
+# common case, on every platform), this function is a transparent pass-through with identical
+# exit-code semantics to running the command directly. If the --no-cache retry also fails, the
+# error is not this known signature (or the corruption is deeper than a single layer) and the
+# caller reports the failure as usual.
+run_compose_build_with_snapshot_repair() {
+    local -a cmd=("$@")
+    local build_log
+    build_log="$(mktemp)"
+    local rc=0
+
+    set +e
+    "${cmd[@]}" 2>&1 | tee "$build_log"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$rc" -ne 0 ] && is_buildkit_snapshot_corruption "$build_log"; then
+        print_warning "Detected a BuildKit/containerd snapshot corruption error (issue #1527):"
+        print_warning "  a cached layer's snapshot no longer exists in the local BuildKit store."
+        print_warning "This is a known upstream Docker Desktop/BuildKit defect, not a repository build issue."
+        print_warning "Retrying this build with --no-cache to bypass the poisoned cache layer"
+        print_warning "(no images or volumes are being removed)..."
+        set +e
+        "${cmd[@]}" --no-cache 2>&1 | tee -a "$build_log"
+        rc=${PIPESTATUS[0]}
+        set -e
+        if [ "$rc" -ne 0 ]; then
+            print_error "Build still failed after --no-cache retry. See docs/DOCKER_DEPLOYMENT.md"
+            print_error "'BuildKit Snapshot Corruption Recovery (issue #1527)' for further Docker Desktop"
+            print_error "recovery steps (restarting the BuildKit daemon, or Docker Desktop itself)."
+        fi
+    fi
+
+    rm -f "$build_log"
+    return "$rc"
+}
+
 # Generate docker-compose override if needed
 # Build and deploy
 deploy_containers() {
@@ -5209,7 +5266,7 @@ EOF
             if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
                 print_success "Skipping orcaslicer-binaries build (using prebuilt image)"
             else
-                if "${ORCA_BUILD_CMD[@]}"; then
+                if run_compose_build_with_snapshot_repair "${ORCA_BUILD_CMD[@]}"; then
                     if ! validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
                         print_error "New OrcaSlicer binary layer failed identity validation."
                         exit 1
@@ -5293,12 +5350,12 @@ EOF
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
+                if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -5307,7 +5364,7 @@ EOF
                 fi
             fi
         else
-            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
+            if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"

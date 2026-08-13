@@ -884,6 +884,54 @@ docker compose down
 docker compose up -d --build
 ```
 
+**BuildKit Snapshot Corruption Recovery (issue #1527):**
+
+Symptom — the build aborts mid-way through the shared `.NET` build stage with an error like:
+
+```text
+failed to commit j9iyc3dyh2304nlj1lsnherqr to n7d4mud8wdonask9boa3gdn4q during finalize:
+failed to stat active key during commit:
+snapshot j9iyc3dyh2304nlj1lsnherqr does not exist: not found
+```
+
+**Root cause:** this is an upstream Docker Desktop / BuildKit / containerd defect, not a
+repository build-stage ordering or `COPY` problem. BuildKit's cache metadata retains a reference
+to a containerd snapshot key that was left in an "active" (uncommitted) state by a prior
+interrupted or failed build sharing the same local builder cache. The snapshotter later
+garbage-collects the underlying snapshot, but the stale cache record survives, so replaying that
+cached layer on a later build fails at finalize time. It can surface at any `COPY`/`RUN` step
+that happens to reuse the poisoned cache entry — the file being copied (e.g. `VERSION`) is not
+the cause. The same containerd snapshotter architecture means this can in principle occur on
+native Linux Docker Engine as well, not only Docker Desktop on Windows/macOS.
+
+**Automatic recovery:** `scripts/deploy-docker.sh` detects this exact error signature in the
+build output and automatically retries the failed build **once** with `--no-cache`. This is a
+narrow, non-destructive repair — it rebuilds only the layers needed for that specific build
+invocation and does **not** run `docker builder prune` or remove any unrelated images or volumes.
+No action is required from you; the installer prints a warning and proceeds automatically.
+
+**If the automatic retry also fails**, escalate manually, from least to most destructive:
+
+```bash
+# 1. Restart the Docker Desktop BuildKit/containerd backend (Windows/macOS):
+#    Docker Desktop UI -> Troubleshoot -> Restart, or:
+wsl --shutdown          # Windows only: restarts the WSL2 VM backing Docker Desktop
+
+# 2. Prune only the active builder's cache (does not touch unrelated images/volumes):
+docker buildx prune --builder "$(docker buildx inspect --bootstrap | head -n1 | awk '{print $2}')" -f
+
+# 3. Full clean rebuild for this repo only (still does not touch unrelated images/volumes):
+./scripts/deploy-docker.sh --no-cache --non-interactive
+
+# 4. Last resort — global builder cache reset (removes ALL local BuildKit cache,
+#    including unrelated projects' cached layers):
+docker builder prune -af
+```
+
+If step 4 is required repeatedly, this is a signal of a persistent Docker Desktop/BuildKit
+defect rather than a repository issue — check for Docker Desktop updates, and consider filing
+the issue with Docker if it recurs after updating.
+
 ## Production Considerations
 
 ### Security
