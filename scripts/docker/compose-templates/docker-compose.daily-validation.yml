@@ -1,0 +1,16 @@
+# Local-only overrides for the digest-pinned daily development image set.
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Testing
+      Security__DevModeBypassAuth: "true"
+      PFARM__NetworkDiscovery__EnableDiscovery: "false"
+
+  printer-discovery:
+    environment:
+      EnablePeriodicDiscovery: "false"
+      PFARM__NetworkDiscovery__EnableDiscovery: "false"
+
+  orcaslicer-worker:
+    environment:
+      Worker__MaxConcurrentJobs: "1"

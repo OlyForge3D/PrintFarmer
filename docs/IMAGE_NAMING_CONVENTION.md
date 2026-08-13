@@ -15,6 +15,8 @@ All PrintFarmer-specific Docker images follow this naming convention:
 | Base Image | `printfarmer-slicer-base` | Shared base image for slicer workers |
 | API | `printfarmer-api` | ASP.NET Core API backend |
 | Frontend | `printfarmer-frontend` | React TypeScript UI (Nginx) |
+| Slicer Host | `printfarmer-slicer-host` | Split-mode slicer API and orchestration |
+| Printer Discovery | `printfarmer-printer-discovery` | Network printer discovery service |
 | OrcaSlicer Worker | `printfarmer-orcaslicer-worker` | Distributed OrcaSlicer processing |
 | PrusaSlicer Worker | `printfarmer-prusaslicer-worker` | Distributed PrusaSlicer processing |
 
@@ -107,4 +109,5 @@ docker compose build
 
 - [Deployment Overview](DEPLOYMENT.md) - General deployment architecture
 - [Docker Deployment](DOCKER_DEPLOYMENT.md) - Docker-specific deployment guide
+- [Daily Development Images](DAILY_DEVELOPMENT_IMAGES.md) - Immutable daily GHCR image sets
 - [Local Development](DEVELOPMENT.md#running-locally) - Running locally without Docker
