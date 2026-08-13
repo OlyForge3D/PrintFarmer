@@ -69,7 +69,7 @@ test('publication uses run-unique tags and emits one coherent digest manifest', 
     workflow,
     /TAG: sha-\$\{\{ needs\.source\.outputs\.commit_sha \}\}-run-\$\{\{ github\.run_id \}\}-attempt-\$\{\{ github\.run_attempt \}\}/,
   );
-  assert.doesNotMatch(workflow, /image_tag: \$\{\{ steps\.source\.outputs\.image_tag \}\}/);
+  assert.doesNotMatch(workflow, /needs\.source\.outputs\.image_tag/);
   assert.doesNotMatch(workflow, /value=latest|:latest/);
   assert.doesNotMatch(workflow, /docker manifest inspect "\$reference"/);
   assert.match(workflow, /docker tag "\$VALIDATED_IMAGE" "\$reference"/);
@@ -113,6 +113,10 @@ test('registry and local validation overlays cover the complete stack', () => {
     assert.match(validationOverlay, new RegExp(binding.replace(/[${}]/g, '\\$&')));
   }
   assert.match(validationOverlay, /name: printfarmer-daily-validation-network/);
+  assert.match(
+    validationOverlay,
+    /printer-discovery:\s+container_name: !reset null\s+volumes: !override \[\]/,
+  );
   assert.match(
     documentation,
     /\.\/scripts\/generate-certs\.sh "\$STACK_DIR\/deploy\/nginx\/certs"/,

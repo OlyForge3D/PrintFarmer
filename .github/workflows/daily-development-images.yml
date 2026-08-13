@@ -345,7 +345,7 @@ jobs:
       - name: Create and validate image-set manifest
         env:
           COMMIT_SHA: ${{ needs.source.outputs.commit_sha }}
-          IMAGE_TAG: ${{ needs.source.outputs.image_tag }}
+          IMAGE_TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           mapfile -t records < <(find artifacts -type f -name '*.json' | sort)
@@ -422,7 +422,7 @@ jobs:
             echo "## Daily development image set"
             echo
             echo "- Commit: \`${{ needs.source.outputs.commit_sha }}\`"
-            echo "- Tag: \`${{ needs.source.outputs.image_tag }}\`"
+            echo "- Tag: \`sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}\`"
             echo "- Artifact: \`daily-development-image-set\`"
             echo
             echo "The artifact contains digest-pinned references for all five application images."

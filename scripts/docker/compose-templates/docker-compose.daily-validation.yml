@@ -48,6 +48,7 @@ services:
 
   printer-discovery:
     container_name: !reset null
+    volumes: !override []
     environment:
       EnablePeriodicDiscovery: "false"
       PFARM__NetworkDiscovery__EnableDiscovery: "false"

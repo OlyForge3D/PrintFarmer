@@ -156,6 +156,7 @@ The dedicated project name, reset container names, isolated network, and high ho
 ports prevent cleanup from targeting an existing PrintFarmer deployment. Every
 published port binds to `127.0.0.1`; the authentication-bypass validation stack is
 therefore reachable only from the local machine and must not be exposed externally.
+The validation override also removes the discovery service's host Docker socket mount.
 
 Wait for the application images to become healthy before starting local UI
 validation:
