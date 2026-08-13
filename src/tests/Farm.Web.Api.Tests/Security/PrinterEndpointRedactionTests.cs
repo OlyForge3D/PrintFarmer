@@ -42,10 +42,10 @@ public sealed class PrinterEndpointRedactionTests
                 Name = "private printer",
                 ServerUrl = "http://embedded-user:embedded-password@printer.internal:7125?token=printer-token#private",
                 OriginalServerUrl = "http://printer-original.internal:7125",
-                ApiKey = "printer-api-key",
-                Username = "printer-user",
-                Password = "printer-password",
-                Backend = 0,
+                ApiKey = "printer-password",
+                Username = "maker",
+                Password = null,
+                Backend = (int)PrinterBackend.PrusaLink,
                 BackendPort = 7125,
                 IsEnabled = true,
                 ManufacturerId = manufacturer.Id,
@@ -106,6 +106,8 @@ public sealed class PrinterEndpointRedactionTests
         _ = redactedRoutesJson.Should().Contain($"/api/printers/{printerId:D}/camera/snapshot");
         _ = detailsJson.Should().Contain("\"serverUrl\":\"http://printer.internal:7125\"");
         _ = detailsJson.Should().Contain("\"password\":\"printer-password\"");
+        _ = detailsJson.Should().Contain("\"passwordConfigured\":true");
+        _ = detailsResponse.Headers.CacheControl?.NoStore.Should().BeTrue();
         _ = printerListJson.Should().Contain("\"frontendUrl\":\"http://printer.internal:7125\"");
         _ = viewOnlyDetailsJson.Should().NotContain("\"serverUrl\"");
         _ = viewOnlyDetailsJson.Should().NotContain("printer.internal");
