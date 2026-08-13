@@ -16,6 +16,23 @@ source "$SCRIPT_DIR/test-framework.sh"
 TEST_TEMP_DIR=""
 readonly -a SUPPORTED_DATABASE_PROVIDERS=("postgres" "sqlserver")
 
+# Resolve a Python interpreter that actually executes, mirroring
+# resolve_python_cmd() in compose-generator.sh (issue #1524). Used by tests
+# that check the *test environment's* Python/ruamel.yaml availability, so
+# those checks don't produce a false negative on a Windows Git Bash machine
+# where `python3` is a non-functional Microsoft Store app-execution alias
+# that satisfies `command -v` but fails to actually run.
+resolve_test_python_cmd() {
+    local candidate
+    for candidate in python3 python py; do
+        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
 setup() {
     setup_test_environment
     TEST_TEMP_DIR=$(create_test_temp_dir)
@@ -719,22 +736,29 @@ test_addon_combinations() {
 # This is CRITICAL because without it, database service YAML will be malformed
 test_ruamel_yaml_dependency_check() {
     start_test "ruamel.yaml Python module dependency check"
-    
-    # Check if Python3 is available
-    if ! command -v python3 >/dev/null 2>&1; then
-        fail_test "python3 is not available (required for compose generation)"
+
+    # Resolve a working Python interpreter the same way compose-generator.sh
+    # does (issue #1524): `command -v python3` alone is not sufficient, since
+    # on Windows Git Bash it can find a non-functional Microsoft Store
+    # app-execution alias that fails when actually invoked. Fall back to
+    # python/py so this precondition check doesn't false-negative on that
+    # platform and abort the suite before test_python3_broken_alias_fallback
+    # ever runs.
+    local test_python
+    if ! test_python="$(resolve_test_python_cmd)"; then
+        fail_test "No working Python interpreter found (tried python3, python, py; required for compose generation)"
         return 1
     fi
     
     # Check if ruamel.yaml module is installed
-    if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+    if ! "$test_python" -c "from ruamel.yaml import YAML" 2>/dev/null; then
         fail_test "Python module 'ruamel.yaml' is not installed (CRITICAL - required for proper YAML generation)"
         test_info "To fix: pip install ruamel.yaml"
         test_info "Or: apt-get install python3-ruamel.yaml (Debian/Ubuntu)"
         return 1
     fi
     
-    test_info "✓ Python3 and ruamel.yaml are available"
+    test_info "✓ Python ($test_python) and ruamel.yaml are available"
     pass_test
 }
 
@@ -747,15 +771,16 @@ test_ruamel_yaml_dependency_check() {
 test_python3_broken_alias_fallback() {
     start_test "python3 broken Windows app-alias falls back to python"
 
-    # Find a real Python 3 interpreter to delegate to (mirrors what a real
-    # working `python`/`py` would be on the affected Windows machine).
+    # Find a real Python interpreter to delegate to (mirrors what a real
+    # working `python`/`py` would be on the affected Windows machine). Uses
+    # the same python3/python/py search order as resolve_python_cmd() in
+    # compose-generator.sh so this doesn't miss an environment where only
+    # `py` is a working interpreter.
     local real_python=""
-    for candidate in python3 python; do
-        if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c "import sys" >/dev/null 2>&1; then
-            real_python="$(command -v "$candidate")"
-            break
-        fi
-    done
+    local real_candidate
+    if real_candidate="$(resolve_test_python_cmd)"; then
+        real_python="$(command -v "$real_candidate")"
+    fi
 
     if [[ -z "$real_python" ]]; then
         test_info "SKIPPED: no working Python interpreter available in test environment to use as fallback target"
