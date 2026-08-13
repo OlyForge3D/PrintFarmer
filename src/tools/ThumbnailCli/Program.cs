@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Farm.Slicer.Module.Services.Rendering;
 
 namespace ThumbnailCli;
@@ -124,15 +125,7 @@ internal static class Program
 
     private static bool HasFlag(IReadOnlyList<string> args, params string[] keys)
     {
-        foreach (string a in args)
-        {
-            if (keys.Any(k => string.Equals(a, k, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return args.Any(a => keys.Any(k => string.Equals(a, k, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static string Require(IReadOnlyList<string> args, params string[] keys)
