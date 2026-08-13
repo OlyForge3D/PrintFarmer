@@ -4957,6 +4957,15 @@ run_compose_build_with_snapshot_repair() {
     local -a cmd=("$@")
     local build_log
     build_log="$(mktemp)"
+    # Ensure the captured build log (which may include --build-arg values) is removed once this
+    # function returns via any path (success, failure, or an early `return`). Deliberately scoped
+    # to RETURN only, not INT/TERM/EXIT: bash traps are not function-scoped, so registering an
+    # INT/TERM/EXIT handler here would leak past this call and could silently override the
+    # script's own EXIT trap (see cleanup_orca_override below) or swallow a user's Ctrl+C instead
+    # of letting the script terminate. A hard interrupt mid-build may leave this temp file behind,
+    # matching the existing risk profile of this script's other unprotected `mktemp` call sites.
+    # shellcheck disable=SC2064
+    trap "rm -f '$build_log'" RETURN
     local rc=0
 
     set +e
@@ -4970,8 +4979,30 @@ run_compose_build_with_snapshot_repair() {
         print_warning "This is a known upstream Docker Desktop/BuildKit defect, not a repository build issue."
         print_warning "Retrying this build with --no-cache to bypass the poisoned cache layer"
         print_warning "(no images or volumes are being removed)..."
+
+        # Insert --no-cache immediately after the "build" subcommand rather than blindly
+        # appending it at the end of the argv. Some call sites (e.g. the OrcaSlicer
+        # `docker build ... -t ... $BUILD_ARGS .` invocation) end with a positional build
+        # context path, and relying on the docker/buildx CLI to accept interspersed flags
+        # after a positional argument is CLI-version-dependent behavior we should not assume.
+        local -a retry_cmd=()
+        local inserted=0
+        local token
+        for token in "${cmd[@]}"; do
+            retry_cmd+=("$token")
+            if [ "$inserted" -eq 0 ] && [ "$token" = "build" ]; then
+                retry_cmd+=(--no-cache)
+                inserted=1
+            fi
+        done
+        if [ "$inserted" -eq 0 ]; then
+            # No literal "build" subcommand token found (shouldn't happen for our call sites);
+            # fall back to appending at the end.
+            retry_cmd+=(--no-cache)
+        fi
+
         set +e
-        "${cmd[@]}" --no-cache 2>&1 | tee -a "$build_log"
+        "${retry_cmd[@]}" 2>&1 | tee -a "$build_log"
         rc=${PIPESTATUS[0]}
         set -e
         if [ "$rc" -ne 0 ]; then
@@ -4981,7 +5012,6 @@ run_compose_build_with_snapshot_repair() {
         fi
     fi
 
-    rm -f "$build_log"
     return "$rc"
 }
 
