@@ -142,9 +142,29 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
         {
             _ = await _context.UserActions.AnyAsync();
         }
-        catch (Exception)
+        catch (Microsoft.Data.Sqlite.SqliteException sqlEx) when (sqlEx.Message?.Contains("no such table", StringComparison.OrdinalIgnoreCase) == true)
         {
-            return;
+            // Core tables aren't visible to this connection yet (e.g. a brief window after
+            // migration). This is the same transient condition InitializeAsync's outer seed
+            // retry loop already tolerates for SeedAllAsync as a whole, so log the reason and
+            // propagate rather than silently skipping the entire authentication seed here.
+            _logger.LogWarning(sqlEx, "[DB] Authentication seed probe failed: core tables not yet visible (SQLite); propagating so startup retry logic can recover");
+            throw;
+        }
+        catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P01")
+        {
+            // PostgreSQL error 42P01 = relation does not exist (table/view not found).
+            _logger.LogWarning(pgEx, "[DB] Authentication seed probe failed: core relation not yet visible (PostgreSQL); propagating so startup retry logic can recover");
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Anything else (connection drop, permissions error, provider quirk, etc.) is not a
+            // known-recoverable missing-table condition. Log the reason at error level and
+            // propagate so InitializeAsync's retry/failure handling sees it, instead of skipping
+            // the entire authentication seed silently.
+            _logger.LogError(ex, "[DB] Authentication seed probe failed unexpectedly; failing rather than silently skipping the authentication seed");
+            throw;
         }
 
         const int maxUniqueConstraintAttempts = 3;
@@ -164,12 +184,26 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
                 _ = await _context.SaveChangesAsync();
                 return;
             }
-            catch (DbUpdateException ex) when (attempt < maxUniqueConstraintAttempts && IsUniqueConstraintViolation(ex))
+            catch (DbUpdateException ex) when (IsUniqueConstraintViolation(ex))
             {
-                _logger.LogDebug(ex, "[DB] Authentication seed insert raced with another initializer; retrying from committed rows");
+                // Caught on every attempt, including the last: falling through to the explicit
+                // failure below (rather than letting the final attempt's exception propagate
+                // raw) gives a single, clear, domain-specific failure message regardless of
+                // which attempt exhausted the retries.
+                _logger.LogWarning(ex, "[DB] Authentication seed insert raced with another initializer; retrying from committed rows (attempt {Attempt}/{MaxAttempts})", attempt, maxUniqueConstraintAttempts);
                 _context.ChangeTracker.Clear();
             }
         }
+
+        // Every attempt hit a unique-constraint violation. Roles/permissions are not
+        // guaranteed to be fully seeded at this point, so fail loudly instead of returning
+        // normally: a silent return here would let InitializeAsync report success even though
+        // authentication data may be incomplete.
+        _logger.LogError(
+            "[DB] Authentication data seed failed after {MaxAttempts} attempts due to repeated unique constraint violations; refusing to report a successful seed.",
+            maxUniqueConstraintAttempts);
+        throw new InvalidOperationException(
+            $"[DB] Authentication data seed failed after {maxUniqueConstraintAttempts} attempts due to repeated unique constraint violations; refusing to report a successful seed.");
     }
 
     private async Task SeedActionsAsync()
