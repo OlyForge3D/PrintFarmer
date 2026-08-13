@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       commit_sha: ${{ steps.source.outputs.commit_sha }}
-      image_tag: ${{ steps.source.outputs.image_tag }}
       build_version: ${{ steps.source.outputs.build_version }}
     steps:
       - name: Checkout development
@@ -49,7 +48,6 @@ jobs:
           fi
 
           echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
-          echo "image_tag=sha-$commit_sha-run-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "build_version=development-${commit_sha:0:12}" >> "$GITHUB_OUTPUT"
           echo "Selected development commit: $commit_sha" >> "$GITHUB_STEP_SUMMARY"
 
@@ -103,7 +101,7 @@ jobs:
           cache-from: type=gha,scope=daily-${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=daily-${{ matrix.image }}
 
-      - name: Smoke check image contents
+      - name: Smoke check running image
         env:
           IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
           EXPECTED_REVISION: ${{ needs.source.outputs.commit_sha }}
@@ -118,19 +116,75 @@ jobs:
             exit 1
           fi
 
+          container="daily-smoke-$SERVICE"
+          cleanup() {
+            docker rm --force "$container" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
           case "$SERVICE" in
             frontend)
               docker run --rm "$IMAGE" nginx -t
+              docker run --detach --name "$container" "$IMAGE"
+              health_url="http://localhost:80/health"
+              ;;
+            api)
+              docker run --detach --name "$container" \
+                --env ASPNETCORE_ENVIRONMENT=Development \
+                --env DB_PROVIDER=Sqlite \
+                --env 'ConnectionStrings__Default=Data Source=/tmp/printfarmer-smoke.db' \
+                --env 'Jwt__Key=daily-image-smoke-only-key-32-bytes-minimum' \
+                --env PFARM__NetworkDiscovery__EnableDiscovery=false \
+                --env SlicerOrchestrator__EnableDistributedSlicing=false \
+                "$IMAGE"
+              health_url="http://localhost:5000/healthz"
+              ;;
+            slicer-host)
+              docker run --detach --name "$container" \
+                --env ASPNETCORE_ENVIRONMENT=Development \
+                --env DB_PROVIDER=Sqlite \
+                --env 'ConnectionStrings__Default=Data Source=/tmp/printfarmer-slicer-smoke.db' \
+                --env 'Jwt__Key=daily-image-smoke-only-key-32-bytes-minimum' \
+                "$IMAGE"
+              health_url="http://localhost:5246/healthz"
               ;;
             orcaslicer-worker)
               docker run --rm --entrypoint sh "$IMAGE" -c \
                 'test -x /opt/orcaslicer/bin/orca-slicer && test -s /etc/printfarmer/orcaslicer.sha256'
-              docker run --rm --entrypoint dotnet "$IMAGE" --info
+              docker run --detach --name "$container" \
+                --env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key' \
+                --env SlicerApi__BaseUrl=http://127.0.0.1:9 \
+                --env SlicerRegistry__ApiBaseUrl=http://127.0.0.1:9 \
+                --env Worker__ApiBaseUrl=http://127.0.0.1:9 \
+                "$IMAGE"
+              health_url="http://localhost:8080/healthz"
               ;;
-            *)
-              docker run --rm --entrypoint dotnet "$IMAGE" --info
+            printer-discovery)
+              docker run --detach --name "$container" \
+                --env ASPNETCORE_URLS=http://+:5246 \
+                --env Discovery__ApiBaseUrl=http://127.0.0.1:9 \
+                --env EnablePeriodicDiscovery=false \
+                --env PFARM__NetworkDiscovery__EnableDiscovery=false \
+                "$IMAGE"
+              health_url="http://localhost:5246/api/discovery/health"
               ;;
           esac
+
+          for _ in {1..45}; do
+            if [[ "$(docker inspect --format '{{.State.Running}}' "$container")" != "true" ]]; then
+              echo "$SERVICE container exited during startup"
+              docker logs "$container"
+              exit 1
+            fi
+            if docker exec "$container" curl --fail --silent --show-error "$health_url" >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "$SERVICE did not become healthy"
+          docker logs "$container"
+          exit 1
 
       - name: Save validated image archive
         env:
@@ -208,7 +262,7 @@ jobs:
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
-          TAG: ${{ needs.source.outputs.image_tag }}
+          TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           reference="$IMAGE:$TAG"
@@ -237,7 +291,7 @@ jobs:
           PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           SERVICE: ${{ matrix.image }}
-          TAG: ${{ needs.source.outputs.image_tag }}
+          TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           digest="$PUBLISHED_DIGEST"

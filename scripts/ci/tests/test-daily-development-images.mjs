@@ -44,7 +44,18 @@ test('all required images validate before publication', () => {
   assert.match(workflow, /file: \$\{\{ env\.DOCKERFILE \}\}/);
   assert.match(workflow, /cache-from: type=gha,scope=daily-/);
   assert.match(workflow, /cache-to: type=gha,mode=max,scope=daily-/);
-  assert.match(workflow, /Smoke check image contents/);
+  assert.match(workflow, /Smoke check running image/);
+  assert.match(workflow, /docker run --detach --name "\$container"/);
+  for (const healthPath of [
+    'localhost:5000/healthz',
+    'localhost:80/health',
+    'localhost:5246/healthz',
+    'localhost:5246/api/discovery/health',
+    'localhost:8080/healthz',
+  ]) {
+    assert.match(workflow, new RegExp(healthPath.replace('/', '\\/')));
+  }
+  assert.doesNotMatch(workflow, /--entrypoint dotnet "\$IMAGE" --info/);
   assert.match(workflow, /Upload validated image archive/);
   assert.match(workflow, /Download validated image archive/);
   assert.match(workflow, /docker load --input validated-image\/image\.tar/);
@@ -56,8 +67,9 @@ test('all required images validate before publication', () => {
 test('publication uses run-unique tags and emits one coherent digest manifest', () => {
   assert.match(
     workflow,
-    /image_tag=sha-\$commit_sha-run-\$GITHUB_RUN_ID-attempt-\$GITHUB_RUN_ATTEMPT/,
+    /TAG: sha-\$\{\{ needs\.source\.outputs\.commit_sha \}\}-run-\$\{\{ github\.run_id \}\}-attempt-\$\{\{ github\.run_attempt \}\}/,
   );
+  assert.doesNotMatch(workflow, /image_tag: \$\{\{ steps\.source\.outputs\.image_tag \}\}/);
   assert.doesNotMatch(workflow, /value=latest|:latest/);
   assert.doesNotMatch(workflow, /docker manifest inspect "\$reference"/);
   assert.match(workflow, /docker tag "\$VALIDATED_IMAGE" "\$reference"/);
@@ -91,7 +103,15 @@ test('registry and local validation overlays cover the complete stack', () => {
   assert.match(validationOverlay, /Worker__MaxConcurrentJobs: "1"/);
   assert.match(validationOverlay, /name: printfarmer-daily-validation/);
   assert.match(validationOverlay, /container_name: !reset null/);
-  assert.match(validationOverlay, /ports: !override\s+- "\$\{POSTGRES_PORT:-15432\}:5432"/);
+  for (const binding of [
+    '127.0.0.1:${POSTGRES_PORT:-15432}:5432',
+    '127.0.0.1:${API_PORT:-15245}:5245',
+    '127.0.0.1:${SLICER_HOST_PORT:-15246}:5246',
+    '127.0.0.1:${HTTP_PORT:-18080}:80',
+    '127.0.0.1:${HTTPS_PORT:-18443}:443',
+  ]) {
+    assert.match(validationOverlay, new RegExp(binding.replace(/[${}]/g, '\\$&')));
+  }
   assert.match(validationOverlay, /name: printfarmer-daily-validation-network/);
   assert.match(
     documentation,
