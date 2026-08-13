@@ -46,6 +46,7 @@ public class CreateLocationDto
 {
     [Required(ErrorMessage = "Location name is required.")]
     [StringLength(256, MinimumLength = 1, ErrorMessage = "Location name must be between 1 and 256 characters.")]
+    [RegularExpression(@"^[^/]+$", ErrorMessage = "Location name cannot contain '/'.")]
     public string Name { get; set; } = string.Empty;
 
     [StringLength(1024, ErrorMessage = "Location description cannot exceed 1024 characters.")]
@@ -63,6 +64,7 @@ public class CreateLocationDto
 public class UpdateLocationDto
 {
     [StringLength(256, MinimumLength = 1, ErrorMessage = "Location name must be between 1 and 256 characters.")]
+    [RegularExpression(@"^[^/]+$", ErrorMessage = "Location name cannot contain '/'.")]
     public string? Name { get; set; }
 
     [StringLength(1024, ErrorMessage = "Location description cannot exceed 1024 characters.")]

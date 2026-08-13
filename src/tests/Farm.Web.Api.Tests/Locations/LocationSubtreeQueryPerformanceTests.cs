@@ -205,6 +205,8 @@ public class LocationSubtreeQueryPerformanceTests : IDisposable
         List<Location> descendants = await repository.GetDescendantsAsync(Guid.NewGuid(), CancellationToken.None);
 
         descendants.Should().BeEmpty();
+        _interceptor.CommandCount.Should().BeLessThanOrEqualTo(1,
+            "an unknown location should only issue the root lookup, with no follow-up prefix-range query");
     }
 
     // =========================================================================
@@ -320,6 +322,178 @@ public class LocationSubtreeQueryPerformanceTests : IDisposable
 
         result.Select(p => p.PrinterId).Should().BeEquivalentTo([rootPrinter.Id, childPrinter.Id],
             "printers under an unrelated sibling location must not be included");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetSubtreePrintersAsync_AttributesEachPrinterToItsOwnLocation()
+    {
+        // Regression: LocationName is now derived from printer.Location?.Name ?? location.Name,
+        // replacing a guaranteed-correct dictionary lookup. Verify each printer's DTO carries the
+        // *correct* LocationId/LocationName, not just that the right set of printer IDs came back.
+        Location root = await CreateAndSaveLocationAsync("Root");
+        Location child = await CreateAndSaveLocationAsync("Child", root.Id);
+
+        Printer rootPrinter = await CreatePrinterInLocationAsync(root.Id);
+        Printer childPrinter = await CreatePrinterInLocationAsync(child.Id);
+
+        LocationService service = CreateLocationService();
+        List<LocationSubtreePrinterDto> result = await service.GetSubtreePrintersAsync(root.Id, CancellationToken.None);
+
+        LocationSubtreePrinterDto rootDto = result.Single(p => p.PrinterId == rootPrinter.Id);
+        rootDto.LocationId.Should().Be(root.Id);
+        rootDto.LocationName.Should().Be("Root");
+
+        LocationSubtreePrinterDto childDto = result.Single(p => p.PrinterId == childPrinter.Id);
+        childDto.LocationId.Should().Be(child.Id);
+        childDto.LocationName.Should().Be("Child", "a descendant printer must be attributed to its own location, not silently fall back to the root's name");
+    }
+
+    // =========================================================================
+    // Materialized-path prefix correctness edge cases
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetDescendantsAsync_DoesNotMatchSiblingWithNamePrefixCollision()
+    {
+        // Classic materialized-path bug: without a trailing-slash boundary, "/Room1" would also
+        // match "/Room10" via a naive StartsWith("/Room1").
+        Location parent = await CreateAndSaveLocationAsync("Building");
+        Location room1 = await CreateAndSaveLocationAsync("Room1", parent.Id);
+        Location room10 = await CreateAndSaveLocationAsync("Room10", parent.Id);
+        Location room1Child = await CreateAndSaveLocationAsync("Shelf", room1.Id);
+
+        var repository = new EfLocationRepository(_context);
+        List<Location> descendants = await repository.GetDescendantsAsync(room1.Id, CancellationToken.None);
+
+        descendants.Select(d => d.Id).Should().BeEquivalentTo([room1Child.Id],
+            "Room10 is a sibling, not a descendant of Room1, and must not be matched by prefix");
+        descendants.Select(d => d.Id).Should().NotContain(room10.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetDescendantsAsync_ExcludesInactiveDescendants()
+    {
+        Location root = await CreateAndSaveLocationAsync("Root");
+        Location activeChild = await CreateAndSaveLocationAsync("ActiveChild", root.Id);
+        Location inactiveChild = await CreateAndSaveLocationAsync("InactiveChild", root.Id);
+        Location inactiveGrandchild = await CreateAndSaveLocationAsync("Grandchild", inactiveChild.Id);
+
+        inactiveChild.IsActive = false;
+        inactiveGrandchild.IsActive = false;
+        await _context.SaveChangesAsync();
+
+        var repository = new EfLocationRepository(_context);
+        List<Location> descendants = await repository.GetDescendantsAsync(root.Id, CancellationToken.None);
+
+        descendants.Select(d => d.Id).Should().BeEquivalentTo([activeChild.Id],
+            "soft-deleted (IsActive = false) descendants must be excluded, matching the old BFS's filter");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetPrinterCountInSubtreeAsync_ExcludesPrintersUnderInactiveDescendants()
+    {
+        Location root = await CreateAndSaveLocationAsync("Root");
+        Location inactiveChild = await CreateAndSaveLocationAsync("InactiveChild", root.Id);
+        inactiveChild.IsActive = false;
+        await _context.SaveChangesAsync();
+
+        await CreatePrinterInLocationAsync(root.Id);
+        await CreatePrinterInLocationAsync(inactiveChild.Id);
+
+        var repository = new EfLocationRepository(_context);
+        int count = await repository.GetPrinterCountInSubtreeAsync(root.Id, CancellationToken.None);
+
+        count.Should().Be(1, "printers under an inactive descendant location must not be counted");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetDescendantsAsync_LocationNameWithLikeWildcardCharacters_MatchesOnlyRealDescendants()
+    {
+        // StartsWith translates to a SQL LIKE; '%' and '_' are wildcards in LIKE patterns unless
+        // escaped. EF Core escapes the argument automatically, but this is the first place in the
+        // codebase Path.StartsWith() is used for subtree filtering, so assert it directly.
+        Location parent = await CreateAndSaveLocationAsync("100%_Reliable");
+        Location child = await CreateAndSaveLocationAsync("Shelf", parent.Id);
+        Location unrelated = await CreateAndSaveLocationAsync("100X_ReliableX");
+
+        var repository = new EfLocationRepository(_context);
+        List<Location> descendants = await repository.GetDescendantsAsync(parent.Id, CancellationToken.None);
+
+        descendants.Select(d => d.Id).Should().BeEquivalentTo([child.Id],
+            "'%' and '_' in a location name must be treated literally, not as SQL LIKE wildcards");
+        descendants.Select(d => d.Id).Should().NotContain(unrelated.Id);
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task GetDescendantsAsync_UnrootedPath_FallsBackToParentIdTraversal_InsteadOfMatchingEveryLocation()
+    {
+        // Simulates legacy/imported data whose Path was never materialized (Location.Path
+        // defaults to "/"). A naive Path.StartsWith("/") would match every other active
+        // location in the table; the repository must detect this and fall back to a
+        // ParentId-based traversal instead.
+        var unrooted = new Location
+        {
+            Id = Guid.NewGuid(),
+            Name = "Imported",
+            Path = "/",
+            Depth = 0,
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow,
+            ModifiedAt = DateTime.UtcNow
+        };
+        _context.Locations.Add(unrooted);
+        await _context.SaveChangesAsync();
+
+        // A real, properly-rooted, unrelated location tree that must NOT be treated as a
+        // descendant of the unrooted location.
+        Location unrelatedRoot = await CreateAndSaveLocationAsync("UnrelatedRoot");
+        await CreateAndSaveLocationAsync("UnrelatedChild", unrelatedRoot.Id);
+
+        var repository = new EfLocationRepository(_context);
+        List<Location> descendants = await repository.GetDescendantsAsync(unrooted.Id, CancellationToken.None);
+
+        descendants.Should().BeEmpty("the unrooted location has no real ParentId-linked children, and must not match unrelated locations by a blanket '/' prefix");
+
+        int printerCount = await repository.GetPrinterCountInSubtreeAsync(unrooted.Id, CancellationToken.None);
+        printerCount.Should().Be(0);
+
+        List<Printer> printers = await repository.GetPrintersInSubtreeAsync(unrooted.Id, CancellationToken.None);
+        printers.Should().BeEmpty();
+    }
+
+    // =========================================================================
+    // Location name validation (tightly coupled: Path.StartsWith would otherwise
+    // treat '/' inside a name as a path separator, breaking subtree isolation)
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task CreateLocationAsync_NameContainingSlash_Throws()
+    {
+        LocationService service = CreateLocationService();
+
+        Func<Task> act = () => service.CreateLocationAsync(new CreateLocationDto { Name = "Foo/Bar" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>(
+            "a '/' inside a location name would otherwise be indistinguishable from a path separator in the materialized Path");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task UpdateLocationAsync_NameContainingSlash_Throws()
+    {
+        Location existing = await CreateAndSaveLocationAsync("Foo");
+        LocationService service = CreateLocationService();
+
+        Func<Task> act = () => service.UpdateLocationAsync(existing.Id, new UpdateLocationDto { Name = "Foo/Bar" }, CancellationToken.None);
+
+        await act.Should().ThrowAsync<ArgumentException>();
     }
 
     private LocationService CreateLocationService()

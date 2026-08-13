@@ -639,11 +639,19 @@ public class DataImportService : IDataImportService
 
                 if (existing == null)
                 {
+                    // Imports never carry hierarchy information (LocationExportDto has no
+                    // ParentId), so every imported location is a top-level node. Compute Path
+                    // the same way LocationService.CreateLocationAsync does for a root location
+                    // instead of leaving the Location.Path/Depth defaults ("/", 0-as-unset)
+                    // unpopulated, which would make every subtree query treat this location as
+                    // an ancestor of every other active location in the table.
                     _context.Locations.Add(new Location
                     {
                         Id = Guid.NewGuid(),
                         Name = dto.Name,
-                        Description = dto.Description
+                        Description = dto.Description,
+                        Path = $"/{dto.Name}",
+                        Depth = 0
                     });
                     imported++;
                 }

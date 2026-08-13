@@ -171,6 +171,11 @@ public class LocationService : ILocationService
             throw new ArgumentException("Location name is required", nameof(dto));
         }
 
+        if (dto.Name.Contains('/', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("Location name cannot contain '/'", nameof(dto));
+        }
+
         try
         {
             string trimmedName = dto.Name.Trim();
@@ -255,6 +260,11 @@ public class LocationService : ILocationService
             // Check for name duplicate under same parent if name is being changed
             if (!string.IsNullOrWhiteSpace(dto.Name) && dto.Name.Trim() != location.Name)
             {
+                if (dto.Name.Contains('/', StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("Location name cannot contain '/'", nameof(dto));
+                }
+
                 Guid? effectiveParentId = dto.ParentId ?? location.ParentId;
                 if (await _unitOfWork.Locations.ExistsByNameAndParentAsync(dto.Name.Trim(), effectiveParentId, ct))
                 {
