@@ -33,18 +33,10 @@ public sealed partial class OrcaPresetMappingService(ICatalogRepository catalogR
         }
 
         // Map filament presets
-        foreach (OrcaFilamentPresetDto filament in preview.Filaments)
-        {
-            FilamentPresetMatch match = MapFilamentPreset(filament);
-            result.FilamentMatches.Add(match);
-        }
+        result.FilamentMatches.AddRange(preview.Filaments.Select(MapFilamentPreset));
 
         // Map process presets
-        foreach (OrcaProcessPresetDto process in preview.Processes)
-        {
-            ProcessPresetMatch match = MapProcessPreset(process);
-            result.ProcessMatches.Add(match);
-        }
+        result.ProcessMatches.AddRange(preview.Processes.Select(MapProcessPreset));
 
         // Calculate statistics
         List<double> allMatches = result.PrinterMatches.Select(m => m.ConfidenceScore)

@@ -2431,9 +2431,8 @@ public sealed class MoonrakerSubscriptionService(
         string sectionHeader = $"[{sectionName}]";
         bool inSection = false;
 
-        foreach (string rawLine in content.Split('\n'))
+        foreach (string line in content.Split('\n').Select(rawLine => rawLine.Trim()))
         {
-            string line = rawLine.Trim();
             if (line.StartsWith('['))
             {
                 inSection = string.Equals(line, sectionHeader, StringComparison.OrdinalIgnoreCase);
@@ -2470,9 +2469,8 @@ public sealed class MoonrakerSubscriptionService(
         result.Clear();
         int currentFilaIndex = -1;
 
-        foreach (string rawLine in content.Split('\n'))
+        foreach (string line in content.Split('\n').Select(rawLine => rawLine.Trim()))
         {
-            string line = rawLine.Trim();
             if (line.StartsWith('['))
             {
                 currentFilaIndex = -1;

@@ -224,15 +224,12 @@ public class JobQueueService : IJobQueueService
     {
         List<PrintJob> jobs = await _dataService.GetPrintJobsForPrinterAsync(printerId, ct);
 
-        var dtos = new List<JobQueuePrintJobDto>(jobs.Count);
-        foreach (PrintJob job in jobs)
-        {
-            JobQueuePrintJobDto dto = MapToJobQueuePrintJobDto(
+        List<JobQueuePrintJobDto> dtos = jobs
+            .Select(job => MapToJobQueuePrintJobDto(
                 job,
                 job.GcodeFile?.Name ?? string.Empty,
-                job.AssignedPrinter?.Name ?? string.Empty);
-            dtos.Add(dto);
-        }
+                job.AssignedPrinter?.Name ?? string.Empty))
+            .ToList();
 
         List<JobQueuePrintJobDto> queued = dtos.Where(d => d.Status.HasValue && (d.Status.Value == Farm.Infrastructure.PrintJobStatus.Queued || d.Status.Value == Farm.Infrastructure.PrintJobStatus.Assigned)).ToList();
         for (int i = 0; i < queued.Count; i++)
