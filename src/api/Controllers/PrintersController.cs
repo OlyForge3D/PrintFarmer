@@ -1138,11 +1138,19 @@ public class PrintersController(
             return NotFound();
         }
 
-        // ServerUrl is editable configuration, so callers with view-only group access
-        // receive the rest of the details payload without the internal network address.
-        string? clientServerUrl = PrintFarmerPermissions.HasPermission(User, "printers:admin")
-            ? PrinterClientUrl.Create(p.ServerUrl)
-            : null;
+        // Internal connection settings are editable configuration. Only printer
+        // administrators receive the server URL or decrypted password.
+        bool canAdministerPrinters = PrintFarmerPermissions.HasPermission(User, "printers:admin");
+        string? effectivePassword = p.Password;
+        if ((PrinterBackend)p.Backend == PrinterBackend.PrusaLink
+            && string.IsNullOrWhiteSpace(effectivePassword)
+            && !string.IsNullOrWhiteSpace(p.ApiKey))
+        {
+            effectivePassword = p.ApiKey;
+        }
+
+        string? clientServerUrl = canAdministerPrinters ? PrinterClientUrl.Create(p.ServerUrl) : null;
+        string? clientPassword = canAdministerPrinters ? effectivePassword : null;
 
         // Get primary toolhead for capabilities DTO (backward compatibility)
         Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary) ?? p.Toolheads?.FirstOrDefault();
@@ -1223,6 +1231,7 @@ public class PrintersController(
         string? rowVersion = p.RowVersion is { Length: > 0 }
             ? Convert.ToBase64String(p.RowVersion)
             : null;
+        Response.Headers.CacheControl = "no-store";
         return new PrinterDetailsDto(
             p.Id,
             p.Name,
@@ -1247,7 +1256,7 @@ public class PrintersController(
             capabilitiesDto,
             toolheadDtos,
             p.Username,
-            p.Password,
+            clientPassword,
             p.ObicoEnabled,
             p.ServiceState?.ObicoServer?.Name,
             p.Wattage,
@@ -1264,7 +1273,7 @@ public class PrintersController(
             !string.IsNullOrWhiteSpace(p.ServerUrl),
             !string.IsNullOrWhiteSpace(p.ApiKey),
             !string.IsNullOrWhiteSpace(p.Username),
-            !string.IsNullOrWhiteSpace(p.Password),
+            !string.IsNullOrWhiteSpace(effectivePassword),
             false,
             false,
             rowVersion);
