@@ -110,6 +110,12 @@ export DB_PROVIDER=Postgres
 export ENABLE_DISTRIBUTED_SLICING=true
 export ENABLE_ORCA_WORKER=yes
 export ORCA_WORKER_COUNT=1
+export COMPOSE_PROJECT_NAME=printfarmer-daily-validation
+export API_PORT=15245
+export SLICER_HOST_PORT=15246
+export HTTP_PORT=18080
+export HTTPS_PORT=18443
+export POSTGRES_PORT=15432
 
 ./scripts/docker/compose-generator.sh \
   --architecture microservices \
@@ -122,14 +128,17 @@ export ORCA_WORKER_COUNT=1
 
 mkdir -p "$STACK_DIR/deploy"
 cp -R deploy/nginx "$STACK_DIR/deploy/nginx"
+./scripts/generate-certs.sh "$STACK_DIR/deploy/nginx/certs"
 
 docker compose \
+  --project-name "$COMPOSE_PROJECT_NAME" \
   -f "$STACK_DIR/docker-compose.yml" \
   -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   pull
 
 docker compose \
+  --project-name "$COMPOSE_PROJECT_NAME" \
   -f "$STACK_DIR/docker-compose.yml" \
   -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
@@ -140,19 +149,22 @@ The daily validation override runs the API normally in `Development` and explici
 enables the TestEmulator's three simulated printers. It disables periodic network
 discovery so local validation does not probe the physical network. The stack contains
 one upstream PostgreSQL container and exactly one OrcaSlicer worker.
+The dedicated project name, reset container names, isolated network, and high host
+ports prevent cleanup from targeting an existing PrintFarmer deployment.
 
 Wait for the application images to become healthy before starting local UI
 validation:
 
 ```bash
 docker compose \
+  --project-name "$COMPOSE_PROJECT_NAME" \
   -f "$STACK_DIR/docker-compose.yml" \
   -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   ps
 
-curl --fail --retry 30 --retry-delay 5 http://localhost:5245/healthz
-curl --fail --retry 30 --retry-delay 5 http://localhost:8080/
+curl --fail --retry 30 --retry-delay 5 http://localhost:15245/healthz
+curl --fail --retry 30 --retry-delay 5 http://localhost:18080/
 ```
 
 This build workflow performs only image-level smoke checks. Browser and Playwright
@@ -165,6 +177,7 @@ selected stack:
 
 ```bash
 docker compose \
+  --project-name "$COMPOSE_PROJECT_NAME" \
   -f "$STACK_DIR/docker-compose.yml" \
   -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
@@ -176,4 +189,5 @@ unset PRINTFARMER_SLICER_HOST_IMAGE PRINTFARMER_PRINTER_DISCOVERY_IMAGE
 unset PRINTFARMER_ORCASLICER_WORKER_IMAGE POSTGRES_PASSWORD Jwt__Key
 unset ORCASLICER_CONTAINER_DIGEST
 unset WORKER_SHARED_API_KEY DISCOVERY_SHARED_API_KEY ConnectionStrings__Default
+unset COMPOSE_PROJECT_NAME API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
 ```

@@ -11,6 +11,7 @@ const validationOverlay = readFileSync(
   'scripts/docker/compose-templates/docker-compose.daily-validation.yml',
   'utf8',
 );
+const documentation = readFileSync('docs/DAILY_DEVELOPMENT_IMAGES.md', 'utf8');
 const triggers = workflow.slice(workflow.indexOf('on:'), workflow.indexOf('concurrency:'));
 
 const services = [
@@ -58,6 +59,9 @@ test('publication is immutable and emits one coherent digest manifest', () => {
   assert.match(workflow, /Preserve an existing immutable tag/);
   assert.match(workflow, /Existing immutable tag does not match the validated image/);
   assert.match(workflow, /Immutable tag appeared with different content/);
+  assert.match(workflow, /Final published tag does not match the validated image/);
+  assert.match(workflow, /manifest unknown\|no such manifest\|not found/);
+  assert.match(workflow, /Unable to determine whether immutable tag exists/);
   assert.match(workflow, /Expected five image digest records/);
   assert.match(workflow, /name: daily-development-image-set/);
   assert.match(workflow, /retention-days: 90/);
@@ -84,4 +88,13 @@ test('registry and local validation overlays cover the complete stack', () => {
   assert.match(validationOverlay, /TestEmulator__Enabled: "true"/);
   assert.match(validationOverlay, /EnablePeriodicDiscovery: "false"/);
   assert.match(validationOverlay, /Worker__MaxConcurrentJobs: "1"/);
+  assert.match(validationOverlay, /name: printfarmer-daily-validation/);
+  assert.match(validationOverlay, /container_name: !reset null/);
+  assert.match(validationOverlay, /name: printfarmer-daily-validation-network/);
+  assert.match(
+    documentation,
+    /\.\/scripts\/generate-certs\.sh "\$STACK_DIR\/deploy\/nginx\/certs"/,
+  );
+  assert.match(documentation, /--project-name "\$COMPOSE_PROJECT_NAME"/);
+  assert.match(documentation, /export API_PORT=15245/);
 });

@@ -1,6 +1,12 @@
 # Local-only overrides for the digest-pinned daily development image set.
+name: printfarmer-daily-validation
+
 services:
+  database:
+    container_name: !reset null
+
   api:
+    container_name: !reset null
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       Security__DevModeBypassAuth: "true"
@@ -21,7 +27,17 @@ services:
       TestEmulator__Printers__2__Progress: "0"
       TestEmulator__Printers__2__PrintDurationSeconds: "60"
 
+  frontend:
+    container_name: !reset null
+
+  nginx-proxy:
+    container_name: !reset null
+
+  slicer-host:
+    container_name: !reset null
+
   printer-discovery:
+    container_name: !reset null
     environment:
       EnablePeriodicDiscovery: "false"
       PFARM__NetworkDiscovery__EnableDiscovery: "false"
@@ -29,3 +45,7 @@ services:
   orcaslicer-worker:
     environment:
       Worker__MaxConcurrentJobs: "1"
+
+networks:
+  printfarmer-network:
+    name: printfarmer-daily-validation-network
