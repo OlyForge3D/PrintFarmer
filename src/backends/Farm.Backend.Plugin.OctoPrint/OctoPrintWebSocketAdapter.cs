@@ -48,6 +48,13 @@ public sealed class OctoPrintWebSocketAdapter(
     private string? _sessionToken;
     private double? _lastBroadcastProgress;
 
+    /// <summary>
+    /// The last "printerupdated" payload actually broadcast for this printer, used to suppress
+    /// byte-identical re-broadcasts. Null until the first broadcast (including after a backend
+    /// restart, since this state is in-memory only), so the first message is never suppressed.
+    /// </summary>
+    private PrinterStatusUpdate? _lastBroadcastUpdate;
+
     // API state tracking
     private string _apiState = "unset"; // "responding", "authFail", "noResponse"
     private string _socketState = "unopened"; // "unopened", "connecting", "authenticated", "error", "closed"
@@ -280,9 +287,13 @@ public sealed class OctoPrintWebSocketAdapter(
                 SpoolInfo: null,
                 FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-            await _hub.Clients.Group(
-                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(_printerId))
-                .SendAsync("printerupdated", signalRUpdate, ct);
+            if (PrinterStatusBroadcastGate.ShouldBroadcast(_lastBroadcastUpdate, signalRUpdate))
+            {
+                await _hub.Clients.Group(
+                        Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(_printerId))
+                    .SendAsync("printerupdated", signalRUpdate, ct);
+                _lastBroadcastUpdate = signalRUpdate;
+            }
 #pragma warning disable S1244 // Explicit tolerance is appropriate for progress telemetry.
             bool progressChanged = _lastBroadcastProgress is null || status.Progress is null
                 ? _lastBroadcastProgress != status.Progress

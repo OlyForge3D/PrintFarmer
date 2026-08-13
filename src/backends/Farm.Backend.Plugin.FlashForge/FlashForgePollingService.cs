@@ -71,6 +71,13 @@ public sealed class FlashForgePollingService(
         /// Reset when the printer leaves "Printing" state so the next external print is detected.
         /// </summary>
         public bool ExternalJobCreatedForCurrentPrint { get; set; }
+
+        /// <summary>
+        /// The last "printerupdated" payload actually broadcast for this printer, used to suppress
+        /// byte-identical re-broadcasts. Null until the first broadcast (including after a backend
+        /// restart, since this state is in-memory only), so the first message is never suppressed.
+        /// </summary>
+        public PrinterStatusUpdate? LastBroadcastUpdate { get; set; }
     }
 
     /// <inheritdoc />
@@ -300,9 +307,14 @@ public sealed class FlashForgePollingService(
                         SpoolInfo: spoolInfo,
                         FileName: PrinterStatusDto.ExtractFileName(status.JobName));
 
-                    await _hub.Clients.Group(
-                            Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-                        .SendAsync("printerupdated", signalRUpdate, ct);
+                    if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, signalRUpdate))
+                    {
+                        await _hub.Clients.Group(
+                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                            .SendAsync("printerupdated", signalRUpdate, ct);
+                        state.LastBroadcastUpdate = signalRUpdate;
+                    }
+
                     await _coverageBroadcaster
                         .BroadcastJobProgressIfChangedAsync(printerId, progressChanged, ct)
                         .ConfigureAwait(false);
@@ -360,9 +372,13 @@ public sealed class FlashForgePollingService(
                             SpoolInfo: null,
                             FileName: null);
 
-                        await _hub.Clients.Group(
-                                Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
-                            .SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                        if (PrinterStatusBroadcastGate.ShouldBroadcast(state.LastBroadcastUpdate, offlineSignalRUpdate))
+                        {
+                            await _hub.Clients.Group(
+                                    Farm.Infrastructure.Security.AuthorizedHubGroups.Printer(printerId))
+                                .SendAsync("printerupdated", offlineSignalRUpdate, ct);
+                            state.LastBroadcastUpdate = offlineSignalRUpdate;
+                        }
                     }
                 }
 
