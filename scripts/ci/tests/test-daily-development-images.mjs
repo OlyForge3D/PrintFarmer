@@ -53,15 +53,16 @@ test('all required images validate before publication', () => {
   assert.match(workflow, /password: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
 });
 
-test('publication is immutable and emits one coherent digest manifest', () => {
-  assert.match(workflow, /echo "image_tag=sha-\$commit_sha"/);
+test('publication uses run-unique tags and emits one coherent digest manifest', () => {
+  assert.match(
+    workflow,
+    /image_tag=sha-\$commit_sha-run-\$GITHUB_RUN_ID-attempt-\$GITHUB_RUN_ATTEMPT/,
+  );
   assert.doesNotMatch(workflow, /value=latest|:latest/);
-  assert.match(workflow, /Preserve an existing immutable tag/);
-  assert.match(workflow, /Existing immutable tag does not match the validated image/);
-  assert.match(workflow, /Immutable tag appeared with different content/);
+  assert.doesNotMatch(workflow, /docker manifest inspect "\$reference"/);
+  assert.match(workflow, /docker tag "\$VALIDATED_IMAGE" "\$reference"/);
+  assert.match(workflow, /docker push "\$reference"/);
   assert.match(workflow, /Final published tag does not match the validated image/);
-  assert.match(workflow, /manifest unknown\|no such manifest\|not found/);
-  assert.match(workflow, /Unable to determine whether immutable tag exists/);
   assert.match(workflow, /Expected five image digest records/);
   assert.match(workflow, /name: daily-development-image-set/);
   assert.match(workflow, /retention-days: 90/);

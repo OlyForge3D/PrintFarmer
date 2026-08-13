@@ -20,9 +20,11 @@ Every successful run publishes these Linux AMD64 images:
 | Printer discovery | `ghcr.io/olyforge3d/printfarmer-printer-discovery` |
 | OrcaSlicer worker | `ghcr.io/olyforge3d/printfarmer-orcaslicer-worker` |
 
-The immutable tag is `sha-<full-development-commit>`. The workflow does not publish
-or consume `latest`. PostgreSQL and the nginx reverse proxy remain official upstream
-images and are not republished.
+Each publication gets a never-reused tag:
+`sha-<full-development-commit>-run-<workflow-run-id>-attempt-<attempt>`. GHCR does not
+provide server-enforced tag immutability, so the workflow avoids tag reuse and verifies
+the published image identity. It does not publish or consume `latest`. PostgreSQL and
+the nginx reverse proxy remain official upstream images and are not republished.
 
 Each image is built once, smoke checked, and saved as a short-lived workflow artifact
 before publication starts. The workflow publishes those exact tested image archives,
@@ -190,4 +192,5 @@ unset PRINTFARMER_ORCASLICER_WORKER_IMAGE POSTGRES_PASSWORD Jwt__Key
 unset ORCASLICER_CONTAINER_DIGEST
 unset WORKER_SHARED_API_KEY DISCOVERY_SHARED_API_KEY ConnectionStrings__Default
 unset COMPOSE_PROJECT_NAME API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
+unset DB_PROVIDER ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT
 ```

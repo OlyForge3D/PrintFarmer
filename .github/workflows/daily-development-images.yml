@@ -49,7 +49,7 @@ jobs:
           fi
 
           echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
-          echo "image_tag=sha-$commit_sha" >> "$GITHUB_OUTPUT"
+          echo "image_tag=sha-$commit_sha-run-$GITHUB_RUN_ID-attempt-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "build_version=development-${commit_sha:0:12}" >> "$GITHUB_OUTPUT"
           echo "Selected development commit: $commit_sha" >> "$GITHUB_STEP_SUMMARY"
 
@@ -203,50 +203,8 @@ jobs:
             exit 1
           fi
 
-      - name: Preserve an existing immutable tag
-        id: existing
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
-          VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
-          TAG: ${{ needs.source.outputs.image_tag }}
-        run: |
-          set -euo pipefail
-          reference="$IMAGE:$TAG"
-          inspect_error=""
-          if docker manifest inspect "$reference" >/dev/null 2>manifest-inspect.err; then
-            :
-          elif grep -Eqi 'manifest unknown|no such manifest|not found' manifest-inspect.err; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          else
-            inspect_error="$(cat manifest-inspect.err)"
-            echo "Unable to determine whether immutable tag exists: $inspect_error"
-            exit 1
-          fi
-
-          validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
-          docker pull "$reference"
-          existing_id="$(docker image inspect --format '{{.Id}}' "$reference")"
-          if [[ "$existing_id" != "$validated_id" ]]; then
-            echo "Existing immutable tag does not match the validated image"
-            exit 1
-          fi
-
-          repo_digest="$(docker image inspect \
-            --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' \
-            "$reference" | grep "^$IMAGE@" | head -n 1)"
-          digest="${repo_digest#*@}"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Existing tag returned invalid digest: $digest"
-            exit 1
-          fi
-
-          echo "exists=true" >> "$GITHUB_OUTPUT"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
       - name: Publish exact validated image
         id: publish
-        if: steps.existing.outputs.exists != 'true'
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
@@ -255,25 +213,8 @@ jobs:
           set -euo pipefail
           reference="$IMAGE:$TAG"
 
-          # Refuse to replace a tag that appeared after the initial check.
-          inspect_error=""
-          if docker manifest inspect "$reference" >/dev/null 2>manifest-inspect.err; then
-            docker pull "$reference"
-            validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
-            existing_id="$(docker image inspect --format '{{.Id}}' "$reference")"
-            if [[ "$existing_id" != "$validated_id" ]]; then
-              echo "Immutable tag appeared with different content"
-              exit 1
-            fi
-          elif grep -Eqi 'manifest unknown|no such manifest|not found' manifest-inspect.err; then
-            docker tag "$VALIDATED_IMAGE" "$reference"
-            docker push "$reference"
-          else
-            inspect_error="$(cat manifest-inspect.err)"
-            echo "Unable to recheck immutable tag before publication: $inspect_error"
-            exit 1
-          fi
-
+          docker tag "$VALIDATED_IMAGE" "$reference"
+          docker push "$reference"
           docker pull "$reference"
           validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
           published_id="$(docker image inspect --format '{{.Id}}' "$reference")"
@@ -293,14 +234,13 @@ jobs:
 
       - name: Record published digest
         env:
-          EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
           PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           SERVICE: ${{ matrix.image }}
           TAG: ${{ needs.source.outputs.image_tag }}
         run: |
           set -euo pipefail
-          digest="${EXISTING_DIGEST:-$PUBLISHED_DIGEST}"
+          digest="$PUBLISHED_DIGEST"
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Invalid published digest: $digest"
             exit 1
