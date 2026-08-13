@@ -120,8 +120,8 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
         }
 
         string[] parts = cidr.Split('/');
-        return parts.Length != 2
-            ? false
-            : !IPAddress.TryParse(parts[0], out _) ? false : int.TryParse(parts[1], out int prefix) && prefix >= 0 && prefix <= 32;
+        return parts.Length == 2
+            && IPAddress.TryParse(parts[0], out _)
+            && int.TryParse(parts[1], out int prefix) && prefix >= 0 && prefix <= 32;
     }
 }

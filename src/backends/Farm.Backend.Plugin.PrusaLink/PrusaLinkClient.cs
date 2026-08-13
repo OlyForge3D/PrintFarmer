@@ -632,7 +632,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
-            return job?.Id != null ? await _apiClient.PauseJobAsync(baseUrl, job.Id, credential, ct) : false;
+            return job?.Id != null && await _apiClient.PauseJobAsync(baseUrl, job.Id, credential, ct);
         }
         catch
         {
@@ -645,7 +645,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
-            return job?.Id != null ? await _apiClient.ResumeJobAsync(baseUrl, job.Id, credential, ct) : false;
+            return job?.Id != null && await _apiClient.ResumeJobAsync(baseUrl, job.Id, credential, ct);
         }
         catch
         {
@@ -658,7 +658,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         try
         {
             Job? job = await _apiClient.GetJobAsync(baseUrl, credential, ct);
-            return job?.Id != null ? await _apiClient.StopJobAsync(baseUrl, job.Id, credential, ct) : false;
+            return job?.Id != null && await _apiClient.StopJobAsync(baseUrl, job.Id, credential, ct);
         }
         catch
         {
