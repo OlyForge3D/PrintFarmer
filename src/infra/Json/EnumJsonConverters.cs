@@ -122,7 +122,7 @@ public sealed class StringToBoolJsonConverter : JsonConverter<bool>
                 JsonTokenType.True => true,
                 JsonTokenType.False => false,
                 JsonTokenType.String => ParseString(reader.GetString()),
-                JsonTokenType.Number => reader.TryGetInt32(out int i) ? i != 0 : false,
+                JsonTokenType.Number => reader.TryGetInt32(out int i) && i != 0,
                 _ => false
             };
         }
@@ -139,11 +139,10 @@ public sealed class StringToBoolJsonConverter : JsonConverter<bool>
 
     private static bool ParseString(string? value)
     {
-        return string.IsNullOrWhiteSpace(value)
-            ? false
-            : value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+        return !string.IsNullOrWhiteSpace(value) &&
+            (value.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                value.Equals("1", StringComparison.Ordinal) ||
-               value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+               value.Equals("yes", StringComparison.OrdinalIgnoreCase));
     }
 
     public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options)

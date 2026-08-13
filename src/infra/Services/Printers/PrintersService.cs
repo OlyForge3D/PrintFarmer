@@ -2643,8 +2643,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.PauseAsync(p!.BackendUrl, p.Credential, ct).ConfigureAwait(false)
-                : false;
+                && await controlClient!.PauseAsync(p!.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -2679,8 +2678,7 @@ public class PrintersService(
 
             // Try print job control capability
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.ResumeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
-                : false;
+                && await controlClient!.ResumeAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -2716,8 +2714,7 @@ public class PrintersService(
 
             // Try print job control capability - calls CancelAsync which routes to backend-specific cancel
             return _capabilityFactory.TryGetControlOperationsClientTyped(backend, out ISupportsControlOperations? controlClient)
-                ? await controlClient!.CancelAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false)
-                : false;
+                && await controlClient!.CancelAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -4116,8 +4113,7 @@ public class PrintersService(
 
             // Try start print capability
             return _capabilityFactory.TryGetStartPrintClientTyped(backend, out ISupportsStartPrint? startPrintClient)
-                ? await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false)
-                : false;
+                && await startPrintClient!.StartPrintAsync(p.BackendUrl, filename, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -4145,12 +4141,11 @@ public class PrintersService(
         return _capabilityFactory.TryGetFileDeleteClientTyped(
             backend,
             out ISupportsFileDelete? deleteClient)
-                ? await deleteClient!.DeleteFileAsync(
+                && await deleteClient!.DeleteFileAsync(
                     p.BackendUrl,
                     filename,
                     p.Credential,
-                    ct).ConfigureAwait(false)
-                : false;
+                    ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -4221,8 +4216,7 @@ public class PrintersService(
         {
             var backend = (PrinterBackend)p.Backend;
             return _capabilityFactory.TryGetFileUploadClientTyped(backend, out ISupportsFileUpload? uploadClient)
-                ? await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.Credential, ct).ConfigureAwait(false)
-                : false;
+                && await uploadClient!.UploadGcodeAsync(p.BackendUrl, filename, stream, p.Credential, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

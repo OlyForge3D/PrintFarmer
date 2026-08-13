@@ -58,7 +58,7 @@ public class EfFileConsistencyRepository(AppDbContext db, SlicerDbContext? slice
 
     public async Task<FileHealthAudit?> GetMostRecentHealthyAuditAsync(CancellationToken ct)
         => await _db.FileHealthAudits
-            .Where(a => a.HasIssues == false)
+            .Where(a => !a.HasIssues)
             .OrderByDescending(a => a.AuditDate)
             .FirstOrDefaultAsync(ct);
 

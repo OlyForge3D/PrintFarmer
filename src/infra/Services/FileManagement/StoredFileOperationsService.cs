@@ -170,7 +170,7 @@ public class StoredFileOperationsService(IFileManagementService fileManagementSe
     /// <param name="storageRoot">The allowed storage root directory.</param>
     public bool FileExistsAndIsSafe(string fullPath, string storageRoot)
     {
-        return string.IsNullOrEmpty(fullPath) || !_fileManagementService.IsSafePath(fullPath, storageRoot) ? false : File.Exists(fullPath);
+        return !string.IsNullOrEmpty(fullPath) && _fileManagementService.IsSafePath(fullPath, storageRoot) && File.Exists(fullPath);
     }
 
     /// <summary>
