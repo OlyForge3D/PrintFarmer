@@ -62,23 +62,19 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
             var printer = entry.Entity;
 
             // Encrypt ApiKey if it was modified or added
-            if (entry.State == EntityState.Added || entry.Property(p => p.ApiKey).IsModified)
+            if ((entry.State == EntityState.Added || entry.Property(p => p.ApiKey).IsModified) &&
+                !string.IsNullOrEmpty(printer.ApiKey) && !IsAlreadyEncrypted(printer.ApiKey))
             {
-                if (!string.IsNullOrEmpty(printer.ApiKey) && !IsAlreadyEncrypted(printer.ApiKey))
-                {
-                    printer.ApiKey = _protector.Protect(printer.ApiKey);
-                    _logger.LogDebug("Encrypted ApiKey for printer {PrinterId}", printer.Id);
-                }
+                printer.ApiKey = _protector.Protect(printer.ApiKey);
+                _logger.LogDebug("Encrypted ApiKey for printer {PrinterId}", printer.Id);
             }
 
             // Encrypt Password if it was modified or added
-            if (entry.State == EntityState.Added || entry.Property(p => p.Password).IsModified)
+            if ((entry.State == EntityState.Added || entry.Property(p => p.Password).IsModified) &&
+                !string.IsNullOrEmpty(printer.Password) && !IsAlreadyEncrypted(printer.Password))
             {
-                if (!string.IsNullOrEmpty(printer.Password) && !IsAlreadyEncrypted(printer.Password))
-                {
-                    printer.Password = _protector.Protect(printer.Password);
-                    _logger.LogDebug("Encrypted Password for printer {PrinterId}", printer.Id);
-                }
+                printer.Password = _protector.Protect(printer.Password);
+                _logger.LogDebug("Encrypted Password for printer {PrinterId}", printer.Id);
             }
         }
     }
@@ -92,13 +88,11 @@ public class SensitiveDataEncryptionInterceptor : SaveChangesInterceptor
         {
             var webhook = entry.Entity;
 
-            if (entry.State == EntityState.Added || entry.Property(w => w.Secret).IsModified)
+            if ((entry.State == EntityState.Added || entry.Property(w => w.Secret).IsModified) &&
+                !string.IsNullOrEmpty(webhook.Secret) && !IsAlreadyEncrypted(webhook.Secret))
             {
-                if (!string.IsNullOrEmpty(webhook.Secret) && !IsAlreadyEncrypted(webhook.Secret))
-                {
-                    webhook.Secret = _protector.Protect(webhook.Secret);
-                    _logger.LogDebug("Encrypted Secret for webhook {WebhookId}", webhook.Id);
-                }
+                webhook.Secret = _protector.Protect(webhook.Secret);
+                _logger.LogDebug("Encrypted Secret for webhook {WebhookId}", webhook.Id);
             }
         }
     }

@@ -651,15 +651,13 @@ public sealed partial class FlashForgeClient : IFlashForgeClient,
     internal static (double? Progress, string? JobName) ParseProgress(string response)
     {
         Match match = ProgressRegex().Match(response);
-        if (match.Success)
+        if (match.Success &&
+            long.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out long current) &&
+            long.TryParse(match.Groups[2].Value, CultureInfo.InvariantCulture, out long total) &&
+            total > 0)
         {
-            if (long.TryParse(match.Groups[1].Value, CultureInfo.InvariantCulture, out long current) &&
-                long.TryParse(match.Groups[2].Value, CultureInfo.InvariantCulture, out long total) &&
-                total > 0)
-            {
-                double progress = (double)current / total * 100.0;
-                return (Math.Round(progress, 1), null);
-            }
+            double progress = (double)current / total * 100.0;
+            return (Math.Round(progress, 1), null);
         }
 
         return (null, null);

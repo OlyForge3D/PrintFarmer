@@ -327,17 +327,14 @@ public sealed class MoonrakerSubscriptionService(
         foreach (Printer? p in enabledPrinters)
         {
             // Check if there's an existing subscription loop for this printer
-            if (_loops.TryGetValue(p.Id, out Task? existingTask))
+            if (_loops.TryGetValue(p.Id, out Task? existingTask) && existingTask.IsCompleted)
             {
                 // If the existing task has completed (either successfully or via exhausted retries),
                 // remove it so we can start a fresh subscription loop with reset retry count
-                if (existingTask.IsCompleted)
-                {
-                    await StopSubscriptionLoopAsync(p.Id, discardRuntimeState: false);
-                    _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
-                    _logger.LogInformation(
-                        "Restarting subscription loop for printer {PName} ({PId}) - previous loop completed", p.Name, p.Id);
-                }
+                await StopSubscriptionLoopAsync(p.Id, discardRuntimeState: false);
+                _connectionMetrics.TryRemove(p.Id, out _); // Reset metrics (reconnect attempts) too
+                _logger.LogInformation(
+                    "Restarting subscription loop for printer {PName} ({PId}) - previous loop completed", p.Name, p.Id);
             }
 
             if (!_loops.ContainsKey(p.Id))
@@ -1970,13 +1967,10 @@ public sealed class MoonrakerSubscriptionService(
                 lastSlotElem.ValueKind == JsonValueKind.String)
             {
                 string? lastSlot = lastSlotElem.GetString();
-                if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal))
+                if (lastSlot is not null && lastSlot.StartsWith("slot", StringComparison.Ordinal) && int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
                 {
-                    if (int.TryParse(lastSlot.AsSpan(4), out int slotIndex))
-                    {
-                        state.MmuActiveTool = slotIndex;
-                        state.MmuActiveGate = slotIndex >= 0 ? slotIndex : -1;
-                    }
+                    state.MmuActiveTool = slotIndex;
+                    state.MmuActiveGate = slotIndex >= 0 ? slotIndex : -1;
                 }
             }
 

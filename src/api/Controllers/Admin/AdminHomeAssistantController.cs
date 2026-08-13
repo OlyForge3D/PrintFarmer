@@ -334,12 +334,9 @@ public class AdminHomeAssistantController(
     private static bool IsPowerCapableEntity(JsonElement attrs)
     {
         // Prefer explicit device_class=power (instantaneous watt sensors).
-        if (attrs.TryGetProperty("device_class", out JsonElement dc))
+        if (attrs.TryGetProperty("device_class", out JsonElement dc) && (dc.GetString() ?? string.Empty) == "power")
         {
-            if ((dc.GetString() ?? string.Empty) == "power")
-            {
-                return true;
-            }
+            return true;
         }
 
         // Fall back to unit_of_measurement for switch entities that expose watts

@@ -2124,13 +2124,10 @@ public class PrintersController(
         {
             // Legacy: Update primary toolhead specs if no explicit toolheads array provided
             Toolhead? primaryToolhead = p.Toolheads?.FirstOrDefault(t => t.IsPrimary);
-            if (primaryToolhead != null)
+            if (primaryToolhead != null && dto.SupportedMaterials != null && dto.SupportedMaterials != primaryToolhead.SupportedMaterials)
             {
-                if (dto.SupportedMaterials != null && dto.SupportedMaterials != primaryToolhead.SupportedMaterials)
-                {
-                    primaryToolhead.SupportedMaterials = dto.SupportedMaterials;
-                    primaryToolhead.UpdatedAt = DateTime.UtcNow;
-                }
+                primaryToolhead.SupportedMaterials = dto.SupportedMaterials;
+                primaryToolhead.UpdatedAt = DateTime.UtcNow;
             }
         }
 

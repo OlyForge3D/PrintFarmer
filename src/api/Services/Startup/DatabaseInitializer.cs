@@ -458,21 +458,18 @@ public class DatabaseInitializer(AppDbContext context, ILogger<DatabaseInitializ
             {
                 Resource? resource = await _context.Resources.FirstOrDefaultAsync(r => r.Name == resourceName);
                 UserAction? action = await _context.UserActions.FirstOrDefaultAsync(a => a.Name == actionName);
-                if (resource != null && action != null)
+                if (resource != null && action != null && !await _context.RolePermissions.AnyAsync(rp =>
+                    rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
                 {
-                    if (!await _context.RolePermissions.AnyAsync(rp =>
-                        rp.RoleId == userRole.Id && rp.ResourceId == resource.Id && rp.ActionId == action.Id))
+                    _ = _context.RolePermissions.Add(new RolePermission
                     {
-                        _ = _context.RolePermissions.Add(new RolePermission
-                        {
-                            Id = Guid.NewGuid(),
-                            RoleId = userRole.Id,
-                            ResourceId = resource.Id,
-                            ActionId = action.Id,
-                            Granted = true,
-                            CreatedAt = DateTime.UtcNow
-                        });
-                    }
+                        Id = Guid.NewGuid(),
+                        RoleId = userRole.Id,
+                        ResourceId = resource.Id,
+                        ActionId = action.Id,
+                        Granted = true,
+                        CreatedAt = DateTime.UtcNow
+                    });
                 }
             }
         }

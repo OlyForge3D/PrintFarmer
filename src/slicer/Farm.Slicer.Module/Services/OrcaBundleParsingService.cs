@@ -295,12 +295,9 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
     {
         foreach (string key in keys)
         {
-            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value)
+            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value && value.TryGetValue(out string? str))
             {
-                if (value.TryGetValue(out string? str))
-                {
-                    return str;
-                }
+                return str;
             }
         }
 

@@ -662,12 +662,9 @@ public class ProfilesService(
         foreach ((Guid modelId, List<MachineProfileListItemDto> modelMachines) in machinesByModelId)
         {
             string manufacturerName = manufacturerFilter ?? modelMachines[0].Manufacturer;
-            if (string.IsNullOrWhiteSpace(manufacturerName) && manufacturerIdByModelId.TryGetValue(modelId, out Guid mid) && manufacturerNameById.TryGetValue(mid, out string? mName))
+            if (string.IsNullOrWhiteSpace(manufacturerName) && manufacturerIdByModelId.TryGetValue(modelId, out Guid mid) && manufacturerNameById.TryGetValue(mid, out string? mName) && !string.IsNullOrWhiteSpace(mName))
             {
-                if (!string.IsNullOrWhiteSpace(mName))
-                {
-                    manufacturerName = mName;
-                }
+                manufacturerName = mName;
             }
 
             if (string.IsNullOrWhiteSpace(manufacturerName))

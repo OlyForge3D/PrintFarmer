@@ -172,16 +172,13 @@ public partial class RoleManagementService(
         RoleDetailDto? before;
         try
         {
-            if (requestsDeactivation)
+            // Reload role.IsActive inside the transaction: the entity above was loaded
+            // before the transaction started, so it may be stale relative to the
+            // transaction's consistent serializable snapshot (e.g. concurrently
+            // reactivated/deactivated by another request in the meantime).
+            if (requestsDeactivation && !await _roles.ReloadRoleAsync(role, ct))
             {
-                // Reload role.IsActive inside the transaction: the entity above was loaded
-                // before the transaction started, so it may be stale relative to the
-                // transaction's consistent serializable snapshot (e.g. concurrently
-                // reactivated/deactivated by another request in the meantime).
-                if (!await _roles.ReloadRoleAsync(role, ct))
-                {
-                    throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
-                }
+                throw new RoleManagementException(RoleManagementErrorCode.NotFound, $"Role {roleId} was not found.");
             }
 
             // Captured after the (optional) reload above, so the audit trail's "before" state

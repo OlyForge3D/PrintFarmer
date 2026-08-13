@@ -473,12 +473,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                     {
                         JsonElement keyProp = plugin.GetProperty("key");
                         string? key = keyProp.GetString();
-                        if (!string.IsNullOrEmpty(key))
+                        if (!string.IsNullOrEmpty(key) && (key.Equals("display_current_position", StringComparison.OrdinalIgnoreCase) || key.Equals("positioninfo", StringComparison.OrdinalIgnoreCase)))
                         {
-                            if (key.Equals("display_current_position", StringComparison.OrdinalIgnoreCase) || key.Equals("positioninfo", StringComparison.OrdinalIgnoreCase))
-                            {
-                                hasPositionPlugin = true;
-                            }
+                            hasPositionPlugin = true;
                         }
                     }
                 }
@@ -570,23 +567,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 using JsonDocument doc = JsonDocument.Parse(jobStatusJson);
                 JsonElement root = doc.RootElement;
-                if (root.TryGetProperty("progress", out JsonElement progressProp))
+                if (root.TryGetProperty("progress", out JsonElement progressProp) && progressProp.TryGetProperty("completion", out JsonElement completion))
                 {
-                    if (progressProp.TryGetProperty("completion", out JsonElement completion))
-                    {
-                        progress = completion.GetDouble();
-                    }
+                    progress = completion.GetDouble();
                 }
 
-                if (root.TryGetProperty("job", out JsonElement jobProp))
+                if (root.TryGetProperty("job", out JsonElement jobProp) && jobProp.TryGetProperty("file", out JsonElement fileProp) && fileProp.TryGetProperty("name", out JsonElement nameProp))
                 {
-                    if (jobProp.TryGetProperty("file", out JsonElement fileProp))
-                    {
-                        if (fileProp.TryGetProperty("name", out JsonElement nameProp))
-                        {
-                            jobName = nameProp.GetString();
-                        }
-                    }
+                    jobName = nameProp.GetString();
                 }
             }
             catch
@@ -1854,17 +1842,14 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 job.PrintDuration = printTimeProp.GetDouble();
             }
 
-            if (jobElement.TryGetProperty("filament", out JsonElement filamentProp) && filamentProp.ValueKind == JsonValueKind.Object)
+            if (jobElement.TryGetProperty("filament", out JsonElement filamentProp) && filamentProp.ValueKind == JsonValueKind.Object && filamentProp.TryGetProperty("length", out JsonElement lengthProp))
             {
-                if (filamentProp.TryGetProperty("length", out JsonElement lengthProp))
+                if (lengthProp.ValueKind != JsonValueKind.Number)
                 {
-                    if (lengthProp.ValueKind != JsonValueKind.Number)
-                    {
-                        return null;
-                    }
-
-                    job.FilamentUsed = lengthProp.GetDouble() / 1000.0; // Convert from mm to m
+                    return null;
                 }
+
+                job.FilamentUsed = lengthProp.GetDouble() / 1000.0; // Convert from mm to m
             }
 
             if (jobElement.TryGetProperty("completionTime", out JsonElement completionProp) && completionProp.ValueKind != JsonValueKind.Null)
