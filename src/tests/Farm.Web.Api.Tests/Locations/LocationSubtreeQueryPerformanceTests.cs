@@ -496,6 +496,113 @@ public class LocationSubtreeQueryPerformanceTests : IDisposable
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
+    // =========================================================================
+    // Move/rename regression (#1516): RebuildPathAsync must leave Path materialized
+    // correctly for the single-round-trip subtree queries above, both within the same
+    // DbContext instance used for the move/rename and from a fresh DbContext after
+    // SaveChangesAsync (ruling out identity-map artifacts masking a persistence bug).
+    // =========================================================================
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task MoveAsync_ThenGetDescendantsOfNewParent_IncludesMovedSubtreeWithUpdatedPaths()
+    {
+        Location oldRoot = await CreateAndSaveLocationAsync("OldRoot");
+        Location movedNode = await CreateAndSaveLocationAsync("Moved", oldRoot.Id);
+        Location movedChild = await CreateAndSaveLocationAsync("MovedChild", movedNode.Id);
+        Location newRoot = await CreateAndSaveLocationAsync("NewRoot");
+
+        LocationService service = CreateLocationService();
+        var repository = new EfLocationRepository(_context);
+
+        LocationDto? result = await service.MoveAsync(movedNode.Id, newRoot.Id, CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Path.Should().Be("/NewRoot/Moved", "RebuildPathAsync must recompute Path against the new parent before returning");
+
+        // Same DbContext instance used for the move: the subtree query must see the
+        // post-move Path immediately, without requiring a fresh context/round trip.
+        List<Location> newRootDescendants = await repository.GetDescendantsAsync(newRoot.Id, CancellationToken.None);
+        newRootDescendants.Select(d => d.Id).Should().BeEquivalentTo([movedNode.Id, movedChild.Id],
+            "the moved subtree must appear under its new parent immediately, in the same DbContext instance used for the move");
+
+        Location movedNodeAfter = newRootDescendants.Single(d => d.Id == movedNode.Id);
+        Location movedChildAfter = newRootDescendants.Single(d => d.Id == movedChild.Id);
+        movedNodeAfter.Path.Should().Be("/NewRoot/Moved");
+        movedNodeAfter.Depth.Should().Be(1);
+        movedChildAfter.Path.Should().Be("/NewRoot/Moved/MovedChild");
+        movedChildAfter.Depth.Should().Be(2);
+
+        // The old parent's subtree must no longer contain the moved node/its descendant.
+        List<Location> oldRootDescendants = await repository.GetDescendantsAsync(oldRoot.Id, CancellationToken.None);
+        oldRootDescendants.Should().BeEmpty("the moved subtree must be removed from the old parent's descendants once ParentId/Path change");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task MoveAsync_ThenQueryFromFreshDbContext_SeesPersistedPathAfterSaveChanges()
+    {
+        Location oldRoot = await CreateAndSaveLocationAsync("OldRoot");
+        Location movedNode = await CreateAndSaveLocationAsync("Moved", oldRoot.Id);
+        Printer movedPrinter = await CreatePrinterInLocationAsync(movedNode.Id);
+        Location newRoot = await CreateAndSaveLocationAsync("NewRoot");
+
+        LocationService service = CreateLocationService();
+        await service.MoveAsync(movedNode.Id, newRoot.Id, CancellationToken.None);
+
+        // Open a brand-new DbContext against the same underlying (in-memory) SQLite connection
+        // to rule out identity-map/tracked-entity artifacts masking a real persistence bug: the
+        // subtree query must reflect the post-move Path purely from what SaveChangesAsync wrote.
+        DbContextOptions<AppDbContext> freshOptions = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(_connection)
+            .Options;
+        await using var freshContext = new AppDbContext(freshOptions);
+        var freshRepository = new EfLocationRepository(freshContext);
+
+        List<Location> descendants = await freshRepository.GetDescendantsAsync(newRoot.Id, CancellationToken.None);
+        descendants.Select(d => d.Id).Should().BeEquivalentTo([movedNode.Id]);
+        descendants.Single().Path.Should().Be("/NewRoot/Moved");
+
+        List<Printer> printers = await freshRepository.GetPrintersInSubtreeAsync(newRoot.Id, CancellationToken.None);
+        printers.Select(p => p.Id).Should().BeEquivalentTo([movedPrinter.Id],
+            "the printer assigned to the moved location must be found via the new parent's subtree query from a fresh DbContext, proving Path was durably persisted");
+    }
+
+    [Fact]
+    [Trait("Category", "Locations")]
+    public async Task UpdateLocationAsync_RenameMidTreeNode_PropagatesPathToDescendantsAndIsVisibleFromAncestorSubtreeQuery()
+    {
+        Location root = await CreateAndSaveLocationAsync("Root");
+        Location middle = await CreateAndSaveLocationAsync("OldName", root.Id);
+        Location leaf = await CreateAndSaveLocationAsync("Leaf", middle.Id);
+        await CreatePrinterInLocationAsync(leaf.Id);
+
+        LocationService service = CreateLocationService();
+        var repository = new EfLocationRepository(_context);
+
+        LocationDto? renamed = await service.UpdateLocationAsync(middle.Id, new UpdateLocationDto { Name = "NewName" }, CancellationToken.None);
+
+        renamed.Should().NotBeNull();
+        renamed!.Path.Should().Be("/Root/NewName");
+
+        // The ancestor's subtree query, in the same DbContext instance right after
+        // SaveChangesAsync, must reflect the renamed node's and its descendant's rebuilt Path.
+        List<Location> rootDescendants = await repository.GetDescendantsAsync(root.Id, CancellationToken.None);
+        Location middleAfter = rootDescendants.Single(d => d.Id == middle.Id);
+        Location leafAfter = rootDescendants.Single(d => d.Id == leaf.Id);
+
+        middleAfter.Path.Should().Be("/Root/NewName");
+        leafAfter.Path.Should().Be("/Root/NewName/Leaf", "RebuildPathAsync must recurse into descendants of the renamed node");
+        leafAfter.Depth.Should().Be(2);
+
+        int printerCount = await repository.GetPrinterCountInSubtreeAsync(root.Id, CancellationToken.None);
+        printerCount.Should().Be(1, "the leaf printer must still be counted under the root after the rename cascades through Path");
+
+        // And directly against the renamed node's own (new) subtree.
+        List<Location> renamedNodeDescendants = await repository.GetDescendantsAsync(middle.Id, CancellationToken.None);
+        renamedNodeDescendants.Select(d => d.Id).Should().BeEquivalentTo([leaf.Id]);
+    }
+
     private LocationService CreateLocationService()
     {
         var unitOfWork = new AppUnitOfWork(_context, Mock.Of<ISensitiveDataProtector>());
