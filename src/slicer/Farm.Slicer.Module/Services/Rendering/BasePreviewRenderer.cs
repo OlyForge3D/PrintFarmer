@@ -911,14 +911,9 @@ public abstract class BasePreviewRenderer
                 var ndcFaceNormal = Vector3.Cross(
                     ndcB.XYZ() - ndcA.XYZ(),
                     ndcC.XYZ() - ndcA.XYZ());
-                if (ndcFaceNormal.LengthSquared() > 1e-12f)
-                {
-                    ndcFaceNormal = Vector3.Normalize(ndcFaceNormal);
-                }
-                else
-                {
-                    ndcFaceNormal = Vector3.UnitZ;
-                }
+                ndcFaceNormal = ndcFaceNormal.LengthSquared() > 1e-12f
+                    ? Vector3.Normalize(ndcFaceNormal)
+                    : Vector3.UnitZ;
 
                 tris.Add(new Triangle
                 {
