@@ -57,8 +57,8 @@ test('all required images validate before publication', () => {
   }
   assert.doesNotMatch(workflow, /--entrypoint dotnet "\$IMAGE" --info/);
   assert.match(workflow, /Upload validated image archive/);
-  assert.match(workflow, /Download validated image archive/);
-  assert.match(workflow, /docker load --input validated-image\/image\.tar/);
+  assert.match(workflow, /Download validated image archives/);
+  assert.match(workflow, /docker load --input "\$archive\/image\.tar"/);
   assert.equal(workflow.match(/uses: docker\/build-push-action@v7/g)?.length, 1);
   assert.match(workflow, /packages: write/);
   assert.match(workflow, /password: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
@@ -70,14 +70,31 @@ test('publication uses run-unique tags and emits one coherent digest manifest', 
     /TAG: sha-\$\{\{ needs\.source\.outputs\.commit_sha \}\}-run-\$\{\{ github\.run_id \}\}-attempt-\$\{\{ github\.run_attempt \}\}/,
   );
   assert.doesNotMatch(workflow, /needs\.source\.outputs\.image_tag/);
+  assert.match(workflow, /artifact_attempt: \$\{\{ steps\.source\.outputs\.artifact_attempt \}\}/);
+  assert.match(
+    workflow,
+    /daily-validated-\$\{\{ matrix\.image \}\}-attempt-\$\{\{ needs\.source\.outputs\.artifact_attempt \}\}/,
+  );
+  assert.match(workflow, /name: Publish validated image set/);
+  assert.match(workflow, /services=\(api frontend slicer-host printer-discovery orcaslicer-worker\)/);
+  assert.match(workflow, /publication_attempt: \$\{\{ steps\.publish\.outputs\.publication_attempt \}\}/);
+  assert.match(
+    workflow,
+    /daily-digest-records-attempt-\$\{\{ needs\.publish-images\.outputs\.publication_attempt \}\}/,
+  );
+  assert.match(
+    workflow,
+    /IMAGE_TAG: sha-\$\{\{ needs\.source\.outputs\.commit_sha \}\}-run-\$\{\{ github\.run_id \}\}-attempt-\$\{\{ needs\.publish-images\.outputs\.publication_attempt \}\}/,
+  );
   assert.doesNotMatch(workflow, /value=latest|:latest/);
   assert.doesNotMatch(workflow, /docker manifest inspect "\$reference"/);
-  assert.match(workflow, /docker tag "\$VALIDATED_IMAGE" "\$reference"/);
+  assert.match(workflow, /docker tag "\$validated_image" "\$reference"/);
   assert.match(workflow, /docker push "\$reference"/);
-  assert.match(workflow, /Final published tag does not match the validated image/);
+  assert.match(workflow, /Final published \$service tag does not match the validated image/);
   assert.match(workflow, /Expected five image digest records/);
   assert.match(workflow, /name: daily-development-image-set/);
   assert.match(workflow, /retention-days: 90/);
+  assert.match(workflow, /overwrite: true/);
   assert.match(workflow, /reference: \(\.image \+ "@" \+ \.digest\)/);
   assert.match(workflow, /test\("\^sha256:\[0-9a-f\]\{64\}\$"\)/);
 });

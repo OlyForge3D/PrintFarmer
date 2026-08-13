@@ -24,6 +24,7 @@ jobs:
     outputs:
       commit_sha: ${{ steps.source.outputs.commit_sha }}
       build_version: ${{ steps.source.outputs.build_version }}
+      artifact_attempt: ${{ steps.source.outputs.artifact_attempt }}
     steps:
       - name: Checkout development
         uses: actions/checkout@v7
@@ -49,6 +50,7 @@ jobs:
 
           echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
           echo "build_version=development-${commit_sha:0:12}" >> "$GITHUB_OUTPUT"
+          echo "artifact_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
           echo "Selected development commit: $commit_sha" >> "$GITHUB_STEP_SUMMARY"
 
   validate-images:
@@ -198,40 +200,29 @@ jobs:
       - name: Upload validated image archive
         uses: actions/upload-artifact@v7
         with:
-          name: daily-validated-${{ matrix.image }}
+          name: daily-validated-${{ matrix.image }}-attempt-${{ needs.source.outputs.artifact_attempt }}
           path: validated-image/
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+          overwrite: true
 
   publish-images:
-    name: Publish ${{ matrix.image }}
+    name: Publish validated image set
     needs: [source, validate-images]
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    outputs:
+      publication_attempt: ${{ steps.publish.outputs.publication_attempt }}
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: api
-            target: api-runtime
-          - image: frontend
-            target: frontend-runtime
-          - image: slicer-host
-            target: slicer-host-runtime
-          - image: printer-discovery
-            target: printer-discovery-runtime
-          - image: orcaslicer-worker
-            target: orcaslicer-worker
     steps:
-      - name: Download validated image archive
+      - name: Download validated image archives
         uses: actions/download-artifact@v8
         with:
-          name: daily-validated-${{ matrix.image }}
-          path: validated-image
+          pattern: daily-validated-*-attempt-${{ needs.source.outputs.artifact_attempt }}
+          path: validated-images
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -240,81 +231,69 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load exact validated image
-        env:
-          IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
-          EXPECTED_REVISION: ${{ needs.source.outputs.commit_sha }}
-        run: |
-          set -euo pipefail
-          docker load --input validated-image/image.tar
-          expected_id="$(tr -d '[:space:]' < validated-image/image-id.txt)"
-          actual_id="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
-          revision="$(docker image inspect \
-            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
-            "$IMAGE")"
-          if [[ "$actual_id" != "$expected_id" || "$revision" != "$EXPECTED_REVISION" ]]; then
-            echo "Downloaded image does not match the validated image identity"
-            exit 1
-          fi
-
-      - name: Publish exact validated image
+      - name: Publish exact validated image set
         id: publish
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
-          VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
+          COMMIT_SHA: ${{ needs.source.outputs.commit_sha }}
           TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          VALIDATION_ATTEMPT: ${{ needs.source.outputs.artifact_attempt }}
         run: |
           set -euo pipefail
-          reference="$IMAGE:$TAG"
-
-          docker tag "$VALIDATED_IMAGE" "$reference"
-          docker push "$reference"
-          docker pull "$reference"
-          validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
-          published_id="$(docker image inspect --format '{{.Id}}' "$reference")"
-          if [[ "$published_id" != "$validated_id" ]]; then
-            echo "Final published tag does not match the validated image"
-            exit 1
-          fi
-          repo_digest="$(docker image inspect \
-            --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' \
-            "$reference" | grep "^$IMAGE@" | head -n 1)"
-          digest="${repo_digest#*@}"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Published tag returned invalid digest: $digest"
-            exit 1
-          fi
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
-
-      - name: Record published digest
-        env:
-          PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
-          SERVICE: ${{ matrix.image }}
-          TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          digest="$PUBLISHED_DIGEST"
-          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-            echo "Invalid published digest: $digest"
-            exit 1
-          fi
-
-          docker manifest inspect "$IMAGE@$digest" >/dev/null
           mkdir -p daily-image
-          jq -n \
-            --arg service "$SERVICE" \
-            --arg image "$IMAGE" \
-            --arg tag "$TAG" \
-            --arg digest "$digest" \
-            '{service: $service, image: $image, tag: $tag, digest: $digest}' \
-            > "daily-image/$SERVICE.json"
+          services=(api frontend slicer-host printer-discovery orcaslicer-worker)
+          for service in "${services[@]}"; do
+            archive="validated-images/daily-validated-$service-attempt-$VALIDATION_ATTEMPT"
+            validated_image="printfarmer-$service:validation-$COMMIT_SHA"
+            image="${REGISTRY}/${IMAGE_OWNER}/printfarmer-$service"
+            reference="$image:$TAG"
 
-      - name: Upload digest record
+            test -s "$archive/image.tar"
+            test -s "$archive/image-id.txt"
+            docker load --input "$archive/image.tar"
+            expected_id="$(tr -d '[:space:]' < "$archive/image-id.txt")"
+            actual_id="$(docker image inspect --format '{{.Id}}' "$validated_image")"
+            revision="$(docker image inspect \
+              --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+              "$validated_image")"
+            if [[ "$actual_id" != "$expected_id" || "$revision" != "$COMMIT_SHA" ]]; then
+              echo "$service archive does not match the validated image identity"
+              exit 1
+            fi
+
+            docker tag "$validated_image" "$reference"
+            docker push "$reference"
+            docker pull "$reference"
+            published_id="$(docker image inspect --format '{{.Id}}' "$reference")"
+            if [[ "$published_id" != "$actual_id" ]]; then
+              echo "Final published $service tag does not match the validated image"
+              exit 1
+            fi
+            repo_digest="$(docker image inspect \
+              --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' \
+              "$reference" | grep "^$image@" | head -n 1)"
+            digest="${repo_digest#*@}"
+            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+              echo "Published $service tag returned invalid digest: $digest"
+              exit 1
+            fi
+
+            docker manifest inspect "$image@$digest" >/dev/null
+            jq -n \
+              --arg service "$service" \
+              --arg image "$image" \
+              --arg tag "$TAG" \
+              --arg digest "$digest" \
+              '{service: $service, image: $image, tag: $tag, digest: $digest}' \
+              > "daily-image/$service.json"
+          done
+
+          echo "publication_attempt=$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload digest records
         uses: actions/upload-artifact@v7
         with:
-          name: daily-digest-${{ matrix.image }}
-          path: daily-image/${{ matrix.image }}.json
+          name: daily-digest-records-attempt-${{ github.run_attempt }}
+          path: daily-image/*.json
           if-no-files-found: error
           retention-days: 90
 
@@ -339,13 +318,13 @@ jobs:
       - name: Download digest records
         uses: actions/download-artifact@v8
         with:
-          pattern: daily-digest-*
+          name: daily-digest-records-attempt-${{ needs.publish-images.outputs.publication_attempt }}
           path: artifacts
 
       - name: Create and validate image-set manifest
         env:
           COMMIT_SHA: ${{ needs.source.outputs.commit_sha }}
-          IMAGE_TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
+          IMAGE_TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ needs.publish-images.outputs.publication_attempt }}
         run: |
           set -euo pipefail
           mapfile -t records < <(find artifacts -type f -name '*.json' | sort)
@@ -415,6 +394,7 @@ jobs:
           path: daily-image-set/
           if-no-files-found: error
           retention-days: 90
+          overwrite: true
 
       - name: Summarize immutable image set
         run: |
@@ -422,7 +402,7 @@ jobs:
             echo "## Daily development image set"
             echo
             echo "- Commit: \`${{ needs.source.outputs.commit_sha }}\`"
-            echo "- Tag: \`sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}\`"
+            echo "- Tag: \`sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ needs.publish-images.outputs.publication_attempt }}\`"
             echo "- Artifact: \`daily-development-image-set\`"
             echo
             echo "The artifact contains digest-pinned references for all five application images."
