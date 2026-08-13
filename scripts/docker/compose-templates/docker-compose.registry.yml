@@ -12,9 +12,6 @@
 #   2. Set image tag: export REGISTRY_IMAGE_TAG=latest
 #   3. Deploy: docker compose -f docker-compose.yml -f docker-compose.registry.yml up
 #
-# Per-service PRINTFARMER_*_IMAGE variables take precedence and accept digest
-# references. Use them when consuming a coherent daily image-set manifest.
-#
 # Available tags (created by GitHub Actions):
 #   - latest           Latest build from main branch
 #   - <branch-name>    Branch name (e.g., main, release)
@@ -24,25 +21,15 @@
 services:
   # Override API to use registry image
   api:
-    image: ${PRINTFARMER_API_IMAGE:-${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-api:${REGISTRY_IMAGE_TAG:-latest}}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-api:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null
     
   # Override React frontend to use registry image
   frontend:
-    image: ${PRINTFARMER_FRONTEND_IMAGE:-${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-frontend:${REGISTRY_IMAGE_TAG:-latest}}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-frontend:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null
     
   # Override printer-discovery to use registry image (when included)
   printer-discovery:
-    image: ${PRINTFARMER_PRINTER_DISCOVERY_IMAGE:-${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG:-latest}}
-    build: !reset null
-
-  # Override slicer-host to use registry image (when OrcaSlicer is enabled)
-  slicer-host:
-    image: ${PRINTFARMER_SLICER_HOST_IMAGE:-${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-slicer-host:${REGISTRY_IMAGE_TAG:-latest}}
-    build: !reset null
-
-  # Override OrcaSlicer worker to use registry image
-  orcaslicer-worker:
-    image: ${PRINTFARMER_ORCASLICER_WORKER_IMAGE:-${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-orcaslicer-worker:${REGISTRY_IMAGE_TAG:-latest}}
+    image: ${REGISTRY_HOST:-ghcr.io/olyforge3d}/printfarmer-printer-discovery:${REGISTRY_IMAGE_TAG:-latest}
     build: !reset null

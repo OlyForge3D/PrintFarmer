@@ -132,6 +132,24 @@ jobs:
               ;;
           esac
 
+      - name: Save validated image archive
+        env:
+          IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p validated-image
+          docker image inspect --format '{{.Id}}' "$IMAGE" > validated-image/image-id.txt
+          docker save --output validated-image/image.tar "$IMAGE"
+
+      - name: Upload validated image archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: daily-validated-${{ matrix.image }}
+          path: validated-image/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
   publish-images:
     name: Publish ${{ matrix.image }}
     needs: [source, validate-images]
@@ -155,14 +173,11 @@ jobs:
           - image: orcaslicer-worker
             target: orcaslicer-worker
     steps:
-      - name: Checkout selected commit
-        uses: actions/checkout@v7
+      - name: Download validated image archive
+        uses: actions/download-artifact@v8
         with:
-          ref: ${{ needs.source.outputs.commit_sha }}
-          persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+          name: daily-validated-${{ matrix.image }}
+          path: validated-image
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -171,30 +186,48 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Load exact validated image
+        env:
+          IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
+          EXPECTED_REVISION: ${{ needs.source.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          docker load --input validated-image/image.tar
+          expected_id="$(tr -d '[:space:]' < validated-image/image-id.txt)"
+          actual_id="$(docker image inspect --format '{{.Id}}' "$IMAGE")"
+          revision="$(docker image inspect \
+            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+            "$IMAGE")"
+          if [[ "$actual_id" != "$expected_id" || "$revision" != "$EXPECTED_REVISION" ]]; then
+            echo "Downloaded image does not match the validated image identity"
+            exit 1
+          fi
+
       - name: Preserve an existing immutable tag
         id: existing
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
+          VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
           TAG: ${{ needs.source.outputs.image_tag }}
-          EXPECTED_REVISION: ${{ needs.source.outputs.commit_sha }}
         run: |
           set -euo pipefail
           reference="$IMAGE:$TAG"
-          if ! docker buildx imagetools inspect "$reference" >/dev/null 2>&1; then
+          if ! docker manifest inspect "$reference" >/dev/null 2>&1; then
             echo "exists=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
           docker pull "$reference"
-          revision="$(docker image inspect \
-            --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
-            "$reference")"
-          if [[ "$revision" != "$EXPECTED_REVISION" ]]; then
-            echo "Existing immutable tag has revision '$revision', expected '$EXPECTED_REVISION'"
+          existing_id="$(docker image inspect --format '{{.Id}}' "$reference")"
+          if [[ "$existing_id" != "$validated_id" ]]; then
+            echo "Existing immutable tag does not match the validated image"
             exit 1
           fi
 
-          repo_digest="$(docker image inspect --format '{{ index .RepoDigests 0 }}' "$reference")"
+          repo_digest="$(docker image inspect \
+            --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' \
+            "$reference" | grep "^$IMAGE@" | head -n 1)"
           digest="${repo_digest#*@}"
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Existing tag returned invalid digest: $digest"
@@ -204,53 +237,58 @@ jobs:
           echo "exists=true" >> "$GITHUB_OUTPUT"
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
-      - name: Build and publish immutable tag
-        id: build
+      - name: Publish exact validated image
+        id: publish
         if: steps.existing.outputs.exists != 'true'
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ env.DOCKERFILE }}
-          target: ${{ matrix.target }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}:${{ needs.source.outputs.image_tag }}
-          labels: |
-            org.opencontainers.image.title=printfarmer-${{ matrix.image }}
-            org.opencontainers.image.description=PrintFarmer daily development ${{ matrix.image }} image
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ needs.source.outputs.commit_sha }}
-            org.opencontainers.image.version=${{ needs.source.outputs.build_version }}
-            org.opencontainers.image.licenses=AGPL-3.0-only
-          build-args: |
-            BUILD_VERBOSITY=quiet
-            GIT_SHA=${{ needs.source.outputs.commit_sha }}
-            VITE_GIT_SHA=${{ needs.source.outputs.commit_sha }}
-            BUILD_VERSION=${{ needs.source.outputs.build_version }}
-            VCS_REF=${{ needs.source.outputs.commit_sha }}
-            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
-            ALLOW_STUB=0
-          sbom: true
-          provenance: mode=max
-          cache-from: type=gha,scope=daily-${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=daily-${{ matrix.image }}
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
+          VALIDATED_IMAGE: printfarmer-${{ matrix.image }}:validation-${{ needs.source.outputs.commit_sha }}
+          TAG: ${{ needs.source.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          reference="$IMAGE:$TAG"
+
+          # Refuse to replace a tag that appeared after the initial check.
+          if docker manifest inspect "$reference" >/dev/null 2>&1; then
+            docker pull "$reference"
+            validated_id="$(docker image inspect --format '{{.Id}}' "$VALIDATED_IMAGE")"
+            existing_id="$(docker image inspect --format '{{.Id}}' "$reference")"
+            if [[ "$existing_id" != "$validated_id" ]]; then
+              echo "Immutable tag appeared with different content"
+              exit 1
+            fi
+          else
+            docker tag "$VALIDATED_IMAGE" "$reference"
+            docker push "$reference"
+          fi
+
+          docker pull "$reference"
+          repo_digest="$(docker image inspect \
+            --format '{{ range .RepoDigests }}{{ println . }}{{ end }}' \
+            "$reference" | grep "^$IMAGE@" | head -n 1)"
+          digest="${repo_digest#*@}"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "Published tag returned invalid digest: $digest"
+            exit 1
+          fi
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
       - name: Record published digest
         env:
           EXISTING_DIGEST: ${{ steps.existing.outputs.digest }}
-          BUILT_DIGEST: ${{ steps.build.outputs.digest }}
+          PUBLISHED_DIGEST: ${{ steps.publish.outputs.digest }}
           IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
           SERVICE: ${{ matrix.image }}
           TAG: ${{ needs.source.outputs.image_tag }}
         run: |
           set -euo pipefail
-          digest="${EXISTING_DIGEST:-$BUILT_DIGEST}"
+          digest="${EXISTING_DIGEST:-$PUBLISHED_DIGEST}"
           if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
             echo "Invalid published digest: $digest"
             exit 1
           fi
 
-          docker buildx imagetools inspect "$IMAGE@$digest" >/dev/null
+          docker manifest inspect "$IMAGE@$digest" >/dev/null
           mkdir -p daily-image
           jq -n \
             --arg service "$SERVICE" \
@@ -276,6 +314,16 @@ jobs:
       contents: read
       packages: read
     steps:
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download digest records
         uses: actions/download-artifact@v8
         with:
@@ -293,6 +341,20 @@ jobs:
             echo "Expected five image digest records, found ${#records[@]}"
             exit 1
           fi
+
+          for record in "${records[@]}"; do
+            image="$(jq -er '.image' "$record")"
+            tag="$(jq -er '.tag' "$record")"
+            digest="$(jq -er '.digest' "$record")"
+            actual_digest="$(
+              docker buildx imagetools inspect "$image:$tag" |
+                awk '/^Digest:/ {print $2; exit}'
+            )"
+            if [[ "$actual_digest" != "$digest" ]]; then
+              echo "$image:$tag resolves to $actual_digest, expected $digest"
+              exit 1
+            fi
+          done
 
           mkdir -p daily-image-set
           jq -s \

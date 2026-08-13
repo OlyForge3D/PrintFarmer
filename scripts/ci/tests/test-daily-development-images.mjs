@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/daily-development-images.yml', 'utf8');
-const registryOverlay = readFileSync(
-  'scripts/docker/compose-templates/docker-compose.registry.yml',
+const dailyRegistryOverlay = readFileSync(
+  'scripts/docker/compose-templates/docker-compose.daily-registry.yml',
   'utf8',
 );
 const validationOverlay = readFileSync(
@@ -44,6 +44,10 @@ test('all required images validate before publication', () => {
   assert.match(workflow, /cache-from: type=gha,scope=daily-/);
   assert.match(workflow, /cache-to: type=gha,mode=max,scope=daily-/);
   assert.match(workflow, /Smoke check image contents/);
+  assert.match(workflow, /Upload validated image archive/);
+  assert.match(workflow, /Download validated image archive/);
+  assert.match(workflow, /docker load --input validated-image\/image\.tar/);
+  assert.equal(workflow.match(/uses: docker\/build-push-action@v7/g)?.length, 1);
   assert.match(workflow, /packages: write/);
   assert.match(workflow, /password: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
 });
@@ -52,7 +56,8 @@ test('publication is immutable and emits one coherent digest manifest', () => {
   assert.match(workflow, /echo "image_tag=sha-\$commit_sha"/);
   assert.doesNotMatch(workflow, /value=latest|:latest/);
   assert.match(workflow, /Preserve an existing immutable tag/);
-  assert.match(workflow, /Existing immutable tag has revision/);
+  assert.match(workflow, /Existing immutable tag does not match the validated image/);
+  assert.match(workflow, /Immutable tag appeared with different content/);
   assert.match(workflow, /Expected five image digest records/);
   assert.match(workflow, /name: daily-development-image-set/);
   assert.match(workflow, /retention-days: 90/);
@@ -62,7 +67,7 @@ test('publication is immutable and emits one coherent digest manifest', () => {
 
 test('registry and local validation overlays cover the complete stack', () => {
   for (const [service] of services) {
-    assert.match(registryOverlay, new RegExp(`^  ${service}:`, 'm'));
+    assert.match(dailyRegistryOverlay, new RegExp(`^  ${service}:`, 'm'));
   }
 
   for (const variable of [
@@ -72,10 +77,11 @@ test('registry and local validation overlays cover the complete stack', () => {
     'PRINTFARMER_PRINTER_DISCOVERY_IMAGE',
     'PRINTFARMER_ORCASLICER_WORKER_IMAGE',
   ]) {
-    assert.match(registryOverlay, new RegExp(variable));
+    assert.match(dailyRegistryOverlay, new RegExp(variable));
   }
 
-  assert.match(validationOverlay, /ASPNETCORE_ENVIRONMENT: Testing/);
+  assert.match(validationOverlay, /ASPNETCORE_ENVIRONMENT: Development/);
+  assert.match(validationOverlay, /TestEmulator__Enabled: "true"/);
   assert.match(validationOverlay, /EnablePeriodicDiscovery: "false"/);
   assert.match(validationOverlay, /Worker__MaxConcurrentJobs: "1"/);
 });

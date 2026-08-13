@@ -24,8 +24,9 @@ The immutable tag is `sha-<full-development-commit>`. The workflow does not publ
 or consume `latest`. PostgreSQL and the nginx reverse proxy remain official upstream
 images and are not republished.
 
-Each image is built and smoke checked before publication starts. The workflow then
-publishes the SHA tags, records their registry digests, and uploads one
+Each image is built once, smoke checked, and saved as a short-lived workflow artifact
+before publication starts. The workflow publishes those exact tested image archives,
+records their registry digests, and uploads one
 `daily-development-image-set` artifact. Its `image-set.json` contains the tested
 commit and the digest-pinned reference for every image. Local automation must treat
 that file as the atomic release unit and must not combine references from different
@@ -119,23 +120,26 @@ export ORCA_WORKER_COUNT=1
   --exclude-telemetry \
   --output-dir "$STACK_DIR"
 
+mkdir -p "$STACK_DIR/deploy"
+cp -R deploy/nginx "$STACK_DIR/deploy/nginx"
+
 docker compose \
   -f "$STACK_DIR/docker-compose.yml" \
-  -f scripts/docker/compose-templates/docker-compose.registry.yml \
+  -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   pull
 
 docker compose \
   -f "$STACK_DIR/docker-compose.yml" \
-  -f scripts/docker/compose-templates/docker-compose.registry.yml \
+  -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   up -d --scale orcaslicer-worker=1
 ```
 
-The daily validation override runs the API in its existing `Testing` environment,
-which enables the TestEmulator's three simulated printers. It disables periodic
-network discovery so local validation does not probe the physical network. The
-stack contains one upstream PostgreSQL container and exactly one OrcaSlicer worker.
+The daily validation override runs the API normally in `Development` and explicitly
+enables the TestEmulator's three simulated printers. It disables periodic network
+discovery so local validation does not probe the physical network. The stack contains
+one upstream PostgreSQL container and exactly one OrcaSlicer worker.
 
 Wait for the application images to become healthy before starting local UI
 validation:
@@ -143,7 +147,7 @@ validation:
 ```bash
 docker compose \
   -f "$STACK_DIR/docker-compose.yml" \
-  -f scripts/docker/compose-templates/docker-compose.registry.yml \
+  -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   ps
 
@@ -162,7 +166,7 @@ selected stack:
 ```bash
 docker compose \
   -f "$STACK_DIR/docker-compose.yml" \
-  -f scripts/docker/compose-templates/docker-compose.registry.yml \
+  -f scripts/docker/compose-templates/docker-compose.daily-registry.yml \
   -f scripts/docker/compose-templates/docker-compose.daily-validation.yml \
   down --volumes --remove-orphans
 

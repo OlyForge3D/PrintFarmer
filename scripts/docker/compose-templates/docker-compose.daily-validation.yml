@@ -2,9 +2,24 @@
 services:
   api:
     environment:
-      ASPNETCORE_ENVIRONMENT: Testing
+      ASPNETCORE_ENVIRONMENT: Development
       Security__DevModeBypassAuth: "true"
       PFARM__NetworkDiscovery__EnableDiscovery: "false"
+      TestEmulator__Enabled: "true"
+      TestEmulator__MockDiscovery: "true"
+      TestEmulator__MockSpoolman: "true"
+      TestEmulator__Printers__0__Name: Test Printer Alpha
+      TestEmulator__Printers__0__InitialState: Idle
+      TestEmulator__Printers__0__Progress: "0"
+      TestEmulator__Printers__0__PrintDurationSeconds: "60"
+      TestEmulator__Printers__1__Name: Test Printer Beta
+      TestEmulator__Printers__1__InitialState: Printing
+      TestEmulator__Printers__1__Progress: "42"
+      TestEmulator__Printers__1__PrintDurationSeconds: "36000"
+      TestEmulator__Printers__2__Name: Test Printer Gamma
+      TestEmulator__Printers__2__InitialState: Error
+      TestEmulator__Printers__2__Progress: "0"
+      TestEmulator__Printers__2__PrintDurationSeconds: "60"
 
   printer-discovery:
     environment:
