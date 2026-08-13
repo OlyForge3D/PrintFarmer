@@ -4,11 +4,14 @@ name: printfarmer-daily-validation
 services:
   database:
     container_name: !reset null
+    ports: !override
+      - "${POSTGRES_PORT:-15432}:5432"
 
   api:
     container_name: !reset null
     environment:
       ASPNETCORE_ENVIRONMENT: Development
+      # Local validation only: never expose this stack to an untrusted network.
       Security__DevModeBypassAuth: "true"
       PFARM__NetworkDiscovery__EnableDiscovery: "false"
       TestEmulator__Enabled: "true"

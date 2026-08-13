@@ -91,6 +91,7 @@ test('registry and local validation overlays cover the complete stack', () => {
   assert.match(validationOverlay, /Worker__MaxConcurrentJobs: "1"/);
   assert.match(validationOverlay, /name: printfarmer-daily-validation/);
   assert.match(validationOverlay, /container_name: !reset null/);
+  assert.match(validationOverlay, /ports: !override\s+- "\$\{POSTGRES_PORT:-15432\}:5432"/);
   assert.match(validationOverlay, /name: printfarmer-daily-validation-network/);
   assert.match(
     documentation,
@@ -98,4 +99,6 @@ test('registry and local validation overlays cover the complete stack', () => {
   );
   assert.match(documentation, /--project-name "\$COMPOSE_PROJECT_NAME"/);
   assert.match(documentation, /export API_PORT=15245/);
+  assert.match(documentation, /export POSTGRES_USER=printfarmer/);
+  assert.match(documentation, /unset POSTGRES_USER/);
 });
