@@ -29,6 +29,37 @@ const KEYS = {
 const autoDispatchQueryClients = new Set<QueryClient>();
 let autoDispatchSignalRUnsubscribe: (() => void) | undefined;
 
+// Shared freshness window for the KEYS.globalStatus query. All consumers
+// (useAutoDispatchGlobalStatus, useAutoDispatchStatus, useAllAutoDispatchStatuses)
+// must agree on the same staleTime/refetchInterval so that whichever one mounts
+// first and whichever one mounts second draw the identical "is this still
+// fresh?" conclusion. Divergent per-hook staleTime values previously let a
+// later-mounting consumer decide the shared cache entry was already stale
+// and re-trigger a fetch (#1547).
+const GLOBAL_STATUS_STALE_TIME_MS = 8_000;
+const GLOBAL_STATUS_REFETCH_INTERVAL_MS = 10_000;
+
+// Single-flight guard around the GET /api/auto-dispatch/status request itself.
+// TanStack Query already dedupes concurrent fetches for observers that share
+// one Query instance in one QueryClient, but that guarantee only holds once
+// every mounted consumer has actually subscribed to the *same* in-flight
+// fetch. On a cold navigation, Layout's useAllAutoDispatchStatuses and the
+// lazy-loaded dashboard's useAutoDispatchGlobalStatus can each independently
+// decide (via shouldFetchOnMount) to call queryFn before the other has
+// subscribed, producing two real HTTP requests moments apart (#1547). This
+// wrapper collapses any overlapping calls into the one underlying request
+// regardless of the exact observer-mount timing that triggered them.
+let inflightGlobalStatusRequest: Promise<AutoDispatchGlobalStatus> | null = null;
+
+function fetchAutoDispatchGlobalStatus(): Promise<AutoDispatchGlobalStatus> {
+  if (!inflightGlobalStatusRequest) {
+    inflightGlobalStatusRequest = apiClient.getAutoDispatchStatus().finally(() => {
+      inflightGlobalStatusRequest = null;
+    });
+  }
+  return inflightGlobalStatusRequest;
+}
+
 function mergeStatusSnapshot<T extends AutoDispatchStatus>(
   previousStatus: T | undefined,
   nextStatus: AutoDispatchStatus,
@@ -199,9 +230,9 @@ export function useAutoDispatchGlobalStatus() {
   useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
-    staleTime: 10_000,
-    refetchInterval: 10_000,
+    queryFn: fetchAutoDispatchGlobalStatus,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
   });
 }
 
@@ -213,12 +244,12 @@ export function useAutoDispatchStatus(printerId: string) {
   useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
+    queryFn: fetchAutoDispatchGlobalStatus,
     select: (data: AutoDispatchGlobalStatus) =>
       data.printers.find(s => s.printerId === printerId),
     enabled: !!printerId,
-    refetchInterval: 10_000,
-    staleTime: 8_000,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
   });
 }
 
@@ -266,9 +297,10 @@ export function useAllAutoDispatchStatuses() {
   useAutoDispatchSignalRSync();
   const query = useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
+    queryFn: fetchAutoDispatchGlobalStatus,
     select: (data: AutoDispatchGlobalStatus) => data.printers ?? [],
-    refetchInterval: 10_000,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
   });
 
   const data = query.data;
