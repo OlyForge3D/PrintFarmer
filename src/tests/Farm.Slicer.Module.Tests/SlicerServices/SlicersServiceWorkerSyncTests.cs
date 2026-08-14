@@ -12,6 +12,7 @@ using Farm.Slicer.Module.Services.Configuration;
 using Farm.Slicer.Module.Services.Metrics;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -207,6 +208,17 @@ public class SlicersServiceWorkerSyncTests
         };
 
         (Guid firstId, string firstApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        Worker? firstWorker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = firstWorker.Should().NotBeNull();
+        Guid firstWorkerId = firstWorker!.Id;
+        DateTime? firstHeartbeat = firstWorker.LastHeartbeat;
+        _ = firstHeartbeat.Should().NotBeNull();
+
+        // Ensure the timestamp comparison below is meaningful even on very fast test
+        // hardware where both calls could otherwise land in the same UtcNow tick.
+        await Task.Delay(15);
+
         (Guid secondId, string secondApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
 
         _ = secondId.Should().Be(firstId, "re-registering under the same InstanceId must update the existing service, not create a new one");
@@ -217,7 +229,9 @@ public class SlicersServiceWorkerSyncTests
 
         Worker? worker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
         _ = worker.Should().NotBeNull();
-        _ = worker!.ApiKey.Should().Be(secondApiKey);
+        _ = worker!.Id.Should().Be(firstWorkerId, "the same Worker row must be reused, not replaced, on redeploy");
+        _ = worker.ApiKey.Should().Be(secondApiKey);
+        _ = worker.LastHeartbeat.Should().BeAfter(firstHeartbeat!.Value, "the heartbeat must be refreshed on re-registration");
     }
 
     [Fact(DisplayName = "RegisterAsync without an InstanceId always creates a new service/worker (scaled replicas stay distinct)")]
@@ -256,6 +270,39 @@ public class SlicersServiceWorkerSyncTests
         _ = secondId.Should().NotBe(firstId, "without a shared InstanceId each registration must remain a distinct worker (e.g. scaled replicas)");
         _ = db.Set<SlicerService>().Should().HaveCount(2);
         _ = db.Set<Worker>().Should().HaveCount(2);
+    }
+
+    [Fact(DisplayName = "SlicerService.InstanceId has a unique database constraint, closing the upsert race window (issue #1528)")]
+    public async Task SlicerServiceConfiguration_RejectsDuplicateInstanceIdAtTheDatabaseLevel()
+    {
+        // RegisterAsync's GetByInstanceIdAsync-then-insert is not atomic: two concurrent
+        // registrations for the same stable InstanceId could both read "no existing row"
+        // before either commits. Without a database-level unique constraint, both inserts
+        // would succeed and violate the "worker count stays at 1" acceptance criterion.
+        // This proves the constraint declared in SlicerServiceConfiguration is actually
+        // enforced by the database, not just declared in the EF model (UpsertServiceAndWorkerAsync
+        // relies on this to turn the losing insert into a catchable DbUpdateException it can
+        // retry as an update instead of a duplicate).
+        using SlicerDbContext db = CreateDb();
+
+        db.Set<SlicerService>().Add(new SlicerService
+        {
+            Id = Guid.NewGuid(),
+            Name = "first",
+            InstanceId = "orcaslicer-worker-1",
+            Status = "Online",
+        });
+        _ = await db.SaveChangesAsync();
+
+        db.Set<SlicerService>().Add(new SlicerService
+        {
+            Id = Guid.NewGuid(),
+            Name = "second",
+            InstanceId = "orcaslicer-worker-1", // same InstanceId as an existing row
+            Status = "Online",
+        });
+
+        _ = await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
     }
 
     [Fact(DisplayName = "RegisterAsync fails closed without persisting an orphaned service")]

@@ -40,4 +40,13 @@ public interface ISlicersRepository
     /// <summary>Saves pending changes to the database.</summary>
     /// <param name="ct">Cancellation token.</param>
     Task SaveChangesAsync(CancellationToken ct);
+
+    /// <summary>
+    /// Discards all locally tracked entity changes without touching the database.
+    /// Used to recover from a failed <see cref="SaveChangesAsync"/> (e.g. a unique
+    /// InstanceId conflict from a concurrent registration) so the caller can retry
+    /// the operation against a freshly queried row instead of resubmitting stale,
+    /// already-tracked entities.
+    /// </summary>
+    void ClearTracking();
 }

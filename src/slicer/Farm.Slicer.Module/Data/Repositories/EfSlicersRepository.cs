@@ -49,4 +49,10 @@ public class EfSlicersRepository(SlicerDbContext db) : ISlicersRepository
     {
         _ = await _db.SaveChangesAsync(ct);
     }
+
+    /// <inheritdoc/>
+    public void ClearTracking()
+    {
+        _db.ChangeTracker.Clear();
+    }
 }
