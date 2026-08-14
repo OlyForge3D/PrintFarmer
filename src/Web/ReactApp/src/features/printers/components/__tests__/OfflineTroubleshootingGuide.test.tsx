@@ -60,6 +60,24 @@ describe('OfflineTroubleshootingGuide', () => {
     expect(link.closest('a')).toHaveAttribute('href', 'http://192.168.1.100');
   });
 
+  it('omits the web-interface link for a TestEmulator internal-only host (#1546)', () => {
+    render(
+      <OfflineTroubleshootingGuide
+        printerBackend="Moonraker"
+        frontendUrl="http://testemulator-11111111-1111-1111-1111-111111111111"
+      />,
+    );
+
+    expect(screen.queryByText("Check if the printer's web interface is accessible")).not.toBeInTheDocument();
+    expect(screen.queryByText('http://testemulator-11111111-1111-1111-1111-111111111111')).not.toBeInTheDocument();
+  });
+
+  it('does not render an unsafe frontendUrl as a link', () => {
+    render(<OfflineTroubleshootingGuide printerBackend="Moonraker" frontendUrl="javascript:alert(1)" />);
+
+    expect(screen.queryByText("Check if the printer's web interface is accessible")).not.toBeInTheDocument();
+  });
+
   it('dismiss callback works', async () => {
     const user = userEvent.setup();
     const onDismiss = vi.fn();

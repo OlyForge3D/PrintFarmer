@@ -71,7 +71,7 @@ import {
   DEFAULT_EXTRUDE_SPEED_MMS,
 } from '@/features/printers/constants/temperaturePresets';
 import { lazyWithPreload } from '@/common/utils/lazyWithPreload';
-import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
+import { isSafeHttpUrl, isBrowserReachableUrl, toSafeHref } from '@/common/utils/validation';
 
 // Interaction-only: the Z-offset calibration wizard is a modal only opened
 // via an explicit "Calibrate Z-Offset" click, so it's lazy-loaded out of the
@@ -95,9 +95,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
-  const browserUrl = printer.frontendUrl && isSafeHttpUrl(printer.frontendUrl)
+  const browserUrl = printer.frontendUrl && isBrowserReachableUrl(printer.frontendUrl)
     ? toSafeHref(printer.frontendUrl)
     : undefined;
+  // Syntactically safe but known-unreachable from the browser (e.g. TestEmulator's
+  // internal `testemulator-<guid>` hostname, #1546) — distinct from "no URL at all"
+  // so the disabled action can explain *why* instead of just saying "unavailable".
+  const isInternalOnlyBrowserUrl = !!printer.frontendUrl
+    && isSafeHttpUrl(printer.frontendUrl)
+    && !isBrowserReachableUrl(printer.frontendUrl);
 
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -525,8 +531,12 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 size="sm"
                 disabled
                 className="h-8 w-8 p-0 text-pf-text-secondary"
-                aria-label={`Printer browser URL unavailable for ${printer.name}`}
-                title="Printer browser URL is unavailable"
+                aria-label={isInternalOnlyBrowserUrl
+                  ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                  : `Printer browser URL unavailable for ${printer.name}`}
+                title={isInternalOnlyBrowserUrl
+                  ? 'Not available for simulated test printers'
+                  : 'Printer browser URL is unavailable'}
                 iconCenter={<ExternalLinkIcon className="h-4 w-4" />}
               />
             )}
