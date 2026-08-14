@@ -1,9 +1,9 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
-using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
 using Farm.Slicer.Module.Api.HostedServices;
+using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services;
@@ -27,7 +27,7 @@ public sealed class ProfileTaskCheckServiceTests
     private readonly Mock<IServiceProvider> _scopeProvider = new();
     private readonly Mock<ILogger<ProfileTaskCheckService>> _logger = new();
     private readonly Mock<ISlicersService> _slicersService = new();
-    private readonly Mock<IPrintersService> _printersService = new();
+    private readonly Mock<IPrinterProfileCheckRepository> _printersService = new();
     private readonly Mock<IMachineModelProfileRepository> _machineModelProfileRepo = new();
     private readonly Mock<IMachineProfileRepository> _machineProfileRepo = new();
     private readonly Mock<IUserTaskService> _taskService = new();
@@ -41,7 +41,7 @@ public sealed class ProfileTaskCheckServiceTests
 
         _scopeProvider.Setup(p => p.GetService(typeof(ISlicersService)))
             .Returns(_slicersService.Object);
-        _scopeProvider.Setup(p => p.GetService(typeof(IPrintersService)))
+        _scopeProvider.Setup(p => p.GetService(typeof(IPrinterProfileCheckRepository)))
             .Returns(_printersService.Object);
         _scopeProvider.Setup(p => p.GetService(typeof(IMachineModelProfileRepository)))
             .Returns(_machineModelProfileRepo.Object);

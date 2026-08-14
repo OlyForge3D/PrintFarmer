@@ -50,6 +50,7 @@ public static class SlicerApiExtensions
         _ = services.AddScoped<IPermissionValidator, ClaimsPermissionValidator>();
         _ = services.AddScoped<ISlicerResourceAccessAuthorizer, SlicerResourceAccessAuthorizer>();
         _ = services.AddScoped<IPrinterAccessValidator, PrinterAccessValidator>();
+        _ = services.AddScoped<IPrinterProfileCheckRepository, EfPrinterProfileCheckRepository>();
         services.TryAddSingleton<
             Microsoft.AspNetCore.Authorization.IAuthorizationMiddlewareResultHandler,
             SlicerAuthorizationResultHandler>();
