@@ -167,3 +167,31 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 });
+
+describe('DetailedPrinterCard Open in Browser (#1546)', () => {
+  beforeEach(() => {
+    useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
+  });
+
+  it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host', () => {
+    const printer = makePrinter({
+      frontendUrl: 'http://testemulator-11111111-1111-1111-1111-111111111111',
+    });
+
+    render(<DetailedPrinterCard printer={printer} />);
+
+    expect(screen.queryByRole('link', { name: /open printer/i })).not.toBeInTheDocument();
+    const disabledButton = screen.getByRole('button', { name: `Printer browser URL unavailable for ${printer.name}` });
+    expect(disabledButton).toBeDisabled();
+    expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
+  });
+
+  it('keeps a real printer browser URL as a working link', () => {
+    const printer = makePrinter({ frontendUrl: 'http://printer-1.local' });
+
+    render(<DetailedPrinterCard printer={printer} />);
+
+    expect(screen.getByRole('link', { name: `Open printer ${printer.name} in new tab` }))
+      .toHaveAttribute('href', 'http://printer-1.local');
+  });
+});

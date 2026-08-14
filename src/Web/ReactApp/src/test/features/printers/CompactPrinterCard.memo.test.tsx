@@ -325,6 +325,25 @@ describe('CompactPrinterCard memoization', () => {
     expect(screen.getByRole('button', { name: 'Open in Browser' })).toBeDisabled();
   });
 
+  it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ frontendUrl: 'http://testemulator-11111111-1111-1111-1111-111111111111' })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
+    const disabledButton = screen.getByRole('button', { name: 'Open in Browser' });
+    expect(disabledButton).toBeDisabled();
+    expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
+  });
+
   it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {
     render(
       <CompactPrinterCard

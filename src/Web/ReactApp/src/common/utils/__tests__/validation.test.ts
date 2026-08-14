@@ -7,6 +7,7 @@ import {
   normalizeUrl,
   normalizeSpoolmanBaseUrl,
   isSafeHttpUrl,
+  isBrowserReachableUrl,
   toSafeHref,
 } from '../validation';
 
@@ -148,6 +149,29 @@ describe('validation utils', () => {
     it('rejects malformed or empty input', () => {
       expect(isSafeHttpUrl('')).toBe(false);
       expect(isSafeHttpUrl('not a url')).toBe(false);
+    });
+  });
+
+  describe('isBrowserReachableUrl', () => {
+    // Regression for #1546: TestEmulatorSeeder always creates simulated
+    // printers with ServerUrl `http://testemulator-<guid>` — a syntactically
+    // valid http(s) URL that isSafeHttpUrl() alone would accept, but whose
+    // hostname is an internal Docker service name unresolvable from a
+    // browser on the user's machine.
+    it('rejects the TestEmulator internal-only hostname', () => {
+      expect(isBrowserReachableUrl('http://testemulator-11111111-1111-1111-1111-111111111111')).toBe(false);
+      expect(isBrowserReachableUrl('http://TestEmulator-abc')).toBe(false);
+    });
+
+    it('accepts real printer http/https URLs', () => {
+      expect(isBrowserReachableUrl('http://printer-1.local')).toBe(true);
+      expect(isBrowserReachableUrl('https://192.168.1.100:7125')).toBe(true);
+    });
+
+    it('rejects unsafe schemes just like isSafeHttpUrl', () => {
+      expect(isBrowserReachableUrl('javascript:alert(1)')).toBe(false);
+      expect(isBrowserReachableUrl('')).toBe(false);
+      expect(isBrowserReachableUrl('not a url')).toBe(false);
     });
   });
 
