@@ -49,43 +49,64 @@ public static class ControlApiEndpoints
         // element in this single-printer-per-process model.
         group.MapGet("/printers", (PrinterRegistry registry) => Results.Ok(new[] { PrinterSummary(registry.Printer) }));
 
-        group.MapPost("/reset", async (PrinterRegistry registry) =>
-        {
-            PrinterAggregate printer = registry.Printer;
-            string previousKlippyState = printer.KlippyState;
-            MmuMode previousMmuMode = printer.Mmu.Mode;
-            registry.ResetToInitial();
-            await NotifyScenarioTransitionAsync(printer, previousKlippyState);
-            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
-            return Results.Ok(PrinterSummary(printer));
-        });
+        group.MapPost("/reset", async (
+            PrinterRegistry registry,
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
+            await coordinator.ExecuteExclusiveAsync(
+                async () =>
+                {
+                    PrinterAggregate printer = registry.Printer;
+                    string previousKlippyState = printer.KlippyState;
+                    MmuMode previousMmuMode = printer.Mmu.Mode;
+                    registry.ResetToInitial();
+                    await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+                    await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
+                    return Results.Ok(PrinterSummary(printer));
+                },
+                cancellationToken));
 
-        group.MapPost("/printer/scenario", async (ScenarioRequest request, PrinterRegistry registry) =>
+        group.MapPost("/printer/scenario", async (
+            ScenarioRequest request,
+            PrinterRegistry registry,
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
         {
             if (!Enum.TryParse(request.Scenario, ignoreCase: true, out PrinterScenario scenario))
             {
                 return Results.BadRequest(new { message = $"Unknown scenario '{request.Scenario}'." });
             }
 
-            PrinterAggregate printer = registry.Printer;
-            string previousKlippyState = printer.KlippyState;
-            MmuMode previousMmuMode = printer.Mmu.Mode;
-            registry.ResetToScenario(scenario);
-            await NotifyScenarioTransitionAsync(printer, previousKlippyState);
-            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
-            return Results.Ok(PrinterSummary(printer));
+            return await coordinator.ExecuteExclusiveAsync(
+                async () =>
+                {
+                    PrinterAggregate printer = registry.Printer;
+                    string previousKlippyState = printer.KlippyState;
+                    MmuMode previousMmuMode = printer.Mmu.Mode;
+                    registry.ResetToScenario(scenario);
+                    await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+                    await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
+                    return Results.Ok(PrinterSummary(printer));
+                },
+                cancellationToken);
         });
 
-        group.MapPost("/printer/reset", async (PrinterRegistry registry) =>
-        {
-            PrinterAggregate printer = registry.Printer;
-            string previousKlippyState = printer.KlippyState;
-            MmuMode previousMmuMode = printer.Mmu.Mode;
-            registry.ResetToInitial();
-            await NotifyScenarioTransitionAsync(printer, previousKlippyState);
-            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
-            return Results.Ok(PrinterSummary(printer));
-        });
+        group.MapPost("/printer/reset", async (
+            PrinterRegistry registry,
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
+            await coordinator.ExecuteExclusiveAsync(
+                async () =>
+                {
+                    PrinterAggregate printer = registry.Printer;
+                    string previousKlippyState = printer.KlippyState;
+                    MmuMode previousMmuMode = printer.Mmu.Mode;
+                    registry.ResetToInitial();
+                    await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+                    await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
+                    return Results.Ok(PrinterSummary(printer));
+                },
+                cancellationToken));
 
         group.MapGet("/printer/mmu", (PrinterRegistry registry) => Results.Ok(MmuSummary(registry.Printer.Mmu)));
 

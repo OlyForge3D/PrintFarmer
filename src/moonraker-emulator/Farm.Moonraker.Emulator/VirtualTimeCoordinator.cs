@@ -25,26 +25,38 @@ public sealed class VirtualTimeCoordinator(PrinterRegistry registry) : IDisposab
     public Task<VirtualTimeSnapshot> ResetAsync(CancellationToken cancellationToken = default) =>
         MutateAndPublishAsync(printer => printer.ResetTime(), cancellationToken);
 
-    private async Task<VirtualTimeSnapshot> MutateAndPublishAsync(
-        Action<PrinterAggregate> mutation,
-        CancellationToken cancellationToken)
+    public async Task<TResult> ExecuteExclusiveAsync<TResult>(
+        Func<Task<TResult>> operation,
+        CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            PrinterAggregate printer = registry.Printer;
-            mutation(printer);
-            VirtualTimeSnapshot snapshot = new(
-                printer.Id,
-                printer.Clock.UtcNow,
-                printer.PrintState);
-            await BroadcastService.NotifyStatusUpdateAsync(printer);
-            return snapshot;
+            return await operation();
         }
         finally
         {
             _gate.Release();
         }
+    }
+
+    private async Task<VirtualTimeSnapshot> MutateAndPublishAsync(
+        Action<PrinterAggregate> mutation,
+        CancellationToken cancellationToken)
+    {
+        return await ExecuteExclusiveAsync(
+            async () =>
+            {
+                PrinterAggregate printer = registry.Printer;
+                mutation(printer);
+                VirtualTimeSnapshot snapshot = new(
+                    printer.Id,
+                    printer.Clock.UtcNow,
+                    printer.PrintState);
+                await BroadcastService.NotifyStatusUpdateAsync(printer);
+                return snapshot;
+            },
+            cancellationToken);
     }
 
     public void Dispose() => _gate.Dispose();
