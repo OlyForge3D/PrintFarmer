@@ -1297,7 +1297,7 @@ export const NewSliceJobPage: React.FC = () => {
     if (hasVisibleMachineProfiles) return false;
     // Suggest if machine profiles query completed but returned empty
     // (meaning OrcaSlicer has no profiles for this printer model)
-    if (machineProfilesData.length === 0 && !isMachineProfilesLoading) return true;
+    if (machineProfilesData.length === 0) return true;
     // Don't suggest if we have machine profiles (process profiles will load after machine selection)
     return false;
   }, [selectedPrinterId, selectedPrinterModelId, machineProfilesData.length, isMachineProfilesLoading, isCustomProfilesLoading, hasVisibleMachineProfiles, cloneProfilesDismissed]);

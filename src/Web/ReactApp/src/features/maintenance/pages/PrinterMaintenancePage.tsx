@@ -758,19 +758,17 @@ export function PrinterMaintenancePage() {
           scope selection, isSubmitting) that we cannot reset from
           outside via props — remounting is the only guarantee. This is
           the second half of Hicks #2 (route change with open modal). */}
-      {printerId && (
-        <LogMaintenanceModal
-          key={printerId}
-          isOpen={showLogModal}
-          printerId={printerId}
-          printerName={printer?.name || 'Unknown Printer'}
-          deployments={deployments}
-          toolheads={printerDetails?.toolheads ?? []}
-          initialToolheadId={modalInitialToolheadId}
-          onSubmit={handleLogSubmit}
-          onClose={() => setShowLogModal(false)}
-        />
-      )}
+      <LogMaintenanceModal
+        key={printerId}
+        isOpen={showLogModal}
+        printerId={printerId}
+        printerName={printer?.name || 'Unknown Printer'}
+        deployments={deployments}
+        toolheads={printerDetails?.toolheads ?? []}
+        initialToolheadId={modalInitialToolheadId}
+        onSubmit={handleLogSubmit}
+        onClose={() => setShowLogModal(false)}
+      />
 
     </PageTemplate>
   );
