@@ -65,7 +65,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
 
     private void RefreshSettingsIfNeeded()
     {
-        if (!_startupStatus.IsReady)
+        if (!_startupStatus.IsDatabaseSchemaReady)
         {
             return;
         }
@@ -107,7 +107,7 @@ public class SystemLogLoggerProvider : ILoggerProvider
 
         try
         {
-            await WaitForDatabaseReadyAsync(ct).ConfigureAwait(false);
+            await WaitForDatabaseSchemaAsync(ct).ConfigureAwait(false);
 
             while (!ct.IsCancellationRequested)
             {
@@ -159,9 +159,9 @@ public class SystemLogLoggerProvider : ILoggerProvider
         }
     }
 
-    private async Task WaitForDatabaseReadyAsync(CancellationToken cancellationToken)
+    private async Task WaitForDatabaseSchemaAsync(CancellationToken cancellationToken)
     {
-        while (!_startupStatus.IsReady)
+        while (!_startupStatus.IsDatabaseSchemaReady)
         {
             if (_startupStatus.IsFailed)
             {

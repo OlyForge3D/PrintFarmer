@@ -12,7 +12,20 @@ public class StartupStatusTests
 
         status.Phase.Should().Be(StartupPhase.Starting);
         status.IsReady.Should().BeFalse();
+        status.IsDatabaseSchemaReady.Should().BeFalse();
         status.IsFailed.Should().BeFalse();
+    }
+
+    [Fact]
+    public void MarkDatabaseSchemaReady_RecordsIndependentSchemaReadiness()
+    {
+        var status = new StartupStatus();
+
+        status.MarkDatabaseSchemaReady();
+
+        status.IsDatabaseSchemaReady.Should().BeTrue();
+        status.Phase.Should().Be(StartupPhase.Starting);
+        status.IsReady.Should().BeFalse();
     }
 
     [Fact]

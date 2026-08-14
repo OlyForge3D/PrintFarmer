@@ -312,6 +312,7 @@ public sealed class DatabaseMigrationTests
             "20260808162833_AddPowerReadingCompositeIndex",
             "20260811235527_AddRoleUpdatedAtConcurrencyToken",
             "20260812020851_HardenBedClearReplayStorage");
+        startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
 
@@ -352,6 +353,8 @@ public sealed class DatabaseMigrationTests
         startupStatus.Phase.Should().Be(
             StartupPhase.Starting,
             "reference-data seeding failure keeps startup degraded rather than reporting ready");
+        startupStatus.IsDatabaseSchemaReady.Should().BeTrue(
+            "database-backed infrastructure may start after migration even when optional reference-data seeding fails");
         (await TableExistsAsync(connection, "__EFMigrationsHistory")).Should().BeTrue(
             "migration and schema validation must complete before reference-data seeding");
         loggerProvider.Entries.Should().ContainSingle(entry =>

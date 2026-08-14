@@ -26,6 +26,7 @@ public class StartupStatus : IStartupStatus
     private long _initStartTicks; // 0 until started
     private long _initEndTicks;   // set when ready/failed
     private Exception? _failure;
+    private volatile bool _isDatabaseSchemaReady;
 
     /// <summary>
     /// UTC timestamp when initialization started (if recorded).
@@ -58,6 +59,11 @@ public class StartupStatus : IStartupStatus
     public bool IsReady => _phase == StartupPhase.Ready;
 
     /// <summary>
+    /// Gets a value indicating whether core database migrations completed successfully.
+    /// </summary>
+    public bool IsDatabaseSchemaReady => _isDatabaseSchemaReady;
+
+    /// <summary>
     /// Convenience boolean indicating a terminal failure (true when <see cref="Phase"/> == <see cref="StartupPhase.Failed"/>).
     /// </summary>
     public bool IsFailed => _phase == StartupPhase.Failed;
@@ -84,6 +90,14 @@ public class StartupStatus : IStartupStatus
                 _ = Interlocked.CompareExchange(ref _initEndTicks, DateTime.UtcNow.Ticks, 0);
             }
         }
+    }
+
+    /// <summary>
+    /// Marks the core database schema as safe for database-backed services to query.
+    /// </summary>
+    public void MarkDatabaseSchemaReady()
+    {
+        _isDatabaseSchemaReady = true;
     }
 
     /// <summary>
