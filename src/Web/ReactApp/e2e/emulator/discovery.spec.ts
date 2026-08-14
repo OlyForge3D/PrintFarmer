@@ -25,13 +25,10 @@ import {
  *   - "Discovered Prusa MK4S"
  *
  * Neither name collides with the five seeded farm printers, so "not already
- * added" holds by construction. Because registering a candidate permanently
- * excludes it from later scans (no control-API reset for discovery), the
- * "add" test intentionally runs last so the earlier exact-count/name
- * assertions see both candidates still available — this assumes a single
- * fresh run against an ephemeral validation environment, matching this
- * project's daily-validation topology (see `e2e/README.md` and
- * `docs/MOONRAKER_EMULATOR_VALIDATION.md`).
+ * added" holds by construction. The automatic emulatorReady fixture invokes
+ * the application-state reset before every test, which removes printers added
+ * from deterministic discovery fixtures. The "add" test still runs last so
+ * this serial workflow remains explicit and easy to follow.
  *
  * These tests require the "Discover Printers" action to actually be
  * present (gated by `useDiscoveryAvailable`, which needs the discovery

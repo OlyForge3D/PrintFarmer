@@ -130,6 +130,42 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
+    public async Task TimeReset_DuringActivePrint_BroadcastsZeroTelemetryImmediately()
+    {
+        await ResetPrinterAsync();
+        using WebSocket socket = await ConnectAsync();
+        await SendAsync(
+            socket,
+            """{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"print_stats":null}},"id":101}""");
+        _ = await ReceiveAsync(socket);
+
+        using HttpClient client = _factory.CreateClient();
+        (await client.PostAsync(
+            "/__emulator/time/advance",
+            TestRequests.Json("""{"seconds":120}"""))).EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/printer/print/start",
+            TestRequests.Json("""{"filename":"benchy.gcode"}"""))).EnsureSuccessStatusCode();
+        _ = await ReceiveAsync(socket);
+
+        (await client.PostAsync(
+            "/__emulator/time/advance",
+            TestRequests.Json("""{"seconds":60}"""))).EnsureSuccessStatusCode();
+        _ = await ReceiveAsync(socket);
+
+        (await client.PostAsync("/__emulator/time/reset", content: null)).EnsureSuccessStatusCode();
+        using JsonDocument resetNotification = await ReceiveAsync(socket);
+
+        resetNotification.RootElement.GetProperty("method").GetString().Should().Be("notify_status_update");
+        JsonElement stats = resetNotification.RootElement.GetProperty("params")[0].GetProperty("print_stats");
+        stats.GetProperty("print_duration").GetDouble().Should().Be(0);
+        stats.GetProperty("total_duration").GetDouble().Should().Be(0);
+        stats.GetProperty("filament_used").GetDouble().Should().Be(0);
+
+        await client.PostAsync("/__emulator/printer/reset", content: null);
+    }
+
+    [Fact]
     public async Task ObjectsQuery_ReturnsFilteredSnapshotWithoutPersistingSubscription()
     {
         await ResetPrinterAsync();

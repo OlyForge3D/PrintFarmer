@@ -122,10 +122,13 @@ public static class ControlApiEndpoints
             return Results.Ok(new { printer.Id, virtualTime = printer.Clock.UtcNow, printer.PrintState });
         });
 
-        group.MapPost("/time/reset", (PrinterRegistry registry) =>
+        group.MapPost("/time/reset", async (PrinterRegistry registry) =>
         {
-            registry.Printer.Clock.Reset();
-            return Results.Ok(new { registry.Printer.Id, virtualTime = registry.Printer.Clock.UtcNow });
+            PrinterAggregate printer = registry.Printer;
+            printer.Clock.Reset();
+            printer.Tick();
+            await BroadcastService.NotifyStatusUpdateAsync(printer);
+            return Results.Ok(new { printer.Id, virtualTime = printer.Clock.UtcNow });
         });
 
         group.MapGet("/rules", (PrinterRegistry registry) => Results.Ok(registry.Rules.List().Select(RuleDto)));
