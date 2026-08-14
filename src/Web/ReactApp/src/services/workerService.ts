@@ -59,7 +59,7 @@ export class WorkerService {
     if (limit !== undefined) params.append('limit', limit.toString());
     if (offset !== undefined) params.append('offset', offset.toString());
     
-    const url = `/workers${params.toString() ? `?${params.toString()}` : ''}`;
+    const url = `/workers/${params.toString() ? `?${params.toString()}` : ''}`;
     const response = await apiClient.request<WorkerResponse[]>({ url, method: 'GET' });
     return response;
   }

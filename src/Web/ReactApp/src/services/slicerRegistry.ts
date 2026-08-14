@@ -41,7 +41,7 @@ function mapWorkerToSlicer(worker: WorkerDto): SlicerDto {
 class SlicerRegistryClient {
   async getSlicers(): Promise<SlicerDto[]> {
     // Canonical source for UI worker discovery in both monolith and microservices.
-    const workers = await apiClient.request<WorkerDto[]>({ method: 'get', url: '/workers' });
+    const workers = await apiClient.request<WorkerDto[]>({ method: 'get', url: '/workers/' });
     return workers.map(mapWorkerToSlicer);
   }
 

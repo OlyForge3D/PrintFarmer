@@ -3523,6 +3523,15 @@ port_in_use() {
     fi
 }
 
+# Return success when the expected container from the current deployment publishes
+# the host port. Redeploy validation runs before those containers are recreated.
+container_publishes_host_port() {
+    local container_name=$1
+    local port=$2
+
+    docker port "$container_name" 2>/dev/null | grep -Eq ":${port}$"
+}
+
 # Find next free port starting from given number
 find_next_free_port() {
     local start=$1
@@ -3599,17 +3608,24 @@ validate_configuration() {
     }
 
     # Port availability checks with optional remapping
-    if [ -n "${HTTP_PORT:-}" ] && port_in_use "$HTTP_PORT"; then
+    if [ -n "${HTTP_PORT:-}" ] \
+        && port_in_use "$HTTP_PORT" \
+        && ! { [ "${REDEPLOY:-false}" = "true" ] && container_publishes_host_port "printfarmer-nginx-proxy" "$HTTP_PORT"; }; then
         suggest_port_replacement HTTP_PORT "$HTTP_PORT" "HTTP"
     fi
-    if [ -n "${API_PORT:-}" ] && port_in_use "$API_PORT"; then
+    if [ -n "${API_PORT:-}" ] \
+        && port_in_use "$API_PORT" \
+        && ! { [ "${REDEPLOY:-false}" = "true" ] && container_publishes_host_port "printfarmer-api" "$API_PORT"; }; then
         suggest_port_replacement API_PORT "$API_PORT" "API"
     fi
 
     # Worker port handling
     ORCA_HOST_PORT=${ORCA_HOST_PORT:-8081}
     # Allow remap for workers (we will rely on variable interpolation in compose file)
-    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -gt 0 ] && port_in_use "$ORCA_HOST_PORT"; then
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] \
+        && [ "$ORCA_WORKER_COUNT" -gt 0 ] \
+        && port_in_use "$ORCA_HOST_PORT" \
+        && ! { [ "${REDEPLOY:-false}" = "true" ] && container_publishes_host_port "printfarmer-orcaslicer-worker-1" "$ORCA_HOST_PORT"; }; then
         suggest_port_replacement ORCA_HOST_PORT "$ORCA_HOST_PORT" "Orca worker"
     fi
 
@@ -7100,6 +7116,11 @@ redeploy_existing() {
     
     # Deploy with rebuild
     deploy_containers
+
+    # A redeploy may be recovering a first deployment that stopped before the
+    # configured initial-admin step. The setup endpoint is idempotent once an
+    # administrator exists, so run the same post-readiness step as a full deploy.
+    setup_initial_admin || true
     
     print_success "✅ Redeployment complete!"
     print_info "All containers have been rebuilt and restarted with the same configuration."
