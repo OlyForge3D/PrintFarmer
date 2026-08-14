@@ -15,22 +15,25 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       # Local validation only: never expose this stack to an untrusted network.
       Security__DevModeBypassAuth: "true"
-      PFARM__NetworkDiscovery__EnableDiscovery: "false"
-      TestEmulator__Enabled: "true"
-      TestEmulator__MockDiscovery: "true"
-      TestEmulator__MockSpoolman: "true"
-      TestEmulator__Printers__0__Name: Test Printer Alpha
-      TestEmulator__Printers__0__InitialState: Idle
-      TestEmulator__Printers__0__Progress: "0"
-      TestEmulator__Printers__0__PrintDurationSeconds: "60"
-      TestEmulator__Printers__1__Name: Test Printer Beta
-      TestEmulator__Printers__1__InitialState: Printing
-      TestEmulator__Printers__1__Progress: "42"
-      TestEmulator__Printers__1__PrintDurationSeconds: "36000"
-      TestEmulator__Printers__2__Name: Test Printer Gamma
-      TestEmulator__Printers__2__InitialState: Error
-      TestEmulator__Printers__2__Progress: "0"
-      TestEmulator__Printers__2__PrintDurationSeconds: "60"
+      # Keep the UI's real discovery/add surface enabled. Physical scanning
+      # remains disabled in printer-discovery below; deterministic fixtures
+      # replace network probing for this isolated validation stack.
+      PFARM__NetworkDiscovery__EnableDiscovery: "true"
+      # Real Moonraker-backend seeding: printers are created against the
+      # repository-built emulator instances (see moonraker-ready/printing/
+      # paused/shutdown services below), not the in-process TestEmulator
+      # plugin. This one flag is sufficient (disabled by default everywhere
+      # else) and seeds the API's built-in deterministic defaults — root URLs
+      # http://moonraker-ready:7125, http://moonraker-printing:7125,
+      # http://moonraker-paused:7125, http://moonraker-shutdown:7125, and the
+      # intentionally-unreachable http://moonraker-offline:7125, all backend
+      # Moonraker. No MoonrakerEmulatorSeed__Printers__N__* overrides are
+      # needed here; that per-printer Name/ServerUrl/IsEnabled override
+      # mechanism exists only for local experimentation.
+      MoonrakerEmulatorSeed__Enabled: "true"
+      # Authenticated and development-gated. Browser tests use this to restore
+      # dispatch ownership after lifecycle mutations; production never maps it.
+      MoonrakerEmulatorSeed__EnableControlApi: "true"
 
   frontend:
     container_name: !reset null
@@ -52,10 +55,49 @@ services:
     environment:
       EnablePeriodicDiscovery: "false"
       PFARM__NetworkDiscovery__EnableDiscovery: "false"
+      # Deterministic discovery candidates for the emulator's Voron/Prusa
+      # fixtures (see DeterministicDiscoveryFixtureSettings) so discovery/add
+      # exercises the real application path without any physical LAN scan.
+      Discovery__DeterministicFixtures__Enabled: "true"
 
   orcaslicer-worker:
     environment:
       Worker__MaxConcurrentJobs: "1"
+
+  moonraker-ready:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${MOONRAKER_EMULATOR_PORT:-17125}:7125"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Validation-only: the control API (scenario/fault injection) is bound
+      # exclusively to the isolated validation network and loopback-only host
+      # ports here; it is never enabled in the production compose template.
+      Emulator__EnableControlApi: "true"
+
+  moonraker-printing:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${MOONRAKER_EMULATOR_PRINTING_PORT:-17126}:7125"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Emulator__EnableControlApi: "true"
+
+  moonraker-paused:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${MOONRAKER_EMULATOR_PAUSED_PORT:-17127}:7125"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Emulator__EnableControlApi: "true"
+
+  moonraker-shutdown:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${MOONRAKER_EMULATOR_SHUTDOWN_PORT:-17128}:7125"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Emulator__EnableControlApi: "true"
 
 networks:
   printfarmer-network:

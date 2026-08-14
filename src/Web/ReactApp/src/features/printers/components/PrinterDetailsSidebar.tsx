@@ -696,7 +696,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   };
 
   return (
-    <div className={`${sidebarShellClassName} z-30`}>
+    <div className={`${sidebarShellClassName} z-30`} role="complementary" aria-label={`${printer.name} details`}>
       {/* Header */}
       <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
         <div className="flex-1 min-w-0">
@@ -842,6 +842,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   disabled={controlActionPending || !canPauseOrResumeNow}
                   onClick={() => handleControlAction(isPaused ? 'resume' : 'pause')}
                   title={isPaused ? 'Resume print' : 'Pause print'}
+                  aria-label={isPaused ? 'Resume print' : 'Pause print'}
                   padSize="small"
                 >
                   {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
@@ -850,6 +851,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   disabled={controlActionPending || !canCancelNow}
                   onClick={() => handleControlAction('cancel')}
                   title="Cancel print"
+                  aria-label="Cancel print"
                   padSize="small"
                 >
                   <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
@@ -859,6 +861,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   disabled={controlActionPending || !canEmergencyStopNow}
                   onClick={() => handleControlAction(isShutdown ? 'firmware-restart' : 'stop')}
                   title={isShutdown ? "Firmware Restart" : "Emergency Stop"}
+                  aria-label={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
                   padSize="small"
                 >
                   {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}
@@ -874,6 +877,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   disabled={!canOpenFilesNow}
                   onClick={() => setShowFiles(true)}
                   title="View printer files"
+                  aria-label="View printer files"
                   padSize="small"
                 >
                   <FileIcon className="h-4 w-4" />
@@ -882,6 +886,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                   disabled={!canOpenHistoryNow}
                   onClick={() => setShowHistory(true)}
                   title="View print history"
+                  aria-label="View print history"
                   padSize="small"
                 >
                   <HistoryIcon className="h-4 w-4" />
@@ -1306,7 +1311,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
         {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
         {(() => {
-          const hasLiveMmuGates = !isSnapmakerU1Mmu && !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
+          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
           const toolheads = hasLiveMmuGates
             ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
             : printerDetails?.toolheads && printerDetails.toolheads.length > 1

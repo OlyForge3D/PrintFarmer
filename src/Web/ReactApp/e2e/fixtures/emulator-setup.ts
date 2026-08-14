@@ -3,8 +3,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const API_BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:5245';
-const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
+export const API_BASE_URL = process.env.API_BASE_URL || 'http://127.0.0.1:5245';
+export const BASE_URL = process.env.BASE_URL || 'http://localhost:3000';
 
 const ADMIN_USERNAME = 'e2e-admin';
 const ADMIN_EMAIL = 'e2e-admin@printfarmer.test';
@@ -30,25 +30,23 @@ const TOKEN_CACHE_FILE = path.join(TOKEN_CACHE_DIR, 'e2e-token.json');
 // ---------------------------------------------------------------------------
 
 /**
- * Wait for a SignalR `PrinterUpdated` event for a specific printer.
- * The frontend receives these on the `/hubs/printers` hub.
- * We poll the UI for an updated timestamp or status change as a proxy.
+ * Wait for a printer card's live-updated content (status badge, progress
+ * bar, temperatures, etc.) to change via a real-time SignalR broadcast.
+ *
+ * Scoped by printer **name** (the deterministic Moonraker seed contract
+ * guarantees unique names) rather than a DOM data attribute, since no
+ * `data-printer-id` attribute is rendered on printer cards. This makes a
+ * hard assertion — the card's text content must actually change within
+ * `timeoutMs` — rather than a fixed, unconditional sleep standing in for a
+ * real check.
  */
-export async function waitForPrinterUpdate(page: Page, printerId: string, timeoutMs = 10_000): Promise<void> {
-  // The emulator broadcasts every ~2 s.  Wait for the printer card to show
-  // a reactive value change by polling the progress-bar or status badge.
-  const card = page.locator('.pf-detailed-printer-card, div.rounded-xl.bg-pf-card')
-    .filter({ has: page.locator(`[data-printer-id="${printerId}"]`) });
+export async function waitForPrinterUpdate(page: Page, printerName: string, timeoutMs = 10_000): Promise<void> {
+  const card = getPrinterCards(page).filter({ hasText: printerName }).first();
+  await expect(card).toBeVisible({ timeout: timeoutMs });
 
-  // Fallback: if no data-printer-id, just wait for any status badge change
-  if (await card.count() === 0) {
-    await page.waitForTimeout(Math.min(timeoutMs, 4_000));
-    return;
-  }
-
-  const initialText = await card.first().textContent() ?? '';
+  const initialText = await card.textContent() ?? '';
   await expect(async () => {
-    const current = await card.first().textContent() ?? '';
+    const current = await card.textContent() ?? '';
     expect(current).not.toBe(initialText);
   }).toPass({ timeout: timeoutMs });
 }
@@ -60,8 +58,8 @@ export async function dismissTourIfVisible(page: Page): Promise<void> {
   const closeBtn = page.locator('.driver-popover-close-btn');
   for (let i = 0; i < 5; i++) {
     if (await closeBtn.isVisible({ timeout: 500 }).catch(() => false)) {
-      await closeBtn.click();
-      await page.waitForTimeout(300);
+      await closeBtn.click({ force: true, timeout: 1_000 });
+      await expect(closeBtn).toBeHidden({ timeout: 1_000 }).catch(() => undefined);
     } else {
       break;
     }
@@ -72,27 +70,40 @@ export async function dismissTourIfVisible(page: Page): Promise<void> {
  * Return all visible printer card locators on the current page.
  */
 export function getPrinterCards(page: Page): Locator {
-  return page.locator('.pf-detailed-printer-card, div.rounded-xl.bg-pf-card.border');
+  return page.getByRole('main').locator('article[data-pf-card]');
 }
 
 /**
- * Navigate to a specific printer's detail view by clicking its card.
+ * Open a printer's detail sidebar via its card's "Open details sidebar"
+ * button (the only element that actually opens it — the card itself has no
+ * click handler) and wait for the `complementary` landmark to render.
  */
-export async function navigateToPrinter(page: Page, printerName: string): Promise<void> {
-  // On the /printers page, clicking a card opens the detail sidebar.
-  const card = page.locator('.pf-detailed-printer-card, div.rounded-xl.bg-pf-card')
-    .filter({ hasText: printerName })
-    .first();
+export async function navigateToPrinter(page: Page, printerName: string): Promise<Locator> {
+  const card = getPrinterCards(page).filter({ hasText: printerName }).first();
 
   await expect(card).toBeVisible({ timeout: 10_000 });
-  await card.click();
-  // Wait for the sidebar/detail panel to appear
-  await page.waitForTimeout(500);
+  await card.getByRole('button', { name: 'Open details sidebar' }).click();
+
+  const sidebar = page.getByRole('complementary', { name: `${printerName} details` });
+  await expect(sidebar).toBeVisible({ timeout: 10_000 });
+  return sidebar;
 }
 
 // ---------------------------------------------------------------------------
 // Playwright fixture extension
 // ---------------------------------------------------------------------------
+
+/**
+ * Read the JWT the `emulatorReady` fixture injected into `localStorage`.
+ * Used by dependent fixture modules (e.g. Moonraker contract helpers) that
+ * need to make authenticated `page.request` calls against the PrintFarmer
+ * API directly, since `page.request` does not automatically attach tokens
+ * stored in `localStorage` the way the app's own axios client does.
+ */
+export async function getStoredAuthToken(page: Page): Promise<string | undefined> {
+  const token = await page.evaluate(() => localStorage.getItem('auth-token'));
+  return token ?? undefined;
+}
 
 type EmulatorFixtures = {
   /** Ensures the API is healthy and the emulator is active before each test. */
@@ -110,17 +121,30 @@ export const test = base.extend<EmulatorFixtures>({
     const token = await getOrCreateToken(page);
     expect(token, 'Failed to obtain auth token for test admin').toBeTruthy();
 
-    // 3. Inject auth token into localStorage before the app loads
+    // 3. Restore application-owned dispatch state. Resetting Moonraker alone
+    // cannot release durable queue claims created by a prior browser test.
+    const resetResponse = await page.request.post(
+      `${API_BASE_URL}/api/test/moonraker-emulator/reset`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    expect(
+      resetResponse.status(),
+      'PrintFarmer Moonraker application-state reset endpoint must be enabled in the isolated validation stack'
+    ).toBe(204);
+
+    // 4. Inject auth token into localStorage before the app loads
     await page.goto(BASE_URL);
     await page.evaluate((t: string) => {
       localStorage.setItem('auth-token', t);
+      localStorage.setItem('printerViewMode', 'detailed');
+      localStorage.setItem('pf-tour-seen-printers', 'true');
     }, token!);
 
-    // 4. Reload so the React app picks up the token from localStorage
+    // 5. Reload so the React app picks up the token from localStorage
     await page.reload();
     await page.waitForLoadState('networkidle');
 
-    // 5. Dismiss any onboarding tour popover that may appear
+    // 6. Dismiss any onboarding tour popover that may appear
     await dismissTourIfVisible(page);
 
     await use();
@@ -137,7 +161,7 @@ export const test = base.extend<EmulatorFixtures>({
 async function getOrCreateToken(page: Page): Promise<string | undefined> {
   // Try reading cached token first
   const cached = readCachedToken();
-  if (cached && await isTokenValid(page, cached)) return cached;
+  if (cached && hasUsableTokenLifetime(cached) && await isTokenValid(page, cached)) return cached;
   if (cached) {
     try { fs.unlinkSync(TOKEN_CACHE_FILE); } catch { /* another worker removed it */ }
   }
@@ -155,7 +179,7 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
     for (let i = 0; i < 30; i++) {
       await page.waitForTimeout(500);
       const t = readCachedToken();
-      if (t && await isTokenValid(page, t)) return t;
+      if (t && hasUsableTokenLifetime(t) && await isTokenValid(page, t)) return t;
     }
     // Fallback: try login directly
     return await loginDirect(page);
@@ -185,6 +209,22 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
     return token;
   } finally {
     try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
+  }
+}
+
+function hasUsableTokenLifetime(token: string): boolean {
+  try {
+    const payloadSegment = token.split('.')[1];
+    if (!payloadSegment) {
+      return false;
+    }
+
+    const payload = JSON.parse(Buffer.from(payloadSegment, 'base64url').toString('utf8')) as {
+      exp?: number;
+    };
+    return typeof payload.exp === 'number' && payload.exp > Math.floor(Date.now() / 1000) + 120;
+  } catch {
+    return false;
   }
 }
 

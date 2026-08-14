@@ -79,6 +79,68 @@ describe("ApiClient", () => {
       expect(mockGet).toHaveBeenCalledWith("/healthz");
       expect(result).toEqual(mockResponse.data);
     });
+
+    describe("printer history", () => {
+      it("normalizes Moonraker wire names before returning history to the UI", async () => {
+        const mockGet = vi.fn().mockResolvedValue({
+          data: {
+            count: 1,
+            jobs: [{
+              job_id: "job-1",
+              exists: true,
+              end_time: 20,
+              filament_used: 4.5,
+              filename: "benchy.gcode",
+              metadata: {},
+              print_duration: 18,
+              status: "cancelled",
+              start_time: 2,
+              total_duration: 18,
+              user: "emulator",
+            }],
+          },
+        });
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+          mockGet;
+
+        const result = await apiClient.getPrinterHistory("printer-1");
+
+        expect(result.jobs[0]).toMatchObject({
+          jobId: "job-1",
+          endTime: 20,
+          filamentUsed: 4.5,
+          printDuration: 18,
+          startTime: 2,
+          totalDuration: 18,
+        });
+      });
+
+      it("normalizes Moonraker aggregate total names", async () => {
+        const mockGet = vi.fn().mockResolvedValue({
+          data: {
+            job_totals: {
+              total_jobs: 2,
+              total_print_time: 120,
+              total_filament_used: 8.5,
+              longest_job: 90,
+              longest_print: 80,
+            },
+          },
+        });
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+          mockGet;
+
+        const result = await apiClient.getPrinterHistoryTotals("printer-1");
+
+        expect(result.jobTotals).toEqual({
+          totalJobs: 2,
+          totalPrintTime: 120,
+          totalFilament: 8.5,
+          longestJob: 90,
+          longestPrint: 80,
+        });
+      });
+    });
   });
 
   describe("createPrinter", () => {

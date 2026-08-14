@@ -1,9 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { signalRService, type SingleFileHarvestProgressEvent, type SingleFileHarvestCompleteEvent } from '@/services/harvest-signalr';
 import { toast } from 'sonner';
@@ -99,20 +97,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
     };
   }, [isOpen]);
 
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
-
   const handleQueueFile = async (fileName: string) => {
     const file = files.find(f => f.fileName === fileName);
     if (file) {
@@ -144,23 +128,33 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleDownloadFile = async (fileName: string) => {
+    let downloadUrl: string | undefined;
+    let link: HTMLAnchorElement | undefined;
     try {
       setIsDownloading(fileName);
-      // Create a download link for the file
-      // The API should provide a file download endpoint
-      const downloadUrl = `${getApiBaseUrl()}/printers/${printer.id}/files/download?filename=${encodeURIComponent(fileName)}`;
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = fileName.split('/').pop() || 'download';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      toast.success(`Downloading: ${fileName}`);
+      const response = await apiClient.get<Blob>(
+        `/printers/${printer.id}/files/download`,
+        {
+          params: { filename: fileName },
+          responseType: 'blob',
+        },
+      );
+      downloadUrl = window.URL.createObjectURL(response.data);
+      link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName.split('/').pop() || 'download';
+      document.body.appendChild(link);
+      link.click();
+      toast.success(`Downloaded: ${fileName}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to download file';
       toast.error(errorMessage);
       console.error('Error downloading file:', err);
     } finally {
+      link?.remove();
+      if (downloadUrl) {
+        window.URL.revokeObjectURL(downloadUrl);
+      }
       setIsDownloading(null);
     }
   };
@@ -255,26 +249,29 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   }
 
   const modalContent = (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs" />
-
-        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-pf-border">
-            <div>
-              <h2 className="text-xl font-semibold text-pf-text-primary">Printer Files</h2>
-              <p className="text-sm text-pf-text-secondary mt-1">
-                {printer.name} - Available G-code files
-              </p>
-            </div>
-
-            {/* Close handled by Modal */}
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {isLoading ? (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Printer Files"
+      width="max-w-4xl"
+      maxHeight="max-h-[80vh]"
+      closeOnBackdrop
+      footer={
+        <div className="flex w-full items-center justify-between">
+          <p className="text-sm text-pf-text-secondary">
+            {files.length} file{files.length !== 1 ? 's' : ''} available on printer
+          </p>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      }
+    >
+      <p className="mb-4 text-sm text-pf-text-secondary">
+        {printer.name} - Available G-code files
+      </p>
+      <div>
+        {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
                 <span className="ml-3 text-pf-text-secondary">Loading files...</span>
@@ -371,7 +368,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-2 shrink-0 ml-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                             <Button
                               type="button"
                               variant="subtle"
@@ -464,32 +461,15 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-pf-border bg-pf-bg-1">
-            <p className="text-sm text-pf-text-secondary">
-              {files.length} file{files.length !== 1 ? 's' : ''} available on printer
-            </p>
-
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onClose}
-            >
-              Close
-            </Button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 
   // Confirmation dialog using generic ConfirmationModal component
   const printConfirmDialog = confirmDialog?.type === 'print' ? confirmDialog : null;
   const deleteConfirmDialog = confirmDialog?.type === 'delete' ? confirmDialog : null;
 
-  return createPortal(
+  return (
     <>
       {modalContent}
 
@@ -590,7 +570,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
         </Modal>
       )}
-    </>,
-    document.body
+    </>
   );
 }

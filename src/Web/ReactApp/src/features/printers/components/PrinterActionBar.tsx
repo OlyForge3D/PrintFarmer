@@ -36,6 +36,7 @@ export function PrinterActionBar({
           disabled={controlActionPending || !canPauseOrResume}
           onClick={() => onControlAction(isPaused ? 'resume' : 'pause')}
           title={isPaused ? 'Resume' : 'Pause'}
+          aria-label={isPaused ? 'Resume' : 'Pause'}
           padSize="small"
         >
           {isPaused ? <PlayIcon className="h-4 w-4" /> : <PauseIcon className="h-4 w-4" />}
@@ -44,6 +45,7 @@ export function PrinterActionBar({
           disabled={controlActionPending || !canCancel}
           onClick={() => onControlAction('cancel')}
           title="Cancel"
+          aria-label="Cancel"
           padSize="small"
         >
           <XCircleIcon className="h-4 w-4" ariaLabel="Cancel" />
@@ -53,6 +55,7 @@ export function PrinterActionBar({
           disabled={controlActionPending || !canEmergencyStop}
           onClick={() => onControlAction(isShutdown ? 'firmware-restart' : 'stop')}
           title={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
+          aria-label={isShutdown ? 'Firmware Restart' : 'Emergency Stop'}
           padSize="small"
         >
           {isShutdown ? <RefreshIcon className="h-4 w-4" /> : <EmergencyStopIcon className="h-4 w-4" />}

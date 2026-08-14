@@ -23,6 +23,7 @@ vi.mock('@/common/hooks/useApi', () => ({
   usePrinters: () => ({ data: [], isLoading: false, refetch: vi.fn() }),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterBackendCapabilities: () => ({ data: [] }),
+  usePrinterCameraUrls: () => ({ data: [] }),
   useBedTypes: () => ({ data: [] }),
 }));
 

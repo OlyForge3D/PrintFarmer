@@ -231,8 +231,12 @@ public sealed class PrinterPhysicalActuationService(
 
         PrinterDispatchState? state = await _db.PrinterDispatchStates
             .SingleOrDefaultAsync(candidate => candidate.PrinterId == printerId, ct);
-        if (state?.ActiveDispatchAttemptId is not Guid attemptId ||
-            !state.ActiveJobId.HasValue)
+        PrintJob? activeJob = state?.ActiveJobId.HasValue == true
+            ? await _db.PrintJobs.SingleOrDefaultAsync(
+                candidate => candidate.Id == state.ActiveJobId.Value,
+                ct)
+            : null;
+        if (state is null || activeJob is null)
         {
             await WriteDeniedAsync(
                 printerId,
@@ -243,7 +247,7 @@ public sealed class PrinterPhysicalActuationService(
                 state);
             return Denied(
                 PrinterActuationResultCode.PrinterBusy,
-                "The operation requires an active dispatch attempt.");
+                "The operation requires an active print.");
         }
 
         if (state.PhysicalControlCommandId.HasValue)
@@ -253,6 +257,19 @@ public sealed class PrinterPhysicalActuationService(
                 "Another physical operation owns the printer barrier.");
         }
 
+        QueueDispatchAttempt? attempt = state.ActiveDispatchAttemptId.HasValue
+            ? await _db.QueueDispatchAttempts.SingleOrDefaultAsync(
+                candidate =>
+                    candidate.Id == state.ActiveDispatchAttemptId.Value &&
+                    candidate.PrintJobId == activeJob.Id,
+                ct)
+            : null;
+        if (attempt is null)
+        {
+            attempt = await CreateLegacyAttemptAsync(activeJob, state, actorSubject, ct);
+        }
+
+        Guid attemptId = attempt.Id;
         Guid commandId = Guid.NewGuid();
         DateTime now = DateTime.UtcNow;
         state.PhysicalControlCommandId = commandId;

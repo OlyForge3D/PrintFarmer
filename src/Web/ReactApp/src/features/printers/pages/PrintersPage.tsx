@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes, usePrinterCameraUrls } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -77,16 +77,39 @@ export function PrintersPage() {
   useFleetQueueSummaries();
   const queryClient = useQueryClient();
   
-  const { 
-    data: printers, 
+  const {
+    data: printers,
     isLoading,
-    refetch: refetchPrinters
+    isError: isPrintersError,
+    error: printersError,
+    refetch: refetchPrinters,
   } = usePrinters();
+  const { data: cameraUrls = [] } = usePrinterCameraUrls();
 
   const { data: bedTypes = [] } = useBedTypes();
-  
+
+  const printersWithCameraUrls = useMemo(() => {
+    const cameraUrlsByPrinterId = new Map(
+      cameraUrls.map((camera) => [camera.id, camera])
+    );
+
+    return (printers || []).map((printer) => {
+      const camera = cameraUrlsByPrinterId.get(printer.id);
+      return camera
+        ? {
+            ...printer,
+            cameraStreamUrl: camera.cameraStreamUrl,
+            cameraSnapshotUrl: camera.cameraSnapshotUrl,
+            cameraAccessMode: camera.cameraAccessMode,
+            cameraStreamFormat: camera.cameraStreamFormat,
+            cameraSnapshotStrategy: camera.cameraSnapshotStrategy,
+          }
+        : printer;
+    });
+  }, [cameraUrls, printers]);
+
   // Merge with realtime SignalR updates for display
-  const displayPrinters = usePrinterDisplays(printers || []);
+  const displayPrinters = usePrinterDisplays(printersWithCameraUrls);
 
   // Whether ANY printer in the fleet has Obico/failure detection enabled,
   // computed once here (not per-card) and shared via context so the
@@ -400,6 +423,33 @@ export function PrintersPage() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (isPrintersError) {
+    return (
+      <PageTemplate
+        title="Printers"
+        subtitle="Monitor and manage your 3D printer farm"
+        icon={PrinterIcon}
+        titleActions={<HelpButton onClick={startTour} />}
+      >
+        <div
+          role="alert"
+          className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-pf-error/40 bg-pf-error/5 p-8 text-center"
+        >
+          <PrinterIcon className="mb-4 h-14 w-14 text-pf-error" />
+          <h2 className="mb-2 text-xl font-semibold text-pf-text-primary">Unable to Load Printers</h2>
+          <p className="mb-6 max-w-md text-pf-text-secondary">
+            {printersError instanceof Error
+              ? printersError.message
+              : 'PrintFarmer could not retrieve the printer list. Try again.'}
+          </p>
+          <Button type="button" variant="primary" onClick={() => void refetchPrinters()}>
+            Retry
+          </Button>
+        </div>
+      </PageTemplate>
     );
   }
 

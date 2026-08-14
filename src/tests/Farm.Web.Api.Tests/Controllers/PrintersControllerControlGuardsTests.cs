@@ -217,6 +217,37 @@ public class PrintersControllerControlGuardsTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task EmergencyStopAsync_IdlePrinter_ExecutesDirectBackendControl()
+    {
+        Guid id = Guid.NewGuid();
+        var printersService = new Mock<IPrintersService>();
+        printersService.Setup(service => service.FindByIdAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SamplePrinter(id));
+        printersService.Setup(service => service.EmergencyStopAsync(
+                id,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var statusCache = new Mock<IPrinterStatusCacheReader>();
+        statusCache.Setup(cache => cache.GetStatus(id))
+            .Returns(new PrinterStatusDto(id, IsOnline: true, State: "Idle"));
+        PrintersController controller = CreateController(
+            printersService,
+            statusCache,
+            out _);
+
+        ActionResult<CommandResult> result = await controller.EmergencyStopAsync(
+            id,
+            CancellationToken.None);
+
+        Assert.True(result.Value?.Success);
+        printersService.Verify(service => service.EmergencyStopAsync(
+            id,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Theory]
     [InlineData("Qidibox", "Load", 2, null, "T2")]
     [InlineData("Qidibox", "Unload", 2, null, "UNLOAD_T2")]

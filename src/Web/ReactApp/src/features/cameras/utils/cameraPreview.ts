@@ -16,6 +16,13 @@ export function shouldPollPrinterSnapshot({
   snapshotStrategy,
   snapshotUrl,
 }: CameraPreviewContract): boolean {
+  // Same-origin printer proxy URLs are protected by the application JWT. An
+  // <img> element cannot attach that header, so retrieve them through apiClient
+  // and render the resulting object URL instead.
+  if (snapshotUrl?.startsWith('/api/printers/')) {
+    return true;
+  }
+
   if (snapshotStrategy === CameraSnapshotStrategy.SnapmakerU1MonitorJpeg) {
     return true;
   }

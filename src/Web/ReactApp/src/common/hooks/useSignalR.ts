@@ -78,6 +78,36 @@ export function usePrinterStatusUpdates(
     printerIdsRef.current = printerIds;
   }, [printerIds]);
 
+  useEffect(() => {
+    if (!printerIds?.length) return;
+
+    let cancelled = false;
+    let subscribed = false;
+    const subscribeToPrinters = () => {
+      if (cancelled || subscribed) return;
+      subscribed = true;
+      void Promise.allSettled(
+        printerIds.map((printerId) => printerSignalRService.subscribeToPrinter(printerId))
+      );
+    };
+    const unsubscribeConnectionState = printerSignalRService.onConnectionStateChange((connected) => {
+      if (connected) subscribeToPrinters();
+    });
+
+    if (printerSignalRService.isConnected) {
+      subscribeToPrinters();
+    } else {
+      void printerSignalRService.connect().then(() => {
+        if (printerSignalRService.isConnected) subscribeToPrinters();
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      unsubscribeConnectionState();
+    };
+  }, [printerIds]);
+
   // Flush interval: sync accumulated ref updates to React state (~1 render/sec max)
   useEffect(() => {
     const flushId = setInterval(() => {

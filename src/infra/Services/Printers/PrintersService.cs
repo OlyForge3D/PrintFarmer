@@ -964,12 +964,23 @@ public class PrintersService(
     public async Task<PrinterCameraUrlsDto[]> GetCameraUrlsAsync(CancellationToken ct)
     {
         List<Printer> items = await _unitOfWork.Printers.GetAllAsync(ct);
-        PrinterCameraUrlsDto[] dtos = await Task.WhenAll(items.Where(p => p.IsEnabled).Select(async p =>
-        {
-            (string? streamUrl, string? snapshotUrl) = await ResolveCameraUrlsFromTableAsync(p.Id, ct).ConfigureAwait(false);
-            return PrinterCameraUrlsDto.FromUrls(p.Id, p.Name, streamUrl, snapshotUrl);
-        }));
-        return dtos;
+        Dictionary<Guid, (string? StreamUrl, string? SnapshotUrl)> cameraUrls =
+            await BatchResolveCameraUrlsAsync(ct).ConfigureAwait(false);
+
+        return items
+            .Where(p => p.IsEnabled)
+            .Select(p =>
+            {
+                cameraUrls.TryGetValue(
+                    p.Id,
+                    out (string? StreamUrl, string? SnapshotUrl) camera);
+                return PrinterCameraUrlsDto.FromUrls(
+                    p.Id,
+                    p.Name,
+                    camera.StreamUrl,
+                    camera.SnapshotUrl);
+            })
+            .ToArray();
     }
 
     /// <summary>

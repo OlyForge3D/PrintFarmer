@@ -2560,9 +2560,10 @@ public class PrintersController(
         string operation,
         string telemetryOperation,
         Func<CancellationToken, Task<bool>> backendCall,
-        CancellationToken ct)
+        CancellationToken ct,
+        PrinterActuationResult? acquired = null)
     {
-        PrinterActuationResult begin = await BeginPhysicalControlAsync(
+        PrinterActuationResult begin = acquired ?? await BeginPhysicalControlAsync(
             printerId,
             operation,
             ct);
@@ -2975,11 +2976,26 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
-        return await QueueLifecycleControlAsync(
+        PrinterActuationResult direct = await BeginPhysicalControlAsync(
+            id,
+            "emergencystop",
+            ct);
+        if (direct.Code == PrinterActuationResultCode.PrinterBusy)
+        {
+            return await QueueLifecycleControlAsync(
+                id,
+                "emergencystop",
+                "emergency_stop",
+                ct);
+        }
+
+        return await ExecuteDirectBooleanControlAsync(
             id,
             "emergencystop",
             "emergency_stop",
-            ct);
+            token => _printersService.EmergencyStopAsync(id, token),
+            ct,
+            direct);
     }
 
     /// <summary>

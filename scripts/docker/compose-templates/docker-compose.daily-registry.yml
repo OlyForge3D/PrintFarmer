@@ -19,3 +19,22 @@ services:
   orcaslicer-worker:
     image: ${PRINTFARMER_ORCASLICER_WORKER_IMAGE:?Set PRINTFARMER_ORCASLICER_WORKER_IMAGE from image-set.json}
     build: !reset null
+
+  # One digest-pinned emulator image runs as four isolated instances (see
+  # docker-compose.moonraker-emulator.yml); every instance pins to the same
+  # published image reference.
+  moonraker-ready:
+    image: ${PRINTFARMER_MOONRAKER_EMULATOR_IMAGE:?Set PRINTFARMER_MOONRAKER_EMULATOR_IMAGE from image-set.json}
+    build: !reset null
+
+  moonraker-printing:
+    image: ${PRINTFARMER_MOONRAKER_EMULATOR_IMAGE:?Set PRINTFARMER_MOONRAKER_EMULATOR_IMAGE from image-set.json}
+    build: !reset null
+
+  moonraker-paused:
+    image: ${PRINTFARMER_MOONRAKER_EMULATOR_IMAGE:?Set PRINTFARMER_MOONRAKER_EMULATOR_IMAGE from image-set.json}
+    build: !reset null
+
+  moonraker-shutdown:
+    image: ${PRINTFARMER_MOONRAKER_EMULATOR_IMAGE:?Set PRINTFARMER_MOONRAKER_EMULATOR_IMAGE from image-set.json}
+    build: !reset null

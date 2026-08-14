@@ -572,7 +572,7 @@ public sealed class MoonrakerSubscriptionService(
                 await SendConnectionIdentificationAsync(ws, ct);
 
                 // Step 2: Subscribe to printer objects
-                await SendObjectSubscriptionAsync(ws, ct);
+                await SendObjectSubscriptionAsync(ws, printer.Id, ct);
 
                 // Step 2b: Query initial toolhead data (especially homed_axes) since Moonraker only sends incremental updates
                 try
@@ -750,8 +750,9 @@ public sealed class MoonrakerSubscriptionService(
     /// ensuring full state coverage for any Moonraker configuration without hardcoding object names.
     /// </summary>
     /// <param name="ws">The WebSocket connection.</param>
+    /// <param name="printerId">The printer whose persistent subscription state is being refreshed.</param>
     /// <param name="ct">Cancellation token.</param>
-    private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, CancellationToken ct)
+    private async Task SendObjectSubscriptionAsync(ClientWebSocket ws, Guid printerId, CancellationToken ct)
     {
         // Step 1: Query the list of all available objects from Moonraker
         JsonRpcRequest listRequest = new()
@@ -853,6 +854,11 @@ public sealed class MoonrakerSubscriptionService(
             }
         }
 
+        if (_printerStates.TryGetValue(printerId, out PrinterState? state))
+        {
+            state.ResetMmuState();
+        }
+
         // Step 4: Send the subscription request with discovered objects
         ObjectSubscriptionRequest subscriptionParams = new()
         {
@@ -902,10 +908,14 @@ public sealed class MoonrakerSubscriptionService(
                         break;
                     }
 
-                    // Send ping frame
+                    // ClientWebSocket does not expose control-frame pings. Use a valid,
+                    // side-effect-free Moonraker JSON-RPC request instead of arbitrary text:
+                    // real Moonraker rejects non-JSON text with -32700, which previously
+                    // accumulated parse errors and forced healthy connections into polling.
                     try
                     {
-                        byte[] pingData = Encoding.UTF8.GetBytes($"ping-{DateTime.UtcNow:O}");
+                        byte[] pingData = Encoding.UTF8.GetBytes(
+                            """{"jsonrpc":"2.0","method":"server.info","id":-1}""");
                         await ws.SendAsync(pingData, WebSocketMessageType.Text, endOfMessage: true, ct);
                         _logger.LogDebug("Sent heartbeat ping to printer {PrinterName}", printer.Name);
                     }
@@ -1171,6 +1181,7 @@ public sealed class MoonrakerSubscriptionService(
                 SetPollingMode(printer.Id, PollingMode.WebSocketRealTime, "Klippy ready");
                 CancelOfflineGraceTimer(printer.Id);
                 RecordHealthTransition(printer.Id, printer.Name, PrinterConnectionState.Connected, "Klippy ready");
+                await RefreshPrinterStatusAsync(printer.Id, delayMs: 0, ct);
                 break;
 
             case "notify_klippy_shutdown":
@@ -2570,8 +2581,15 @@ public sealed class MoonrakerSubscriptionService(
             webhooksState = ws.GetString();
         }
 
-        // Determine final state: print_stats takes precedence
-        if (!string.IsNullOrEmpty(printStatsState))
+        // A non-ready Klippy system state supersedes the active print state. For example,
+        // M112 reports print_stats=error alongside webhooks=shutdown; the printer is in
+        // firmware shutdown and must expose the restart path rather than a generic job error.
+        if (!string.IsNullOrEmpty(webhooksState) &&
+            !string.Equals(webhooksState, "ready", StringComparison.OrdinalIgnoreCase))
+        {
+            stateValue = webhooksState;
+        }
+        else if (!string.IsNullOrEmpty(printStatsState))
         {
             stateValue = printStatsState;
         }
@@ -2642,9 +2660,9 @@ public sealed class MoonrakerSubscriptionService(
     {
         try
         {
-            // Determine online status based on Klippy ready state
-            // Default to false if not yet tracked (prevents false positives)
-            bool isOnline = _klippyReadyState.TryGetValue(printerId, out bool ready) && ready;
+            // Reaching this path means Moonraker delivered a live object update. Klippy may
+            // be shut down or disconnected while the Moonraker host remains reachable.
+            const bool isOnline = true;
 
             // Build MMU status if detected
             MmuStatusDto? mmuStatus = state.BuildMmuStatus();
@@ -2781,7 +2799,8 @@ public sealed class MoonrakerSubscriptionService(
 
     /// <summary>
     /// Sends a shutdown status update for a printer when Klippy shuts down.
-    /// Broadcasts via SignalR "printerupdated" event with State="Shutdown" and IsOnline=false.
+    /// Broadcasts via SignalR "printerupdated" event with State="Shutdown" while keeping
+    /// the Moonraker host online so recovery controls remain available.
     /// </summary>
     /// <param name="printerId">The ID of the printer.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2797,7 +2816,7 @@ public sealed class MoonrakerSubscriptionService(
 
             PrinterStatusUpdate shutdownUpdate = new(
                 printerId,
-                false, // IsOnline
+                true, // Moonraker is reachable even though Klippy is shut down.
                 PrinterStateNormalizer.NormalizeState("Shutdown"),
                 null, null, null, null,
                 null, null, null,
@@ -2807,7 +2826,7 @@ public sealed class MoonrakerSubscriptionService(
 
             PrinterStatusDto shutdownCacheUpdate = new(
                 Id: printerId,
-                IsOnline: false,
+                IsOnline: true,
                 State: PrinterStateNormalizer.NormalizeState("Shutdown"),
                 Progress: null,
                 JobName: null,

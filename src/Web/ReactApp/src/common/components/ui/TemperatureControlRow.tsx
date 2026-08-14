@@ -61,6 +61,7 @@ export function TemperatureControlRow({
         onChange={onChange}
         onKeyDown={onKeyDown}
         disabled={disabled}
+        aria-label={`${label} target temperature`}
         className="w-full"
       />
       {hasRowPresetSelector ? (

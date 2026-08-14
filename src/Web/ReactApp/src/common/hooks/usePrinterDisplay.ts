@@ -88,7 +88,8 @@ function mergePrinterDisplayCached(printer: Printer, signalRStatus: PrinterStatu
  * @returns PrinterDisplay object with merged state, ready for UI rendering
  */
 export function usePrinterDisplay(printer: Printer): PrinterDisplay {
-  const { printerStatuses } = usePrinterStatusUpdates();
+  const printerIds = useMemo(() => [printer.id], [printer.id]);
+  const { printerStatuses } = usePrinterStatusUpdates(undefined, printerIds);
   const signalRStatus = printerStatuses.get(printer.id);
 
   // Compute display values - prefer SignalR, fall back to API
@@ -109,7 +110,8 @@ export function usePrinterDisplay(printer: Printer): PrinterDisplay {
  * @returns Array of PrinterDisplay objects
  */
 export function usePrinterDisplays(printers: Printer[]): PrinterDisplay[] {
-  const { printerStatuses } = usePrinterStatusUpdates();
+  const printerIds = useMemo(() => printers.map((printer) => printer.id), [printers]);
+  const { printerStatuses } = usePrinterStatusUpdates(undefined, printerIds);
 
   return useMemo(
     () => printers.map((printer) => mergePrinterDisplayCached(printer, printerStatuses.get(printer.id))),
