@@ -136,6 +136,7 @@ jobs:
                 --env DB_PROVIDER=Sqlite \
                 --env 'ConnectionStrings__Default=Data Source=/tmp/printfarmer-smoke.db' \
                 --env 'Jwt__Key=daily-image-smoke-only-key-32-bytes-minimum' \
+                --env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key' \
                 --env PFARM__NetworkDiscovery__EnableDiscovery=false \
                 --env SlicerOrchestrator__EnableDistributedSlicing=false \
                 "$IMAGE"
@@ -147,6 +148,7 @@ jobs:
                 --env DB_PROVIDER=Sqlite \
                 --env 'ConnectionStrings__Default=Data Source=/tmp/printfarmer-slicer-smoke.db' \
                 --env 'Jwt__Key=daily-image-smoke-only-key-32-bytes-minimum' \
+                --env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key' \
                 "$IMAGE"
               health_url="http://localhost:5246/healthz"
               ;;
