@@ -68,7 +68,6 @@ module.exports = function(fileInfo, api, options) {
   }).forEach(p => {
     const callExpr = p.node;
     // Only transform direct console.*(...) expressions (not assignments or other parent types)
-    const parent = p.parent.node;
     // If already inside an IfStatement checking PrintFarmerDebug, skip
     let ancestor = p.parent;
     let alreadyGuarded = false;

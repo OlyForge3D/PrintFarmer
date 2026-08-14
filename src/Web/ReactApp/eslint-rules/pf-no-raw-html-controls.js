@@ -62,16 +62,6 @@ export default {
       return typeAttr?.value?.value === 'hidden';
     }
 
-    function hasSpecialAttribute(node) {
-      // Check for data-* or aria-* attributes
-      return node.attributes?.some(attr => 
-        attr.type === 'JSXAttribute' && (
-          attr.name.name?.startsWith('data-') ||
-          attr.name.name?.startsWith('aria-')
-        )
-      );
-    }
-
     function getInputType(node) {
       const typeAttr = node.attributes?.find(attr => 
         attr.type === 'JSXAttribute' && attr.name.name === 'type'
