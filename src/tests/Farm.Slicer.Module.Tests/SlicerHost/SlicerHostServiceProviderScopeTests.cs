@@ -54,5 +54,15 @@ public sealed class SlicerHostServiceProviderScopeTests
         Assert.NotNull(
             scope.ServiceProvider
                 .GetRequiredService<Farm.Infrastructure.Services.Authentication.ITokenRevocationService>());
+
+        // Confirms #1544: ProfileTaskCheckService resolves its printer data source
+        // (IPrinterProfileCheckRepository) via GetRequiredService at runtime inside a scope,
+        // which ValidateOnBuild alone would NOT catch because the hosted service's constructor
+        // only takes IServiceScopeFactory/ILogger/IConfiguration. Resolving it directly here
+        // exercises the actual runtime dependency chain and would have failed before the fix,
+        // when ProfileTaskCheckService instead required the unregistered main-API IPrintersService.
+        Assert.NotNull(
+            scope.ServiceProvider
+                .GetRequiredService<Farm.Slicer.Module.Api.Repositories.IPrinterProfileCheckRepository>());
     }
 }

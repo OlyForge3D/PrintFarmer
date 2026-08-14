@@ -1,8 +1,8 @@
 ﻿using Farm.Infrastructure;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Catalog;
-using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Tasks;
+using Farm.Slicer.Module.Api.Repositories;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.Logging;
@@ -114,7 +114,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
             return;
         }
 
-        IPrintersService printersService = scope.ServiceProvider.GetRequiredService<IPrintersService>();
+        IPrinterProfileCheckRepository printersRepo = scope.ServiceProvider.GetRequiredService<IPrinterProfileCheckRepository>();
         IMachineModelProfileRepository machineModelProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineModelProfileRepository>();
         IMachineProfileRepository machineProfileRepo = scope.ServiceProvider.GetRequiredService<IMachineProfileRepository>();
         IUserTaskService taskService = scope.ServiceProvider.GetRequiredService<IUserTaskService>();
@@ -123,7 +123,7 @@ public sealed class ProfileTaskCheckService : BackgroundService
         try
         {
             // Get all printers
-            List<Printer> printers = (await printersService.GetAllAsync(ct)).ToList();
+            List<Printer> printers = (await printersRepo.GetAllAsync(ct)).ToList();
 
             if (printers.Count == 0)
             {
