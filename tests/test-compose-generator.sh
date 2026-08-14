@@ -219,7 +219,7 @@ test_orcaslicer_worker_config() {
     
     # Validate worker environment configuration
     assert_contains "$compose_content" "Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer" "Should launch the real OrcaSlicer binary"
-    assert_contains "$compose_content" "Worker__WorkerId" "Should set worker ID"
+    assert_contains "$compose_content" "Worker__InstanceId" "Should set worker instance ID"
     # Queue name may be present as Worker__QueueName or the worker may use API-based orchestration
     if echo "$compose_content" | grep -q "Worker__QueueName" || echo "$compose_content" | grep -q "Worker__ApiBaseUrl" || echo "$compose_content" | grep -q "SlicerOrchestrator__Workers__OrcaSlicer" || echo "$compose_content" | grep -q "ORCA_WORKER_ENDPOINT"; then
         test_info "✓ Queue configuration or API orchestration setting present"
@@ -300,7 +300,7 @@ test_orcaslicer_worker_variations() {
         
         # Validate worker environment
         assert_contains "$compose_content" "Worker__OrcaSlicerPath" "Should set OrcaSlicer path for $count workers"
-        assert_contains "$compose_content" "Worker__WorkerId" "Should set worker ID for $count workers"
+        assert_contains "$compose_content" "Worker__InstanceId" "Should set worker instance ID for $count workers"
         
         # Validate multistage build
         assert_contains "$compose_content" "Dockerfile.multistage" "Should use multistage dockerfile for $count workers"

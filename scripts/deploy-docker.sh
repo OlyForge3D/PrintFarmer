@@ -3469,12 +3469,14 @@ normalize_worker_configuration() {
     if [[ "$force_disable" == "true" ]]; then
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
+        ORCA_WORKER_INSTANCE_ID=""
         return 0
     fi
 
     if [[ "$ENABLE_DISTRIBUTED_SLICING" != "true" ]]; then
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
+        ORCA_WORKER_INSTANCE_ID=""
         return 0
     fi
 
@@ -3492,6 +3494,19 @@ normalize_worker_configuration() {
         ORCA_WORKER_COUNT="${ORCA_WORKER_COUNT:-1}"
     else
         ORCA_WORKER_COUNT=0
+    fi
+
+    # A stable Worker:InstanceId lets the registry upsert the same worker/service
+    # record across redeploys instead of accumulating a duplicate every restart
+    # (issue #1528). That only works for a single, non-scaled worker: Docker
+    # Compose applies the same environment to every scaled replica, so sharing
+    # one instance ID across replicas would collapse them into a single
+    # registered worker. Only set it when exactly one worker is configured;
+    # scaled deployments keep generating a random per-process identity.
+    if [[ "$ENABLE_ORCA_WORKER" == "yes" && "$ORCA_WORKER_COUNT" -eq 1 ]]; then
+        ORCA_WORKER_INSTANCE_ID="orcaslicer-worker-1"
+    else
+        ORCA_WORKER_INSTANCE_ID=""
     fi
 }
 
@@ -3614,6 +3629,18 @@ validate_configuration() {
 
     if [ "$NON_INTERACTIVE" = "true" ]; then
         print_info "Effective OrcaSlicer worker configuration: enabled=$ENABLE_ORCA_WORKER, count=$ORCA_WORKER_COUNT"
+    fi
+
+    # Recompute the stable worker InstanceId (issue #1528): the adjustments just
+    # above can still change ENABLE_ORCA_WORKER/ORCA_WORKER_COUNT after
+    # normalize_worker_configuration already set it, so re-derive it here from
+    # the final values. Only a single, non-scaled worker gets a stable ID;
+    # scaled replicas keep generating a random per-process identity because
+    # Docker Compose applies identical environment to every replica.
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -eq 1 ]; then
+        ORCA_WORKER_INSTANCE_ID="orcaslicer-worker-1"
+    else
+        ORCA_WORKER_INSTANCE_ID=""
     fi
 
     print_success "Validation complete."
@@ -4581,7 +4608,18 @@ EOF
         AUTO_ADMIN_PASSWORD=$(generate_random_password)
         print_info "Generated random pgAdmin password (saved to env file)"
     fi
-    
+
+    # Only emit ORCA_WORKER_INSTANCE_ID when it has a real value. Leaving the
+    # entire line out (rather than writing it with an empty value) when scaled
+    # keeps `${ORCA_WORKER_INSTANCE_ID:-}` substitution in the compose template
+    # behaving identically, while avoiding an env file key that looks like a
+    # stable identity was assigned to what are actually distinct replicas
+    # (issue #1528).
+    ORCA_WORKER_INSTANCE_ID_ENV_LINE=""
+    if [ -n "$ORCA_WORKER_INSTANCE_ID" ]; then
+        ORCA_WORKER_INSTANCE_ID_ENV_LINE="ORCA_WORKER_INSTANCE_ID=$ORCA_WORKER_INSTANCE_ID"
+    fi
+
     cat >> "$ENV_FILE" << EOF
 
 # Monitoring & Observability Credentials
@@ -4610,6 +4648,9 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
+# Stable worker identity for redeploys of a single (non-scaled) worker; omitted
+# entirely when scaled so replicas keep distinct, per-process identities (issue #1528).
+$ORCA_WORKER_INSTANCE_ID_ENV_LINE
 
 # Profile Task Check - auto-disable when slicing workers are disabled
 PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" || echo "false")

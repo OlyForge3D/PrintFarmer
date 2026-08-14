@@ -16,7 +16,7 @@ This reference lists environment variables common to all per-engine slicing work
 ## Worker Identity & Queueing
 | Variable | Required | Default | Purpose |
 |----------|----------|---------|---------|
-| `Worker__WorkerId` | No | Auto-generated GUID (implementation specific) | Stable identifier in logs & metrics. Provide when running multiple replicas to ease tracing. |
+| `Worker__InstanceId` | No | Auto-generated GUID (random per process) | Stable identity used to upsert the worker/service record on redeploy instead of creating a duplicate (issue #1528); always issued a fresh API key regardless of match. Only set for a single, non-scaled worker — scaled replicas must leave this unset/distinct so Compose doesn't collapse them into one record. |
 | `Worker__QueueName` | Yes | (engine-specific initializer) | Redis list / stream / queue name from which jobs are consumed. Distinct per engine. |
 | `Worker__WorkingDirectory` | No | `/app/temp` | Scratch space for slicing operations; periodically cleaned. |
 
@@ -64,7 +64,7 @@ Worker__QueueName=<engine-queue-name>
 ```
 Optional but recommended:
 ```
-Worker__WorkerId=<human-readable-id>
+Worker__InstanceId=<stable-id>  # only for a single, non-scaled worker
 Logging__LogLevel__Default=Information
 ```
 

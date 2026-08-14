@@ -903,7 +903,8 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(512)");
 
                     b.Property<string>("InstanceId")
-                        .HasColumnType("nvarchar(max)");
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
 
                     b.Property<DateTime>("LastSeen")
                         .HasColumnType("datetime2");
@@ -938,6 +939,10 @@ namespace Farm.Slicer.Migrations.SqlServer.Migrations
                         .HasColumnType("nvarchar(64)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("InstanceId")
+                        .IsUnique()
+                        .HasFilter("[InstanceId] IS NOT NULL");
 
                     b.HasIndex("Name");
 

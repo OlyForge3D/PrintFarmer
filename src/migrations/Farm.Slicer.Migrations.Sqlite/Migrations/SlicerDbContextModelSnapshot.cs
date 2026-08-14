@@ -890,6 +890,7 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("InstanceId")
+                        .HasMaxLength(200)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("LastSeen")
@@ -925,6 +926,9 @@ namespace Farm.Slicer.Migrations.Sqlite.Migrations
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("InstanceId")
+                        .IsUnique();
 
                     b.HasIndex("Name");
 

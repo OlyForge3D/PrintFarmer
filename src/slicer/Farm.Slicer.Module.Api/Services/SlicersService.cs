@@ -213,80 +213,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         int maxJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs));
 
-        // Every registration receives fresh credentials. InstanceId is diagnostic metadata,
-        // never proof of ownership and never a key-recovery mechanism.
-        SlicerService svc = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = dto.Name ?? "orca-service",
-            SlicerType = dto.SlicerType,
-            Version = dto.Version,
-            Host = dto.Host,
-            UiManifestUrl = dto.UiManifestUrl,
-            CapabilitiesJson = dto.CapabilitiesJson,
-            MaxConcurrentJobs = maxJobs,
-            Status = "Online",
-            LastSeen = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            Tags = dto.Tags,
-            InstanceId = dto.InstanceId,
-            ApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_'),
-        };
-
-        await _repo.AddAsync(svc, ct);
-
-        // Synchronize to Worker table for dispatcher
-        Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
-
-        if (worker != null)
-        {
-            worker.ServiceId = svc.Id.ToString();
-            worker.Name = svc.Name;
-            worker.EndpointUrl = svc.Host ?? string.Empty;
-            worker.CapabilitiesJson = svc.CapabilitiesJson ?? "[]";
-            worker.Status = WorkerStatus.Online;
-            worker.TotalSlots = maxJobs;
-            worker.ActiveJobs = 0;
-            worker.LastHeartbeat = DateTime.UtcNow;
-            worker.OnlineAt = DateTime.UtcNow;
-            worker.ApiKey = svc.ApiKey;
-            worker.Version = svc.Version;
-            worker.UpdatedAt = DateTime.UtcNow;
-            worker.IsDisabled = false;
-        }
-        else
-        {
-            worker = new Worker
-            {
-                Id = Guid.NewGuid(),
-                ServiceId = svc.Id.ToString(),
-                Name = svc.Name,
-                EndpointUrl = svc.Host ?? string.Empty,
-                CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
-                Status = WorkerStatus.Online,
-                TotalSlots = maxJobs,
-                ActiveJobs = 0,
-                CompletedJobs = 0,
-                FailedJobs = 0,
-                LastHeartbeat = DateTime.UtcNow,
-                RegisteredAt = DateTime.UtcNow,
-                OnlineAt = DateTime.UtcNow,
-                ApiKey = svc.ApiKey,
-                Version = svc.Version,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                IsDisabled = false
-            };
-
-            await _workerRepo.AddAsync(worker);
-        }
-
-        // SlicerService and Worker share the scoped DbContext, so this single save is atomic.
-        await _repo.SaveChangesAsync(ct);
+        SlicerService svc = await UpsertServiceAndWorkerAsync(dto, maxJobs, ct);
 
         // Enable the slicer feature on first worker registration.
         // This is the single source of truth: slicer UI is shown only when a worker exists.
@@ -355,6 +282,157 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
         }
 
         return (svc.Id, svc.ApiKey ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Creates or updates the <see cref="SlicerService"/>/<see cref="Worker"/> pair for a
+    /// registration and persists the change.
+    /// </summary>
+    /// <remarks>
+    /// Every registration receives fresh credentials — InstanceId is never a
+    /// key-recovery mechanism, so an old ApiKey can never be reclaimed by claiming a
+    /// known instance ID. It is only used to find an existing row for a stable
+    /// worker (e.g. the same container redeploying) so that row can be updated in
+    /// place instead of the registration accumulating a new duplicate service/worker
+    /// on every restart (issue #1528).
+    ///
+    /// The lookup-then-insert is not atomic, so two concurrent registrations for the
+    /// same InstanceId could otherwise both decide no existing row exists and both
+    /// try to insert one. A unique database index on <see cref="SlicerService.InstanceId"/>
+    /// (see <c>SlicerServiceConfiguration</c>) makes the loser's insert fail with a
+    /// <see cref="DbUpdateException"/> instead of silently creating a duplicate; when
+    /// that happens we discard our tracked entities and retry once, which finds and
+    /// updates the winner's row instead of surfacing an error.
+    /// </remarks>
+    private async Task<SlicerService> UpsertServiceAndWorkerAsync(RegisterSlicerDto dto, int maxJobs, CancellationToken ct)
+    {
+        bool hasInstanceId = !string.IsNullOrWhiteSpace(dto.InstanceId);
+
+        for (int attempt = 0; attempt < 2; attempt++)
+        {
+            string freshApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+
+            SlicerService? svc = hasInstanceId
+                ? await _repo.GetByInstanceIdAsync(dto.InstanceId!, ct)
+                : null;
+
+            bool insertingNewInstanceRecord = svc is null && hasInstanceId;
+
+            if (svc is not null)
+            {
+                _logger.LogInformation(
+                    "Re-registering slicer service {ServiceId} for stable worker instance {InstanceId}; issuing fresh credentials.",
+                    svc.Id,
+                    dto.InstanceId);
+
+                svc.Name = dto.Name ?? svc.Name;
+                svc.SlicerType = dto.SlicerType;
+                svc.Version = dto.Version;
+                svc.Host = dto.Host;
+                svc.UiManifestUrl = dto.UiManifestUrl;
+                svc.CapabilitiesJson = dto.CapabilitiesJson;
+                svc.MaxConcurrentJobs = maxJobs;
+                svc.Status = "Online";
+                svc.LastSeen = DateTime.UtcNow;
+                svc.UpdatedAt = DateTime.UtcNow;
+                svc.Tags = dto.Tags;
+                svc.ApiKey = freshApiKey;
+                svc.ApiKeyRotatedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                svc = new SlicerService
+                {
+                    Id = Guid.NewGuid(),
+                    Name = dto.Name ?? "orca-service",
+                    SlicerType = dto.SlicerType,
+                    Version = dto.Version,
+                    Host = dto.Host,
+                    UiManifestUrl = dto.UiManifestUrl,
+                    CapabilitiesJson = dto.CapabilitiesJson,
+                    MaxConcurrentJobs = maxJobs,
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    Tags = dto.Tags,
+                    InstanceId = dto.InstanceId,
+                    ApiKey = freshApiKey,
+                    ApiKeyRotatedAt = DateTime.UtcNow,
+                };
+
+                await _repo.AddAsync(svc, ct);
+            }
+
+            // Synchronize to Worker table for dispatcher
+            Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());
+
+            if (worker != null)
+            {
+                worker.ServiceId = svc.Id.ToString();
+                worker.Name = svc.Name;
+                worker.EndpointUrl = svc.Host ?? string.Empty;
+                worker.CapabilitiesJson = svc.CapabilitiesJson ?? "[]";
+                worker.Status = WorkerStatus.Online;
+                worker.TotalSlots = maxJobs;
+                worker.ActiveJobs = 0;
+                worker.LastHeartbeat = DateTime.UtcNow;
+                worker.OnlineAt = DateTime.UtcNow;
+                worker.ApiKey = svc.ApiKey;
+                worker.Version = svc.Version;
+                worker.UpdatedAt = DateTime.UtcNow;
+                worker.IsDisabled = false;
+            }
+            else
+            {
+                worker = new Worker
+                {
+                    Id = Guid.NewGuid(),
+                    ServiceId = svc.Id.ToString(),
+                    Name = svc.Name,
+                    EndpointUrl = svc.Host ?? string.Empty,
+                    CapabilitiesJson = svc.CapabilitiesJson ?? "[]",
+                    Status = WorkerStatus.Online,
+                    TotalSlots = maxJobs,
+                    ActiveJobs = 0,
+                    CompletedJobs = 0,
+                    FailedJobs = 0,
+                    LastHeartbeat = DateTime.UtcNow,
+                    RegisteredAt = DateTime.UtcNow,
+                    OnlineAt = DateTime.UtcNow,
+                    ApiKey = svc.ApiKey,
+                    Version = svc.Version,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    IsDisabled = false
+                };
+
+                await _workerRepo.AddAsync(worker);
+            }
+
+            try
+            {
+                // SlicerService and Worker share the scoped DbContext, so this single save is atomic.
+                await _repo.SaveChangesAsync(ct);
+                return svc;
+            }
+            catch (DbUpdateException) when (attempt == 0 && insertingNewInstanceRecord)
+            {
+                _logger.LogInformation(
+                    "Concurrent registration for instance {InstanceId} won the race to insert a new row; retrying as an update against its record.",
+                    dto.InstanceId);
+                _repo.ClearTracking();
+            }
+        }
+
+        // Unreachable: attempt 0 either returns or, on a non-retryable failure,
+        // rethrows past this loop; attempt 1 either returns or lets any exception
+        // propagate (the retry guard only matches attempt 0). Present only to
+        // satisfy the compiler's flow analysis.
+        throw new InvalidOperationException("Unreachable: RegisterAsync retry loop exited without returning or throwing.");
     }
 
     private static string GetSlicerTypeName(int slicerType)
