@@ -79,12 +79,20 @@ test('API image includes the runtime-selected SQLite slicer migrations', () => {
   );
 });
 
-test('slicer-host smoke check supplies its required worker shared key', () => {
+test('API and slicer-host smoke checks supply their required worker shared key', () => {
+  const apiSmoke = workflow.slice(
+    workflow.indexOf('            api)'),
+    workflow.indexOf('            slicer-host)'),
+  );
   const slicerHostSmoke = workflow.slice(
     workflow.indexOf('            slicer-host)'),
     workflow.indexOf('            orcaslicer-worker)'),
   );
 
+  assert.match(
+    apiSmoke,
+    /--env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key'/,
+  );
   assert.match(
     slicerHostSmoke,
     /--env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key'/,
