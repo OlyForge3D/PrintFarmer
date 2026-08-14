@@ -2,6 +2,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { AlertIcon, ExternalLinkIcon, HelpCircleIcon, ChevronDownIcon, ChevronUpIcon, CloseIcon } from '@/common/components/icons/MdiIcons';
 import { Button } from '@/common/components/ui';
+import { isBrowserReachableUrl, toSafeHref } from '@/common/utils/validation';
 import type { PrinterBackend } from '@/types/api';
 
 interface OfflineTroubleshootingGuideProps {
@@ -44,11 +45,18 @@ function getBackendName(backend: PrinterBackend | string): string {
 
 function getCommonSteps(printerIp?: string, serverUrl?: string, frontendUrl?: string): TroubleshootingStep[] {
   const webUrl = frontendUrl ?? serverUrl;
+  // Same client-visible URL sanitization used by the printer card's "Open in
+  // Browser" action (#1506, #1546): reject unsafe schemes and known
+  // internal-only synthetic hostnames (e.g. TestEmulator's
+  // `testemulator-<guid>`) so this link is never rendered as a raw,
+  // unsanitized href, and is omitted entirely rather than shown broken when
+  // the printer's URL is safe but unreachable from the browser.
+  const safeWebUrl = webUrl && isBrowserReachableUrl(webUrl) ? toSafeHref(webUrl) : undefined;
   return [
     { text: 'Check that the printer is powered on and the display is active' },
     { text: 'Verify the network cable is connected or WiFi is associated' },
     ...(printerIp ? [{ text: 'Ping the printer to check network connectivity', command: `ping ${printerIp}` }] : []),
-    ...(webUrl ? [{ text: "Check if the printer's web interface is accessible", link: { url: webUrl, label: webUrl } }] : []),
+    ...(safeWebUrl ? [{ text: "Check if the printer's web interface is accessible", link: { url: safeWebUrl, label: safeWebUrl } }] : []),
   ];
 }
 

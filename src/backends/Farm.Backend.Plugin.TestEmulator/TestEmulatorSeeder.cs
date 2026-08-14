@@ -76,7 +76,7 @@ public sealed class TestEmulatorSeeder(
 
             // Find an existing emulator printer by name + server URL prefix
             Printer? existing = allPrinters.FirstOrDefault(p =>
-                p.Name == config.Name && p.ServerUrl.StartsWith("http://testemulator-", StringComparison.OrdinalIgnoreCase));
+                p.Name == config.Name && p.ServerUrl.StartsWith(HostnamePrefix, StringComparison.OrdinalIgnoreCase));
 
             if (existing is not null)
             {
@@ -90,7 +90,7 @@ public sealed class TestEmulatorSeeder(
                 {
                     Id = printerId,
                     Name = config.Name,
-                    ServerUrl = $"http://testemulator-{printerId}",
+                    ServerUrl = BuildServerUrl(printerId),
                     BackendPort = 80,
                     Backend = BackendTypeId,
                     IsEnabled = true,
@@ -129,6 +129,22 @@ public sealed class TestEmulatorSeeder(
 
     // Backend int value for TestEmulator — matches the 100 in BackendPluginAttribute
     private const int BackendTypeId = 100;
+
+    // Single source of truth for the internal-only hostname prefix, shared by BuildServerUrl (the
+    // generator) and the existing-printer lookup above, so the two can never drift from each other.
+    private const string HostnamePrefix = "http://testemulator-";
+
+    /// <summary>
+    /// Builds the internal-only, browser-unreachable ServerUrl for a seeded emulator printer.
+    /// The React frontend (src/Web/ReactApp/src/common/utils/validation.ts,
+    /// <c>INTERNAL_ONLY_HOSTNAME_PATTERNS</c>) detects this exact hostname shape — a "testemulator-"
+    /// prefix followed by a lowercase, dashed Guid — to disable the "Open in Browser" action instead
+    /// of rendering a broken link (issue #1546). Exposed as internal so the contract test in
+    /// Farm.Web.Api.Tests (TestEmulatorServerUrlHostnameContractTests) can call the real production
+    /// logic instead of duplicating it, guaranteeing a change here is caught if the frontend pattern
+    /// isn't updated to match.
+    /// </summary>
+    internal static string BuildServerUrl(Guid printerId) => $"{HostnamePrefix}{printerId}";
 
     private static EmulatorPrinterState ParseInitialState(string state) =>
         state?.ToLowerInvariant() switch

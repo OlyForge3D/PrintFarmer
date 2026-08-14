@@ -40,7 +40,7 @@ import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors
 import { TaggingModal } from '@/components/TaggingModal';
 import { getPrinterDisplayState, requiresBedClearConfirmation } from '@/common/utils/printerStateDisplay';
 import { areCompactPrinterCardPropsEqual } from '@/features/printers/utils/compactPrinterCardMemo';
-import { isSafeHttpUrl, toSafeHref } from '@/common/utils/validation';
+import { isSafeHttpUrl, isBrowserReachableUrl, toSafeHref } from '@/common/utils/validation';
 
 interface CompactPrinterCardProps {
   printer: Printer | PrinterDisplay;
@@ -100,9 +100,15 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
 }: CompactPrinterCardProps) {
   // Merge with realtime SignalR updates
   const printer = printerProp; // printerProp already includes display data
-  const browserUrl = printer.frontendUrl && isSafeHttpUrl(printer.frontendUrl)
+  const browserUrl = printer.frontendUrl && isBrowserReachableUrl(printer.frontendUrl)
     ? toSafeHref(printer.frontendUrl)
     : undefined;
+  // Syntactically safe but known-unreachable from the browser (e.g. TestEmulator's
+  // internal `testemulator-<guid>` hostname, #1546) — distinct from "no URL at all"
+  // so the disabled action can explain *why* instead of just saying "unavailable".
+  const isInternalOnlyBrowserUrl = !!printer.frontendUrl
+    && isSafeHttpUrl(printer.frontendUrl)
+    && !isBrowserReachableUrl(printer.frontendUrl);
   const [showCamera, setShowCamera] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
@@ -559,7 +565,12 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                     className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary"
                     disabled
                     explainedDisabled
-                    title="Printer browser URL is unavailable"
+                    aria-label={isInternalOnlyBrowserUrl
+                      ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                      : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
+                    title={isInternalOnlyBrowserUrl
+                      ? 'Not available for simulated test printers'
+                      : 'Printer browser URL is unavailable'}
                     iconLeft={<ExternalLinkIcon className="h-4 w-4 shrink-0" />}
                   >
                     Open in Browser
