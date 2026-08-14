@@ -184,7 +184,8 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
     const disabledButton = screen.getByRole('button', {
       name: `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`,
     });
-    expect(disabledButton).toBeDisabled();
+    expect(disabledButton).not.toBeDisabled();
+    expect(disabledButton).toHaveAttribute('aria-disabled', 'true');
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
   });
 
