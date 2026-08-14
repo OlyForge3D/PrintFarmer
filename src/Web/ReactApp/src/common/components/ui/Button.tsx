@@ -106,8 +106,12 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     ? (event: React.MouseEvent<HTMLButtonElement>) => {
         // Suppress activation. Native <button> elements fire a click event for
         // both mouse clicks and keyboard activation (Enter/Space), so this
-        // single handler covers both without a separate onKeyDown.
+        // single handler covers both without a separate onKeyDown. Stop
+        // propagation too, mirroring the native `disabled` attribute, which
+        // never lets a click reach ancestor handlers (e.g. a clickable card
+        // or menu row wrapping this button).
         event.preventDefault();
+        event.stopPropagation();
       }
     : onClick;
 
@@ -120,7 +124,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
       data-pf-disabled-explained={useExplainedDisabled ? '' : undefined}
       className={clsx(
         applyBaseStyles &&
-          'font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+          'font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
+        // Excluded from useExplainedDisabled: the button is never natively
+        // `:disabled` in that mode, so `enabled:cursor-pointer` would win over
+        // the plain `cursor-not-allowed` class below on CSS specificity,
+        // showing a clickable-looking pointer cursor on a visually-disabled
+        // button.
+        applyBaseStyles && !useExplainedDisabled && 'enabled:cursor-pointer',
         applyBaseStyles && !hasRadiusOverride(className) && defaultRadiusClass,
         applyRingOffset && 'focus-visible:ring-offset-2',
         variantClasses[variant],

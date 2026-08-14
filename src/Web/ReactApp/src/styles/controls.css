@@ -1745,7 +1745,7 @@
     box-shadow: none;
   }
 
-  [data-pf-button][data-pf-variant='ghost']:hover:not(:disabled) {
+  [data-pf-button][data-pf-variant='ghost']:hover:not(:disabled):not([data-pf-disabled-explained]) {
     background-color: rgba(255, 255, 255, 0.1);
   }
 
@@ -1800,7 +1800,7 @@
     border-color: transparent;
   }
 
-  [data-pf-button][data-pf-variant='subtle']:hover:not(:disabled) {
+  [data-pf-button][data-pf-variant='subtle']:hover:not(:disabled):not([data-pf-disabled-explained]) {
     background-color: var(--pf-bg-1);
   }
 
@@ -1810,7 +1810,7 @@
     border-color: transparent;
   }
 
-  [data-pf-button][data-pf-variant='tab']:hover:not(:disabled) {
+  [data-pf-button][data-pf-variant='tab']:hover:not(:disabled):not([data-pf-disabled-explained]) {
     color: var(--pf-text-primary);
   }
 
@@ -1832,7 +1832,7 @@
     border-color: transparent;
   }
 
-  [data-pf-button][data-pf-variant='toggle']:hover:not(:disabled) {
+  [data-pf-button][data-pf-variant='toggle']:hover:not(:disabled):not([data-pf-disabled-explained]) {
     color: var(--pf-text-primary);
   }
 

@@ -296,6 +296,61 @@ describe('Button', () => {
       expect(button).toHaveFocus();
     });
 
+    it('is reachable via sequential Tab navigation, unlike a natively disabled button', async () => {
+      const user = userEvent.setup();
+
+      render(
+        <>
+          <button type="button">Before</button>
+          <Button disabled explainedDisabled title="Unavailable">
+            Open in Browser
+          </Button>
+          <button type="button">After</button>
+        </>
+      );
+
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Before' })).toHaveFocus();
+
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'Open in Browser' })).toHaveFocus();
+
+      await user.tab();
+      expect(screen.getByRole('button', { name: 'After' })).toHaveFocus();
+    });
+
+    it('does not let a suppressed click reach an ancestor onClick handler', async () => {
+      const onAncestorClick = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <div onClick={onAncestorClick}>
+          <Button disabled explainedDisabled title="Unavailable">
+            Open in Browser
+          </Button>
+        </div>
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Open in Browser' }));
+
+      expect(onAncestorClick).not.toHaveBeenCalled();
+    });
+
+    it('does not apply the pointer-cursor utility that would defeat cursor-not-allowed', () => {
+      render(
+        <Button disabled explainedDisabled title="Unavailable">
+          Open in Browser
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Open in Browser' });
+      // `enabled:cursor-pointer` has higher CSS specificity than the plain
+      // `cursor-not-allowed` utility and would win regardless of source order,
+      // since the button is not natively `:disabled` in this mode. See #1554
+      // review discussion.
+      expect(button).not.toHaveClass('enabled:cursor-pointer');
+    });
+
     it('is a no-op when the button is not otherwise disabled', () => {
       render(
         <Button explainedDisabled onClick={() => {}}>
@@ -307,6 +362,25 @@ describe('Button', () => {
       expect(button).not.toBeDisabled();
       expect(button).not.toHaveAttribute('aria-disabled');
       expect(button).not.toHaveAttribute('data-pf-disabled-explained');
+    });
+
+    it('does not suppress normal click/keyboard activation when not disabled', async () => {
+      const onClick = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <Button explainedDisabled onClick={onClick}>
+          Enabled
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Enabled' });
+      await user.click(button);
+      button.focus();
+      await user.keyboard('{Enter}');
+      await user.keyboard(' ');
+
+      expect(onClick).toHaveBeenCalledTimes(3);
     });
   });
 
