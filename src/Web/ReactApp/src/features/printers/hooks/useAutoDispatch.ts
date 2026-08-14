@@ -53,11 +53,42 @@ let inflightGlobalStatusRequest: Promise<AutoDispatchGlobalStatus> | null = null
 
 function fetchAutoDispatchGlobalStatus(): Promise<AutoDispatchGlobalStatus> {
   if (!inflightGlobalStatusRequest) {
-    inflightGlobalStatusRequest = apiClient.getAutoDispatchStatus().finally(() => {
-      inflightGlobalStatusRequest = null;
+    const request: Promise<AutoDispatchGlobalStatus> = apiClient.getAutoDispatchStatus().finally(() => {
+      // Only clear the guard if it still points at *this* request. A forced
+      // refresh (see resetAutoDispatchGlobalStatusInFlight below) may have
+      // already replaced it with a newer in-flight request by the time this
+      // older one settles; clearing unconditionally here would wipe out
+      // tracking for that newer, still-pending request.
+      if (inflightGlobalStatusRequest === request) {
+        inflightGlobalStatusRequest = null;
+      }
     });
+    inflightGlobalStatusRequest = request;
   }
   return inflightGlobalStatusRequest;
+}
+
+/**
+ * Drops the single-flight guard so the next call to
+ * fetchAutoDispatchGlobalStatus() issues a brand-new HTTP request instead of
+ * reusing whatever request (e.g. a still-pending background poll) happened
+ * to be in flight. Explicit mutation invalidation/refetch must never be
+ * satisfied by a pre-mutation response, so every mutation success/error
+ * handler that invalidates or refetches KEYS.globalStatus (or the broader
+ * KEYS.all prefix, which includes it) calls this first.
+ */
+function resetAutoDispatchGlobalStatusInFlight() {
+  inflightGlobalStatusRequest = null;
+}
+
+/**
+ * Test-only escape hatch. Vitest does not reset this module's top-level
+ * state between `it()` blocks within the same test file, so a leftover
+ * in-flight promise reference from one test could otherwise leak into the
+ * next and mask real dedup regressions. Call this in `beforeEach`.
+ */
+export function __resetAutoDispatchGlobalStatusSingleFlightForTests() {
+  resetAutoDispatchGlobalStatusInFlight();
 }
 
 function mergeStatusSnapshot<T extends AutoDispatchStatus>(
@@ -172,6 +203,9 @@ async function handleMutationError(
 ) {
   const status = mutationErrorStatus(error);
   if (status === 412 || status === 428) {
+    // Force a genuinely fresh fetch rather than reusing whatever background
+    // poll happened to be in flight when this conflict was detected.
+    resetAutoDispatchGlobalStatusInFlight();
     const exactRefetch = printerId
       ? queryClient.refetchQueries({
           queryKey: KEYS.status(printerId),
@@ -275,6 +309,7 @@ export function useSetAutoDispatchEnabled() {
       );
     },
     onSuccess: () => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
     onError: (error, variables) =>
@@ -328,6 +363,7 @@ export function useSetAllAutoDispatchEnabled() {
       await apiClient.setAutoDispatchGlobalEnabled(enabled, statuses);
     },
     onSuccess: () => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.all });
     },
     onError: (error) =>
@@ -392,6 +428,7 @@ export function useConfirmBedClear() {
       if (data.kind === 'standard') {
         syncAutoDispatchCaches(qc, data.result.status);
       }
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       qc.invalidateQueries({ queryKey: ['job-queue'] });
@@ -528,6 +565,7 @@ export function useSkipNextJob() {
       );
     },
     onSuccess: (_data, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
@@ -546,6 +584,7 @@ export function useCancelAutoDispatch() {
       );
     },
     onSuccess: (_data, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
@@ -563,6 +602,7 @@ export function usePreClearBed() {
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       ),
     onSuccess: (result, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       if (result.bedPreConfirmed) {

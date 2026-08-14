@@ -16,13 +16,14 @@
  */
 import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import {
   useAllAutoDispatchStatuses,
   useAutoDispatchGlobalStatus,
   useSetAutoDispatchEnabled,
+  __resetAutoDispatchGlobalStatusSingleFlightForTests,
 } from '@/features/printers/hooks/useAutoDispatch';
 import type { AutoDispatchGlobalStatus } from '@/types/api';
 
@@ -105,6 +106,7 @@ describe('auto-dispatch cold-load status request dedup (#1547)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetAutoDispatchGlobalStatusSingleFlightForTests();
     apiTestState.getAutoDispatchStatus.mockResolvedValue(emptyStatus);
     apiTestState.setAutoDispatchEnabled.mockResolvedValue(undefined);
     queryClient = new QueryClient({
@@ -114,11 +116,21 @@ describe('auto-dispatch cold-load status request dedup (#1547)', () => {
 
   afterEach(() => {
     queryClient.clear();
+    __resetAutoDispatchGlobalStatusSingleFlightForTests();
     vi.useRealTimers();
   });
 
   it('fires exactly one status request when Layout and the dashboard mount together on cold load', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    // Give the request real (simulated) network latency so Layout's fetch is
+    // still genuinely in flight when the dashboard mounts 368ms later —
+    // otherwise this test can pass even without the fix, because an
+    // instant-resolving mock never creates the overlap window the bug
+    // depends on (see PR review discussion on #1547).
+    apiTestState.getAutoDispatchStatus.mockImplementation(
+      () => new Promise((resolve) => setTimeout(() => resolve(emptyStatus), 500))
+    );
 
     render(
       <QueryClientProvider client={queryClient}>
@@ -126,21 +138,22 @@ describe('auto-dispatch cold-load status request dedup (#1547)', () => {
       </QueryClientProvider>
     );
 
-    // Advance past the simulated lazy-chunk stagger that mounts the dashboard.
+    // Advance to just past the dashboard's staggered mount (368ms) while the
+    // first request (500ms) is still unresolved — this is the exact overlap
+    // window in which the reported duplicate fetch occurred.
     await act(async () => {
-      vi.advanceTimersByTime(500);
+      vi.advanceTimersByTime(400);
+    });
+    expect(apiTestState.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
+
+    // Let the in-flight request resolve and settle.
+    await act(async () => {
+      vi.advanceTimersByTime(200);
     });
 
     await waitFor(() => {
       expect(apiTestState.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
     });
-
-    // Give any pending microtasks/effects a chance to run, then assert the
-    // count is still exactly one (no trailing duplicate fetch).
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(apiTestState.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
   });
 
   it('fires exactly one status request per configured polling interval while idle with both consumers mounted', async () => {
@@ -204,6 +217,74 @@ describe('auto-dispatch cold-load status request dedup (#1547)', () => {
       expect(apiTestState.getAutoDispatchStatus.mock.calls.length).toBeGreaterThan(
         callsBeforeMutation
       );
+    });
+  });
+
+  it('forces a fresh status request on mutation success even while a background poll is still in flight', async () => {
+    // Reproduces the scenario the single-flight guard could otherwise make
+    // worse: a background poll fetch is genuinely still pending (its
+    // response hasn't arrived yet) at the exact moment a mutation succeeds
+    // and asks for a guaranteed-fresh refetch. The mutation's refetch must
+    // not be silently satisfied by the stale, still-pending poll response —
+    // it must issue its own new request.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    const pendingResolvers: Array<(value: AutoDispatchGlobalStatus) => void> = [];
+    apiTestState.getAutoDispatchStatus.mockImplementation(
+      () =>
+        new Promise<AutoDispatchGlobalStatus>((resolve) => {
+          pendingResolvers.push(resolve);
+        })
+    );
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <div>
+          <LayoutLike />
+          <DashboardLike />
+          <MutatorLike />
+        </div>
+      </QueryClientProvider>
+    );
+
+    // Resolve the cold-load fetch (call #1) so the query settles into idle.
+    await act(async () => {
+      pendingResolvers.shift()?.(emptyStatus);
+    });
+    await waitFor(() => {
+      expect(apiTestState.getAutoDispatchStatus).toHaveBeenCalledTimes(1);
+    });
+
+    // Advance to the next poll tick — this starts a second request (call #2)
+    // that we deliberately leave unresolved, simulating a slow in-flight
+    // background poll.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    await waitFor(() => {
+      expect(apiTestState.getAutoDispatchStatus).toHaveBeenCalledTimes(2);
+    });
+    expect(pendingResolvers).toHaveLength(1);
+
+    // Trigger the mutation while call #2 is still pending. Its onSuccess
+    // resets the single-flight guard before invalidating/refetching, so this
+    // must produce a brand-new call #3 rather than reusing call #2's promise.
+    await act(async () => {
+      screen.getByRole('button', { name: 'toggle' }).click();
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    await waitFor(() => {
+      expect(apiTestState.setAutoDispatchEnabled).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(apiTestState.getAutoDispatchStatus.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
+
+    // Clean up the still-pending promises so the test doesn't leak timers.
+    pendingResolvers.splice(0).forEach((resolve) => resolve(emptyStatus));
+    await act(async () => {
+      await Promise.resolve();
     });
   });
 });
