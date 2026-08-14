@@ -129,7 +129,7 @@ const PrintJobProgress: React.FC<{
         <span className="text-white font-mono">{Math.round(percentage)}%</span>
       </div>
       <SharedProgressBar value={percentage} ariaLabel="Print progress" showPercent={false} />
-      {jobName && <p className="text-xs text-pf-text-tertiary truncate">{jobName}</p>}
+      <p className="text-xs text-pf-text-tertiary truncate">{jobName}</p>
     </div>
   );
 };

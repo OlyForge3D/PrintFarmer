@@ -83,7 +83,7 @@ export function NotificationDrawer({ isOpen, onClose }: NotificationDrawerProps)
       <div className={clsx(
         "fixed top-0 right-0 h-full w-full sm:w-96 bg-pf-bg-1 shadow-lg z-50 flex flex-col",
         "transition-transform duration-300 ease-in-out",
-        isOpen ? "translate-x-0" : "translate-x-full"
+        "translate-x-0"
       )}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-pf-border">

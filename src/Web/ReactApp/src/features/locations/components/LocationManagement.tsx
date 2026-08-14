@@ -351,7 +351,7 @@ export const LocationManagement: React.FC<LocationManagementProps> = ({
                 onChange={(parentId) => setFormData({ ...formData, parentId })}
                 label="Parent Location"
                 placeholder="None (top-level)"
-                excludeId={editingId ?? undefined}
+                excludeId={undefined}
               />
             )}
 
