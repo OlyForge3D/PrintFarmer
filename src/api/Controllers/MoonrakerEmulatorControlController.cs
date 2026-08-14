@@ -1,5 +1,5 @@
+using Farm.Infrastructure.Authorization;
 using Farm.Web.Api.Services.Startup;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -10,7 +10,7 @@ namespace Farm.Web.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/test/moonraker-emulator")]
-[Authorize(Roles = "farm_admin")]
+[RequirePermission("diagnostics", "admin")]
 public sealed class MoonrakerEmulatorControlController(
     IWebHostEnvironment environment,
     IOptions<MoonrakerEmulatorSeedSettings> options,
