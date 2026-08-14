@@ -412,8 +412,7 @@ public static class SpoolmanJsonParser
         return s.Length == 6 && s.All(IsHex) ? "#" + s : null;
     }
 
-    internal static bool IsHex(char c) =>
-        (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f');
+    internal static bool IsHex(char c) => char.IsAsciiHexDigit(c);
 
     public static string? TryGetString(JsonElement el, params string[] names)
     {

@@ -3469,12 +3469,14 @@ normalize_worker_configuration() {
     if [[ "$force_disable" == "true" ]]; then
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
+        ORCA_WORKER_INSTANCE_ID=""
         return 0
     fi
 
     if [[ "$ENABLE_DISTRIBUTED_SLICING" != "true" ]]; then
         ENABLE_ORCA_WORKER=no
         ORCA_WORKER_COUNT=0
+        ORCA_WORKER_INSTANCE_ID=""
         return 0
     fi
 
@@ -3492,6 +3494,19 @@ normalize_worker_configuration() {
         ORCA_WORKER_COUNT="${ORCA_WORKER_COUNT:-1}"
     else
         ORCA_WORKER_COUNT=0
+    fi
+
+    # A stable Worker:InstanceId lets the registry upsert the same worker/service
+    # record across redeploys instead of accumulating a duplicate every restart
+    # (issue #1528). That only works for a single, non-scaled worker: Docker
+    # Compose applies the same environment to every scaled replica, so sharing
+    # one instance ID across replicas would collapse them into a single
+    # registered worker. Only set it when exactly one worker is configured;
+    # scaled deployments keep generating a random per-process identity.
+    if [[ "$ENABLE_ORCA_WORKER" == "yes" && "$ORCA_WORKER_COUNT" -eq 1 ]]; then
+        ORCA_WORKER_INSTANCE_ID="orcaslicer-worker-1"
+    else
+        ORCA_WORKER_INSTANCE_ID=""
     fi
 }
 
@@ -3630,6 +3645,18 @@ validate_configuration() {
 
     if [ "$NON_INTERACTIVE" = "true" ]; then
         print_info "Effective OrcaSlicer worker configuration: enabled=$ENABLE_ORCA_WORKER, count=$ORCA_WORKER_COUNT"
+    fi
+
+    # Recompute the stable worker InstanceId (issue #1528): the adjustments just
+    # above can still change ENABLE_ORCA_WORKER/ORCA_WORKER_COUNT after
+    # normalize_worker_configuration already set it, so re-derive it here from
+    # the final values. Only a single, non-scaled worker gets a stable ID;
+    # scaled replicas keep generating a random per-process identity because
+    # Docker Compose applies identical environment to every replica.
+    if [ "$ENABLE_ORCA_WORKER" = "yes" ] && [ "$ORCA_WORKER_COUNT" -eq 1 ]; then
+        ORCA_WORKER_INSTANCE_ID="orcaslicer-worker-1"
+    else
+        ORCA_WORKER_INSTANCE_ID=""
     fi
 
     print_success "Validation complete."
@@ -4044,15 +4071,65 @@ configure_additional() {
     # In non-interactive mode, use pre-loaded config if available
     if [ "$NON_INTERACTIVE" = "true" ] && [ -n "${ENVIRONMENT:-}" ]; then
         print_info "Using configured environment: $ENVIRONMENT"
-        INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
-        INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
-        INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
-        INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
-        INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
-        ENABLE_DISCOVERY=${ENABLE_DISCOVERY:-false}
-        ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-false}
+        if [ -n "${CLI_INCLUDE_MONITORING:-}" ]; then
+            # --include-monitoring or --exclude-monitoring was explicitly passed;
+            # CLI_INCLUDE_MONITORING is only ever set (to "true" or "false") in
+            # that case, so honor it as-is rather than re-defaulting it.
+            INCLUDE_MONITORING="$CLI_INCLUDE_MONITORING"
+            if [ "$INCLUDE_MONITORING" = "true" ]; then
+                print_info "Monitoring stack enabled via CLI flag"
+            else
+                print_info "Monitoring stack disabled via CLI flag"
+            fi
+        else
+            # Mirror the interactive path's monitoring/telemetry-enabled-by-default
+            # posture so INCLUDE_MONITORING is always assigned before later
+            # references (e.g. generate_deployment_config) expand it under `set -u`.
+            INCLUDE_MONITORING=${INCLUDE_MONITORING:-true}
+        fi
+        if [ -n "${CLI_INCLUDE_TELEMETRY:-}" ]; then
+            INCLUDE_TELEMETRY="$CLI_INCLUDE_TELEMETRY"
+            if [ "$INCLUDE_TELEMETRY" = "true" ]; then
+                print_info "Telemetry/observability enabled via CLI flag"
+            else
+                print_info "Telemetry/observability disabled via CLI flag"
+            fi
+        else
+            INCLUDE_TELEMETRY=${INCLUDE_TELEMETRY:-true}
+        fi
+        if [ "${CLI_INCLUDE_SECURITY:-false}" = "true" ]; then
+            INCLUDE_SECURITY=true
+            print_info "Security configurations enabled via CLI flag"
+        else
+            INCLUDE_SECURITY=${INCLUDE_SECURITY:-false}
+        fi
+        if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ]; then
+            INCLUDE_REGISTRY=true
+            print_info "Local Docker registry enabled via CLI flag"
+        else
+            INCLUDE_REGISTRY=${INCLUDE_REGISTRY:-false}
+        fi
+        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
+            INCLUDE_DISCOVERY=true
+            ENABLE_DISCOVERY=true
+            ALLOW_LOCAL_NETWORK=true
+            print_info "Network printer discovery enabled via CLI flag"
+        else
+            # Optional discovery was not requested via --include-discovery. Give these
+            # variables safe defaults here so downstream config persistence
+            # (save_deployment_config) and env-file generation can reference them
+            # under `set -u` without aborting with an unbound-variable error.
+            INCLUDE_DISCOVERY=${INCLUDE_DISCOVERY:-false}
+            ENABLE_DISCOVERY=${ENABLE_DISCOVERY:-false}
+            ALLOW_LOCAL_NETWORK=${ALLOW_LOCAL_NETWORK:-false}
+        fi
         NETWORK_RANGES=${NETWORK_RANGES:-}
 
+        # ENABLE_SWAGGER/ENABLE_DETAILED_LOGGING are only assigned by the
+        # interactive Development/Production branch below. Mirror that same
+        # environment-based default here so the non-interactive path never
+        # leaves them unset before save_deployment_config and env-file
+        # generation expand them under `set -u`.
         if [ "$ENVIRONMENT" = "Development" ]; then
             ENABLE_SWAGGER=${ENABLE_SWAGGER:-true}
             ENABLE_DETAILED_LOGGING=${ENABLE_DETAILED_LOGGING:-true}
@@ -4061,29 +4138,6 @@ configure_additional() {
             ENABLE_DETAILED_LOGGING=${ENABLE_DETAILED_LOGGING:-false}
         fi
         DEVMODE_BYPASS_AUTH=${DEVMODE_BYPASS_AUTH:-false}
-
-        if [ "${CLI_INCLUDE_MONITORING:-false}" = "true" ]; then
-            INCLUDE_MONITORING=true
-            print_info "Monitoring stack enabled via CLI flag"
-        fi
-        if [ "${CLI_INCLUDE_TELEMETRY:-false}" = "true" ]; then
-            INCLUDE_TELEMETRY=true
-            print_info "Telemetry/observability enabled via CLI flag"
-        fi
-        if [ "${CLI_INCLUDE_SECURITY:-false}" = "true" ]; then
-            INCLUDE_SECURITY=true
-            print_info "Security configurations enabled via CLI flag"
-        fi
-        if [ "${CLI_INCLUDE_REGISTRY:-false}" = "true" ]; then
-            INCLUDE_REGISTRY=true
-            print_info "Local Docker registry enabled via CLI flag"
-        fi
-        if [ "${CLI_INCLUDE_DISCOVERY:-false}" = "true" ]; then
-            INCLUDE_DISCOVERY=true
-            ENABLE_DISCOVERY=true
-            ALLOW_LOCAL_NETWORK=true
-            print_info "Network printer discovery enabled via CLI flag"
-        fi
 
         return 0
     fi
@@ -4570,7 +4624,18 @@ EOF
         AUTO_ADMIN_PASSWORD=$(generate_random_password)
         print_info "Generated random pgAdmin password (saved to env file)"
     fi
-    
+
+    # Only emit ORCA_WORKER_INSTANCE_ID when it has a real value. Leaving the
+    # entire line out (rather than writing it with an empty value) when scaled
+    # keeps `${ORCA_WORKER_INSTANCE_ID:-}` substitution in the compose template
+    # behaving identically, while avoiding an env file key that looks like a
+    # stable identity was assigned to what are actually distinct replicas
+    # (issue #1528).
+    ORCA_WORKER_INSTANCE_ID_ENV_LINE=""
+    if [ -n "$ORCA_WORKER_INSTANCE_ID" ]; then
+        ORCA_WORKER_INSTANCE_ID_ENV_LINE="ORCA_WORKER_INSTANCE_ID=$ORCA_WORKER_INSTANCE_ID"
+    fi
+
     cat >> "$ENV_FILE" << EOF
 
 # Monitoring & Observability Credentials
@@ -4599,6 +4664,9 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
+# Stable worker identity for redeploys of a single (non-scaled) worker; omitted
+# entirely when scaled so replicas keep distinct, per-process identities (issue #1528).
+$ORCA_WORKER_INSTANCE_ID_ENV_LINE
 
 # Profile Task Check - auto-disable when slicing workers are disabled
 PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" || echo "false")
@@ -4962,6 +5030,93 @@ EOF
     print_success "React production environment configured: $react_dir/.env.production"
 }
 
+# Detect the Docker Desktop / BuildKit containerd snapshot corruption signature described in
+# issue #1527: a cached BuildKit layer references a containerd snapshot key that no longer
+# exists in the local snapshotter store (typically left behind by a prior interrupted or failed
+# build attempt sharing the same builder cache). This is an upstream BuildKit/containerd defect,
+# not a repository build-stage ordering or COPY-path problem — see docs/DOCKER_DEPLOYMENT.md
+# "BuildKit Snapshot Corruption Recovery (issue #1527)" for details. Matching is deliberately
+# OS-agnostic: the same containerd snapshotter architecture can hit this on Linux Docker Engine
+# too, not just Docker Desktop on Windows/macOS.
+is_buildkit_snapshot_corruption() {
+    local log_file="$1"
+    grep -Eq 'failed to commit [A-Za-z0-9_-]+ to [A-Za-z0-9_-]+ during finalize' "$log_file" && \
+        grep -Eq 'failed to stat active key during commit' "$log_file" && \
+        grep -Eq 'snapshot [A-Za-z0-9_-]+ does not exist: not found' "$log_file"
+}
+
+# Run a `docker compose build` invocation, and if it fails with the BuildKit/containerd snapshot
+# corruption signature above, automatically retry once with --no-cache.
+#
+# This is a narrow, non-destructive repair: it does not run `docker builder prune` and does not
+# remove any unrelated images or volumes. It only forces this one build invocation to bypass the
+# poisoned cache layer so the affected stage recompiles from scratch. If the build succeeds (the
+# common case, on every platform), this function is a transparent pass-through with identical
+# exit-code semantics to running the command directly. If the --no-cache retry also fails, the
+# error is not this known signature (or the corruption is deeper than a single layer) and the
+# caller reports the failure as usual.
+run_compose_build_with_snapshot_repair() {
+    local -a cmd=("$@")
+    local build_log
+    build_log="$(mktemp)"
+    # Ensure the captured build log (which may include --build-arg values) is removed once this
+    # function returns via any path (success, failure, or an early `return`). Deliberately scoped
+    # to RETURN only, not INT/TERM/EXIT: bash traps are not function-scoped, so registering an
+    # INT/TERM/EXIT handler here would leak past this call and could silently override the
+    # script's own EXIT trap (see cleanup_orca_override below) or swallow a user's Ctrl+C instead
+    # of letting the script terminate. A hard interrupt mid-build may leave this temp file behind,
+    # matching the existing risk profile of this script's other unprotected `mktemp` call sites.
+    # shellcheck disable=SC2064
+    trap "rm -f '$build_log'" RETURN
+    local rc=0
+
+    set +e
+    "${cmd[@]}" 2>&1 | tee "$build_log"
+    rc=${PIPESTATUS[0]}
+    set -e
+
+    if [ "$rc" -ne 0 ] && is_buildkit_snapshot_corruption "$build_log"; then
+        print_warning "Detected a BuildKit/containerd snapshot corruption error (issue #1527):"
+        print_warning "  a cached layer's snapshot no longer exists in the local BuildKit store."
+        print_warning "This is a known upstream Docker Desktop/BuildKit defect, not a repository build issue."
+        print_warning "Retrying this build with --no-cache to bypass the poisoned cache layer"
+        print_warning "(no images or volumes are being removed)..."
+
+        # Insert --no-cache immediately after the "build" subcommand rather than blindly
+        # appending it at the end of the argv. Some call sites (e.g. the OrcaSlicer
+        # `docker build ... -t ... $BUILD_ARGS .` invocation) end with a positional build
+        # context path, and relying on the docker/buildx CLI to accept interspersed flags
+        # after a positional argument is CLI-version-dependent behavior we should not assume.
+        local -a retry_cmd=()
+        local inserted=0
+        local token
+        for token in "${cmd[@]}"; do
+            retry_cmd+=("$token")
+            if [ "$inserted" -eq 0 ] && [ "$token" = "build" ]; then
+                retry_cmd+=(--no-cache)
+                inserted=1
+            fi
+        done
+        if [ "$inserted" -eq 0 ]; then
+            # No literal "build" subcommand token found (shouldn't happen for our call sites);
+            # fall back to appending at the end.
+            retry_cmd+=(--no-cache)
+        fi
+
+        set +e
+        "${retry_cmd[@]}" 2>&1 | tee -a "$build_log"
+        rc=${PIPESTATUS[0]}
+        set -e
+        if [ "$rc" -ne 0 ]; then
+            print_error "Build still failed after --no-cache retry. See docs/DOCKER_DEPLOYMENT.md"
+            print_error "'BuildKit Snapshot Corruption Recovery (issue #1527)' for further Docker Desktop"
+            print_error "recovery steps (restarting the BuildKit daemon, or Docker Desktop itself)."
+        fi
+    fi
+
+    return "$rc"
+}
+
 # Generate docker-compose override if needed
 # Build and deploy
 deploy_containers() {
@@ -5243,7 +5398,7 @@ EOF
             if [ "${_PF_SKIP_ORCA_BUILD:-0}" = "1" ]; then
                 print_success "Skipping orcaslicer-binaries build (using prebuilt image)"
             else
-                if "${ORCA_BUILD_CMD[@]}"; then
+                if run_compose_build_with_snapshot_repair "${ORCA_BUILD_CMD[@]}"; then
                     if ! validate_orcaslicer_binary_image "orcaslicer-binaries:${ORCA_VERSION}" "$ORCA_VERSION" "$ORCASLICER_SHA256"; then
                         print_error "New OrcaSlicer binary layer failed identity validation."
                         exit 1
@@ -5327,12 +5482,12 @@ EOF
             # Try using the --platform flag first (supported on modern compose). If it fails
             # (for example older compose binary that reports unknown flag), fall back to
             # setting DOCKER_DEFAULT_PLATFORM and retrying without the flag.
-            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
+            if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}" --platform "${DOCKER_BUILD_PLATFORM}"; then
                 print_success "Docker images built successfully"
             else
                 print_warning "docker compose build --platform failed; retrying with DOCKER_DEFAULT_PLATFORM fallback"
                 export DOCKER_DEFAULT_PLATFORM="${DOCKER_BUILD_PLATFORM}"
-                if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
+                if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                     print_success "Docker images built successfully (using DOCKER_DEFAULT_PLATFORM=${DOCKER_BUILD_PLATFORM})"
                 else
                     print_error "Failed to build Docker images (even with DOCKER_DEFAULT_PLATFORM)"
@@ -5341,7 +5496,7 @@ EOF
                 fi
             fi
         else
-            if "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
+            if run_compose_build_with_snapshot_repair "${build_compose_cmd[@]}" --progress=plain build "${compose_build_args[@]}"; then
                 print_success "Docker images built successfully"
             else
                 print_error "Failed to build Docker images"

@@ -24,7 +24,12 @@ install.sh text eol=lf
 
 # Compliance inputs and MSBuild metadata must remain stable across platforms
 *.conf text eol=lf
-/compliance/licenses/*.txt text eol=lf
+# Reviewed compliance license evidence is pinned by SHA-256 hash in
+# compliance/dependency-license-policy.json against its LF-normalized bytes.
+# Use **/*.txt (not *.txt) so this also covers subdirectories such as
+# compliance/licenses/npm/*.txt — a single-star glob does not cross path
+# separators, so it silently missed those files on Windows checkouts and let
+# Git convert them to CRLF, breaking the pinned-hash integrity check.
 /compliance/licenses/**/*.txt text eol=lf
 /Directory.Build.props whitespace=cr-at-eol
 /src/.editorconfig whitespace=cr-at-eol

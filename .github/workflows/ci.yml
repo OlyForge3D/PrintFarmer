@@ -166,6 +166,9 @@ jobs:
       - name: Test release tag-trigger policy
         run: node --test scripts/ci/tests/test-release-tag-triggers.mjs
 
+      - name: Test daily development image-set policy
+        run: node --test scripts/ci/tests/test-daily-development-images.mjs
+
       - name: Test Squad state-root containment
         run: node --test scripts/ci/tests/test-squad-state-root.mjs
 

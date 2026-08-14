@@ -445,6 +445,9 @@ run_full_tests() {
 
     log_subsection "Test: OrcaSlicer Binary Metadata"
     run_test_suite "OrcaSlicer binary metadata tests" "$SCRIPT_DIR/test-orcaslicer-binary-metadata.sh" || true
+
+    log_subsection "Test: BuildKit Snapshot Corruption Auto-Repair (#1527)"
+    run_test_suite "BuildKit snapshot corruption auto-repair tests" "$SCRIPT_DIR/test-buildkit-snapshot-repair.sh" || true
     
     log_subsection "Test: Configuration Persistence"
     run_test_suite "configuration persistence tests" "$SCRIPT_DIR/test-config-persistence.sh" || true

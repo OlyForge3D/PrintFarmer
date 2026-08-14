@@ -273,6 +273,7 @@ public class WorkersController(
         }
 
         await _workerRepository.DeleteAsync(id);
+        await _workerRepository.SaveChangesAsync();
         _logger.LogWarning("Worker {WorkerId} deleted", id);
         return NoContent();
     }

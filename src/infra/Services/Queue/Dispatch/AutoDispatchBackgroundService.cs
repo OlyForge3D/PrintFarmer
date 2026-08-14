@@ -265,7 +265,7 @@ public sealed class AutoDispatchBackgroundService(
         bool skipIdleThreshold,
         CancellationToken serviceCt)
     {
-        PendingDispatchLease? pendingLease = skipIdleThreshold
+        using PendingDispatchLease? pendingLease = skipIdleThreshold
             ? null
             : trigger.CreatePendingLease(printerId, serviceCt);
         try
@@ -308,8 +308,6 @@ public sealed class AutoDispatchBackgroundService(
                 }
 
                 trigger.ClearPending(printerId, pendingLease);
-                pendingLease.Dispose();
-                pendingLease = null;
             }
             else
             {
@@ -363,10 +361,12 @@ public sealed class AutoDispatchBackgroundService(
         }
         finally
         {
+            // ClearPending is idempotent (it only removes the lease from the map if this
+            // exact generation is still registered), so calling it again here is a safe
+            // no-op on the success path where it was already cleared above.
             if (pendingLease is not null)
             {
                 trigger.ClearPending(printerId, pendingLease);
-                pendingLease.Dispose();
             }
         }
     }

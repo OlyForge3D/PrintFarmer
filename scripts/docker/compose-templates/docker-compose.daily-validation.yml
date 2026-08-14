@@ -1,0 +1,62 @@
+# Local-only overrides for the digest-pinned daily development image set.
+name: printfarmer-daily-validation
+
+services:
+  database:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${POSTGRES_PORT:-15432}:5432"
+
+  api:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${API_PORT:-15245}:5245"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      # Local validation only: never expose this stack to an untrusted network.
+      Security__DevModeBypassAuth: "true"
+      PFARM__NetworkDiscovery__EnableDiscovery: "false"
+      TestEmulator__Enabled: "true"
+      TestEmulator__MockDiscovery: "true"
+      TestEmulator__MockSpoolman: "true"
+      TestEmulator__Printers__0__Name: Test Printer Alpha
+      TestEmulator__Printers__0__InitialState: Idle
+      TestEmulator__Printers__0__Progress: "0"
+      TestEmulator__Printers__0__PrintDurationSeconds: "60"
+      TestEmulator__Printers__1__Name: Test Printer Beta
+      TestEmulator__Printers__1__InitialState: Printing
+      TestEmulator__Printers__1__Progress: "42"
+      TestEmulator__Printers__1__PrintDurationSeconds: "36000"
+      TestEmulator__Printers__2__Name: Test Printer Gamma
+      TestEmulator__Printers__2__InitialState: Error
+      TestEmulator__Printers__2__Progress: "0"
+      TestEmulator__Printers__2__PrintDurationSeconds: "60"
+
+  frontend:
+    container_name: !reset null
+
+  nginx-proxy:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${HTTP_PORT:-18080}:80"
+      - "127.0.0.1:${HTTPS_PORT:-18443}:443"
+
+  slicer-host:
+    container_name: !reset null
+    ports: !override
+      - "127.0.0.1:${SLICER_HOST_PORT:-15246}:5246"
+
+  printer-discovery:
+    container_name: !reset null
+    volumes: !override []
+    environment:
+      EnablePeriodicDiscovery: "false"
+      PFARM__NetworkDiscovery__EnableDiscovery: "false"
+
+  orcaslicer-worker:
+    environment:
+      Worker__MaxConcurrentJobs: "1"
+
+networks:
+  printfarmer-network:
+    name: printfarmer-daily-validation-network

@@ -35,6 +35,10 @@ public sealed class QueueReconciliationService(
     /// <summary>Attempts older than this are considered stale and eligible for forced reconciliation.</summary>
     private static readonly TimeSpan StaleAttemptAge = TimeSpan.FromMinutes(10);
 
+    /// <summary>Outbox command statuses that are still awaiting completion and can be finalized.</summary>
+    private static readonly QueueOutboxEventStatus[] PendingOutboxStatuses =
+        [QueueOutboxEventStatus.Pending, QueueOutboxEventStatus.Processing];
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[Reconciliation] Queue reconciliation service started");
@@ -823,8 +827,7 @@ public sealed class QueueReconciliationService(
         List<QueueDispatchOutbox> commands = await db.QueueDispatchOutbox
             .Where(command =>
                 command.EventType == BedClearAcknowledgementService.BackendStartCommandEventType &&
-                (command.Status == QueueOutboxEventStatus.Pending ||
-                 command.Status == QueueOutboxEventStatus.Processing) &&
+                PendingOutboxStatuses.Contains(command.Status) &&
                 (command.AttemptId == attempt.Id ||
                  (command.AttemptId == null && command.AggregateId == attempt.PrintJobId.Value)))
             .ToListAsync(ct);

@@ -309,6 +309,64 @@ test_disabled_worker_defaults_missing_count() {
     fi
 }
 
+test_non_interactive_missing_discovery_flag_defaults_safely() {
+    start_test "non-interactive deploy defaults ENABLE_DISCOVERY when --include-discovery is omitted"
+
+    cd "$TEST_TEMP_DIR"
+    rm -f .deploy-config .env
+
+    # This is the exact reproduction from issue #1523: a fresh non-interactive
+    # deployment (no pre-existing .deploy-config) that never passes
+    # --include-discovery. Under `set -u`, configure_additional()'s
+    # non-interactive short-circuit must still assign ENABLE_DISCOVERY (and
+    # friends) a safe default before save_deployment_config expands them.
+    capture_output "cd '$TEST_TEMP_DIR' && ARCHITECTURE=microservices DB_PROVIDER=postgres ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ENVIRONMENT=E2E AUTO_ADMIN=true timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Non-interactive deploy without --include-discovery should complete successfully" || true
+    assert_not_contains "$output" "unbound variable" "Omitted discovery flag should not dereference an unset ENABLE_DISCOVERY" || true
+    assert_not_contains "$output" "ENABLE_DISCOVERY: unbound variable" "Should not reproduce the specific ENABLE_DISCOVERY unbound-variable failure" || true
+    assert_file_has_exact_line ".deploy-config" "ENABLE_DISCOVERY=false" "Should persist a safe disabled default when discovery was not requested" || true
+    assert_file_has_exact_line ".deploy-config" "ALLOW_LOCAL_NETWORK=false" "Should persist a safe disabled default for local network access" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
+test_non_interactive_explicit_exclude_monitoring_telemetry_honored() {
+    start_test "non-interactive deploy honors explicit --exclude-monitoring/--exclude-telemetry"
+
+    cd "$TEST_TEMP_DIR"
+    rm -f .deploy-config .env
+
+    # Regression coverage for a defect introduced while fixing #1523: the
+    # non-interactive short-circuit must distinguish "flag omitted" (defaults
+    # monitoring/telemetry to enabled) from "flag explicitly passed as
+    # --exclude-monitoring/--exclude-telemetry" (must stay disabled), since
+    # CLI_INCLUDE_MONITORING/CLI_INCLUDE_TELEMETRY are set to the literal
+    # string "false" in the latter case rather than left unset.
+    capture_output "cd '$TEST_TEMP_DIR' && ARCHITECTURE=microservices DB_PROVIDER=postgres ENABLE_DISTRIBUTED_SLICING=true ENABLE_ORCA_WORKER=yes ORCA_WORKER_COUNT=1 ENVIRONMENT=E2E AUTO_ADMIN=true timeout 60 '$DEPLOY_SCRIPT' --config-file .deploy-config --env-file .env --output-dir generated --dry-run --non-interactive --exclude-monitoring --exclude-telemetry 2>&1"
+    local exit_code
+    exit_code=$(get_output_exit_code)
+    local output
+    output=$(get_output)
+    local failures_before=$TESTS_FAILED
+
+    assert_equals "0" "$exit_code" "Non-interactive deploy with explicit excludes should complete successfully" || true
+    assert_not_contains "$output" "unbound variable" "Explicit exclude flags should not leave any variable unset" || true
+    assert_file_has_exact_line ".deploy-config" "INCLUDE_MONITORING=false" "Explicit --exclude-monitoring must not be overridden by the enabled-by-default posture" || true
+    assert_file_has_exact_line ".deploy-config" "INCLUDE_TELEMETRY=false" "Explicit --exclude-telemetry must not be overridden by the enabled-by-default posture" || true
+
+    if [[ "$TESTS_FAILED" -eq "$failures_before" ]]; then
+        pass_test
+    fi
+}
+
 test_regenerate_config_migrates_legacy_worker_defaults() {
     start_test "config regeneration migrates legacy worker defaults"
 
@@ -689,6 +747,8 @@ run_all_tests() {
     test_explicit_worker_disable_remains_disabled
     test_disabled_slicing_defaults_missing_worker_settings
     test_disabled_worker_defaults_missing_count
+    test_non_interactive_missing_discovery_flag_defaults_safely
+    test_non_interactive_explicit_exclude_monitoring_telemetry_honored
     test_regenerate_config_migrates_legacy_worker_defaults
     test_redeploy_migrates_legacy_worker_defaults
     test_worker_boolean_forms_and_exact_count_are_normalized

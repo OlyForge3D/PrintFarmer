@@ -67,6 +67,14 @@ public sealed class CalibrationGenerationSaga(
     private static readonly TimeSpan WorkerPollDelay = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan LeaseDuration = TimeSpan.FromMinutes(5);
 
+    /// <summary>Orchestration statuses eligible for recovery scanning.</summary>
+    private static readonly CalibrationOrchestrationStatus[] RecoverableStatuses =
+    [
+        CalibrationOrchestrationStatus.Running,
+        CalibrationOrchestrationStatus.WaitingToRetry,
+        CalibrationOrchestrationStatus.Pending,
+    ];
+
     private static readonly JsonSerializerOptions ProblemJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -343,9 +351,7 @@ public sealed class CalibrationGenerationSaga(
             .AsNoTracking()
             .Where(orchestration =>
                 orchestration.GenerationRequestSha256 != null &&
-                (orchestration.Status == CalibrationOrchestrationStatus.Running ||
-                    orchestration.Status == CalibrationOrchestrationStatus.WaitingToRetry ||
-                    orchestration.Status == CalibrationOrchestrationStatus.Pending) &&
+                RecoverableStatuses.Contains(orchestration.Status) &&
                 (orchestration.NextRetryAtUtc == null || orchestration.NextRetryAtUtc <= nowUtc) &&
                 (orchestration.LeaseExpiresAtUtc == null || orchestration.LeaseExpiresAtUtc <= nowUtc))
             .OrderBy(orchestration => orchestration.UpdatedAtUtc)

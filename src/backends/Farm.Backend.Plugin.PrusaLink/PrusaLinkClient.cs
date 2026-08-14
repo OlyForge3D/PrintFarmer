@@ -92,10 +92,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions that include these fields)
             // - If those fields don't exist (null), just check that we got a valid status response
-            bool isOnline = status != null &&
-                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null &&
-                             status.Printer.StatusPrinter.Ok && status.Printer.StatusConnect.Ok) ||
-                            (status.Printer.StatusPrinter == null && status.Printer.StatusConnect == null));
+            bool isOnline = IsPrinterOnline(status);
 
             // Extract thumbnail URL from job file refs if available
             string? thumbnailUrl = job?.File?.Refs?.Thumbnail;
@@ -146,10 +143,7 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
             // Determine if printer is online:
             // - Check StatusPrinter/StatusConnect if available (newer firmware versions)
             // - If those fields don't exist (null), just check that we got a valid status response
-            bool isOnline = status != null &&
-                           ((status.Printer.StatusPrinter != null && status.Printer.StatusConnect != null &&
-                             status.Printer.StatusPrinter.Ok && status.Printer.StatusConnect.Ok) ||
-                            (status.Printer.StatusPrinter == null && status.Printer.StatusConnect == null));
+            bool isOnline = IsPrinterOnline(status);
 
             return new PrusaStatus(isOnline, status?.Printer?.State);
         }
@@ -164,6 +158,28 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     {
         ArgumentNullException.ThrowIfNull(baseUrl);
         return GetStatusAsync(baseUrl.ToString().TrimEnd('/'), credential, ct);
+    }
+
+    /// <summary>
+    /// Determines printer online status from a PrusaLink status response.
+    /// Newer firmware reports <c>StatusPrinter</c>/<c>StatusConnect</c> health flags; when both are
+    /// present the printer is online only if both report OK. Older firmware omits these fields
+    /// entirely (both null), in which case a valid status response alone indicates the printer is
+    /// reachable. Any other combination (one present, one missing) is treated as offline.
+    /// </summary>
+    private static bool IsPrinterOnline(StatusInfo? status)
+    {
+        if (status is null)
+        {
+            return false;
+        }
+
+        return (status.Printer.StatusPrinter, status.Printer.StatusConnect) switch
+        {
+            (null, null) => true,
+            ({ } printerHealth, { } connectHealth) => printerHealth.Ok && connectHealth.Ok,
+            _ => false,
+        };
     }
 
     public async Task<PrusaJob?> GetJobAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)

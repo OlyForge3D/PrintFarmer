@@ -55,10 +55,21 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 }
                 else
                 {
-                    checks["CatalogApi"] = new { Status = "Healthy", Count = manufacturerCount, Source = "Database" };
+                    // Catalog and filament readiness are verified directly against the
+                    // database rather than via anonymous internal HTTP calls to the
+                    // application's own controller routes. CatalogController and
+                    // FilamentTypeController are [Authorize]-protected, so an anonymous
+                    // loopback GET to them permanently returns 401 and would keep this
+                    // health check - and therefore the deployment - unhealthy forever.
+                    // Seeded-record counts are equivalent evidence of readiness and don't
+                    // require weakening those routes' authentication policy.
+                    checks["CatalogApi"] = new { Status = manufacturerCount > 0 ? "Healthy" : "Unhealthy", Count = manufacturerCount, Source = "Database" };
+                    if (manufacturerCount == 0)
+                    {
+                        overallHealthy = false;
+                        issues.Add("Catalog readiness check found no manufacturers in database");
+                    }
 
-                    // Verify filament presets directly in the database. The corresponding API
-                    // endpoint requires user authentication and is not a valid readiness probe.
                     try
                     {
                         int filamentTypeCount = await dbContext.FilamentTypes.CountAsync(cancellationToken);
@@ -72,10 +83,9 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                     }
                     catch (Exception ex)
                     {
-                        checks["FilamentTypesDb"] = new { Status = "Unhealthy", Error = ex.Message };
                         checks["FilamentTypesApi"] = new { Status = "Unhealthy", Error = ex.Message };
                         overallHealthy = false;
-                        issues.Add($"Filament type database check failed: {ex.Message}");
+                        issues.Add($"FilamentType readiness check failed: {ex.Message}");
                     }
                 }
             }
