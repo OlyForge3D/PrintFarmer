@@ -1254,7 +1254,9 @@ public partial class OrcaSlicingPipelineService : ISlicingPipelineService
             Match tm = printTimeRegex.Match(line);
             if (tm.Success)
             {
-                metadata.PrintTimeSeconds = (int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + (int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
+                // Multiply in double space (not int) before assigning to the double PrintTimeSeconds field,
+                // so an unexpectedly large parsed hour/minute value cannot silently overflow as int arithmetic.
+                metadata.PrintTimeSeconds = ((double)int.Parse(tm.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture) * 3600) + ((double)int.Parse(tm.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture) * 60);
             }
             else
             {
