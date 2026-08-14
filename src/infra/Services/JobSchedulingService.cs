@@ -808,7 +808,10 @@ public class JobSchedulingService(
         DateTime nextLocal = schedule.RecurrencePattern switch
         {
             "Daily" => local.AddDays(interval),
-            "Weekly" => local.AddDays(7 * interval),
+
+            // Multiply in double space so a large RecurrenceInterval cannot overflow as int arithmetic
+            // before AddDays' implicit conversion to double.
+            "Weekly" => local.AddDays(7.0 * interval),
             "Monthly" => local.AddMonths(interval),
             _ => throw new InvalidOperationException(
                 $"Unsupported recurrence pattern '{schedule.RecurrencePattern}'."),

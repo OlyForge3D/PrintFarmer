@@ -629,7 +629,10 @@ public class GcodeMetadataExtractorService(ILogger<GcodeMetadataExtractorService
             int h = int.Parse(hoursMatch.Groups[1].Value);
             int m = int.Parse(hoursMatch.Groups[2].Value);
             int s = int.Parse(hoursMatch.Groups[3].Value);
-            minutes = (h * 60) + m + (s / 60.0);
+
+            // Multiply in double space so a large parsed hour value cannot overflow as int arithmetic
+            // before it is added into the double `minutes` result.
+            minutes = ((double)h * 60) + m + (s / 60.0);
             return true;
         }
 

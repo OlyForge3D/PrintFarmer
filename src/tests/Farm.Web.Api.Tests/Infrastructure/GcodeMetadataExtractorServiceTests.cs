@@ -486,6 +486,23 @@ G28
     }
 
     [Fact]
+    public async Task ExtractMetadataAsync_HandlesExtremelyLargePrintTimeWithoutIntOverflow()
+    {
+        // 40,000,000 hours * 60 = 2,400,000,000, which exceeds int.MaxValue (2,147,483,647).
+        // Regression test for CodeQL cs/loss-of-precision alert #715: the hour*60 multiplication
+        // must happen in double space so this does not silently wrap to a negative value.
+        string gcodeContent = @"; estimated printing time (normal mode) = 40000000h 30m 0s
+G28
+";
+
+        GcodeMetadataExtracted result = await _service.ExtractMetadataAsync(gcodeContent);
+
+        result.Should().NotBeNull();
+        result.EstimatedPrintTimeMinutes.Should().BeApproximately(2_400_000_030.0, 0.01);
+        result.EstimatedPrintTimeMinutes.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
     public async Task ExtractMetadataAsync_HandlesEmptyThumbnailBlock()
     {
         string gcodeContent = @"; thumbnail begin 200x200
