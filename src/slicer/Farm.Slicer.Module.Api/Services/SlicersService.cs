@@ -213,31 +213,66 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
     {
         int maxJobs = Math.Min(dto.MaxConcurrentJobs, Math.Max(1, _slicerSettings.CurrentValue.MaxConcurrentJobs));
 
-        // Every registration receives fresh credentials. InstanceId is diagnostic metadata,
-        // never proof of ownership and never a key-recovery mechanism.
-        SlicerService svc = new()
-        {
-            Id = Guid.NewGuid(),
-            Name = dto.Name ?? "orca-service",
-            SlicerType = dto.SlicerType,
-            Version = dto.Version,
-            Host = dto.Host,
-            UiManifestUrl = dto.UiManifestUrl,
-            CapabilitiesJson = dto.CapabilitiesJson,
-            MaxConcurrentJobs = maxJobs,
-            Status = "Online",
-            LastSeen = DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            Tags = dto.Tags,
-            InstanceId = dto.InstanceId,
-            ApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-                .TrimEnd('=')
-                .Replace('+', '-')
-                .Replace('/', '_'),
-        };
+        // Every registration receives fresh credentials — InstanceId is never a
+        // key-recovery mechanism, so an old ApiKey can never be reclaimed by
+        // claiming a known instance ID. It is only used to find an existing row
+        // for a stable worker (e.g. the same container redeploying) so that row
+        // can be updated in place instead of the registration accumulating a new
+        // duplicate service/worker on every restart.
+        string freshApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
 
-        await _repo.AddAsync(svc, ct);
+        SlicerService? svc = !string.IsNullOrWhiteSpace(dto.InstanceId)
+            ? await _repo.GetByInstanceIdAsync(dto.InstanceId, ct)
+            : null;
+
+        if (svc is not null)
+        {
+            _logger.LogInformation(
+                "Re-registering slicer service {ServiceId} for stable worker instance {InstanceId}; issuing fresh credentials.",
+                svc.Id,
+                dto.InstanceId);
+
+            svc.Name = dto.Name ?? svc.Name;
+            svc.SlicerType = dto.SlicerType;
+            svc.Version = dto.Version;
+            svc.Host = dto.Host;
+            svc.UiManifestUrl = dto.UiManifestUrl;
+            svc.CapabilitiesJson = dto.CapabilitiesJson;
+            svc.MaxConcurrentJobs = maxJobs;
+            svc.Status = "Online";
+            svc.LastSeen = DateTime.UtcNow;
+            svc.UpdatedAt = DateTime.UtcNow;
+            svc.Tags = dto.Tags;
+            svc.ApiKey = freshApiKey;
+            svc.ApiKeyRotatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            svc = new SlicerService
+            {
+                Id = Guid.NewGuid(),
+                Name = dto.Name ?? "orca-service",
+                SlicerType = dto.SlicerType,
+                Version = dto.Version,
+                Host = dto.Host,
+                UiManifestUrl = dto.UiManifestUrl,
+                CapabilitiesJson = dto.CapabilitiesJson,
+                MaxConcurrentJobs = maxJobs,
+                Status = "Online",
+                LastSeen = DateTime.UtcNow,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                Tags = dto.Tags,
+                InstanceId = dto.InstanceId,
+                ApiKey = freshApiKey,
+                ApiKeyRotatedAt = DateTime.UtcNow,
+            };
+
+            await _repo.AddAsync(svc, ct);
+        }
 
         // Synchronize to Worker table for dispatcher
         Worker? worker = await _workerRepo.GetByServiceIdAsync(svc.Id.ToString());

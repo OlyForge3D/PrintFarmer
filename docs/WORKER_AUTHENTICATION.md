@@ -50,10 +50,11 @@ key:
 }
 ```
 
-Every registration creates a fresh `SlicerService`, service key, and internal
-`Worker` record atomically. A synchronization failure leaves neither record
-persisted. Registration never returns an existing service key based on
-caller-supplied metadata.
+Registration issues a fresh service key on every call, and always synchronizes
+the `SlicerService` and internal `Worker` records atomically — a
+synchronization failure leaves neither record persisted. Registration never
+returns an existing service key based on caller-supplied metadata: the key is
+always freshly generated, even when an existing record is updated in place.
 
 The worker keeps the returned GUID and key as its registered service identity.
 They are sent as `X-Worker-Id` and `X-Worker-Key` on every worker-only request.
@@ -61,11 +62,22 @@ PrintFarmer resolves that GUID to the internal enabled worker record and
 validates the key bound to that record. A key issued to one service cannot be
 paired with another service's GUID.
 
-`Worker:InstanceId` is optional diagnostic metadata, not proof of ownership or
-a credential-recovery token. When it is unset, each worker process generates a
-random GUID. Docker deployments leave it unset for both single and scaled
-workers. Even if two callers present the same value and host, registration
-issues separate service GUIDs and keys and preserves both worker records.
+`Worker:InstanceId` identifies a stable worker process across restarts and
+redeploys. When it is set and matches an existing `SlicerService`, registration
+updates that service and its paired `Worker` record in place — same GUID, same
+worker row, refreshed heartbeat — instead of creating a duplicate. It never
+recovers or reuses the previous key: a fresh key is minted on every
+registration, so re-registering under a known instance ID cannot reclaim
+another registration's live credential. When `Worker:InstanceId` is unset, each
+worker process generates a random GUID instead, so restarts always create a
+new service/worker pair. `deploy-docker.sh` sets a stable `Worker__InstanceId`
+for the OrcaSlicer worker service only when it is deployed as a single,
+non-scaled replica (and always for the never-scaled previous-version worker),
+so redeploys keep worker count at one. Docker Compose applies identical
+environment to every scaled replica, so a scaled OrcaSlicer worker deployment
+(`ORCA_WORKER_COUNT` > 1) leaves the variable unset and each replica keeps
+generating its own random instance ID to avoid collapsing into a single worker
+record.
 
 Offline and deregistered workers cannot authenticate to service-lifecycle or
 worker-only routes. A worker discards an identity rejected by the registry and

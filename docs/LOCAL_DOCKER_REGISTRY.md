@@ -134,7 +134,7 @@ services:
       - Worker__StorageEndpoint=${MONO_API_ENDPOINT:-http://api:5001}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
-      - Worker__WorkerId=orcaslicer-worker-1
+      - Worker__InstanceId=orcaslicer-worker-1
       - Worker__MaxConcurrentJobs=1
       - Worker__MaxMemoryMb=1024
     volumes:

@@ -545,24 +545,35 @@ fi
 pass "Static: configure_additional preserves pre-loaded ENABLE_SPOOLMAN in NON_INTERACTIVE mode"
 
 # ----------------------------------------------------------------------------
-# Static regression: deployment config supplies only the bootstrap key, while
-# every worker process derives a fresh identity at runtime.
+# Static regression: deployment config supplies only the bootstrap key. Worker
+# identity depends on the service: the scalable orcaslicer-worker service must
+# derive its InstanceId from ORCA_WORKER_INSTANCE_ID (deploy-docker.sh only
+# populates it for a single, non-scaled worker; scaled replicas get an empty
+# value and fall back to a random per-process identity) rather than a
+# hardcoded literal, which would collapse every scaled replica into one
+# registered worker. The never-scaled orcaslicer-worker-previous service may
+# pin a literal InstanceId safely (issue #1528).
 # ----------------------------------------------------------------------------
 
-for compose_file in \
-    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml" \
-    "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml"; do
+worker_compose="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker.yml"
+worker_previous_compose="$REPO_ROOT/scripts/docker/compose-templates/docker-compose.orcaslicer-worker-previous.yml"
+
+for compose_file in "$worker_compose" "$worker_previous_compose"; do
     if ! grep -q 'WorkerAuth__SharedKey=${WORKER_SHARED_API_KEY:-}' "$compose_file"; then
         fail "$(basename "$compose_file") does not map the canonical WorkerAuth__SharedKey."
     fi
     if grep -qE 'WorkerAuth__SharedApiKey|Worker__SharedKey' "$compose_file"; then
         fail "$(basename "$compose_file") still contains a deprecated worker-auth alias."
     fi
-    if grep -q 'Worker__InstanceId' "$compose_file"; then
-        fail "$(basename "$compose_file") pins a reusable worker process identity."
-    fi
 done
-pass "Static: worker compose templates use only WorkerAuth__SharedKey and runtime identities"
+
+if ! grep -q 'Worker__InstanceId=${ORCA_WORKER_INSTANCE_ID:-}' "$worker_compose"; then
+    fail "$(basename "$worker_compose") must derive Worker__InstanceId from \${ORCA_WORKER_INSTANCE_ID:-}, not a hardcoded literal, since it can be scaled."
+fi
+if ! grep -q 'Worker__InstanceId=orcaslicer-worker-previous-1' "$worker_previous_compose"; then
+    fail "$(basename "$worker_previous_compose") should pin a stable Worker__InstanceId (never scaled)."
+fi
+pass "Static: worker compose templates use only WorkerAuth__SharedKey, and Worker__InstanceId is scale-safe"
 
 # The bootstrap key must be resolved before save_deployment_config persists the
 # config and before generate_env_file truncates .env.

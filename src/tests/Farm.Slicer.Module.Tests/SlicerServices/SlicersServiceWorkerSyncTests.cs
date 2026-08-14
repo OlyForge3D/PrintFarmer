@@ -175,6 +175,89 @@ public class SlicersServiceWorkerSyncTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact(DisplayName = "RegisterAsync with a repeated InstanceId reuses the same service/worker row and rotates the key (issue #1528)")]
+    public async Task RegisterAsync_WithSameInstanceId_UpsertsExistingRecord()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+        SlicerServiceMetrics metrics = CreateMetrics();
+        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+        HttpClient httpClient = CreateMockHttpClient();
+        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
+        ILogger<SlicersService> logger = CreateMockLogger();
+        Mock<ICatalogService> catalogService = CreateMockCatalogService();
+        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
+        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+        SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "redeploy-worker",
+            SlicerType = 0,
+            Version = "0.9.0",
+            Host = "http://worker-host",
+            MaxConcurrentJobs = 3,
+            CapabilitiesJson = "[\"orcaslicer\"]",
+            InstanceId = "orcaslicer-worker-1"
+        };
+
+        (Guid firstId, string firstApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+        (Guid secondId, string secondApiKey) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        _ = secondId.Should().Be(firstId, "re-registering under the same InstanceId must update the existing service, not create a new one");
+        _ = secondApiKey.Should().NotBe(firstApiKey, "InstanceId must never be used to recover or reuse a prior credential");
+
+        _ = db.Set<SlicerService>().Should().HaveCount(1);
+        _ = db.Set<Worker>().Should().HaveCount(1, "worker count must stay at 1 across repeated redeploys of the same instance");
+
+        Worker? worker = await workerRepo.GetByServiceIdAsync(firstId.ToString());
+        _ = worker.Should().NotBeNull();
+        _ = worker!.ApiKey.Should().Be(secondApiKey);
+    }
+
+    [Fact(DisplayName = "RegisterAsync without an InstanceId always creates a new service/worker (scaled replicas stay distinct)")]
+    public async Task RegisterAsync_WithoutInstanceId_AlwaysCreatesNewRecord()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+        SlicerServiceMetrics metrics = CreateMetrics();
+        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+        HttpClient httpClient = CreateMockHttpClient();
+        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
+        ILogger<SlicersService> logger = CreateMockLogger();
+        Mock<ICatalogService> catalogService = CreateMockCatalogService();
+        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
+        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+        SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, logger, settings);
+
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "scaled-worker",
+            SlicerType = 0,
+            Version = "0.9.0",
+            Host = "http://worker-host",
+            MaxConcurrentJobs = 3,
+            CapabilitiesJson = "[\"orcaslicer\"]"
+        };
+
+        (Guid firstId, _) = await svc.RegisterAsync(dto, CancellationToken.None);
+        (Guid secondId, _) = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        _ = secondId.Should().NotBe(firstId, "without a shared InstanceId each registration must remain a distinct worker (e.g. scaled replicas)");
+        _ = db.Set<SlicerService>().Should().HaveCount(2);
+        _ = db.Set<Worker>().Should().HaveCount(2);
+    }
+
     [Fact(DisplayName = "RegisterAsync fails closed without persisting an orphaned service")]
     public async Task RegisterAsync_WhenWorkerSynchronizationFails_DoesNotPersistService()
     {

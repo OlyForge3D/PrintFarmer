@@ -4,8 +4,9 @@
 # (default 2.3.1) alongside the current engine so version-pinned slice jobs
 # can be routed to a compatible worker.
 #
-# Registration receives a fresh service identity and key, while the distinct
-# Host / ServiceName / WorkerId values keep operations and routing clear.
+# Registration reuses this worker's stable identity (Worker__InstanceId) across
+# redeploys while always issuing a fresh key, and the distinct Host / ServiceName
+# values keep operations and routing clear from the current-version worker.
 
 x-orcaslicer-previous-build: &orcaslicer-previous-build
   context: .
@@ -65,7 +66,10 @@ services:
       - Worker__StorageEndpoint=${WORKER_API_BASE_URL:-http://slicer-host:5246}
       - Worker__WorkingDirectory=/app/temp
       - Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer
-      - Worker__WorkerId=orcaslicer-worker-previous-1
+      # Stable identity across redeploys: RegisterAsync upserts on this ID so a
+      # redeploy updates the existing worker/service record instead of creating
+      # a duplicate. Fresh credentials are still issued on every registration.
+      - Worker__InstanceId=orcaslicer-worker-previous-1
       - Worker__MaxConcurrentJobs=1
       - Worker__ModelDownloadMaxBytes=${WORKER_MODEL_DOWNLOAD_MAX_BYTES:-536870912}
       - Worker__ModelDownloadTimeoutSeconds=${WORKER_MODEL_DOWNLOAD_TIMEOUT_SECONDS:-120}

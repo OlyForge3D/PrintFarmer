@@ -22,8 +22,11 @@ public class RegisterSlicerDto
     public string? Tags { get; set; }
 
     /// <summary>
-    /// Diagnostic identifier for this worker process. It is not authentication material,
-    /// and registration always creates a fresh service identity and key.
+    /// Stable identifier for this worker process across restarts and redeploys. When it
+    /// matches an existing registration, that service/worker row is updated in place instead
+    /// of creating a duplicate (issue #1528). It is never authentication material: every
+    /// registration — matched or not — always issues a fresh API key, so a known InstanceId
+    /// can never recover or reuse a prior credential.
     /// </summary>
     public string? InstanceId { get; set; }
 
