@@ -241,8 +241,9 @@ never affected by fault rules, so a broad injected fault cannot prevent cleanup.
 
 The daily validation API also enables `POST
 /api/test/moonraker-emulator/reset`. This application-level reset requires an
-authenticated `farm_admin`, returns `404` unless the API is running in Development with
-both `MoonrakerEmulatorSeed__Enabled=true` and
+authenticated principal holding the `diagnostics:admin` permission (including
+`farm_admin`), returns `404` unless the API is running in Development with both
+`MoonrakerEmulatorSeed__Enabled=true` and
 `MoonrakerEmulatorSeed__EnableControlApi=true`, and is never enabled by the production
 templates. It restores the seeded printing/paused queue rows and dispatch ownership,
 cancels transient active jobs, clears physical-control and acknowledgement state, and
