@@ -173,6 +173,47 @@ public class BackendCapabilityFactoryTests
     }
 
     [Fact]
+    public void UnknownBackend_IsSkipped_AndDoesNotQueryClientFactory()
+    {
+        // Arrange - reset the client factory mock so we can assert GetClient(Unknown) is never called.
+        var mockFactory = new Mock<IBackendClientFactory>();
+        mockFactory.Setup(f => f.GetClient(It.IsAny<PrinterBackend>()))
+            .Throws(new ArgumentException("Unsupported printer backend: Unknown"));
+
+        // Act - constructing the factory triggers DiscoverBackendCapabilities() for every enum value.
+        var factory = new BackendCapabilityFactory(mockFactory.Object, _mockLogger.Object);
+
+        // Assert - Unknown must never reach BackendClientFactory.GetClient(), since it is a
+        // sentinel/non-routable value, not a real backend.
+        mockFactory.Verify(f => f.GetClient(PrinterBackend.Unknown), Times.Never);
+        Assert.Equal(BackendCapabilities.None, factory.GetSupportedCapabilities(PrinterBackend.Unknown));
+    }
+
+    [Fact]
+    public void UnknownBackend_DiscoveryEmitsNoFailureLevelLog()
+    {
+        // Arrange - a fresh mock logger scoped to this test so we can inspect all invocations.
+        var logger = new Mock<ILogger<BackendCapabilityFactory>>();
+        var mockFactory = new Mock<IBackendClientFactory>();
+        mockFactory.Setup(f => f.GetClient(It.IsAny<PrinterBackend>()))
+            .Throws(new ArgumentException("Unsupported printer backend: Unknown"));
+
+        // Act
+        _ = new BackendCapabilityFactory(mockFactory.Object, logger.Object);
+
+        // Assert - no Warning/Error log should mention the Unknown sentinel backend. Real
+        // unsupported-backend failures (handled in BackendClientFactory) must remain unaffected.
+        logger.Verify(
+            l => l.Log(
+                It.Is<LogLevel>(level => level >= LogLevel.Warning),
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) => v.ToString()!.Contains("Unknown", StringComparison.Ordinal)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Never);
+    }
+
+    [Fact]
     public void ClientTypeReflection_TakesPriorityOver_StaleGetCapabilities()
     {
         // Arrange — plugin whose ClientType implements ISupportsFileList

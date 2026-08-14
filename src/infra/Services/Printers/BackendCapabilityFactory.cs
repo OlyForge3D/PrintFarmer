@@ -80,9 +80,18 @@ public class BackendCapabilityFactory : IBackendCapabilityFactory
     {
         var discovered = new Dictionary<PrinterBackend, BackendCapabilities>();
 
-        // For each backend, get its client and check which capability interfaces it implements
+        // For each backend, get its client and check which capability interfaces it implements.
+        // PrinterBackend.Unknown is a sentinel value for "unspecified/unrouted" and is not a
+        // real backend, so it is skipped here to avoid BackendClientFactory logging a
+        // failure-level "Unsupported printer backend" exception on every healthy discovery pass.
         foreach (PrinterBackend backend in Enum.GetValues<PrinterBackend>())
         {
+            if (backend == PrinterBackend.Unknown)
+            {
+                discovered.Add(backend, BackendCapabilities.None);
+                continue;
+            }
+
             try
             {
                 string backendType = GetBackendTypeName(backend);
