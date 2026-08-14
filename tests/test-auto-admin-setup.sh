@@ -33,7 +33,7 @@ test_help_includes_auto_admin_examples() {
     local help_output=$(bash "$DEPLOY_SCRIPT" --help 2>&1 || true)
     
     assert_contains "$help_output" "INITIAL ADMIN SETUP OPTIONS" "Help should have dedicated section for auto-admin"
-    assert_contains "$help_output" "./scripts/deploy-docker.sh --auto-admin" "Help should show basic auto-admin usage example"
+    assert_contains "$help_output" "./scripts/deploy-docker.sh --non-interactive --auto-admin" "Help should show non-interactive auto-admin usage example"
     
     pass_test
 }
@@ -78,14 +78,13 @@ test_setup_initial_admin_function_exists() {
     pass_test
 }
 
-# Test 6: setup_initial_admin function calls setup API endpoint
+# Test 6: setup_initial_admin delegates to the shared setup helper
 test_setup_initial_admin_calls_api_endpoint() {
-    start_test "setup_initial_admin calls /api/setup/initial-admin endpoint"
+    start_test "setup_initial_admin delegates initial admin creation"
     
     local script_content=$(cat "$DEPLOY_SCRIPT")
     
-    assert_contains "$script_content" "/api/setup/initial-admin" "Function should call /api/setup/initial-admin endpoint"
-    assert_contains "$script_content" "curl" "Function should use curl to call API"
+    assert_contains "$script_content" 'create_initial_admin "$api_url" "$admin_username" "$admin_password" "$admin_email"' "Function should call the shared initial-admin helper"
     
     pass_test
 }
@@ -102,7 +101,20 @@ test_setup_initial_admin_is_called_in_flow() {
     pass_test
 }
 
-# Test 8: Config persistence for auto-admin settings
+# Test 8: setup_initial_admin is called in redeploy recovery flow
+test_setup_initial_admin_is_called_in_redeploy_flow() {
+    start_test "setup_initial_admin is called in redeploy recovery flow"
+
+    local redeploy_function
+    redeploy_function=$(sed -n '/^redeploy_existing() {/,/^}/p' "$DEPLOY_SCRIPT")
+
+    assert_contains "$redeploy_function" 'deploy_containers' "Redeploy should start containers"
+    assert_contains "$redeploy_function" 'setup_initial_admin || true' "Redeploy should complete configured auto-admin setup"
+
+    pass_test
+}
+
+# Test 9: Config persistence for auto-admin settings
 test_config_persistence_code_exists() {
     start_test "config persistence code for auto-admin exists"
     
@@ -116,7 +128,7 @@ test_config_persistence_code_exists() {
     pass_test
 }
 
-# Test 9: Password IS persisted to config file
+# Test 10: Password IS persisted to config file
 test_password_persisted() {
     start_test "password is persisted to disk in config file"
     
@@ -128,7 +140,7 @@ test_password_persisted() {
     pass_test
 }
 
-# Test 10: API readiness check in setup function
+# Test 11: API readiness check in setup function
 test_api_readiness_check() {
     start_test "setup_initial_admin includes API readiness check"
     
@@ -140,7 +152,7 @@ test_api_readiness_check() {
     pass_test
 }
 
-# Test 11: Password auto-generation capability
+# Test 12: Password auto-generation capability
 test_password_auto_generation() {
     start_test "auto-admin has password auto-generation capability"
     
@@ -152,7 +164,7 @@ test_password_auto_generation() {
     pass_test
 }
 
-# Test 12: Documentation and comments exist
+# Test 13: Documentation and comments exist
 test_script_documentation() {
     start_test "script includes documentation for auto-admin feature"
     
@@ -177,6 +189,7 @@ main() {
     test_setup_initial_admin_function_exists
     test_setup_initial_admin_calls_api_endpoint
     test_setup_initial_admin_is_called_in_flow
+    test_setup_initial_admin_is_called_in_redeploy_flow
     test_config_persistence_code_exists
     test_password_persisted
     test_api_readiness_check

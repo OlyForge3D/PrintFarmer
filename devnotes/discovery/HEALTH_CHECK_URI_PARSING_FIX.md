@@ -1,4 +1,10 @@
-# Health Check URI Parsing Fix
+# Health Check URI Parsing Fix (Historical)
+
+> **Superseded:** The comprehensive health check no longer makes loopback HTTP
+> requests to catalog endpoints. Those endpoints require user authentication, so
+> readiness now verifies the same seeded manufacturer and filament-type data
+> directly through `AppDbContext`. The `CatalogApi` and `FilamentTypesApi` response
+> keys remain for compatibility and report `Source: "Database"`.
 
 ## Problem
 After fresh deployment, the API health checks were failing with:
@@ -101,35 +107,24 @@ To verify the fix:
    # Should return comprehensive health check with all checks passing
    ```
 
-3. **Check that Catalog API check passes**:
+3. **Check that catalog readiness passes**:
    ```bash
    curl http://localhost:8080/health | jq '.checks.CatalogApi'
-   # Should show: {"Status":"Healthy","Count":8}
+   # Should show: {"Status":"Healthy","Count":8,"Source":"Database"}
    ```
 
-4. **Check that FilamentType API check passes**:
+4. **Check that filament-type readiness passes**:
    ```bash
    curl http://localhost:8080/health | jq '.checks.FilamentTypesApi'
-   # Should show: {"Status":"Healthy","Count":...}
+   # Should show: {"Status":"Healthy","Count":...,"Source":"Database"}
    ```
 
 ## Architecture
 
 ```
-Deployment Script (.env file)
-    ↓
-API Container Environment
-    ↓
 ComprehensiveHealthCheck.CheckHealthAsync()
-    ├─ Read API_URL env var (PRIMARY) ✅ http://localhost:5245
-    ├─ Read ASPNETCORE_URLS env var (SECONDARY FALLBACK)
-    ├─ Use hardcoded default (FINAL FALLBACK) http://localhost:5245
-    ↓
-Parse & Normalize URL (handle 0.0.0.0, semicolon-separated, etc.)
-    ↓
-Make internal HTTP calls:
-    ├─ GET /api/catalog/manufacturers (Catalog API check)
-    └─ GET /api/filament-types (FilamentType API check)
+    ├─ Query AppDbContext.Manufacturers
+    └─ Query AppDbContext.FilamentTypes
 ```
 
 ## Configuration Variables
