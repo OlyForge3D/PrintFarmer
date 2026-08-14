@@ -106,8 +106,12 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RegisterAsync_SameInstanceAndHost_IssuesDistinctWorkerCredentials()
+    public async Task RegisterAsync_SameInstanceId_UpsertsSameWorkerAndRotatesCredential()
     {
+        // Re-registering with the same InstanceId (e.g. a redeployed worker) must
+        // reuse the existing service/worker record rather than creating a duplicate
+        // (issue #1528). The API key still rotates on every registration, so the
+        // previous credential is no longer valid once the newer one is issued.
         using HttpClient client = _factory.CreateClient();
         RegisteredService first = await RegisterAsync(
             client,
@@ -118,9 +122,9 @@ public sealed class SlicerRegistryAuthenticationTests : IAsyncLifetime
             "second-replica",
             instanceId: "shared-diagnostic-instance");
 
-        _ = second.Id.Should().NotBe(first.Id);
-        _ = second.ApiKey.Should().NotBe(first.ApiKey);
-        await AssertWorkerCredentialAcceptedAsync(client, first);
+        _ = second.Id.Should().Be(first.Id, "re-registering the same InstanceId must upsert the existing worker record");
+        _ = second.ApiKey.Should().NotBe(first.ApiKey, "each registration still rotates the credential");
+        await AssertWorkerCredentialStatusAsync(client, first, HttpStatusCode.Unauthorized);
         await AssertWorkerCredentialAcceptedAsync(client, second);
     }
 
