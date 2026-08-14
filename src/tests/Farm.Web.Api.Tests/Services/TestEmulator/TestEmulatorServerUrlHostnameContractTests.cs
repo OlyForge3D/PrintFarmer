@@ -1,19 +1,22 @@
 ﻿using System.Text.RegularExpressions;
+using Farm.Backend.Plugin.TestEmulator;
 using FluentAssertions;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Services.TestEmulator;
 
 /// <summary>
-/// Cross-stack contract test for issue #1546. <c>TestEmulatorSeeder</c>
+/// Cross-stack contract test for issue #1546. <c>TestEmulatorSeeder.BuildServerUrl</c>
 /// (src/backends/Farm.Backend.Plugin.TestEmulator/TestEmulatorSeeder.cs) always creates simulated
-/// printers with <c>ServerUrl = $"http://testemulator-{printerId}"</c>, where <c>printerId</c> is a
+/// printers with <c>ServerUrl = "http://testemulator-{printerId}"</c>, where <c>printerId</c> is a
 /// .NET <see cref="Guid"/> in its default lowercase, dashed 8-4-4-4-12 form. The React frontend
 /// (src/Web/ReactApp/src/common/utils/validation.ts, <c>INTERNAL_ONLY_HOSTNAME_PATTERNS</c>) relies
 /// on that exact hostname shape to recognize the internal-only, browser-unreachable host and disable
 /// the "Open in Browser" action instead of rendering a broken link.
 ///
-/// Nothing in the type system enforces these two independently-maintained literals stay in sync — if
+/// Nothing in the type system enforces these two independently-maintained literals stay in sync, so
+/// this test calls the real production method (via <c>InternalsVisibleTo</c>, see
+/// Farm.Backend.Plugin.TestEmulator/AssemblyInfo.cs) rather than re-implementing its logic — if
 /// either the backend's "testemulator-" prefix or the seeded printer ID's format ever changes, this
 /// test (and the equivalent frontend test in validation.test.ts) will fail, giving an explicit signal
 /// that the frontend regex must be updated too, instead of the #1546 regression reappearing silently.
@@ -28,9 +31,10 @@ public class TestEmulatorServerUrlHostnameContractTests
     [Fact]
     public void SeededServerUrl_HostnameMatchesFrontendInternalOnlyPattern()
     {
-        // Reproduces exactly what TestEmulatorSeeder.TrySeedAsync does when creating a new printer.
+        // Calls TestEmulatorSeeder's actual URL-generation logic (not a re-implementation), so a
+        // change to the real prefix/format is guaranteed to flow into this assertion.
         Guid printerId = Guid.NewGuid();
-        string serverUrl = $"http://testemulator-{printerId}";
+        string serverUrl = TestEmulatorSeeder.BuildServerUrl(printerId);
 
         var uri = new Uri(serverUrl);
 
@@ -40,14 +44,13 @@ public class TestEmulatorServerUrlHostnameContractTests
     }
 
     [Fact]
-    public void SeederLookupPrefix_IsASubsetOfTheFrontendPattern()
+    public void SeededServerUrl_UsesHttpSchemeAndIsParseableAsAbsoluteUri()
     {
-        // TestEmulatorSeeder itself re-identifies existing emulator printers via
-        // p.ServerUrl.StartsWith("http://testemulator-", ...) — assert that literal prefix is exactly
-        // the one the frontend pattern also keys off, so the two can't silently drift apart.
-        const string seederLookupPrefix = "http://testemulator-";
+        // Guards against a future change that breaks the assumption isBrowserReachableUrl relies on:
+        // that the seeded URL is a well-formed absolute http(s) URL isSafeHttpUrl() can evaluate.
+        string serverUrl = TestEmulatorSeeder.BuildServerUrl(Guid.NewGuid());
 
-        seederLookupPrefix.Should().Be("http://testemulator-");
-        FrontendInternalOnlyHostnamePattern.ToString().Should().StartWith("^testemulator-");
+        Uri.TryCreate(serverUrl, UriKind.Absolute, out Uri? uri).Should().BeTrue();
+        uri!.Scheme.Should().Be(Uri.UriSchemeHttp);
     }
 }
