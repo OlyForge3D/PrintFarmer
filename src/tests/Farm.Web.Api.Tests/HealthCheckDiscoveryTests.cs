@@ -366,6 +366,70 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
+    public async Task ComprehensiveHealthCheck_InNonTestingEnvironment_DoesNotCallProtectedCatalogOrFilamentRoutes()
+    {
+        // Regression test for #1540: CatalogController and FilamentTypeController are
+        // [Authorize]-protected, so an anonymous internal HTTP call to
+        // /api/catalog/manufacturers or /api/filament-types will always return 401 and
+        // previously kept the comprehensive health check - and therefore /health -
+        // permanently unhealthy outside the special "Testing" environment. Readiness
+        // must be derived from seeded database records instead, in every environment,
+        // without ever calling those authenticated routes anonymously.
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+
+        Manufacturer manufacturer = new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Regression Test Manufacturer"
+        };
+
+        dbContext.Manufacturers.Add(manufacturer);
+        dbContext.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "PLA"
+        });
+
+        await dbContext.SaveChangesAsync();
+        dbContext.ChangeTracker.Clear();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings
+            {
+                PrintersToCheck = 0,
+                PercentFailedThreshold = 100
+            });
+
+        // Simulate a real deployment: NOT the "Testing" environment (e.g. E2E/Production),
+        // and TEST_USE_SHARED_SQLITE is unset, so any legacy skip-HTTP branching would not
+        // apply. An HttpClientFactory that fails the test if invoked proves the health
+        // check never makes an anonymous loopback call to the protected routes.
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("E2E");
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new UnauthorizedIfCalledHttpClientFactory(),
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+    }
+
+    [Fact]
     public async Task ComprehensiveHealthCheck_WithEnabledDiscovery_RequiresValidSubnets()
     {
         // Arrange
@@ -552,6 +616,28 @@ public class HealthCheckDiscoveryTests
             };
 
             return Task.FromResult(response);
+        }
+    }
+
+    /// <summary>
+    /// HttpClientFactory used to prove the comprehensive health check never makes an
+    /// anonymous loopback HTTP call to protected catalog/filament-type routes. Any request
+    /// through this factory returns 401 Unauthorized, matching real [Authorize]-protected
+    /// controller behavior for an unauthenticated caller.
+    /// </summary>
+    private sealed class UnauthorizedIfCalledHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            return new HttpClient(new UnauthorizedHttpMessageHandler());
+        }
+    }
+
+    private sealed class UnauthorizedHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Unauthorized));
         }
     }
 }
