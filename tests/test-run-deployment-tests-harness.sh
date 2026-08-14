@@ -539,10 +539,115 @@ if [[ "$ca_start" == "0" ]]; then
     fail "configure_additional not found in $DEPLOY_SCRIPT"
 fi
 ca_body=$(sed -n "${ca_start},${ca_end}p" "$DEPLOY_SCRIPT")
+
+# The environment-driven NON_INTERACTIVE path must initialize every optional
+# value expanded by save_deployment_config before returning under set -u.
+ca_environment_shortcircuit=$(echo "$ca_body" | awk '
+    /NON_INTERACTIVE.*=.*"true".*ENVIRONMENT/ { in_block=1 }
+    in_block { print }
+    in_block && /return 0/ { exit }
+')
+for additional_var in ENABLE_DISCOVERY ALLOW_LOCAL_NETWORK NETWORK_RANGES ENABLE_SWAGGER ENABLE_DETAILED_LOGGING DEVMODE_BYPASS_AUTH; do
+    if ! echo "$ca_environment_shortcircuit" | grep -qE "${additional_var}="; then
+        echo "$ca_environment_shortcircuit"
+        fail "configure_additional environment short-circuit does not derive ${additional_var}; save_deployment_config heredoc will trip set -u."
+    fi
+done
+pass "Static: configure_additional environment short-circuit derives persisted optional settings"
+
 if ! echo "$ca_body" | grep -qE 'NON_INTERACTIVE.*=.*"true".*ENABLE_SPOOLMAN'; then
     fail "configure_additional missing NON_INTERACTIVE + ENABLE_SPOOLMAN short-circuit guard."
 fi
 pass "Static: configure_additional preserves pre-loaded ENABLE_SPOOLMAN in NON_INTERACTIVE mode"
+
+# Redeploy validates ports while the existing deployment is still running. It
+# must distinguish its own published ports from unrelated host conflicts.
+read -r ownership_start ownership_end <<<"$(function_range container_publishes_host_port "$DEPLOY_SCRIPT")"
+if [[ "$ownership_start" == "0" ]]; then
+    fail "container_publishes_host_port not found in $DEPLOY_SCRIPT"
+fi
+ownership_body=$(sed -n "${ownership_start},$((ownership_end - 1))p" "$DEPLOY_SCRIPT")
+eval "$ownership_body"
+
+docker() {
+    if [[ "$1" == "port" && "$2" == "printfarmer-nginx-proxy" ]]; then
+        printf '%s\n' '80/tcp -> 0.0.0.0:8080' '80/tcp -> [::]:8080'
+        return 0
+    fi
+    return 1
+}
+
+if ! container_publishes_host_port "printfarmer-nginx-proxy" 8080; then
+    fail "Redeploy should recognize the current nginx container as owner of HTTP port 8080."
+fi
+if container_publishes_host_port "printfarmer-nginx-proxy" 8081; then
+    fail "Redeploy must not treat an unpublished port as owned by the current nginx container."
+fi
+unset -f docker
+pass "Dynamic: redeploy recognizes only ports published by its expected container"
+
+read -r validation_start validation_end <<<"$(function_range validate_configuration "$DEPLOY_SCRIPT")"
+validation_body=$(sed -n "${validation_start},${validation_end}p" "$DEPLOY_SCRIPT")
+for ownership_check in \
+    'printfarmer-nginx-proxy.*HTTP_PORT' \
+    'printfarmer-api.*API_PORT' \
+    'printfarmer-orcaslicer-worker-1.*ORCA_HOST_PORT'; do
+    if ! echo "$validation_body" | grep -qE "$ownership_check"; then
+        fail "validate_configuration is missing redeploy ownership guard: $ownership_check"
+    fi
+done
+pass "Static: HTTP, API, and worker conflict checks preserve current deployment ports"
+
+# ----------------------------------------------------------------------------
+# Dynamic regression: Windows exposes a python3 app-execution alias that is
+# present on PATH but exits unsuccessfully. The compose generator must validate
+# candidates and fall back to a runnable Python 3 interpreter.
+# ----------------------------------------------------------------------------
+
+COMPOSE_GENERATOR="$REPO_ROOT/scripts/docker/compose-generator.sh"
+read -r rp_start rp_end <<<"$(function_range resolve_python_bin "$COMPOSE_GENERATOR")"
+if [[ "$rp_start" == "0" ]]; then
+    fail "resolve_python_bin not found in $COMPOSE_GENERATOR"
+fi
+rp_body=$(awk -v start="$rp_start" '
+    NR >= start { print }
+    NR > start && /^}/ { exit }
+' "$COMPOSE_GENERATOR")
+eval "$rp_body"
+
+python_mock_dir=$(mktemp -d)
+cat > "$python_mock_dir/python3" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+cat > "$python_mock_dir/python" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+chmod +x "$python_mock_dir/python3" "$python_mock_dir/python"
+
+resolved_python=$(PATH="$python_mock_dir:$PATH" PYTHON_BIN="" resolve_python_bin)
+if [[ "$resolved_python" != "python" ]]; then
+    rm -rf "$python_mock_dir"
+    fail "resolve_python_bin should skip a broken python3 command and select runnable python; got '$resolved_python'."
+fi
+pass "Dynamic: compose generator skips broken python3 aliases"
+
+if ! PATH="$python_mock_dir:$PATH" PYTHON_BIN="" \
+    "$REPO_ROOT/scripts/docker/compose-dedupe.sh" --help >/dev/null 2>&1; then
+    rm -rf "$python_mock_dir"
+    fail "compose-dedupe.sh should skip a broken python3 command and select runnable python."
+fi
+rm -rf "$python_mock_dir"
+pass "Dynamic: compose dedupe skips broken python3 aliases"
+
+# Reviewed license files are hashed byte-for-byte during Docker builds, so
+# nested npm evidence must not be converted to CRLF on Windows checkouts.
+license_eol=$(git -C "$REPO_ROOT" check-attr eol -- compliance/licenses/npm/microsoft-signalr-10.0.0.txt)
+if [[ "$license_eol" != *"eol: lf" ]]; then
+    fail "Nested reviewed compliance license files must be checked out with LF line endings."
+fi
+pass "Static: nested reviewed compliance licenses enforce LF line endings"
 
 # ----------------------------------------------------------------------------
 # Static regression: deployment config supplies only the bootstrap key, while

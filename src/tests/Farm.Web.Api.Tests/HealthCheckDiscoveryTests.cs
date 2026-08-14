@@ -366,6 +366,52 @@ public class HealthCheckDiscoveryTests
     }
 
     [Fact]
+    public async Task ComprehensiveHealthCheck_WithSeededDatabase_DoesNotProbeProtectedApiRoutes()
+    {
+        await using SqliteConnection connection = new("DataSource=:memory:");
+        await connection.OpenAsync();
+
+        DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlite(connection)
+            .Options;
+
+        await using AppDbContext dbContext = new(options);
+        await dbContext.Database.EnsureCreatedAsync();
+        dbContext.Manufacturers.Add(new Manufacturer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Readiness Test Manufacturer"
+        });
+        dbContext.FilamentTypes.Add(new FilamentType
+        {
+            Id = Guid.NewGuid(),
+            Name = "PLA"
+        });
+        await dbContext.SaveChangesAsync();
+
+        Mock<ISettingsService> settingsService = new();
+        _ = settingsService
+            .Setup(s => s.Get<ExternalServicesHealthSettings>())
+            .Returns(new ExternalServicesHealthSettings { PrintersToCheck = 0 });
+
+        Mock<IHostEnvironment> hostEnvironment = new();
+        _ = hostEnvironment.Setup(h => h.EnvironmentName).Returns("Production");
+
+        ComprehensiveHealthCheck healthCheck = new(
+            dbContext,
+            new ThrowingHttpClientFactory(),
+            _mockLogger.Object,
+            settingsService.Object,
+            hostEnvironment.Object);
+
+        HealthCheckResult result = await healthCheck.CheckHealthAsync(new HealthCheckContext());
+
+        _ = result.Status.Should().Be(HealthStatus.Healthy);
+        _ = ReadStringProperty(result.Data["CatalogApi"], "Source").Should().Be("Database");
+        _ = ReadStringProperty(result.Data["FilamentTypesApi"], "Source").Should().Be("Database");
+    }
+
+    [Fact]
     public async Task ComprehensiveHealthCheck_WithEnabledDiscovery_RequiresValidSubnets()
     {
         // Arrange
@@ -553,5 +599,18 @@ public class HealthCheckDiscoveryTests
 
             return Task.FromResult(response);
         }
+    }
+
+    private sealed class ThrowingHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name)
+        {
+            throw new InvalidOperationException("Readiness must not call protected API routes.");
+        }
+    }
+
+    private static string? ReadStringProperty(object value, string propertyName)
+    {
+        return value.GetType().GetProperty(propertyName)?.GetValue(value) as string;
     }
 }

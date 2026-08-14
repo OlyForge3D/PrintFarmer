@@ -55,216 +55,27 @@ public class ComprehensiveHealthCheck(AppDbContext dbContext, IHttpClientFactory
                 }
                 else
                 {
-                    // Avoid making actual outbound HTTP calls to the same process during tests.
-                    // In some test modes (Testing env or when using the shared-sqlite fixture)
-                    // the in-process test server may not be reachable via network loopback or
-                    // constructing typed HTTP clients can trigger DI resolution ordering that
-                    // leads to concurrent DB access on the same connection. In those cases we
-                    // fall back to direct DB checks instead of internal HTTP.
-                    bool skipInternalHttp = hostEnvironment.IsEnvironment("Testing")
-                                            || string.Equals(Environment.GetEnvironmentVariable("TEST_USE_SHARED_SQLITE"), "true", StringComparison.OrdinalIgnoreCase);
-                    using HttpClient client = httpClientFactory.CreateClient();
-                    client.Timeout = TimeSpan.FromSeconds(3);
+                    checks["CatalogApi"] = new { Status = "Healthy", Count = manufacturerCount, Source = "Database" };
 
-                    // Determine API base URL for internal health check
-                    const string DefaultApiBaseUrl = "http://localhost:5245";
-                    string? baseUrl = Environment.GetEnvironmentVariable("API_URL")
-                        ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
-                        ?? DefaultApiBaseUrl;
-
-                    if (string.IsNullOrWhiteSpace(baseUrl))
-                    {
-                        baseUrl = DefaultApiBaseUrl;
-                    }
-
-                    // ASPNETCORE_URLS can contain multiple URLs separated by semicolons.
-                    // Extract just the first one for internal health probing.
-                    if (baseUrl.Contains(';'))
-                    {
-                        baseUrl = baseUrl.Split(';')[0].Trim();
-                    }
-
-                    if (baseUrl.EndsWith('/'))
-                    {
-                        baseUrl = baseUrl.TrimEnd('/');
-                    }
-
-                    // Normalize hosts like 0.0.0.0, ::, * or + which are "listen on all" and
-                    // are not valid targets for outbound HTTP calls. Replace them with
-                    // localhost so internal health probes target the local loopback.
-                    try
-                    {
-                        if (Uri.TryCreate(baseUrl, UriKind.Absolute, out Uri? parsed))
-                        {
-                            string host = parsed.Host ?? string.Empty;
-                            if (string.Equals(host, "0.0.0.0", StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(host, "::", StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(host, "*", StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(host, "+", StringComparison.OrdinalIgnoreCase))
-                            {
-                                int port = parsed.IsDefaultPort ? -1 : parsed.Port;
-                                string scheme = string.IsNullOrEmpty(parsed.Scheme) ? "http" : parsed.Scheme;
-                                baseUrl = port > 0 ? $"{scheme}://localhost:{port}" : $"{scheme}://localhost";
-                            }
-                        }
-                        else
-                        {
-                            // Uri.TryCreate failed - baseUrl is malformed. Use default.
-                            baseUrl = DefaultApiBaseUrl;
-                        }
-                    }
-#pragma warning disable CS0168 // Variable declared but never used
-                    catch (Exception)
-#pragma warning restore CS0168
-                    {
-                        // best-effort normalization - ignore failures and fall back to default
-                        baseUrl = DefaultApiBaseUrl;
-                    }
-
-                    // Catalog API endpoint check (internal HTTP call)
-                    try
-                    {
-                        if (skipInternalHttp)
-                        {
-                            // In test runs we skip HTTP calls and consider the catalog API healthy
-                            // if the database shows manufacturers seeded (checked above). This avoids
-                            // unreliable network calls to the same in-process test server.
-                            checks["CatalogApi"] = new { Status = manufacturerCount > 0 ? "Healthy" : "Unhealthy", Count = manufacturerCount, SkippedHttp = true };
-                            if (manufacturerCount == 0)
-                            {
-                                overallHealthy = false;
-                                issues.Add("Catalog API skipped HTTP check and found no manufacturers in DB");
-                            }
-                        }
-                        else
-                        {
-                            // Catalog API health check via HTTP
-                            HttpResponseMessage resp = await client.GetAsync($"{baseUrl}/api/catalog/manufacturers", cancellationToken);
-                            if (!resp.IsSuccessStatusCode)
-                            {
-                                checks["CatalogApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
-                                overallHealthy = false;
-                                issues.Add($"Catalog API returned status {(int)resp.StatusCode}");
-                            }
-                            else
-                            {
-                                string json = await resp.Content.ReadAsStringAsync(cancellationToken);
-
-                                // Try to parse as array
-                                bool valid = false;
-                                int count = 0;
-                                try
-                                {
-                                    System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
-                                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                    {
-                                        count = doc.RootElement.GetArrayLength();
-                                        valid = true;
-                                    }
-                                }
-                                catch
-                                {
-                                }
-
-                                if (!valid)
-                                {
-                                    checks["CatalogApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
-                                    overallHealthy = false;
-                                    issues.Add("Catalog API returned invalid JSON");
-                                }
-                                else if (count == 0)
-                                {
-                                    checks["CatalogApi"] = new { Status = "Unhealthy", Count = 0, Reason = "No manufacturers returned" };
-                                    overallHealthy = false;
-                                    issues.Add("Catalog API returned empty list");
-                                }
-                                else
-                                {
-                                    checks["CatalogApi"] = new { Status = "Healthy", Count = count };
-                                }
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        checks["CatalogApi"] = new { Status = "Unhealthy", Error = ex.Message };
-                        overallHealthy = false;
-                        issues.Add($"Catalog API check failed: {ex.Message}");
-                    }
-
-                    // Filament presets health check (database and API)
+                    // Verify filament presets directly in the database. The corresponding API
+                    // endpoint requires user authentication and is not a valid readiness probe.
                     try
                     {
                         int filamentTypeCount = await dbContext.FilamentTypes.CountAsync(cancellationToken);
                         checks["FilamentTypesDb"] = new { Status = filamentTypeCount > 0 ? "Healthy" : "Unhealthy", Count = filamentTypeCount };
+                        checks["FilamentTypesApi"] = new { Status = filamentTypeCount > 0 ? "Healthy" : "Unhealthy", Count = filamentTypeCount, Source = "Database" };
                         if (filamentTypeCount == 0)
                         {
                             overallHealthy = false;
                             issues.Add("No filament types found in database");
                         }
-
-                        // If running in the test environment, avoid loopback HTTP calls to the in-process server.
-                        if (skipInternalHttp)
-                        {
-                            checks["FilamentTypesApi"] = new { Status = filamentTypeCount > 0 ? "Healthy" : "Unhealthy", Count = filamentTypeCount, SkippedHttp = true };
-                            if (filamentTypeCount == 0)
-                            {
-                                overallHealthy = false;
-                                issues.Add("FilamentType API skipped HTTP check and found no filament types in DB");
-                            }
-                        }
-                        else
-                        {
-                            // Check /api/filament-types endpoint
-                            HttpResponseMessage resp = await client.GetAsync($"{baseUrl}/api/filament-types", cancellationToken);
-                            if (!resp.IsSuccessStatusCode)
-                            {
-                                checks["FilamentTypesApi"] = new { Status = "Unhealthy", StatusCode = (int)resp.StatusCode, Reason = "Non-200 response" };
-                                overallHealthy = false;
-                                issues.Add($"FilamentType API returned status {(int)resp.StatusCode}");
-                            }
-                            else
-                            {
-                                string json = await resp.Content.ReadAsStringAsync(cancellationToken);
-                                bool valid = false;
-                                int count = 0;
-                                try
-                                {
-                                    System.Text.Json.JsonDocument doc = System.Text.Json.JsonDocument.Parse(json);
-                                    if (doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array)
-                                    {
-                                        count = doc.RootElement.GetArrayLength();
-                                        valid = true;
-                                    }
-                                }
-                                catch
-                                {
-                                }
-
-                                if (!valid)
-                                {
-                                    checks["FilamentTypesApi"] = new { Status = "Unhealthy", Reason = "Invalid JSON returned" };
-                                    overallHealthy = false;
-                                    issues.Add("FilamentType API returned invalid JSON");
-                                }
-                                else if (count == 0)
-                                {
-                                    checks["FilamentTypesApi"] = new { Status = "Unhealthy", Count = 0, Reason = "No filament types returned" };
-                                    overallHealthy = false;
-                                    issues.Add("FilamentType API returned empty list");
-                                }
-                                else
-                                {
-                                    checks["FilamentTypesApi"] = new { Status = "Healthy", Count = count };
-                                }
-                            }
-                        }
                     }
                     catch (Exception ex)
                     {
+                        checks["FilamentTypesDb"] = new { Status = "Unhealthy", Error = ex.Message };
                         checks["FilamentTypesApi"] = new { Status = "Unhealthy", Error = ex.Message };
                         overallHealthy = false;
-                        issues.Add($"FilamentType API check failed: {ex.Message}");
+                        issues.Add($"Filament type database check failed: {ex.Message}");
                     }
                 }
             }

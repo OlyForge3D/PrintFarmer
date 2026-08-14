@@ -12,6 +12,21 @@ CONFIGS_DIR="$DOCKER_DIR/configs"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SYSTEM_ARCH="${TARGET_ARCH:-$(uname -m)}"
 
+resolve_python_bin() {
+    local candidate
+    for candidate in "${PYTHON_BIN:-}" python3 python; do
+        [[ -z "$candidate" ]] && continue
+        if command -v "$candidate" >/dev/null 2>&1 \
+            && "$candidate" -c "import sys; raise SystemExit(0 if sys.version_info.major == 3 else 1)" >/dev/null 2>&1; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PYTHON_BIN="$(resolve_python_bin || true)"
+
 # Source container versions from single source of truth
 VERSIONS_FILE="$DOCKER_DIR/container-versions.conf"
 if [[ -f "$VERSIONS_FILE" ]]; then
@@ -326,7 +341,12 @@ inject_health_check_anchors() {
     
     # Extract full anchor definitions with their content (can be multi-line) using Python
     local temp_injected=$(mktemp)
-    python3 - "$common_file" "$compose_file" "$temp_injected" <<'PY'
+    if [[ -z "$PYTHON_BIN" ]]; then
+        log_error "Python 3 is required to inject compose health check anchors"
+        return 1
+    fi
+
+    "$PYTHON_BIN" - "$common_file" "$compose_file" "$temp_injected" <<'PY'
 import sys
 import re
 
@@ -441,10 +461,10 @@ merge_addon_services() {
         local temp_merged temp_addon_services temp_addon_volumes temp_addon_networks temp_combined
         
         # If ruamel.yaml based merge helper exists, use it for robust YAML-aware merging
-        if command -v python3 >/dev/null 2>&1 && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && python3 -c "import ruamel.yaml" >/dev/null 2>&1; then
+        if [[ -n "$PYTHON_BIN" ]] && [[ -f "$SCRIPT_DIR/compose-merge.py" ]] && "$PYTHON_BIN" -c "import ruamel.yaml" >/dev/null 2>&1; then
             # Use YAML-aware merge helper (ruamel.yaml must be available)
             temp_combined=$(mktemp)
-            python3 "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
+            "$PYTHON_BIN" "$SCRIPT_DIR/compose-merge.py" "$compose_file" "$addon_template" > "$temp_combined"
             mv "$temp_combined" "$compose_file"
         else
             # Fallback to the original (conservative) merging approach
@@ -466,7 +486,7 @@ merge_addon_services() {
             if [[ -s "$temp_addon_services" ]]; then
                 # Filter out any addon services that already exist in the base compose
                 temp_filtered_services="$(mktemp)"
-                python3 - "$temp_addon_services" "$compose_file" "$temp_filtered_services" <<'PY'
+                "$PYTHON_BIN" - "$temp_addon_services" "$compose_file" "$temp_filtered_services" <<'PY'
 import sys,re
 addon_file=sys.argv[1]; base_file=sys.argv[2]; out_file=sys.argv[3]
 addon_lines=open(addon_file,'r').read().splitlines()
@@ -642,8 +662,8 @@ generate_compose() {
     
     # CRITICAL: Check for required dependencies BEFORE attempting any replacements
     # Python3 is required to properly handle YAML structure and indentation
-    if ! command -v python3 >/dev/null 2>&1; then
-        log_error "FATAL: python3 is required for database service configuration"
+    if [[ -z "$PYTHON_BIN" ]]; then
+        log_error "FATAL: Python 3 is required for database service configuration"
         log_error "       Please install Python 3 to continue"
         log_error "       Installation: apt-get install python3 (Debian/Ubuntu) or equivalent"
         return 1
@@ -651,7 +671,7 @@ generate_compose() {
     
     # CRITICAL: ruamel.yaml is required for proper YAML handling
     # Check if the Python module is available
-    if ! python3 -c "from ruamel.yaml import YAML" 2>/dev/null; then
+    if ! "$PYTHON_BIN" -c "from ruamel.yaml import YAML" 2>/dev/null; then
         log_error "FATAL: Python module 'ruamel.yaml' is not installed"
         log_error "       This module is REQUIRED for proper Docker Compose YAML generation"
         log_error "       Installation: pip install ruamel.yaml"
@@ -672,7 +692,7 @@ generate_compose() {
     temp_replaced="$(mktemp)"
     py_error="$(mktemp)"
     
-    if ! python3 "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
+    if ! "$PYTHON_BIN" "$SCRIPT_DIR/compose-replace-db.py" "$compose_file" "$db_config" > "$temp_replaced" 2>"$py_error"; then
         log_error "FATAL: Failed to generate database configuration"
         log_error "       Error details:"
         cat "$py_error" | sed 's/^/         /' >&2
@@ -871,7 +891,7 @@ generate_compose() {
     # API stays on bridge network for service discovery by hostname.
     log_info "Applying microservices adjustments: removing frontend host ports (keep bridge network)"
 
-    python3 - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
+    "$PYTHON_BIN" - "$compose_file" "$HOST_IP" "${HTTPS_PORT-}" <<'PY'
 import sys
 path = sys.argv[1]
 host_ip = sys.argv[2]
