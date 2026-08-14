@@ -48,7 +48,7 @@
 
 set -uo pipefail
 
-SCRIPT_VERSION="1.2.1"
+SCRIPT_VERSION="1.3.0"
 
 # ---------------------------------------------------------------------------
 # Required CI test projects. The final field opts projects into special MSBuild
@@ -206,8 +206,18 @@ load_changed_files() {
 # Tokens (order matters only for readability):
 #   shared_config   — global.json, *.sln, Directory.Build.*,
 #                     Directory.Packages.props, NuGet.Config
-#   ci_selector     — .github/workflows/**, scripts/ci/**, .githooks/**,
-#                     .devcontainer/**
+#   ci_selector     — the narrow set of files that actually govern .NET
+#                     test/build selection or repo-wide hook enforcement:
+#                     .github/workflows/ci.yml, scripts/ci/select-dotnet-tests.sh,
+#                     scripts/ci/compute-change-set.sh, .githooks/**. Editing
+#                     any of these can silently change what gets tested for
+#                     every PR, so it remains full-safe.
+#   ci_other        — every other .github/workflows/**, scripts/ci/**, and
+#                     .devcontainer/** path (e.g. an unrelated workflow, a
+#                     script's own test file, a Dockerfile-build workflow).
+#                     Inert like docs/mobile — recorded in the reason string
+#                     but never forces want_dotnet_build/want_dotnet_test/
+#                     want_mig_drift/want_frontend or full-safe.
 #   docs            — docs/**, *.md, LICENSE, .editorconfig outside src/
 #   frontend        — src/Web/**
 #   api             — src/api/**
@@ -253,15 +263,25 @@ classify_path() {
     *.sln)
       printf 'shared_config' ; return ;;
 
-    # CI selector, workflows, hooks, devcontainer post-create integration.
-    .github/workflows/*)
+    # CI selector proper: only files that actually govern .NET test/build
+    # selection, plus repo-wide git hooks. These MUST be matched before the
+    # general .github/workflows/* and scripts/ci/* patterns below, since
+    # classify_path returns on first match.
+    .github/workflows/ci.yml)
       printf 'ci_selector' ; return ;;
-    scripts/ci/*)
+    scripts/ci/select-dotnet-tests.sh|scripts/ci/compute-change-set.sh)
       printf 'ci_selector' ; return ;;
     .githooks/*)
       printf 'ci_selector' ; return ;;
+
+    # Every other workflow, CI script, or devcontainer path. Unrelated to
+    # .NET test selection — inert like docs/mobile.
+    .github/workflows/*)
+      printf 'ci_other' ; return ;;
+    scripts/ci/*)
+      printf 'ci_other' ; return ;;
     .devcontainer/*)
-      printf 'ci_selector' ; return ;;
+      printf 'ci_other' ; return ;;
 
     # iOS/macOS surface — does not trigger .NET work.
     mobile/*)
@@ -484,7 +504,7 @@ main() {
   local has_mig_app=0 has_mig_slcr=0
   local has_tests_api=0 has_tests_slicer=0 has_tests_orca=0
   local has_tests_integration=0 has_tests_other=0
-  local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_other=0
+  local has_tools=0 has_unknown_src=0 has_docs=0 has_mobile=0 has_ci_other=0 has_other=0
 
   local p category
   for p in "${CHANGED_LIST[@]}"; do
@@ -512,6 +532,7 @@ main() {
       unknown_src)     has_unknown_src=1 ;;
       docs)            has_docs=1 ;;
       mobile)          has_mobile=1 ;;
+      ci_other)        has_ci_other=1 ;;
       *)               has_other=1 ;;
     esac
   done
@@ -671,6 +692,7 @@ main() {
   if (( has_tools )); then reason+="tools "; fi
   if (( has_docs )); then reason+="docs "; fi
   if (( has_mobile )); then reason+="mobile "; fi
+  if (( has_ci_other )); then reason+="ci-other "; fi
   if (( has_other )); then reason+="other "; fi
   reason="${reason%% }"
   if [[ -z "$reason" ]]; then
