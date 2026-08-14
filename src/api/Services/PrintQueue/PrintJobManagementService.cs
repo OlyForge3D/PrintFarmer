@@ -257,7 +257,7 @@ public class PrintJobManagementService(
                         cancellationToken);
                 dispatchVersions = dispatchRevisionValues.ToDictionary(
                     pair => pair.Key,
-                    pair => (string?)RevisionETag.Encode(pair.Value));
+                    string? (pair) => RevisionETag.Encode(pair.Value));
                 List<QueueDispatchAttempt> attempts = await _appDbContext
                     .QueueDispatchAttempts
                     .AsNoTracking()
