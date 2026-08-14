@@ -275,7 +275,7 @@ public sealed class PrinterAggregate
             }
 
             double elapsed = (Clock.UtcNow - _printStartedAt.Value).TotalSeconds;
-            PrintDuration = Math.Min(elapsed, SimulatedPrintTotalSeconds);
+            PrintDuration = Math.Clamp(elapsed, 0, SimulatedPrintTotalSeconds);
             TotalDuration = _totalDurationOffset + PrintDuration;
             FilamentUsed = Math.Round(PrintDuration / SimulatedPrintTotalSeconds * 1200.0, 2);
             if (PrintDuration >= SimulatedPrintTotalSeconds)

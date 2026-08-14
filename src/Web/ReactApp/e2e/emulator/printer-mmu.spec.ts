@@ -52,10 +52,14 @@ test.describe('Printer MMU controls — Moonraker', () => {
 
     const sidebar = await openPrinterDetails(page, MOONRAKER_PRINTERS.ready);
     await expect(sidebar.getByText('AFC', { exact: true })).toBeVisible({ timeout: 15_000 });
+    const rack = sidebar.getByText('Rack', { exact: true }).locator('..');
+    await expect(rack.getByText('PLA', { exact: true })).toBeVisible();
+
     const lane = sidebar.getByRole('button', { name: 'Gate 1B: PETG - Ready' });
     await lane.click();
     await sidebar.getByRole('button', { name: 'Load', exact: true }).click();
-    await expect(sidebar.getByText('Rack', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(rack.getByText('PETG', { exact: true })).toBeVisible({ timeout: 15_000 });
+    await expect(rack.getByText('PLA', { exact: true })).toHaveCount(0);
   });
 
   test('Qidibox slots render and unload through the real backend', async ({ page, request }) => {

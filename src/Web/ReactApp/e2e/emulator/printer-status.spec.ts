@@ -85,11 +85,12 @@ test.describe('Printer Status — Moonraker', () => {
     // control API.
     const progressBar = card.getByRole('progressbar', { name: 'Print progress' });
     await expect(progressBar).toBeVisible();
-    const firstRead = Number(await progressBar.getAttribute('aria-valuenow'));
-    expect(firstRead).toBeGreaterThanOrEqual(0);
-    expect(firstRead).toBeLessThanOrEqual(100);
-    const secondRead = Number(await progressBar.getAttribute('aria-valuenow'));
-    expect(secondRead, 'progress must not drift on its own with no control-API action').toBe(firstRead);
+    await expect(progressBar).toHaveAttribute('aria-valuenow', '0');
+    await page.waitForTimeout(500);
+    await expect(
+      progressBar,
+      'progress must remain at the exact frozen baseline with no control-API action',
+    ).toHaveAttribute('aria-valuenow', '0');
   });
 
   test('Paused printer shows Paused status with resume/cancel enabled and its seeded 20% progress', async ({ page }) => {

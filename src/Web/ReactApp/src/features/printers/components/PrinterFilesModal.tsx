@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
-import { getApiBaseUrl } from '@/common/utils/apiUrlHelpers';
 import { apiClient } from '@/services/api';
 import { signalRService, type SingleFileHarvestProgressEvent, type SingleFileHarvestCompleteEvent } from '@/services/harvest-signalr';
 import { toast } from 'sonner';
@@ -129,23 +128,33 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   };
 
   const handleDownloadFile = async (fileName: string) => {
+    let downloadUrl: string | undefined;
+    let link: HTMLAnchorElement | undefined;
     try {
       setIsDownloading(fileName);
-      // Create a download link for the file
-      // The API should provide a file download endpoint
-      const downloadUrl = `${getApiBaseUrl()}/printers/${printer.id}/files/download?filename=${encodeURIComponent(fileName)}`;
-      const a = document.createElement('a');
-      a.href = downloadUrl;
-      a.download = fileName.split('/').pop() || 'download';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      toast.success(`Downloading: ${fileName}`);
+      const response = await apiClient.get<Blob>(
+        `/printers/${printer.id}/files/download`,
+        {
+          params: { filename: fileName },
+          responseType: 'blob',
+        },
+      );
+      downloadUrl = window.URL.createObjectURL(response.data);
+      link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = fileName.split('/').pop() || 'download';
+      document.body.appendChild(link);
+      link.click();
+      toast.success(`Downloaded: ${fileName}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to download file';
       toast.error(errorMessage);
       console.error('Error downloading file:', err);
     } finally {
+      link?.remove();
+      if (downloadUrl) {
+        window.URL.revokeObjectURL(downloadUrl);
+      }
       setIsDownloading(null);
     }
   };

@@ -129,6 +129,31 @@ public sealed class ControlApiScenarioAndTimeTests : IClassFixture<ReadyPrinterF
     }
 
     [Fact]
+    public async Task TimeReset_DuringActivePrint_NeverEmitsNegativeTelemetry()
+    {
+        using HttpClient client = _factory.CreateClient();
+        (await client.PostAsync(
+            "/__emulator/printer/scenario",
+            TestRequests.Json("""{"scenario":"Printing"}"""))).EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/__emulator/time/advance",
+            TestRequests.Json("""{"seconds":120}"""))).EnsureSuccessStatusCode();
+        (await client.PostAsync("/__emulator/time/reset", content: null)).EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/__emulator/time/advance",
+            TestRequests.Json("""{"seconds":0}"""))).EnsureSuccessStatusCode();
+
+        using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?print_stats");
+        using JsonDocument queryDoc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        JsonElement stats = queryDoc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats");
+        stats.GetProperty("print_duration").GetDouble().Should().BeGreaterThanOrEqualTo(0);
+        stats.GetProperty("total_duration").GetDouble().Should().BeGreaterThanOrEqualTo(0);
+        stats.GetProperty("filament_used").GetDouble().Should().BeGreaterThanOrEqualTo(0);
+
+        await client.PostAsync("/__emulator/printer/reset", content: null);
+    }
+
+    [Fact]
     public async Task TimeAdvance_NegativeSeconds_Returns400()
     {
         using HttpClient client = _factory.CreateClient();

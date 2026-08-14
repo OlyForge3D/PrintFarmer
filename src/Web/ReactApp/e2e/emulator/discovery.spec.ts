@@ -66,7 +66,7 @@ test.describe('Printer Discovery — Moonraker', () => {
   test('starting a scan shows progress and completes with exactly the two deterministic candidates', async ({ page }) => {
     await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
 
-    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    const modal = page.getByRole('dialog', { name: 'Discover Printers', exact: true });
     await expect(modal).toBeVisible();
 
     await modal.getByRole('button', { name: 'Start Scan' }).click();
@@ -84,7 +84,7 @@ test.describe('Printer Discovery — Moonraker', () => {
 
   test('discovered candidates are all backend Moonraker', async ({ page }) => {
     await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
-    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    const modal = page.getByRole('dialog', { name: 'Discover Printers', exact: true });
     await modal.getByRole('button', { name: 'Start Scan' }).click();
     await expect(modal.getByText('Found 2 printers', { exact: true })).toBeVisible({ timeout: 30_000 });
 
@@ -101,7 +101,7 @@ test.describe('Printer Discovery — Moonraker', () => {
   test('can add a discovered candidate to the farm', async ({ page }) => {
     test.setTimeout(60_000);
     await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
-    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    const modal = page.getByRole('dialog', { name: 'Discover Printers', exact: true });
     await modal.getByRole('button', { name: 'Start Scan' }).click();
     await expect(modal.getByText('Found 2 printers', { exact: true })).toBeVisible({ timeout: 30_000 });
 
