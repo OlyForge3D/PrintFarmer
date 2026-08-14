@@ -347,7 +347,17 @@ internal static class ArtifactStorageFileSystem
             IntPtr.Zero);
         if (handle.IsInvalid)
         {
-            int error = Marshal.GetLastPInvokeError();
+            int error;
+            try
+            {
+                error = Marshal.GetLastPInvokeError();
+            }
+            catch
+            {
+                handle.Dispose();
+                throw;
+            }
+
             handle.Dispose();
             ThrowWindowsDeletionException(path, error);
         }

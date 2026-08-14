@@ -687,11 +687,18 @@ public sealed class PrintablesOAuthService(
                 errorsEl.ValueKind == JsonValueKind.Array &&
                 errorsEl.GetArrayLength() > 0)
             {
-                string? message = errorsEl[0].TryGetProperty("message", out JsonElement msgEl) && msgEl.ValueKind == JsonValueKind.String
-                    ? msgEl.GetString()
-                    : null;
-                doc.Dispose();
-                throw new PrintablesApiException($"Printables GraphQL error during '{operationName}': {message ?? "Unknown error"}");
+                try
+                {
+                    string? message = errorsEl[0].TryGetProperty("message", out JsonElement msgEl) && msgEl.ValueKind == JsonValueKind.String
+                        ? msgEl.GetString()
+                        : null;
+                    throw new PrintablesApiException($"Printables GraphQL error during '{operationName}': {message ?? "Unknown error"}");
+                }
+                catch
+                {
+                    doc.Dispose();
+                    throw;
+                }
             }
 
             return doc;

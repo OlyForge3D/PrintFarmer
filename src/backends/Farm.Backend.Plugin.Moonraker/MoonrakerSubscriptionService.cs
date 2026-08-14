@@ -349,7 +349,18 @@ public sealed class MoonrakerSubscriptionService(
     {
         CancellationTokenSource printerCts =
             CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
-        if (!_loopCancellationSources.TryAdd(printer.Id, printerCts))
+        bool added;
+        try
+        {
+            added = _loopCancellationSources.TryAdd(printer.Id, printerCts);
+        }
+        catch
+        {
+            printerCts.Dispose();
+            throw;
+        }
+
+        if (!added)
         {
             // TryAdd failed, so ownership was not transferred and no task captured this source.
 #pragma warning disable IDISP016 // Don't use disposed instance
