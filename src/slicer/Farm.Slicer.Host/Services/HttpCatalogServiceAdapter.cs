@@ -147,7 +147,7 @@ public sealed class HttpCatalogServiceAdapter : ICatalogServiceAdapter
                 await http.GetFromJsonAsync<List<SlicerModelAliasDto>>(
                     $"api/catalog/printer-models/{modelId}/aliases", JsonOptions, ct);
 
-            IReadOnlyList<SlicerModelAliasDto> result = aliases ?? (IReadOnlyList<SlicerModelAliasDto>)[];
+            IReadOnlyList<SlicerModelAliasDto> result = aliases ?? [];
             _cache.Set(cacheKey, result, CacheDuration);
             return result;
         }
