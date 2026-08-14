@@ -5,7 +5,7 @@
  * Waits for health-check endpoints before handing control to tests.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

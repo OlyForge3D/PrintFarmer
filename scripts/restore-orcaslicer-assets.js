@@ -174,7 +174,6 @@ function restoreAssets() {
 
         try {
           const modelJson = JSON.parse(fs.readFileSync(modelJsonPath, 'utf8'));
-          const printerId = printerEntry.id;
 
           // Copy bed model
           if (modelJson.bed_model) {
