@@ -137,6 +137,7 @@ export const test = base.extend<EmulatorFixtures>({
     await page.evaluate((t: string) => {
       localStorage.setItem('auth-token', t);
       localStorage.setItem('printerViewMode', 'detailed');
+      localStorage.setItem('pf-tour-seen-printers', 'true');
     }, token!);
 
     // 5. Reload so the React app picks up the token from localStorage
