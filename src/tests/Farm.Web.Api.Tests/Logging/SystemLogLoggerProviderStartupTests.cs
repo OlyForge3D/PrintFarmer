@@ -83,5 +83,22 @@ public sealed class SystemLogLoggerProviderStartupTests
         completed.Should().Be(
             dbResolved.Task,
             "queued database log writes should resume once the schema-ready signal is set");
+
+        await using var assertionContext = new AppDbContext(dbOptions);
+        int persistedPreSchemaLogs = 0;
+        DateTime persistenceDeadline = DateTime.UtcNow.AddSeconds(3);
+        while (persistedPreSchemaLogs < 50 && DateTime.UtcNow < persistenceDeadline)
+        {
+            persistedPreSchemaLogs = await assertionContext.SystemLogs.CountAsync(
+                log => log.Message.StartsWith("Warning ") && log.Message.Contains("before schema initialization"));
+            if (persistedPreSchemaLogs < 50)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25));
+            }
+        }
+
+        persistedPreSchemaLogs.Should().Be(
+            50,
+            "all logs queued before schema readiness should be persisted after the gate opens");
     }
 }
