@@ -56,7 +56,7 @@ rm -rf "$TEST2_DIR" 2>/dev/null || true
 mkdir -p "$TEST2_DIR"
 if "$REPO_ROOT/scripts/docker/compose-generator.sh" --output-dir "$TEST2_DIR" >/dev/null 2>&1; then
     if [ -f "$TEST2_DIR/docker-compose.yml" ] && [ -f "$TEST2_DIR/Dockerfile.multistage" ]; then
-        if grep -q "dockerfile: Dockerfile.multistage" "$TEST2_DIR/docker-compose.yml"; then
+        if grep -Eq '^[[:space:]]+dockerfile:[[:space:]].*Dockerfile\.multistage' "$TEST2_DIR/docker-compose.yml"; then
             check_result true "Compose generator creates multistage configuration"
         else
             check_result false "Compose file uses multistage dockerfile"

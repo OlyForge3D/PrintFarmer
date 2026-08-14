@@ -126,6 +126,7 @@ export POSTGRES_PASSWORD POSTGRES_USER Jwt__Key WORKER_SHARED_API_KEY DISCOVERY_
 export DB_PROVIDER=Postgres
 export ENABLE_DISTRIBUTED_SLICING=true
 export ENABLE_ORCA_WORKER=yes
+export ENABLE_ORCA_WORKER_PREVIOUS=no
 export ORCA_WORKER_COUNT=1
 
 log "Generating microservices stack (registry=$USE_REGISTRY, project=$PROJECT_NAME) in $STACK_DIR"
@@ -296,9 +297,10 @@ fi
 log "OK: discovery scan returned both deterministic fixture entries (Voron, Prusa); this proves the discovery contract, not a live connection to the emulator"
 
 log "Verifying exactly one OrcaSlicer worker is running"
-worker_count="$(compose ps --status running --format '{{.Service}}' orcaslicer-worker | grep -c '^orcaslicer-worker$' || true)"
-if [[ "$worker_count" -ne 1 ]]; then
-  log "FAIL: expected exactly one running orcaslicer-worker container, found $worker_count"
+worker_services="$(compose ps --status running --format '{{.Service}}' | grep -E '^orcaslicer-worker(-previous)?$' || true)"
+worker_count="$(printf '%s\n' "$worker_services" | grep -Ec '^orcaslicer-worker(-previous)?$' || true)"
+if [[ "$worker_count" -ne 1 || "$worker_services" != "orcaslicer-worker" ]]; then
+  log "FAIL: expected exactly one current OrcaSlicer worker and no previous-version worker, found $worker_count: ${worker_services:-none}"
   compose ps
   exit 1
 fi

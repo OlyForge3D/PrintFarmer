@@ -116,6 +116,22 @@ test('API and slicer-host smoke checks supply their required worker shared key',
   );
 });
 
+test('printer-discovery smoke check binds its probed port explicitly', () => {
+  const printerDiscoverySmoke = workflow.slice(
+    workflow.indexOf('            printer-discovery)'),
+    workflow.indexOf('            moonraker-emulator)'),
+  );
+
+  assert.match(
+    printerDiscoverySmoke,
+    /--env ASPNETCORE_URLS=http:\/\/\+:5247/,
+  );
+  assert.match(
+    printerDiscoverySmoke,
+    /health_url="http:\/\/localhost:5247\/api\/discovery\/health"/,
+  );
+});
+
 test('publication uses run-unique tags and emits one coherent digest manifest', () => {
   assert.match(
     workflow,

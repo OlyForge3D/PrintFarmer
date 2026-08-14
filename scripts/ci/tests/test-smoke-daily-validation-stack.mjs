@@ -41,6 +41,7 @@ test('smoke script boots the four-instance emulator topology via the generator',
   assert.match(script, /docker-compose\.daily-registry\.yml/);
   assert.match(script, /PRINTFARMER_MOONRAKER_EMULATOR_IMAGE/);
   assert.match(script, /up -d --scale orcaslicer-worker=1/);
+  assert.match(script, /export ENABLE_ORCA_WORKER_PREVIOUS=no/);
 
   // Cleanup must always run and must be scoped to the generated stack dir
   // and its own compose project, never a shared/default project.
@@ -99,7 +100,9 @@ test('smoke script asserts all four emulator instances, real Moonraker printers,
   assert.doesNotMatch(script, /real Moonraker connection/i);
 
   assert.match(script, /orcaslicer-worker/);
+  assert.match(script, /\^orcaslicer-worker\(-previous\)\?\$/);
   assert.match(script, /worker_count.*-ne 1/);
+  assert.match(script, /worker_services.*!= "orcaslicer-worker"/);
 
   // Assertion failures must be fatal, not swallowed.
   assert.match(script, /FAIL:.*\n\s*(printf|compose logs|compose ps)/);

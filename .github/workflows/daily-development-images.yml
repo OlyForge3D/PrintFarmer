@@ -167,6 +167,7 @@ jobs:
               ;;
             printer-discovery)
               docker run --detach --name "$container" \
+                --env ASPNETCORE_URLS=http://+:5247 \
                 --env Discovery__ApiBaseUrl=http://127.0.0.1:9 \
                 --env EnablePeriodicDiscovery=false \
                 --env PFARM__NetworkDiscovery__EnableDiscovery=false \
