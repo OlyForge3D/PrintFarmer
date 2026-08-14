@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Startup;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -19,6 +20,7 @@ namespace Farm.Infrastructure.Logging;
 public class SystemLogLoggerProvider : ILoggerProvider
 {
     private readonly IServiceProvider _serviceProvider;
+    private readonly IStartupStatus _startupStatus;
     private readonly LogLevel _initialMinimumLevel;
     private readonly BlockingCollection<SystemLog> _logQueue;
     private readonly CancellationTokenSource _cts;
@@ -30,9 +32,13 @@ public class SystemLogLoggerProvider : ILoggerProvider
     private DateTime _lastSettingsRefresh = DateTime.MinValue;
     private static readonly TimeSpan SettingsRefreshInterval = TimeSpan.FromSeconds(30);
 
-    public SystemLogLoggerProvider(IServiceProvider serviceProvider, LogLevel minimumLevel = LogLevel.Information)
+    public SystemLogLoggerProvider(
+        IServiceProvider serviceProvider,
+        IStartupStatus startupStatus,
+        LogLevel minimumLevel = LogLevel.Information)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _startupStatus = startupStatus ?? throw new ArgumentNullException(nameof(startupStatus));
         _initialMinimumLevel = minimumLevel;
         _currentMinimumLevel = minimumLevel;
         _logQueue = new BlockingCollection<SystemLog>(1000);
@@ -59,6 +65,11 @@ public class SystemLogLoggerProvider : ILoggerProvider
 
     private void RefreshSettingsIfNeeded()
     {
+        if (!_startupStatus.IsReady)
+        {
+            return;
+        }
+
         if (DateTime.UtcNow - _lastSettingsRefresh < SettingsRefreshInterval)
         {
             return;
@@ -94,11 +105,10 @@ public class SystemLogLoggerProvider : ILoggerProvider
     {
         var batch = new List<SystemLog>(capacity: 50);
 
-        // Add a small delay at the start to let the application fully initialize
-        await Task.Delay(2000, ct).ConfigureAwait(false);
-
         try
         {
+            await WaitForDatabaseReadyAsync(ct).ConfigureAwait(false);
+
             while (!ct.IsCancellationRequested)
             {
                 // Try to get a log from the queue with a timeout
@@ -146,6 +156,21 @@ public class SystemLogLoggerProvider : ILoggerProvider
         catch
         {
             // Silently fail - don't let logging errors break the application
+        }
+    }
+
+    private async Task WaitForDatabaseReadyAsync(CancellationToken cancellationToken)
+    {
+        while (!_startupStatus.IsReady)
+        {
+            if (_startupStatus.IsFailed)
+            {
+                throw new InvalidOperationException(
+                    "Database-backed logging cannot start because application initialization failed.",
+                    _startupStatus.FailureException);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken).ConfigureAwait(false);
         }
     }
 

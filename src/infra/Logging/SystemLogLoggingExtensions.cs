@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.DependencyInjection;
+using Farm.Infrastructure.Services.Startup;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Logging;
@@ -26,7 +27,10 @@ public static class SystemLogLoggingExtensions
         builder.Services.AddHttpContextAccessor();
 
         builder.Services.AddSingleton<ILoggerProvider>(sp =>
-            new SystemLogLoggerProvider(sp, minimumLevel));
+            new SystemLogLoggerProvider(
+                sp,
+                sp.GetRequiredService<IStartupStatus>(),
+                minimumLevel));
 
         return builder;
     }
