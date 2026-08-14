@@ -18,7 +18,7 @@
 services:
   printer-discovery:
     build:
-      context: .
+      context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
       dockerfile: Dockerfile.multistage
       target: printer-discovery-runtime
       args:

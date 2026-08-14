@@ -63,6 +63,7 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
+    dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj && \
     dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj && \
     dotnet restore ./Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
@@ -79,6 +80,7 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet restore ./orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj && \
     dotnet restore ./printer-discovery/PrinterDiscoveryService.csproj && \
     dotnet restore ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj && \
+    dotnet restore ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj && \
     dotnet restore ./backends/Farm.Backend.Plugin.OctoPrint/Farm.Backend.Plugin.OctoPrint.csproj && \
@@ -93,6 +95,8 @@ RUN dotnet restore ./api/Farm.Web.Api.csproj && \
     dotnet publish ./printer-discovery/PrinterDiscoveryService.csproj -c Release -o /app/publish/printer-discovery --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Publishing Slicer Host..." && \
     dotnet publish ./slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj -c Release -o /app/publish/slicer-host --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
+    echo "Publishing Moonraker Emulator..." && \
+    dotnet publish ./moonraker-emulator/Farm.Moonraker.Emulator/Farm.Moonraker.Emulator.csproj -c Release -o /app/publish/moonraker-emulator --no-restore -p:GitCommitSha=${GIT_SHA} --verbosity ${BUILD_VERBOSITY:-quiet} && \
     echo "Building backend plugins..." && \
     dotnet build ./backends/Farm.Backend.Plugin.Moonraker/Farm.Backend.Plugin.Moonraker.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
     dotnet build ./backends/Farm.Backend.Plugin.PrusaLink/Farm.Backend.Plugin.PrusaLink.csproj -c Release -o /app/publish/api --no-restore --verbosity ${BUILD_VERBOSITY:-quiet} && \
@@ -118,11 +122,13 @@ RUN echo "Checking published artifacts..." && \
     echo "OrcaSlicer Worker publish directory:" && ls -lah /app/publish/orcaslicer-worker/ 2>&1 | head -20 && \
     echo "Printer Discovery publish directory:" && ls -lah /app/publish/printer-discovery/ 2>&1 | head -20 && \
     echo "Slicer Host publish directory:" && ls -lah /app/publish/slicer-host/ 2>&1 | head -20 && \
+    echo "Moonraker Emulator publish directory:" && ls -lah /app/publish/moonraker-emulator/ 2>&1 | head -20 && \
     echo "Checking for plugin DLLs in API directory:" && ls -lah /app/publish/api/Farm.Backend.Plugin.*.dll 2>&1 && \
     ([ -f /app/publish/api/Farm.Web.Api.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Web.Api.dll"; exit 1)) && \
     ([ -f /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll ] || (echo "✗ MISSING: /app/publish/orcaslicer-worker/Farm.OrcaSlicer.Worker.dll"; exit 1)) && \
     ([ -f /app/publish/printer-discovery/PrinterDiscoveryService.dll ] || (echo "✗ MISSING: /app/publish/printer-discovery/PrinterDiscoveryService.dll"; exit 1)) && \
     ([ -f /app/publish/slicer-host/Farm.Slicer.Host.dll ] || (echo "✗ MISSING: /app/publish/slicer-host/Farm.Slicer.Host.dll"; exit 1)) && \
+    ([ -f /app/publish/moonraker-emulator/Farm.Moonraker.Emulator.dll ] || (echo "✗ MISSING: /app/publish/moonraker-emulator/Farm.Moonraker.Emulator.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Core.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Core.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.Moonraker.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.Moonraker.dll"; exit 1)) && \
     ([ -f /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll ] || (echo "✗ MISSING: /app/publish/api/Farm.Backend.Plugin.PrusaLink.dll"; exit 1)) && \
@@ -841,3 +847,58 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 EXPOSE 5246
 
 ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
+
+############################################################
+# Moonraker Emulator Runtime Container
+# Standalone repository-built Moonraker protocol emulator used only by the
+# digest-pinned daily validation stack (and local opt-in use). It has no
+# Docker socket mount, no physical network scanning, and no external service
+# dependencies: it only serves deterministic printer-shaped HTTP/WebSocket
+# state to the unchanged Farm.Backend.Plugin.Moonraker client.
+############################################################
+FROM mcr.microsoft.com/dotnet/aspnet:${ASPNET_TAG} AS moonraker-emulator-runtime
+ARG BUILD_VERSION
+ARG VCS_REF
+ARG SOURCE_REPOSITORY
+ARG SOURCE_ARCHIVE_URL
+ARG SBOM_URL
+WORKDIR /app
+
+LABEL org.opencontainers.image.title="PrintFarmer Moonraker Emulator" \
+      org.opencontainers.image.description="Repository-built Moonraker protocol emulator for digest-pinned daily validation" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${BUILD_VERSION}" \
+      org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
+      org.printfarmer.sbom="${SBOM_URL}"
+
+# Install curl for health checks (standard base images don't have it)
+RUN apt-get update && apt-get install -y --no-install-recommends curl && rm -rf /var/lib/apt/lists/*
+
+# Create emulator user (isolated from appuser/discovery for service separation)
+RUN groupadd -r emulator && useradd -r -g emulator emulator && \
+    chown -R emulator:emulator /app
+
+# Copy published Moonraker emulator service (as emulator user)
+COPY --chown=emulator:emulator --from=shared-build /app/publish/moonraker-emulator .
+COPY --from=legal-assets /LICENSE /usr/share/licenses/printfarmer/LICENSE
+COPY --from=legal-assets /THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
+
+ENV ASPNETCORE_URLS=http://+:7125
+ENV ASPNETCORE_ENVIRONMENT=Production
+# Control API (scenario/fault injection) is emulator-only and off unless the
+# validation topology explicitly enables it.
+ENV Emulator__EnableControlApi=false
+
+# Run as non-root user; the image is compatible with a read-only root
+# filesystem (Compose supplies a writable /tmp tmpfs for ASP.NET Core).
+USER emulator
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:7125/healthz || exit 1
+
+EXPOSE 7125
+
+ENTRYPOINT ["dotnet", "Farm.Moonraker.Emulator.dll"]

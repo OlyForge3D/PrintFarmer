@@ -47,6 +47,7 @@ vi.mock('@/common/hooks/useApi', () => ({
   }),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterBackendCapabilities: () => ({ data: [] }),
+  usePrinterCameraUrls: () => ({ data: [] }),
   useBedTypes: () => ({ data: [] }),
 }));
 
@@ -271,4 +272,3 @@ describe('PrintersPage', () => {
     expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
   });
 });
-

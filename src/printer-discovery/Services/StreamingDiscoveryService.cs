@@ -43,6 +43,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
     private readonly ICoreNetworkDiscoveryService _coreDiscovery;
     private readonly IApiClient _apiClient;
     private readonly IDiscoveryProgressBroadcaster _broadcaster;
+    private readonly IDeterministicDiscoveryFixtureProvider _fixtureProvider;
     private readonly IDiscoverySessionManager _sessionManager;
     private readonly ILogger<StreamingDiscoveryService> _logger;
     private readonly IConfiguration _config;
@@ -52,6 +53,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
         ICoreNetworkDiscoveryService coreDiscovery,
         IApiClient apiClient,
         IDiscoveryProgressBroadcaster broadcaster,
+        IDeterministicDiscoveryFixtureProvider fixtureProvider,
         IDiscoverySessionManager sessionManager,
         ILogger<StreamingDiscoveryService> logger,
         IConfiguration config)
@@ -59,6 +61,7 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
         _coreDiscovery = coreDiscovery ?? throw new ArgumentNullException(nameof(coreDiscovery));
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _broadcaster = broadcaster ?? throw new ArgumentNullException(nameof(broadcaster));
+        _fixtureProvider = fixtureProvider ?? throw new ArgumentNullException(nameof(fixtureProvider));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config = config ?? throw new ArgumentNullException(nameof(config));
@@ -81,6 +84,15 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
         try
         {
             _logger.LogInformation("[STREAMING-DISCOVERY] Starting scan for session {SessionId}", LogSanitizer.Sanitize(sessionId));
+
+            if (_fixtureProvider.IsEnabled)
+            {
+                return await ScanDeterministicFixturesAsync(
+                    sessionId,
+                    backends,
+                    autoRegister,
+                    cts.Token);
+            }
 
             // Use provided subnets or fall back to config
             string[] subnetArray;
@@ -325,6 +337,117 @@ public class StreamingDiscoveryService : IStreamingDiscoveryService
     public void CancelSession(string sessionId)
     {
         _sessionManager.CancelSession(sessionId);
+    }
+
+    private async Task<IReadOnlyList<DiscoveredPrinterDto>> ScanDeterministicFixturesAsync(
+        string sessionId,
+        IEnumerable<PrinterBackend>? backends,
+        bool autoRegister,
+        CancellationToken cancellationToken)
+    {
+        IReadOnlyList<DiscoveredPrinterDto> fixtures = _fixtureProvider.GetPrinters(backends);
+        HashSet<string> registeredUrls = await _apiClient.GetRegisteredPrinterUrlsAsync(
+            cancellationToken);
+        List<DiscoveredPrinterDto> discovered = fixtures
+            .Where(printer => !registeredUrls.Contains(printer.ServerUrl))
+            .ToList();
+        int excluded = fixtures.Count - discovered.Count;
+
+        await _broadcaster.BroadcastProgressAsync(
+            new DiscoveryProgressDto(
+                SessionId: sessionId,
+                CurrentNetwork: "deterministic-fixtures",
+                CurrentIp: string.Empty,
+                TotalIps: fixtures.Count,
+                ScannedIps: 0,
+                PrintersFound: 0,
+                PrintersExcluded: excluded,
+                ProgressPercentage: 0,
+                Status: DiscoveryStatus.Scanning,
+                Message: "Loading deterministic Moonraker discovery fixtures",
+                AutoDetectedNetworks: false),
+            cancellationToken);
+
+        int found = 0;
+        foreach (DiscoveredPrinterDto printer in discovered)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await _broadcaster.BroadcastPrinterFoundAsync(
+                new InternalDiscoveryPrinterFoundDto(
+                    sessionId,
+                    printer.Name,
+                    printer.ServerUrl,
+                    printer.OriginalServerUrl,
+                    printer.IpAddress,
+                    printer.Backend,
+                    printer.BackendPort,
+                    printer.FrontendPort,
+                    printer.CameraStreamUrl,
+                    printer.CameraSnapshotUrl,
+                    printer.Manufacturer,
+                    printer.Model,
+                    printer.Notes,
+                    printer.DiscoveredAt,
+                    printer.IsReachable),
+                cancellationToken);
+            found++;
+
+            double progressPercentage = fixtures.Count == 0
+                ? 100
+                : (double)(found + excluded) / fixtures.Count * 100;
+            await _broadcaster.BroadcastProgressAsync(
+                new DiscoveryProgressDto(
+                    SessionId: sessionId,
+                    CurrentNetwork: "deterministic-fixtures",
+                    CurrentIp: string.Empty,
+                    TotalIps: fixtures.Count,
+                    ScannedIps: found + excluded,
+                    PrintersFound: found,
+                    PrintersExcluded: excluded,
+                    ProgressPercentage: progressPercentage,
+                    Status: DiscoveryStatus.Scanning,
+                    Message: $"Loaded {found}/{discovered.Count} deterministic printers",
+                    AutoDetectedNetworks: false),
+                cancellationToken);
+        }
+
+        if (autoRegister)
+        {
+            foreach (DiscoveredPrinterDto printer in discovered)
+            {
+                await _apiClient.RegisterDiscoveredPrinterAsync(printer, cancellationToken);
+            }
+        }
+
+        var completed = new DiscoveryCompletedDto(
+            SessionId: sessionId,
+            TotalPrintersFound: discovered.Count,
+            TotalPrintersExcluded: excluded,
+            Duration: TimeSpan.Zero,
+            WasCancelled: false,
+            AutoDetectedNetworks: false);
+        await _broadcaster.BroadcastProgressAsync(
+            new DiscoveryProgressDto(
+                SessionId: sessionId,
+                CurrentNetwork: "deterministic-fixtures",
+                CurrentIp: string.Empty,
+                TotalIps: fixtures.Count,
+                ScannedIps: fixtures.Count,
+                PrintersFound: discovered.Count,
+                PrintersExcluded: excluded,
+                ProgressPercentage: 100,
+                Status: DiscoveryStatus.Completed,
+                Message: $"Discovery complete - Found {discovered.Count} deterministic printers",
+                AutoDetectedNetworks: false),
+            cancellationToken);
+        await _broadcaster.BroadcastCompletedAsync(completed, cancellationToken);
+
+        _logger.LogInformation(
+            "[STREAMING-DISCOVERY] Session {SessionId} used deterministic fixtures: {Found} found, {Excluded} excluded",
+            LogSanitizer.Sanitize(sessionId),
+            discovered.Count,
+            excluded);
+        return discovered;
     }
 
     private static List<string> GenerateIpAddresses(List<string> subnets)

@@ -43,6 +43,7 @@ public interface INetworkDiscoveryService
 public class NetworkDiscoveryService : INetworkDiscoveryService
 {
     private readonly ICoreNetworkDiscoveryService _coreDiscovery;
+    private readonly IDeterministicDiscoveryFixtureProvider _fixtureProvider;
     private readonly IApiClient _apiClient;
     private readonly ILogger<NetworkDiscoveryService> _logger;
     private readonly IConfiguration _config;
@@ -51,11 +52,13 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
 
     public NetworkDiscoveryService(
         ICoreNetworkDiscoveryService coreDiscovery,
+        IDeterministicDiscoveryFixtureProvider fixtureProvider,
         IApiClient apiClient,
         ILogger<NetworkDiscoveryService> logger,
         IConfiguration config)
     {
         _coreDiscovery = coreDiscovery ?? throw new ArgumentNullException(nameof(coreDiscovery));
+        _fixtureProvider = fixtureProvider ?? throw new ArgumentNullException(nameof(fixtureProvider));
         _apiClient = apiClient ?? throw new ArgumentNullException(nameof(apiClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _config = config ?? throw new ArgumentNullException(nameof(config));
@@ -78,6 +81,13 @@ public class NetworkDiscoveryService : INetworkDiscoveryService
 
     public async Task<IReadOnlyList<DiscoveredPrinterDto>> ScanOnceAsync(IList<string> subnets, CancellationToken cancellationToken = default)
     {
+        if (_fixtureProvider.IsEnabled)
+        {
+            _logger.LogInformation(
+                "Using deterministic Moonraker discovery fixtures instead of physical network scanning");
+            return _fixtureProvider.GetPrinters(backends: null);
+        }
+
         try
         {
             _logger.LogInformation("Starting printer discovery scan...");

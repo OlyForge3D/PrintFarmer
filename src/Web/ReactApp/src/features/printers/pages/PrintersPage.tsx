@@ -1,6 +1,6 @@
 import React, { Suspense, useCallback, useDeferredValue, useMemo, useState, useOptimistic, useTransition, useEffect } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
-import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes } from '@/common/hooks/useApi';
+import { usePrinters, useDeletePrinter, usePrinterBackendCapabilities, useBedTypes, usePrinterCameraUrls } from '@/common/hooks/useApi';
 import { usePrinterDisplays } from '@/common/hooks/usePrinterDisplay';
 import { useQueryClient } from '@tanstack/react-query';
 import { useKeyboardShortcuts } from '@/common/hooks/useKeyboardShortcuts';
@@ -82,11 +82,32 @@ export function PrintersPage() {
     isLoading,
     refetch: refetchPrinters
   } = usePrinters();
+  const { data: cameraUrls = [] } = usePrinterCameraUrls();
 
   const { data: bedTypes = [] } = useBedTypes();
-  
+
+  const printersWithCameraUrls = useMemo(() => {
+    const cameraUrlsByPrinterId = new Map(
+      cameraUrls.map((camera) => [camera.id, camera])
+    );
+
+    return (printers || []).map((printer) => {
+      const camera = cameraUrlsByPrinterId.get(printer.id);
+      return camera
+        ? {
+            ...printer,
+            cameraStreamUrl: camera.cameraStreamUrl,
+            cameraSnapshotUrl: camera.cameraSnapshotUrl,
+            cameraAccessMode: camera.cameraAccessMode,
+            cameraStreamFormat: camera.cameraStreamFormat,
+            cameraSnapshotStrategy: camera.cameraSnapshotStrategy,
+          }
+        : printer;
+    });
+  }, [cameraUrls, printers]);
+
   // Merge with realtime SignalR updates for display
-  const displayPrinters = usePrinterDisplays(printers || []);
+  const displayPrinters = usePrinterDisplays(printersWithCameraUrls);
 
   // Whether ANY printer in the fleet has Obico/failure detection enabled,
   // computed once here (not per-card) and shared via context so the

@@ -40,7 +40,7 @@ services:
   # PrintFarmer API - Core microservice with multi-stage build
   api:
     build:
-      context: .
+      context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
       dockerfile: Dockerfile.multistage
       target: api-runtime
       args:
@@ -119,7 +119,7 @@ services:
   # React Frontend with multi-stage build
   frontend:
     build:
-      context: .
+      context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
       dockerfile: Dockerfile.multistage
       target: frontend-runtime
       args:

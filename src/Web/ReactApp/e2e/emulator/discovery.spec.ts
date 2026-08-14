@@ -1,180 +1,108 @@
-import { test, expect, dismissTourIfVisible } from '../fixtures/emulator-setup';
+import { dismissTourIfVisible } from '../fixtures/emulator-setup';
+import { test, expect, getPrinterCardByName } from '../fixtures/moonraker';
 
 /**
- * Printer Discovery E2E Tests — Emulator-backed
+ * Printer Discovery E2E Tests — Moonraker emulator-backed.
  *
- * The mock discovery service (activated alongside the emulator) simulates
- * a 2 s network scan that returns 3 discoverable printers.
+ * The seed contract's deterministic, injected discovery source is
+ * `PrinterDiscovery.Services.DeterministicDiscoveryFixtureProvider`, which
+ * landed in this worktree while these specs were being written. It returns
+ * exactly two fixed candidates, both backend Moonraker, filtered to exclude
+ * any already-registered printer by server URL
+ * (`StreamingDiscoveryService.ScanDeterministicFixturesAsync`):
  *
- * These tests verify the discovery UI flow: triggering a scan, showing
- * progress, listing results, and adding a discovered printer.
+ *   - "Discovered Voron V2.4"
+ *   - "Discovered Prusa MK4S"
+ *
+ * Neither name collides with the five seeded farm printers, so "not already
+ * added" holds by construction. Because registering a candidate permanently
+ * excludes it from later scans (no control-API reset for discovery), the
+ * "add" test intentionally runs last so the earlier exact-count/name
+ * assertions see both candidates still available — this assumes a single
+ * fresh run against an ephemeral validation environment, matching this
+ * project's daily-validation topology (see `e2e/README.md` and
+ * `docs/MOONRAKER_EMULATOR_VALIDATION.md`).
+ *
+ * These tests require the "Discover Printers" action to actually be
+ * present (gated by `useDiscoveryAvailable`, which needs the discovery
+ * service's `NetworkDiscovery` settings enabled with a fresh heartbeat) and
+ * require exactly these two discovered candidates — a missing action,
+ * empty result set, or wrong candidate set fails the test rather than being
+ * treated as an acceptable "soft" outcome.
  */
 
-test.describe('Printer Discovery — Emulator', () => {
-  // Emulator tests share mutable printer state — run serially to avoid interference
+const EXPECTED_DISCOVERY_CANDIDATES = ['Discovered Voron V2.4', 'Discovered Prusa MK4S'];
+
+test.describe('Printer Discovery — Moonraker', () => {
   test.describe.configure({ mode: 'serial' });
 
-  let consoleErrors: string[] = [];
-
   test.beforeEach(async ({ page }) => {
-    consoleErrors = [];
-    page.on('pageerror', (error) => consoleErrors.push(error.message));
     await page.goto('/printers');
     await page.waitForLoadState('networkidle');
     await dismissTourIfVisible(page);
   });
 
-  function criticalErrors(): string[] {
-    return consoleErrors.filter(
-      (e) =>
-        !e.includes('ResizeObserver') &&
-        !e.includes('Network Error') &&
-        !e.includes('Failed to fetch') &&
-        !e.includes('AbortError') &&
-        !e.includes('cancelled')
-    );
-  }
-
-  test('can trigger printer discovery from the UI', async ({ page }) => {
-    // The discovery action lives on the printers page — either a button
-    // labelled "Discover" or inside the add-printer flow.
-
-    // Try the direct discover button first
-    const discoverButton = page.getByRole('button', { name: /discover/i }).first();
-    let hasDiscover = await discoverButton.isVisible().catch(() => false);
-
-    if (!hasDiscover) {
-      // May be behind the add-printer button/dialog
-      const addButton = page.getByRole('button', { name: /add printer|add|new/i }).first();
-      const hasAdd = await addButton.isVisible().catch(() => false);
-      if (hasAdd) {
-        await addButton.click();
-        await page.waitForTimeout(500);
-        // Look for discover option inside the modal/dialog
-        hasDiscover = await page.getByRole('button', { name: /discover|scan/i }).first()
-          .isVisible().catch(() => false);
-        // If no explicit discover button, the add-printer flow itself counts
-        if (!hasDiscover) {
-          hasDiscover = true; // The add-printer modal is the discovery entry point
-        }
-      }
-    }
-
-    // Discovery should be accessible from the UI
-    expect(hasDiscover).toBeTruthy();
+  test('the Discover Printers action is available to an admin', async ({ page }) => {
+    const discoverButton = page.getByRole('button', { name: 'Discover Printers on the local network' });
+    await expect(
+      discoverButton,
+      'The "Discover Printers" action must be visible for an admin session. If this fails, the ' +
+        'NetworkDiscovery settings heartbeat is stale or discovery is disabled — see useDiscoveryAvailable.'
+    ).toBeVisible({ timeout: 15_000 });
   });
 
-  test('discovery progress indicator appears during scan', async ({ page }) => {
-    // Open discovery flow
-    const discoverButton = page.getByRole('button', { name: /discover/i }).first();
-    const directDiscover = await discoverButton.isVisible().catch(() => false);
+  test('starting a scan shows progress and completes with exactly the two deterministic candidates', async ({ page }) => {
+    await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
 
-    let scanInitiated = false;
-    if (directDiscover) {
-      await discoverButton.click();
-      scanInitiated = true;
-    } else {
-      const addButton = page.getByRole('button', { name: /add printer|add|new/i }).first();
-      if (await addButton.isVisible().catch(() => false)) {
-        await addButton.click();
-        await page.waitForTimeout(500);
-        const scanButton = page.getByRole('button', { name: /discover|scan|start/i }).first();
-        if (await scanButton.isVisible().catch(() => false)) {
-          await scanButton.click();
-          scanInitiated = true;
-        }
-      }
-    }
+    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    await expect(modal).toBeVisible();
 
-    if (scanInitiated) {
-      // Wait briefly for any feedback
-      await page.waitForTimeout(2_000);
+    await modal.getByRole('button', { name: 'Start Scan' }).click();
 
-      // A progress indicator MAY appear — spinner, progress bar, or status text
-      const progressIndicator = page.locator(
-        '[role="progressbar"], [class*="spinner"], [class*="animate-spin"]'
-      ).first();
-      const statusText = page.locator('text=/scanning|discovering|searching|found|complete/i').first();
+    // Hard assertion: the scan announces progress via the discovery stream.
+    await expect(modal.getByText(/Session:/)).toBeVisible({ timeout: 10_000 });
 
-      const hasProgress = await progressIndicator.isVisible().catch(() => false);
-      const hasStatus = await statusText.isVisible().catch(() => false);
+    // Hard assertion: the scan must complete and report exactly two found printers.
+    await expect(modal.getByText('Found 2 printers', { exact: true })).toBeVisible({ timeout: 30_000 });
 
-      // With TestEmulator, scan may complete instantly — either feedback or completion is acceptable
-      expect(hasProgress || hasStatus || scanInitiated).toBeTruthy();
-    }
-
-    expect(criticalErrors()).toHaveLength(0);
-  });
-
-  test('discovered printers are listed after scan completes', async ({ page }) => {
-    // Trigger discovery
-    const discoverButton = page.getByRole('button', { name: /discover/i }).first();
-    if (await discoverButton.isVisible().catch(() => false)) {
-      await discoverButton.click();
-    } else {
-      const addButton = page.getByRole('button', { name: /add printer|add|new/i }).first();
-      if (await addButton.isVisible().catch(() => false)) {
-        await addButton.click();
-        await page.waitForTimeout(500);
-        const scanButton = page.getByRole('button', { name: /discover|scan|start/i }).first();
-        if (await scanButton.isVisible().catch(() => false)) {
-          await scanButton.click();
-        }
-      }
-    }
-
-    // Wait for the mock scan to complete
-    await page.waitForTimeout(4_000);
-
-    // With TestEmulator, discovery may not return results since it uses mock endpoints.
-    // Check for results OR any discovery-related UI state (empty state, completion message)
-    const discoveryResults = page.locator(
-      '[class*="discovery"] li, ' +
-      '[class*="discovery"] tr, ' +
-      '[class*="discovery"] [class*="card"], ' +
-      '[class*="result"] [class*="printer"], ' +
-      'div[role="listitem"]'
-    );
-
-    const resultCount = await discoveryResults.count();
-    if (resultCount > 0) {
-      expect(resultCount).toBeGreaterThanOrEqual(1);
-    } else {
-      // No results is acceptable with TestEmulator — verify the UI handled it gracefully
-      const bodyText = await page.locator('body').textContent() ?? '';
-      const hasDiscoveryContent = /found|discovered|no.*printer|scan|complete|add.*manually/i.test(bodyText);
-      // The discovery UI should show SOME feedback — results, empty state, or error
-      expect(hasDiscoveryContent || resultCount === 0).toBeTruthy();
+    for (const name of EXPECTED_DISCOVERY_CANDIDATES) {
+      await expect(modal.getByRole('checkbox', { name: `Select printer ${name}` })).toBeVisible();
     }
   });
 
-  test('can add a discovered printer to the farm', async ({ page }) => {
-    // Trigger discovery and wait for results
-    const discoverButton = page.getByRole('button', { name: /discover/i }).first();
-    if (await discoverButton.isVisible().catch(() => false)) {
-      await discoverButton.click();
-    } else {
-      const addButton = page.getByRole('button', { name: /add printer|add|new/i }).first();
-      if (await addButton.isVisible().catch(() => false)) {
-        await addButton.click();
-        await page.waitForTimeout(500);
-        const scanButton = page.getByRole('button', { name: /discover|scan|start/i }).first();
-        if (await scanButton.isVisible().catch(() => false)) {
-          await scanButton.click();
-        }
-      }
+  test('discovered candidates are all backend Moonraker', async ({ page }) => {
+    await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
+    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    await modal.getByRole('button', { name: 'Start Scan' }).click();
+    await expect(modal.getByText('Found 2 printers', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+    for (const printerName of EXPECTED_DISCOVERY_CANDIDATES) {
+      const checkbox = modal.getByRole('checkbox', { name: `Select printer ${printerName}` });
+      await expect(checkbox).toBeVisible();
+      const candidate = checkbox.locator(
+        'xpath=ancestor::div[contains(concat(" ", normalize-space(@class), " "), " p-4 ")][1]'
+      );
+      await expect(candidate.getByText('Moonraker', { exact: true })).toHaveCount(1);
     }
+  });
 
-    // Wait for scan to complete
-    await page.waitForTimeout(4_000);
+  test('can add a discovered candidate to the farm', async ({ page }) => {
+    test.setTimeout(60_000);
+    await page.getByRole('button', { name: 'Discover Printers on the local network' }).click();
+    const modal = page.getByRole('dialog', { name: 'Discover Printers' });
+    await modal.getByRole('button', { name: 'Start Scan' }).click();
+    await expect(modal.getByText('Found 2 printers', { exact: true })).toBeVisible({ timeout: 30_000 });
 
-    // TestEmulator doesn't implement real network discovery — 
-    // no discovered printers to add is the expected outcome.
-    // Just verify the discovery UI didn't crash and no JS errors occurred.
-    const bodyText = await page.locator('body').textContent() ?? '';
-    const hasDiscoveryUI = /discover|scan|search|no.*found|no.*result|add.*printer|manual/i.test(bodyText);
-    expect(hasDiscoveryUI).toBeTruthy();
+    const targetName = EXPECTED_DISCOVERY_CANDIDATES[0];
+    const checkbox = modal.getByRole('checkbox', { name: `Select printer ${targetName}` });
+    await expect(checkbox).toBeVisible();
+    await checkbox.check();
+    await modal.getByRole('button', { name: 'Add 1 Selected Printer' }).click();
 
-    expect(criticalErrors()).toHaveLength(0);
+    // The modal closes itself once the printer is registered.
+    await expect(modal).toBeHidden({ timeout: 45_000 });
+
+    // The newly added printer must now be a real card on the farm.
+    await expect(getPrinterCardByName(page, targetName)).toBeVisible({ timeout: 15_000 });
   });
 });

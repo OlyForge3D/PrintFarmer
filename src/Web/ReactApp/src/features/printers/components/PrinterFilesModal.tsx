@@ -259,11 +259,17 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       <div className="flex min-h-screen items-center justify-center p-4">
         <div className="fixed inset-0 bg-black/50 backdrop-blur-xs" />
 
-        <div className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col">
+        <div
+          className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="printer-files-modal-title"
+          tabIndex={-1}
+        >
           {/* Header */}
           <div className="flex items-center justify-between p-6 border-b border-pf-border">
             <div>
-              <h2 className="text-xl font-semibold text-pf-text-primary">Printer Files</h2>
+              <h2 id="printer-files-modal-title" className="text-xl font-semibold text-pf-text-primary">Printer Files</h2>
               <p className="text-sm text-pf-text-secondary mt-1">
                 {printer.name} - Available G-code files
               </p>
@@ -371,7 +377,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 shrink-0 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-2 shrink-0 ml-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
                             <Button
                               type="button"
                               variant="subtle"

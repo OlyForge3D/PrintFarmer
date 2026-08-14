@@ -72,6 +72,8 @@ jobs:
             target: printer-discovery-runtime
           - image: orcaslicer-worker
             target: orcaslicer-worker
+          - image: moonraker-emulator
+            target: moonraker-emulator-runtime
     steps:
       - name: Checkout selected commit
         uses: actions/checkout@v7
@@ -172,6 +174,16 @@ jobs:
                 "$IMAGE"
               health_url="http://localhost:5246/api/discovery/health"
               ;;
+            moonraker-emulator)
+              docker run --detach --name "$container" \
+                --env ASPNETCORE_ENVIRONMENT=Development \
+                --env Emulator__EnableControlApi=false \
+                --env Emulator__Scenario=Ready \
+                --env Emulator__PrinterId=ready \
+                --env 'Emulator__PrinterName=Moonraker Ready' \
+                "$IMAGE"
+              health_url="http://localhost:7125/healthz"
+              ;;
           esac
 
           for _ in {1..45}; do
@@ -242,7 +254,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p daily-image
-          services=(api frontend slicer-host printer-discovery orcaslicer-worker)
+          services=(api frontend slicer-host printer-discovery orcaslicer-worker moonraker-emulator)
           for service in "${services[@]}"; do
             archive="validated-images/daily-validated-$service-attempt-$VALIDATION_ATTEMPT"
             validated_image="printfarmer-$service:validation-$COMMIT_SHA"
@@ -330,8 +342,8 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t records < <(find artifacts -type f -name '*.json' | sort)
-          if [[ "${#records[@]}" -ne 5 ]]; then
-            echo "Expected five image digest records, found ${#records[@]}"
+          if [[ "${#records[@]}" -ne 6 ]]; then
+            echo "Expected six image digest records, found ${#records[@]}"
             exit 1
           fi
 
@@ -382,7 +394,7 @@ jobs:
               and .branch == "development"
               and .commit == $commit
               and .tag == $tag
-              and (.images | length) == 5
+              and (.images | length) == 6
               and ([.images[].tag] | all(. == $tag))
               and ([.images[].digest] | all(test("^sha256:[0-9a-f]{64}$")))' \
             daily-image-set/image-set.json >/dev/null
@@ -407,5 +419,5 @@ jobs:
             echo "- Tag: \`sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ needs.publish-images.outputs.publication_attempt }}\`"
             echo "- Artifact: \`daily-development-image-set\`"
             echo
-            echo "The artifact contains digest-pinned references for all five application images."
+            echo "The artifact contains digest-pinned references for all six application images."
           } >> "$GITHUB_STEP_SUMMARY"

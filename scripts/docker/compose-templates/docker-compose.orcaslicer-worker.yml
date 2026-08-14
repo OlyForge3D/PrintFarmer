@@ -4,7 +4,7 @@
 
 # Anchor definitions (these are typically injected from docker-compose.common.yml by compose-generator.sh)
 x-orcaslicer-build: &orcaslicer-build
-  context: .
+  context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
   dockerfile: Dockerfile.multistage
   target: orcaslicer-worker
   args:

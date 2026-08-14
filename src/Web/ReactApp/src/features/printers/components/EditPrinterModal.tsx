@@ -555,10 +555,12 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <FormField
                 label="Name"
+                htmlFor="edit-printer-name"
                 required
                 error={validationErrors.name?.[0]}
               >
                 <Input
+                  id="edit-printer-name"
                   type="text"
                   value={formData.name}
                   onChange={e => handleInputChange('name', e.target.value)}
@@ -670,8 +672,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
 
             {/* Catalog Selection Grid */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <FormField label="Manufacturer">
+              <FormField label="Manufacturer" htmlFor="edit-printer-manufacturer">
                 <Select
+                  id="edit-printer-manufacturer"
                   value={formData.manufacturerId || ''}
                   onChange={e => { const val = e.target.value || undefined; handleInputChange('manufacturerId', val); setSelectedManufacturer(val); }}
                   title="Manufacturer"
@@ -680,8 +683,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
                   {manufacturers?.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
                 </Select>
               </FormField>
-              <FormField label="Model">
+              <FormField label="Model" htmlFor="edit-printer-model">
                 <Select
+                  id="edit-printer-model"
                   value={formData.modelId || ''}
                   onChange={e => handleInputChange('modelId', e.target.value || undefined)}
                   title="Model"

@@ -166,6 +166,7 @@ OPTIONS:
     --include-security      Include security configurations  
     --include-registry      Include local registry
     --include-discovery     Include printer discovery service
+    --include-moonraker-emulator   Include the repository-built Moonraker protocol emulator
     --include-obico-ml      Include Obico ML API for AI print failure detection
     --include-go2rtc        Include go2rtc RTSP-to-WebRTC bridge sidecar
     --enable-orca-worker VAL    Enable OrcaSlicer workers (yes/no/true/false or count, default: yes)
@@ -237,6 +238,7 @@ parse_args() {
     INCLUDE_SECURITY="false"
     INCLUDE_REGISTRY="false"
     INCLUDE_DISCOVERY="false"
+    INCLUDE_MOONRAKER_EMULATOR="false"
     INCLUDE_SPOOLMAN="false"
     INCLUDE_OBICO_ML="false"
     INCLUDE_GO2RTC="false"
@@ -273,6 +275,8 @@ parse_args() {
                 INCLUDE_REGISTRY="true"; shift ;;
             --include-discovery)
                 INCLUDE_DISCOVERY="true"; shift ;;
+            --include-moonraker-emulator)
+                INCLUDE_MOONRAKER_EMULATOR="true"; shift ;;
             --include-spoolman)
                 INCLUDE_SPOOLMAN="true"; shift ;;
             --include-obico-ml|--enable-obico-ml)
@@ -779,6 +783,15 @@ generate_compose() {
             log_warning "Failed to merge discovery service, continuing without it"
         fi
     fi
+
+    if [[ "$INCLUDE_MOONRAKER_EMULATOR" == "true" ]]; then
+        if merge_addon_services "$compose_file" "moonraker-emulator"; then
+            log_info "Merged Moonraker protocol emulator service"
+            addons_merged=true
+        else
+            log_warning "Failed to merge Moonraker emulator service, continuing without it"
+        fi
+    fi
     
     # Conditionally merge orcaslicer-worker addon if enabled AND platform supports slicing
     if [[ "$SUPPORTS_SLICING" != "true" ]]; then
@@ -1087,6 +1100,9 @@ show_dry_run() {
     fi
     if [[ "$INCLUDE_REGISTRY" == "true" ]]; then
         echo "  - Includes local registry"
+    fi
+    if [[ "$INCLUDE_MOONRAKER_EMULATOR" == "true" ]]; then
+        echo "  - Includes Moonraker protocol emulator (internal network only)"
     fi
     local dry_run_orca="${ENABLE_ORCA_WORKER:-${ORCA_WORKER_COUNT:-yes}}"
     if [[ "$dry_run_orca" =~ ^(yes|true|1)$ ]] || [[ "$dry_run_orca" =~ ^[0-9]+$ && "$dry_run_orca" -gt 0 ]]; then

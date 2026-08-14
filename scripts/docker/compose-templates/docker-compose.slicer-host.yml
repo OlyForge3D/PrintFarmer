@@ -13,7 +13,7 @@ x-slicer-host-healthcheck: &slicer-host-healthcheck
 services:
   slicer-host:
     build:
-      context: .
+      context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
       dockerfile: Dockerfile.multistage
       target: slicer-host-runtime
       args:

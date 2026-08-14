@@ -205,8 +205,9 @@ public class MoonrakerClient(
                 state = stNode.GetString();
             }
 
-            // Only report job details when printing
-            if (!string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase))
+            // Paused jobs still occupy the printer and retain their filename, progress, and duration.
+            if (!string.Equals(state, "printing", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(state, "paused", StringComparison.OrdinalIgnoreCase))
             {
                 return new PrinterJob(state, null, null, null);
             }

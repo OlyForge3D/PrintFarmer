@@ -169,6 +169,75 @@ import {
   CreateCustomFieldDefinitionRequest,
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
+
+type HistoryJobWire = Omit<
+  HistoryJob,
+  'jobId' | 'endTime' | 'filamentUsed' | 'printDuration' | 'startTime' | 'totalDuration' | 'auxiliaryData' | 'thumbnailUrl'
+> & {
+  jobId?: string;
+  job_id?: string;
+  endTime?: number;
+  end_time?: number;
+  filamentUsed?: number;
+  filament_used?: number;
+  printDuration?: number;
+  print_duration?: number;
+  startTime?: number;
+  start_time?: number;
+  totalDuration?: number;
+  total_duration?: number;
+  auxiliaryData?: HistoryJob['auxiliaryData'];
+  auxiliary_data?: HistoryJob['auxiliaryData'];
+  thumbnailUrl?: string;
+  thumbnail_url?: string;
+};
+
+type HistoryTotalsWire = Partial<HistoryTotals> & {
+  job_totals?: {
+    total_jobs?: number;
+    total_print_time?: number;
+    total_filament_used?: number;
+    longest_job?: number;
+    longest_print?: number;
+  };
+  auxiliary_totals?: HistoryTotals['auxiliaryTotals'];
+};
+
+function normalizeHistoryJob(job: HistoryJobWire): HistoryJob {
+  return {
+    exists: job.exists,
+    filename: job.filename,
+    metadata: job.metadata,
+    status: job.status,
+    user: job.user,
+    jobId: job.jobId ?? job.job_id ?? '',
+    endTime: job.endTime ?? job.end_time,
+    filamentUsed: job.filamentUsed ?? job.filament_used ?? 0,
+    printDuration: job.printDuration ?? job.print_duration ?? 0,
+    startTime: job.startTime ?? job.start_time ?? 0,
+    totalDuration: job.totalDuration ?? job.total_duration ?? 0,
+    auxiliaryData: job.auxiliaryData ?? job.auxiliary_data,
+    thumbnailUrl: job.thumbnailUrl ?? job.thumbnail_url,
+  };
+}
+
+function normalizeHistoryTotals(totals: HistoryTotalsWire): HistoryTotals {
+  if (totals.jobTotals) {
+    return totals as HistoryTotals;
+  }
+
+  const jobTotals = totals.job_totals;
+  return {
+    jobTotals: {
+      totalJobs: jobTotals?.total_jobs ?? 0,
+      totalPrintTime: jobTotals?.total_print_time ?? 0,
+      totalFilament: jobTotals?.total_filament_used ?? 0,
+      longestJob: jobTotals?.longest_job ?? 0,
+      longestPrint: jobTotals?.longest_print ?? 0,
+    },
+    auxiliaryTotals: totals.auxiliaryTotals ?? totals.auxiliary_totals,
+  };
+}
 import type {
   PrintablesDownloadHistoryItem,
   GeometryUploadResultDto,
@@ -1336,28 +1405,31 @@ export class ApiClient {
     if (options?.before) params.before = options.before.toISOString();
     if (options?.order) params.order = options.order;
 
-    const response = await this.client.get<HistoryListResponse>(
+    const response = await this.client.get<{ count: number; jobs: HistoryJobWire[] }>(
       `/printers/${printerId}/history`,
       { params }
     );
-    return response.data;
+    return {
+      count: response.data.count,
+      jobs: response.data.jobs.map(normalizeHistoryJob),
+    };
   }
 
   async getPrinterHistoryJob(
     printerId: string,
     jobId: string
   ): Promise<HistoryJob> {
-    const response = await this.client.get<HistoryJob>(
+    const response = await this.client.get<HistoryJobWire>(
       `/printers/${printerId}/history/${jobId}`
     );
-    return response.data;
+    return normalizeHistoryJob(response.data);
   }
 
   async getPrinterHistoryTotals(printerId: string): Promise<HistoryTotals> {
-    const response = await this.client.get<HistoryTotals>(
+    const response = await this.client.get<HistoryTotalsWire>(
       `/printers/${printerId}/history/totals`
     );
-    return response.data;
+    return normalizeHistoryTotals(response.data);
   }
 
   // ============ Printer Files API methods ============

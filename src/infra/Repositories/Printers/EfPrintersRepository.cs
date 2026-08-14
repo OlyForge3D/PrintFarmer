@@ -78,6 +78,11 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
         return printer;
     }
 
+    public async Task<PrinterDispatchState?> FindDispatchStateAsync(
+        Guid printerId,
+        CancellationToken ct) =>
+        await _db.PrinterDispatchStates.FindAsync([printerId], ct);
+
     public async Task<Printer?> FindByIdWithIncludesAsync(Guid id, CancellationToken ct)
     {
         // AsNoTracking: all callers are read-only (details DTO, config read, status check)
