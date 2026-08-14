@@ -322,7 +322,11 @@ describe('CompactPrinterCard memoization', () => {
     await user.click(screen.getByRole('button', { name: 'More options' }));
 
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /open in browser unavailable for printer printer 1: printer browser url is unavailable/i })).toBeDisabled();
+    const fallbackButton = screen.getByRole('button', {
+      name: /open in browser unavailable for printer printer 1: printer browser url is unavailable/i,
+    });
+    expect(fallbackButton).not.toBeDisabled();
+    expect(fallbackButton).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', async () => {
@@ -342,7 +346,8 @@ describe('CompactPrinterCard memoization', () => {
     const disabledButton = screen.getByRole('button', {
       name: /open in browser unavailable for printer printer 1: not available for simulated test printers/i,
     });
-    expect(disabledButton).toBeDisabled();
+    expect(disabledButton).not.toBeDisabled();
+    expect(disabledButton).toHaveAttribute('aria-disabled', 'true');
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
   });
 

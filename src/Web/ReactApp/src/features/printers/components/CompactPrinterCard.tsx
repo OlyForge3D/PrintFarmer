@@ -564,6 +564,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
                     size="sm"
                     className="w-full justify-start rounded-none h-auto px-3 py-2 text-pf-text-secondary"
                     disabled
+                    explainedDisabled
                     aria-label={isInternalOnlyBrowserUrl
                       ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
                       : `Open in Browser unavailable for printer ${printer.name}: printer browser URL is unavailable`}
