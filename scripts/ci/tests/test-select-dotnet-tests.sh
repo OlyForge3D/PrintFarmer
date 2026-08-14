@@ -178,6 +178,7 @@ assert_required_matrix() {
   done
   assert_contains "integration opt-in" "$matrix" '"name":"Farm.Web.IntegrationTests"' || return 1
   assert_contains "integration run flag" "$matrix" '"run_integration":"true"' || return 1
+  assert_contains "default api filter" "$matrix" '"filter":"Category!=DbHeavy&Category!=Docker"' || return 1
 }
 
 # run_case <name> <function>
@@ -249,6 +250,7 @@ case_api_change() {
   assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
   assert_contains "matrix slicer" "$matrix" "Farm.Slicer.Module.Tests" || return 1
   assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  assert_contains "api filter" "$matrix" '"filter":"Category!=DbHeavy&Category!=Docker"' || return 1
   assert_contains "integration opt-in" "$matrix" '"run_integration":"true"' || return 1
   assert_not_contains "no orca for api-only" "$matrix" "Farm.OrcaSlicer.Worker.Tests" || return 1
 }

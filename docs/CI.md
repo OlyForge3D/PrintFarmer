@@ -141,6 +141,13 @@ the changed-path set.
 workflow passes `-p:RunIntegrationTests=true` during restore, build, and test so
 the project compiles and executes its tests instead of disabling itself.
 
+Each matrix leg also carries a `filter` field. The default PR gate uses
+`Category!=DbHeavy&Category!=Docker`, and `dotnet-test` passes that value through
+to `dotnet test --filter` so the selector and workflow stay aligned without re-
+encoding the same category rule in one branch only. This keeps the ordinary PR
+path narrow while leaving provider-heavy `DbHeavy` / `Docker` runs to the
+separate out-of-band provider job and the fail-closed full-safe matrix.
+
 ### Exclusions
 
 - Docker- and external-service-tagged test categories are excluded from ordinary
