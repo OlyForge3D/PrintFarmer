@@ -322,7 +322,7 @@ describe('CompactPrinterCard memoization', () => {
     await user.click(screen.getByRole('button', { name: 'More options' }));
 
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open in Browser' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /open in browser unavailable for printer printer 1: printer browser url is unavailable/i })).toBeDisabled();
   });
 
   it('disables Open in Browser with an explanatory tooltip for a TestEmulator internal-only host (#1546)', async () => {
@@ -339,7 +339,9 @@ describe('CompactPrinterCard memoization', () => {
     await user.click(screen.getByRole('button', { name: 'More options' }));
 
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
-    const disabledButton = screen.getByRole('button', { name: 'Open in Browser' });
+    const disabledButton = screen.getByRole('button', {
+      name: /open in browser unavailable for printer printer 1: not available for simulated test printers/i,
+    });
     expect(disabledButton).toBeDisabled();
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
   });

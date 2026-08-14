@@ -181,7 +181,9 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
     render(<DetailedPrinterCard printer={printer} />);
 
     expect(screen.queryByRole('link', { name: /open printer/i })).not.toBeInTheDocument();
-    const disabledButton = screen.getByRole('button', { name: `Printer browser URL unavailable for ${printer.name}` });
+    const disabledButton = screen.getByRole('button', {
+      name: `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`,
+    });
     expect(disabledButton).toBeDisabled();
     expect(disabledButton).toHaveAttribute('title', 'Not available for simulated test printers');
   });

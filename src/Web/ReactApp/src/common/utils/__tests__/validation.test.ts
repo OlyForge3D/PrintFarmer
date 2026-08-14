@@ -160,12 +160,19 @@ describe('validation utils', () => {
     // browser on the user's machine.
     it('rejects the TestEmulator internal-only hostname', () => {
       expect(isBrowserReachableUrl('http://testemulator-11111111-1111-1111-1111-111111111111')).toBe(false);
-      expect(isBrowserReachableUrl('http://TestEmulator-abc')).toBe(false);
+      expect(isBrowserReachableUrl('http://TestEmulator-ABCDEFAB-1234-1234-1234-123456789012')).toBe(false);
     });
 
     it('accepts real printer http/https URLs', () => {
       expect(isBrowserReachableUrl('http://printer-1.local')).toBe(true);
       expect(isBrowserReachableUrl('https://192.168.1.100:7125')).toBe(true);
+    });
+
+    it('does not misclassify a real hostname that merely starts with "testemulator-"', () => {
+      // Matching must be exact (the full single-label GUID hostname), not a
+      // prefix check, so a real LAN/DNS name is never wrongly disabled.
+      expect(isBrowserReachableUrl('http://testemulator-lab.local')).toBe(true);
+      expect(isBrowserReachableUrl('https://testemulator-prod.example.com')).toBe(true);
     });
 
     it('rejects unsafe schemes just like isSafeHttpUrl', () => {

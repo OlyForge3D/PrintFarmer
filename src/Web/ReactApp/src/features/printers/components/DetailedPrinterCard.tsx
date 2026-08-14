@@ -531,7 +531,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 size="sm"
                 disabled
                 className="h-8 w-8 p-0 text-pf-text-secondary"
-                aria-label={`Printer browser URL unavailable for ${printer.name}`}
+                aria-label={isInternalOnlyBrowserUrl
+                  ? `Open in Browser unavailable for printer ${printer.name}: not available for simulated test printers`
+                  : `Printer browser URL unavailable for ${printer.name}`}
                 title={isInternalOnlyBrowserUrl
                   ? 'Not available for simulated test printers'
                   : 'Printer browser URL is unavailable'}
