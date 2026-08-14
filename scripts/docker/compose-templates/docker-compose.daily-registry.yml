@@ -1,0 +1,21 @@
+# Complete digest-pinned registry override for local daily UI validation.
+services:
+  api:
+    image: ${PRINTFARMER_API_IMAGE:?Set PRINTFARMER_API_IMAGE from image-set.json}
+    build: !reset null
+
+  frontend:
+    image: ${PRINTFARMER_FRONTEND_IMAGE:?Set PRINTFARMER_FRONTEND_IMAGE from image-set.json}
+    build: !reset null
+
+  slicer-host:
+    image: ${PRINTFARMER_SLICER_HOST_IMAGE:?Set PRINTFARMER_SLICER_HOST_IMAGE from image-set.json}
+    build: !reset null
+
+  printer-discovery:
+    image: ${PRINTFARMER_PRINTER_DISCOVERY_IMAGE:?Set PRINTFARMER_PRINTER_DISCOVERY_IMAGE from image-set.json}
+    build: !reset null
+
+  orcaslicer-worker:
+    image: ${PRINTFARMER_ORCASLICER_WORKER_IMAGE:?Set PRINTFARMER_ORCASLICER_WORKER_IMAGE from image-set.json}
+    build: !reset null
