@@ -276,7 +276,7 @@ docker ps --format "table {{.Names}}\t{{.Status}}" | grep printer-discovery
 
 # 2. Check discovery service health
 docker exec printfarmer-printer-discovery \
-  wget -q -O- http://localhost:5246/health 2>&1 | head -20
+  wget -q -O- http://localhost:5247/api/discovery/health 2>&1 | head -20
 
 # 3. Check if API is reachable from discovery
 docker exec printfarmer-printer-discovery \

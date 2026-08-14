@@ -1,6 +1,7 @@
 ﻿using Farm.Infrastructure.Services.Assets;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Web.Api.Services;
+using Farm.Web.Api.Services.Startup;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Web.Api.Startup;
@@ -19,6 +20,12 @@ public static class BackgroundServicesStartup
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        services.Configure<MoonrakerEmulatorSeedSettings>(
+            configuration.GetSection(MoonrakerEmulatorSeedSettings.SectionName));
+        services.AddSingleton<MoonrakerEmulatorSeeder>();
+        services.AddHostedService(serviceProvider =>
+            serviceProvider.GetRequiredService<MoonrakerEmulatorSeeder>());
+
         // Maintenance Module - Print Statistics Sync Service
         services.Configure<Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings>(configuration.GetSection(Farm.Infrastructure.Services.Maintenance.PrintStatsSyncSettings.SectionName));
         services.AddHostedService<Farm.Web.Api.Services.Maintenance.PrintStatsSyncHostedService>();

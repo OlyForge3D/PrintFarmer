@@ -35,6 +35,12 @@ builder.Services.AddSingleton<IDiscoverySessionManager, DiscoverySessionManager>
 // Authenticated progress broadcaster for streaming discovery
 builder.Services.AddHttpClient<IDiscoveryProgressBroadcaster, DiscoveryProgressBroadcaster>();
 
+builder.Services.Configure<DeterministicDiscoveryFixtureSettings>(
+    builder.Configuration.GetSection(DeterministicDiscoveryFixtureSettings.SectionName));
+builder.Services.AddSingleton<
+    IDeterministicDiscoveryFixtureProvider,
+    DeterministicDiscoveryFixtureProvider>();
+
 // Streaming discovery service with progress updates (Scoped to match IApiClient dependency)
 builder.Services.AddScoped<IStreamingDiscoveryService, StreamingDiscoveryService>();
 

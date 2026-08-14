@@ -1,0 +1,189 @@
+# Moonraker Protocol Emulator Addon Services
+# Repository-built, deterministic Moonraker-protocol backend used so daily
+# validation (and opt-in local use) exercises the unchanged
+# Farm.Backend.Plugin.Moonraker client without any physical printer hardware.
+# These services are conditionally included via compose-generator.sh when
+# --include-moonraker-emulator is set.
+#
+# Topology:
+#   One digest-pinned emulator image (printfarmer-moonraker-emulator) runs as
+#   four isolated container instances — moonraker-ready, moonraker-printing,
+#   moonraker-paused, and moonraker-shutdown — each configured via
+#   Emulator__Scenario / Emulator__PrinterId / Emulator__PrinterName to serve
+#   exactly one deterministic printer at its own container root on port 7125.
+#   The "exactly one" requirement in this repository applies to the
+#   OrcaSlicer worker, not to emulator instances: these four are expected,
+#   intentional replicas of the same image, addressed by Docker Compose's
+#   own per-service DNS name for seeding (moonraker-ready additionally
+#   carries two discovery-only network aliases; see below).
+#
+#   A fifth scenario, "offline", is deliberately NOT run as a service here:
+#   it is seeded by the API as http://moonraker-offline:7125 with no
+#   listener at all, so Farm.Backend.Plugin.Moonraker's unreachable/offline
+#   handling is exercised against a real connection failure instead of a
+#   simulated one.
+#
+#   For discovery/add coverage, moonraker-ready also answers on two extra
+#   network aliases — moonraker-discovery-voron and moonraker-discovery-prusa
+#   — used only by printer-discovery's DeterministicDiscoveryFixtureSettings
+#   defaults (Discovery:DeterministicFixtures, printer-discovery service).
+#   Deterministic fixture discovery intentionally bypasses physical probing:
+#   the injected fixture provider returns these candidate DTOs directly and
+#   does NOT contact the aliases or perform any Moonraker handshake during
+#   the scan itself. What it does exercise for real is the discovery
+#   controller/streaming service/broadcaster/session-registry application
+#   path, without any LAN scan. The returned URLs resolve via these aliases
+#   so that if a candidate is subsequently added as a printer, the unchanged
+#   real Farm.Backend.Plugin.Moonraker backend connects to the same running
+#   instance — that add/connect step is covered by UI add/printer-card E2E
+#   coverage, not by the discovery scan itself. Discovery candidate URLs are
+#   distinct from every MoonrakerEmulatorSeed hostname above, so a discovered
+#   candidate is never excluded as "already registered".
+#
+#   Seeded printer URLs must be plain http://<host>:7125 origins with no
+#   trailing slash or path (never /printers/{id}): Printer.BackendUrl trims
+#   the trailing slash and Farm.Backend.Plugin.Moonraker builds every request
+#   URI relative to that origin, so a path-prefixed seed would double up the
+#   path on every backend call.
+#
+# Hardening (applies to every instance):
+#   - Runs as a dedicated non-root "emulator" user (see Dockerfile.multistage).
+#   - Internal-only by default: no ports are published here. Loopback-only
+#     port exposure is added exclusively by the daily validation overlay
+#     (scripts/docker/compose-templates/docker-compose.daily-validation.yml).
+#   - Read-only root filesystem with a size-bounded /tmp tmpfs.
+#   - All Linux capabilities dropped; none re-added.
+#   - No Docker socket mount and no external network/service dependencies.
+
+x-moonraker-emulator-build: &moonraker-emulator-build
+  context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
+  dockerfile: "${PRINTFARMER_DOCKERFILE:-Dockerfile.multistage}"
+  target: moonraker-emulator-runtime
+  args:
+    SDK_TAG: ${SDK_TAG}
+    ASPNET_TAG: ${ASPNET_TAG}
+    NODE_TAG: ${NODE_TAG}
+    NGINX_TAG: ${NGINX_TAG}
+    UBUNTU_TAG: ${UBUNTU_TAG}
+    GIT_SHA: ${GIT_SHA:-unknown}
+    BUILD_VERSION: ${BUILD_VERSION:-development}
+    VCS_REF: ${VCS_REF:-unknown}
+    SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
+    SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
+    SBOM_URL: ${SBOM_URL:-}
+
+x-moonraker-emulator-security: &moonraker-emulator-security
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m
+  cap_drop:
+    - ALL
+  ulimits:
+    nofile: 1024
+
+x-moonraker-emulator-healthcheck: &moonraker-emulator-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:7125/healthz"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
+x-moonraker-emulator-deploy: &moonraker-emulator-deploy
+  resources:
+    limits:
+      cpus: "0.5"
+      memory: 256M
+    reservations:
+      cpus: "0.1"
+      memory: 64M
+
+services:
+  moonraker-ready:
+    build:
+      <<: *moonraker-emulator-build
+    image: printfarmer-moonraker-emulator
+    container_name: printfarmer-moonraker-ready
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:7125
+      # Off by default; the daily validation overlay turns this on so its
+      # deterministic scenario/fault controls are reachable only inside the
+      # isolated validation network.
+      - Emulator__EnableControlApi=${MOONRAKER_EMULATOR_ENABLE_CONTROL_API:-false}
+      - Emulator__Scenario=Ready
+      - Emulator__PrinterId=ready
+      - Emulator__PrinterName=Moonraker Ready
+    networks:
+      printfarmer-network:
+        aliases:
+          # Discovery-only aliases: printer-discovery's deterministic fixture
+          # defaults point at these hostnames, but the deterministic scan
+          # itself never contacts them (no handshake, no physical probing).
+          # They resolve to this ready-scenario instance so that a
+          # subsequently added printer connects for real via the unchanged
+          # Moonraker backend plugin. These URLs are distinct from every
+          # MoonrakerEmulatorSeed hostname, so discovered candidates are
+          # never excluded as already-registered.
+          - moonraker-discovery-voron
+          - moonraker-discovery-prusa
+    healthcheck: *moonraker-emulator-healthcheck
+    <<: *moonraker-emulator-security
+    deploy: *moonraker-emulator-deploy
+
+  moonraker-printing:
+    build:
+      <<: *moonraker-emulator-build
+    image: printfarmer-moonraker-emulator
+    container_name: printfarmer-moonraker-printing
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:7125
+      - Emulator__EnableControlApi=${MOONRAKER_EMULATOR_ENABLE_CONTROL_API:-false}
+      - Emulator__Scenario=Printing
+      - Emulator__PrinterId=printing
+      - Emulator__PrinterName=Moonraker Printing
+    networks:
+      - printfarmer-network
+    healthcheck: *moonraker-emulator-healthcheck
+    <<: *moonraker-emulator-security
+    deploy: *moonraker-emulator-deploy
+
+  moonraker-paused:
+    build:
+      <<: *moonraker-emulator-build
+    image: printfarmer-moonraker-emulator
+    container_name: printfarmer-moonraker-paused
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:7125
+      - Emulator__EnableControlApi=${MOONRAKER_EMULATOR_ENABLE_CONTROL_API:-false}
+      - Emulator__Scenario=Paused
+      - Emulator__PrinterId=paused
+      - Emulator__PrinterName=Moonraker Paused
+    networks:
+      - printfarmer-network
+    healthcheck: *moonraker-emulator-healthcheck
+    <<: *moonraker-emulator-security
+    deploy: *moonraker-emulator-deploy
+
+  moonraker-shutdown:
+    build:
+      <<: *moonraker-emulator-build
+    image: printfarmer-moonraker-emulator
+    container_name: printfarmer-moonraker-shutdown
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ASPNETCORE_URLS=http://+:7125
+      - Emulator__EnableControlApi=${MOONRAKER_EMULATOR_ENABLE_CONTROL_API:-false}
+      - Emulator__Scenario=Shutdown
+      - Emulator__PrinterId=shutdown
+      - Emulator__PrinterName=Moonraker Shutdown
+    networks:
+      - printfarmer-network
+    healthcheck: *moonraker-emulator-healthcheck
+    <<: *moonraker-emulator-security
+    deploy: *moonraker-emulator-deploy

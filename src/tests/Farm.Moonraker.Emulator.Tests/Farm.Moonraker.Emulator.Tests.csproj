@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.8.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.10" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="8.10.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\moonraker-emulator\Farm.Moonraker.Emulator\Farm.Moonraker.Emulator.csproj" />
+
+    <!--
+      Required by the task: the emulator's test suite must also exercise the
+      unchanged real Farm.Backend.Plugin.Moonraker client/subscription code
+      against this emulator, not just the emulator's own HTTP surface in
+      isolation. This project reference (and everything it pulls in
+      transitively — Farm.Infrastructure, EF Core, etc.) is scoped to the test
+      project only; Farm.Moonraker.Emulator itself remains a standalone,
+      dependency-free service.
+    -->
+    <ProjectReference Include="..\..\backends\Farm.Backend.Plugin.Moonraker\Farm.Backend.Plugin.Moonraker.csproj" />
+  </ItemGroup>
+</Project>

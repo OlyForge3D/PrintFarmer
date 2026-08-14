@@ -32,6 +32,11 @@ public interface IPrintersRepository
     Task<Printer?> FindByIdAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Loads the tracked dispatch-state row for a printer when one exists.
+    /// </summary>
+    Task<PrinterDispatchState?> FindDispatchStateAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
     /// Finds a printer by ID with related entities (Manufacturer, Model) included.
     /// </summary>
     /// <param name="id">The printer's unique identifier.</param>

@@ -35,6 +35,10 @@ resolve_test_python_cmd() {
 
 setup() {
     setup_test_environment
+    export AUTO_ADMIN_PASSWORD="compose-generator-test-value"
+    export GRAFANA_ADMIN_PASSWORD="compose-generator-test-value"
+    export Jwt__Key="compose-generator-test-jwt-key-32-bytes"
+    export VAULT_DEV_ROOT_TOKEN="compose-generator-test-value"
     TEST_TEMP_DIR=$(create_test_temp_dir)
     test_info "Using temp directory: $TEST_TEMP_DIR"
 }
@@ -1934,7 +1938,7 @@ test_anchor_injection_standard() {
     # Verify build anchors
         assert_contains "$compose_content" "x-orcaslicer-build:" "Should inject x-orcaslicer-build anchor"
         # orcaslicer-build may be present as an alias or expanded inline
-        if echo "$compose_content" | grep -q "&orcaslicer-build" || echo "$compose_content" | grep -q "dockerfile: Dockerfile.multistage"; then
+        if echo "$compose_content" | grep -q "&orcaslicer-build" || echo "$compose_content" | grep -q "dockerfile:.*Dockerfile.multistage"; then
             test_info "✓ orcaslicer-build present as anchor or inline"
         else
             test_info "✗ orcaslicer-build missing"
@@ -2019,7 +2023,7 @@ test_anchor_references() {
     assert_contains "$compose_content" "*frontend-healthcheck" "Should reference frontend-healthcheck in services"
     assert_contains "$compose_content" "*nginx-healthcheck" "Should reference nginx-healthcheck in services"
     # orcaslicer-build may be referenced by alias or its contents may be inline in service definition
-    if echo "$compose_content" | grep -q "\*orcaslicer-build" || echo "$compose_content" | grep -q "dockerfile:\s*Dockerfile.multistage"; then
+    if echo "$compose_content" | grep -q "\*orcaslicer-build" || echo "$compose_content" | grep -q "dockerfile:.*Dockerfile.multistage"; then
         test_info "✓ orcaslicer-build referenced or inline in services"
     else
         test_info "✗ orcaslicer-build reference missing in services"

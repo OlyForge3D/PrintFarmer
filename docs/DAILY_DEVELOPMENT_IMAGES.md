@@ -19,6 +19,7 @@ Every successful run publishes these Linux AMD64 images:
 | Slicer host | `ghcr.io/olyforge3d/printfarmer-slicer-host` |
 | Printer discovery | `ghcr.io/olyforge3d/printfarmer-printer-discovery` |
 | OrcaSlicer worker | `ghcr.io/olyforge3d/printfarmer-orcaslicer-worker` |
+| Moonraker emulator | `ghcr.io/olyforge3d/printfarmer-moonraker-emulator` |
 
 Each publication gets a never-reused tag:
 `sha-<full-development-commit>-run-<workflow-run-id>-attempt-<attempt>`. GHCR does not
@@ -73,7 +74,7 @@ gh run download "$RUN_ID" \
 
 IMAGE_SET="$STACK_DIR/release/image-set.json"
 COMMIT_SHA="$(jq -er '.commit' "$IMAGE_SET")"
-test "$(jq -r '.images | length' "$IMAGE_SET")" -eq 5
+test "$(jq -r '.images | length' "$IMAGE_SET")" -eq 6
 ```
 
 To test a specific commit instead, find its successful workflow run and pass that
@@ -81,7 +82,7 @@ run ID to `gh run download`. The manifest's `commit` field is authoritative.
 
 ## Export Digest-Pinned Images
 
-Export all five references from the same manifest:
+Export all six references from the same manifest:
 
 ```bash
 export PRINTFARMER_API_IMAGE="$(jq -er '.images.api.reference' "$IMAGE_SET")"
@@ -89,6 +90,7 @@ export PRINTFARMER_FRONTEND_IMAGE="$(jq -er '.images.frontend.reference' "$IMAGE
 export PRINTFARMER_SLICER_HOST_IMAGE="$(jq -er '.images["slicer-host"].reference' "$IMAGE_SET")"
 export PRINTFARMER_PRINTER_DISCOVERY_IMAGE="$(jq -er '.images["printer-discovery"].reference' "$IMAGE_SET")"
 export PRINTFARMER_ORCASLICER_WORKER_IMAGE="$(jq -er '.images["orcaslicer-worker"].reference' "$IMAGE_SET")"
+export PRINTFARMER_MOONRAKER_EMULATOR_IMAGE="$(jq -er '.images["moonraker-emulator"].reference' "$IMAGE_SET")"
 export ORCASLICER_CONTAINER_DIGEST="$(jq -er '.images["orcaslicer-worker"].digest' "$IMAGE_SET")"
 
 printf 'Using PrintFarmer development commit %s\n' "$COMMIT_SHA"
@@ -100,7 +102,7 @@ different image even if a mutable registry tag changes.
 ## Start the Local Validation Stack
 
 Generate the existing microservice deployment with PostgreSQL, discovery,
-slicer-host, and one OrcaSlicer worker:
+slicer-host, one OrcaSlicer worker, and the Moonraker protocol emulator:
 
 ```bash
 export POSTGRES_PASSWORD="$(openssl rand -base64 24)"
@@ -119,12 +121,17 @@ export SLICER_HOST_PORT=15246
 export HTTP_PORT=18080
 export HTTPS_PORT=18443
 export POSTGRES_PORT=15432
+export MOONRAKER_EMULATOR_PORT=17125
+export MOONRAKER_EMULATOR_PRINTING_PORT=17126
+export MOONRAKER_EMULATOR_PAUSED_PORT=17127
+export MOONRAKER_EMULATOR_SHUTDOWN_PORT=17128
 
 ./scripts/docker/compose-generator.sh \
   --architecture microservices \
   --db-provider postgres \
   --enable-orca-worker yes \
   --include-discovery \
+  --include-moonraker-emulator \
   --exclude-monitoring \
   --exclude-telemetry \
   --output-dir "$STACK_DIR"
@@ -148,15 +155,35 @@ docker compose \
   up -d --scale orcaslicer-worker=1
 ```
 
-The daily validation override runs the API normally in `Development` and explicitly
-enables the TestEmulator's three simulated printers. It disables periodic network
-discovery so local validation does not probe the physical network. The stack contains
-one upstream PostgreSQL container and exactly one OrcaSlicer worker.
+The daily validation override runs the API normally in `Development` and enables the
+API's own deterministic Moonraker-backed seed fixtures
+(`MoonrakerEmulatorSeed__Enabled`), plus the printer-discovery service's matching
+deterministic discovery fixtures (`Discovery__DeterministicFixtures__Enabled`). The
+seed fixtures point at four isolated instances of the same digest-pinned emulator
+image — `moonraker-ready`, `moonraker-printing`, `moonraker-paused`, and
+`moonraker-shutdown` — plus a fifth, `moonraker-offline`, that is deliberately **not**
+a running service, so the seeded "Moonraker Offline" printer exercises a real
+connection failure. None of this uses the in-process TestEmulator plugin. It disables
+periodic network discovery so local validation does not probe the physical network.
+The stack contains one upstream PostgreSQL container, exactly one OrcaSlicer worker,
+and four Moonraker emulator instances (the repository's "exactly one" rule applies
+only to the OrcaSlicer worker, not to these emulator replicas of a single image).
 The dedicated project name, reset container names, isolated network, and high host
 ports prevent cleanup from targeting an existing PrintFarmer deployment. Every
 published port binds to `127.0.0.1`; the authentication-bypass validation stack is
 therefore reachable only from the local machine and must not be exposed externally.
 The validation override also removes the discovery service's host Docker socket mount.
+
+Every emulator instance has no Docker socket mount and no external network or service
+dependencies. Each instance is internal-only by default (reachable only on the
+internal `printfarmer-network`, e.g. `http://moonraker-ready:7125`); the validation
+overlay is the only place that publishes any of them, and only to loopback, one
+distinct port per instance. Its control API (`Emulator__EnableControlApi`) is off in
+the base template and on only in this validation overlay, so scenario/fault-injection
+endpoints are never reachable from the production compose template. See
+[`MOONRAKER_EMULATOR_VALIDATION.md`](./MOONRAKER_EMULATOR_VALIDATION.md) for the
+emulator's health/control surface, seeded scenarios, and supported/unsupported protocol
+fidelity boundary.
 
 Wait for the application images to become healthy before starting local UI
 validation:
@@ -171,10 +198,18 @@ docker compose \
 
 curl --fail --retry 30 --retry-delay 5 http://localhost:15245/healthz
 curl --fail --retry 30 --retry-delay 5 http://localhost:18080/
+curl --fail --retry 30 --retry-delay 5 http://localhost:17125/healthz
+curl --fail --retry 30 --retry-delay 5 http://localhost:17126/healthz
+curl --fail --retry 30 --retry-delay 5 http://localhost:17127/healthz
+curl --fail --retry 30 --retry-delay 5 http://localhost:17128/healthz
 ```
 
 This build workflow performs only image-level smoke checks. Browser and Playwright
-validation remains a local automation responsibility.
+validation remains a local automation responsibility. A separate Compose-level smoke
+script (`scripts/ci/smoke-daily-validation-stack.sh`) boots this exact stack when
+Docker is available and asserts the seeded Moonraker-backend printers and the
+single-worker topology; see
+[`MOONRAKER_EMULATOR_VALIDATION.md`](./MOONRAKER_EMULATOR_VALIDATION.md) for details.
 
 ## Cleanup
 
@@ -192,10 +227,13 @@ docker compose \
 rm -rf "$STACK_DIR"
 unset PRINTFARMER_API_IMAGE PRINTFARMER_FRONTEND_IMAGE
 unset PRINTFARMER_SLICER_HOST_IMAGE PRINTFARMER_PRINTER_DISCOVERY_IMAGE
-unset PRINTFARMER_ORCASLICER_WORKER_IMAGE POSTGRES_PASSWORD Jwt__Key
+unset PRINTFARMER_ORCASLICER_WORKER_IMAGE PRINTFARMER_MOONRAKER_EMULATOR_IMAGE
+unset POSTGRES_PASSWORD Jwt__Key
 unset POSTGRES_USER
 unset ORCASLICER_CONTAINER_DIGEST
 unset WORKER_SHARED_API_KEY DISCOVERY_SHARED_API_KEY ConnectionStrings__Default
 unset COMPOSE_PROJECT_NAME API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
+unset MOONRAKER_EMULATOR_PORT MOONRAKER_EMULATOR_PRINTING_PORT MOONRAKER_EMULATOR_PAUSED_PORT
+unset MOONRAKER_EMULATOR_SHUTDOWN_PORT
 unset DB_PROVIDER ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT
 ```
