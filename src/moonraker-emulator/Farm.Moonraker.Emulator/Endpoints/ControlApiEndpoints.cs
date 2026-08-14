@@ -107,28 +107,37 @@ public static class ControlApiEndpoints
         group.MapGet("/time", (PrinterRegistry registry) =>
             Results.Ok(new { registry.Printer.Id, virtualTime = registry.Printer.Clock.UtcNow }));
 
-        group.MapPost("/time/advance", async (TimeAdvanceRequest request, PrinterRegistry registry) =>
+        group.MapPost("/time/advance", async (
+            TimeAdvanceRequest request,
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
         {
             if (request.Seconds < 0)
             {
                 return Results.BadRequest(new { message = "Seconds must be non-negative." });
             }
 
-            PrinterAggregate printer = registry.Printer;
-            printer.Clock.Advance(TimeSpan.FromSeconds(request.Seconds));
-            printer.Tick();
-            await BroadcastService.NotifyStatusUpdateAsync(printer);
-
-            return Results.Ok(new { printer.Id, virtualTime = printer.Clock.UtcNow, printer.PrintState });
+            VirtualTimeSnapshot snapshot = await coordinator.AdvanceAsync(
+                TimeSpan.FromSeconds(request.Seconds),
+                cancellationToken);
+            return Results.Ok(new
+            {
+                Id = snapshot.PrinterId,
+                virtualTime = snapshot.VirtualTime,
+                snapshot.PrintState,
+            });
         });
 
-        group.MapPost("/time/reset", async (PrinterRegistry registry) =>
+        group.MapPost("/time/reset", async (
+            VirtualTimeCoordinator coordinator,
+            CancellationToken cancellationToken) =>
         {
-            PrinterAggregate printer = registry.Printer;
-            printer.Clock.Reset();
-            printer.Tick();
-            await BroadcastService.NotifyStatusUpdateAsync(printer);
-            return Results.Ok(new { printer.Id, virtualTime = printer.Clock.UtcNow });
+            VirtualTimeSnapshot snapshot = await coordinator.ResetAsync(cancellationToken);
+            return Results.Ok(new
+            {
+                Id = snapshot.PrinterId,
+                virtualTime = snapshot.VirtualTime,
+            });
         });
 
         group.MapGet("/rules", (PrinterRegistry registry) => Results.Ok(registry.Rules.List().Select(RuleDto)));

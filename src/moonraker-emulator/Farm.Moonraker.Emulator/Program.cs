@@ -47,6 +47,7 @@ public sealed partial class Program
 
         builder.Services.Configure<EmulatorOptions>(builder.Configuration.GetSection(EmulatorOptions.SectionName));
         builder.Services.AddSingleton<PrinterRegistry>();
+        builder.Services.AddSingleton<VirtualTimeCoordinator>();
         builder.Services.AddHostedService<VirtualTimeTickerService>();
         builder.Services.AddHealthChecks();
 

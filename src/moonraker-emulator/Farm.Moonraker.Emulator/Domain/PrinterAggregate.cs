@@ -269,19 +269,51 @@ public sealed class PrinterAggregate
     {
         lock (_stateLock)
         {
-            if (PrintState != "printing" || _printStartedAt is null)
-            {
-                return;
-            }
+            TickLocked();
+        }
+    }
 
-            double elapsed = (Clock.UtcNow - _printStartedAt.Value).TotalSeconds;
-            PrintDuration = Math.Clamp(elapsed, 0, SimulatedPrintTotalSeconds);
-            TotalDuration = _totalDurationOffset + PrintDuration;
-            FilamentUsed = Math.Round(PrintDuration / SimulatedPrintTotalSeconds * 1200.0, 2);
-            if (PrintDuration >= SimulatedPrintTotalSeconds)
-            {
-                CompletePrintLocked();
-            }
+    public void AdvanceTime(TimeSpan delta)
+    {
+        lock (_stateLock)
+        {
+            Clock.Advance(delta);
+            TickLocked();
+        }
+    }
+
+    public void AutoAdvanceTime(double seconds)
+    {
+        lock (_stateLock)
+        {
+            Clock.AutoAdvance(seconds);
+            TickLocked();
+        }
+    }
+
+    public void ResetTime()
+    {
+        lock (_stateLock)
+        {
+            Clock.Reset();
+            TickLocked();
+        }
+    }
+
+    private void TickLocked()
+    {
+        if (PrintState != "printing" || _printStartedAt is null)
+        {
+            return;
+        }
+
+        double elapsed = (Clock.UtcNow - _printStartedAt.Value).TotalSeconds;
+        PrintDuration = Math.Clamp(elapsed, 0, SimulatedPrintTotalSeconds);
+        TotalDuration = _totalDurationOffset + PrintDuration;
+        FilamentUsed = Math.Round(PrintDuration / SimulatedPrintTotalSeconds * 1200.0, 2);
+        if (PrintDuration >= SimulatedPrintTotalSeconds)
+        {
+            CompletePrintLocked();
         }
     }
 

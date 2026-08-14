@@ -1,6 +1,4 @@
-﻿using Farm.Moonraker.Emulator.Domain;
-using Farm.Moonraker.Emulator.Endpoints;
-using Farm.Moonraker.Emulator.Options;
+﻿using Farm.Moonraker.Emulator.Options;
 
 namespace Farm.Moonraker.Emulator;
 
@@ -11,7 +9,7 @@ namespace Farm.Moonraker.Emulator;
 /// (default TimeScale = 0) contract tests never observe unsolicited time movement.
 /// </summary>
 public sealed class VirtualTimeTickerService(
-    PrinterRegistry registry,
+    VirtualTimeCoordinator coordinator,
     Microsoft.Extensions.Options.IOptions<EmulatorOptions> options,
     ILogger<VirtualTimeTickerService> logger) : BackgroundService
 {
@@ -26,13 +24,12 @@ public sealed class VirtualTimeTickerService(
         }
 
         logger.LogInformation("Virtual time auto-advance enabled at {Scale}x real time.", scale);
-        PrinterAggregate printer = registry.Printer;
         using var timer = new PeriodicTimer(TickInterval);
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            printer.Clock.AutoAdvance(TickInterval.TotalSeconds * scale);
-            printer.Tick();
-            await BroadcastService.NotifyStatusUpdateAsync(printer);
+            await coordinator.AutoAdvanceAsync(
+                TickInterval.TotalSeconds * scale,
+                stoppingToken);
         }
     }
 }
