@@ -427,11 +427,11 @@ jobs:
           MATRIX_NAME: ${{ matrix.name }}
           MATRIX_PROJECT: ${{ matrix.project }}
           RUN_INTEGRATION_TESTS: ${{ matrix.run_integration }}
-        # Category filter matches the legacy CI behavior: skip Docker /
-        # DbHeavy categories that need external services. Callers who want
-        # those categories run them out-of-band (workflow_dispatch will
-        # force the full safe matrix, which still excludes Docker per
-        # policy).
+          TEST_FILTER: ${{ matrix.filter || 'Category!=DbHeavy&Category!=Docker' }}
+        # The selector emits each matrix leg's xUnit category filter so the PR
+        # gate can stay narrow without hardcoding the same filter in one job.
+        # Provider-heavy tags still run out-of-band via the dedicated provider
+        # workflow and full-safe CI path.
         run: |
           set -euo pipefail
           mkdir -p TestResults
@@ -443,7 +443,7 @@ jobs:
             ${integration_args[@]+"${integration_args[@]}"} \
             --logger "trx;LogFileName=$MATRIX_NAME.trx" \
             --results-directory TestResults \
-            --filter "Category!=DbHeavy&Category!=Docker"
+            --filter "$TEST_FILTER"
 
       - name: Assert non-zero test execution
         working-directory: src

@@ -51,16 +51,21 @@ set -uo pipefail
 SCRIPT_VERSION="1.3.0"
 
 # ---------------------------------------------------------------------------
-# Required CI test projects. The final field opts projects into special MSBuild
-# properties during restore, build, and test. Farm.Web.IntegrationTests
-# intentionally lives outside farm-web.sln and must be invoked directly with
-# RunIntegrationTests=true because its csproj disables test discovery otherwise.
+# Required CI test projects. The final two fields are the test-project
+# opt-in flag for integration-only build properties and the xUnit category
+# filter used by PR CI. Keeping the filter in the selector matrix makes the
+# default API gate explicit and reusable by both local commands and the
+# GitHub Actions matrix, rather than hardcoding it in one workflow leg only.
+# Farm.Web.IntegrationTests intentionally lives outside farm-web.sln and must
+# be invoked directly with RunIntegrationTests=true because its csproj disables
+# test discovery otherwise.
 # ---------------------------------------------------------------------------
+readonly DEFAULT_TEST_FILTER='Category!=DbHeavy&Category!=Docker'
 readonly ALL_TEST_PROJECTS=(
-  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false"
-  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false"
-  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false"
-  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true"
+  "Farm.Web.Api.Tests|tests/Farm.Web.Api.Tests/Farm.Web.Api.Tests.csproj|false|$DEFAULT_TEST_FILTER"
+  "Farm.Slicer.Module.Tests|tests/Farm.Slicer.Module.Tests/Farm.Slicer.Module.Tests.csproj|false|$DEFAULT_TEST_FILTER"
+  "Farm.OrcaSlicer.Worker.Tests|tests/Farm.OrcaSlicer.Worker.Tests/Farm.OrcaSlicer.Worker.Tests.csproj|false|$DEFAULT_TEST_FILTER"
+  "Farm.Web.IntegrationTests|tests/Farm.Web.IntegrationTests/Farm.Web.IntegrationTests.csproj|true|$DEFAULT_TEST_FILTER"
 )
 
 # All migration context/provider pairs (matches the ci.yml legacy drift block).
@@ -358,17 +363,21 @@ finish() {
   # Build test matrix JSON.
   local matrix_json='{"include":[]}'
   if (( ${#test_selected[@]} > 0 )); then
-    local items="" first=1 entry name project run_integration
+    local items="" first=1 entry name project run_integration test_filter
     for name in "${test_selected[@]}"; do
       # Look up project from ALL_TEST_PROJECTS.
       project=""
       run_integration="false"
+      test_filter="$DEFAULT_TEST_FILTER"
       for entry in "${ALL_TEST_PROJECTS[@]}"; do
-        local entry_name entry_project entry_integration
-        IFS='|' read -r entry_name entry_project entry_integration <<< "$entry"
+        local entry_name entry_project entry_integration entry_filter
+        IFS='|' read -r entry_name entry_project entry_integration entry_filter <<< "$entry"
         if [[ "$entry_name" == "$name" ]]; then
           project="$entry_project"
           run_integration="$entry_integration"
+          if [[ -n "$entry_filter" ]]; then
+            test_filter="$entry_filter"
+          fi
           break
         fi
       done
@@ -378,7 +387,7 @@ finish() {
       local label="$name"
       if (( first == 0 )); then items+=","; fi
       first=0
-      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'","run_integration":"'"$run_integration"'"}'
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$label"'","run_integration":"'"$run_integration"'","filter":"'"$test_filter"'"}'
     done
     matrix_json='{"include":['"$items"']}'
   fi
@@ -405,12 +414,15 @@ finish() {
   if [[ "$want_dotnet_test" == "true" && "$matrix_json" == '{"include":[]}' ]]; then
     reason_raw="internal: empty test selection with want_dotnet_test=true — coercing full safe"
     full_matrix="true"
-    local items="" first=1 entry name project run_integration
+    local items="" first=1 entry name project run_integration test_filter
     for entry in "${ALL_TEST_PROJECTS[@]}"; do
-      IFS='|' read -r name project run_integration <<< "$entry"
+      IFS='|' read -r name project run_integration test_filter <<< "$entry"
+      if [[ -z "$test_filter" ]]; then
+        test_filter="$DEFAULT_TEST_FILTER"
+      fi
       if (( first == 0 )); then items+=","; fi
       first=0
-      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$name"'","run_integration":"'"$run_integration"'"}'
+      items+='{"name":"'"$name"'","project":"'"$project"'","label":"'"$name"'","run_integration":"'"$run_integration"'","filter":"'"$test_filter"'"}'
     done
     matrix_json='{"include":['"$items"']}'
   fi
