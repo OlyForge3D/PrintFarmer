@@ -16,6 +16,7 @@ namespace Farm.Web.Api.Tests.Startup;
 /// <summary>
 /// Regression coverage for issue #1567's empty SQLite image-startup path.
 /// </summary>
+[Collection(EnvironmentVariableTestCollection.Name)]
 public sealed class SqliteStartupSmokeTests
 {
     [Fact]
@@ -24,6 +25,9 @@ public sealed class SqliteStartupSmokeTests
         string tempDirectory = Path.Combine(Path.GetTempPath(), $"printfarmer-startup-{Guid.NewGuid():N}");
         Directory.CreateDirectory(tempDirectory);
         string databasePath = Path.Combine(tempDirectory, "smoke.db");
+        const string skipStartupVariable = "TEST_SKIP_STARTUP_DB_INIT";
+        string? originalSkipStartup = Environment.GetEnvironmentVariable(skipStartupVariable);
+        Environment.SetEnvironmentVariable(skipStartupVariable, null);
 
         try
         {
@@ -44,6 +48,7 @@ public sealed class SqliteStartupSmokeTests
         }
         finally
         {
+            Environment.SetEnvironmentVariable(skipStartupVariable, originalSkipStartup);
             SqliteConnection.ClearAllPools();
             Directory.Delete(tempDirectory, recursive: true);
         }
@@ -87,5 +92,11 @@ public sealed class SqliteStartupSmokeTests
                         sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")));
             });
         }
+    }
+
+    [CollectionDefinition(Name, DisableParallelization = true)]
+    public sealed class EnvironmentVariableTestCollection
+    {
+        public const string Name = "EnvironmentVariableSerial";
     }
 }

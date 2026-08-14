@@ -61,12 +61,12 @@ public sealed class SystemLogLoggerProviderStartupTests
             LogLevel.Warning);
         ILogger logger = provider.CreateLogger("Startup");
 
+        await schemaCheckObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
+
         for (int index = 0; index < 50; index++)
         {
             logger.LogWarning("Warning {Index} emitted before schema initialization", index);
         }
-
-        await schemaCheckObserved.Task.WaitAsync(TimeSpan.FromSeconds(3));
 
         settingsResolutionCount.Should().Be(
             0,
