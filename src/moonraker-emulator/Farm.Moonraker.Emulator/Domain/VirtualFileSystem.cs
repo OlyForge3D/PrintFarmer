@@ -86,6 +86,13 @@ public sealed class VirtualFileSystem
 
     public VirtualFileSystem()
     {
+        Reset();
+    }
+
+    public void Reset()
+    {
+        _roots.Clear();
+        _directories.Clear();
         foreach (string root in new[] { "gcodes", "config", "logs" })
         {
             _roots[root] = new ConcurrentDictionary<string, VirtualFile>(StringComparer.Ordinal);

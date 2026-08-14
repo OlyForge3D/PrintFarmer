@@ -83,17 +83,20 @@ public sealed class ScenarioSmokeTests :
     }
 
     [Fact]
-    public async Task ShutdownScenario_ServerInfoReportsKlippyDisconnectedAndObjectsQueryFails()
+    public async Task ShutdownScenario_RemainsConnectedAndObjectsQueryReportsShutdown()
     {
         using HttpClient client = _shutdown.CreateClient();
 
         using HttpResponseMessage serverInfoResponse = await client.GetAsync("/server/info");
         using JsonDocument serverDoc = JsonDocument.Parse(await serverInfoResponse.Content.ReadAsStringAsync());
-        serverDoc.RootElement.GetProperty("result").GetProperty("klippy_connected").GetBoolean().Should().BeFalse();
+        serverDoc.RootElement.GetProperty("result").GetProperty("klippy_connected").GetBoolean().Should().BeTrue();
         serverDoc.RootElement.GetProperty("result").GetProperty("klippy_state").GetString().Should().Be("shutdown");
 
         using HttpResponseMessage response = await client.GetAsync("/printer/objects/query?print_stats");
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument queryDoc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        queryDoc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats")
+            .GetProperty("state").GetString().Should().Be("error");
     }
 
     private EmulatorFactory FactoryFor(string scenarioKey) => scenarioKey switch

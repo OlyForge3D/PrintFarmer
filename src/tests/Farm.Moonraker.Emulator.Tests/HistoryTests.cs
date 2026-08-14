@@ -109,6 +109,8 @@ public sealed class HistoryTests : IClassFixture<ReadyPrinterFactory>
         using HttpResponseMessage after = await client.GetAsync("/server/history/totals");
         using JsonDocument afterDoc = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
         afterDoc.RootElement.GetProperty("result").GetProperty("job_totals").GetProperty("total_jobs").GetDouble().Should().Be(0);
+
+        (await client.PostAsync("/__emulator/reset", content: null)).EnsureSuccessStatusCode();
     }
 
     [Fact]

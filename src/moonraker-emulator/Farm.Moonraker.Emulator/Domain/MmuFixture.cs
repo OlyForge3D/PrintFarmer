@@ -178,4 +178,40 @@ public sealed class MmuFixture
     public string[] SnapmakerU1FilamentColorRgba { get; set; } = ["FF0000FF", "00A0FFFF", "00000000", "00000000"];
 
     public bool[] SnapmakerU1FilamentOfficial { get; set; } = [true, true, false, false];
+
+    public void Reset()
+    {
+        Mode = MmuMode.None;
+        Enabled = true;
+        IsHomed = true;
+        ActiveTool = 0;
+        ActiveGate = 0;
+        FilamentState = "Loaded";
+        Action = "Idle";
+        NumGates = 4;
+        HasBypass = true;
+        EndlessSpool = false;
+        ClogDetection = true;
+        GateStatus = [1, 1, 0, -1];
+        GateMaterial = ["PLA", "PETG", null, null];
+        GateColor = ["#FF0000", "#00A0FF", null, null];
+        GateFilamentName = ["Generic PLA", "Generic PETG", null, null];
+        GateSpoolId = [101, 102, -1, -1];
+        LaneNames = ["lane1", "lane2", "lane3", "lane4"];
+        AfcCurrentState = "Idle";
+        AfcCurrentLoad = "lane1";
+        AfcErrorState = false;
+        AfcBypassState = false;
+        QidiboxBoxCount = 1;
+        QidiboxLastLoadSlot = "slot0";
+        QidiboxFilamentTypeCodes = [1, 2, 0, 0];
+        QidiboxColorCodes = [1, 2, 0, 0];
+        QidiboxRunoutButton = [0, 0, 1, null];
+        SnapmakerU1ActiveToolheadIndex = 1;
+        SnapmakerU1FilamentExist = [true, true, false, false];
+        SnapmakerU1FilamentType = ["PLA", "PETG", "NONE", "NONE"];
+        SnapmakerU1FilamentSubType = ["NONE", "NONE", "NONE", "NONE"];
+        SnapmakerU1FilamentColorRgba = ["FF0000FF", "00A0FFFF", "00000000", "00000000"];
+        SnapmakerU1FilamentOfficial = [true, true, false, false];
+    }
 }

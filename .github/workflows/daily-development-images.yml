@@ -167,12 +167,11 @@ jobs:
               ;;
             printer-discovery)
               docker run --detach --name "$container" \
-                --env ASPNETCORE_URLS=http://+:5246 \
                 --env Discovery__ApiBaseUrl=http://127.0.0.1:9 \
                 --env EnablePeriodicDiscovery=false \
                 --env PFARM__NetworkDiscovery__EnableDiscovery=false \
                 "$IMAGE"
-              health_url="http://localhost:5246/api/discovery/health"
+              health_url="http://localhost:5247/api/discovery/health"
               ;;
             moonraker-emulator)
               docker run --detach --name "$container" \

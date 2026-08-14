@@ -24,7 +24,7 @@ test.describe('Printer Accessibility — Moonraker', () => {
   test.beforeEach(async ({ page, request }) => {
     await createMoonrakerControl(request).resetAll();
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
@@ -58,10 +58,23 @@ test.describe('Printer Accessibility — Moonraker', () => {
     await expect(page.getByRole('complementary', { name: `${MOONRAKER_PRINTERS.ready} details` })).toBeVisible();
   });
 
-  test('the printer files dialog closes on Escape', async ({ page }) => {
+  test('the printer files dialog traps focus, closes on Escape, and restores its trigger', async ({ page }) => {
+    const card = getPrinterCardByName(page, MOONRAKER_PRINTERS.ready);
+    const trigger = card.getByRole('button', { name: 'View printer files' });
+    await trigger.focus();
     const filesDialog = await openPrinterFiles(page, MOONRAKER_PRINTERS.ready);
+
+    const headerClose = filesDialog.getByRole('button', { name: 'Close modal' });
+    await expect(headerClose).toBeFocused();
+
+    const footerClose = filesDialog.getByRole('button', { name: 'Close', exact: true });
+    await footerClose.focus();
+    await page.keyboard.press('Tab');
+    await expect(headerClose).toBeFocused();
+
     await page.keyboard.press('Escape');
     await expect(filesDialog).toBeHidden();
+    await expect(trigger).toBeFocused();
   });
 
   test('the detail sidebar landmark has a name distinguishing it from other printers', async ({ page }) => {

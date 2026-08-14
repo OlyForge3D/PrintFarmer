@@ -58,4 +58,10 @@ public sealed class EmulatorOptions
     /// see live progress without polling the control API.
     /// </summary>
     public double TimeScale { get; set; }
+
+    /// <summary>
+    /// Optional Moonraker API key. When configured, protocol routes require an exact
+    /// <c>X-Api-Key</c> header while health and test-control routes remain local harness surfaces.
+    /// </summary>
+    public string? ApiKey { get; set; }
 }

@@ -58,8 +58,8 @@ export async function dismissTourIfVisible(page: Page): Promise<void> {
   const closeBtn = page.locator('.driver-popover-close-btn');
   for (let i = 0; i < 5; i++) {
     if (await closeBtn.isVisible({ timeout: 500 }).catch(() => false)) {
-      await closeBtn.click();
-      await page.waitForTimeout(300);
+      await closeBtn.click({ force: true, timeout: 1_000 });
+      await expect(closeBtn).toBeHidden({ timeout: 1_000 }).catch(() => undefined);
     } else {
       break;
     }
@@ -70,7 +70,7 @@ export async function dismissTourIfVisible(page: Page): Promise<void> {
  * Return all visible printer card locators on the current page.
  */
 export function getPrinterCards(page: Page): Locator {
-  return page.locator('[data-pf-card]');
+  return page.getByRole('main').locator('article[data-pf-card]');
 }
 
 /**

@@ -842,9 +842,9 @@ USER discovery
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://localhost:5246/health || exit 1
+    CMD curl -f http://localhost:5247/api/discovery/health || exit 1
 
-EXPOSE 5246
+EXPOSE 5247
 
 ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
 

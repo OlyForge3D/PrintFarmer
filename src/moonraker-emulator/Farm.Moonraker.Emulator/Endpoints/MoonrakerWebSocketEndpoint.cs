@@ -73,6 +73,7 @@ public static class MoonrakerWebSocketEndpoint
             {
                 using var message = new MemoryStream();
                 WebSocketReceiveResult result;
+                bool tooLarge = false;
                 do
                 {
                     result = await socket.ReceiveAsync(buffer, ctx.RequestAborted);
@@ -82,9 +83,25 @@ public static class MoonrakerWebSocketEndpoint
                         return;
                     }
 
-                    await message.WriteAsync(buffer.AsMemory(0, result.Count), ctx.RequestAborted);
+                    if (!tooLarge && message.Length + result.Count <= MaxMessageBytes)
+                    {
+                        await message.WriteAsync(buffer.AsMemory(0, result.Count), ctx.RequestAborted);
+                    }
+                    else
+                    {
+                        tooLarge = true;
+                    }
                 }
-                while (!result.EndOfMessage && message.Length < MaxMessageBytes);
+                while (!result.EndOfMessage);
+
+                if (tooLarge)
+                {
+                    await socket.CloseAsync(
+                        WebSocketCloseStatus.MessageTooBig,
+                        $"Maximum JSON-RPC message size is {MaxMessageBytes} bytes.",
+                        ctx.RequestAborted);
+                    return;
+                }
 
                 string requestText = Encoding.UTF8.GetString(message.ToArray());
                 if (string.IsNullOrWhiteSpace(requestText))

@@ -19,7 +19,7 @@ services:
   printer-discovery:
     build:
       context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
-      dockerfile: Dockerfile.multistage
+      dockerfile: "${PRINTFARMER_DOCKERFILE:-Dockerfile.multistage}"
       target: printer-discovery-runtime
       args:
         SDK_TAG: ${SDK_TAG}

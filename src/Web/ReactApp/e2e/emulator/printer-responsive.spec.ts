@@ -23,7 +23,7 @@ test.describe('Printer Responsive Layout — Moonraker', () => {
     test(`cards view: no horizontal overflow and all printers reachable at ${vp.name} (${vp.width}px)`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto('/printers?view=collapsed');
-      await page.waitForLoadState('networkidle');
+      await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
       await dismissTourIfVisible(page);
 
       const hasHorizontalScroll = await page.evaluate(
@@ -47,7 +47,7 @@ test.describe('Printer Responsive Layout — Moonraker', () => {
     test(`table view: all five seeded printers appear as rows at ${vp.name} (${vp.width}px)`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height });
       await page.goto('/printers');
-      await page.waitForLoadState('networkidle');
+      await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
       await dismissTourIfVisible(page);
 
       await page.getByRole('button', { name: 'Table View' }).click();
@@ -66,7 +66,7 @@ test.describe('Printer Responsive Layout — Moonraker', () => {
   test('view mode toggle is keyboard operable', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
 
     const tableToggle = page.getByRole('button', { name: 'Table View' });

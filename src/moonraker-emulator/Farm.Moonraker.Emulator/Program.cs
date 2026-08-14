@@ -41,7 +41,7 @@ public sealed partial class Program
         if (string.IsNullOrEmpty(builder.Configuration["urls"]))
         {
 #pragma warning disable S5332 // Using http protocol is insecure - intentional Moonraker protocol parity
-            builder.WebHost.UseUrls("http://0.0.0.0:7125");
+            builder.WebHost.UseUrls("http://127.0.0.1:7125");
 #pragma warning restore S5332
         }
 

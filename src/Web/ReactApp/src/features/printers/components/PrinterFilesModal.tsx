@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { DeleteIcon, TextIcon, AlertIcon, PlayIcon, CopyIcon, ImageIcon, SortIcon, DownloadIcon, SaveIcon } from '@/common/components/icons/MdiIcons';
 import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
@@ -98,20 +97,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
       unsubscribeComplete();
     };
   }, [isOpen]);
-
-  // Handle ESC key to close modal
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
 
   const handleQueueFile = async (fileName: string) => {
     const file = files.find(f => f.fileName === fileName);
@@ -255,32 +240,29 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   }
 
   const modalContent = (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-xs" />
-
-        <div
-          className="relative bg-pf-bg-1 rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] flex flex-col"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="printer-files-modal-title"
-          tabIndex={-1}
-        >
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-pf-border">
-            <div>
-              <h2 id="printer-files-modal-title" className="text-xl font-semibold text-pf-text-primary">Printer Files</h2>
-              <p className="text-sm text-pf-text-secondary mt-1">
-                {printer.name} - Available G-code files
-              </p>
-            </div>
-
-            {/* Close handled by Modal */}
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 overflow-y-auto p-6">
-            {isLoading ? (
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="Printer Files"
+      width="max-w-4xl"
+      maxHeight="max-h-[80vh]"
+      closeOnBackdrop
+      footer={
+        <div className="flex w-full items-center justify-between">
+          <p className="text-sm text-pf-text-secondary">
+            {files.length} file{files.length !== 1 ? 's' : ''} available on printer
+          </p>
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      }
+    >
+      <p className="mb-4 text-sm text-pf-text-secondary">
+        {printer.name} - Available G-code files
+      </p>
+      <div>
+        {isLoading ? (
               <div className="flex items-center justify-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pf-accent"></div>
                 <span className="ml-3 text-pf-text-secondary">Loading files...</span>
@@ -470,32 +452,15 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                 </div>
               </div>
             )}
-          </div>
-
-          {/* Footer */}
-          <div className="flex items-center justify-between p-6 border-t border-pf-border bg-pf-bg-1">
-            <p className="text-sm text-pf-text-secondary">
-              {files.length} file{files.length !== 1 ? 's' : ''} available on printer
-            </p>
-
-            <Button
-              type="button"
-              variant="secondary"
-              onClick={onClose}
-            >
-              Close
-            </Button>
-          </div>
-        </div>
       </div>
-    </div>
+    </Modal>
   );
 
   // Confirmation dialog using generic ConfirmationModal component
   const printConfirmDialog = confirmDialog?.type === 'print' ? confirmDialog : null;
   const deleteConfirmDialog = confirmDialog?.type === 'delete' ? confirmDialog : null;
 
-  return createPortal(
+  return (
     <>
       {modalContent}
 
@@ -596,7 +561,6 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           </div>
         </Modal>
       )}
-    </>,
-    document.body
+    </>
   );
 }

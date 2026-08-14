@@ -34,7 +34,7 @@ test.describe('Full Page Coverage — Moonraker', () => {
 
   test('printers page lists every seeded Moonraker printer by exact name', async ({ page }) => {
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
 
     for (const name of Object.values(MOONRAKER_PRINTERS)) {

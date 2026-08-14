@@ -18,6 +18,7 @@ integration cannot verify.
 | Listen port | `7125` (root — no path prefix) |
 | Health check path | `/healthz` |
 | Control API toggle | `Emulator__EnableControlApi` (`true`/`false`) |
+| Optional protocol authentication | `Emulator__ApiKey` (`X-Api-Key` header or `token` query parameter) |
 | Instance identity | `Emulator__Scenario`, `Emulator__PrinterId`, `Emulator__PrinterName` |
 | Runtime user | dedicated non-root `emulator` user |
 
@@ -25,6 +26,12 @@ The container has no Docker socket mount, no physical network scanning, and no
 external network or service dependencies — it only serves deterministic,
 printer-shaped HTTP/WebSocket state to the unchanged `Farm.Backend.Plugin.Moonraker`
 client.
+
+Local native runs bind to `127.0.0.1` by default. The container explicitly binds its
+isolated listener for Compose networking. When `Emulator__ApiKey` is non-empty, every
+Moonraker HTTP route and `/websocket` connection requires the configured key; the
+validation-only `/__emulator/**` surface remains separately controlled by
+`Emulator__EnableControlApi` and must not be enabled in production.
 
 Seeded printer URLs must be plain `http://<host>:7125` origins, with no trailing
 slash and no path prefix such as `/printers/{id}`: `Printer.BackendUrl` trims the
@@ -151,7 +158,9 @@ explicit `SKIP:` message and exits `0`, so it can be included in local unit test
 without failing Docker-less environments; once the stack is up, any failed assertion
 is fatal and the script exits non-zero after printing the failing container's logs.
 It always tears down its own isolated Compose project and generated directory on
-exit, whether or not the assertions passed.
+exit, whether or not the assertions passed. Local image builds use the tracked
+`scripts/docker/dockerfiles/Dockerfile.multistage` source and do not depend on an
+ignored generated copy at the repository root.
 
 ## Protocol fidelity inventory
 
@@ -181,6 +190,7 @@ they do not return success-shaped placeholders.
 `/websocket` supports:
 
 - `server.connection.identify`;
+- `server.info` (including the production subscription service's heartbeat);
 - `printer.objects.list`;
 - `printer.objects.subscribe`, including per-object field filtering and an initial
   snapshot;
@@ -213,7 +223,7 @@ The validation-only control API is available only when
 | Route | Purpose |
 |---|---|
 | `GET /__emulator/printers` | Read the current instance state as a one-element array |
-| `POST /__emulator/reset` | Restore the instance's configured initial scenario |
+| `POST /__emulator/reset` | Restore the complete configured fixture baseline: scenario, virtual time, files, history/totals, Spoolman, MMU, and faults |
 | `POST /__emulator/printer/scenario` | Switch to `Ready`, `Printing`, `Paused`, or `Shutdown` |
 | `GET/POST /__emulator/printer/mmu` | Read or select `None`, `HappyHare`, `Afc`, `Qidibox`, or `SnapmakerU1` |
 | `GET /__emulator/time` | Read virtual time |
@@ -237,8 +247,9 @@ both `MoonrakerEmulatorSeed__Enabled=true` and
 templates. It restores the seeded printing/paused queue rows and dispatch ownership,
 cancels transient active jobs, clears physical-control and acknowledgement state, and
 removes printers added from the deterministic `moonraker-discovery-*` fixtures. The
-Playwright fixture calls it before every emulator test; emulator scenario reset alone
-cannot restore these PostgreSQL-owned records.
+Playwright fixture calls it before every emulator test. The application reset and
+each emulator instance's complete fixture reset are both required because neither
+boundary owns the other's PostgreSQL or process-local state.
 
 Example deterministic progress and one-shot fault:
 
@@ -290,6 +301,9 @@ PrintFarmer printer flows do not consume them:
 - announcements, extensions, and update-manager mutation;
 - sudo/password, service/package management, and host reboot/shutdown;
 - OctoPrint compatibility endpoints and arbitrary third-party component APIs;
+- power-device discovery and mutation (`/machine/device_power/*`); PrintFarmer defines
+  infrastructure DTOs for this upstream area but has no production Moonraker call site
+  or printer-facing UI consuming it;
 - unmodeled Spoolman proxy operations beyond the consumed spool lookups.
 
 All four filament changer/toolhead variants consumed by the current Moonraker

@@ -289,18 +289,23 @@ public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmul
         created!.Item.Path.Should().Be("real-client-dir");
         created.Action.Should().Be("create_dir");
 
-        MoonrakerDirectoryInfo? emptyListing = await _client.GetDirectoryAsync(_host.BaseUrl, "real-client-dir");
+        MoonrakerDirectoryInfo? emptyListing = await _client.GetDirectoryAsync(_host.BaseUrl, "gcodes/real-client-dir");
         emptyListing.Should().NotBeNull();
         emptyListing!.Dirs.Should().BeEmpty();
         emptyListing.Files.Should().BeEmpty();
 
-        MoonrakerDirectoryInfo? rootListing = await _client.GetDirectoryAsync(_host.BaseUrl, string.Empty);
+        using MemoryStream listingContent = new("; listed\nG28\n"u8.ToArray());
+        (await _client.UploadFileAsync(_host.BaseUrl, "gcodes", "real-client-dir/listed.gcode", listingContent)).Should().NotBeNull();
+        MoonrakerDirectoryInfo? populatedListing = await _client.GetDirectoryAsync(_host.BaseUrl, "gcodes/real-client-dir");
+        populatedListing!.Files.Select(file => file.Path).Should().Contain("real-client-dir/listed.gcode");
+
+        MoonrakerDirectoryInfo? rootListing = await _client.GetDirectoryAsync(_host.BaseUrl, "gcodes");
         rootListing.Should().NotBeNull();
         rootListing!.Dirs.Select(d => d.Dirname).Should().Contain("real-client-dir");
 
-        (await _client.DeleteFileOrDirectoryAsync(_host.BaseUrl, "gcodes/real-client-dir")).Should().BeTrue();
+        (await _client.DeleteFileOrDirectoryAsync(_host.BaseUrl, "gcodes/real-client-dir", force: true)).Should().BeTrue();
 
-        MoonrakerDirectoryInfo? afterDelete = await _client.GetDirectoryAsync(_host.BaseUrl, string.Empty);
+        MoonrakerDirectoryInfo? afterDelete = await _client.GetDirectoryAsync(_host.BaseUrl, "gcodes");
         afterDelete!.Dirs.Select(d => d.Dirname).Should().NotContain("real-client-dir");
     }
 
@@ -324,7 +329,7 @@ public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmul
 
         (await _client.DeleteFileOrDirectoryAsync(_host.BaseUrl, "gcodes/real-client-nonempty-dir", force: true)).Should().BeTrue();
 
-        MoonrakerDirectoryInfo? afterDelete = await _client.GetDirectoryAsync(_host.BaseUrl, string.Empty);
+        MoonrakerDirectoryInfo? afterDelete = await _client.GetDirectoryAsync(_host.BaseUrl, "gcodes");
         afterDelete!.Dirs.Select(d => d.Dirname).Should().NotContain("real-client-nonempty-dir");
     }
 

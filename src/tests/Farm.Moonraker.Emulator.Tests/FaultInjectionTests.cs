@@ -210,7 +210,7 @@ public sealed class FaultInjectionTests : IClassFixture<ReadyPrinterFactory>
         using WebSocket socket = await wsClient.ConnectAsync(new Uri("ws://localhost/websocket"), CancellationToken.None);
 
         await socket.SendAsync(
-            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"print_stats":null}},"id":1}"""),
+            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"extruder":["target"]}},"id":1}"""),
             WebSocketMessageType.Text,
             true,
             CancellationToken.None);
@@ -222,7 +222,7 @@ public sealed class FaultInjectionTests : IClassFixture<ReadyPrinterFactory>
 
         // Trigger the stale-notifications effect via a query call on this same connection.
         await socket.SendAsync(
-            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","method":"printer.objects.query","params":{"objects":{"print_stats":null}},"id":2}"""),
+            Encoding.UTF8.GetBytes("""{"jsonrpc":"2.0","method":"printer.objects.query","params":{"objects":{"extruder":["target"]}},"id":2}"""),
             WebSocketMessageType.Text,
             true,
             CancellationToken.None);
@@ -230,12 +230,46 @@ public sealed class FaultInjectionTests : IClassFixture<ReadyPrinterFactory>
 
         using HttpResponseMessage gcode = await client.PostAsync(
             "/printer/gcode/script",
-            TestRequests.Json("""{"script":"M117 silenced"}"""));
+            TestRequests.Json("""{"script":"M104 S210"}"""));
         gcode.EnsureSuccessStatusCode();
 
         using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         Func<Task> receive = async () => await ReceiveAsync(socket, cts.Token);
         await receive.Should().ThrowAsync<OperationCanceledException>();
+
+        (await client.PostAsync("/__emulator/time/advance", TestRequests.Json("""{"seconds":31}""")))
+            .EnsureSuccessStatusCode();
+        using JsonDocument catchUp = await ReceiveAsync(socket, new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token);
+        catchUp.RootElement.GetProperty("params")[0].GetProperty("extruder")
+            .GetProperty("target").GetDouble().Should().Be(210);
+
+        (await client.PostAsync("/printer/gcode/script", TestRequests.Json("""{"script":"M104 S220"}""")))
+            .EnsureSuccessStatusCode();
+
+        using JsonDocument resumed = await ReceiveAsync(socket, new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token);
+        resumed.RootElement.GetProperty("method").GetString().Should().Be("notify_status_update");
+        resumed.RootElement.GetProperty("params")[0].GetProperty("extruder")
+            .GetProperty("target").GetDouble().Should().Be(220);
+    }
+
+    [Fact]
+    public async Task OverlappingRules_MatchInCreationOrder()
+    {
+        using HttpClient client = _factory.CreateClient();
+        await ClearRulesAsync(client);
+
+        (await client.PostAsync(
+            "/__emulator/rules",
+            TestRequests.Json("""{"printerId":"ready","target":"Http","effect":"HttpStatus","pathContains":"/server/info","httpStatusCode":429,"httpBody":"{\"source\":\"first\"}","repeating":true}""")))
+            .EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/__emulator/rules",
+            TestRequests.Json("""{"printerId":"ready","target":"Http","effect":"HttpStatus","pathContains":"/server/info","httpStatusCode":503,"httpBody":"{\"source\":\"second\"}","repeating":true}""")))
+            .EnsureSuccessStatusCode();
+
+        using HttpResponseMessage response = await client.GetAsync("/server/info");
+        response.StatusCode.Should().Be(HttpStatusCode.TooManyRequests);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("\"first\"");
     }
 
     private static async Task<JsonDocument> ReceiveAsync(WebSocket socket, CancellationToken ct = default)

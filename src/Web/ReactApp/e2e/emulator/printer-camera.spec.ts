@@ -1,5 +1,5 @@
 import { dismissTourIfVisible } from '../fixtures/emulator-setup';
-import { test, expect, ALL_MOONRAKER_PRINTER_NAMES, getPrinterCardByName } from '../fixtures/moonraker';
+import { test, expect, MOONRAKER_PRINTERS, getPrinterCardByName } from '../fixtures/moonraker';
 
 /**
  * Printer Camera E2E Tests — Moonraker emulator-backed.
@@ -17,22 +17,22 @@ test.describe('Printer Camera — Moonraker', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
-  test('at least one seeded printer exposes a working local camera preview', async ({ page }) => {
-    let verifiedCount = 0;
-
-    for (const name of ALL_MOONRAKER_PRINTER_NAMES) {
+  test('every reachable scenario exposes a decoded local camera preview', async ({ page }) => {
+    for (const name of [
+      MOONRAKER_PRINTERS.ready,
+      MOONRAKER_PRINTERS.printing,
+      MOONRAKER_PRINTERS.paused,
+      MOONRAKER_PRINTERS.shutdown,
+    ]) {
       const card = getPrinterCardByName(page, name);
       await expect(card).toBeVisible();
 
       const toggle = card.getByRole('button', { name: /^(Show|Hide) camera preview$/ });
-      const isEnabled = await toggle.isEnabled();
-      if (!isEnabled) {
-        continue;
-      }
+      await expect(toggle).toBeEnabled();
 
       await toggle.click();
       const preview = card.locator('.pf-detailed-printer-camera-preview');
@@ -45,13 +45,20 @@ test.describe('Printer Camera — Moonraker', () => {
       await expect(image).toBeVisible({ timeout: 10_000 });
       const src = await image.getAttribute('src');
       expect(src, `${name} camera preview must have a real image source`).toBeTruthy();
+      expect(src).toMatch(/^blob:/);
+      expect(src).not.toContain('moonraker-');
 
-      verifiedCount += 1;
+      await expect.poll(
+        () => image.evaluate((element: HTMLImageElement) =>
+          element.complete && element.naturalWidth > 0
+        ),
+        { message: `${name} camera should decode a deterministic local image` }
+      ).toBe(true);
     }
 
-    expect(
-      verifiedCount,
-      'expected at least one seeded Moonraker printer to expose a working local camera preview'
-    ).toBeGreaterThan(0);
+    await expect(
+      getPrinterCardByName(page, MOONRAKER_PRINTERS.offline)
+        .getByRole('button', { name: /^(Show|Hide) camera preview$/ })
+    ).toBeDisabled();
   });
 });

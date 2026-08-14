@@ -31,7 +31,7 @@ test.describe('Job Lifecycle — Moonraker', () => {
   test.beforeEach(async ({ page, request }) => {
     await createMoonrakerControl(request).resetAll();
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
@@ -102,6 +102,7 @@ test.describe('Job Lifecycle — Moonraker', () => {
   });
 
   test('Cancel: cancelling the Paused printer disables print controls and zeroes progress', async ({ page }) => {
+    test.setTimeout(60_000);
     const printerName = MOONRAKER_PRINTERS.paused;
     const card = getPrinterCardByName(page, printerName);
     await expect(card).toBeVisible();

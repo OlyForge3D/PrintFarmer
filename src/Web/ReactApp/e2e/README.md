@@ -93,7 +93,7 @@ correct scenario's own root URL:
 
 | Method | Path                        | Purpose                                                                 |
 |--------|------------------------------|--------------------------------------------------------------------------|
-| `POST` | `/__emulator/reset`          | Reset this instance's printer's Klippy/print/temperature/position state back to its seeded scenario. Does **not** restore deleted/uploaded virtual files. |
+| `POST` | `/__emulator/reset`          | Restore the instance's complete deterministic baseline, including printer state, virtual time, files, history/totals, Spoolman, MMU, and faults. |
 | `POST` | `/__emulator/time/advance`   | Body `{ seconds }` — advances this instance's deterministic virtual clock; there is no direct "set progress" call, so `advancePrintProgress(scenario, percent)` converts percent → the equivalent `seconds` (progress = elapsedSeconds / 600). |
 | `GET`  | `/__emulator/printers`       | Authoritative current state (Klippy state, print state, filename, progress, virtual time) for this instance's printer(s). |
 | `POST` | `/__emulator/printer/mmu`     | Select `None`, `HappyHare`, `Afc`, `Qidibox`, or `SnapmakerU1` for deterministic protocol/UI coverage. |

@@ -18,6 +18,8 @@ public abstract class EmulatorFactory : WebApplicationFactory<Program>
 
     protected virtual bool EnableControlApi => true;
 
+    protected virtual string? ApiKey => null;
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         string printerId = Scenario.ToLowerInvariant();
@@ -25,6 +27,10 @@ public abstract class EmulatorFactory : WebApplicationFactory<Program>
         builder.UseSetting("Emulator:PrinterId", printerId);
         builder.UseSetting("Emulator:PrinterName", $"moonraker-{printerId}");
         builder.UseSetting("Emulator:EnableControlApi", EnableControlApi ? "true" : "false");
+        if (ApiKey is not null)
+        {
+            builder.UseSetting("Emulator:ApiKey", ApiKey);
+        }
 
         if (!EnableControlApi)
         {
@@ -70,4 +76,11 @@ public sealed class DefaultDisabledControlApiFactory : EmulatorFactory
     protected override string Scenario => "Ready";
 
     protected override bool EnableControlApi => false;
+}
+
+public sealed class ApiKeyProtectedFactory : EmulatorFactory
+{
+    protected override string Scenario => "Ready";
+
+    protected override string ApiKey => "moonraker-test-api-key";
 }

@@ -1,5 +1,12 @@
 import type { APIRequestContext, Locator, Page } from '@playwright/test';
-import { test as emulatorTest, expect, API_BASE_URL, getStoredAuthToken, getPrinterCards } from './emulator-setup';
+import {
+  test as emulatorTest,
+  expect,
+  API_BASE_URL,
+  dismissTourIfVisible,
+  getStoredAuthToken,
+  getPrinterCards,
+} from './emulator-setup';
 
 /**
  * Deterministic Moonraker emulator seed contract (see `e2e/README.md`,
@@ -25,9 +32,8 @@ import { test as emulatorTest, expect, API_BASE_URL, getStoredAuthToken, getPrin
  * `Emulator:EnableControlApi=true`):
  *
  *   POST /__emulator/reset
- *     Resets this instance's printer back to its originally-seeded scenario
- *     (Klippy/print/temperature/position state — NOT its virtual files,
- *     which persist for the instance's lifetime).
+ *     Resets this instance to its complete deterministic fixture baseline,
+ *     including printer state, virtual files, history, Spoolman, and MMU data.
  *
  *   POST /__emulator/time/advance   body { seconds }
  *     Advances this instance's deterministic virtual clock and re-computes
@@ -191,7 +197,7 @@ export const test = emulatorTest.extend<MoonrakerFixtures>({
 const SIMULATED_PRINT_TOTAL_SECONDS = 600;
 
 export interface MoonrakerControlClient {
-  /** Reset one seeded printer scenario back to its deterministic initial state (Klippy/print/temp/position — not files). */
+  /** Reset one seeded printer scenario back to its complete deterministic fixture baseline. */
   reset(scenario: MoonrakerControllableScenario): Promise<void>;
   /** Reset every controllable seeded printer scenario. */
   resetAll(): Promise<void>;
@@ -288,6 +294,7 @@ export async function expectPrinterStatus(card: Locator, label: string): Promise
 export async function openPrinterDetails(page: Page, name: string): Promise<Locator> {
   const card = getPrinterCardByName(page, name);
   await expect(card).toBeVisible({ timeout: 10_000 });
+  await dismissTourIfVisible(page);
   await card.getByRole('button', { name: 'Open details sidebar' }).click();
 
   const sidebar = page.getByRole('complementary', { name: `${name} details` });
@@ -368,10 +375,9 @@ export async function uploadScratchGcodeFile(
 
 /**
  * Delete a file directly via the real Moonraker file-delete endpoint,
- * bypassing the UI. Used as test *cleanup* for scratch files uploaded with
- * {@link uploadScratchGcodeFile}, since the root `/__emulator/reset` does
- * not restore the virtual filesystem — leftover scratch files would
- * otherwise persist for the emulator instance's entire lifetime.
+ * bypassing the UI. Tests can use this for immediate cleanup within one
+ * scenario; the root `/__emulator/reset` also restores the complete seeded
+ * virtual filesystem before the next test.
  */
 export async function deleteScratchGcodeFile(
   request: APIRequestContext,
@@ -387,4 +393,4 @@ export async function deleteScratchGcodeFile(
   expect(res.ok(), `Failed to delete scratch file "${fileName}" at ${url} (status ${res.status()})`).toBeTruthy();
 }
 
-export { expect };
+export { expect, getPrinterCards };

@@ -70,7 +70,7 @@ test('all required images validate before publication', () => {
     'localhost:5000/healthz',
     'localhost:80/health',
     'localhost:5246/healthz',
-    'localhost:5246/api/discovery/health',
+    'localhost:5247/api/discovery/health',
     'localhost:8080/healthz',
     'localhost:7125/healthz',
   ]) {

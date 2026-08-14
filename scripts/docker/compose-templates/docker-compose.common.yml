@@ -34,7 +34,7 @@ x-nginx-healthcheck: &nginx-healthcheck
 # Docker will use the prebuilt image instead of downloading from GitHub
 x-orcaslicer-build: &orcaslicer-build
   context: .
-  dockerfile: Dockerfile.multistage
+  dockerfile: "${PRINTFARMER_DOCKERFILE:-Dockerfile.multistage}"
   target: orcaslicer-worker
   args:
     ALLOW_STUB: "false"

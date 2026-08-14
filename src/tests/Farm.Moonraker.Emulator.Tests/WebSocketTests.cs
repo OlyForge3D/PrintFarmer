@@ -1,4 +1,5 @@
-﻿using System.Net.WebSockets;
+using System.Net.Http.Headers;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
@@ -22,14 +23,14 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
     private static async Task SendAsync(WebSocket socket, string json) =>
         await socket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, CancellationToken.None);
 
-    private static async Task<JsonDocument> ReceiveAsync(WebSocket socket)
+    private static async Task<JsonDocument> ReceiveAsync(WebSocket socket, CancellationToken cancellationToken = default)
     {
         byte[] buffer = new byte[32 * 1024];
         using var stream = new MemoryStream();
         WebSocketReceiveResult result;
         do
         {
-            result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+            result = await socket.ReceiveAsync(buffer, cancellationToken);
             stream.Write(buffer, 0, result.Count);
         }
         while (!result.EndOfMessage);
@@ -53,6 +54,18 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
 
         doc.RootElement.GetProperty("id").GetInt32().Should().Be(100);
         doc.RootElement.GetProperty("result").GetProperty("connection_id").GetInt32().Should().Be(1);
+        doc.RootElement.TryGetProperty("error", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ServerInfo_ValidHeartbeatRequest_ReturnsSuccessfulResponse()
+    {
+        using WebSocket socket = await ConnectAsync();
+        await SendAsync(socket, """{"jsonrpc":"2.0","method":"server.info","id":-1}""");
+        using JsonDocument doc = await ReceiveAsync(socket);
+
+        doc.RootElement.GetProperty("id").GetInt32().Should().Be(-1);
+        doc.RootElement.GetProperty("result").GetProperty("klippy_connected").GetBoolean().Should().BeTrue();
         doc.RootElement.TryGetProperty("error", out _).Should().BeFalse();
     }
 
@@ -84,6 +97,36 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
         status.GetProperty("extruder").TryGetProperty("target", out _).Should().BeFalse();
         status.TryGetProperty("heater_bed", out _).Should().BeFalse();
         doc.RootElement.GetProperty("result").GetProperty("eventtime").GetDouble().Should().BeGreaterThanOrEqualTo(0);
+    }
+
+    [Fact]
+    public async Task StatusNotifications_ContainOnlyFieldsChangedSincePriorSnapshot()
+    {
+        await ResetPrinterAsync();
+        using WebSocket socket = await ConnectAsync();
+        await SendAsync(
+            socket,
+            """{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"print_stats":null,"extruder":null}},"id":101}""");
+        _ = await ReceiveAsync(socket);
+
+        using HttpClient client = _factory.CreateClient();
+        (await client.PostAsync(
+            "/__emulator/printer/scenario",
+            TestRequests.Json("""{"scenario":"Printing"}"""))).EnsureSuccessStatusCode();
+        _ = await ReceiveAsync(socket);
+
+        (await client.PostAsync(
+            "/__emulator/time/advance",
+            TestRequests.Json("""{"seconds":5}"""))).EnsureSuccessStatusCode();
+        using JsonDocument delta = await ReceiveAsync(socket);
+
+        JsonElement status = delta.RootElement.GetProperty("params")[0];
+        status.TryGetProperty("extruder", out _).Should().BeFalse();
+        JsonElement printStats = status.GetProperty("print_stats");
+        printStats.TryGetProperty("print_duration", out _).Should().BeTrue();
+        printStats.TryGetProperty("filament_used", out _).Should().BeTrue();
+        printStats.TryGetProperty("filename", out _).Should().BeFalse();
+        printStats.TryGetProperty("state", out _).Should().BeFalse();
     }
 
     [Fact]
@@ -170,6 +213,37 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
+    public async Task UploadWithPrint_BroadcastsPrintingStatusToSubscribers()
+    {
+        await ResetPrinterAsync();
+        using WebSocket socket = await ConnectAsync();
+        await SendAsync(
+            socket,
+            """{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"print_stats":null}},"id":1}""");
+        _ = await ReceiveAsync(socket);
+
+        using HttpClient client = _factory.CreateClient();
+        using var form = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent("; websocket upload\nG28\n"u8.ToArray());
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "file", "websocket-upload.gcode");
+        form.Add(new StringContent("gcodes"), "root");
+        form.Add(new StringContent("true"), "print");
+
+        using HttpResponseMessage upload = await client.PostAsync("/server/files/upload", form);
+        upload.EnsureSuccessStatusCode();
+
+        using JsonDocument notification = await ReceiveAsync(
+            socket,
+            new CancellationTokenSource(TimeSpan.FromSeconds(2)).Token);
+        JsonElement printStats = notification.RootElement.GetProperty("params")[0].GetProperty("print_stats");
+        printStats.GetProperty("state").GetString().Should().Be("printing");
+        printStats.GetProperty("filename").GetString().Should().Be("websocket-upload.gcode");
+
+        await ResetPrinterAsync();
+    }
+
+    [Fact]
     public async Task NotifyKlippyShutdown_BroadcastsWhenScenarioTransitionsToShutdown()
     {
         await ResetPrinterAsync();
@@ -206,10 +280,14 @@ public sealed class WebSocketTests : IClassFixture<ReadyPrinterFactory>
         await SendAsync(subB, """{"jsonrpc":"2.0","method":"printer.objects.subscribe","params":{"objects":{"heater_bed":null}},"id":1}""");
         _ = await ReceiveAsync(subB);
 
-        using HttpResponseMessage gcode = await client.PostAsync(
+        using HttpResponseMessage extruder = await client.PostAsync(
             "/printer/gcode/script",
-            TestRequests.Json("""{"script":"M117 hello"}"""));
-        gcode.EnsureSuccessStatusCode();
+            TestRequests.Json("""{"script":"M104 S205"}"""));
+        extruder.EnsureSuccessStatusCode();
+        using HttpResponseMessage bed = await client.PostAsync(
+            "/printer/gcode/script",
+            TestRequests.Json("""{"script":"M140 S55"}"""));
+        bed.EnsureSuccessStatusCode();
 
         using JsonDocument notifyA = await ReceiveAsync(subA);
         using JsonDocument notifyB = await ReceiveAsync(subB);

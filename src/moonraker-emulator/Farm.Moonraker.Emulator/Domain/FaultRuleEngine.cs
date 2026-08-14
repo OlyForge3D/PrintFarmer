@@ -35,6 +35,8 @@ public enum FaultEffect
 /// <summary>One test-control fault-injection rule (REST or WebSocket), scoped to a printer or global.</summary>
 public sealed class FaultRule
 {
+    internal long Sequence { get; set; }
+
     /// <summary>
     /// Intentionally non-deterministic: rules are ephemeral test-control constructs, not
     /// part of the emulated Moonraker wire protocol, and are always returned synchronously
@@ -86,9 +88,11 @@ public sealed class FaultRule
 public sealed class FaultRuleEngine
 {
     private readonly ConcurrentDictionary<string, FaultRule> _rules = new(StringComparer.Ordinal);
+    private long _nextSequence;
 
     public FaultRule Add(FaultRule rule)
     {
+        rule.Sequence = Interlocked.Increment(ref _nextSequence);
         _rules[rule.Id] = rule;
         return rule;
     }
@@ -97,11 +101,11 @@ public sealed class FaultRuleEngine
 
     public void Clear() => _rules.Clear();
 
-    public IReadOnlyList<FaultRule> List() => _rules.Values.OrderBy(r => r.Id, StringComparer.Ordinal).ToList();
+    public IReadOnlyList<FaultRule> List() => OrderedRules().ToList();
 
     public FaultRule? MatchHttp(string printerId, string method, string path)
     {
-        foreach (FaultRule rule in _rules.Values)
+        foreach (FaultRule rule in OrderedRules())
         {
             if (rule.Target != FaultTarget.Http)
             {
@@ -132,7 +136,7 @@ public sealed class FaultRuleEngine
 
     public FaultRule? MatchWebSocket(string printerId, string? rpcMethod)
     {
-        foreach (FaultRule rule in _rules.Values)
+        foreach (FaultRule rule in OrderedRules())
         {
             if (rule.Target != FaultTarget.WebSocket)
             {
@@ -180,4 +184,7 @@ public sealed class FaultRuleEngine
             return rule;
         }
     }
+
+    private IOrderedEnumerable<FaultRule> OrderedRules() =>
+        _rules.Values.OrderBy(rule => rule.Sequence);
 }

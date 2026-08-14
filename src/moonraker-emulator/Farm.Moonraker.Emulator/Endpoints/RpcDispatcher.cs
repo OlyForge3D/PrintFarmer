@@ -50,7 +50,7 @@ public static class RpcDispatcher
                 case FaultEffect.KlippyUnavailable:
                     return new RpcResult(MoonrakerJson.BuildRpcError(id, -32000, "Klippy is not connected"));
                 case FaultEffect.StaleNotifications when subscription is not null:
-                    subscription.SuppressNotificationsUntil = DateTimeOffset.UtcNow.AddSeconds(rule.StaleSeconds ?? 60);
+                    subscription.SuppressNotificationsUntil = printer.Clock.UtcNow.AddSeconds(rule.StaleSeconds ?? 60);
                     break;
                 case FaultEffect.WsDisconnect:
                     disconnectAfter = true;
@@ -67,6 +67,7 @@ public static class RpcDispatcher
         string payload = method switch
         {
             "server.connection.identify" => MoonrakerJson.BuildRpcResult(id, new Dictionary<string, object?> { ["connection_id"] = 1 }),
+            "server.info" => BuildServerInfo(printer, id),
             "printer.objects.list" => MoonrakerJson.BuildRpcResult(id, new Dictionary<string, object?> { ["objects"] = printer.BuildObjectsSnapshot().Keys.ToArray() }),
             "printer.objects.subscribe" => HandleSubscribe(printer, subscription, id, paramsEl),
             "printer.objects.query" => HandleQuery(printer, id, paramsEl),
@@ -105,12 +106,25 @@ public static class RpcDispatcher
             status[name] = FilterFields(value, requested.GetValueOrDefault(name));
         }
 
+        if (subscription is not null)
+        {
+            BroadcastService.CaptureBaseline(subscription, status);
+        }
+
         return MoonrakerJson.BuildRpcResult(id, new Dictionary<string, object?>
         {
             ["status"] = status,
             ["eventtime"] = printer.Clock.UtcNow.ToUnixTimeMilliseconds() / 1000.0,
         });
     }
+
+    private static string BuildServerInfo(PrinterAggregate printer, object? id) =>
+        MoonrakerJson.BuildRpcResult(id, new Dictionary<string, object?>
+        {
+            ["klippy_connected"] = printer.KlippyState != "disconnected",
+            ["klippy_state"] = printer.KlippyState,
+            ["moonraker_version"] = "v0.9.2-emulator",
+        });
 
     private static string HandleQuery(PrinterAggregate printer, object? id, JsonElement paramsEl)
     {

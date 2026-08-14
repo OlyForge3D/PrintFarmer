@@ -135,7 +135,7 @@ public sealed class WebcamTests : IClassFixture<ReadyPrinterFactory>
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
-        JsonElement webcam = doc.RootElement.GetProperty("webcams")[0];
+        JsonElement webcam = doc.RootElement.GetProperty("result").GetProperty("webcams")[0];
         webcam.GetProperty("name").GetString().Should().Be("Nozzle Cam");
         webcam.GetProperty("uid").GetString().Should().Be("nozzle-cam");
         webcam.GetProperty("stream_url").GetString().Should().Contain("/webcams/");
@@ -169,6 +169,7 @@ public sealed class WebcamTests : IClassFixture<ReadyPrinterFactory>
         byte[] bytes = await response.Content.ReadAsByteArrayAsync();
         bytes.Should().NotBeEmpty();
         AssertJpegMagicBytes(bytes);
+        AssertBaselineOnePixelJpeg(bytes);
     }
 
     [Fact]
@@ -182,6 +183,7 @@ public sealed class WebcamTests : IClassFixture<ReadyPrinterFactory>
         byte[] bytes = await response.Content.ReadAsByteArrayAsync();
         bytes.Should().NotBeEmpty();
         AssertJpegMagicBytes(bytes);
+        AssertBaselineOnePixelJpeg(bytes);
     }
 
     [Fact]
@@ -204,6 +206,7 @@ public sealed class WebcamTests : IClassFixture<ReadyPrinterFactory>
         frameStart.Should().BeGreaterThanOrEqualTo(0, "the multipart body must contain an embedded JPEG SOI marker");
         byte[] frame = body[frameStart..];
         AssertJpegMagicBytes(frame);
+        AssertBaselineOnePixelJpeg(frame);
     }
 
     /// <summary>
@@ -219,6 +222,17 @@ public sealed class WebcamTests : IClassFixture<ReadyPrinterFactory>
         bytes[2].Should().Be(0xFF);
         bytes[^2].Should().Be(0xFF);
         bytes[^1].Should().Be(0xD9);
+    }
+
+    private static void AssertBaselineOnePixelJpeg(byte[] bytes)
+    {
+        int frameHeader = IndexOf(bytes, [0xFF, 0xC0]);
+        frameHeader.Should().BeGreaterThanOrEqualTo(0, "camera fixtures must use browser-compatible baseline JPEG encoding");
+        bytes[frameHeader + 5].Should().Be(0x00);
+        bytes[frameHeader + 6].Should().Be(0x01);
+        bytes[frameHeader + 7].Should().Be(0x00);
+        bytes[frameHeader + 8].Should().Be(0x01);
+        IndexOf(bytes, [0xFF, 0xC9]).Should().Be(-1, "arithmetic-coded JPEG is not broadly browser compatible");
     }
 
     private static int IndexOf(byte[] haystack, byte[] needle)

@@ -1,5 +1,15 @@
-import { dismissTourIfVisible } from '../fixtures/emulator-setup';
-import { test, expect, getPrinterCardByName } from '../fixtures/moonraker';
+import {
+  API_BASE_URL,
+  dismissTourIfVisible,
+  getStoredAuthToken,
+} from '../fixtures/emulator-setup';
+import {
+  test,
+  expect,
+  expectPrinterStatus,
+  getPrinterCardByName,
+  MOONRAKER_BACKEND_LABEL,
+} from '../fixtures/moonraker';
 
 /**
  * Printer Discovery E2E Tests — Moonraker emulator-backed.
@@ -38,7 +48,9 @@ test.describe('Printer Discovery — Moonraker', () => {
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(
+      page.getByRole('button', { name: 'Discover Printers on the local network' })
+    ).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
@@ -103,6 +115,26 @@ test.describe('Printer Discovery — Moonraker', () => {
     await expect(modal).toBeHidden({ timeout: 45_000 });
 
     // The newly added printer must now be a real card on the farm.
-    await expect(getPrinterCardByName(page, targetName)).toBeVisible({ timeout: 15_000 });
+    const card = getPrinterCardByName(page, targetName);
+    await expect(card).toBeVisible({ timeout: 15_000 });
+    await expectPrinterStatus(card, 'Idle');
+
+    const token = await getStoredAuthToken(page);
+    await expect.poll(async () => {
+      const response = await page.request.get(`${API_BASE_URL}/api/printers`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(response.ok()).toBeTruthy();
+      const printers = await response.json() as Array<{
+        name: string;
+        backend: string;
+        isOnline: boolean;
+      }>;
+      return printers.find((printer) => printer.name === targetName);
+    }).toMatchObject({
+      name: targetName,
+      backend: MOONRAKER_BACKEND_LABEL,
+      isOnline: true,
+    });
   });
 });

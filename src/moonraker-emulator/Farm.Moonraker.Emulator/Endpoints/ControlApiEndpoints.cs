@@ -53,8 +53,10 @@ public static class ControlApiEndpoints
         {
             PrinterAggregate printer = registry.Printer;
             string previousKlippyState = printer.KlippyState;
-            printer.ResetToInitial();
+            MmuMode previousMmuMode = printer.Mmu.Mode;
+            registry.ResetToInitial();
             await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
             return Results.Ok(PrinterSummary(printer));
         });
 
@@ -67,8 +69,10 @@ public static class ControlApiEndpoints
 
             PrinterAggregate printer = registry.Printer;
             string previousKlippyState = printer.KlippyState;
-            printer.ResetToScenario(scenario);
+            MmuMode previousMmuMode = printer.Mmu.Mode;
+            registry.ResetToScenario(scenario);
             await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
             return Results.Ok(PrinterSummary(printer));
         });
 
@@ -76,8 +80,10 @@ public static class ControlApiEndpoints
         {
             PrinterAggregate printer = registry.Printer;
             string previousKlippyState = printer.KlippyState;
-            printer.ResetToInitial();
+            MmuMode previousMmuMode = printer.Mmu.Mode;
+            registry.ResetToInitial();
             await NotifyScenarioTransitionAsync(printer, previousKlippyState);
+            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
             return Results.Ok(PrinterSummary(printer));
         });
 
@@ -91,9 +97,10 @@ public static class ControlApiEndpoints
             }
 
             PrinterAggregate printer = registry.Printer;
-            printer.Mmu.Mode = mode;
+            MmuMode previousMmuMode = printer.Mmu.Mode;
+            printer.SetMmuMode(mode);
             await BroadcastService.NotifyStatusUpdateAsync(printer);
-            await ReconnectSubscribersForObjectDiscoveryAsync(printer);
+            await ReconnectIfObjectTopologyChangedAsync(printer, previousMmuMode);
             return Results.Ok(MmuSummary(printer.Mmu));
         });
 
@@ -190,6 +197,11 @@ public static class ControlApiEndpoints
 
     private static Task NotifyScenarioTransitionAsync(PrinterAggregate printer, string previousKlippyState) =>
         BroadcastService.NotifyKlippyTransitionIfChangedAsync(printer, previousKlippyState);
+
+    private static Task ReconnectIfObjectTopologyChangedAsync(PrinterAggregate printer, MmuMode previousMmuMode) =>
+        previousMmuMode == printer.Mmu.Mode
+            ? Task.CompletedTask
+            : ReconnectSubscribersForObjectDiscoveryAsync(printer);
 
     private static async Task ReconnectSubscribersForObjectDiscoveryAsync(PrinterAggregate printer)
     {

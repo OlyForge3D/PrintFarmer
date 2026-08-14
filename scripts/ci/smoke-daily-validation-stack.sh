@@ -51,6 +51,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEMPLATES_DIR="$REPO_ROOT/scripts/docker/compose-templates"
 source "$REPO_ROOT/scripts/docker/container-versions.conf"
 export PRINTFARMER_BUILD_CONTEXT="${PRINTFARMER_BUILD_CONTEXT:-$REPO_ROOT}"
+export PRINTFARMER_DOCKERFILE="${PRINTFARMER_DOCKERFILE:-scripts/docker/dockerfiles/Dockerfile.multistage}"
 
 log() {
   printf '[smoke-daily-validation-stack] %s\n' "$1"

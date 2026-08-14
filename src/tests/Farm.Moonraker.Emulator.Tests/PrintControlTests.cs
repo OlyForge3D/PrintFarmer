@@ -72,6 +72,22 @@ public sealed class PrintControlTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
+    public async Task StartPrint_WhilePaused_Returns409WithoutReplacingActiveJob()
+    {
+        using HttpClient client = await ClientWithScenarioAsync("Paused");
+        using HttpResponseMessage response = await client.PostAsync(
+            "/printer/print/start",
+            TestRequests.Json("""{"filename":"benchy.gcode"}"""));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?print_stats");
+        using JsonDocument doc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        doc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats")
+            .GetProperty("state").GetString().Should().Be("paused");
+    }
+
+    [Fact]
     public async Task Pause_WhilePrinting_TransitionsToPaused()
     {
         using HttpClient client = await ClientWithScenarioAsync("Printing");
@@ -111,6 +127,20 @@ public sealed class PrintControlTests : IClassFixture<ReadyPrinterFactory>
         using JsonDocument doc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
         doc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats").GetProperty("state")
             .GetString().Should().Be("printing");
+    }
+
+    [Fact]
+    public async Task Resume_ThenAdvance_PreservesPausedTimeInTotalDuration()
+    {
+        using HttpClient client = await ClientWithScenarioAsync("Paused");
+        (await client.PostAsync("/printer/print/resume", content: null)).EnsureSuccessStatusCode();
+        (await client.PostAsync("/__emulator/time/advance", TestRequests.Json("""{"seconds":10}"""))).EnsureSuccessStatusCode();
+
+        using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?print_stats");
+        using JsonDocument doc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        JsonElement stats = doc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats");
+        stats.GetProperty("print_duration").GetDouble().Should().Be(130);
+        stats.GetProperty("total_duration").GetDouble().Should().Be(140);
     }
 
     [Fact]
@@ -159,14 +189,14 @@ public sealed class PrintControlTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
-    public async Task GcodeScript_HomingWhilePrinting_Returns409Busy()
+    public async Task GcodeScript_HomingWhilePrinting_Returns400Busy()
     {
         using HttpClient client = await ClientWithScenarioAsync("Printing");
         using HttpResponseMessage response = await client.PostAsync(
             "/printer/gcode/script",
             TestRequests.Json("""{"script":"G28"}"""));
 
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
     [Fact]

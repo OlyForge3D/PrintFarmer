@@ -77,10 +77,12 @@ export function PrintersPage() {
   useFleetQueueSummaries();
   const queryClient = useQueryClient();
   
-  const { 
-    data: printers, 
+  const {
+    data: printers,
     isLoading,
-    refetch: refetchPrinters
+    isError: isPrintersError,
+    error: printersError,
+    refetch: refetchPrinters,
   } = usePrinters();
   const { data: cameraUrls = [] } = usePrinterCameraUrls();
 
@@ -421,6 +423,33 @@ export function PrintersPage() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  if (isPrintersError) {
+    return (
+      <PageTemplate
+        title="Printers"
+        subtitle="Monitor and manage your 3D printer farm"
+        icon={PrinterIcon}
+        titleActions={<HelpButton onClick={startTour} />}
+      >
+        <div
+          role="alert"
+          className="flex min-h-72 flex-col items-center justify-center rounded-lg border border-pf-error/40 bg-pf-error/5 p-8 text-center"
+        >
+          <PrinterIcon className="mb-4 h-14 w-14 text-pf-error" />
+          <h2 className="mb-2 text-xl font-semibold text-pf-text-primary">Unable to Load Printers</h2>
+          <p className="mb-6 max-w-md text-pf-text-secondary">
+            {printersError instanceof Error
+              ? printersError.message
+              : 'PrintFarmer could not retrieve the printer list. Try again.'}
+          </p>
+          <Button type="button" variant="primary" onClick={() => void refetchPrinters()}>
+            Retry
+          </Button>
+        </div>
+      </PageTemplate>
     );
   }
 

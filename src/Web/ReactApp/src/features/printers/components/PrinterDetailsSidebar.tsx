@@ -1311,7 +1311,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
         {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
         {(() => {
-          const hasLiveMmuGates = !isSnapmakerU1Mmu && !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
+          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
           const toolheads = hasLiveMmuGates
             ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
             : printerDetails?.toolheads && printerDetails.toolheads.length > 1

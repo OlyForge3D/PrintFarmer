@@ -23,12 +23,12 @@ public static class BroadcastService
                 continue;
             }
 
-            if (sub.SuppressNotificationsUntil is { } until && DateTimeOffset.UtcNow < until)
+            if (sub.SuppressNotificationsUntil is { } until && printer.Clock.UtcNow < until)
             {
                 continue;
             }
 
-            var filtered = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var delta = new Dictionary<string, object?>(StringComparer.Ordinal);
             foreach ((string name, string[]? fields) in sub.Objects)
             {
                 if (!snapshot.TryGetValue(name, out object? value))
@@ -36,19 +36,65 @@ public static class BroadcastService
                     continue;
                 }
 
-                if (fields is null || value is not Dictionary<string, object?> allFields)
+                if (value is not Dictionary<string, object?> allFields)
                 {
-                    filtered[name] = value;
+                    if (RecordChangedValue(sub, name, "$value", value))
+                    {
+                        delta[name] = value;
+                    }
+
                     continue;
                 }
 
-                filtered[name] = fields
-                    .Where(allFields.ContainsKey)
-                    .ToDictionary(f => f, f => allFields[f], StringComparer.Ordinal);
+                IEnumerable<string> requestedFields = fields is null ? allFields.Keys : fields.Where(allFields.ContainsKey);
+                var changedFields = new Dictionary<string, object?>(StringComparer.Ordinal);
+                foreach (string field in requestedFields)
+                {
+                    object? fieldValue = allFields[field];
+                    if (RecordChangedValue(sub, name, field, fieldValue))
+                    {
+                        changedFields[field] = fieldValue;
+                    }
+                }
+
+                if (changedFields.Count > 0)
+                {
+                    delta[name] = changedFields;
+                }
             }
 
-            string payload = MoonrakerJson.BuildNotification("notify_status_update", new object?[] { filtered, eventTime });
+            if (delta.Count == 0)
+            {
+                continue;
+            }
+
+            string payload = MoonrakerJson.BuildNotification("notify_status_update", new object?[] { delta, eventTime });
             await SendAsync(sub, payload);
+        }
+    }
+
+    public static void CaptureBaseline(WsSubscription subscription, IReadOnlyDictionary<string, object?> status)
+    {
+        lock (subscription.LastFieldValues)
+        {
+            subscription.LastFieldValues.Clear();
+            foreach ((string objectName, object? value) in status)
+            {
+                var values = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (value is Dictionary<string, object?> fields)
+                {
+                    foreach ((string field, object? fieldValue) in fields)
+                    {
+                        values[field] = SerializeValue(fieldValue);
+                    }
+                }
+                else
+                {
+                    values["$value"] = SerializeValue(value);
+                }
+
+                subscription.LastFieldValues[objectName] = values;
+            }
         }
     }
 
@@ -113,4 +159,29 @@ public static class BroadcastService
             sub.SendGate.Release();
         }
     }
+
+    private static bool RecordChangedValue(WsSubscription subscription, string objectName, string field, object? value)
+    {
+        string serialized = SerializeValue(value);
+        lock (subscription.LastFieldValues)
+        {
+            if (!subscription.LastFieldValues.TryGetValue(objectName, out Dictionary<string, string>? values))
+            {
+                values = new Dictionary<string, string>(StringComparer.Ordinal);
+                subscription.LastFieldValues[objectName] = values;
+            }
+
+            if (values.TryGetValue(field, out string? previous) &&
+                string.Equals(previous, serialized, StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            values[field] = serialized;
+            return true;
+        }
+    }
+
+    private static string SerializeValue(object? value) =>
+        System.Text.Json.JsonSerializer.Serialize(value, MoonrakerJson.Options);
 }

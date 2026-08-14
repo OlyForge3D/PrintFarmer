@@ -98,6 +98,8 @@ public sealed class WsSubscription
     public DateTimeOffset? SuppressNotificationsUntil { get; set; }
 
     public SemaphoreSlim SendGate { get; } = new(1, 1);
+
+    public Dictionary<string, Dictionary<string, string>> LastFieldValues { get; } = new(StringComparer.Ordinal);
 }
 
 /// <summary>
@@ -156,6 +158,7 @@ public sealed class PrinterAggregate
     public string PrintMessage { get; private set; } = string.Empty;
 
     private DateTimeOffset? _printStartedAt;
+    private double _totalDurationOffset;
 
     private const double SimulatedPrintTotalSeconds = 600;
 
@@ -192,6 +195,7 @@ public sealed class PrinterAggregate
         {
             Clock.Reset();
             _printStartedAt = null;
+            _totalDurationOffset = 0;
             ExtruderTarget = 0;
             BedTarget = 0;
             ExtruderTemperature = 23.4;
@@ -242,6 +246,7 @@ public sealed class PrinterAggregate
                     AvailableObjects.AddRange(["benchy_hull", "benchy_cabin"]);
                     PrintDuration = 120;
                     TotalDuration = 130;
+                    _totalDurationOffset = 10;
                     FilamentUsed = 340.5;
                     break;
                 case PrinterScenario.Shutdown:
@@ -271,7 +276,7 @@ public sealed class PrinterAggregate
 
             double elapsed = (Clock.UtcNow - _printStartedAt.Value).TotalSeconds;
             PrintDuration = Math.Min(elapsed, SimulatedPrintTotalSeconds);
-            TotalDuration = PrintDuration;
+            TotalDuration = _totalDurationOffset + PrintDuration;
             FilamentUsed = Math.Round(PrintDuration / SimulatedPrintTotalSeconds * 1200.0, 2);
             if (PrintDuration >= SimulatedPrintTotalSeconds)
             {
@@ -306,7 +311,7 @@ public sealed class PrinterAggregate
         lock (_stateLock)
         {
             RequireKlippyReady();
-            if (PrintState is "printing")
+            if (PrintState is "printing" or "paused")
             {
                 throw new PrinterBusyException("Print already in progress");
             }
@@ -323,6 +328,7 @@ public sealed class PrinterAggregate
             PrintState = "printing";
             PrintDuration = 0;
             TotalDuration = 0;
+            _totalDurationOffset = 0;
             FilamentUsed = 0;
             ExcludedObjects.Clear();
             CurrentObject = null;
@@ -365,6 +371,7 @@ public sealed class PrinterAggregate
             }
 
             PrintState = "printing";
+            _totalDurationOffset = Math.Max(0, TotalDuration - PrintDuration);
             _printStartedAt = Clock.UtcNow - TimeSpan.FromSeconds(PrintDuration);
         }
     }
@@ -911,8 +918,22 @@ public sealed class PrinterAggregate
         string rest = script[(idx + 5)..].Trim();
         if (rest.StartsWith('"'))
         {
-            int end = rest.IndexOf('"', 1);
-            return end > 0 ? rest[1..end].Replace("\\\"", "\"", StringComparison.Ordinal) : null;
+            bool escaped = false;
+            for (int i = 1; i < rest.Length; i++)
+            {
+                if (rest[i] == '"' && !escaped)
+                {
+                    return rest[1..i].Replace("\\\"", "\"", StringComparison.Ordinal);
+                }
+
+                escaped = rest[i] == '\\' && !escaped;
+                if (rest[i] != '\\')
+                {
+                    escaped = false;
+                }
+            }
+
+            return null;
         }
 
         int space = rest.IndexOf(' ', StringComparison.Ordinal);
@@ -1114,6 +1135,14 @@ public sealed class PrinterAggregate
             }
 
             return objects;
+        }
+    }
+
+    public void SetMmuMode(MmuMode mode)
+    {
+        lock (_stateLock)
+        {
+            Mmu.Mode = mode;
         }
     }
 }

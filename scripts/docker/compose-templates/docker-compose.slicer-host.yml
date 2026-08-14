@@ -14,7 +14,7 @@ services:
   slicer-host:
     build:
       context: "${PRINTFARMER_BUILD_CONTEXT:-.}"
-      dockerfile: Dockerfile.multistage
+      dockerfile: "${PRINTFARMER_DOCKERFILE:-Dockerfile.multistage}"
       target: slicer-host-runtime
       args:
         SDK_TAG: ${SDK_TAG}

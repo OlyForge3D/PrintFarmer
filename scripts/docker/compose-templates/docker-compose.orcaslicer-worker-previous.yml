@@ -10,7 +10,7 @@
 
 x-orcaslicer-previous-build: &orcaslicer-previous-build
   context: .
-  dockerfile: Dockerfile.multistage
+  dockerfile: "${PRINTFARMER_DOCKERFILE:-Dockerfile.multistage}"
   target: orcaslicer-worker
   args:
     SDK_TAG: ${SDK_TAG}

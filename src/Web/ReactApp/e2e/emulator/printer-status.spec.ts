@@ -1,5 +1,13 @@
 import { dismissTourIfVisible } from '../fixtures/emulator-setup';
-import { test, expect, MOONRAKER_PRINTERS, getPrinterCardByName, expectPrinterStatus } from '../fixtures/moonraker';
+import {
+  test,
+  expect,
+  ALL_MOONRAKER_PRINTER_NAMES,
+  MOONRAKER_PRINTERS,
+  getPrinterCards,
+  getPrinterCardByName,
+  expectPrinterStatus,
+} from '../fixtures/moonraker';
 
 /**
  * Printer Status E2E Tests — Moonraker emulator-backed.
@@ -19,20 +27,29 @@ import { test, expect, MOONRAKER_PRINTERS, getPrinterCardByName, expectPrinterSt
  *     that the printer is online.
  */
 
+test.use({ serviceWorkers: 'block' });
+
 test.describe('Printer Status — Moonraker', () => {
   test.describe.configure({ mode: 'serial' });
 
   test.beforeEach(async ({ page }) => {
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('domcontentloaded');
     await dismissTourIfVisible(page);
   });
 
   test('printers page lists exactly the five seeded Moonraker printers, each exactly once', async ({ page }) => {
+    await expect(getPrinterCards(page)).toHaveCount(5);
+
     for (const name of Object.values(MOONRAKER_PRINTERS)) {
       const card = getPrinterCardByName(page, name);
       await expect(card).toBeVisible({ timeout: 15_000 });
       await expect(page.locator('[data-pf-card]').filter({ hasText: name })).toHaveCount(1);
+    }
+
+    const cardText = await getPrinterCards(page).allTextContents();
+    for (const name of ALL_MOONRAKER_PRINTER_NAMES) {
+      expect(cardText.filter((text) => text.includes(name))).toHaveLength(1);
     }
   });
 
@@ -120,15 +137,62 @@ test.describe('Printer Status — Moonraker', () => {
     // Deterministically slow the printers list response instead of racing a
     // real page load — this asserts the actual `isLoading` skeleton branch
     // rather than assuming it flashes by fast enough to "probably" be seen.
-    await page.route('**/api/printers*', async (route) => {
+    const printersCollectionRoute = '**/api/printers*';
+    await page.route(printersCollectionRoute, async (route) => {
+      if (new URL(route.request().url()).pathname !== '/api/printers') {
+        await route.continue();
+        return;
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 1_000));
       await route.continue();
     });
 
-    await page.goto('/printers');
+    await page.reload();
     const loadingRegion = page.locator('[role="status"][aria-busy="true"]');
     await expect(loadingRegion).toBeVisible();
 
-    await page.unroute('**/api/printers*');
+    await page.unroute(printersCollectionRoute);
+  });
+
+  test('distinguishes a failed printer request from a successful empty fleet', async ({ page }) => {
+    test.setTimeout(90_000);
+    const printersCollectionRoute = '**/api/printers*';
+    await page.route(printersCollectionRoute, async (route) => {
+      if (new URL(route.request().url()).pathname !== '/api/printers') {
+        await route.continue();
+        return;
+      }
+
+      await route.fulfill({
+        status: 503,
+        contentType: 'application/json',
+        body: JSON.stringify({ message: 'Moonraker validation outage' }),
+      });
+    });
+
+    await page.reload();
+    const alert = page.getByRole('alert');
+    await expect(alert).toContainText('Unable to Load Printers', { timeout: 60_000 });
+    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+    await expect(page.getByText('No Printers Found')).toHaveCount(0);
+
+    await page.unroute(printersCollectionRoute);
+    await page.route(printersCollectionRoute, async (route) => {
+      if (new URL(route.request().url()).pathname !== '/api/printers') {
+        await route.continue();
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '[]',
+      });
+    });
+
+    await page.reload();
+    await expect(page.getByText('No Printers Found')).toBeVisible();
+    await expect(page.getByRole('alert')).toHaveCount(0);
   });
 });

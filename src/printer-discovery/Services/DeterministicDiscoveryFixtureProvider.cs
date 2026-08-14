@@ -104,8 +104,8 @@ public sealed class DeterministicDiscoveryFixtureProvider(
             frontendPort: 7125,
             manufacturer: fixture.Manufacturer,
             model: fixture.Model,
-            cameraStreamUrl: $"{fixture.ServerUrl.TrimEnd('/')}/webcam/stream",
-            cameraSnapshotUrl: $"{fixture.ServerUrl.TrimEnd('/')}/webcam/snapshot");
+            cameraStreamUrl: $"{fixture.ServerUrl.TrimEnd('/')}/webcams/Nozzle%20Cam/stream",
+            cameraSnapshotUrl: $"{fixture.ServerUrl.TrimEnd('/')}/webcams/Nozzle%20Cam/snapshot");
         printer.OriginalServerUrl = fixture.ServerUrl;
         printer.DiscoveredAt = DeterministicDiscoveryTime;
         return printer;

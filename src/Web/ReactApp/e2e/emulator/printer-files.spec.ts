@@ -4,6 +4,7 @@ import {
   expect,
   MOONRAKER_PRINTERS,
   MOONRAKER_FILES,
+  getPrinterCardByName,
   openPrinterFiles,
   getPrinterFileRow,
   createMoonrakerControl,
@@ -34,7 +35,7 @@ test.describe('Printer Files — Moonraker', () => {
     await deleteScratchGcodeFile(request, 'ready', SORT_SCRATCH_FILE, true);
     await deleteScratchGcodeFile(request, 'ready', DELETE_SCRATCH_FILE, true);
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
@@ -52,6 +53,16 @@ test.describe('Printer Files — Moonraker', () => {
     await expect(row.getByRole('button', { name: 'Queue for printing' })).toBeEnabled();
     await expect(row.getByRole('button', { name: 'Download file' })).toBeEnabled();
     await expect(row.getByRole('button', { name: 'Delete file' })).toBeEnabled();
+  });
+
+  test('downloads the seeded G-code through the real printer file endpoint', async ({ page }) => {
+    const filesDialog = await openPrinterFiles(page, MOONRAKER_PRINTERS.ready);
+    const row = getPrinterFileRow(filesDialog, MOONRAKER_FILES.benchy);
+
+    const downloadPromise = page.waitForEvent('download');
+    await row.getByRole('button', { name: 'Download file' }).click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe(MOONRAKER_FILES.benchy);
   });
 
   test('sorting toggles the visible file order once a second file exists', async ({ page, request }) => {
@@ -74,9 +85,8 @@ test.describe('Printer Files — Moonraker', () => {
   });
 
   test('can delete an uploaded file without touching the guaranteed benchy.gcode seed file', async ({ page, request }) => {
-    // The emulator's root `/__emulator/reset` does not restore deleted
-    // virtual files, so this test deletes a scratch file it uploads itself
-    // rather than the guaranteed seed file.
+    // Delete an uploaded scratch file so the assertion exercises mutation
+    // without removing the canonical benchy fixture during the test.
     await uploadScratchGcodeFile(request, 'ready', DELETE_SCRATCH_FILE);
 
     const filesDialog = await openPrinterFiles(page, MOONRAKER_PRINTERS.ready);

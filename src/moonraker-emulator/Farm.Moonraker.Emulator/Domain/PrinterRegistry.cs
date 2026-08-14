@@ -31,6 +31,22 @@ public sealed class PrinterRegistry
             Name = settings.PrinterName,
             InitialScenario = scenario,
         };
+        ResetToScenario(scenario);
+    }
+
+    public void ResetToInitial()
+    {
+        Rules.Clear();
+        ResetToScenario(Printer.InitialScenario);
+    }
+
+    public void ResetToScenario(PrinterScenario scenario)
+    {
+        Printer.Files.Reset();
+        Printer.History.Reset();
+        Printer.Spoolman.Reset();
+        Printer.Mmu.Reset();
+        Printer.Webcams.Clear();
         Printer.ResetToScenario(scenario);
         SeedFixtures(Printer);
     }

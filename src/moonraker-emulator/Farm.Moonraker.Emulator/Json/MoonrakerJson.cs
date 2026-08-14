@@ -25,14 +25,6 @@ public static class MoonrakerJson
         return context.Response.WriteAsync(JsonSerializer.Serialize(new Dictionary<string, object?> { ["result"] = result }, Options));
     }
 
-    /// <summary>Writes a bare (non-"result"-wrapped) JSON payload, used by a few Moonraker endpoints (server/webcams/list, server/info).</summary>
-    public static Task WriteBareAsync(HttpContext context, object payload, int statusCode = StatusCodes.Status200OK)
-    {
-        context.Response.StatusCode = statusCode;
-        context.Response.ContentType = "application/json";
-        return context.Response.WriteAsync(JsonSerializer.Serialize(payload, Options));
-    }
-
     /// <summary>Writes a Moonraker WebRequestError-style error body, matching what the real server sends for 4xx/5xx.</summary>
     public static Task WriteWebRequestErrorAsync(HttpContext context, int statusCode, string message)
     {

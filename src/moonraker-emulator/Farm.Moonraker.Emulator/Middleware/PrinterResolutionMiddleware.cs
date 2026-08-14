@@ -1,5 +1,7 @@
 ﻿using Farm.Moonraker.Emulator.Domain;
 using Farm.Moonraker.Emulator.Json;
+using Farm.Moonraker.Emulator.Options;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Moonraker.Emulator.Middleware;
 
@@ -16,7 +18,7 @@ namespace Farm.Moonraker.Emulator.Middleware;
 /// </summary>
 public sealed class PrinterResolutionMiddleware(RequestDelegate next)
 {
-    public async Task InvokeAsync(HttpContext context, PrinterRegistry registry)
+    public async Task InvokeAsync(HttpContext context, PrinterRegistry registry, IOptions<EmulatorOptions> options)
     {
         PrinterAggregate printer = registry.Printer;
         context.Items["printer"] = printer;
@@ -28,6 +30,17 @@ public sealed class PrinterResolutionMiddleware(RequestDelegate next)
         // rule (e.g. "500 for every request") could brick the very control API needed
         // to clear that rule again.
         bool isControlApiRequest = path.StartsWith("/__emulator", StringComparison.OrdinalIgnoreCase);
+        bool isHealthRequest = path.Equals("/healthz", StringComparison.OrdinalIgnoreCase);
+        string? requiredApiKey = options.Value.ApiKey;
+        if (!isControlApiRequest &&
+            !isHealthRequest &&
+            !string.IsNullOrEmpty(requiredApiKey) &&
+            !string.Equals(context.Request.Headers["X-Api-Key"], requiredApiKey, StringComparison.Ordinal))
+        {
+            await MoonrakerJson.WriteWebRequestErrorAsync(context, StatusCodes.Status401Unauthorized, "Unauthorized");
+            return;
+        }
+
         FaultRule? rule = isControlApiRequest
             ? null
             : registry.Rules.MatchHttp(printer.Id, context.Request.Method, path);

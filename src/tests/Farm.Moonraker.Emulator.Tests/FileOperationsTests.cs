@@ -64,12 +64,12 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
     public async Task Directory_ListsSeededFileAtRoot()
     {
         using HttpClient client = _factory.CreateClient();
-        using HttpResponseMessage response = await client.GetAsync("/server/files/directory?path=&extended=true");
+        using HttpResponseMessage response = await client.GetAsync("/server/files/directory?path=gcodes&extended=true");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
         using JsonDocument doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         doc.RootElement.GetProperty("result").GetProperty("files").EnumerateArray()
-            .Select(f => f.GetProperty("path").GetString())
+            .Select(f => f.GetProperty("filename").GetString())
             .Should().Contain("benchy.gcode");
     }
 
@@ -91,13 +91,13 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
         // The directory must be real state, not just an acknowledged no-op: it must show up when
         // listing its parent, and listing the new (empty) directory itself must succeed with no
         // files/dirs, rather than silently 404ing or fabricating contents.
-        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=");
+        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=gcodes");
         using JsonDocument parentDoc = JsonDocument.Parse(await parentListing.Content.ReadAsStringAsync());
         parentDoc.RootElement.GetProperty("result").GetProperty("dirs").EnumerateArray()
             .Select(d => d.GetProperty("dirname").GetString())
             .Should().Contain("http-new-dir");
 
-        using HttpResponseMessage childListing = await client.GetAsync("/server/files/directory?path=http-new-dir");
+        using HttpResponseMessage childListing = await client.GetAsync("/server/files/directory?path=gcodes/http-new-dir");
         childListing.StatusCode.Should().Be(HttpStatusCode.OK);
         using JsonDocument childDoc = JsonDocument.Parse(await childListing.Content.ReadAsStringAsync());
         JsonElement childResult = childDoc.RootElement.GetProperty("result");
@@ -149,7 +149,7 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
         using JsonDocument deleteDoc = JsonDocument.Parse(await delete.Content.ReadAsStringAsync());
         deleteDoc.RootElement.GetProperty("result").GetProperty("action").GetString().Should().Be("delete_dir");
 
-        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=");
+        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=gcodes");
         using JsonDocument parentDoc = JsonDocument.Parse(await parentListing.Content.ReadAsStringAsync());
         parentDoc.RootElement.GetProperty("result").GetProperty("dirs").EnumerateArray()
             .Select(d => d.GetProperty("dirname").GetString())
@@ -202,7 +202,7 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
         using HttpResponseMessage gone = await client.GetAsync("/server/files/gcodes/http-force-delete-dir/inner.gcode");
         gone.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=");
+        using HttpResponseMessage parentListing = await client.GetAsync("/server/files/directory?path=gcodes");
         using JsonDocument parentDoc = JsonDocument.Parse(await parentListing.Content.ReadAsStringAsync());
         parentDoc.RootElement.GetProperty("result").GetProperty("dirs").EnumerateArray()
             .Select(d => d.GetProperty("dirname").GetString())
@@ -273,7 +273,7 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
         using HttpClient client = _factory.CreateClient();
         using HttpResponseMessage scenario = await client.PostAsync(
             "/__emulator/printer/scenario",
-            TestRequests.Json("""{"scenario":"Paused"}"""));
+            TestRequests.Json("""{"scenario":"Ready"}"""));
         scenario.StatusCode.Should().Be(HttpStatusCode.OK);
 
         byte[] payload = "; print on upload\nG28\n"u8.ToArray();
@@ -292,6 +292,36 @@ public sealed class FileOperationsTests : IClassFixture<ReadyPrinterFactory>
         using JsonDocument doc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
         doc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats").GetProperty("filename")
             .GetString().Should().Be("auto-print.gcode");
+    }
+
+    [Fact]
+    public async Task Upload_WithPrintTrue_WhenKlippyUnavailable_SucceedsWithoutStartingPrint()
+    {
+        using HttpClient client = _factory.CreateClient();
+        (await client.PostAsync(
+            "/__emulator/printer/scenario",
+            TestRequests.Json("""{"scenario":"Shutdown"}"""))).EnsureSuccessStatusCode();
+
+        using var form = new MultipartFormDataContent();
+        var fileContent = new ByteArrayContent("; unavailable upload\nG28\n"u8.ToArray());
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "file", "unavailable-upload.gcode");
+        form.Add(new StringContent("gcodes"), "root");
+        form.Add(new StringContent("true"), "print");
+
+        using HttpResponseMessage upload = await client.PostAsync("/server/files/upload", form);
+        upload.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using JsonDocument query = JsonDocument.Parse(
+            await client.GetStringAsync("/printer/objects/query?print_stats"));
+        query.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats")
+            .GetProperty("state").GetString().Should().Be("error");
+
+        using HttpResponseMessage stored = await client.GetAsync(
+            "/server/files/gcodes/unavailable-upload.gcode");
+        stored.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        (await client.PostAsync("/__emulator/reset", content: null)).EnsureSuccessStatusCode();
     }
 
     [Fact]

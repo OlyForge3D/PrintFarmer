@@ -7,6 +7,7 @@ import type { Printer } from '@/types/api';
 import { PrintersPage } from '../PrintersPage';
 
 const mockRefetchPrinters = vi.fn();
+const mockUsePrinters = vi.fn();
 const mockQueryClient = {
   invalidateQueries: vi.fn(),
   refetchQueries: vi.fn(),
@@ -40,11 +41,7 @@ vi.mock('@tanstack/react-query', () => ({
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({
-  usePrinters: () => ({
-    data: mockPrinters,
-    isLoading: false,
-    refetch: mockRefetchPrinters,
-  }),
+  usePrinters: () => mockUsePrinters(),
   useDeletePrinter: () => ({ mutateAsync: vi.fn() }),
   usePrinterBackendCapabilities: () => ({ data: [] }),
   usePrinterCameraUrls: () => ({ data: [] }),
@@ -219,6 +216,13 @@ describe('PrintersPage', () => {
   beforeEach(() => {
     localStorage.clear();
     mockRefetchPrinters.mockClear();
+    mockUsePrinters.mockReturnValue({
+      data: mockPrinters,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetchPrinters,
+    });
     mockQueryClient.invalidateQueries.mockClear();
     mockQueryClient.refetchQueries.mockClear();
   });
@@ -270,5 +274,25 @@ describe('PrintersPage', () => {
       expect(screen.getByTestId('location-display')).toHaveTextContent('/printers');
     });
     expect(screen.queryByTestId('printer-details-sidebar')).not.toBeInTheDocument();
+  });
+
+  it('renders a retryable error instead of the empty state when loading printers fails', async () => {
+    const user = userEvent.setup();
+    mockUsePrinters.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('Printer service unavailable'),
+      refetch: mockRefetchPrinters,
+    });
+
+    renderPage('/printers');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Unable to Load Printers');
+    expect(screen.getByRole('alert')).toHaveTextContent('Printer service unavailable');
+    expect(screen.queryByText('No Printers Found')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(mockRefetchPrinters).toHaveBeenCalledTimes(1);
   });
 });

@@ -225,6 +225,54 @@ internal sealed class PrinterState
     private MmuStatusDto? _cachedMmuStatus;
 
     /// <summary>
+    /// Clears topology-dependent MMU state before a new Moonraker object subscription snapshot
+    /// is applied. A reconnect can discover a different Klipper object set, so retaining fields
+    /// from the previous connection would surface a removed or different MMU protocol indefinitely.
+    /// </summary>
+    public void ResetMmuState()
+    {
+        MmuDetected = false;
+        MmuEnabled = false;
+        MmuIsHomed = false;
+        MmuActiveTool = -1;
+        MmuActiveGate = 0;
+        MmuFilamentState = null;
+        MmuAction = null;
+        MmuNumGates = 0;
+        MmuHasBypass = false;
+        MmuEndlessSpool = false;
+        MmuClogDetection = false;
+        MmuGateStatus = null;
+        MmuGateMaterial = null;
+        MmuGateColor = null;
+        MmuGateFilamentName = null;
+        MmuGateSpoolId = null;
+        MmuType = MmuProtocol.Unknown;
+
+        QidiboxDetected = false;
+        QidiboxBoxCount = 0;
+        QidiboxDictFetched = false;
+        QidiboxDictFetchAttempts = 0;
+        QidiboxDictRetryAfter = default;
+        QidiboxFilamentDict = [];
+        QidiboxColorDict = [];
+
+        AfcDetected = false;
+        AfcCurrentState = null;
+        AfcCurrentLoad = null;
+        AfcErrorState = false;
+        AfcBypassState = false;
+        AfcLaneNames = [];
+
+        SnapmakerU1Detected = false;
+        SnapmakerU1ActiveTool = -1;
+        SnapmakerU1Lanes = SnapmakerU1PrintTaskConfigParser.CreateEmptyLanes();
+
+        MmuDirty = true;
+        _cachedMmuStatus = null;
+    }
+
+    /// <summary>
     /// Builds an <see cref="MmuStatusDto"/> from accumulated state, or null if no MMU detected.
     /// Returns a cached instance when nothing has changed (<see cref="MmuDirty"/> is false).
     /// </summary>

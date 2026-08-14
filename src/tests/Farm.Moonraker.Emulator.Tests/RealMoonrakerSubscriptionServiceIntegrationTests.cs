@@ -1,4 +1,5 @@
-﻿using Farm.Backend.Plugin.Moonraker;
+﻿using System.Collections.Concurrent;
+using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers.Moonraker;
 using Farm.Infrastructure.Domain;
@@ -88,11 +89,16 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         var httpClientFactory = new Mock<IHttpClientFactory>();
         httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
 
+        var observedUpdates = new ConcurrentQueue<PrinterStatusDto>();
         var firstUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         var statusCacheWriter = new Mock<IPrinterStatusCacheWriter>();
         statusCacheWriter
             .Setup(w => w.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
-            .Callback<PrinterStatusDto, long?>((dto, _) => firstUpdate.TrySetResult(dto));
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                observedUpdates.Enqueue(dto);
+                firstUpdate.TrySetResult(dto);
+            });
 
         _service = new MoonrakerSubscriptionService(
             hubContext.Object,
@@ -120,7 +126,11 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
         var secondUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
         statusCacheWriter
             .Setup(w => w.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
-            .Callback<PrinterStatusDto, long?>((dto, _) => secondUpdate.TrySetResult(dto));
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                observedUpdates.Enqueue(dto);
+                secondUpdate.TrySetResult(dto);
+            });
 
         using HttpResponseMessage scenario = await _host.ControlClient.PostAsync(
             "/__emulator/printer/scenario",
@@ -129,6 +139,50 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
 
         PrinterStatusDto updated = await secondUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
         updated.Id.Should().Be(printer.Id);
+
+        var shutdownUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        statusCacheWriter
+            .Setup(w => w.UpdateStatus(
+                It.Is<PrinterStatusDto>(dto => dto.State == "Shutdown"),
+                It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                observedUpdates.Enqueue(dto);
+                shutdownUpdate.TrySetResult(dto);
+            });
+
+        using HttpResponseMessage emergencyStop = await _host.ControlClient.PostAsync(
+            "/printer/gcode/script",
+            TestRequests.Json("""{"script":"M112"}"""));
+        emergencyStop.EnsureSuccessStatusCode();
+
+        PrinterStatusDto shutdown = await shutdownUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        shutdown.IsOnline.Should().BeTrue(
+            "Moonraker remains reachable when only Klippy has entered shutdown");
+
+        var recoveredUpdate = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        statusCacheWriter
+            .Setup(w => w.UpdateStatus(
+                It.Is<PrinterStatusDto>(dto => dto.State == "Idle" && dto.IsOnline),
+                It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                observedUpdates.Enqueue(dto);
+                recoveredUpdate.TrySetResult(dto);
+            });
+
+        using HttpResponseMessage firmwareRestart = await _host.ControlClient.PostAsync(
+            "/printer/gcode/script",
+            TestRequests.Json("""{"script":"FIRMWARE_RESTART"}"""));
+        firmwareRestart.EnsureSuccessStatusCode();
+
+        PrinterStatusDto recovered = await recoveredUpdate.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        recovered.Id.Should().Be(printer.Id);
+        observedUpdates
+            .Where(dto => dto.State is "Shutdown" or "Error")
+            .Should()
+            .OnlyContain(dto => dto.IsOnline);
+        observedUpdates.Should().NotContain(dto => dto.State == "Error");
     }
 
     [Fact]
@@ -211,6 +265,75 @@ public sealed class RealMoonrakerSubscriptionServiceIntegrationTests : IClassFix
                 TestRequests.Json("""{"mode":"None"}"""));
             resetMode.EnsureSuccessStatusCode();
         }
+    }
+
+    [Fact]
+    public async Task ResetAsync_AfterMmuTopologyChange_ClearsStaleSubscriptionState()
+    {
+        await _host.ResetAsync();
+        using HttpResponseMessage mmuMode = await _host.ControlClient.PostAsync(
+            "/__emulator/printer/mmu",
+            TestRequests.Json("""{"mode":"HappyHare"}"""));
+        mmuMode.EnsureSuccessStatusCode();
+
+        var printer = BuildPrinterPointingAtEmulator();
+        var printersRepo = new Mock<IPrintersRepository>();
+        printersRepo
+            .Setup(r => r.GetByBackendWithToolheadsAsync(PrinterBackend.Moonraker, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([printer]);
+        printersRepo
+            .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.SetupGet(u => u.Printers).Returns(printersRepo.Object);
+
+        var services = new ServiceCollection();
+        services.AddScoped<IUnitOfWork>(_ => unitOfWork.Object);
+        services.AddScoped<IMoonrakerClient>(
+            _ => new MoonrakerClient(new HttpClient(), NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings()));
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        var clientProxy = new Mock<IClientProxy>();
+        var hubClients = new Mock<IHubClients>();
+        hubClients.Setup(c => c.Group(It.IsAny<string>())).Returns(clientProxy.Object);
+        var hubContext = new Mock<IHubContext<PrinterHub>>();
+        hubContext.SetupGet(h => h.Clients).Returns(hubClients.Object);
+
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(() => new HttpClient());
+
+        var initialMmu = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clearedMmu = new TaskCompletionSource<PrinterStatusDto>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var statusCacheWriter = new Mock<IPrinterStatusCacheWriter>();
+        statusCacheWriter
+            .Setup(w => w.UpdateStatus(It.IsAny<PrinterStatusDto>(), It.IsAny<long?>()))
+            .Callback<PrinterStatusDto, long?>((dto, _) =>
+            {
+                if (dto.MmuStatus is not null)
+                {
+                    initialMmu.TrySetResult(dto);
+                }
+                else if (initialMmu.Task.IsCompleted)
+                {
+                    clearedMmu.TrySetResult(dto);
+                }
+            });
+
+        _service = new MoonrakerSubscriptionService(
+            hubContext.Object,
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            new TestOutputLogger<MoonrakerSubscriptionService>(_output),
+            httpClientFactory.Object,
+            statusCacheWriter.Object);
+
+        await _service.StartAsync(CancellationToken.None);
+        (await initialMmu.Task.WaitAsync(TimeSpan.FromSeconds(15))).MmuStatus.Should().NotBeNull();
+
+        await _host.ResetAsync();
+
+        PrinterStatusDto reset = await clearedMmu.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        reset.MmuStatus.Should().BeNull();
     }
 
     [Fact]

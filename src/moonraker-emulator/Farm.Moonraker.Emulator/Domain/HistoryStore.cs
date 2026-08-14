@@ -35,14 +35,7 @@ public sealed class HistoryStore
     private readonly List<HistoryJobEntry> _jobs = [];
     private readonly object _gate = new();
 
-    /// <summary>
-    /// Backing counter for <see cref="NextJobId"/>. Monotonic and process-lifetime-scoped
-    /// (never reset by a scenario/printer reset — resetting it while prior entries remain
-    /// in <see cref="_jobs"/> would let a new job collide with an old one's id). Starts at
-    /// 1 so the first newly recorded job is deterministically "job-0001", the second
-    /// "job-0002", and so on — reproducible for a fixed sequence of operations, unlike the
-    /// random GUID fragment this replaced.
-    /// </summary>
+    /// <summary>Backing counter for <see cref="NextJobId"/>.</summary>
     private int _nextJobSequence;
 
     public double TotalJobs { get; private set; }
@@ -103,12 +96,27 @@ public sealed class HistoryStore
     {
         lock (_gate)
         {
-            TotalJobs = 0;
-            TotalTime = 0;
-            TotalPrintTime = 0;
-            TotalFilamentUsed = 0;
-            LongestJob = 0;
-            LongestPrint = 0;
+            ResetTotalsLocked();
         }
+    }
+
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _jobs.Clear();
+            _nextJobSequence = 0;
+            ResetTotalsLocked();
+        }
+    }
+
+    private void ResetTotalsLocked()
+    {
+        TotalJobs = 0;
+        TotalTime = 0;
+        TotalPrintTime = 0;
+        TotalFilamentUsed = 0;
+        LongestJob = 0;
+        LongestPrint = 0;
     }
 }

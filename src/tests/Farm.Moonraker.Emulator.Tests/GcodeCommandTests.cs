@@ -54,10 +54,11 @@ public sealed class GcodeCommandTests : IClassFixture<ReadyPrinterFactory>
         using JsonDocument infoDoc = JsonDocument.Parse(await info.Content.ReadAsStringAsync());
         infoDoc.RootElement.GetProperty("result").GetProperty("state").GetString().Should().Be("shutdown");
 
-        // print_stats itself is only reachable while Klippy is ready, matching real
-        // Moonraker's 503 behavior once Klippy has shut down.
         using HttpResponseMessage query = await client.GetAsync("/printer/objects/query?print_stats");
-        query.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        query.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument queryDoc = JsonDocument.Parse(await query.Content.ReadAsStringAsync());
+        queryDoc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats")
+            .GetProperty("state").GetString().Should().Be("error");
 
         await client.PostAsync("/__emulator/printer/reset", content: null);
     }
@@ -174,12 +175,12 @@ public sealed class GcodeCommandTests : IClassFixture<ReadyPrinterFactory>
     }
 
     [Fact]
-    public async Task G28_WhilePrinting_Returns409Busy()
+    public async Task G28_WhilePrinting_ReturnsMoonrakerBadRequest()
     {
         using HttpClient client = await ClientWithScenarioAsync("Printing");
 
         using HttpResponseMessage response = await SendScriptAsync(client, "G28 Z");
-        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
         await client.PostAsync("/__emulator/printer/reset", content: null);
     }

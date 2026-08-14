@@ -31,9 +31,19 @@ public sealed class SpoolmanFixture
 
     public SpoolmanFixture()
     {
-        _spools[1] = new SpoolmanSpool { Id = 1, FilamentName = "Generic PLA", Material = "PLA", Color = "#FF0000" };
-        _spools[2] = new SpoolmanSpool { Id = 2, FilamentName = "Generic PETG", Material = "PETG", Color = "#00A0FF" };
-        ActiveSpoolId = 1;
+        Reset();
+    }
+
+    public void Reset()
+    {
+        lock (_gate)
+        {
+            _spools.Clear();
+            _spools[1] = new SpoolmanSpool { Id = 1, FilamentName = "Generic PLA", Material = "PLA", Color = "#FF0000" };
+            _spools[2] = new SpoolmanSpool { Id = 2, FilamentName = "Generic PETG", Material = "PETG", Color = "#00A0FF" };
+            Connected = true;
+            ActiveSpoolId = 1;
+        }
     }
 
     public IReadOnlyList<SpoolmanSpool> Spools()

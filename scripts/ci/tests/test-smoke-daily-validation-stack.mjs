@@ -27,6 +27,11 @@ test('smoke script boots the four-instance emulator topology via the generator',
     script,
     /export PRINTFARMER_BUILD_CONTEXT="\$\{PRINTFARMER_BUILD_CONTEXT:-\$REPO_ROOT\}"/,
   );
+  assert.match(
+    script,
+    /PRINTFARMER_DOCKERFILE.*scripts\/docker\/dockerfiles\/Dockerfile\.multistage/,
+    'local builds must use the tracked canonical Dockerfile rather than an ignored generated root copy',
+  );
   assert.match(script, /compose-generator\.sh/);
   assert.match(script, /--architecture microservices/);
   assert.match(script, /--include-discovery/);

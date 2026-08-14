@@ -189,4 +189,46 @@ public sealed class ControlApiScenarioAndTimeTests : IClassFixture<ReadyPrinterF
         doc.RootElement.GetProperty("result").GetProperty("status").GetProperty("print_stats").GetProperty("state")
             .GetString().Should().Be("standby");
     }
+
+    [Fact]
+    public async Task RootReset_RestoresFilesHistorySpoolmanAndMmuFixtures()
+    {
+        using HttpClient client = _factory.CreateClient();
+
+        (await client.DeleteAsync("/server/files/gcodes/benchy.gcode")).EnsureSuccessStatusCode();
+        (await client.DeleteAsync("/server/history/job?uid=seed0001")).EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/server/spoolman/spool_id",
+            TestRequests.Json("""{"spool_id":2}"""))).EnsureSuccessStatusCode();
+        (await client.PostAsync(
+            "/__emulator/printer/mmu",
+            TestRequests.Json("""{"mode":"Afc"}"""))).EnsureSuccessStatusCode();
+
+        using HttpResponseMessage reset = await client.PostAsync("/__emulator/reset", content: null);
+        reset.EnsureSuccessStatusCode();
+
+        using JsonDocument files = JsonDocument.Parse(await client.GetStringAsync("/server/files/list?root=gcodes"));
+        files.RootElement.GetProperty("result").EnumerateArray()
+            .Select(file => file.GetProperty("path").GetString())
+            .Should().Equal("benchy.gcode");
+
+        using JsonDocument history = JsonDocument.Parse(await client.GetStringAsync("/server/history/list?limit=100"));
+        JsonElement historyResult = history.RootElement.GetProperty("result");
+        historyResult.GetProperty("count").GetInt32().Should().Be(1);
+        JsonElement seededJob = historyResult.GetProperty("jobs").EnumerateArray().Single();
+        seededJob.GetProperty("job_id").GetString().Should().Be("seed0001");
+        seededJob.GetProperty("filename").GetString().Should().Be("calibration_cube.gcode");
+
+        using JsonDocument totals = JsonDocument.Parse(await client.GetStringAsync("/server/history/totals"));
+        JsonElement jobTotals = totals.RootElement.GetProperty("result").GetProperty("job_totals");
+        jobTotals.GetProperty("total_jobs").GetDouble().Should().Be(1);
+        jobTotals.GetProperty("total_print_time").GetDouble().Should().Be(3550);
+        jobTotals.GetProperty("total_filament_used").GetDouble().Should().Be(12.4);
+
+        using JsonDocument spool = JsonDocument.Parse(await client.GetStringAsync("/server/spoolman/spool_id"));
+        spool.RootElement.GetProperty("result").GetProperty("spool_id").GetInt32().Should().Be(1);
+
+        using JsonDocument mmu = JsonDocument.Parse(await client.GetStringAsync("/__emulator/printer/mmu"));
+        mmu.RootElement.GetProperty("mode").GetString().Should().Be("None");
+    }
 }

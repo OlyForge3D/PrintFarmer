@@ -26,9 +26,10 @@ import {
 test.describe('Printer History — Moonraker', () => {
   test.describe.configure({ mode: 'serial' });
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    await createMoonrakerControl(request).resetAll();
     await page.goto('/printers');
-    await page.waitForLoadState('networkidle');
+    await expect(getPrinterCardByName(page, MOONRAKER_PRINTERS.ready)).toBeVisible({ timeout: 15_000 });
     await dismissTourIfVisible(page);
   });
 
@@ -58,16 +59,13 @@ test.describe('Printer History — Moonraker', () => {
     await control.reset('printing');
   });
 
-  test('summary statistics reflect real totals, not zeroed placeholders', async ({ page }) => {
+  test('summary statistics match the exact reset baseline', async ({ page }) => {
     const dialog = await openPrinterHistory(page, MOONRAKER_PRINTERS.ready);
 
     await expect(dialog.getByText('Print Statistics')).toBeVisible();
-    await expect(dialog.getByText('Total Jobs')).toBeVisible();
-
-    const totalJobsCard = dialog.getByText('Total Jobs', { exact: true }).locator('../..');
-    const totalJobsText = (await totalJobsCard.textContent()) ?? '';
-    const totalJobs = Number(totalJobsText.replace(/[^\d]/g, ''));
-    expect(totalJobs, 'seeded history must contribute at least one job to the printer totals').toBeGreaterThan(0);
+    await expect(dialog.getByText('Total Jobs', { exact: true }).locator('../..')).toContainText('1');
+    await expect(dialog.getByText('Total Print Time', { exact: true }).locator('../..')).toContainText('59m 10s');
+    await expect(dialog.getByText('Total Filament', { exact: true }).locator('../..')).toContainText('12mm');
   });
 
   test('can change the number of jobs shown and the sort order', async ({ page }) => {
