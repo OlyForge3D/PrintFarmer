@@ -466,12 +466,21 @@ public class ArtifactCleanupService(
                 FileMode.Open,
                 FileAccess.ReadWrite,
                 FileShare.None);
-            if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
-                    leaseStream))
+            try
             {
-                leaseStream.Dispose();
+                if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
+                        leaseStream))
+                {
+                    leaseStream.Dispose();
+                    leaseStream = null;
+                    return false;
+                }
+            }
+            catch
+            {
+                leaseStream?.Dispose();
                 leaseStream = null;
-                return false;
+                throw;
             }
 
             return true;
