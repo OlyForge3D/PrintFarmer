@@ -4608,7 +4608,18 @@ EOF
         AUTO_ADMIN_PASSWORD=$(generate_random_password)
         print_info "Generated random pgAdmin password (saved to env file)"
     fi
-    
+
+    # Only emit ORCA_WORKER_INSTANCE_ID when it has a real value. Leaving the
+    # entire line out (rather than writing it with an empty value) when scaled
+    # keeps `${ORCA_WORKER_INSTANCE_ID:-}` substitution in the compose template
+    # behaving identically, while avoiding an env file key that looks like a
+    # stable identity was assigned to what are actually distinct replicas
+    # (issue #1528).
+    ORCA_WORKER_INSTANCE_ID_ENV_LINE=""
+    if [ -n "$ORCA_WORKER_INSTANCE_ID" ]; then
+        ORCA_WORKER_INSTANCE_ID_ENV_LINE="ORCA_WORKER_INSTANCE_ID=$ORCA_WORKER_INSTANCE_ID"
+    fi
+
     cat >> "$ENV_FILE" << EOF
 
 # Monitoring & Observability Credentials
@@ -4637,9 +4648,9 @@ ENABLE_DISTRIBUTED_SLICING=$ENABLE_DISTRIBUTED_SLICING
 ORCA_WORKER_COUNT=$ORCA_WORKER_COUNT
 ENABLE_ORCA_WORKER=$ENABLE_ORCA_WORKER
 ORCA_HOST_PORT=$ORCA_HOST_PORT
-# Stable worker identity for redeploys of a single (non-scaled) worker; blank
-# when scaled so replicas keep distinct, per-process identities (issue #1528).
-ORCA_WORKER_INSTANCE_ID=$ORCA_WORKER_INSTANCE_ID
+# Stable worker identity for redeploys of a single (non-scaled) worker; omitted
+# entirely when scaled so replicas keep distinct, per-process identities (issue #1528).
+$ORCA_WORKER_INSTANCE_ID_ENV_LINE
 
 # Profile Task Check - auto-disable when slicing workers are disabled
 PROFILE_TASK_CHECK_ENABLED=$([ "$ENABLE_ORCA_WORKER" = "yes" ] && echo "true" || echo "false")

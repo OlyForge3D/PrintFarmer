@@ -1498,9 +1498,11 @@ EOF
     local env_content
     env_content=$(cat "$env_file")
 
-    # Verify the canonical bootstrap input is present without a reusable process identity.
+    # Verify the canonical bootstrap input is present, plus the stable per-process
+    # instance identity that lets a single (non-scaled) worker upsert its existing
+    # record across redeploys instead of accumulating a duplicate (issue #1528).
     assert_contains "$env_content" "WORKER_SHARED_API_KEY=" "Should configure the API and worker with a bootstrap key"
-    assert_not_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=" "Single workers must derive fresh runtime identities"
+    assert_contains "$env_content" "ORCA_WORKER_INSTANCE_ID=orcaslicer-worker-1" "Single (non-scaled) workers must reuse a stable runtime identity across redeploys"
     assert_not_contains "$env_content" "SlicerRegistry__ApiKey=" "Should not emit the removed registry-key alias"
 
     local shared_key_line
