@@ -524,6 +524,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 variant="ghost"
                 size="sm"
                 disabled
+                explainedDisabled
                 className="h-8 w-8 p-0 text-pf-text-secondary"
                 aria-label={`Printer browser URL unavailable for ${printer.name}`}
                 title="Printer browser URL is unavailable"

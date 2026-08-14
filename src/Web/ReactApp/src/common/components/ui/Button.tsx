@@ -15,6 +15,20 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   iconCenter?: React.ReactNode;
   /** For tab variant: whether this tab is currently active/selected */
   active?: boolean;
+  /**
+   * Opt-in "explained disabled" mode for actions that carry a `title`/`aria-label`
+   * explaining *why* they're unavailable (e.g. "Printer browser URL is unavailable").
+   * When combined with `disabled` (or `loading`), renders `aria-disabled="true"` +
+   * `tabIndex={0}` instead of the native `disabled` attribute — keeping the button in
+   * the Tab order so keyboard users can reach it and discover the explanation — and
+   * suppresses click/keyboard activation in the click handler. The native
+   * `disabled:opacity-50 disabled:cursor-not-allowed` styling is reproduced via the
+   * `data-pf-disabled-explained` attribute, since `:disabled` no longer applies.
+   *
+   * Do not use this for buttons with no explanatory text — those should stay
+   * natively disabled via the `disabled` prop alone. See #1554.
+   */
+  explainedDisabled?: boolean;
   children?: React.ReactNode;
 }
 
@@ -53,12 +67,16 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
     size = 'md',
     loading = false,
     disabled,
+    explainedDisabled = false,
     className,
     iconLeft,
     iconRight,
     iconCenter,
     active,
     children,
+    onClick,
+    tabIndex,
+    'aria-disabled': ariaDisabledProp,
     ...rest
   },
   ref
@@ -78,12 +96,28 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
   const applyRingOffset = variant !== 'ghost' && variant !== 'link' && variant !== 'unstyled';
   const defaultRadiusClass = variant === 'tab' ? 'rounded-none' : 'rounded-xs';
 
+  // "Explained disabled" only takes effect when the button is actually disabled
+  // (via `disabled` or `loading`); otherwise it's a no-op so callers can pass the
+  // prop unconditionally alongside `disabled={someCondition}`.
+  const isDisabled = Boolean(disabled) || loading;
+  const useExplainedDisabled = explainedDisabled && isDisabled;
+
+  const handleClick = useExplainedDisabled
+    ? (event: React.MouseEvent<HTMLButtonElement>) => {
+        // Suppress activation. Native <button> elements fire a click event for
+        // both mouse clicks and keyboard activation (Enter/Space), so this
+        // single handler covers both without a separate onKeyDown.
+        event.preventDefault();
+      }
+    : onClick;
+
   return (
     <button
       ref={ref}
       data-pf-button
       data-pf-variant={variant}
       data-pf-active={isActiveTab ? '' : undefined}
+      data-pf-disabled-explained={useExplainedDisabled ? '' : undefined}
       className={clsx(
         applyBaseStyles &&
           'font-medium inline-flex items-center justify-center gap-2 whitespace-nowrap transition-all duration-200 enabled:cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus:outline-hidden focus-visible:ring-2 focus-visible:ring-pf-accent',
@@ -93,9 +127,15 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function 
         applySizeClasses && sizeClasses[size],
         // center icon style when iconCenter provided
         iconCenter && 'justify-center',
+        // Reproduces disabled:opacity-50 disabled:cursor-not-allowed above, since
+        // the native :disabled pseudo-class no longer applies in this mode.
+        useExplainedDisabled && 'opacity-50 cursor-not-allowed',
         className
       )}
-      disabled={disabled || loading}
+      disabled={useExplainedDisabled ? undefined : isDisabled}
+      aria-disabled={useExplainedDisabled ? true : ariaDisabledProp}
+      tabIndex={useExplainedDisabled ? 0 : tabIndex}
+      onClick={handleClick}
       {...rest}
     >
       {iconLeft && <span className="flex items-center" aria-hidden>{iconLeft}</span>}

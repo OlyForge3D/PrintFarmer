@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { Button } from '@/common/components/ui/Button';
 
 const FORBIDDEN_PAINT_PATTERNS: Array<[string, RegExp]> = [
@@ -236,6 +237,76 @@ describe('Button', () => {
       
       const button = screen.getByRole('button');
       expect(button).toBeDisabled();
+    });
+  });
+
+  describe('explainedDisabled (#1554)', () => {
+    it('renders aria-disabled + tabIndex=0 instead of native disabled', () => {
+      render(
+        <Button disabled explainedDisabled title="Unavailable">
+          Open in Browser
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Open in Browser' });
+      expect(button).not.toBeDisabled();
+      expect(button).toHaveAttribute('aria-disabled', 'true');
+      expect(button).toHaveAttribute('tabIndex', '0');
+      expect(button).toHaveAttribute('data-pf-disabled-explained', '');
+    });
+
+    it('reproduces the disabled opacity/cursor styling via classes', () => {
+      render(
+        <Button disabled explainedDisabled title="Unavailable">
+          Open in Browser
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Open in Browser' });
+      expect(button).toHaveClass('opacity-50', 'cursor-not-allowed');
+    });
+
+    it('suppresses onClick when explained-disabled', async () => {
+      const onClick = vi.fn();
+      const user = userEvent.setup();
+
+      render(
+        <Button disabled explainedDisabled onClick={onClick} title="Unavailable">
+          Open in Browser
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Open in Browser' });
+      await user.click(button);
+      await user.type(button, '{Enter}');
+      await user.type(button, ' ');
+
+      expect(onClick).not.toHaveBeenCalled();
+    });
+
+    it('remains keyboard-focusable, unlike a natively disabled button', () => {
+      render(
+        <Button disabled explainedDisabled title="Unavailable">
+          Open in Browser
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Open in Browser' });
+      button.focus();
+      expect(button).toHaveFocus();
+    });
+
+    it('is a no-op when the button is not otherwise disabled', () => {
+      render(
+        <Button explainedDisabled onClick={() => {}}>
+          Enabled
+        </Button>
+      );
+
+      const button = screen.getByRole('button', { name: 'Enabled' });
+      expect(button).not.toBeDisabled();
+      expect(button).not.toHaveAttribute('aria-disabled');
+      expect(button).not.toHaveAttribute('data-pf-disabled-explained');
     });
   });
 

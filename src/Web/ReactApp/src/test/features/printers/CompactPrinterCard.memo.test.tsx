@@ -322,7 +322,9 @@ describe('CompactPrinterCard memoization', () => {
     await user.click(screen.getByRole('button', { name: 'More options' }));
 
     expect(screen.queryByRole('link', { name: /open in browser/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open in Browser' })).toBeDisabled();
+    const fallbackButton = screen.getByRole('button', { name: 'Open in Browser' });
+    expect(fallbackButton).not.toBeDisabled();
+    expect(fallbackButton).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('reads the shared queue-summary fleet query by printer id instead of polling its own queue', () => {
