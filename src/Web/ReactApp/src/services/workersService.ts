@@ -29,7 +29,7 @@ class WorkersService {
    * Get all workers
    */
   async getAllWorkers(limit: number = 100, offset: number = 0): Promise<WorkerResponse[]> {
-    const response = await apiClient.get<WorkerResponse[]>(`/workers?limit=${limit}&offset=${offset}`);
+    const response = await apiClient.get<WorkerResponse[]>(`/workers/?limit=${limit}&offset=${offset}`);
     return response.data;
   }
 

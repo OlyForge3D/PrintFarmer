@@ -69,7 +69,7 @@ describe('workersService', () => {
 
       const result = await workersService.getAllWorkers();
 
-      expect(apiClient.get).toHaveBeenCalledWith('/workers?limit=100&offset=0');
+      expect(apiClient.get).toHaveBeenCalledWith('/workers/?limit=100&offset=0');
       expect(result).toEqual(mockWorkers);
       expect(result).toHaveLength(2);
     });
@@ -81,7 +81,7 @@ describe('workersService', () => {
 
       const result = await workersService.getAllWorkers(50, 100);
 
-      expect(apiClient.get).toHaveBeenCalledWith('/workers?limit=50&offset=100');
+      expect(apiClient.get).toHaveBeenCalledWith('/workers/?limit=50&offset=100');
       expect(result).toEqual(mockWorkers);
     });
   });
