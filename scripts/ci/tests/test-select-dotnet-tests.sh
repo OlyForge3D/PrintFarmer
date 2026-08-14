@@ -633,6 +633,86 @@ case_ci_script_change() {
   assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
 }
 
+case_ci_other_workflow_change_no_dotnet() {
+  # Regression (#1562): editing an unrelated workflow must not force the
+  # full .NET matrix. Only .github/workflows/ci.yml (and the other narrow
+  # ci_selector paths) remain full-safe; every other workflow is ci_other.
+  local out="$1"
+  CHANGED_FILES=".github/workflows/docs-health.yml"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_frontend" "$(get_output "$out" want_frontend)" "false" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason ci-other" "$reason" "ci-other" || return 1
+}
+
+case_ci_other_ci_script_change_no_dotnet() {
+  # A script under scripts/ci/** that is NOT select-dotnet-tests.sh or
+  # compute-change-set.sh (e.g. its own test file, or an unrelated CI script)
+  # must be ci_other, not ci_selector.
+  local out="$1"
+  CHANGED_FILES="scripts/ci/tests/test-daily-development-images.mjs"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+}
+
+case_compute_change_set_script_change_full_safe() {
+  # scripts/ci/compute-change-set.sh feeds the selector's own input and must
+  # remain full-safe.
+  local out="$1"
+  CHANGED_FILES="scripts/ci/compute-change-set.sh"
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+}
+
+case_pr1562_file_set_narrowed_no_dotnet() {
+  # Regression (#1562): this exact three-file change set must no longer
+  # force the full .NET matrix.
+  local out="$1"
+  CHANGED_FILES=$'.github/workflows/daily-development-images.yml\nscripts/ci/tests/test-daily-development-images.mjs\nscripts/docker/dockerfiles/Dockerfile.multistage'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  assert_eq "matrix" "$(get_output "$out" matrix)" '{"include":[]}' || return 1
+}
+
+case_ci_other_mixed_with_api_still_selects_api() {
+  # A ci_other workflow change alongside a real .NET change must not
+  # suppress the real signal — api-scoped tests/migrations still run.
+  local out="$1"
+  CHANGED_FILES=$'.github/workflows/docs-health.yml\nsrc/api/Controllers/PrintersController.cs'
+  EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
+    CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
+    select_run >/dev/null 2>&1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "true" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "true" || return 1
+  assert_eq "want_mig_drift" "$(get_output "$out" want_mig_drift)" "true" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
+  local matrix ; matrix="$(get_output "$out" matrix)"
+  assert_contains "matrix api" "$matrix" "Farm.Web.Api.Tests" || return 1
+  assert_contains "matrix integration" "$matrix" "Farm.Web.IntegrationTests" || return 1
+  local mig ; mig="$(get_output "$out" mig_matrix)"
+  assert_contains "mig app pg" "$mig" '"name":"AppPg"' || return 1
+  local reason ; reason="$(get_output "$out" reason)"
+  assert_contains "reason ci-other" "$reason" "ci-other" || return 1
+  assert_contains "reason api" "$reason" "api" || return 1
+}
+
 case_tools_only_build_no_tests() {
   local out="$1"
   CHANGED_FILES="src/tools/AdminCli/Program.cs"
@@ -1028,13 +1108,17 @@ case_multi_bucket_dedup() {
   fi
 }
 
-case_devcontainer_change_full_safe() {
+case_devcontainer_change_no_dotnet() {
+  # .devcontainer/** does not govern .NET test selection; it is ci_other,
+  # not full-safe.
   local out="$1"
   CHANGED_FILES=".devcontainer/devcontainer.json"
   EVENT_NAME="pull_request" BASE_REF="development" FORCE_FULL_SAFE="" \
     CHANGED_FILES_FROM_Z="" CHANGED_FILES="$CHANGED_FILES" \
     select_run >/dev/null 2>&1
-  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "true" || return 1
+  assert_eq "want_dotnet_build" "$(get_output "$out" want_dotnet_build)" "false" || return 1
+  assert_eq "want_dotnet_test" "$(get_output "$out" want_dotnet_test)" "false" || return 1
+  assert_eq "full_matrix" "$(get_output "$out" full_matrix)" "false" || return 1
 }
 
 case_discovery_full_safe() {
@@ -2272,6 +2356,11 @@ TESTS=(
   case_ci_workflow_change
   case_hook_file_change
   case_ci_script_change
+  case_ci_other_workflow_change_no_dotnet
+  case_ci_other_ci_script_change_no_dotnet
+  case_compute_change_set_script_change_full_safe
+  case_pr1562_file_set_narrowed_no_dotnet
+  case_ci_other_mixed_with_api_still_selects_api
   case_tools_only_build_no_tests
   case_mobile_change_no_dotnet
   case_merge_base_diverged_pr_base_sha_mobile_only
@@ -2288,7 +2377,7 @@ TESTS=(
   case_git_quoted_path_forces_full_safe
   case_hostile_metachar_in_reason_stripped
   case_multi_bucket_dedup
-  case_devcontainer_change_full_safe
+  case_devcontainer_change_no_dotnet
   case_discovery_full_safe
   case_settings_full_safe
   case_mixed_react_and_dotnet
