@@ -127,7 +127,7 @@ test('registry and local validation overlays cover the complete stack', () => {
     '127.0.0.1:${HTTP_PORT:-18080}:80',
     '127.0.0.1:${HTTPS_PORT:-18443}:443',
   ]) {
-    assert.match(validationOverlay, new RegExp(binding.replace(/[${}]/g, '\\$&')));
+    assert.ok(validationOverlay.includes(binding), `Missing port binding: ${binding}`);
   }
   assert.match(validationOverlay, /name: printfarmer-daily-validation-network/);
   assert.match(
