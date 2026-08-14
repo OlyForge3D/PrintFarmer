@@ -3,6 +3,10 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 const workflow = readFileSync('.github/workflows/daily-development-images.yml', 'utf8');
+const dockerfile = readFileSync(
+  'scripts/docker/dockerfiles/Dockerfile.multistage',
+  'utf8',
+);
 const dailyRegistryOverlay = readFileSync(
   'scripts/docker/compose-templates/docker-compose.daily-registry.yml',
   'utf8',
@@ -62,6 +66,29 @@ test('all required images validate before publication', () => {
   assert.equal(workflow.match(/uses: docker\/build-push-action@v7/g)?.length, 1);
   assert.match(workflow, /packages: write/);
   assert.match(workflow, /password: \$\{\{ secrets\.GITHUB_TOKEN \}\}/);
+});
+
+test('API image includes the runtime-selected SQLite slicer migrations', () => {
+  assert.match(
+    dockerfile,
+    /dotnet build \.\/migrations\/Farm\.Slicer\.Migrations\.Sqlite\/Farm\.Slicer\.Migrations\.Sqlite\.csproj -c Release -o \/app\/publish\/api\/plugins\/slicer/,
+  );
+  assert.match(
+    dockerfile,
+    /\[ -f \/app\/publish\/api\/plugins\/slicer\/Farm\.Slicer\.Migrations\.Sqlite\.dll \]/,
+  );
+});
+
+test('slicer-host smoke check supplies its required worker shared key', () => {
+  const slicerHostSmoke = workflow.slice(
+    workflow.indexOf('            slicer-host)'),
+    workflow.indexOf('            orcaslicer-worker)'),
+  );
+
+  assert.match(
+    slicerHostSmoke,
+    /--env 'WorkerAuth__SharedKey=daily-image-smoke-only-worker-key'/,
+  );
 });
 
 test('publication uses run-unique tags and emits one coherent digest manifest', () => {
