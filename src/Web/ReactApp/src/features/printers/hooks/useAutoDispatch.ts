@@ -29,6 +29,68 @@ const KEYS = {
 const autoDispatchQueryClients = new Set<QueryClient>();
 let autoDispatchSignalRUnsubscribe: (() => void) | undefined;
 
+// Shared freshness window for the KEYS.globalStatus query. All consumers
+// (useAutoDispatchGlobalStatus, useAutoDispatchStatus, useAllAutoDispatchStatuses)
+// must agree on the same staleTime/refetchInterval so that whichever one mounts
+// first and whichever one mounts second draw the identical "is this still
+// fresh?" conclusion. Divergent per-hook staleTime values previously let a
+// later-mounting consumer decide the shared cache entry was already stale
+// and re-trigger a fetch (#1547).
+const GLOBAL_STATUS_STALE_TIME_MS = 8_000;
+const GLOBAL_STATUS_REFETCH_INTERVAL_MS = 10_000;
+
+// Single-flight guard around the GET /api/auto-dispatch/status request itself.
+// TanStack Query already dedupes concurrent fetches for observers that share
+// one Query instance in one QueryClient, but that guarantee only holds once
+// every mounted consumer has actually subscribed to the *same* in-flight
+// fetch. On a cold navigation, Layout's useAllAutoDispatchStatuses and the
+// lazy-loaded dashboard's useAutoDispatchGlobalStatus can each independently
+// decide (via shouldFetchOnMount) to call queryFn before the other has
+// subscribed, producing two real HTTP requests moments apart (#1547). This
+// wrapper collapses any overlapping calls into the one underlying request
+// regardless of the exact observer-mount timing that triggered them.
+let inflightGlobalStatusRequest: Promise<AutoDispatchGlobalStatus> | null = null;
+
+function fetchAutoDispatchGlobalStatus(): Promise<AutoDispatchGlobalStatus> {
+  if (!inflightGlobalStatusRequest) {
+    const request: Promise<AutoDispatchGlobalStatus> = apiClient.getAutoDispatchStatus().finally(() => {
+      // Only clear the guard if it still points at *this* request. A forced
+      // refresh (see resetAutoDispatchGlobalStatusInFlight below) may have
+      // already replaced it with a newer in-flight request by the time this
+      // older one settles; clearing unconditionally here would wipe out
+      // tracking for that newer, still-pending request.
+      if (inflightGlobalStatusRequest === request) {
+        inflightGlobalStatusRequest = null;
+      }
+    });
+    inflightGlobalStatusRequest = request;
+  }
+  return inflightGlobalStatusRequest;
+}
+
+/**
+ * Drops the single-flight guard so the next call to
+ * fetchAutoDispatchGlobalStatus() issues a brand-new HTTP request instead of
+ * reusing whatever request (e.g. a still-pending background poll) happened
+ * to be in flight. Explicit mutation invalidation/refetch must never be
+ * satisfied by a pre-mutation response, so every mutation success/error
+ * handler that invalidates or refetches KEYS.globalStatus (or the broader
+ * KEYS.all prefix, which includes it) calls this first.
+ */
+function resetAutoDispatchGlobalStatusInFlight() {
+  inflightGlobalStatusRequest = null;
+}
+
+/**
+ * Test-only escape hatch. Vitest does not reset this module's top-level
+ * state between `it()` blocks within the same test file, so a leftover
+ * in-flight promise reference from one test could otherwise leak into the
+ * next and mask real dedup regressions. Call this in `beforeEach`.
+ */
+export function __resetAutoDispatchGlobalStatusSingleFlightForTests() {
+  resetAutoDispatchGlobalStatusInFlight();
+}
+
 function mergeStatusSnapshot<T extends AutoDispatchStatus>(
   previousStatus: T | undefined,
   nextStatus: AutoDispatchStatus,
@@ -141,6 +203,9 @@ async function handleMutationError(
 ) {
   const status = mutationErrorStatus(error);
   if (status === 412 || status === 428) {
+    // Force a genuinely fresh fetch rather than reusing whatever background
+    // poll happened to be in flight when this conflict was detected.
+    resetAutoDispatchGlobalStatusInFlight();
     const exactRefetch = printerId
       ? queryClient.refetchQueries({
           queryKey: KEYS.status(printerId),
@@ -199,9 +264,9 @@ export function useAutoDispatchGlobalStatus() {
   useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
-    staleTime: 10_000,
-    refetchInterval: 10_000,
+    queryFn: fetchAutoDispatchGlobalStatus,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
   });
 }
 
@@ -213,12 +278,12 @@ export function useAutoDispatchStatus(printerId: string) {
   useAutoDispatchSignalRSync();
   return useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
+    queryFn: fetchAutoDispatchGlobalStatus,
     select: (data: AutoDispatchGlobalStatus) =>
       data.printers.find(s => s.printerId === printerId),
     enabled: !!printerId,
-    refetchInterval: 10_000,
-    staleTime: 8_000,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
   });
 }
 
@@ -244,6 +309,7 @@ export function useSetAutoDispatchEnabled() {
       );
     },
     onSuccess: () => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
     onError: (error, variables) =>
@@ -266,9 +332,10 @@ export function useAllAutoDispatchStatuses() {
   useAutoDispatchSignalRSync();
   const query = useQuery({
     queryKey: KEYS.globalStatus,
-    queryFn: () => apiClient.getAutoDispatchStatus(),
+    queryFn: fetchAutoDispatchGlobalStatus,
     select: (data: AutoDispatchGlobalStatus) => data.printers ?? [],
-    refetchInterval: 10_000,
+    staleTime: GLOBAL_STATUS_STALE_TIME_MS,
+    refetchInterval: GLOBAL_STATUS_REFETCH_INTERVAL_MS,
   });
 
   const data = query.data;
@@ -296,6 +363,7 @@ export function useSetAllAutoDispatchEnabled() {
       await apiClient.setAutoDispatchGlobalEnabled(enabled, statuses);
     },
     onSuccess: () => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.all });
     },
     onError: (error) =>
@@ -360,6 +428,7 @@ export function useConfirmBedClear() {
       if (data.kind === 'standard') {
         syncAutoDispatchCaches(qc, data.result.status);
       }
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       qc.invalidateQueries({ queryKey: ['job-queue'] });
@@ -496,6 +565,7 @@ export function useSkipNextJob() {
       );
     },
     onSuccess: (_data, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
@@ -514,6 +584,7 @@ export function useCancelAutoDispatch() {
       );
     },
     onSuccess: (_data, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
     },
@@ -531,6 +602,7 @@ export function usePreClearBed() {
         requireStatusEtag(status.dispatchStateETag, 'Dispatch-state ETag')
       ),
     onSuccess: (result, status) => {
+      resetAutoDispatchGlobalStatusInFlight();
       qc.invalidateQueries({ queryKey: KEYS.status(status.printerId) });
       qc.invalidateQueries({ queryKey: KEYS.globalStatus });
       if (result.bedPreConfirmed) {
