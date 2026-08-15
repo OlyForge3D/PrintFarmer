@@ -175,27 +175,27 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   const [isVersionExpanded, setIsVersionExpanded] = useState(false);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
 
-  // Collapsed Material-Slots/Spool badges can render entirely from data
-  // already loaded without a details fetch (`mmuStatus`/`printer.spoolInfo`
-  // cover the AMS/MMU and single-spool cases respectively). The only
-  // collapsed (no click required) case that genuinely needs
-  // `printerDetails.toolheads` is a printer with independent physical
-  // toolheads that ISN'T reflected via MMU gates — there is no other signal
-  // available before the fetch, so that one case stays eager. Every other
-  // card defers the request until the Z-Offset wizard (this component's
-  // other `printerDetails` consumer) is actually opened (#1146 item 4).
-  // Also fetch eagerly when live MMU gates are present — the persisted
-  // toolhead topology is what lets `MaterialLoadout` map live gate indices
-  // (offset by the shared hotend on an MMU) safely to backend API indices.
-  // Without it, an assignment to gate 1 could land on physical hotend index 0.
-  const hasMmuGateData = !!(mmuStatus?.gates && mmuStatus.gates.length > 0);
-  const needsCollapsedToolheadProbe = !hasMmuGateData;
+  // This card always needs `printerDetails` once Spoolman is ready, because
+  // every path it can take needs the persisted toolhead topology:
+  //   - No live MMU gates: `printerDetails.toolheads` is the only signal that
+  //     distinguishes a printer with independent physical toolheads, and the
+  //     collapsed badges must render without a click.
+  //   - Live MMU gates present: the persisted topology is what lets
+  //     `MaterialLoadout` map a live gate index (offset by the shared hotend)
+  //     to the backend API index. Without it `hasResolvedTopology` is false and
+  //     the module blocks every assignment, so the materials UI is a dead end.
+  //   - Z-Offset wizard: this component's other `printerDetails` consumer.
+  //
+  // Those cases are exhaustive, so there is deliberately NO deferral condition
+  // here. #1146 item 4 originally deferred the fetch until the wizard opened;
+  // the MMU index-mapping requirement above superseded that, since deferring
+  // would leave the materials module permanently unable to assign a spool.
+  // Do not reintroduce a condition on MMU gate presence — a gate-based
+  // predicate is what silently produced that dead end.
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled:
-        spoolmanReady &&
-        (needsCollapsedToolheadProbe || hasMmuGateData || showZOffsetWizard),
+      enabled: spoolmanReady,
       staleTime: 60000,
     }
   );
