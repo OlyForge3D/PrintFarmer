@@ -88,6 +88,13 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
     console.log('[PrintFarmer] PrinterHistoryModal render:', { isOpen, printerName: printer.name, printerId: printer.id });
   }
 
+  // Only fetch history/totals while the modal is actually open and the printer
+  // is reachable. `PrinterHistoryModal` is mounted unconditionally by the printer
+  // cards (visibility is controlled by `isOpen`), so without this gate every
+  // printer card — including offline ones — would fire these requests on mount,
+  // and react-query's default retries would amplify each failure (see #1589).
+  const canFetchHistory = isOpen && printer.isOnline;
+
   const { 
     data: historyData, 
     isLoading, 
@@ -95,13 +102,14 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
     refetch 
   } = usePrinterHistory(
     printer.id, 
-    { limit, order }
+    { limit, order },
+    { enabled: canFetchHistory }
   );
 
   const { 
     data: totalsData,
     isLoading: totalsLoading 
-  } = usePrinterHistoryTotals(printer.id);
+  } = usePrinterHistoryTotals(printer.id, { enabled: canFetchHistory });
 
   const modalBody = (
     <div className="space-y-6">
