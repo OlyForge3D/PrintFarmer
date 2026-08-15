@@ -777,6 +777,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
+            foreach (HistoryJob job in requestedJobs)
+            {
+                job.ThumbnailUrl = ResolveThumbnailUrl(normalizedBaseUrl, job.ThumbnailUrl);
+            }
+
             bool coversRequestedRange = requiresFullScan
                 ? reachedSourceEnd
                 : requestedLimit.HasValue &&
@@ -873,6 +878,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     $"PrusaLink returned malformed history detail for {jobId}.");
             }
 
+            parsed.ThumbnailUrl = ResolveThumbnailUrl(normalizedBaseUrl, parsed.ThumbnailUrl);
             return parsed;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1055,6 +1061,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 stateProp.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(stateProp.GetString());
             string? filename = null;
+            string? thumbnailRelativePath = null;
             if (jobElement.TryGetProperty("job", out JsonElement jobProp) &&
                 jobProp.ValueKind == JsonValueKind.Object &&
                 jobProp.TryGetProperty("file", out JsonElement fileProp) &&
@@ -1063,6 +1070,17 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 nameProp.ValueKind == JsonValueKind.String)
             {
                 filename = nameProp.GetString();
+
+                // PrusaLink's history entries mirror the /api/v1/files file shape, exposing a
+                // relative thumbnail reference under job.file.refs.thumbnail. Capture it here;
+                // callers resolve it to an absolute URL once the request base URL is known.
+                if (fileProp.TryGetProperty("refs", out JsonElement refsProp) &&
+                    refsProp.ValueKind == JsonValueKind.Object &&
+                    refsProp.TryGetProperty("thumbnail", out JsonElement thumbnailProp) &&
+                    thumbnailProp.ValueKind == JsonValueKind.String)
+                {
+                    thumbnailRelativePath = thumbnailProp.GetString();
+                }
             }
 
             bool hasFilename = !string.IsNullOrWhiteSpace(filename);
@@ -1083,6 +1101,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             if (hasFilename)
             {
                 job.Filename = filename!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(thumbnailRelativePath))
+            {
+                // Stored as-is (possibly relative) here; resolved to an absolute URL by the
+                // caller, which knows the request's base URL.
+                job.ThumbnailUrl = thumbnailRelativePath;
             }
 
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind == JsonValueKind.Number)
@@ -1114,6 +1139,26 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Resolves a possibly-relative PrusaLink thumbnail reference (e.g. from
+    /// job.file.refs.thumbnail) to an absolute URL against the printer's base URL, matching
+    /// the pattern used for live job status thumbnails elsewhere in the PrusaLink integration.
+    /// </summary>
+    private static string? ResolveThumbnailUrl(string baseUrl, string? thumbnailPath)
+    {
+        if (string.IsNullOrWhiteSpace(thumbnailPath))
+        {
+            return null;
+        }
+
+        if (thumbnailPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            return thumbnailPath;
+        }
+
+        return new Uri(new Uri(baseUrl.TrimEnd('/')), thumbnailPath).ToString();
     }
 
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(

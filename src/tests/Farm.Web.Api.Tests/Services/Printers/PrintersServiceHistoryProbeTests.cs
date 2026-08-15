@@ -195,6 +195,49 @@ public sealed class PrintersServiceHistoryProbeTests
     }
 
     [Fact]
+    public async Task ProbeHistoryListAsync_BackendPopulatedThumbnailUrlIsPreserved()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        var historyWithThumbnail = new HistoryListResponse
+        {
+            Count = 1,
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "job-1",
+                    Filename = "calibration.gcode",
+                    Status = "completed",
+                    ThumbnailUrl = "http://prusalink/api/v1/files/local/calibration.gcode/thumb",
+                },
+            ],
+            AuthorityEvidence = CompleteEvidence(1),
+        };
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(historyWithThumbnail);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Authoritative);
+        result.History!.Jobs.Should().ContainSingle()
+            .Which.ThumbnailUrl.Should().Be(
+                "http://prusalink/api/v1/files/local/calibration.gcode/thumb");
+    }
+
+    [Fact]
     public async Task ProbeHistoryListAsync_NonNullWithoutCompletenessEvidenceIsError()
     {
         await using AppDbContext db = CreateDbContext();
@@ -287,6 +330,34 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(HistoryDetailProbeStatus.Found);
         result.Job!.JobId.Should().Be("provider-job");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_BackendPopulatedThumbnailUrlIsPreserved()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                "provider-job",
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob
+            {
+                JobId = "provider-job",
+                Filename = "calibration.gcode",
+                ThumbnailUrl = "http://prusalink/api/v1/files/local/calibration.gcode/thumb",
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Found);
+        result.Job!.ThumbnailUrl.Should().Be(
+            "http://prusalink/api/v1/files/local/calibration.gcode/thumb");
     }
 
     [Fact]
