@@ -1,4 +1,4 @@
-import { test as base, expect, type Page, type Locator } from '@playwright/test';
+import { test as base, expect, type Page, type Locator, type APIRequestContext } from '@playwright/test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -255,22 +255,7 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
 
   try {
     // We hold the lock — create admin (pristine database only) and login
-    const setupStatus = await page.request.get(`${API_BASE_URL}/api/setup/status`);
-    const setupData = await setupStatus.json();
-
-    if (setupData.needsSetup) {
-      await page.request.post(`${API_BASE_URL}/api/setup/initial-admin`, {
-        data: {
-          username: ADMIN.username,
-          email: ADMIN.email,
-          password: ADMIN.password,
-          firstName: ADMIN.firstName,
-          lastName: ADMIN.lastName,
-        },
-      });
-    }
-
-    const token = await loginDirect(page);
+    const token = await provisionAdminAndLogin(page.request, (ms) => page.waitForTimeout(ms));
     if (token) {
       fs.writeFileSync(TOKEN_CACHE_FILE, JSON.stringify({ token, ts: Date.now() }));
     }
@@ -278,6 +263,41 @@ async function getOrCreateToken(page: Page): Promise<string | undefined> {
   } finally {
     try { fs.unlinkSync(lockFile); } catch { /* ignore */ }
   }
+}
+
+/**
+ * Core `needsSetup` branching for issue #1586, extracted from
+ * {@link getOrCreateToken} so it can be exercised directly in unit tests
+ * against a fake `request` client instead of a real Playwright `Page`.
+ *
+ * - `needsSetup: true` (pristine database): self-provisions `ADMIN` via
+ *   `POST /api/setup/initial-admin`, exactly as before, then logs in.
+ * - `needsSetup: false` (an admin already exists — e.g. the daily
+ *   immutable-image harness's own validation admin): skips provisioning
+ *   entirely and logs in directly. This only succeeds when `ADMIN` reflects
+ *   an externally supplied account (`E2E_ADMIN_USERNAME`/`E2E_ADMIN_PASSWORD`)
+ *   matching the account that already exists.
+ */
+export async function provisionAdminAndLogin(
+  request: Pick<APIRequestContext, 'get' | 'post'>,
+  wait: (ms: number) => Promise<void> = async () => undefined,
+): Promise<string | undefined> {
+  const setupStatus = await request.get(`${API_BASE_URL}/api/setup/status`);
+  const setupData = await setupStatus.json();
+
+  if (setupData.needsSetup) {
+    await request.post(`${API_BASE_URL}/api/setup/initial-admin`, {
+      data: {
+        username: ADMIN.username,
+        email: ADMIN.email,
+        password: ADMIN.password,
+        firstName: ADMIN.firstName,
+        lastName: ADMIN.lastName,
+      },
+    });
+  }
+
+  return await loginWith(request, wait);
 }
 
 function hasUsableTokenLifetime(token: string): boolean {
@@ -321,9 +341,17 @@ function readCachedToken(): string | undefined {
 
 /** Login directly via the API (retry up to 10 times with backoff). */
 async function loginDirect(page: Page): Promise<string | undefined> {
+  return loginWith(page.request, (ms) => page.waitForTimeout(ms));
+}
+
+/** Shared retry-with-backoff login implementation, decoupled from `Page`. */
+async function loginWith(
+  request: Pick<APIRequestContext, 'get' | 'post'>,
+  wait: (ms: number) => Promise<void>,
+): Promise<string | undefined> {
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const resp = await page.request.post(`${API_BASE_URL}/api/auth/login`, {
+      const resp = await request.post(`${API_BASE_URL}/api/auth/login`, {
         data: { usernameOrEmail: ADMIN.username, password: ADMIN.password },
       });
       if (resp.ok()) {
@@ -331,7 +359,7 @@ async function loginDirect(page: Page): Promise<string | undefined> {
         if (data.success && data.token) return data.token;
       }
     } catch { /* retry */ }
-    await page.waitForTimeout(300 * (attempt + 1));
+    await wait(300 * (attempt + 1));
   }
   return undefined;
 }

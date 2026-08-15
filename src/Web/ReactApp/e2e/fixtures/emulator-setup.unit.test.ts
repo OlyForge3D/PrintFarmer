@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { resolveAdminCredentials } from './emulator-setup';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { provisionAdminAndLogin, resolveAdminCredentials } from './emulator-setup';
+
+/** Minimal fake satisfying the `{ get, post }` shape `provisionAdminAndLogin` needs. */
+function fakeResponse(body: unknown, ok = true) {
+  return { ok: () => ok, status: () => (ok ? 200 : 500), json: async () => body };
+}
 
 /**
  * Unit coverage for the credential-resolution seam behind issue #1586: the
@@ -90,5 +95,75 @@ describe('resolveAdminCredentials', () => {
 
     expect(credentials.isExternal).toBe(false);
     expect(credentials.username).toBe('e2e-admin');
+  });
+});
+
+/**
+ * Branch coverage for the actual `needsSetup` decision the fixture makes
+ * (issue #1586), exercised against a fake `request` client rather than a
+ * real Playwright `Page`/API server. `getOrCreateToken` (the real fixture
+ * entry point) is not itself exported since it also owns disk-based
+ * token-cache/lock bookkeeping unrelated to this bug; `provisionAdminAndLogin`
+ * is the extracted seam that owns exactly the `needsSetup` branch plus login.
+ */
+describe('provisionAdminAndLogin', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('needsSetup:true — self-provisions the default admin, then logs in (pristine-database path, unchanged behavior)', async () => {
+    const get = vi.fn().mockResolvedValue(fakeResponse({ needsSetup: true }));
+    const post = vi.fn()
+      .mockResolvedValueOnce(fakeResponse({})) // POST /api/setup/initial-admin
+      .mockResolvedValueOnce(fakeResponse({ success: true, token: 'default-admin-token' })); // POST /api/auth/login
+
+    const token = await provisionAdminAndLogin({ get, post });
+
+    expect(token).toBe('default-admin-token');
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post.mock.calls[0][0]).toContain('/api/setup/initial-admin');
+    expect(post.mock.calls[0][1]?.data).toMatchObject({ username: 'e2e-admin' });
+    expect(post.mock.calls[1][0]).toContain('/api/auth/login');
+    expect(post.mock.calls[1][1]?.data).toMatchObject({ usernameOrEmail: 'e2e-admin' });
+  });
+
+  it('needsSetup:false — skips admin creation entirely and logs in directly as the externally provisioned admin', async () => {
+    // A pre-existing admin already exists (e.g. the daily immutable-image
+    // harness's own smoke admin) — simulate the fixture having resolved an
+    // external account by re-importing the module with the env vars set,
+    // since `ADMIN` is computed once at module load time.
+    vi.resetModules();
+    vi.stubEnv('E2E_ADMIN_USERNAME', 'daily-smoke-admin');
+    vi.stubEnv('E2E_ADMIN_PASSWORD', 'Sm0ke!super-secret-Aa1');
+
+    const { provisionAdminAndLogin: provisionAdminAndLoginWithExternalEnv } =
+      await import('./emulator-setup');
+
+    const get = vi.fn().mockResolvedValue(fakeResponse({ needsSetup: false }));
+    const post = vi.fn().mockResolvedValue(fakeResponse({ success: true, token: 'external-admin-token' }));
+
+    const token = await provisionAdminAndLoginWithExternalEnv({ get, post });
+
+    expect(token).toBe('external-admin-token');
+    // The admin already exists — no /api/setup/initial-admin call should occur.
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0][0]).toContain('/api/auth/login');
+    expect(post.mock.calls[0][1]?.data).toMatchObject({
+      usernameOrEmail: 'daily-smoke-admin',
+      password: 'Sm0ke!super-secret-Aa1',
+    });
+  });
+
+  it('retries login with backoff and eventually gives up if every attempt fails', async () => {
+    const get = vi.fn().mockResolvedValue(fakeResponse({ needsSetup: false }));
+    const post = vi.fn().mockResolvedValue(fakeResponse({}, false));
+    const wait = vi.fn().mockResolvedValue(undefined);
+
+    const token = await provisionAdminAndLogin({ get, post }, wait);
+
+    expect(token).toBeUndefined();
+    expect(post).toHaveBeenCalledTimes(10);
+    expect(wait).toHaveBeenCalledTimes(10);
   });
 });
