@@ -47,6 +47,29 @@ gh auth token | docker login ghcr.io -u "$(gh api user --jq .login)" --password-
 
 Do not store the token in the repository or a Compose environment file.
 
+### Publishing access
+
+The workflow publishes with its repository-scoped `GITHUB_TOKEN` and grants
+`packages: write` only to the publication job. It does not use a personal access
+token.
+
+Each existing `printfarmer-*` package must be connected to
+`OlyForge3D/PrintFarmer`. In the package settings, either enable **Inherit access
+from source repository** or add `OlyForge3D/PrintFarmer` with **Write** under
+**Manage Actions access**. Package settings use this URL pattern:
+
+```text
+https://github.com/orgs/OlyForge3D/packages/container/<package>/settings
+```
+
+The publication job checks all six package pages before downloading the validated
+image archives. A missing package is allowed because the repository workflow will
+create and connect it on first publication. An existing package that is unlinked or
+linked to another repository fails immediately with the settings path needed to
+correct it. The validated images also must carry
+`org.opencontainers.image.source=https://github.com/OlyForge3D/PrintFarmer`, which
+allows newly created packages to link to this repository.
+
 ## Select the Latest Successful Set
 
 Run these commands from the repository root. They deliberately select a successful

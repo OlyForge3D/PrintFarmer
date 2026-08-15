@@ -167,6 +167,47 @@ test('publication uses run-unique tags and emits one coherent digest manifest', 
   assert.match(workflow, /test\("\^sha256:\[0-9a-f\]\{64\}\$"\)/);
 });
 
+test('publication fails fast for packages outside repository ownership', () => {
+  const preflight = workflow.slice(
+    workflow.indexOf('      - name: Preflight GHCR package ownership'),
+    workflow.indexOf('      - name: Download validated image archives'),
+  );
+
+  assert.ok(preflight.length > 0);
+  assert.match(
+    preflight,
+    /services=\(api frontend slicer-host printer-discovery orcaslicer-worker moonraker-emulator\)/,
+  );
+  assert.match(preflight, /packages\/container\/package\/\$\{package\}/);
+  assert.match(preflight, /301\|302\|307\|308/);
+  assert.match(preflight, /404\)/);
+  assert.match(preflight, /exists in \$GITHUB_REPOSITORY_OWNER but is not connected/);
+  assert.match(preflight, /linked outside \$GITHUB_REPOSITORY/);
+  assert.match(preflight, /Manage Actions access/);
+  assert.ok(
+    workflow.indexOf('Preflight GHCR package ownership') <
+      workflow.indexOf('Download validated image archives'),
+  );
+});
+
+test('publication enforces package source linkage and diagnoses write denial', () => {
+  const publication = workflow.slice(
+    workflow.indexOf('      - name: Publish exact validated image set'),
+    workflow.indexOf('      - name: Upload digest records'),
+  );
+
+  assert.match(
+    publication,
+    /EXPECTED_SOURCE_REPOSITORY: \$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository \}\}/,
+  );
+  assert.match(publication, /org\.opencontainers\.image\.source/);
+  assert.match(publication, /source_repository" != "\$EXPECTED_SOURCE_REPOSITORY"/);
+  assert.match(publication, /if ! docker push "\$reference"; then/);
+  assert.match(publication, /GHCR package write failed/);
+  assert.match(publication, /Manage Actions access/);
+  assert.match(publication, /packages\/container\/printfarmer-\$\{service\}\/settings/);
+});
+
 test('registry and local validation overlays cover the complete stack', () => {
   for (const [service] of services) {
     // The registry overlay pins compose SERVICE names to published IMAGES.
