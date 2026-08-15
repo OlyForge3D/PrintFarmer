@@ -349,24 +349,26 @@ public sealed class MoonrakerSubscriptionService(
     {
         CancellationTokenSource printerCts =
             CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
-        bool added;
+        bool added = false;
         try
         {
             added = _loopCancellationSources.TryAdd(printer.Id, printerCts);
+            if (!added)
+            {
+                // TryAdd failed, so ownership was not transferred and no task captured this source.
+                return;
+            }
         }
-        catch
+        finally
         {
-            printerCts.Dispose();
-            throw;
-        }
-
-        if (!added)
-        {
-            // TryAdd failed, so ownership was not transferred and no task captured this source.
+            if (!added)
+            {
+                // TryAdd failed or threw, so ownership was not transferred and no task
+                // captured this source; it is safe to dispose it here.
 #pragma warning disable IDISP016 // Don't use disposed instance
-            printerCts.Dispose();
+                printerCts.Dispose();
 #pragma warning restore IDISP016 // Don't use disposed instance
-            return;
+            }
         }
 
         Func<Printer, CancellationToken, Task> loop =

@@ -345,25 +345,16 @@ internal static class ArtifactStorageFileSystem
             WindowsOpenExisting,
             WindowsOpenReparsePoint | WindowsBackupSemantics,
             IntPtr.Zero);
-        if (handle.IsInvalid)
-        {
-            int error;
-            try
-            {
-                error = Marshal.GetLastPInvokeError();
-            }
-            catch
-            {
-                handle.Dispose();
-                throw;
-            }
 
-            handle.Dispose();
-            ThrowWindowsDeletionException(path, error);
-        }
-
+        bool opened = false;
         try
         {
+            if (handle.IsInvalid)
+            {
+                int error = Marshal.GetLastPInvokeError();
+                ThrowWindowsDeletionException(path, error);
+            }
+
             if (!GetWindowsFileInformation(
                     handle,
                     WindowsFileInfoByHandleClass.FileBasicInfo,
@@ -395,12 +386,15 @@ internal static class ArtifactStorageFileSystem
                     "The artifact publication directory resolved to an unexpected path.");
             }
 
+            opened = true;
             return handle;
         }
-        catch
+        finally
         {
-            handle.Dispose();
-            throw;
+            if (!opened)
+            {
+                handle.Dispose();
+            }
         }
     }
 

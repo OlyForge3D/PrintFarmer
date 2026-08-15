@@ -466,24 +466,21 @@ public class ArtifactCleanupService(
                 FileMode.Open,
                 FileAccess.ReadWrite,
                 FileShare.None);
+            bool lockAcquired = false;
             try
             {
-                if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
-                        leaseStream))
+                lockAcquired = ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
+                    leaseStream);
+                return lockAcquired;
+            }
+            finally
+            {
+                if (!lockAcquired)
                 {
                     leaseStream.Dispose();
                     leaseStream = null;
-                    return false;
                 }
             }
-            catch
-            {
-                leaseStream?.Dispose();
-                leaseStream = null;
-                throw;
-            }
-
-            return true;
         }
         catch (FileNotFoundException)
         {
