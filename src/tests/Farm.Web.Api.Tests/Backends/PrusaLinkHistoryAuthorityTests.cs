@@ -361,6 +361,28 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
+    public async Task GetHistoryListAsync_JobWithWhitespaceOnlyThumbnailRef_ThumbnailUrlIsNull()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"count":1,"results":[{"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode","refs":{"thumbnail":"   "}}}}]}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/");
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle()
+            .Which.ThumbnailUrl.Should().BeNull();
+    }
+
+    [Fact]
     public async Task GetHistoryJobAsync_JobWithRelativeThumbnailRef_ResolvesAbsoluteUrl()
     {
         using var handler = new InlineHandler(_ =>
@@ -381,6 +403,50 @@ public sealed class PrusaLinkHistoryAuthorityTests
         job.Should().NotBeNull();
         job!.ThumbnailUrl.Should().Be(
             "http://prusalink/api/v1/files/local/a.gcode/thumb");
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_JobWithAbsoluteThumbnailRef_KeepsUrlUnchanged()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode","refs":{"thumbnail":"http://elsewhere/a.gcode/thumb"}}}}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryJob? job = await client.GetHistoryJobAsync(
+            "http://prusalink/",
+            "job-1");
+
+        job.Should().NotBeNull();
+        job!.ThumbnailUrl.Should().Be("http://elsewhere/a.gcode/thumb");
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_JobWithoutThumbnailRef_ThumbnailUrlIsNull()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"success":true,"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode"}}}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryJob? job = await client.GetHistoryJobAsync(
+            "http://prusalink/",
+            "job-1");
+
+        job.Should().NotBeNull();
+        job!.ThumbnailUrl.Should().BeNull();
     }
 
     private static HttpResponseMessage JsonResponse(

@@ -1103,7 +1103,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 job.Filename = filename!;
             }
 
-            if (!string.IsNullOrEmpty(thumbnailRelativePath))
+            if (!string.IsNullOrWhiteSpace(thumbnailRelativePath))
             {
                 // Stored as-is (possibly relative) here; resolved to an absolute URL by the
                 // caller, which knows the request's base URL.
@@ -1148,7 +1148,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     /// </summary>
     private static string? ResolveThumbnailUrl(string baseUrl, string? thumbnailPath)
     {
-        if (string.IsNullOrEmpty(thumbnailPath))
+        if (string.IsNullOrWhiteSpace(thumbnailPath))
         {
             return null;
         }
