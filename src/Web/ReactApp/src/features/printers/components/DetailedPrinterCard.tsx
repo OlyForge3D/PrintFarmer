@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useRef, useEffect } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -146,6 +146,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         (needsCollapsedToolheadProbe || hasMmuGateData || showZOffsetWizard),
       staleTime: 60000,
     }
+  );
+
+  // One resolution per render, shared by the materials module and the
+  // single-spool fallback below. Calling the resolver separately in each
+  // branch let the two guards drift out of sync (and did the work twice).
+  const materialLoadout = useMemo(
+    () => resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads),
+    [mmuStatus, printerDetails?.toolheads],
   );
 
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
@@ -775,24 +783,20 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
       {/* Consolidated materials module — replaces the old Material Slots strip
           and the parallel Spools assignment list, which could disagree. */}
-      {(() => {
-        const loadout = resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads);
-        if (!loadout) return null;
-        return (
-          <MaterialLoadout
-            printerId={printer.id}
-            mmuStatus={mmuStatus}
-            toolheads={printerDetails?.toolheads}
-            reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
-            compact
-            className="mb-2"
-          />
-        );
-      })()}
+      {materialLoadout && (
+        <MaterialLoadout
+          printerId={printer.id}
+          mmuStatus={mmuStatus}
+          toolheads={printerDetails?.toolheads}
+          reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
+          compact
+          className="mb-2"
+        />
+      )}
 
       {/* Single-spool printers keep the classic spool card. */}
       {(spoolmanReady || printer.spoolInfo)
-        && !resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads) && (
+        && !materialLoadout && (
         <div className="mb-2">
           <div className="flex items-center justify-between mb-1">
             <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>

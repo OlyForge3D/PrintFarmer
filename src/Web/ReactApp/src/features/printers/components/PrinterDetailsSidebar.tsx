@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -352,6 +352,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       toast.error(`Failed to skip object: ${error.message}`);
     },
   });
+
+  // Resolved once per render and shared by the materials module and the
+  // single-spool fallback, so the two guards cannot disagree. Must sit above
+  // the `printerId` early-return below to keep hook order stable.
+  const materialLoadout = useMemo(
+    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads),
+    [printer?.mmuStatus, printerDetails?.toolheads],
+  );
 
   // Guard early after all hooks are called
   if (!printerId) {
@@ -1316,9 +1324,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
         {/* Consolidated materials module — one slot list drives the rail, the
             coverage rings and the assignment drawer. */}
-        {(() => {
-          const loadout = resolveMaterialLoadout(displayPrinter?.mmuStatus, printerDetails?.toolheads);
-          if (!loadout) return null;
+        {materialLoadout && (() => {
           const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
             ? printerDetails.toolheads
             : undefined;
@@ -1343,7 +1349,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         {/* Single-spool printers keep the classic spool card; multi-slot printers are
             fully described by the materials module above. */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          if (resolveMaterialLoadout(displayPrinter?.mmuStatus, printerDetails?.toolheads)) return null;
+          if (materialLoadout) return null;
 
           return (
             <CollapsibleSection
