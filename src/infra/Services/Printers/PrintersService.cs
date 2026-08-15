@@ -3411,6 +3411,18 @@ public class PrintersService(
             return new CommandResult(false, $"Toolhead index {toolheadIndex} is out of bounds (max: {MaxToolheadIndex})");
         }
 
+        // Defence-in-depth: spoolId 0 (and negatives) mean "release this slot" to
+        // callers, never "bind spool 0". Reject here so a stray zero can't slip
+        // through and persist as a bogus CurrentSpoolId = 0 binding; callers must
+        // use ClearToolheadSpoolAsync to release a slot.
+        if (spoolId <= 0)
+        {
+            _logger.LogWarning(
+                "SetToolheadSpoolAsync: rejected non-positive spoolId {SpoolId} for toolhead T{Index} on printer {PName} ({Id}); use clear-spool to release a slot",
+                spoolId, toolheadIndex, p.Name, id);
+            return new CommandResult(false, $"Spool id {spoolId} is invalid; use the clear-spool endpoint to release toolhead T{toolheadIndex}");
+        }
+
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
