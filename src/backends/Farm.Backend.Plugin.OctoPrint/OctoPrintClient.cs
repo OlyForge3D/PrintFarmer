@@ -2,6 +2,7 @@
 
 using System;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -45,6 +46,10 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     private const int MaxHistoryPagesForListFullScan = 20;
     private const int MaxHistoryEntriesForListFullScan =
         HistoryPageSize * MaxHistoryPagesForListFullScan;
+
+    private const int MaxHistoryPagesForTotals = 20;
+    private const int MaxHistoryEntriesForTotals =
+        HistoryPageSize * MaxHistoryPagesForTotals;
 
     private const int MaxHistoryPageBytes = 2 * 1024 * 1024;
 
@@ -116,12 +121,17 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     /// <param name="request">The HTTP request to send</param>
     /// <param name="timeoutSeconds">Timeout in seconds (default: 30)</param>
     /// <param name="allowRetry">Whether a transient transport failure may be retried.</param>
+    /// <param name="timeoutAsTimeoutException">
+    /// Whether an internal request timeout is surfaced as a
+    /// <see cref="TimeoutException"/>.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token</param>
     /// <returns>The HTTP response</returns>
     private async Task<HttpResponseMessage> SendWithRetryAsync(
         HttpRequestMessage request,
         int timeoutSeconds = 0,
         bool allowRetry = true,
+        bool timeoutAsTimeoutException = false,
         CancellationToken cancellationToken = default)
     {
         if (timeoutSeconds <= 0)
@@ -164,6 +174,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 // Timeout occurred
                 LogError($"Request timeout after {timeoutSeconds} seconds");
+                if (timeoutAsTimeoutException)
+                {
+                    throw new TimeoutException(
+                        $"OctoPrint request timeout after {timeoutSeconds} seconds.");
+                }
+
                 throw new HttpRequestException($"OctoPrint request timeout after {timeoutSeconds} seconds");
             }
             catch (HttpRequestException ex)
@@ -824,7 +840,8 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         int? limit,
         int start,
         PrinterCredential? credential,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool timeoutAsTimeoutException = false)
     {
         var queryParams = new List<string>();
         if (limit.HasValue)
@@ -839,6 +856,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
         request.Headers.Add("X-Api-Key", credential?.ApiKey);
         using HttpResponseMessage response = await SendWithRetryAsync(
             request,
+            timeoutAsTimeoutException: timeoutAsTimeoutException,
             cancellationToken: ct);
         response.EnsureSuccessStatusCode();
         string content = await ReadBoundedStringAsync(
@@ -933,46 +951,148 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
-        using HttpRequestMessage request = new(HttpMethod.Get, $"{baseUrl}/api/history?limit=0");
-        request.Headers.Add("X-Api-Key", credential?.ApiKey);
-
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
-            string content = await response.Content.ReadAsStringAsync();
-            HistoryListResponse? historyList = ParseOctoPrintHistoryList(content);
-            if (historyList == null)
-            {
-                return null;
-            }
+            IReadOnlyList<HistoryJob> jobs =
+                await FetchCompleteHistoryForTotalsAsync(
+                    baseUrl,
+                    credential,
+                    ct);
 
-            // Calculate totals from the job list
             double totalPrintTime = 0;
             double totalFilamentUsed = 0;
-            int jobCount = 0;
 
-            foreach (HistoryJob job in historyList.Jobs.Where(job => job.Status == "Completed"))
+            foreach (HistoryJob job in jobs.Where(job =>
+                         job.Status.Equals(
+                             "Completed",
+                             StringComparison.OrdinalIgnoreCase)))
             {
                 totalPrintTime += job.PrintDuration;
                 totalFilamentUsed += job.FilamentUsed;
-                jobCount++;
             }
 
             return new HistoryTotals
             {
                 JobTotals = new JobTotals
                 {
-                    TotalJobs = jobCount,
+                    TotalJobs = jobs.Count,
                     TotalPrintTime = totalPrintTime,
                     TotalFilamentUsed = totalFilamentUsed
                 }
             };
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            LogError("Get history totals timed out", ex);
+            throw new TimeoutException(
+                "OctoPrint history totals request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            LogError("Get history totals transport failed", ex);
+            throw new HttpRequestException(
+                "OctoPrint history totals transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            LogError("Get history totals transport failed", ex);
+            throw new HttpRequestException(
+                "OctoPrint history totals transport failed.",
+                ex);
+        }
         catch (Exception ex)
         {
             LogError("Get history totals failed", ex);
-            return null;
+            throw;
         }
+    }
+
+    private async Task<IReadOnlyList<HistoryJob>>
+        FetchCompleteHistoryForTotalsAsync(
+            string baseUrl,
+            PrinterCredential? credential,
+            CancellationToken ct)
+    {
+        var jobs = new List<HistoryJob>();
+        int expectedSourceCount = -1;
+        int offset = 0;
+
+        for (int pageNumber = 0;
+             pageNumber < MaxHistoryPagesForTotals;
+             pageNumber++)
+        {
+            HistoryListResponse? fetchedPage =
+                await FetchOctoPrintHistoryPageAsync(
+                    baseUrl,
+                    HistoryPageSize,
+                    offset,
+                    credential,
+                    ct,
+                    timeoutAsTimeoutException: true);
+            if (fetchedPage is null)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint returned malformed history while calculating totals.");
+            }
+
+            HistoryListResponse page = fetchedPage;
+            int examined = page.ExaminedSourceEntries;
+            if (expectedSourceCount < 0)
+            {
+                expectedSourceCount = page.Count;
+                if (expectedSourceCount > MaxHistoryEntriesForTotals)
+                {
+                    throw new InvalidDataException(
+                        $"OctoPrint history contains {expectedSourceCount} entries, exceeding the authoritative totals limit of {MaxHistoryEntriesForTotals}.");
+                }
+            }
+            else if (page.Count != expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint history count changed while calculating totals.");
+            }
+
+            if (examined > HistoryPageSize ||
+                (examined > 0 && page.Count < offset + examined))
+            {
+                throw new InvalidDataException(
+                    "OctoPrint history page exceeded the requested range.");
+            }
+
+            if (page.ExcludedEntries.Length > 0)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint history contained malformed entries, so authoritative totals could not be calculated.");
+            }
+
+            jobs.AddRange(page.Jobs);
+            offset += examined;
+            if (offset == expectedSourceCount)
+            {
+                if (jobs.Count != expectedSourceCount)
+                {
+                    throw new InvalidDataException(
+                        "OctoPrint history totals did not cover every source entry.");
+                }
+
+                return jobs;
+            }
+
+            if (examined == 0 || offset > expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint history ended before the advertised source count.");
+            }
+        }
+
+        throw new InvalidDataException(
+            $"OctoPrint history totals exceeded the authoritative paging limit of {MaxHistoryPagesForTotals} pages.");
     }
 
     /// <summary>

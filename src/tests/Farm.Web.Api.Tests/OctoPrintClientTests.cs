@@ -621,6 +621,391 @@ public class OctoPrintClientTests
     }
 
     [Fact]
+    public async Task GetHistoryTotalsAsync_CompletedJobs_ReturnsBoundedTotals()
+    {
+        (OctoPrintClient client, _, List<HttpRequestMessage> recorded) =
+            CreateClient(_ => Json(new
+            {
+                success = true,
+                count = 2,
+                results = new[]
+                {
+                    new
+                    {
+                        name = "first.gcode",
+                        success = true,
+                        timestamp = 1700000000,
+                        printTime = 120,
+                        filament = new { length = 5000 },
+                    },
+                    new
+                    {
+                        name = "second.gcode",
+                        success = true,
+                        timestamp = 1700000100,
+                        printTime = 180,
+                        filament = new { length = 7000 },
+                    },
+                },
+            }));
+
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(
+            "http://octo",
+            new PrinterCredential { ApiKey = "key" });
+
+        recorded.Should().ContainSingle();
+        recorded[0].RequestUri!.PathAndQuery.Should().Be(
+            "/api/history?limit=100&start=0");
+        totals.Should().NotBeNull();
+        totals!.JobTotals.TotalJobs.Should().Be(2);
+        totals.JobTotals.TotalPrintTime.Should().Be(300);
+        totals.JobTotals.TotalFilamentUsed.Should().Be(12);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_MixedStatuses_CountsAllJobsAndAggregatesCompletedJobs()
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ => Json(new
+        {
+            success = true,
+            count = 3,
+            results = new[]
+            {
+                new
+                {
+                    name = "completed-a.gcode",
+                    success = true,
+                    timestamp = 1700000000,
+                    printTime = 120,
+                    filament = new { length = 3000 },
+                },
+                new
+                {
+                    name = "failed.gcode",
+                    success = false,
+                    timestamp = 1700000100,
+                    printTime = 30,
+                    filament = new { length = 500 },
+                },
+                new
+                {
+                    name = "completed-b.gcode",
+                    success = true,
+                    timestamp = 1700000200,
+                    printTime = 180,
+                    filament = new { length = 7000 },
+                },
+            },
+        }));
+
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(
+            "http://octo");
+
+        totals.Should().NotBeNull();
+        totals!.JobTotals.TotalJobs.Should().Be(3);
+        totals.JobTotals.TotalPrintTime.Should().Be(300);
+        totals.JobTotals.TotalFilamentUsed.Should().Be(10);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_AtAuthorityBound_UsesTwentyRequests()
+    {
+        var entries = Enumerable.Range(0, 2000)
+            .Select(index => new
+            {
+                name = $"job-{index:D4}.gcode",
+                success = index % 2 == 0,
+                timestamp = 1700000000 + index,
+                printTime = 1,
+                filament = new { length = 1000 },
+            })
+            .ToArray();
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return Json(new
+            {
+                success = true,
+                count = entries.Length,
+                results = entries.Skip(start).Take(limit),
+            });
+        });
+
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(
+            "http://octo");
+
+        requestCount.Should().Be(20);
+        totals.Should().NotBeNull();
+        totals!.JobTotals.TotalJobs.Should().Be(2000);
+        totals.JobTotals.TotalPrintTime.Should().Be(1000);
+        totals.JobTotals.TotalFilamentUsed.Should().Be(1000);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_AboveAuthorityBound_FailsAfterOneRequest()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+        {
+            requestCount++;
+            return Json(new
+            {
+                success = true,
+                count = 2001,
+                results = Array.Empty<object>(),
+            });
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*authoritative totals limit of 2000*");
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_CountDrift_FailsAfterTwoRequests()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            return Json(new
+            {
+                success = true,
+                count = start == 0 ? 101 : 100,
+                results = start == 0
+                    ? Enumerable.Range(0, 100).Select(index => new
+                    {
+                        name = $"job-{index:D3}.gcode",
+                        success = true,
+                        timestamp = 1700000000 + index,
+                    }).ToArray()
+                    :
+                    [
+                        new
+                        {
+                            name = "job-100.gcode",
+                            success = true,
+                            timestamp = 1700000100,
+                        },
+                    ],
+            });
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*count changed while calculating totals*");
+        requestCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_NonProgress_FailsAfterTwoRequests()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            return Json(new
+            {
+                success = true,
+                count = 101,
+                results = start == 0
+                    ? Enumerable.Range(0, 100).Select(index => new
+                    {
+                        name = $"job-{index:D3}.gcode",
+                        success = true,
+                        timestamp = 1700000000 + index,
+                    }).ToArray()
+                    : [],
+            });
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*ended before the advertised source count*");
+        requestCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_PageLimitExhaustion_FailsAfterTwentyRequests()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            return Json(new
+            {
+                success = true,
+                count = 2000,
+                results = Enumerable.Range(start, 99).Select(index => new
+                {
+                    name = $"job-{index:D4}.gcode",
+                    success = true,
+                    timestamp = 1700000000 + index,
+                }),
+            });
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*paging limit of 20 pages*");
+        requestCount.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_MalformedEntry_ThrowsInvalidData()
+    {
+        (OctoPrintClient client, _, _) = CreateClient(_ => Json(new
+        {
+            success = true,
+            count = 1,
+            results = new[]
+            {
+                new
+                {
+                    name = "missing-timestamp.gcode",
+                    success = true,
+                },
+            },
+        }));
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*contained malformed entries*");
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_ResponseExceedsBodyBound_FailsAfterOneRequest()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+        {
+            requestCount++;
+            HttpResponseMessage response = Json(new
+            {
+                success = true,
+                count = 0,
+                results = Array.Empty<object>(),
+            });
+            response.Content.Headers.ContentLength = (2 * 1024 * 1024) + 1;
+            return response;
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*history response exceeded the size limit*");
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_HttpError_PropagatesAfterOneRequest()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(_ =>
+        {
+            requestCount++;
+            return new HttpResponseMessage(HttpStatusCode.BadGateway);
+        });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        (await action.Should().ThrowAsync<HttpRequestException>())
+            .Which.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_TransportFailure_PropagatesAfterOneRequest()
+    {
+        int requestCount = 0;
+        using var handler = new AsyncMessageHandler((_, _) =>
+        {
+            requestCount++;
+            return Task.FromException<HttpResponseMessage>(
+                new HttpRequestException("backend offline"));
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<HttpRequestException>();
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_InternalTimeout_PropagatesAsTimeout()
+    {
+        using var handler = new AsyncMessageHandler(async (_, ct) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings
+            {
+                CommandTimeoutSeconds = 1,
+            });
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://octo");
+
+        await action.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_CallerCancellation_StaysCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new AsyncMessageHandler((_, _) =>
+        {
+            cts.Cancel();
+            return Task.FromException<HttpResponseMessage>(
+                new OperationCanceledException(cts.Token));
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(
+            http,
+            NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync(
+                "http://octo",
+                credential: null,
+                cts.Token);
+
+        (await action.Should().ThrowAsync<OperationCanceledException>())
+            .Which.Should().NotBeOfType<TimeoutException>();
+    }
+
+    [Fact]
     public async Task UploadAndStartPrintAsync_PostSendIOException_SendsOnceAndReturnsUnknown()
     {
         int requestCount = 0;

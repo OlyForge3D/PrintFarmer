@@ -1550,12 +1550,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
         if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
         {
             return bytes.StartsWith(
-                new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+                new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }
+                    .AsSpan());
         }
 
         if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase))
         {
-            return bytes.StartsWith(new byte[] { 0xFF, 0xD8, 0xFF });
+            return bytes.StartsWith(
+                new byte[] { 0xFF, 0xD8, 0xFF }.AsSpan());
         }
 
         if (contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
