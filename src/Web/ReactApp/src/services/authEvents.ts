@@ -11,3 +11,16 @@
  * Keep this in sync with the literal asserted in the SignalR service tests.
  */
 export const AUTH_SESSION_ESTABLISHED_EVENT = 'printfarmer:auth-session-established';
+
+/**
+ * Whether a stored auth token exists right now.
+ *
+ * Long-lived singletons that load authenticated data at module-import time (e.g. the
+ * SignalR services) must not fire that request when no session exists yet — an
+ * anonymous request against an authenticated endpoint fails closed (401) and is pure
+ * console/network noise on signed-out pages such as `/login`. Callers should gate
+ * their initial load on this check and rely on {@link AUTH_SESSION_ESTABLISHED_EVENT}
+ * to trigger the real load once a session is established.
+ */
+export const hasStoredAuthToken = (): boolean =>
+  Boolean(localStorage.getItem('auth-token'));

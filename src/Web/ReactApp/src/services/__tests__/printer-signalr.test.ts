@@ -838,13 +838,14 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Regression coverage for the #950 follow-up: the SignalR settings loader runs
-// once, at module-import time, before the user authenticates. Against the
-// hardened UnifiedSettingsController the anonymous GET /api/settings/SignalR
-// fails closed (401), so the service silently falls back to defaults. Before this
-// fix loadSettings() was never re-run, so the admin-configured log level was
-// ignored for the entire session until a manual page refresh. The service must
-// reload its settings once a session is established.
+// Regression coverage for #1590: the SignalR settings loader used to run
+// unconditionally at module-import time, before the user authenticates. Against the
+// hardened UnifiedSettingsController that anonymous GET /api/settings/SignalR failed
+// closed (401), producing a doomed request and a console warning on every signed-out
+// page (including /login) before this fix. The constructor must now skip the network
+// call entirely when no session exists yet, falling straight back to defaults, and
+// only fetch real settings once a session is established (or immediately, on a page
+// refresh while a session already exists).
 // ─────────────────────────────────────────────────────────────────────────────
 describe('PrinterSignalRService settings reload on authentication', () => {
   // Must stay in sync with AUTH_SESSION_ESTABLISHED_EVENT in src/services/authEvents.ts.
@@ -877,58 +878,94 @@ describe('PrinterSignalRService settings reload on authentication', () => {
       signalRTestState.connection.state = 'Disconnected';
     });
     window.PrintFarmerDebug = undefined;
+    localStorage.clear();
   });
 
-  it('reloads settings and rebuilds the connection when the log level changes after auth', async () => {
-    // Pre-auth load fails closed (401); post-auth load returns the admin config,
-    // here with console logging disabled so the effective log level changes.
-    signalRTestState.getSettings
-      .mockRejectedValueOnce(new Error('Unauthorized'))
-      .mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false });
+  it('never calls the protected settings endpoint when no session exists yet', async () => {
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     const { printerSignalRService } = await import('../printer-signalr');
     await flushMicrotasks();
 
-    // Baseline: the constructor loaded once (falling back to defaults) and built
-    // the connection once with the default log level.
+    // No stored auth token: the constructor must not fire the anonymous,
+    // protected GET /api/settings/SignalR at all (this is the #1590 fix), and it
+    // still builds a working connection using the same defaults loadSettings()
+    // falls back to on failure.
+    expect(signalRTestState.getSettings).not.toHaveBeenCalled();
+    expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
+    expect(consoleWarn).not.toHaveBeenCalled();
+
+    consoleWarn.mockRestore();
+    printerSignalRService.dispose();
+  });
+
+  it('fetches settings immediately when a session already exists at construction', async () => {
+    localStorage.setItem('auth-token', 'existing-token');
+    signalRTestState.getSettings.mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false });
+
+    const { printerSignalRService } = await import('../printer-signalr');
+    await flushMicrotasks();
+
+    // A page refresh while already signed in must still load real settings
+    // up front, since a session is genuinely available.
     expect(signalRTestState.getSettings).toHaveBeenCalledTimes(1);
+    expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
+
+    printerSignalRService.dispose();
+  });
+
+  it('reloads settings and rebuilds the connection when the log level changes after auth', async () => {
+    // No session at construction: the anonymous call is skipped and defaults are
+    // used (logLevel Information, consoleLoggingEnabled true). The post-auth load
+    // returns the admin config, here with console logging disabled so the
+    // effective log level changes.
+    signalRTestState.getSettings.mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: false });
+
+    const { printerSignalRService } = await import('../printer-signalr');
+    await flushMicrotasks();
+
+    // Baseline: no network call yet, and the connection was built once with defaults.
+    expect(signalRTestState.getSettings).not.toHaveBeenCalled();
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
 
     // Simulate the user authenticating.
     window.dispatchEvent(new Event(AUTH_EVENT));
     await flushMicrotasks();
 
-    // The service must reload settings and rebuild the connection so the admin's
+    // The service must load settings and rebuild the connection so the admin's
     // configured log level actually takes effect.
-    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2);
+    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(1);
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(2);
 
     printerSignalRService.dispose();
   });
 
   it('reloads settings but does not rebuild when the effective log level is unchanged', async () => {
-    // Pre-auth defaults and post-auth config resolve to the same effective level,
-    // so there is nothing to rebuild — avoids needless reconnect churn on login.
-    signalRTestState.getSettings
-      .mockRejectedValueOnce(new Error('Unauthorized'))
-      .mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: true });
+    // Post-auth config resolves to the same effective level as the defaults used
+    // before authentication, so there is nothing to rebuild — avoids needless
+    // reconnect churn on login.
+    signalRTestState.getSettings.mockResolvedValue({ logLevel: 'Information', consoleLoggingEnabled: true });
 
     const { printerSignalRService } = await import('../printer-signalr');
     await flushMicrotasks();
 
-    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(1);
+    expect(signalRTestState.getSettings).not.toHaveBeenCalled();
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
 
     window.dispatchEvent(new Event(AUTH_EVENT));
     await flushMicrotasks();
 
-    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2);
+    expect(signalRTestState.getSettings).toHaveBeenCalledTimes(1);
     expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
 
     printerSignalRService.dispose();
   });
 
   it('does not let a late initial settings response overwrite authenticated settings', async () => {
+    // A session already exists at construction, so the initial (slow) load fires
+    // for real; a second, faster load triggered by re-authentication must win even
+    // though the first settles later.
+    localStorage.setItem('auth-token', 'existing-token');
     const initialSettings = createDeferredSettings();
     const authenticatedSettings = createDeferredSettings();
     signalRTestState.getSettings
@@ -959,19 +996,23 @@ describe('PrinterSignalRService settings reload on authentication', () => {
     const firstAuthenticatedSettings = createDeferredSettings();
     const secondAuthenticatedSettings = createDeferredSettings();
     signalRTestState.getSettings
-      .mockResolvedValueOnce({ logLevel: 'Information', consoleLoggingEnabled: true })
       .mockReturnValueOnce(firstAuthenticatedSettings.promise)
       .mockReturnValueOnce(secondAuthenticatedSettings.promise);
 
     const { printerSignalRService } = await import('../printer-signalr');
     await flushMicrotasks();
 
+    // No session yet: the constructor skipped the network call and built once
+    // using defaults.
+    expect(signalRTestState.getSettings).not.toHaveBeenCalled();
+    expect(signalRTestState.builder.build).toHaveBeenCalledTimes(1);
+
     window.dispatchEvent(new Event(AUTH_EVENT));
-    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(1));
     window.dispatchEvent(new Event(AUTH_EVENT));
 
     firstAuthenticatedSettings.resolve({ logLevel: 'Warning', consoleLoggingEnabled: true });
-    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(signalRTestState.getSettings).toHaveBeenCalledTimes(2));
     secondAuthenticatedSettings.resolve({ logLevel: 'Critical', consoleLoggingEnabled: true });
     await flushMicrotasks();
 
@@ -981,6 +1022,9 @@ describe('PrinterSignalRService settings reload on authentication', () => {
   });
 
   it('filters custom logger messages below the configured threshold', async () => {
+    // A session already exists at construction so the initial load happens for
+    // real, matching the "signed in, then refresh" scenario this test exercises.
+    localStorage.setItem('auth-token', 'existing-token');
     signalRTestState.getSettings
       .mockResolvedValueOnce({
         logLevel: 'Warning',
@@ -1020,6 +1064,9 @@ describe('PrinterSignalRService settings reload on authentication', () => {
   });
 
   it('does not reconnect when logout supersedes a deferred settings stop', async () => {
+    // A session exists at construction so the initial settings load fires for
+    // real, matching the pre-existing session scenario this test exercises.
+    localStorage.setItem('auth-token', 'existing-token');
     signalRTestState.getSettings.mockResolvedValueOnce({
       logLevel: 'Information',
       consoleLoggingEnabled: false,
