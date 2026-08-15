@@ -295,4 +295,65 @@ describe('PrintersPage', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(mockRefetchPrinters).toHaveBeenCalledTimes(1);
   });
+
+  it('keeps the error alert and Retry button visible through a transient refetch after a sustained failure (#1581)', () => {
+    // React Query only reaches `status: 'error'` after retries are exhausted,
+    // and the printers query never had a successful fetch here (every attempt
+    // 503s). Any subsequent refetch of that still-empty query — a manual
+    // Retry click, or QueueRealtimeBridge's `invalidateQueries(['printers'])`
+    // on SignalR reconnect/queue events — resets `status` back to `pending`,
+    // which is exactly what this mock sequence simulates: error -> transient
+    // pending/fetching with no data yet -> (still failing) error again. The
+    // page must not fall back to the loading skeleton in that middle state.
+    mockUsePrinters.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      error: new Error('Printer service unavailable'),
+      refetch: mockRefetchPrinters,
+    });
+    const { rerender } = renderPage('/printers');
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Unable to Load Printers');
+
+    // Simulate the invalidateQueries-triggered refetch: React Query resets
+    // isError/error back to their pending defaults even though no printers
+    // data has ever arrived.
+    mockUsePrinters.mockReturnValue({
+      data: undefined,
+      isLoading: true,
+      isError: false,
+      error: null,
+      refetch: mockRefetchPrinters,
+    });
+    rerender(
+      <MemoryRouter initialEntries={['/printers']}>
+        <Routes>
+          <Route path="/printers" element={<PrintersPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Unable to Load Printers');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    // Once the fleet actually loads, the error state must clear.
+    mockUsePrinters.mockReturnValue({
+      data: mockPrinters,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: mockRefetchPrinters,
+    });
+    rerender(
+      <MemoryRouter initialEntries={['/printers']}>
+        <Routes>
+          <Route path="/printers" element={<PrintersPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
 });
