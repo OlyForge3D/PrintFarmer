@@ -346,7 +346,9 @@ internal static class ArtifactStorageFileSystem
             WindowsOpenReparsePoint | WindowsBackupSemantics,
             IntPtr.Zero);
 
-        bool opened = false;
+        // Ownership of the handle transfers to the caller on success, so it cannot be
+        // wrapped in a `using` statement here (that would dispose it before the caller
+        // ever sees it). Dispose only on the exception paths below.
         try
         {
             if (handle.IsInvalid)
@@ -386,15 +388,12 @@ internal static class ArtifactStorageFileSystem
                     "The artifact publication directory resolved to an unexpected path.");
             }
 
-            opened = true;
             return handle;
         }
-        finally
+        catch
         {
-            if (!opened)
-            {
-                handle.Dispose();
-            }
+            handle.Dispose();
+            throw;
         }
     }
 

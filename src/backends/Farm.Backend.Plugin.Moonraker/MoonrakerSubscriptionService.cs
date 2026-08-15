@@ -349,26 +349,16 @@ public sealed class MoonrakerSubscriptionService(
     {
         CancellationTokenSource printerCts =
             CancellationTokenSource.CreateLinkedTokenSource(serviceToken);
-        bool added = false;
-        try
+        if (!_loopCancellationSources.TryAdd(printer.Id, printerCts))
         {
-            added = _loopCancellationSources.TryAdd(printer.Id, printerCts);
-            if (!added)
+            // TryAdd failed, so ownership was not transferred and no task captured this
+            // source; it is safe to dispose it here via a using statement.
+#pragma warning disable IDISP016 // Don't use disposed instance
+            using (printerCts)
             {
-                // TryAdd failed, so ownership was not transferred and no task captured this source.
                 return;
             }
-        }
-        finally
-        {
-            if (!added)
-            {
-                // TryAdd failed or threw, so ownership was not transferred and no task
-                // captured this source; it is safe to dispose it here.
-#pragma warning disable IDISP016 // Don't use disposed instance
-                printerCts.Dispose();
 #pragma warning restore IDISP016 // Don't use disposed instance
-            }
         }
 
         Func<Printer, CancellationToken, Task> loop =
@@ -384,17 +374,19 @@ public sealed class MoonrakerSubscriptionService(
         }
 
         await printerCts.CancelAsync();
-        try
+        using (printerCts)
         {
-            await loopTask;
-        }
-        catch (OperationCanceledException) when (printerCts.IsCancellationRequested)
-        {
-        }
-        finally
-        {
-            _loopCancellationSources.TryRemove(printer.Id, out _);
-            printerCts.Dispose();
+            try
+            {
+                await loopTask;
+            }
+            catch (OperationCanceledException) when (printerCts.IsCancellationRequested)
+            {
+            }
+            finally
+            {
+                _loopCancellationSources.TryRemove(printer.Id, out _);
+            }
         }
     }
 
