@@ -1562,11 +1562,6 @@ export function usePrinterHistory(
     queryFn: () => apiClient.getPrinterHistory(printerId, options),
     staleTime: 30000,
     enabled: !!printerId,
-    retry: (failureCount, error) => {
-      // Don't hammer a printer that's offline/unreachable (404/502) with retries.
-      if (error?.statusCode === 404 || error?.statusCode === 502) return false;
-      return failureCount < 1;
-    },
     ...queryOptions,
   });
 }
@@ -1594,10 +1589,6 @@ export function usePrinterHistoryTotals(
     queryFn: () => apiClient.getPrinterHistoryTotals(printerId),
     staleTime: 300000, // History totals don't change often
     enabled: !!printerId,
-    retry: (failureCount, error) => {
-      if (error?.statusCode === 404 || error?.statusCode === 502) return false;
-      return failureCount < 1;
-    },
     ...queryOptions,
   });
 }

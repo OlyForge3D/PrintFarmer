@@ -93,7 +93,10 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
   // cards (visibility is controlled by `isOpen`), so without this gate every
   // printer card — including offline ones — would fire these requests on mount,
   // and react-query's default retries would amplify each failure (see #1589).
-  const canFetchHistory = isOpen && printer.isOnline;
+  // Coerce to a real boolean: react-query treats `enabled: undefined` as "not
+  // specified" (i.e. enabled), so if `printer.isOnline` were ever undefined at
+  // runtime this must not silently fall through to fetching.
+  const canFetchHistory = isOpen && !!printer.isOnline;
 
   const { 
     data: historyData, 
