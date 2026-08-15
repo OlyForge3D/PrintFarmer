@@ -24,6 +24,8 @@ permissions:
 jobs:
   heartbeat:
     runs-on: ubuntu-latest
+    outputs:
+      decisions: ${{ steps.triage-results.outputs.decisions }}
     steps:
       - uses: actions/checkout@v7
 
@@ -46,56 +48,16 @@ jobs:
             --squad-dir .squad \
             --output triage-results.json
 
-      - name: Ralph — Apply triage decisions
-        if: steps.check-script.outputs.has_script == 'true' && hashFiles('triage-results.json') != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const path = 'triage-results.json';
-            if (!fs.existsSync(path)) {
-              core.info('No triage results — board is clear');
-              return;
-            }
-            
-            const results = JSON.parse(fs.readFileSync(path, 'utf8'));
-            if (results.length === 0) {
-              core.info('📋 Board is clear — Ralph found no untriaged issues');
-              return;
-            }
-            
-            for (const decision of results) {
-              try {
-                await github.rest.issues.addLabels({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: decision.issueNumber,
-                  labels: [decision.label]
-                });
-                
-                await github.rest.issues.createComment({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: decision.issueNumber,
-                  body: [
-                    '### 🔄 Ralph — Auto-Triage',
-                    '',
-                    `**Assigned to:** ${decision.assignTo}`,
-                    `**Reason:** ${decision.reason}`,
-                    `**Source:** ${decision.source}`,
-                    '',
-                    '> Ralph auto-triaged this issue using routing rules.',
-                    '> To reassign, swap the `squad:*` label.'
-                  ].join('\n')
-                });
-                
-                core.info(`Triaged #${decision.issueNumber} → ${decision.assignTo} (${decision.source})`);
-              } catch (e) {
-                core.warning(`Failed to triage #${decision.issueNumber}: ${e.message}`);
-              }
-            }
-            
-            core.info(`🔄 Ralph triaged ${results.length} issue(s)`);
+      - name: Ralph — Publish triage decisions
+        id: triage-results
+        if: steps.check-script.outputs.has_script == 'true'
+        shell: bash
+        run: |
+          if [ -f triage-results.json ]; then
+            echo "decisions=$(jq -c . triage-results.json)" >> "$GITHUB_OUTPUT"
+          else
+            echo "decisions=[]" >> "$GITHUB_OUTPUT"
+          fi
 
       # Copilot auto-assign step (uses PAT if available)
       - name: Ralph — Assign @copilot issues
@@ -162,3 +124,79 @@ jobs:
             } catch (e) {
               core.info(`No squad:copilot label found or error: ${e.message}`);
             }
+
+  apply-triage:
+    needs: heartbeat
+    if: needs.heartbeat.outputs.decisions != '' && needs.heartbeat.outputs.decisions != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        decision: ${{ fromJSON(needs.heartbeat.outputs.decisions) }}
+    concurrency:
+      group: squad-triage-${{ matrix.decision.issueNumber }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ralph — Apply triage decision
+        uses: actions/github-script@v9
+        env:
+          TRIAGE_DECISION: ${{ toJSON(matrix.decision) }}
+        with:
+          script: |
+            const path = require('path');
+            const { canonicalOwnerLabels, ownerLabelsToRemove } = require(
+              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
+            );
+            const decision = JSON.parse(process.env.TRIAGE_DECISION);
+            const { data: currentIssue } = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: decision.issueNumber
+            });
+            if (canonicalOwnerLabels(currentIssue.labels).length > 0) {
+              core.info(`Issue #${decision.issueNumber} already has an owner — skipping`);
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: decision.issueNumber,
+              labels: [decision.label]
+            });
+
+            for (const label of ownerLabelsToRemove(currentIssue.labels, decision.label)) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: decision.issueNumber,
+                  name: label
+                });
+              } catch (error) {
+                if (error.status !== 404) {
+                  throw error;
+                }
+                core.info(`Owner label already removed: ${label}`);
+              }
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: decision.issueNumber,
+              body: [
+                '### 🔄 Ralph — Auto-Triage',
+                '',
+                `**Assigned to:** ${decision.assignTo}`,
+                `**Reason:** ${decision.reason}`,
+                `**Source:** ${decision.source}`,
+                '',
+                '> Ralph auto-triaged this issue using routing rules.',
+                '> To reassign, swap the `squad:*` label.'
+              ].join('\n')
+            });
+
+            core.info(`Triaged #${decision.issueNumber} → ${decision.assignTo} (${decision.source})`);
