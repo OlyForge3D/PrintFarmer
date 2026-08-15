@@ -167,25 +167,10 @@ test('publication uses run-unique tags and emits one coherent digest manifest', 
   assert.match(workflow, /test\("\^sha256:\[0-9a-f\]\{64\}\$"\)/);
 });
 
-test('publication fails fast for packages outside repository ownership', () => {
-  const preflight = workflow.slice(
-    workflow.indexOf('      - name: Preflight GHCR package ownership'),
-    workflow.indexOf('      - name: Download validated image archives'),
-  );
-
-  assert.ok(preflight.length > 0);
-  assert.match(
-    preflight,
-    /services=\(api frontend slicer-host printer-discovery orcaslicer-worker moonraker-emulator\)/,
-  );
-  assert.match(preflight, /packages\/container\/package\/\$\{package\}/);
-  assert.match(preflight, /301\|302\|307\|308/);
-  assert.match(preflight, /404\)/);
-  assert.match(preflight, /exists in \$GITHUB_REPOSITORY_OWNER but is not connected/);
-  assert.match(preflight, /linked outside \$GITHUB_REPOSITORY/);
-  assert.match(preflight, /Manage Actions access/);
+test('publication authenticates before transferring validated artifacts', () => {
+  assert.match(workflow, /name: Authenticate to GHCR before artifact transfer/);
   assert.ok(
-    workflow.indexOf('Preflight GHCR package ownership') <
+    workflow.indexOf('Authenticate to GHCR before artifact transfer') <
       workflow.indexOf('Download validated image archives'),
   );
 });
@@ -202,10 +187,13 @@ test('publication enforces package source linkage and diagnoses write denial', (
   );
   assert.match(publication, /org\.opencontainers\.image\.source/);
   assert.match(publication, /source_repository" != "\$EXPECTED_SOURCE_REPOSITORY"/);
-  assert.match(publication, /if ! docker push "\$reference"; then/);
-  assert.match(publication, /GHCR package write failed/);
+  assert.match(publication, /docker push "\$reference" 2>&1 \| tee "\$push_log"/);
+  assert.match(publication, /grep -Fq 'permission_denied: write_package'/);
+  assert.match(publication, /GHCR package write denied/);
   assert.match(publication, /Manage Actions access/);
   assert.match(publication, /packages\/container\/printfarmer-\$\{service\}\/settings/);
+  assert.match(publication, /GHCR push failed/);
+  assert.match(publication, /reason other than package write authorization/);
 });
 
 test('registry and local validation overlays cover the complete stack', () => {

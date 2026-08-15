@@ -62,11 +62,12 @@ from source repository** or add `OlyForge3D/PrintFarmer` with **Write** under
 https://github.com/orgs/OlyForge3D/packages/container/<package>/settings
 ```
 
-The publication job checks all six package pages before downloading the validated
-image archives. A missing package is allowed because the repository workflow will
-create and connect it on first publication. An existing package that is unlinked or
-linked to another repository fails immediately with the settings path needed to
-correct it. The validated images also must carry
+The publication job authenticates to GHCR before downloading the validated image
+archives. GitHub does not provide a non-mutating API that proves package write
+access, so the workflow classifies the actual push failure instead of creating a
+throwaway tag. A `permission_denied: write_package` failure reports the exact
+package settings URL and access correction; unrelated registry or network failures
+remain distinct. The validated images also must carry
 `org.opencontainers.image.source=https://github.com/OlyForge3D/PrintFarmer`, which
 allows newly created packages to link to this repository.
 

@@ -232,79 +232,18 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Preflight GHCR package ownership
-        env:
-          PACKAGE_SETTINGS_BASE: ${{ github.server_url }}/orgs/${{ github.repository_owner }}/packages/container
-        run: |
-          set -euo pipefail
-          services=(api frontend slicer-host printer-discovery orcaslicer-worker moonraker-emulator)
-          expected_package_base="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/pkgs/container"
-          failures=()
-
-          for service in "${services[@]}"; do
-            package="printfarmer-$service"
-            package_page="${GITHUB_SERVER_URL}/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/package/${package}"
-            headers="$(mktemp)"
-            if ! status="$(
-              curl --silent --show-error \
-                --output /dev/null \
-                --dump-header "$headers" \
-                --write-out '%{http_code}' \
-                "$package_page"
-            )"; then
-              rm -f "$headers"
-              failures+=("$package: GitHub package page request failed")
-              continue
-            fi
-
-            location="$(
-              awk 'BEGIN { IGNORECASE = 1 } /^location:/ { sub(/\r$/, ""); print $2; exit }' \
-                "$headers"
-            )"
-            rm -f "$headers"
-
-            case "$status" in
-              404)
-                echo "$package does not exist yet; this repository workflow will create it"
-                ;;
-              301|302|307|308)
-                expected_location="${expected_package_base}/${package}"
-                if [[ "$location" == "$expected_location"* ]]; then
-                  echo "$package is connected to $GITHUB_REPOSITORY"
-                else
-                  failures+=("$package: linked outside $GITHUB_REPOSITORY ($location)")
-                fi
-                ;;
-              200)
-                failures+=("$package: exists in $GITHUB_REPOSITORY_OWNER but is not connected to a repository")
-                ;;
-              *)
-                failures+=("$package: package page returned HTTP $status")
-                ;;
-            esac
-          done
-
-          if (( ${#failures[@]} > 0 )); then
-            printf '::error title=GHCR package ownership preflight failed::%s\n' \
-              "Existing packages must be connected to $GITHUB_REPOSITORY before GITHUB_TOKEN can publish them."
-            printf ' - %s\n' "${failures[@]}"
-            echo "For each existing package, open ${PACKAGE_SETTINGS_BASE}/<package>/settings."
-            echo "Connect $GITHUB_REPOSITORY, then inherit repository access or grant it Write under Manage Actions access."
-            exit 1
-          fi
+      - name: Authenticate to GHCR before artifact transfer
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download validated image archives
         uses: actions/download-artifact@v8
         with:
           pattern: daily-validated-*-attempt-${{ needs.source.outputs.artifact_attempt }}
           path: validated-images
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish exact validated image set
         id: publish
@@ -342,11 +281,20 @@ jobs:
             fi
 
             docker tag "$validated_image" "$reference"
-            if ! docker push "$reference"; then
+            push_log="$(mktemp)"
+            if docker push "$reference" 2>&1 | tee "$push_log"; then
+              rm -f "$push_log"
+            elif grep -Fq 'permission_denied: write_package' "$push_log"; then
+              rm -f "$push_log"
               settings="${GITHUB_SERVER_URL}/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/printfarmer-${service}/settings"
-              printf '::error title=GHCR package write failed::%s\n' \
-                "GITHUB_TOKEN could not publish $reference. Verify $GITHUB_REPOSITORY has Write under Manage Actions access or inherits access from the connected repository."
+              printf '::error title=GHCR package write denied::%s\n' \
+                "GITHUB_TOKEN lacks Write for $reference. Connect the package to $GITHUB_REPOSITORY and inherit repository access, or grant it Write under Manage Actions access."
               echo "Package settings: $settings"
+              exit 1
+            else
+              rm -f "$push_log"
+              printf '::error title=GHCR push failed::%s\n' \
+                "Publishing $reference failed for a reason other than package write authorization; inspect the docker push output above."
               exit 1
             fi
             docker pull "$reference"
