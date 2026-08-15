@@ -287,6 +287,33 @@ Override any instance independently with `MOONRAKER_EMULATOR_URL_READY`,
 `MOONRAKER_EMULATOR_URL_PRINTING`, `MOONRAKER_EMULATOR_URL_PAUSED`, or
 `MOONRAKER_EMULATOR_URL_SHUTDOWN`.
 
+### Authenticating against an already-provisioned admin (issue #1586)
+
+The `emulatorReady` Playwright fixture (`e2e/fixtures/emulator-setup.ts`) authenticates
+as an admin before every test. On a pristine database (`/api/setup/status` reports
+`needsSetup: true`) it self-provisions its own hardcoded `e2e-admin` account exactly as
+before — no configuration is needed for a fresh local run.
+
+Daily immutable-image validation, however, first runs
+`scripts/ci/smoke-daily-validation-stack.sh`, which completes initial setup by creating
+its own validation administrator. By the time Playwright runs, `needsSetup` is already
+`false`, and the fixture cannot create its hardcoded account. Set both
+`E2E_ADMIN_USERNAME` and `E2E_ADMIN_PASSWORD` (and optionally `E2E_ADMIN_EMAIL`) to the
+credentials of that already-provisioned admin so the fixture authenticates as it
+instead:
+
+```bash
+API_BASE_URL=http://127.0.0.1:15245 \
+BASE_URL=http://127.0.0.1:18080 \
+E2E_ADMIN_USERNAME=daily-smoke-admin \
+E2E_ADMIN_PASSWORD="$smoke_admin_password" \
+npm run test:e2e:moonraker -- --project=chromium
+```
+
+Both env vars must be set together — the fixture falls back to its hardcoded defaults
+(warning, but never logging the values) if only one is present. Neither value is ever
+printed to logs.
+
 The daily stack no longer uses TestEmulator flags. The TestEmulator plugin remains in
 the repository for its existing focused tests and non-daily workflows; this change
 does not remove or alter production backend selection.

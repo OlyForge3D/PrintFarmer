@@ -119,6 +119,12 @@ instances and seeding the API. The React E2E suite itself only needs:
 - The four scenario URLs in the table above reachable, with
   `Emulator:EnableControlApi=true`, for job-lifecycle/reset/upload control
   calls.
+- Optionally, `E2E_ADMIN_USERNAME` + `E2E_ADMIN_PASSWORD` (and optional
+  `E2E_ADMIN_EMAIL`) if an admin account was already provisioned externally
+  (e.g. the daily immutable-image smoke setup) and `/api/setup/status`
+  already reports `needsSetup: false` — see "Fixtures" below and issue
+  #1586. Leave unset for a normal pristine-database local run; the fixture
+  self-provisions its hardcoded `e2e-admin` default in that case.
 
 ### 2. Start the React dev server
 
@@ -161,6 +167,7 @@ npx playwright test e2e/emulator/printer-accessibility.spec.ts --workers=1
 npm run typecheck:e2e     # tsc --noEmit against e2e/**, strict mode
 npm run lint               # eslint . (covers e2e/**/*.ts too)
 npm run test:e2e:list      # Playwright test discovery dry-run (no server required)
+npm run test:run -- e2e/fixtures/emulator-setup.unit.test.ts  # Vitest unit coverage for fixture logic (no server required)
 ```
 
 `tsconfig.e2e.json` excludes `e2e/emulator/queue-realtime-auth.spec.ts` — a
@@ -173,8 +180,16 @@ change and are out of scope for the Moonraker printer-facing contract (see
 Shared test fixtures live in `e2e/fixtures/`:
 
 - **`emulator-setup.ts`** — Base fixture that verifies the API is healthy,
-  logs in a cached admin token, and injects it into `localStorage`. Also
-  exports helpers:
+  logs in a cached admin token, and injects it into `localStorage`. On a
+  pristine database (`needsSetup: true`) it self-provisions its hardcoded
+  `e2e-admin` default; if `E2E_ADMIN_USERNAME` + `E2E_ADMIN_PASSWORD` are
+  set, it authenticates as that externally provisioned account instead
+  (`resolveAdminCredentials`; see issue #1586 and
+  `docs/MOONRAKER_EMULATOR_VALIDATION.md`). Also exports helpers:
+  - `resolveAdminCredentials(env?)` — pure function resolving which admin
+    account to use; covered directly by
+    `e2e/fixtures/emulator-setup.unit.test.ts` (run via `npm run test:run`,
+    not Playwright).
   - `waitForPrinterUpdate(page, printerName)` — hard-waits for a printer
     card's content to actually change (a real SignalR update), scoped by
     the printer's exact seeded name.
