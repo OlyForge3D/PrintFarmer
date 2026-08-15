@@ -205,14 +205,27 @@ public class OctoPrintClientTests
     [Fact]
     public async Task GetHistoryListAsync_MalformedEntry_DoesNotShiftRequestedValidRange()
     {
-        (OctoPrintClient client, _, _) = CreateClient(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(
-                    """{"success":true,"count":3,"results":[{"name":"bad.gcode","success":true},{"name":"first.gcode","success":true,"timestamp":1700000000},{"name":"second.gcode","success":true,"timestamp":1700000001}]}""",
-                    Encoding.UTF8,
-                    "application/json"),
-            });
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+            Json(ReadQueryInt(request, "start") == 0
+                ? new
+                {
+                    success = true,
+                    count = 3,
+                    results = new[]
+                    {
+                        new { name = "bad.gcode", success = true, timestamp = (int?)null },
+                        new { name = "first.gcode", success = true, timestamp = (int?)1700000000 },
+                    },
+                }
+                : new
+                {
+                    success = true,
+                    count = 3,
+                    results = new[]
+                    {
+                        new { name = "second.gcode", success = true, timestamp = (int?)1700000001 },
+                    },
+                }));
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://octo",
@@ -238,14 +251,23 @@ public class OctoPrintClientTests
     [Fact]
     public async Task GetHistoryListAsync_ScalarEntries_AreExcludedWithoutShiftingValidRange()
     {
-        (OctoPrintClient client, _, _) = CreateClient(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK)
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            int start = ReadQueryInt(request, "start");
+            string payload = start switch
+            {
+                0 => """{"success":true,"count":5,"results":[null,"malformed"]}""",
+                2 => """{"success":true,"count":5,"results":[42,{"name":"first.gcode","success":true,"timestamp":1700000000}]}""",
+                _ => """{"success":true,"count":5,"results":[{"name":"second.gcode","success":true,"timestamp":1700000001}]}""",
+            };
+            return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    """{"success":true,"count":5,"results":[null,"malformed",42,{"name":"first.gcode","success":true,"timestamp":1700000000},{"name":"second.gcode","success":true,"timestamp":1700000001}]}""",
+                    payload,
                     Encoding.UTF8,
                     "application/json"),
-            });
+            };
+        });
 
         HistoryListResponse? history = await client.GetHistoryListAsync(
             "http://octo",
@@ -303,6 +325,156 @@ public class OctoPrintClientTests
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeFalse();
         history.AuthorityEvidence.ProvesRequestedRange.Should().BeTrue();
         recorded.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRange_UsesTwoRequests()
+    {
+        var entries = Enumerable.Range(0, 250)
+            .Select(index => new
+            {
+                name = $"job-{index:D3}.gcode",
+                success = true,
+                timestamp = 1700000000 + index,
+            })
+            .ToArray();
+        (OctoPrintClient client, _, List<HttpRequestMessage> recorded) =
+            CreateClient(request =>
+            {
+                int start = ReadQueryInt(request, "start");
+                int limit = ReadQueryInt(request, "limit");
+                return Json(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(limit),
+                });
+            });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 50,
+            start: 100,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        recorded.Select(request => request.RequestUri!.PathAndQuery).Should().Equal(
+            "/api/history?limit=100&start=0",
+            "/api/history?limit=50&start=100");
+        history.Should().NotBeNull();
+        history!.Jobs.Select(job => job.JobId).Should().Equal(
+            Enumerable.Range(100, 50)
+                .Select(index => $"job-{index:D3}.gcode"));
+        history.AuthorityEvidence!.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeAtAuthorityBoundary_UsesTwentyRequests()
+    {
+        var entries = Enumerable.Range(0, 2500)
+            .Select(index => new
+            {
+                name = $"job-{index:D4}.gcode",
+                success = true,
+                timestamp = 1700000000 + index,
+            })
+            .ToArray();
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return Json(new
+            {
+                success = true,
+                count = entries.Length,
+                results = entries.Skip(start).Take(limit),
+            });
+        });
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 2000,
+            start: 0,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        requestCount.Should().Be(20);
+        history.Should().NotBeNull();
+        history!.Jobs.Should().HaveCount(2000);
+        history.Jobs[0].JobId.Should().Be("job-0000.gcode");
+        history.Jobs[^1].JobId.Should().Be("job-1999.gcode");
+        history.AuthorityEvidence!.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeNeedsEntryBeyondAuthorityBoundary_FailsAfterTwentyRequests()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            IEnumerable<object> results = Enumerable.Range(start, limit)
+                .Select(index => index == 0
+                    ? (object)new { name = "malformed.gcode", success = true }
+                    : new
+                    {
+                        name = $"job-{index:D4}.gcode",
+                        success = true,
+                        timestamp = 1700000000 + index,
+                    });
+            return Json(new
+            {
+                success = true,
+                count = 2500,
+                results,
+            });
+        });
+
+        Func<Task> action = async () => await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 2000,
+            start: 0,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*20 pages and 2000 source entries*");
+        requestCount.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeCountDrift_FailsAfterTwoRequests()
+    {
+        int requestCount = 0;
+        (OctoPrintClient client, _, _) = CreateClient(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return Json(new
+            {
+                success = true,
+                count = start == 0 ? 250 : 249,
+                results = Enumerable.Range(start, limit)
+                    .Select(index => new
+                    {
+                        name = $"job-{index:D3}.gcode",
+                        success = true,
+                        timestamp = 1700000000 + index,
+                    }),
+            });
+        });
+
+        Func<Task> action = async () => await client.GetHistoryListAsync(
+            "http://octo",
+            limit: 50,
+            start: 100,
+            credential: new PrinterCredential { ApiKey = "key" });
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*count changed during an authoritative list scan*");
+        requestCount.Should().Be(2);
     }
 
     [Fact]
@@ -455,7 +627,7 @@ public class OctoPrintClientTests
             credential: new PrinterCredential { ApiKey = "key" });
 
         await action.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*authoritative list full-scan limit of 2000*");
+            .WithMessage("*authoritative list scan limit of 2000*");
         requestCount.Should().Be(1);
     }
 
@@ -490,7 +662,7 @@ public class OctoPrintClientTests
             credential: new PrinterCredential { ApiKey = "key" });
 
         await action.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*count changed during an authoritative list full scan*");
+            .WithMessage("*count changed during an authoritative list scan*");
         requestCount.Should().Be(2);
     }
 
@@ -588,7 +760,7 @@ public class OctoPrintClientTests
             credential: new PrinterCredential { ApiKey = "key" });
 
         await action.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*full-scan paging limit of 20 pages*");
+            .WithMessage("*20 pages and 2000 source entries*");
         requestCount.Should().Be(20);
     }
 

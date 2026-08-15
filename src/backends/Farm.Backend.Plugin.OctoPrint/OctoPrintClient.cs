@@ -43,9 +43,9 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
     private const int MaxRetryAttempts = 3;
     private const int RetryDelayMs = 1000;
     private const int HistoryPageSize = 100;
-    private const int MaxHistoryPagesForListFullScan = 20;
-    private const int MaxHistoryEntriesForListFullScan =
-        HistoryPageSize * MaxHistoryPagesForListFullScan;
+    private const int MaxHistoryPagesForList = 20;
+    private const int MaxHistoryEntriesForList =
+        HistoryPageSize * MaxHistoryPagesForList;
 
     private const int MaxHistoryPagesForTotals = 20;
     private const int MaxHistoryEntriesForTotals =
@@ -668,8 +668,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 : long.MaxValue;
 
             int offset = 0;
-            int sourceCount = 0;
-            int expectedFullScanSourceCount = -1;
+            int sourceCount = -1;
             int examinedCount = 0;
             int pagesFetched = 0;
             bool reachedSourceEnd = false;
@@ -696,41 +695,38 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 HistoryListResponse page = fetchedPage;
                 pagesFetched++;
                 int examined = page.ExaminedSourceEntries;
-                if ((requiresFullScan && examined > pageSize) ||
+                if (examined > pageSize ||
                     (examined > 0 && page.Count < offset + examined))
                 {
                     throw new InvalidDataException(
                         "OctoPrint history count did not cover the returned source page.");
                 }
 
-                if (requiresFullScan)
+                if (sourceCount < 0)
                 {
-                    if (expectedFullScanSourceCount < 0)
-                    {
-                        expectedFullScanSourceCount = page.Count;
-                        if (expectedFullScanSourceCount >
-                            MaxHistoryEntriesForListFullScan)
-                        {
-                            throw new InvalidDataException(
-                                $"OctoPrint history contains {expectedFullScanSourceCount} entries, exceeding the authoritative list full-scan limit of {MaxHistoryEntriesForListFullScan}.");
-                        }
-                    }
-                    else if (page.Count != expectedFullScanSourceCount)
+                    sourceCount = page.Count;
+                    if (requiresFullScan &&
+                        sourceCount > MaxHistoryEntriesForList)
                     {
                         throw new InvalidDataException(
-                            "OctoPrint history count changed during an authoritative list full scan.");
+                            $"OctoPrint history contains {sourceCount} entries, exceeding the authoritative list scan limit of {MaxHistoryEntriesForList}.");
                     }
-
-                    sourceCount = expectedFullScanSourceCount;
                 }
-                else
+                else if (page.Count != sourceCount)
                 {
-                    sourceCount = Math.Max(sourceCount, page.Count);
+                    throw new InvalidDataException(
+                        "OctoPrint history count changed during an authoritative list scan.");
                 }
 
                 allJobs.AddRange(page.Jobs);
                 excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
+                if (examinedCount > MaxHistoryEntriesForList)
+                {
+                    throw new InvalidDataException(
+                        $"OctoPrint history list exceeded the authoritative scan limit of {MaxHistoryEntriesForList} source entries.");
+                }
+
                 offset += examined;
                 reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
@@ -748,11 +744,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                         "OctoPrint history ended before the advertised source count.");
                 }
 
-                if (requiresFullScan &&
-                    pagesFetched >= MaxHistoryPagesForListFullScan)
+                if (pagesFetched >= MaxHistoryPagesForList ||
+                    examinedCount >= MaxHistoryEntriesForList)
                 {
                     throw new InvalidDataException(
-                        $"OctoPrint history list exceeded the authoritative full-scan paging limit of {MaxHistoryPagesForListFullScan} pages.");
+                        $"OctoPrint history list exceeded the authoritative scan bounds of {MaxHistoryPagesForList} pages and {MaxHistoryEntriesForList} source entries.");
                 }
             }
 
@@ -781,6 +777,15 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
+            if (!requiresFullScan &&
+                requestedLimit.HasValue &&
+                requestedEnd <= sourceCount &&
+                requestedJobs.Length < requestedLimit.Value)
+            {
+                throw new InvalidDataException(
+                    "OctoPrint history contained excluded entries that prevented proving the requested range.");
+            }
+
             bool coversRequestedRange = requiresFullScan
                 ? reachedSourceEnd
                 : requestedLimit.HasValue &&

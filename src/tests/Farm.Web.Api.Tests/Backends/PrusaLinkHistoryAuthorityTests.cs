@@ -241,6 +241,189 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRange_UsesTwoRequests()
+    {
+        var entries = Enumerable.Range(0, 250)
+            .Select(index => new
+            {
+                id = $"job-{index:D3}",
+                state = "completed",
+                startTime = 1700000000 + index,
+                job = new { file = new { name = $"job-{index:D3}.gcode" } },
+            })
+            .ToArray();
+        var requestedUris = new List<Uri>();
+        using var handler = new InlineHandler(request =>
+        {
+            requestedUris.Add(request.RequestUri!);
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return JsonResponse(
+                HttpStatusCode.OK,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(limit),
+                }));
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/",
+            limit: 50,
+            start: 100);
+
+        requestedUris.Select(uri => uri.PathAndQuery).Should().Equal(
+            "/api/history?limit=100&start=0",
+            "/api/history?limit=50&start=100");
+        history.Should().NotBeNull();
+        history!.Jobs.Select(job => job.JobId).Should().Equal(
+            Enumerable.Range(100, 50)
+                .Select(index => $"job-{index:D3}"));
+        history.AuthorityEvidence!.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeAtAuthorityBoundary_UsesTwentyRequests()
+    {
+        var entries = Enumerable.Range(0, 2500)
+            .Select(index => new
+            {
+                id = $"job-{index:D4}",
+                state = "completed",
+                startTime = 1700000000 + index,
+                job = new { file = new { name = $"job-{index:D4}.gcode" } },
+            })
+            .ToArray();
+        int requestCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return JsonResponse(
+                HttpStatusCode.OK,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(limit),
+                }));
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/",
+            limit: 2000,
+            start: 0);
+
+        requestCount.Should().Be(20);
+        history.Should().NotBeNull();
+        history!.Jobs.Should().HaveCount(2000);
+        history.Jobs[0].JobId.Should().Be("job-0000");
+        history.Jobs[^1].JobId.Should().Be("job-1999");
+        history.AuthorityEvidence!.ProvesRequestedRange.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeNeedsEntryBeyondAuthorityBoundary_FailsAfterTwentyRequests()
+    {
+        int requestCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            IEnumerable<object> results = Enumerable.Range(start, limit)
+                .Select(index => index == 0
+                    ? (object)new
+                    {
+                        id = "malformed",
+                        state = "completed",
+                        job = new { file = new { name = "malformed.gcode" } },
+                    }
+                    : new
+                    {
+                        id = $"job-{index:D4}",
+                        state = "completed",
+                        startTime = 1700000000 + index,
+                        job = new { file = new { name = $"job-{index:D4}.gcode" } },
+                    });
+            return JsonResponse(
+                HttpStatusCode.OK,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = 2500,
+                    results,
+                }));
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync(
+                "http://prusalink/",
+                limit: 2000,
+                start: 0);
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*20 pages and 2000 source entries*");
+        requestCount.Should().Be(20);
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ExactNonOrderedRangeCountDrift_FailsAfterTwoRequests()
+    {
+        int requestCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            var results = Enumerable.Range(start, limit)
+                .Select(index => new
+                {
+                    id = $"job-{index:D3}",
+                    state = "completed",
+                    startTime = 1700000000 + index,
+                    job = new { file = new { name = $"job-{index:D3}.gcode" } },
+                });
+            return JsonResponse(
+                HttpStatusCode.OK,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = start == 0 ? 250 : 249,
+                    results,
+                }));
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync(
+                "http://prusalink/",
+                limit: 50,
+                start: 100);
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*count changed during an authoritative list scan*");
+        requestCount.Should().Be(2);
+    }
+
+    [Fact]
     public async Task GetHistoryListAsync_ModalDescendingRequest_AtFullScanBoundUsesTwentyRequests()
     {
         var entries = Enumerable.Range(0, 2000)
@@ -310,7 +493,7 @@ public sealed class PrusaLinkHistoryAuthorityTests
                 order: "desc");
 
         await action.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*authoritative list full-scan limit of 2000*");
+            .WithMessage("*authoritative list scan limit of 2000*");
         requestCount.Should().Be(1);
     }
 
@@ -353,7 +536,7 @@ public sealed class PrusaLinkHistoryAuthorityTests
                 order: "desc");
 
         await action.Should().ThrowAsync<InvalidDataException>()
-            .WithMessage("*count changed during an authoritative list full scan*");
+            .WithMessage("*count changed during an authoritative list scan*");
         requestCount.Should().Be(2);
     }
 
@@ -741,6 +924,34 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
+    public async Task GetHistoryThumbnailAsync_ValidJpegSignature_ReturnsContent()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.jpg"}}}}
+                    """)
+                : ImageResponse(
+                    HttpStatusCode.OK,
+                    "image/jpeg",
+                    [0xFF, 0xD8, 0xFF, 0xE0]));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryThumbnailContent thumbnail =
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        thumbnail.Content.Should().Equal(0xFF, 0xD8, 0xFF, 0xE0);
+        thumbnail.ContentType.Should().Be("image/jpeg");
+    }
+
+    [Fact]
     public async Task GetHistoryThumbnailAsync_CrossOriginReference_IsRejected()
     {
         using var handler = new InlineHandler(_ =>
@@ -821,12 +1032,16 @@ public sealed class PrusaLinkHistoryAuthorityTests
     [Fact]
     public async Task GetHistoryListAsync_MissingStartTime_DoesNotShiftRequestedValidRange()
     {
-        using var handler = new InlineHandler(_ =>
+        using var handler = new InlineHandler(request =>
             JsonResponse(
                 HttpStatusCode.OK,
-                """
-                {"success":true,"count":3,"results":[{"id":"bad","state":"completed","job":{"file":{"name":"bad.gcode"}}},{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}},{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}
-                """));
+                ReadQueryInt(request, "start") == 0
+                    ? """
+                      {"success":true,"count":3,"results":[{"id":"bad","state":"completed","job":{"file":{"name":"bad.gcode"}}},{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}}]}
+                      """
+                    : """
+                      {"success":true,"count":3,"results":[{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}
+                      """));
         using var http = new HttpClient(handler);
         var client = new PrusaLinkApiClient(
             http,
@@ -855,12 +1070,16 @@ public sealed class PrusaLinkHistoryAuthorityTests
     [Fact]
     public async Task GetHistoryListAsync_ScalarEntries_AreExcludedWithoutShiftingValidRange()
     {
-        using var handler = new InlineHandler(_ =>
-            JsonResponse(
-                HttpStatusCode.OK,
-                """
-                {"success":true,"count":5,"results":[null,"malformed",42,{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}},{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}
-                """));
+        using var handler = new InlineHandler(request =>
+        {
+            string payload = ReadQueryInt(request, "start") switch
+            {
+                0 => """{"success":true,"count":5,"results":[null,"malformed"]}""",
+                2 => """{"success":true,"count":5,"results":[42,{"id":"first","state":"completed","startTime":1700000000,"job":{"file":{"name":"first.gcode"}}}]}""",
+                _ => """{"success":true,"count":5,"results":[{"id":"second","state":"completed","startTime":1700000001,"job":{"file":{"name":"second.gcode"}}}]}""",
+            };
+            return JsonResponse(HttpStatusCode.OK, payload);
+        });
         using var http = new HttpClient(handler);
         var client = new PrusaLinkApiClient(
             http,

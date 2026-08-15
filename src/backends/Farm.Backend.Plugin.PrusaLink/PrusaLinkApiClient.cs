@@ -25,9 +25,9 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
     private const int HistoryPageSize = 100;
-    private const int MaxHistoryPagesForListFullScan = 20;
-    private const int MaxHistoryEntriesForListFullScan =
-        HistoryPageSize * MaxHistoryPagesForListFullScan;
+    private const int MaxHistoryPagesForList = 20;
+    private const int MaxHistoryEntriesForList =
+        HistoryPageSize * MaxHistoryPagesForList;
 
     private const int MaxHistoryPagesForTotals = 20;
     private const int MaxHistoryEntriesForTotals =
@@ -764,8 +764,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 : long.MaxValue;
 
             int offset = 0;
-            int sourceCount = 0;
-            int expectedFullScanSourceCount = -1;
+            int sourceCount = -1;
             int examinedCount = 0;
             int pagesFetched = 0;
             bool reachedSourceEnd = false;
@@ -787,41 +786,38 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                     ct);
                 pagesFetched++;
                 int examined = page.ExaminedSourceEntries;
-                if ((requiresFullScan && examined > pageSize) ||
+                if (examined > pageSize ||
                     (examined > 0 && page.Count < offset + examined))
                 {
                     throw new InvalidDataException(
                         "PrusaLink history count did not cover the returned source page.");
                 }
 
-                if (requiresFullScan)
+                if (sourceCount < 0)
                 {
-                    if (expectedFullScanSourceCount < 0)
-                    {
-                        expectedFullScanSourceCount = page.Count;
-                        if (expectedFullScanSourceCount >
-                            MaxHistoryEntriesForListFullScan)
-                        {
-                            throw new InvalidDataException(
-                                $"PrusaLink history contains {expectedFullScanSourceCount} entries, exceeding the authoritative list full-scan limit of {MaxHistoryEntriesForListFullScan}.");
-                        }
-                    }
-                    else if (page.Count != expectedFullScanSourceCount)
+                    sourceCount = page.Count;
+                    if (requiresFullScan &&
+                        sourceCount > MaxHistoryEntriesForList)
                     {
                         throw new InvalidDataException(
-                            "PrusaLink history count changed during an authoritative list full scan.");
+                            $"PrusaLink history contains {sourceCount} entries, exceeding the authoritative list scan limit of {MaxHistoryEntriesForList}.");
                     }
-
-                    sourceCount = expectedFullScanSourceCount;
                 }
-                else
+                else if (page.Count != sourceCount)
                 {
-                    sourceCount = Math.Max(sourceCount, page.Count);
+                    throw new InvalidDataException(
+                        "PrusaLink history count changed during an authoritative list scan.");
                 }
 
                 allJobs.AddRange(page.Jobs);
                 excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
+                if (examinedCount > MaxHistoryEntriesForList)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history list exceeded the authoritative scan limit of {MaxHistoryEntriesForList} source entries.");
+                }
+
                 offset += examined;
                 reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
@@ -839,11 +835,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                         "PrusaLink history ended before the advertised source count.");
                 }
 
-                if (requiresFullScan &&
-                    pagesFetched >= MaxHistoryPagesForListFullScan)
+                if (pagesFetched >= MaxHistoryPagesForList ||
+                    examinedCount >= MaxHistoryEntriesForList)
                 {
                     throw new InvalidDataException(
-                        $"PrusaLink history list exceeded the authoritative full-scan paging limit of {MaxHistoryPagesForListFullScan} pages.");
+                        $"PrusaLink history list exceeded the authoritative scan bounds of {MaxHistoryPagesForList} pages and {MaxHistoryEntriesForList} source entries.");
                 }
             }
 
@@ -872,6 +868,15 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
+            if (!requiresFullScan &&
+                requestedLimit.HasValue &&
+                requestedEnd <= sourceCount &&
+                requestedJobs.Length < requestedLimit.Value)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history contained excluded entries that prevented proving the requested range.");
+            }
+
             bool coversRequestedRange = requiresFullScan
                 ? reachedSourceEnd
                 : requestedLimit.HasValue &&
@@ -1549,15 +1554,23 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
     {
         if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
         {
-            return bytes.StartsWith(
-                new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A }
-                    .AsSpan());
+            return bytes.Length >= 8 &&
+                bytes[0] == 0x89 &&
+                bytes[1] == 0x50 &&
+                bytes[2] == 0x4E &&
+                bytes[3] == 0x47 &&
+                bytes[4] == 0x0D &&
+                bytes[5] == 0x0A &&
+                bytes[6] == 0x1A &&
+                bytes[7] == 0x0A;
         }
 
         if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase))
         {
-            return bytes.StartsWith(
-                new byte[] { 0xFF, 0xD8, 0xFF }.AsSpan());
+            return bytes.Length >= 3 &&
+                bytes[0] == 0xFF &&
+                bytes[1] == 0xD8 &&
+                bytes[2] == 0xFF;
         }
 
         if (contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
