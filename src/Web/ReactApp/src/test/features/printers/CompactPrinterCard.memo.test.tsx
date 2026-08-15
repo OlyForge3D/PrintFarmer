@@ -643,3 +643,81 @@ describe('CompactPrinterCard memoization', () => {
     expect(progressBarRender).toHaveBeenCalledTimes(2);
   });
 });
+
+/**
+ * #1584: the History action must be reachable for PrusaLink printers.
+ *
+ * `backendCapabilities` is fetched per-printer and is undefined on first paint, so
+ * `getPrinterSupport` falls back to a client-side guess. That guess previously listed
+ * only Moonraker and OctoPrint, which hid History for PrusaLink (and SDCP) until the
+ * capability query resolved — and permanently whenever it never resolved.
+ *
+ * The fallback must mirror the server's own rule (`ISupportsHistory`, surfaced by
+ * `PrinterBackendCapabilitiesService`), so these render with NO capabilities to pin the
+ * pre-hydration behaviour specifically.
+ */
+describe('CompactPrinterCard history action before capabilities hydrate', () => {
+  beforeEach(() => {
+    printerTagsFromFleetMock.mockReturnValue({ data: [], isPending: false, isError: false, error: null });
+    queueSummaryFromFleetMock.mockReturnValue({ data: undefined, isPending: false, isError: false, error: null });
+    failureDetectionPollingEnabledMock.mockReturnValue(false);
+    usePrinterFailureDetectionStatusMock.mockReturnValue({ printerStatus: undefined, data: undefined, isLoading: false });
+  });
+
+  it.each([
+    ['PrusaLink', PrinterBackend.PrusaLink],
+    ['Moonraker', PrinterBackend.Moonraker],
+    ['OctoPrint', PrinterBackend.OctoPrint],
+    ['SDCP', PrinterBackend.SDCP],
+  ])('offers History for a history-capable %s printer with no capabilities loaded', async (_name, backend) => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ backend })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.getByRole('button', { name: 'History' })).toBeEnabled();
+  });
+
+  it.each([
+    ['FlashForge', PrinterBackend.FlashForge],
+    ['Unknown', PrinterBackend.Unknown],
+  ])('still hides History for a non-history %s backend before hydration', async (_name, backend) => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ backend })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+  });
+
+  it('lets the authoritative capability payload override the fallback', async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter({ backend: PrinterBackend.PrusaLink })}
+        backendCapabilities={createCapabilities({ supportsHistory: false })}
+        onExpand={vi.fn()}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'More options' }));
+
+    expect(screen.queryByRole('button', { name: 'History' })).not.toBeInTheDocument();
+  });
+});

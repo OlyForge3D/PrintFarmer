@@ -102,6 +102,9 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
     [InlineData(typeof(KeyNotFoundException), HttpStatusCode.NotFound)]
     [InlineData(typeof(InvalidDataException), HttpStatusCode.BadGateway)]
     [InlineData(typeof(HttpRequestException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(SocketException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(IOException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(TimeoutException), HttpStatusCode.RequestTimeout)]
     public async Task HistoryThumbnail_ProviderFailure_ReturnsExplicitStatus(
         Type exceptionType,
         HttpStatusCode expectedStatus)
@@ -117,6 +120,24 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             $"/api/printers/{printerId}/history/job-1/thumbnail");
 
         response.StatusCode.Should().Be(expectedStatus);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_HttpClientTimeout_ReturnsRequestTimeout()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException(
+                "timed out",
+                new TimeoutException("HttpClient timeout")));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestTimeout);
     }
 
     [Fact]

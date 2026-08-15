@@ -4711,6 +4711,7 @@ public class PrintersController(
     /// <returns>Validated image content without exposing printer credentials or its private URL.</returns>
     [HttpGet("{id:guid}/history/{jobId}/thumbnail")]
     [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(400)]
     [ProducesResponseType(404)]
     [ProducesResponseType(408)]
     [ProducesResponseType(502)]
@@ -4761,7 +4762,26 @@ public class PrintersController(
                 "The printer thumbnail request timed out.",
                 StatusCodes.Status408RequestTimeout);
         }
-        catch (HttpRequestException ex)
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "History thumbnail request timed out for printer {PrinterId}, job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException)
         {
             _logger.LogWarning(
                 ex,

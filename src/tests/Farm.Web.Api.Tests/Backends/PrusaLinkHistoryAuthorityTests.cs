@@ -3,11 +3,17 @@
 // </copyright>
 
 using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
+using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.PrusaLink;
 using Farm.Infrastructure;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Web.Api.Tests.Backends;
@@ -163,6 +169,29 @@ public sealed class PrusaLinkHistoryAuthorityTests
             "job-1");
 
         job!.ThumbnailUrl.Should().Be("http://prusalink/thumb/job-1.png");
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_CompletedRequest_IsDisposed()
+    {
+        var requestContent = new DisposalProbeContent();
+        using var handler = new InlineHandler(request =>
+        {
+            request.Content = requestContent;
+            return JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode"}}}
+                """);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        await client.GetHistoryJobAsync("http://prusalink/", "job-1");
+
+        requestContent.IsDisposed.Should().BeTrue();
     }
 
     [Fact]
@@ -431,6 +460,28 @@ public sealed class PrusaLinkHistoryAuthorityTests
         await action.Should().ThrowAsync<InvalidDataException>();
     }
 
+    [Fact]
+    public async Task DeleteHistoryJobAsync_CompletedRequest_IsDisposed()
+    {
+        var requestContent = new DisposalProbeContent();
+        using var handler = new InlineHandler(request =>
+        {
+            request.Content = requestContent;
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        bool deleted = await client.DeleteHistoryJobAsync(
+            "http://prusalink/",
+            "job-1");
+
+        deleted.Should().BeTrue();
+        requestContent.IsDisposed.Should().BeTrue();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Forbidden)]
@@ -462,6 +513,241 @@ public sealed class PrusaLinkHistoryAuthorityTests
         result.Outcome.Should().Be(UploadAndPrintOutcome.FailedBeforeStart);
     }
 
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_TransportFailure_IsClassifiedAsUpstreamFailure()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : throw new SocketException((int)SocketError.ConnectionReset));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        (await action.Should().ThrowAsync<HttpRequestException>())
+            .WithInnerExceptionExactly<SocketException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_StreamFailure_IsClassifiedAsUpstreamFailure()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : throw new IOException("stream aborted"));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        (await action.Should().ThrowAsync<HttpRequestException>())
+            .WithInnerExceptionExactly<IOException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_ClientTimeout_IsClassifiedAsTimeout()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : throw new TaskCanceledException(
+                    "timed out",
+                    new TimeoutException("HttpClient timeout")));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        await action.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_CallerCancellation_StaysCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new InlineHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath == "/api/history/job-1")
+            {
+                return JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """);
+            }
+
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1",
+                credentials: null,
+                cts.Token);
+
+        (await action.Should().ThrowAsync<OperationCanceledException>())
+            .Which.Should().NotBeOfType<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task DigestCredentialedRequest_KeepsUsingTheInjectedVettedClient()
+    {
+        List<HttpRequestMessage> observed = [];
+        using var handler = new InlineHandler(request =>
+        {
+            observed.Add(request);
+            if (request.Headers.Authorization is null)
+            {
+                var challenge = new HttpResponseMessage(HttpStatusCode.Unauthorized);
+                challenge.Headers.WwwAuthenticate.Add(new AuthenticationHeaderValue(
+                    "Digest",
+                    """realm="Prusalink", nonce="dcd98b7102dd2f0e", qop="auth", algorithm=MD5"""));
+                return challenge;
+            }
+
+            return JsonResponse(
+                HttpStatusCode.OK,
+                """{"success":true,"count":0,"results":[]}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+        var credentials = new PrinterCredential { Username = "maker", Password = "secret" };
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/",
+            credentials: credentials);
+
+        history.Should().NotBeNull();
+
+        // Both the challenge and the authenticated retry must travel through the injected
+        // client's handler. A private HttpClient built around a raw HttpClientHandler would
+        // never reach it, silently dropping caller pinning and named-client redirect policies.
+        observed.Should().HaveCount(2);
+        observed[0].Headers.Authorization.Should().BeNull();
+        observed[1].Headers.Authorization.Should().NotBeNull();
+        observed[1].Headers.Authorization!.Scheme.Should().Be("Digest");
+        observed[1].Headers.Authorization!.Parameter.Should().Contain("nonce=\"dcd98b7102dd2f0e\"");
+    }
+
+    [Fact]
+    public async Task DigestCredentialedRequest_ReusesCachedChallengeOnSubsequentCalls()
+    {
+        int challengeCount = 0;
+        int authenticatedCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            if (request.Headers.Authorization is null)
+            {
+                challengeCount++;
+                var challenge = new HttpResponseMessage(HttpStatusCode.Unauthorized);
+                challenge.Headers.WwwAuthenticate.Add(new AuthenticationHeaderValue(
+                    "Digest",
+                    """realm="Prusalink", nonce="dcd98b7102dd2f0e", qop="auth", algorithm=MD5"""));
+                return challenge;
+            }
+
+            authenticatedCount++;
+            return JsonResponse(
+                HttpStatusCode.OK,
+                """{"success":true,"count":0,"results":[]}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+        var credentials = new PrinterCredential { Username = "maker", Password = "secret" };
+
+        await client.GetHistoryListAsync("http://prusalink/", credentials: credentials);
+        await client.GetHistoryListAsync("http://prusalink/", credentials: credentials);
+
+        // The per-credential transport is cached, so the second call pre-authenticates
+        // from the cached challenge instead of paying another 401 round-trip.
+        challengeCount.Should().Be(1);
+        authenticatedCount.Should().Be(2);
+    }
+
+    [Fact]
+    public void DigestAuthenticator_RepeatedChallengeNonce_DoesNotReuseNonceCount()
+    {
+        var authenticator = new DigestAuthenticator("maker", "secret");
+        using HttpResponseMessage firstChallenge = DigestChallengeResponse("same-nonce");
+        using HttpResponseMessage repeatedChallenge = DigestChallengeResponse("same-nonce");
+        using var firstRequest =
+            new HttpRequestMessage(HttpMethod.Get, "http://prusalink/api/history");
+        using var secondRequest =
+            new HttpRequestMessage(HttpMethod.Get, "http://prusalink/api/history");
+
+        authenticator.TryAcceptChallenge(firstChallenge).Should().BeTrue();
+        authenticator.ApplyAuthorization(firstRequest);
+        authenticator.TryAcceptChallenge(repeatedChallenge).Should().BeTrue();
+        authenticator.ApplyAuthorization(secondRequest);
+
+        firstRequest.Headers.Authorization!.Parameter.Should().Contain("nc=00000001");
+        secondRequest.Headers.Authorization!.Parameter.Should().Contain("nc=00000002");
+    }
+
+    [Fact]
+    public async Task PluginRegistration_DirectApiClient_UsesVettedEgressClient()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """{"success":true,"count":0,"results":[]}"""));
+        using var http = new HttpClient(handler);
+        var factory = new RecordingHttpClientFactory(http);
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions<BackendTimeoutSettings>();
+        services.AddSingleton<IHttpClientFactory>(factory);
+        new PrusaLinkBackendPlugin().RegisterAdditionalServices(services);
+        await using ServiceProvider provider = services.BuildServiceProvider();
+
+        IPrusaLinkApiClient client =
+            provider.GetRequiredService<IPrusaLinkApiClient>();
+        HistoryListResponse? history =
+            await client.GetHistoryListAsync("http://prusalink/");
+
+        history.Should().NotBeNull();
+        factory.RequestedNames.Should().ContainSingle()
+            .Which.Should().Be("VettedEgress");
+    }
+
     private static HttpResponseMessage JsonResponse(
         HttpStatusCode status,
         string payload) =>
@@ -482,6 +768,15 @@ public sealed class PrusaLinkHistoryAuthorityTests
             },
         };
 
+    private static HttpResponseMessage DigestChallengeResponse(string nonce)
+    {
+        var response = new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        response.Headers.WwwAuthenticate.Add(new AuthenticationHeaderValue(
+            "Digest",
+            $"realm=\"Prusalink\", nonce=\"{nonce}\", qop=\"auth\", algorithm=MD5"));
+        return response;
+    }
+
     private static int ReadQueryInt(HttpRequestMessage request, string name)
     {
         string value = request.RequestUri!.Query
@@ -500,5 +795,39 @@ public sealed class PrusaLinkHistoryAuthorityTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             Task.FromResult(responseFactory(request));
+    }
+
+    private sealed class DisposalProbeContent : HttpContent
+    {
+        public bool IsDisposed { get; private set; }
+
+        protected override Task SerializeToStreamAsync(
+            Stream stream,
+            TransportContext? context) =>
+            Task.CompletedTask;
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = 0;
+            return true;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            IsDisposed = true;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class RecordingHttpClientFactory(HttpClient client)
+        : IHttpClientFactory
+    {
+        public List<string> RequestedNames { get; } = [];
+
+        public HttpClient CreateClient(string name)
+        {
+            RequestedNames.Add(name);
+            return client;
+        }
     }
 }
