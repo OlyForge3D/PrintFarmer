@@ -232,18 +232,18 @@ jobs:
       contents: read
       packages: write
     steps:
-      - name: Download validated image archives
-        uses: actions/download-artifact@v8
-        with:
-          pattern: daily-validated-*-attempt-${{ needs.source.outputs.artifact_attempt }}
-          path: validated-images
-
-      - name: Log in to GHCR
+      - name: Authenticate to GHCR before artifact transfer
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download validated image archives
+        uses: actions/download-artifact@v8
+        with:
+          pattern: daily-validated-*-attempt-${{ needs.source.outputs.artifact_attempt }}
+          path: validated-images
 
       - name: Publish exact validated image set
         id: publish
@@ -251,6 +251,7 @@ jobs:
           COMMIT_SHA: ${{ needs.source.outputs.commit_sha }}
           TAG: sha-${{ needs.source.outputs.commit_sha }}-run-${{ github.run_id }}-attempt-${{ github.run_attempt }}
           VALIDATION_ATTEMPT: ${{ needs.source.outputs.artifact_attempt }}
+          EXPECTED_SOURCE_REPOSITORY: ${{ github.server_url }}/${{ github.repository }}
         run: |
           set -euo pipefail
           mkdir -p daily-image
@@ -269,13 +270,33 @@ jobs:
             revision="$(docker image inspect \
               --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
               "$validated_image")"
-            if [[ "$actual_id" != "$expected_id" || "$revision" != "$COMMIT_SHA" ]]; then
+            source_repository="$(docker image inspect \
+              --format '{{ index .Config.Labels "org.opencontainers.image.source" }}' \
+              "$validated_image")"
+            if [[ "$actual_id" != "$expected_id" ||
+                  "$revision" != "$COMMIT_SHA" ||
+                  "$source_repository" != "$EXPECTED_SOURCE_REPOSITORY" ]]; then
               echo "$service archive does not match the validated image identity"
               exit 1
             fi
 
             docker tag "$validated_image" "$reference"
-            docker push "$reference"
+            push_log="$(mktemp)"
+            if docker push "$reference" 2>&1 | tee "$push_log"; then
+              rm -f "$push_log"
+            elif grep -Fq 'permission_denied: write_package' "$push_log"; then
+              rm -f "$push_log"
+              settings="${GITHUB_SERVER_URL}/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/printfarmer-${service}/settings"
+              printf '::error title=GHCR package write denied::%s\n' \
+                "GITHUB_TOKEN lacks Write for $reference. Connect the package to $GITHUB_REPOSITORY and inherit repository access, or grant it Write under Manage Actions access."
+              echo "Package settings: $settings"
+              exit 1
+            else
+              rm -f "$push_log"
+              printf '::error title=GHCR push failed::%s\n' \
+                "Publishing $reference failed for a reason other than package write authorization; inspect the docker push output above."
+              exit 1
+            fi
             docker pull "$reference"
             published_id="$(docker image inspect --format '{{.Id}}' "$reference")"
             if [[ "$published_id" != "$actual_id" ]]; then

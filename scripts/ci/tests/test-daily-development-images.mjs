@@ -167,6 +167,35 @@ test('publication uses run-unique tags and emits one coherent digest manifest', 
   assert.match(workflow, /test\("\^sha256:\[0-9a-f\]\{64\}\$"\)/);
 });
 
+test('publication authenticates before transferring validated artifacts', () => {
+  assert.match(workflow, /name: Authenticate to GHCR before artifact transfer/);
+  assert.ok(
+    workflow.indexOf('Authenticate to GHCR before artifact transfer') <
+      workflow.indexOf('Download validated image archives'),
+  );
+});
+
+test('publication enforces package source linkage and diagnoses write denial', () => {
+  const publication = workflow.slice(
+    workflow.indexOf('      - name: Publish exact validated image set'),
+    workflow.indexOf('      - name: Upload digest records'),
+  );
+
+  assert.match(
+    publication,
+    /EXPECTED_SOURCE_REPOSITORY: \$\{\{ github\.server_url \}\}\/\$\{\{ github\.repository \}\}/,
+  );
+  assert.match(publication, /org\.opencontainers\.image\.source/);
+  assert.match(publication, /source_repository" != "\$EXPECTED_SOURCE_REPOSITORY"/);
+  assert.match(publication, /docker push "\$reference" 2>&1 \| tee "\$push_log"/);
+  assert.match(publication, /grep -Fq 'permission_denied: write_package'/);
+  assert.match(publication, /GHCR package write denied/);
+  assert.match(publication, /Manage Actions access/);
+  assert.match(publication, /packages\/container\/printfarmer-\$\{service\}\/settings/);
+  assert.match(publication, /GHCR push failed/);
+  assert.match(publication, /reason other than package write authorization/);
+});
+
 test('registry and local validation overlays cover the complete stack', () => {
   for (const [service] of services) {
     // The registry overlay pins compose SERVICE names to published IMAGES.
