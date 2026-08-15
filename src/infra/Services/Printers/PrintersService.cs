@@ -3838,6 +3838,9 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
+        bool previousMultiMaterial = p.MultiMaterial;
+        List<Toolhead> stagedGates = [];
+
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
         {
@@ -3853,14 +3856,44 @@ public class PrintersService(
             if (p.MultiMaterial)
             {
                 int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
-                if (gates.Count > 0)
+                stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                if (stagedGates.Count > 0)
                 {
-                    _unitOfWork.Printers.AddToolheads(gates);
-                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        _unitOfWork.Printers.AddToolheads(stagedGates);
+                        await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    }
+                    catch (DbUpdateConcurrencyException ex)
+                    {
+                        // A concurrent request already won the race to create the same gate(s)
+                        // and advanced the printer's RowVersion — identical topology conflict to
+                        // a unique-constraint violation below; the losing request must retry.
+                        RestoreStagedToolheadBinding(
+                            p, previousMultiMaterial, stagedGates, null, null, null, null, null, null);
+                        _logger.LogWarning(
+                            ex,
+                            "ClearToolheadSpoolAsync: concurrent gate materialization conflict (concurrency) for printer {Id} toolhead T{Index}",
+                            id, toolheadIndex);
+                        return new CommandResult(
+                            false,
+                            $"Toolhead T{toolheadIndex} was created by another request; retry clearing the spool");
+                    }
+                    catch (DbUpdateException ex) when (IsToolheadPrinterIndexUniqueViolation(ex))
+                    {
+                        RestoreStagedToolheadBinding(
+                            p, previousMultiMaterial, stagedGates, null, null, null, null, null, null);
+                        _logger.LogWarning(
+                            ex,
+                            "ClearToolheadSpoolAsync: concurrent gate materialization conflict for printer {Id} toolhead T{Index}",
+                            id, toolheadIndex);
+                        return new CommandResult(
+                            false,
+                            $"Toolhead T{toolheadIndex} was created by another request; retry clearing the spool");
+                    }
                 }
 
-                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                toolhead = stagedGates.FirstOrDefault(t => t.Index == toolheadIndex)
                            ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
             }
         }
