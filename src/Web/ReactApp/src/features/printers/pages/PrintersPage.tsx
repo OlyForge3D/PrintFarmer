@@ -84,6 +84,27 @@ export function PrintersPage() {
     error: printersError,
     refetch: refetchPrinters,
   } = usePrinters();
+
+  // The printers query never reaches a "successful" state while every attempt
+  // 503s, so `dataUpdatedAt` never advances. Any refetch of that still-empty
+  // query — a manual Retry click, or QueueRealtimeBridge's
+  // `invalidateQueries(['printers'])` on SignalR reconnect/queue events —
+  // resets React Query's `status` back to `pending`, which flips `isLoading`
+  // true again and would otherwise replace the error alert (and its Retry
+  // button) with the full-page skeleton (#1581). Persist the last-seen error
+  // across those transient pending windows so the alert stays put until
+  // printers data actually arrives (including a genuinely empty `[]` fleet,
+  // which is distinct from `undefined` and must still render normally).
+  const [stalePrintersError, setStalePrintersError] = useState<unknown>(null);
+  useEffect(() => {
+    if (isPrintersError) {
+      setStalePrintersError(printersError);
+    } else if (printers) {
+      setStalePrintersError(null);
+    }
+  }, [isPrintersError, printersError, printers]);
+  const showPrintersError = isPrintersError || (!!stalePrintersError && !printers);
+  const displayedPrintersError = isPrintersError ? printersError : stalePrintersError;
   const { data: cameraUrls = [] } = usePrinterCameraUrls();
 
   const { data: bedTypes = [] } = useBedTypes();
@@ -406,7 +427,7 @@ export function PrintersPage() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading && !showPrintersError) {
     return (
       <div className="min-h-full bg-pf-bg-2 pt-4 pb-8 lg:pt-20">
         <div className="mx-auto px-4 sm:px-6 lg:px-8" role="status" aria-busy="true">
@@ -426,7 +447,7 @@ export function PrintersPage() {
     );
   }
 
-  if (isPrintersError) {
+  if (showPrintersError) {
     return (
       <PageTemplate
         title="Printers"
@@ -441,8 +462,8 @@ export function PrintersPage() {
           <PrinterIcon className="mb-4 h-14 w-14 text-pf-error" />
           <h2 className="mb-2 text-xl font-semibold text-pf-text-primary">Unable to Load Printers</h2>
           <p className="mb-6 max-w-md text-pf-text-secondary">
-            {printersError instanceof Error
-              ? printersError.message
+            {displayedPrintersError instanceof Error
+              ? displayedPrintersError.message
               : 'PrintFarmer could not retrieve the printer list. Try again.'}
           </p>
           <Button type="button" variant="primary" onClick={() => void refetchPrinters()}>
