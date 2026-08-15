@@ -3522,7 +3522,7 @@ public class PrintersService(
 
             if (toolhead is null)
             {
-                if (!p.MultiMaterial && toolheadIndex > 0)
+                if (!p.MultiMaterial && toolheadIndex > 0 && HasConfirmedMmuSignal(p))
                 {
                     _logger.LogInformation(
                         "SetToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
@@ -3846,7 +3846,7 @@ public class PrintersService(
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
         {
-            if (!p.MultiMaterial && toolheadIndex > 0)
+            if (!p.MultiMaterial && toolheadIndex > 0 && HasConfirmedMmuSignal(p))
             {
                 _logger.LogInformation(
                     "ClearToolheadSpoolAsync: Promoting printer {PName} ({Id}) to MultiMaterial=true (requested toolhead T{Index})",
@@ -3902,6 +3902,18 @@ public class PrintersService(
 
         if (toolhead is null)
         {
+            if (p.MultiMaterial != previousMultiMaterial)
+            {
+                // Gate creation was declined (e.g. the printer already carries >1 persisted
+                // physical toolheads, which is the residual toolchanger defense inside
+                // CreateMmuVirtualToolheads) after this call already flipped MultiMaterial to
+                // true in memory. Revert it so the promotion cannot leak into a later
+                // SaveChangesAsync on the shared scoped DbContext (issue #1600).
+                p.MultiMaterial = previousMultiMaterial;
+                _ = PerToolAttributionCapability.Refresh(p);
+                _db.Entry(p).Property(pr => pr.MultiMaterial).IsModified = false;
+            }
+
             return new CommandResult(false, $"Toolhead with index {toolheadIndex} not found on printer \"{p.Name}\"");
         }
 
@@ -4063,6 +4075,25 @@ public class PrintersService(
             _unitOfWork.Printers.AddToolheads(gates);
         }
     }
+
+    /// <summary>
+    /// True when there is a positive, explicit signal that this printer actually has genuine
+    /// MMU/AMS hardware — as opposed to merely lacking evidence that it is a toolchanger.
+    /// </summary>
+    /// <remarks>
+    /// Toolchangers (e.g. Snapmaker U1, Prusa XL) must never be promoted to
+    /// <see cref="Printer.MultiMaterial"/> purely because one of their real physical toolhead
+    /// indices has not yet been materialized as a <see cref="Toolhead"/> row: an absent T1 row
+    /// is not evidence of an AMS, it is just discovery/sync that hasn't caught up yet. Gating on
+    /// the *absence* of &gt;1 persisted physical toolheads (the old defense inside
+    /// <see cref="CreateMmuVirtualToolheads"/>) is order-dependent — it only catches a
+    /// toolchanger once a second physical toolhead has already been persisted — so callers must
+    /// require one of these confirmed-positive signals before treating an unmaterialized
+    /// toolhead index &gt; 0 as an MMU gate request (issue #1600).
+    /// </remarks>
+    private static bool HasConfirmedMmuSignal(Printer printer) =>
+        printer.HasMmu == true
+        || printer.Toolheads.Any(t => t.ToolheadType == ToolheadType.MmuGate);
 
     /// <summary>
     /// Creates MMU virtual toolhead entities for a multi-material printer.
