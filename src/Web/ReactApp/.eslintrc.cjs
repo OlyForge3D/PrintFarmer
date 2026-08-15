@@ -23,7 +23,6 @@ module.exports = {
     'plugin:import/recommended'
   ],
   parser: '@typescript-eslint/parser',
-  plugins: ['@typescript-eslint', 'react-refresh', 'import'],
   // Register local plugin directory under the name 'local'
   // ESLint will resolve this when run from the project root
   pluginPaths: ['eslint-rules'],

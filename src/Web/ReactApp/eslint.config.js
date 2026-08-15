@@ -52,4 +52,16 @@ export default tseslint.config([
       'local/pf-no-raw-html-controls': 'off',
     },
   },
+  // Playwright e2e specs call fetch() inside page.evaluate(), which runs in
+  // the browser page context with no access to the app's apiClient module.
+  // The pf-require-apiclient rule's premise doesn't apply there. This
+  // exclusion is needed now that a CodeQL js/overwritten-property fix
+  // (merging duplicate CallExpression handlers in pf-require-apiclient.js)
+  // makes the rule correctly detect these previously-unreported fetch calls.
+  {
+    files: ['e2e/**/*.ts'],
+    rules: {
+      'local/pf-require-apiclient': 'off',
+    },
+  },
 ])

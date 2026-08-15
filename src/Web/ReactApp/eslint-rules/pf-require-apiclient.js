@@ -30,7 +30,7 @@ export default {
     const allowedAxiosUsage = ['isAxiosError']; // Methods allowed without apiClient
 
     return {
-      // Track if apiClient is imported
+      // Track if apiClient is imported; also detect: import axios from 'axios'
       ImportDeclaration(node) {
         if (node.source.value === '@/services/api') {
           node.specifiers.forEach(spec => {
@@ -39,10 +39,7 @@ export default {
             }
           });
         }
-      },
 
-      // Detect: import axios from 'axios'
-      ImportDeclaration(node) {
         if (node.source.value === 'axios') {
           // Check if it's importing more than just type definitions or error utilities
           const hasAxiosDefault = node.specifiers.some(
@@ -103,6 +100,28 @@ export default {
             });
           }
         }
+
+        // Detect: fetch with getApiBaseUrl() pattern
+        if (
+          node.callee.name === 'fetch' &&
+          node.arguments.length > 0
+        ) {
+          const firstArg = node.arguments[0];
+          // Check for template literal with getApiBaseUrl() call
+          if (firstArg.type === 'TemplateLiteral') {
+            const hasGetApiBaseUrlCall = firstArg.expressions.some(
+              (expr) =>
+                expr.type === 'CallExpression' &&
+                expr.callee.name === 'getApiBaseUrl'
+            );
+            if (hasGetApiBaseUrlCall) {
+              context.report({
+                node,
+                messageId: 'useApiClientForFetch'
+              });
+            }
+          }
+        }
       },
 
       // Detect: api.get/post/put/delete where api is a custom axios instance
@@ -137,30 +156,6 @@ export default {
               node: node.parent,
               messageId: 'useApiClientForCreate'
             });
-          }
-        }
-      },
-
-      // Detect: fetch with getApiBaseUrl() pattern
-      CallExpression(node) {
-        if (
-          node.callee.name === 'fetch' &&
-          node.arguments.length > 0
-        ) {
-          const firstArg = node.arguments[0];
-          // Check for template literal with getApiBaseUrl() call
-          if (firstArg.type === 'TemplateLiteral') {
-            const hasGetApiBaseUrlCall = firstArg.expressions.some(
-              (expr) =>
-                expr.type === 'CallExpression' &&
-                expr.callee.name === 'getApiBaseUrl'
-            );
-            if (hasGetApiBaseUrlCall) {
-              context.report({
-                node,
-                messageId: 'useApiClientForFetch'
-              });
-            }
           }
         }
       }
