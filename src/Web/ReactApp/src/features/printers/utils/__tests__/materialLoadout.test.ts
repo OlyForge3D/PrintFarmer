@@ -46,6 +46,7 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.slots.map((s) => s.label)).toEqual(['G1', 'G2', 'G3', 'G4']);
     expect(loadout!.unitLabel).toBe('QidiBox');
     expect(loadout!.kind).toBe('gate');
+    expect(loadout!.hasResolvedTopology).toBe(false);
   });
 
   it('translates live gate indices to the 1-based indices the spool API persists', () => {
@@ -54,7 +55,7 @@ describe('resolveMaterialLoadout', () => {
     // neighbouring gate, which is what made the two panels disagree.
     const loadout = resolveMaterialLoadout(
       mmu([gate(0), gate(1), gate(2), gate(3)], MmuProtocol.Qidibox),
-      [toolhead(0), persistedGate(1), persistedGate(2), persistedGate(3)],
+      [toolhead(0), persistedGate(1), persistedGate(2), persistedGate(3), persistedGate(4)],
     );
 
     expect(loadout!.slots.map((s) => s.gcodeIndex)).toEqual([0, 1, 2, 3]);
@@ -70,13 +71,25 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.hasResolvedTopology).toBe(false);
   });
 
-  it('marks a live-gate loadout as topology-resolved when persisted toolheads are present', () => {
+  it('does not treat physical-only persisted toolheads as resolved MMU gate topology', () => {
     const loadout = resolveMaterialLoadout(
       mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
-      [toolhead(0), persistedGate(1), persistedGate(2)],
+      [toolhead(0), toolhead(1)],
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(false);
+    expect(loadout!.slots.map((slot) => slot.apiIndex)).toEqual([0, 1]);
+  });
+
+  it('maps live gates by validated persisted ordering when API indices are non-contiguous', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [toolhead(0), persistedGate(2), persistedGate(5)],
     );
 
     expect(loadout!.hasResolvedTopology).toBe(true);
+    expect(loadout!.slots.map((slot) => slot.apiIndex)).toEqual([2, 5]);
+    expect(loadout!.slots.map((slot) => slot.apiIndex)).not.toContain(0);
   });
 
   it('treats a toolchanger as topology-resolved without persisted toolheads', () => {

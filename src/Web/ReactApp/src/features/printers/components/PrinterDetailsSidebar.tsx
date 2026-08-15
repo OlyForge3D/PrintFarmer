@@ -158,8 +158,8 @@ interface PrinterDetailsSidebarProps {
   printer?: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
-  /** Layout mode: drawer panel, bounded content panel, or chrome-free inline details */
-  layout?: 'panel' | 'content' | 'inline';
+  /** Layout mode: drawer panel or bounded content panel. */
+  layout?: 'panel' | 'content';
 }
 
 export function PrinterDetailsSidebar({ printerId, printer: printerProp, backendCapabilities, onClose, layout = 'panel' }: PrinterDetailsSidebarProps) {
@@ -360,11 +360,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
-  const sidebarShellClassName = layout === 'inline'
-    ? 'w-full min-w-0'
-    : layout === 'content'
-      ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
-      : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
+  const sidebarShellClassName = layout === 'content'
+    ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
+    : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
 
   // Show loading state while fetching printer data
   if (isLoading || !printer) {
@@ -697,13 +695,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   return (
     <div
-      className={`${sidebarShellClassName} ${layout === 'inline' ? '' : 'z-30'}`}
-      role={layout === 'inline' ? 'region' : 'complementary'}
+      className={`${sidebarShellClassName} z-30`}
+      role="complementary"
       aria-label={`${printer.name} details`}
     >
       {/* Header */}
-      {layout !== 'inline' && (
-        <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
+      <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
               <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
@@ -725,15 +722,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             title="Close sidebar"
             iconCenter={<CloseIcon className="h-6 w-6" />}
           ></Button>
-        </div>
-      )}
+      </div>
 
       {/* Scrollable Content */}
       <div
         ref={scrollRef}
-        className={layout === 'inline'
-          ? 'min-w-0 space-y-4 border-t border-white/10 pt-4'
-          : 'flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar'}
+        className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar"
       >
         {/* Statistics */}
         <CollapsibleSection

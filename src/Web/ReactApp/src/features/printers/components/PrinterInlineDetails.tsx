@@ -76,8 +76,7 @@ function formatFilament(grams?: number | null): string {
  * Informational-only detail sections rendered inline beneath a
  * {@link DetailedPrinterCard}. This is intentionally NOT the full
  * {@link PrinterDetailsSidebar}: it renders read-only Statistics and Version
- * plus the Objects-skipping affordance (the only informational sub-panel the
- * card doesn't already provide via its dedicated modals/panels), and does not
+ * plus the Objects-skipping affordance when the backend supports it, and does not
  * mount any of the sidebar's action buttons, temperature/movement pads,
  * materials rail, spool picker, files or history modals.
  *
@@ -94,7 +93,7 @@ export function PrinterInlineDetails({
   const queryClient = useQueryClient();
 
   const [isStatisticsExpanded, setIsStatisticsExpanded] = useState(false);
-  const [isVersionExpanded, setIsVersionExpanded] = useState(true);
+  const [isVersionExpanded, setIsVersionExpanded] = useState(false);
   const [objectToSkip, setObjectToSkip] = useState<PrintJobObjectDto | null>(null);
 
   const printerStatisticsQuery = useQuery({

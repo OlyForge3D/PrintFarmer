@@ -45,6 +45,7 @@ const persistedQidiBox: ToolheadDto[] = [
   { id: 'th-1', index: 1, name: 'Gate 1', toolheadType: 'MmuGate' } as ToolheadDto,
   { id: 'th-2', index: 2, name: 'Gate 2', toolheadType: 'MmuGate' } as ToolheadDto,
   { id: 'th-3', index: 3, name: 'Gate 3', toolheadType: 'MmuGate' } as ToolheadDto,
+  { id: 'th-4', index: 4, name: 'Gate 4', toolheadType: 'MmuGate' } as ToolheadDto,
 ];
 
 function renderLoadout(props: Partial<React.ComponentProps<typeof MaterialLoadout>> = {}) {
@@ -108,6 +109,30 @@ describe('MaterialLoadout', () => {
       expect(setSpool).toHaveBeenCalledWith({
         printerId: 'printer-1',
         toolheadIndex: 3,
+        spoolId: 99,
+        reviewedRowVersion: 'rev-1',
+      }),
+    );
+  });
+
+  it('assigns through non-contiguous persisted gate ordering without offset inference', async () => {
+    renderLoadout({
+      mmuStatus: mmu([gate(0), gate(1)]),
+      toolheads: [
+        { id: 'th-0', index: 0, name: 'Hotend', toolheadType: 'Physical' } as ToolheadDto,
+        { id: 'th-2', index: 2, name: 'Gate A', toolheadType: 'MmuGate' } as ToolheadDto,
+        { id: 'th-5', index: 5, name: 'Gate B', toolheadType: 'MmuGate' } as ToolheadDto,
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 5,
         spoolId: 99,
         reviewedRowVersion: 'rev-1',
       }),
@@ -221,6 +246,24 @@ describe('MaterialLoadout', () => {
 
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('does not accept physical-only persisted topology or target hotend index 0', () => {
+    renderLoadout({
+      mmuStatus: mmu([gate(0), gate(1)]),
+      toolheads: [
+        { id: 'th-0', index: 0, name: 'Hotend', toolheadType: 'Physical' } as ToolheadDto,
+        { id: 'th-1', index: 1, name: 'Second hotend', toolheadType: 'Physical' } as ToolheadDto,
+      ],
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toBeDisabled();
+    expect(screen.getByText(/Materials topology not yet loaded/)).toBeInTheDocument();
+    fireEvent.click(assign);
     expect(setSpool).not.toHaveBeenCalled();
   });
 

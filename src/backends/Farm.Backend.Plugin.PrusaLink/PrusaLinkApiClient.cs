@@ -1092,18 +1092,40 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HistoryListResponse? history = await GetHistoryListAsync(
-            baseUrl,
-            limit: 10000,
-            start: 0,
-            since: null,
-            before: null,
-            order: null,
-            credentials: credentials,
-            ct: ct);
-        if (history == null)
+        BackendHttpTransport client = GetClientForCredentials(credentials);
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        HistoryListResponse history;
+        try
         {
-            return null;
+            history = await FetchPrusaLinkHistoryPageAsync(
+                client,
+                normalizedBaseUrl,
+                limit: 0,
+                start: 0,
+                credentials,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException(
+                "PrusaLink history totals request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                "PrusaLink history totals transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            throw new HttpRequestException(
+                "PrusaLink history totals transport failed.",
+                ex);
         }
 
         double totalPrintTime = 0;

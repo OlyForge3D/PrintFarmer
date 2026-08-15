@@ -786,9 +786,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
             compact
             className="mb-2"
-            onSpoolChange={() => {
-              queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-            }}
           />
         );
       })()}

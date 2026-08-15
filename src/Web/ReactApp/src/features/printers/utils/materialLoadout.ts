@@ -23,9 +23,8 @@ export interface LoadoutSlot {
   key: string;
   /**
    * Index accepted by the spool-binding APIs, i.e. the persisted `Toolhead.Index`.
-   * MMU gates are persisted at 1..N because the shared hotend occupies index 0,
-   * while live MMU status reports the same gates 0-based — this field carries the
-   * translated value so an assignment lands on the slot the user clicked.
+   * Live MMU gate indices are mapped to persisted MMU gate records by validated
+   * ordering rather than an inferred numeric offset.
    */
   apiIndex: number;
   /**
@@ -53,12 +52,10 @@ export interface MaterialLoadout {
   unitLabel: string;
   slots: LoadoutSlot[];
   /**
-   * True when the slot list was derived from persisted toolhead topology (which
-   * carries the persisted index offset needed to translate live MMU gates into
-   * the API's expected `Toolhead.Index`). False when the loadout was built from
-   * live MMU status alone — in that case the API-index mapping is a best guess
-   * and spool mutation must be gated until topology arrives, so a `G1` assignment
-   * is never posted to physical hotend index 0. See #1585 (blocker 2).
+   * True when every live MMU gate has an unambiguous persisted MMU gate identity,
+   * or when the device reports physical toolheads directly. False when the API
+   * index is only a display fallback; spool mutation must remain blocked so a G1
+   * assignment can never be posted to physical hotend index 0.
    */
   hasResolvedTopology: boolean;
 }
@@ -89,29 +86,38 @@ function unitLabelFor(kind: LoadoutKind, mmuType?: string): string {
   }
 }
 
-/**
- * Live MMU gates are 0-based, but the backend persists MMU gates at 1..N. Rather
- * than assume one convention globally, read the offset off the persisted topology:
- * gates starting at 1 mean live gate `n` is persisted toolhead `n + 1`. When no
- * gates are persisted yet the indices are passed through unchanged, which matches
- * the backend's own auto-materialization path.
- */
-function persistedGateOffset(toolheads: ToolheadDto[] | undefined): number {
-  const gates = toolheads?.filter(isMmuGate) ?? [];
-  if (gates.length === 0) return 0;
-  return Math.min(...gates.map((gate) => gate.index)) > 0 ? 1 : 0;
+function persistedGateIndicesByLiveIndex(
+  liveGates: MmuGate[],
+  toolheads: ToolheadDto[] | undefined,
+): Map<number, number> | null {
+  const persistedGates = (toolheads ?? [])
+    .filter(isMmuGate)
+    .sort((a, b) => a.index - b.index);
+  const sortedLiveGates = [...liveGates].sort((a, b) => a.index - b.index);
+
+  if (
+    persistedGates.length !== sortedLiveGates.length ||
+    new Set(persistedGates.map((gate) => gate.index)).size !== persistedGates.length ||
+    sortedLiveGates.some((gate, position) => gate.index !== position)
+  ) {
+    return null;
+  }
+
+  return new Map(
+    sortedLiveGates.map((gate, position) => [gate.index, persistedGates[position].index]),
+  );
 }
 
 function slotFromGate(
   gate: MmuGate,
   position: number,
   kind: LoadoutKind,
-  apiOffset: number,
+  apiIndex: number,
 ): LoadoutSlot {
   const isTool = kind === 'tool';
   return {
     key: `gate-${gate.index}`,
-    apiIndex: isTool ? gate.index : gate.index + apiOffset,
+    apiIndex,
     gcodeIndex: gate.index,
     label: isTool ? `T${gate.index}` : `G${position + 1}`,
     name: gate.name,
@@ -126,13 +132,12 @@ function slotFromToolhead(
   toolhead: ToolheadDto,
   position: number,
   kind: LoadoutKind,
-  gcodeOffset: number,
 ): LoadoutSlot {
   const isTool = kind === 'tool';
   return {
     key: toolhead.id ?? `toolhead-${toolhead.index}`,
     apiIndex: toolhead.index,
-    gcodeIndex: isTool ? toolhead.index : toolhead.index - gcodeOffset,
+    gcodeIndex: isTool ? toolhead.index : position,
     label: isTool ? `T${toolhead.index}` : `G${position + 1}`,
     name: toolhead.name,
     material: toolhead.currentMaterial,
@@ -188,21 +193,30 @@ export function resolveMaterialLoadout(
   toolheads: ToolheadDto[] | undefined,
 ): MaterialLoadout | null {
   const liveGates = mmuStatus?.gates;
-  const hasPersistedTopology = !!(toolheads && toolheads.length > 0);
 
   if (liveGates && liveGates.length > 0) {
     const kind: LoadoutKind = isToolchangerProtocol(mmuStatus?.mmuType) ? 'tool' : 'gate';
-    const apiOffset = kind === 'tool' ? 0 : persistedGateOffset(toolheads);
     const sorted = [...liveGates].sort((a, b) => a.index - b.index);
+    const persistedGateIndices = kind === 'tool'
+      ? null
+      : persistedGateIndicesByLiveIndex(sorted, toolheads);
     // Toolchangers already report toolheads 0-based and identical to their API
     // index, so no persisted topology is needed to translate live indices safely.
     // For MMU gates the API-index offset can only be pinned down from the
     // persisted topology — without it, live G1 might land on physical hotend 0.
-    const hasResolvedTopology = kind === 'tool' || hasPersistedTopology;
+    const hasResolvedTopology = kind === 'tool' || persistedGateIndices !== null;
     return {
       kind,
       unitLabel: unitLabelFor(kind, mmuStatus?.mmuType),
-      slots: sorted.map((gate, position) => slotFromGate(gate, position, kind, apiOffset)),
+      slots: sorted.map((gate, position) =>
+        slotFromGate(
+          gate,
+          position,
+          kind,
+          kind === 'tool'
+            ? gate.index
+            : persistedGateIndices?.get(gate.index) ?? gate.index,
+        )),
       hasResolvedTopology,
     };
   }
@@ -216,12 +230,11 @@ export function resolveMaterialLoadout(
     return {
       kind: 'tool',
       unitLabel: unitLabelFor('tool'),
-      slots: physical.map((t, position) => slotFromToolhead(t, position, 'tool', 0)),
+      slots: physical.map((t, position) => slotFromToolhead(t, position, 'tool')),
       hasResolvedTopology: true,
     };
   }
 
-  const gcodeOffset = gates[0].index > 0 ? 1 : 0;
   const externals = physical
     .filter((t) => t.currentSpoolId != null || t.currentMaterial != null)
     .map((t) => externalSlotFromToolhead(t));
@@ -230,7 +243,7 @@ export function resolveMaterialLoadout(
     kind: 'gate',
     unitLabel: unitLabelFor('gate'),
     slots: [
-      ...gates.map((t, position) => slotFromToolhead(t, position, 'gate', gcodeOffset)),
+      ...gates.map((t, position) => slotFromToolhead(t, position, 'gate')),
       ...externals,
     ],
     hasResolvedTopology: true,

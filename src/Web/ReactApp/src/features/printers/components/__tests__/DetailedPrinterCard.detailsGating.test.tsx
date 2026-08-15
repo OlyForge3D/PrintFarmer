@@ -70,11 +70,7 @@ vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ O
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
 vi.mock('@/features/printers/components/PrinterInlineDetails', () => ({
   PrinterInlineDetails: () => (
-    <section aria-label="Printer 1 details" data-layout="inline">
-      <h2>Statistics</h2>
-      <h2>Version</h2>
-      <h2>Objects</h2>
-    </section>
+    <section aria-label="Printer 1 details" data-layout="inline" />
   ),
 }));
 vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
@@ -193,7 +189,7 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
 });
 
 describe('DetailedPrinterCard inline details (#1584)', () => {
-  it('shows sidebar-equivalent information inline without an Open details sidebar control', () => {
+  it('mounts the dedicated inline detail composition without an Open details sidebar control', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
@@ -201,8 +197,5 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
       'data-layout',
       'inline',
     );
-    expect(screen.getByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Version' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Objects' })).toBeInTheDocument();
   });
 });

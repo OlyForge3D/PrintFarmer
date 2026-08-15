@@ -189,6 +189,64 @@ public sealed class PrusaLinkHistoryAuthorityTests
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task GetHistoryTotalsAsync_UsesSingleUnlimitedHistoryRequest()
+    {
+        var requestedUris = new List<Uri>();
+        using var handler = new InlineHandler(request =>
+        {
+            requestedUris.Add(request.RequestUri!);
+            return JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {
+                  "success": true,
+                  "count": 3,
+                  "results": [
+                    {
+                      "id": "job-1",
+                      "state": "completed",
+                      "startTime": 1700000000,
+                      "printTime": 120,
+                      "filament": { "tool0": { "length": 300 } },
+                      "job": { "file": { "name": "a.gcode" } }
+                    },
+                    {
+                      "id": "job-2",
+                      "state": "failed",
+                      "startTime": 1700000100,
+                      "printTime": 30,
+                      "filament": { "tool0": { "length": 50 } },
+                      "job": { "file": { "name": "b.gcode" } }
+                    },
+                    {
+                      "id": "job-3",
+                      "state": "completed",
+                      "startTime": 1700000200,
+                      "printTime": 180,
+                      "filament": { "tool0": { "length": 700 } },
+                      "job": { "file": { "name": "c.gcode" } }
+                    }
+                  ]
+                }
+                """);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(
+            "http://prusalink/");
+
+        requestedUris.Should().ContainSingle();
+        requestedUris[0].PathAndQuery.Should().Be("/api/history?limit=0&start=0");
+        totals.Should().NotBeNull();
+        totals!.JobTotals.TotalJobs.Should().Be(2);
+        totals.JobTotals.TotalPrintTime.Should().Be(300);
+        totals.JobTotals.TotalFilamentUsed.Should().Be(1000);
+    }
+
     [Theory]
     [InlineData("/thumb/job-1.png", "http://prusalink/thumb/job-1.png")]
     [InlineData("thumb/job-1.png", "http://prusalink/thumb/job-1.png")]
