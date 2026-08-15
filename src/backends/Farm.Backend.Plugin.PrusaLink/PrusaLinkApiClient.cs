@@ -1575,8 +1575,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 
         if (contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
         {
-            return bytes.StartsWith("GIF87a"u8) ||
-                bytes.StartsWith("GIF89a"u8);
+            return bytes.Length >= 6 &&
+                bytes[0] == 0x47 &&
+                bytes[1] == 0x49 &&
+                bytes[2] == 0x46 &&
+                bytes[3] == 0x38 &&
+                (bytes[4] == 0x37 || bytes[4] == 0x39) &&
+                bytes[5] == 0x61;
         }
 
         return contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) &&
