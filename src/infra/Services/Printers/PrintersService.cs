@@ -373,6 +373,15 @@ public class PrintersService(
             return HistoryListProbeResult.Unavailable(
                 HistoryProbeFailureCodes.Timeout);
         }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history could not prove the requested range for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Error(
+                "history_completeness_unproven");
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(

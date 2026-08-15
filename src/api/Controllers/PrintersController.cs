@@ -80,6 +80,8 @@ public class PrintersController(
     AppDbContext? appDbContext = null)
     : ControllerBase
 {
+    private const int MaxHistoryQueryEntries = 2000;
+
     private readonly Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private readonly Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
     private readonly Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? _physicalActuationService = physicalActuationService;
@@ -4587,6 +4589,33 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
+        if (limit is < 1 or > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"limit must be between 1 and {MaxHistoryQueryEntries}.");
+        }
+
+        if (start is < 0 or > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(start),
+                $"start must be between 0 and {MaxHistoryQueryEntries}.");
+        }
+
+        if (limit.HasValue &&
+            (long)(start ?? 0) + limit.Value > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"start plus limit must not exceed {MaxHistoryQueryEntries}.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
         if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();

@@ -429,6 +429,32 @@ public sealed class PrintersServiceHistoryProbeTests
     }
 
     [Fact]
+    public async Task ProbeHistoryListAsync_InvalidAdapterDataIsCompletenessError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.OctoPrint);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidDataException("bounded scan failed"));
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 50, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Error);
+        result.FailureCode.Should().Be("history_completeness_unproven");
+    }
+
+    [Fact]
     public async Task ProbeHistoryJobAsync_ValidDetailIsFound()
     {
         await using AppDbContext db = CreateDbContext();

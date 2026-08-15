@@ -41,6 +41,12 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
 
     private const int MaxRetryAttempts = 3;
     private const int RetryDelayMs = 1000;
+    private const int HistoryPageSize = 100;
+    private const int MaxHistoryPagesForListFullScan = 20;
+    private const int MaxHistoryEntriesForListFullScan =
+        HistoryPageSize * MaxHistoryPagesForListFullScan;
+
+    private const int MaxHistoryPageBytes = 2 * 1024 * 1024;
 
     // Keep HttpClient internal; callers should use IOctoPrintClient.SendAsync
     internal HttpClient HttpClient => _httpClient;
@@ -645,10 +651,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
                 ? (long)requestedStart + requestedLimit.Value
                 : long.MaxValue;
 
-            const int PageSize = 100;
             int offset = 0;
             int sourceCount = 0;
+            int expectedFullScanSourceCount = -1;
             int examinedCount = 0;
+            int pagesFetched = 0;
             bool reachedSourceEnd = false;
             var allJobs = new List<HistoryJob>();
             var excludedEntries = new List<HistoryExcludedEntryEvidence>();
@@ -656,35 +663,80 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             {
                 int pageSize = !requiresFullScan && requestedLimit.HasValue
                     ? (int)Math.Min(
-                        PageSize,
+                        HistoryPageSize,
                         Math.Max(1L, requestedEnd - allJobs.Count))
-                    : PageSize;
-                HistoryListResponse page = await FetchOctoPrintHistoryPageAsync(
+                    : HistoryPageSize;
+                HistoryListResponse? fetchedPage = await FetchOctoPrintHistoryPageAsync(
                     baseUrl,
                     pageSize,
                     offset,
                     credential,
                     ct);
+                if (fetchedPage is null)
+                {
+                    return null;
+                }
+
+                HistoryListResponse page = fetchedPage;
+                pagesFetched++;
                 int examined = page.ExaminedSourceEntries;
-                if (examined > 0 && page.Count < offset + examined)
+                if ((requiresFullScan && examined > pageSize) ||
+                    (examined > 0 && page.Count < offset + examined))
                 {
                     throw new InvalidDataException(
                         "OctoPrint history count did not cover the returned source page.");
                 }
 
-                sourceCount = Math.Max(sourceCount, page.Count);
+                if (requiresFullScan)
+                {
+                    if (expectedFullScanSourceCount < 0)
+                    {
+                        expectedFullScanSourceCount = page.Count;
+                        if (expectedFullScanSourceCount >
+                            MaxHistoryEntriesForListFullScan)
+                        {
+                            throw new InvalidDataException(
+                                $"OctoPrint history contains {expectedFullScanSourceCount} entries, exceeding the authoritative list full-scan limit of {MaxHistoryEntriesForListFullScan}.");
+                        }
+                    }
+                    else if (page.Count != expectedFullScanSourceCount)
+                    {
+                        throw new InvalidDataException(
+                            "OctoPrint history count changed during an authoritative list full scan.");
+                    }
+
+                    sourceCount = expectedFullScanSourceCount;
+                }
+                else
+                {
+                    sourceCount = Math.Max(sourceCount, page.Count);
+                }
+
                 allJobs.AddRange(page.Jobs);
                 excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
                 offset += examined;
-                reachedSourceEnd = offset >= sourceCount;
+                reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
                     requestedLimit.HasValue &&
                     allJobs.Count >= requestedEnd;
-                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                if (reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
+                }
+
+                if (examined == 0 || offset > sourceCount)
+                {
+                    throw new InvalidDataException(
+                        "OctoPrint history ended before the advertised source count.");
+                }
+
+                if (requiresFullScan &&
+                    pagesFetched >= MaxHistoryPagesForListFullScan)
+                {
+                    throw new InvalidDataException(
+                        $"OctoPrint history list exceeded the authoritative full-scan paging limit of {MaxHistoryPagesForListFullScan} pages.");
                 }
             }
 
@@ -747,6 +799,11 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             LogError("Get history list transport failed", ex);
             throw;
         }
+        catch (InvalidDataException ex)
+        {
+            LogError("Get history list validation failed", ex);
+            throw;
+        }
         catch (Exception ex)
         {
             LogError("Get history list failed", ex);
@@ -762,7 +819,7 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
         };
 
-    private async Task<HistoryListResponse> FetchOctoPrintHistoryPageAsync(
+    private async Task<HistoryListResponse?> FetchOctoPrintHistoryPageAsync(
         string baseUrl,
         int? limit,
         int start,
@@ -784,10 +841,50 @@ public class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintClient>? lo
             request,
             cancellationToken: ct);
         response.EnsureSuccessStatusCode();
-        string content = await response.Content.ReadAsStringAsync(ct);
-        return ParseOctoPrintHistoryList(content)
-            ?? throw new InvalidDataException(
-                "OctoPrint returned malformed history list data.");
+        string content = await ReadBoundedStringAsync(
+            response.Content,
+            MaxHistoryPageBytes,
+            "OctoPrint history response",
+            ct);
+        return ParseOctoPrintHistoryList(content);
+    }
+
+    private static async Task<string> ReadBoundedStringAsync(
+        HttpContent content,
+        int maxBytes,
+        string responseName,
+        CancellationToken ct)
+    {
+        if (content.Headers.ContentLength > maxBytes)
+        {
+            throw new InvalidDataException(
+                $"{responseName} exceeded the size limit.");
+        }
+
+        await using Stream stream = await content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await stream.ReadAsync(chunk, ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new InvalidDataException(
+                    $"{responseName} exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+
+        return Encoding.UTF8.GetString(
+            buffer.GetBuffer(),
+            0,
+            (int)buffer.Length);
     }
 
     public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credential = null, CancellationToken ct = default)

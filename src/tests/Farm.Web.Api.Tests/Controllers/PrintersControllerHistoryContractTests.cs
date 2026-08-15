@@ -78,6 +78,87 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
         detail.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    [Theory]
+    [InlineData("limit=1")]
+    [InlineData("limit=2000")]
+    [InlineData("start=0")]
+    [InlineData("start=2000")]
+    [InlineData("start=1999&limit=1")]
+    public async Task HistoryList_QueryAtSupportedBoundary_InvokesService(
+        string query)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryListAsync(
+                printerId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse
+            {
+                Count = 0,
+                Jobs = [],
+            });
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history?{query}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _printers.Verify(service => service.GetHistoryListAsync(
+                printerId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("limit=0")]
+    [InlineData("limit=-1")]
+    [InlineData("limit=2001")]
+    [InlineData("start=-1")]
+    [InlineData("start=2001")]
+    [InlineData("start=1&limit=2000")]
+    public async Task HistoryList_QueryOutsideSupportedWindow_ReturnsBadRequestWithoutService(
+        string query)
+    {
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history?{query}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _printers.Verify(service => service.GetHistoryListAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_AnonymousRequest_IsUnauthorized()
+    {
+        await using var productionAuthFactory =
+            new CustomWebApplicationFactory(
+                new Dictionary<string, string?>
+                {
+                    ["Security:DevModeBypassAuth"] = "false",
+                });
+        using HttpClient anonymousClient = productionAuthFactory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
     [Fact]
     public async Task HistoryThumbnail_ValidImage_ReturnsSameOriginContent()
     {
