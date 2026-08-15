@@ -232,6 +232,27 @@ public sealed class PrintersServiceSwapBindingTests : IDisposable
         (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
     }
 
+    // ── Defence-in-depth: spoolId 0 means "release", never "bind spool 0" ──
+
+    [Fact]
+    public async Task SetToolheadSpoolAsync_NonPositiveSpoolId_RejectedWithoutPersisting()
+    {
+        Guid printerId = SeedLegacyPrinterNoToolheads();
+        Mock<ISpoolmanService> spoolman = Spoolman(77, "PLA");
+
+        await using (AppDbContext db = NewDb())
+        {
+            PrintersService service = CreateService(db, spoolman);
+            CommandResult result = await service.SetToolheadSpoolAsync(printerId, 0, 0, CancellationToken.None);
+            result.Success.Should().BeFalse();
+        }
+
+        await using AppDbContext verify = NewDb();
+        Printer saved = await verify.Printers.FirstAsync(p => p.Id == printerId);
+        saved.CurrentSpoolId.Should().BeNull("a rejected non-positive spoolId must never persist as a bogus binding");
+        (await verify.FilamentSwapOverrides.CountAsync()).Should().Be(0);
+    }
+
     // ── B6: durable override audit written atomically with the binding ──
 
     [Fact]

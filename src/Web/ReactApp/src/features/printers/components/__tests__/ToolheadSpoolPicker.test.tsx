@@ -21,9 +21,15 @@ vi.mock('@/common/hooks/useApi', () => ({
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (spoolId: number, spool: SpoolmanSpool) => void }) => (
-    <button type="button" onClick={() => onSelect(1, { id: 1, name: 'Manual', material: 'PLA', inUse: false })}>
-      Pick manual spool
-    </button>
+    <>
+      <button type="button" onClick={() => onSelect(1, { id: 1, name: 'Manual', material: 'PLA', inUse: false })}>
+        Pick manual spool
+      </button>
+      {/* The real picker's Eject action reports spool id 0. */}
+      <button type="button" data-testid="spool-picker-eject" onClick={() => onSelect(0, {} as SpoolmanSpool)}>
+        Eject
+      </button>
+    </>
   ),
 }));
 
@@ -103,5 +109,29 @@ describe('ToolheadSpoolPicker', () => {
       toolheadIndex: 1,
       spoolId: 1,
     });
+  });
+
+  it('routes the picker eject action to the clear endpoint, not a spool-0 bind', async () => {
+    // SpoolPickerModal's Eject button reports spool id 0. Forwarding that to
+    // setSpool would persist a bogus zero binding instead of releasing the slot.
+    render(
+      <ToolheadSpoolPicker
+        printerId="printer-1"
+        reviewedRowVersion="printer-v1"
+        toolheads={toolheads}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByText('Change')[0]);
+    fireEvent.click(await screen.findByTestId('spool-picker-eject'));
+
+    await waitFor(() =>
+      expect(mocks.clearSpoolMutate).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 0,
+        reviewedRowVersion: 'printer-v1',
+      }),
+    );
+    expect(mocks.setSpoolMutateAsync).not.toHaveBeenCalled();
   });
 });
