@@ -308,6 +308,23 @@ describe('CompactPrinterCard memoization', () => {
       .toHaveAttribute('href', 'http://printer-1.local');
   });
 
+  it('keeps the Open details sidebar action in compact mode', async () => {
+    const user = userEvent.setup();
+    const onExpand = vi.fn();
+
+    render(
+      <CompactPrinterCard
+        printer={createPrinter()}
+        onExpand={onExpand}
+        onEdit={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open details sidebar' }));
+
+    expect(onExpand).toHaveBeenCalledWith('printer-1');
+  });
+
   it('does not render an unsafe browser URL as a link', async () => {
     const user = userEvent.setup();
 

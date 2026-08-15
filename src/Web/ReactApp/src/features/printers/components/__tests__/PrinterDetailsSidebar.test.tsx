@@ -183,6 +183,25 @@ describe('PrinterDetailsSidebar', () => {
     expect(shell).not.toHaveClass('lg:max-h-[calc(100dvh-5rem)]');
   });
 
+  it('renders sidebar detail sections inline without drawer chrome', () => {
+    const { container } = render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="inline"
+      />
+    );
+
+    const region = screen.getByRole('region', { name: `${printer.name} details` });
+    expect(region).toHaveClass('w-full', 'min-w-0');
+    expect(region).not.toHaveClass('z-30');
+    expect(screen.queryByRole('button', { name: 'Close sidebar' })).not.toBeInTheDocument();
+    expect(screen.getByText('Statistics')).toBeInTheDocument();
+    expect(screen.getByText('Version')).toBeInTheDocument();
+    expect(container.querySelector('.overflow-y-auto')).not.toBeInTheDocument();
+  });
+
   it('uses the dedicated success action contract for move-to', () => {
     render(
       <PrinterDetailsSidebar

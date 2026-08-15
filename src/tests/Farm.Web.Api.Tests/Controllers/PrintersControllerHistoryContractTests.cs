@@ -78,6 +78,78 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
         detail.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
 
+    [Fact]
+    public async Task HistoryThumbnail_ValidImage_ReturnsSameOriginContent()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryThumbnailContent([1, 2, 3], "image/png"));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+        response.Headers.GetValues("X-Content-Type-Options")
+            .Should().ContainSingle("nosniff");
+        (await response.Content.ReadAsByteArrayAsync()).Should().Equal(1, 2, 3);
+    }
+
+    [Theory]
+    [InlineData(typeof(KeyNotFoundException), HttpStatusCode.NotFound)]
+    [InlineData(typeof(InvalidDataException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(HttpRequestException), HttpStatusCode.BadGateway)]
+    public async Task HistoryThumbnail_ProviderFailure_ReturnsExplicitStatus(
+        Type exceptionType,
+        HttpStatusCode expectedStatus)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(expectedStatus);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_InaccessiblePrinter_ReturnsNotFound()
+    {
+        var authorization =
+            new Mock<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+        authorization
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        await using var factory =
+            new HistoryContractFactory(_printers.Object, authorization.Object);
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add(
+            "X-Test-User-Id",
+            Guid.NewGuid().ToString());
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _printers.Verify(
+            service => service.GetHistoryThumbnailAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
     [Theory]
     [InlineData(false, typeof(HttpRequestException), HttpStatusCode.BadGateway)]
     [InlineData(false, typeof(SocketException), HttpStatusCode.BadGateway)]
@@ -425,7 +497,9 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             Task.FromResult(responseFactory(request));
     }
 
-    private sealed class HistoryContractFactory(IPrintersService printers)
+    private sealed class HistoryContractFactory(
+        IPrintersService printers,
+        Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? authorization = null)
         : CustomWebApplicationFactory(
             new Dictionary<string, string?>
             {
@@ -440,6 +514,11 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             {
                 services.RemoveAll<IPrintersService>();
                 services.AddSingleton(printers);
+                if (authorization is not null)
+                {
+                    services.RemoveAll<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+                    services.AddSingleton(authorization);
+                }
             });
         }
     }

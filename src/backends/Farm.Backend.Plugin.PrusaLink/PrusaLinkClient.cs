@@ -25,7 +25,8 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsMovement,
     ISupportsTemperatureControl,
     ISupportsFilamentUsageQuery,
-    ISupportsHistory
+    ISupportsHistory,
+    ISupportsHistoryThumbnail
 {
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly ILogger<PrusaLinkClient>? _logger;
@@ -68,6 +69,13 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
         PrinterCredential? credential = null,
         CancellationToken ct = default)
         => await _apiClient.GetHistoryJobAsync(baseUrl, jobId, credential, ct);
+
+    public async Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default)
+        => await _apiClient.GetHistoryThumbnailAsync(baseUrl, jobId, credential, ct);
 
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(
         string baseUrl,

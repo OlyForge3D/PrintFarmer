@@ -71,6 +71,15 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
+vi.mock('@/features/printers/components/PrinterDetailsSidebar', () => ({
+  PrinterDetailsSidebar: ({ layout }: { layout?: string }) => (
+    <section aria-label="Printer 1 details" data-layout={layout}>
+      <h2>Statistics</h2>
+      <h2>Version</h2>
+      <h2>Objects</h2>
+    </section>
+  ),
+}));
 vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
   ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
 }));
@@ -196,5 +205,20 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
 
     expect(screen.getByRole('link', { name: `Open printer ${printer.name} in new tab` }))
       .toHaveAttribute('href', 'http://printer-1.local');
+  });
+});
+
+describe('DetailedPrinterCard inline details (#1584)', () => {
+  it('shows sidebar-equivalent information inline without an Open details sidebar control', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Printer 1 details' })).toHaveAttribute(
+      'data-layout',
+      'inline',
+    );
+    expect(screen.getByRole('heading', { name: 'Statistics' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Version' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Objects' })).toBeInTheDocument();
   });
 });

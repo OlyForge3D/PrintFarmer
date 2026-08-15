@@ -110,6 +110,175 @@ public sealed class PrusaLinkHistoryAuthorityTests
         history.AuthorityEvidence!.ProvesCompleteSource.Should().BeTrue();
     }
 
+    [Theory]
+    [InlineData("/thumb/job-1.png", "http://prusalink/thumb/job-1.png")]
+    [InlineData("thumb/job-1.png", "http://prusalink/thumb/job-1.png")]
+    [InlineData("http://prusalink/thumb/absolute.png", "http://prusalink/thumb/absolute.png")]
+    [InlineData("https://cdn.example/job-1.png", "https://cdn.example/job-1.png")]
+    [InlineData(null, null)]
+    public async Task GetHistoryListAsync_ThumbnailReference_IsResolved(
+        string? thumbnailReference,
+        string? expectedUrl)
+    {
+        string refs = thumbnailReference is null
+            ? string.Empty
+            : $",\"refs\":{{\"thumbnail\":{System.Text.Json.JsonSerializer.Serialize(thumbnailReference)}}}";
+        string payload =
+            "{\"success\":true,\"count\":1,\"results\":[{\"id\":\"job-1\",\"state\":\"completed\",\"startTime\":1700000000,\"job\":{\"file\":{\"name\":\"a.gcode\"" +
+            refs +
+            "}}}]}";
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                payload));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryListResponse? history = await client.GetHistoryListAsync(
+            "http://prusalink/");
+
+        history.Should().NotBeNull();
+        history!.Jobs.Should().ContainSingle()
+            .Which.ThumbnailUrl.Should().Be(expectedUrl);
+    }
+
+    [Fact]
+    public async Task GetHistoryJobAsync_RelativeThumbnailReference_IsResolved()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryJob? job = await client.GetHistoryJobAsync(
+            "http://prusalink/",
+            "job-1");
+
+        job!.ThumbnailUrl.Should().Be("http://prusalink/thumb/job-1.png");
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_ValidSameOriginImage_ReturnsContent()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : ImageResponse(
+                    HttpStatusCode.OK,
+                    "image/png",
+                    [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryThumbnailContent thumbnail =
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        thumbnail.Content.Should().Equal(
+            0x89,
+            0x50,
+            0x4E,
+            0x47,
+            0x0D,
+            0x0A,
+            0x1A,
+            0x0A);
+        thumbnail.ContentType.Should().Be("image/png");
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_CrossOriginReference_IsRejected()
+    {
+        using var handler = new InlineHandler(_ =>
+            JsonResponse(
+                HttpStatusCode.OK,
+                """
+                {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"https://attacker.example/thumb.png"}}}}
+                """));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*outside the configured printer endpoint*");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK, "text/html", typeof(InvalidDataException))]
+    [InlineData(HttpStatusCode.BadGateway, "image/png", typeof(HttpRequestException))]
+    public async Task GetHistoryThumbnailAsync_InvalidUpstreamResponse_IsRejected(
+        HttpStatusCode statusCode,
+        string contentType,
+        Type expectedException)
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : ImageResponse(statusCode, contentType, [1, 2, 3]));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        (await action.Should().ThrowAsync<Exception>())
+            .Which.Should().BeOfType(expectedException);
+    }
+
+    [Fact]
+    public async Task GetHistoryThumbnailAsync_SpoofedImageContent_IsRejected()
+    {
+        using var handler = new InlineHandler(request =>
+            request.RequestUri!.AbsolutePath == "/api/history/job-1"
+                ? JsonResponse(
+                    HttpStatusCode.OK,
+                    """
+                    {"id":"job-1","state":"completed","job":{"file":{"name":"a.gcode","refs":{"thumbnail":"/thumb/job-1.png"}}}}
+                    """)
+                : ImageResponse(HttpStatusCode.OK, "image/png", [1, 2, 3]));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryThumbnailAsync(
+                "http://prusalink/",
+                "job-1");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*valid image*");
+    }
+
     [Fact]
     public async Task GetHistoryListAsync_MissingStartTime_DoesNotShiftRequestedValidRange()
     {
@@ -299,6 +468,18 @@ public sealed class PrusaLinkHistoryAuthorityTests
         new(status)
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json"),
+        };
+
+    private static HttpResponseMessage ImageResponse(
+        HttpStatusCode status,
+        string contentType,
+        byte[] payload) =>
+        new(status)
+        {
+            Content = new ByteArrayContent(payload)
+            {
+                Headers = { ContentType = new(contentType) },
+            },
         };
 
     private static int ReadQueryInt(HttpRequestMessage request, string name)

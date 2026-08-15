@@ -671,7 +671,6 @@ export function PrintersPage() {
                         printer={printer}
                         backendCapabilities={backendCapabilitiesByPrinterId[printer.id]}
                         onEdit={handleEditPrinter}
-                        onOpenDetails={handleOpenPrinterDetails}
                       />
                     )}
                   />

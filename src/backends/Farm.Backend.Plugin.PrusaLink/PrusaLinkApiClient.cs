@@ -23,6 +23,7 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// </summary>
 public class PrusaLinkApiClient : IPrusaLinkApiClient
 {
+    private const int MaxHistoryThumbnailBytes = 10 * 1024 * 1024;
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PrusaLinkApiClient> _logger;
@@ -844,7 +845,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
         string content = await response.Content.ReadAsStringAsync(ct);
-        return ParseOctoPrintHistoryList(content)
+        return ParseOctoPrintHistoryList(content, normalizedBaseUrl)
             ?? throw new InvalidDataException(
                 "PrusaLink returned malformed history list data.");
     }
@@ -866,7 +867,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync(ct);
-            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content, normalizedBaseUrl);
             if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
             {
                 throw new InvalidDataException(
@@ -887,6 +888,97 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 LogSanitizer.Sanitize(jobId));
             throw;
         }
+    }
+
+    public async Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default)
+    {
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        HistoryJob? job = await GetHistoryJobAsync(
+            normalizedBaseUrl,
+            jobId,
+            credentials,
+            ct);
+        if (string.IsNullOrWhiteSpace(job?.ThumbnailUrl))
+        {
+            throw new KeyNotFoundException(
+                $"PrusaLink history job {jobId} does not have a thumbnail.");
+        }
+
+        Uri configuredEndpoint = EnsureBaseUri(normalizedBaseUrl);
+        if (!Uri.TryCreate(job.ThumbnailUrl, UriKind.Absolute, out Uri? thumbnailUri) ||
+            !IsSameOrigin(configuredEndpoint, thumbnailUri) ||
+            !string.IsNullOrEmpty(thumbnailUri.UserInfo))
+        {
+            throw new InvalidDataException(
+                "PrusaLink returned a thumbnail outside the configured printer endpoint.");
+        }
+
+        HttpClient client = GetClientForCredentials(credentials);
+        using var request = CreateRequest(HttpMethod.Get, thumbnailUri.ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new KeyNotFoundException(
+                $"PrusaLink history thumbnail for job {jobId} was not found.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                "PrusaLink thumbnail request failed.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        string? contentType = response.Content.Headers.ContentType?.MediaType;
+        if (string.IsNullOrWhiteSpace(contentType) ||
+            !IsSupportedThumbnailContentType(contentType))
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response was not an image.");
+        }
+
+        if (response.Content.Headers.ContentLength is > MaxHistoryThumbnailBytes)
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response exceeded the size limit.");
+        }
+
+        await using Stream content = await response.Content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await content.ReadAsync(chunk, ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > MaxHistoryThumbnailBytes)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink thumbnail response exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+
+        byte[] bytes = buffer.ToArray();
+        if (!HasValidImageSignature(contentType, bytes))
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response did not contain a valid image.");
+        }
+
+        return new HistoryThumbnailContent(bytes, contentType);
     }
 
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
@@ -944,7 +1036,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    private static HistoryListResponse? ParseOctoPrintHistoryList(string historyJson)
+    private static HistoryListResponse? ParseOctoPrintHistoryList(
+        string historyJson,
+        string baseUrl)
     {
         try
         {
@@ -969,6 +1063,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             {
                 HistoryJob? job = ParseOctoPrintJobElement(
                     jobElement,
+                    baseUrl,
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
@@ -1014,12 +1109,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    private static HistoryJob? ParseOctoPrintHistoryJob(string jobJson)
+    private static HistoryJob? ParseOctoPrintHistoryJob(
+        string jobJson,
+        string baseUrl)
     {
         try
         {
             using JsonDocument doc = JsonDocument.Parse(jobJson);
-            return ParseOctoPrintJobElement(doc.RootElement);
+            return ParseOctoPrintJobElement(doc.RootElement, baseUrl);
         }
         catch (JsonException)
         {
@@ -1029,6 +1126,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     private static HistoryJob? ParseOctoPrintJobElement(
         JsonElement jobElement,
+        string baseUrl,
         bool requireCompleteListEntry = false)
     {
         if (jobElement.ValueKind != JsonValueKind.Object)
@@ -1055,14 +1153,25 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 stateProp.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(stateProp.GetString());
             string? filename = null;
+            string? thumbnailReference = null;
             if (jobElement.TryGetProperty("job", out JsonElement jobProp) &&
                 jobProp.ValueKind == JsonValueKind.Object &&
                 jobProp.TryGetProperty("file", out JsonElement fileProp) &&
-                fileProp.ValueKind == JsonValueKind.Object &&
-                fileProp.TryGetProperty("name", out JsonElement nameProp) &&
-                nameProp.ValueKind == JsonValueKind.String)
+                fileProp.ValueKind == JsonValueKind.Object)
             {
-                filename = nameProp.GetString();
+                if (fileProp.TryGetProperty("name", out JsonElement nameProp) &&
+                    nameProp.ValueKind == JsonValueKind.String)
+                {
+                    filename = nameProp.GetString();
+                }
+
+                if (fileProp.TryGetProperty("refs", out JsonElement refsProp) &&
+                    refsProp.ValueKind == JsonValueKind.Object &&
+                    refsProp.TryGetProperty("thumbnail", out JsonElement thumbnailProp) &&
+                    thumbnailProp.ValueKind == JsonValueKind.String)
+                {
+                    thumbnailReference = thumbnailProp.GetString();
+                }
             }
 
             bool hasFilename = !string.IsNullOrWhiteSpace(filename);
@@ -1083,6 +1192,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             if (hasFilename)
             {
                 job.Filename = filename!;
+            }
+
+            if (!string.IsNullOrWhiteSpace(thumbnailReference))
+            {
+                job.ThumbnailUrl = ResolveThumbnailUrl(baseUrl, thumbnailReference);
             }
 
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind == JsonValueKind.Number)
@@ -1115,6 +1229,65 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return null;
         }
     }
+
+    private static string? ResolveThumbnailUrl(
+        string baseUrl,
+        string thumbnailReference)
+    {
+        Uri baseUri = new(baseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+        if (!Uri.TryCreate(baseUri, thumbnailReference, out Uri? resolved) ||
+            (resolved.Scheme != Uri.UriSchemeHttp &&
+             resolved.Scheme != Uri.UriSchemeHttps))
+        {
+            return null;
+        }
+
+        return resolved.ToString();
+    }
+
+    private static bool IsSupportedThumbnailContentType(string contentType) =>
+        contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasValidImageSignature(
+        string contentType,
+        ReadOnlySpan<byte> bytes)
+    {
+        if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+        {
+            return bytes.StartsWith(
+                new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A });
+        }
+
+        if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            return bytes.StartsWith(new byte[] { 0xFF, 0xD8, 0xFF });
+        }
+
+        if (contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return bytes.StartsWith("GIF87a"u8) ||
+                bytes.StartsWith("GIF89a"u8);
+        }
+
+        return contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) &&
+            bytes.Length >= 12 &&
+            bytes[..4].SequenceEqual("RIFF"u8) &&
+            bytes.Slice(8, 4).SequenceEqual("WEBP"u8);
+    }
+
+    private static bool IsSameOrigin(Uri configuredEndpoint, Uri target) =>
+        string.Equals(
+            configuredEndpoint.Scheme,
+            target.Scheme,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            configuredEndpoint.Host,
+            target.Host,
+            StringComparison.OrdinalIgnoreCase) &&
+        configuredEndpoint.Port == target.Port;
 
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
         JsonElement entry)

@@ -1,6 +1,6 @@
 import React, { Suspense, useState, useRef, useEffect } from 'react';
 import './DetailedPrinterCard.css';
-import { PanelRightOpen, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useSpoolmanConfigured } from '@/common/hooks/useSpoolmanConfigured';
 import { apiClient } from '@/services/api';
@@ -47,6 +47,7 @@ import { FailureDetectionMonitoringBadge } from '@/features/printers/components/
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
+import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
 import {
   canCancel,
   canCooldown,
@@ -80,18 +81,18 @@ const ZOffsetCalibrationWizard = lazyWithPreload<ZOffsetCalibrationWizardProps, 
   () => import('@/features/printers/components/ZOffsetCalibrationWizard').then(m => ({ default: m.ZOffsetCalibrationWizard }))
 );
 
+const ignoreInlineClose = () => undefined;
+
 export interface DetailedPrinterCardProps {
   /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
   printer: Printer | PrinterDisplay;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onEdit?: (printer: Printer) => void;
-  /** Receives the printer ID so parents can pass one stable callback for all cards */
-  onOpenDetails?: (printerId: string) => void;
 }
 
 // Memoized: with stable callbacks and structural sharing upstream, a card only
 // re-renders when its own printer's data actually changed.
-export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit, onOpenDetails }: DetailedPrinterCardProps) {
+export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
@@ -612,19 +613,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
               iconCenter={<EditIcon className="h-4 w-4" />}
             >
             </Button>
-            {onOpenDetails && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => onOpenDetails(printer.id)}
-                className="h-8 w-8 p-0 text-pf-text-secondary enabled:hover:text-pf-text-primary"
-                title="Open details sidebar"
-                aria-label="Open details sidebar"
-                iconCenter={<PanelRightOpen className="h-4 w-4" />}
-              >
-              </Button>
-            )}
           </div>
         </div>
 
@@ -905,6 +893,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           </div>
         );
       })()}
+
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        backendCapabilities={backendCapabilities}
+        onClose={ignoreInlineClose}
+        layout="inline"
+      />
 
       {/* History Modal */}
       <PrinterHistoryModal

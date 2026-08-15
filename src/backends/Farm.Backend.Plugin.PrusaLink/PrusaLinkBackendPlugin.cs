@@ -80,7 +80,7 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
         services.AddScoped<IPrusaLinkClient>(provider =>
         {
             IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            HttpClient httpClient = httpClientFactory.CreateClient();
+            HttpClient httpClient = httpClientFactory.CreateClient("VettedEgress");
 
             // PrusaLink uses HttpClient.Timeout as the primary timeout mechanism (no per-request CTS).
             // Use the ceiling from BackendTimeoutSettings so uploads have enough headroom.

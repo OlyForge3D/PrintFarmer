@@ -4702,6 +4702,91 @@ public class PrintersController(
         }
     }
 
+    /// <summary>
+    /// Returns an authenticated same-origin thumbnail for a historical print job.
+    /// </summary>
+    /// <param name="id">The printer identifier.</param>
+    /// <param name="jobId">The backend-specific history job identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Validated image content without exposing printer credentials or its private URL.</returns>
+    [HttpGet("{id:guid}/history/{jobId}/thumbnail")]
+    [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> GetHistoryThumbnailAsync(
+        Guid id,
+        string jobId,
+        CancellationToken ct = default)
+    {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            HistoryThumbnailContent thumbnail =
+                await _printersService.GetHistoryThumbnailAsync(id, jobId, ct);
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(thumbnail.Content, thumbnail.ContentType);
+        }
+        catch (ArgumentException)
+        {
+            return BadRequest("Job ID is required");
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (NotSupportedException)
+        {
+            return NotFound();
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Printer {PrinterId} returned invalid history thumbnail content for job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_invalid",
+                "The printer returned an invalid thumbnail.");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "History thumbnail request failed for printer {PrinterId}, job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_upstream_failed",
+                "The printer thumbnail is unavailable.");
+        }
+    }
+
+    private ObjectResult HistoryThumbnailProblem(
+        string code,
+        string title,
+        int statusCode = StatusCodes.Status502BadGateway) =>
+        Problem(
+            statusCode: statusCode,
+            title: title,
+            type: $"https://printfarmer.dev/problems/{code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+
     [HttpGet("{id}/history/totals")]
     [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]

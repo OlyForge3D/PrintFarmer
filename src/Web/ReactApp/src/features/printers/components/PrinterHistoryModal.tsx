@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { Modal } from '@/common/components/modals/Modal';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, Select } from '@/common/components/ui';
+import { ImagePlaceholder } from '@/common/components/icons';
 
 interface PrinterHistoryModalProps {
   isOpen: boolean;
@@ -77,6 +78,26 @@ function getStatusColor(status: string): string {
     default:
       return 'bg-pf-bg-1 text-pf-text-primary';
   }
+}
+
+function HistoryThumbnail({ job }: { job: HistoryJob }) {
+  const [failed, setFailed] = useState(false);
+  const showPlaceholder = !job.thumbnailUrl || failed;
+
+  return (
+    <div className="ml-4 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-pf-border bg-pf-bg-2 text-pf-text-tertiary">
+      {showPlaceholder ? (
+        <ImagePlaceholder className="h-16 w-16" />
+      ) : (
+        <img
+          src={job.thumbnailUrl}
+          alt={`${job.filename} thumbnail`}
+          className="h-full w-full object-cover"
+          onError={() => setFailed(true)}
+        />
+      )}
+    </div>
+  );
 }
 
 export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistoryModalProps) {
@@ -331,20 +352,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       )}
                     </div>
 
-                    {/* Thumbnail */}
-                    {job.thumbnailUrl && (
-                      <div className="ml-4 shrink-0">
-                        <img
-                          src={job.thumbnailUrl}
-                          alt={`${job.filename} thumbnail`}
-                          className="w-16 h-16 object-cover rounded-sm border border-pf-border"
-                          onError={(e) => {
-                            // Hide broken images
-                            e.currentTarget.style.display = 'none';
-                          }}
-                        />
-                      </div>
-                    )}
+                    <HistoryThumbnail job={job} />
                   </div>
                 </div>
               ))}

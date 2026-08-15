@@ -325,9 +325,10 @@ public class PrintersService(
                 backend);
             foreach (HistoryJob job in response.Jobs)
             {
-                job.ThumbnailUrl = ExtractThumbnailUrl(
-                    job.Metadata ?? new Dictionary<string, object>(),
-                    printer.ServerUrl);
+                job.ThumbnailUrl = GetHistoryThumbnailUrl(
+                    printer,
+                    backend,
+                    job);
             }
 
             return HistoryListProbeResult.Authoritative(response);
@@ -479,7 +480,10 @@ public class PrintersService(
                 return HistoryJobProbeResult.Error("history_job_id_mismatch");
             }
 
-            job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
+            job.ThumbnailUrl = GetHistoryThumbnailUrl(
+                printer,
+                backend,
+                job);
             return HistoryJobProbeResult.Found(job);
         }
         catch (HistoryJobNotFoundException)
@@ -519,6 +523,54 @@ public class PrintersService(
             _logger.LogWarning(ex, "[History] Invalid detail for printer {PrinterId}", printerId);
             return HistoryJobProbeResult.Error();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            throw new ArgumentException("Job ID is required", nameof(jobId));
+        }
+
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} was not found.");
+        }
+
+        IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
+        if (client is not ISupportsHistoryThumbnail thumbnailClient)
+        {
+            throw new NotSupportedException(
+                "The printer backend does not support history thumbnails.");
+        }
+
+        return await thumbnailClient.GetHistoryThumbnailAsync(
+            printer.BackendUrl,
+            jobId,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+    }
+
+    private string? GetHistoryThumbnailUrl(
+        Printer printer,
+        PrinterBackend backend,
+        HistoryJob job)
+    {
+        if (!string.IsNullOrWhiteSpace(job.ThumbnailUrl))
+        {
+            return backend == PrinterBackend.PrusaLink
+                ? $"/api/printers/{printer.Id:D}/history/{Uri.EscapeDataString(job.JobId)}/thumbnail"
+                : job.ThumbnailUrl;
+        }
+
+        return ExtractThumbnailUrl(
+            job.Metadata ?? new Dictionary<string, object>(),
+            printer.ServerUrl);
     }
 
     /// <summary>

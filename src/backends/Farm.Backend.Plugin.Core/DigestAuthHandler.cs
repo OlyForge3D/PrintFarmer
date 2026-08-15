@@ -26,7 +26,7 @@ public class DigestAuthHandler : DelegatingHandler
     private DigestChallenge? _cachedChallenge;
 
     public DigestAuthHandler(string? username, string? password)
-        : base(new HttpClientHandler())
+        : base(new HttpClientHandler { AllowAutoRedirect = false })
     {
         _username = username;
         _password = password;
