@@ -25,6 +25,10 @@ namespace Farm.Backend.Plugin.PrusaLink;
 public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
     private const int HistoryPageSize = 100;
+    private const int MaxHistoryPagesForListFullScan = 20;
+    private const int MaxHistoryEntriesForListFullScan =
+        HistoryPageSize * MaxHistoryPagesForListFullScan;
+
     private const int MaxHistoryPagesForTotals = 20;
     private const int MaxHistoryEntriesForTotals =
         HistoryPageSize * MaxHistoryPagesForTotals;
@@ -761,7 +765,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 
             int offset = 0;
             int sourceCount = 0;
+            int expectedFullScanSourceCount = -1;
             int examinedCount = 0;
+            int pagesFetched = 0;
             bool reachedSourceEnd = false;
             var allJobs = new List<HistoryJob>();
             var excludedEntries = new List<HistoryExcludedEntryEvidence>();
@@ -779,26 +785,65 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                     offset,
                     credentials,
                     ct);
+                pagesFetched++;
                 int examined = page.ExaminedSourceEntries;
-                if (examined > 0 && page.Count < offset + examined)
+                if ((requiresFullScan && examined > pageSize) ||
+                    (examined > 0 && page.Count < offset + examined))
                 {
                     throw new InvalidDataException(
                         "PrusaLink history count did not cover the returned source page.");
                 }
 
-                sourceCount = Math.Max(sourceCount, page.Count);
+                if (requiresFullScan)
+                {
+                    if (expectedFullScanSourceCount < 0)
+                    {
+                        expectedFullScanSourceCount = page.Count;
+                        if (expectedFullScanSourceCount >
+                            MaxHistoryEntriesForListFullScan)
+                        {
+                            throw new InvalidDataException(
+                                $"PrusaLink history contains {expectedFullScanSourceCount} entries, exceeding the authoritative list full-scan limit of {MaxHistoryEntriesForListFullScan}.");
+                        }
+                    }
+                    else if (page.Count != expectedFullScanSourceCount)
+                    {
+                        throw new InvalidDataException(
+                            "PrusaLink history count changed during an authoritative list full scan.");
+                    }
+
+                    sourceCount = expectedFullScanSourceCount;
+                }
+                else
+                {
+                    sourceCount = Math.Max(sourceCount, page.Count);
+                }
+
                 allJobs.AddRange(page.Jobs);
                 excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
                 offset += examined;
-                reachedSourceEnd = offset >= sourceCount;
+                reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
                     requestedLimit.HasValue &&
                     allJobs.Count >= requestedEnd;
-                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                if (reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
+                }
+
+                if (examined == 0 || offset > sourceCount)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history ended before the advertised source count.");
+                }
+
+                if (requiresFullScan &&
+                    pagesFetched >= MaxHistoryPagesForListFullScan)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history list exceeded the authoritative full-scan paging limit of {MaxHistoryPagesForListFullScan} pages.");
                 }
             }
 
