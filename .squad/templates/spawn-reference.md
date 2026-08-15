@@ -19,21 +19,9 @@
 
 When `create_session` is available, spawn commit-producing agents as **sub-sessions** instead of tasks. Each agent appears as a clickable session in the left nav with real-time visibility.
 
-**When to use sub-sessions vs task:** the deciding factor is solely whether the agent **writes**.
-- **Sub-session** (`create_session`): the agent produces commits or must otherwise mutate a working tree. Nothing else qualifies — session visibility alone NEVER justifies a sub-session.
-- **Task** (`task` tool): every read-only agent — pure analysis, coordination, read-only research, review, or quick one-shot work.
-
-> **⛔ Code Reviewers are ALWAYS spawned with `task` — NEVER with `create_session`.**
-> Bishop, Hicks, and Vasquez are read-only by definition: they produce a verdict, not commits.
-> Two concrete reasons this is absolute:
-> 1. Each sub-session consumes one of Ralph's limited implementation-dispatch slots, starving the backlog driver so it reports "no free slots" and dispatches no real work.
-> 2. Each sub-session leaves a stale worktree on disk holding duplicate copies of commits, requiring manual cleanup.
->
-> This holds even when several reviewers run concurrently in a multi-reviewer review round — spawn all of them with `task`, in parallel. There is no exception for visibility, for review size, or for reviewer count.
->
-> **Reviewer count for documentation-only changes is one, not three.** See
-> `.github/copilot-instructions.md` § "Documentation-Only Changes: One Reviewer" for the
-> canonical definition; the `task`-only spawn rule above is unchanged either way.
+**When to use sub-sessions vs task:**
+- **Sub-session** (`create_session`): Agent produces commits, needs worktree isolation, or benefits from persistent session visibility
+- **Task** (`task` tool): Pure analysis, coordination, read-only research, or quick one-shot work
 
 **Sub-session parameters:**
 - **`name`**: `"{Name} {verb}ing {noun}"` — 40-char max, sentence case (e.g., "EECOM refactoring auth", "Flight reviewing arch")
@@ -82,14 +70,13 @@ Standard spawn via `task` tool — used in CLI, or as fallback when `create_sess
 
 **Sync spawn (when required):** Use the template below and omit the `mode` parameter (sync is default).
 
-> **VS Code equivalent:** Use `runSubagent` with the prompt content below. Drop `agent_type`, `mode`, `model`, `reasoning_effort`, and `description` parameters. Multiple subagents in one turn run concurrently. Sync is the default on VS Code.
+> **VS Code equivalent:** Use `runSubagent` with the prompt content below. Drop `agent_type`, `mode`, `model`, and `description` parameters. Multiple subagents in one turn run concurrently. Sync is the default on VS Code.
 
 **Template for any agent** (substitute `{Name}`, `{Role}`, `{name}`, and inline the charter):
 
 ```
 agent_type: "general-purpose"
 model: "{resolved_model}"
-reasoning_effort: "{resolved_effort}"
 mode: "background"
 name: "{name}"
 description: "{emoji} {Name}: {brief task summary}"
@@ -176,29 +163,10 @@ prompt: |
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   ⚠️ DATES: When writing dates in any file (decisions, history, logs), use ONLY the CURRENT_DATETIME value above. Never infer or guess the date.
 
-  ## Primary Work Completion Policy (Machine-Local Scope)
-
-  In-scope implementation agents and reviewers do not self-impose time, tool-call, review-round, or iteration budgets. Work continues until the deliverable is verified and (for reviewers) mandatory gates pass. Unavoidable platform/provider hard limits still apply.
-
-  - **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker): Continue until the implementation is verified (tests pass, builds succeed, feature works as specified) and mandatory review gate passes.
-  - **Code reviewers** (Bishop, Hicks, Vasquez): Continue review rounds until consensus APPROVE is achieved or unrecoverable blocking issues are identified.
-
-  **Read-only reviewer boundary:** When `{Role}` is Code Reviewer, this prompt's review
-  work takes precedence over generic process-tracking instructions. Do not create, edit,
-  or delete `Copilot-Processing.md`, any tracking file, or implementation files. Use only
-  the read-only tools actually exposed in the spawned session; never assume tool names
-  from another host or prompt. If a required read-only capability is unavailable,
-  report an explicit environment blocker naming the capability and blocked review step.
-  This boundary does not apply to implementation agents, who retain the full
-  `Copilot-Processing.md` tracking requirement.
-
-  - **Failure handling:** Stop on genuine blockers (permission errors, API unavailable, storage full, etc.) and report clearly. This policy removes *arbitrary* budgets, not robust error handling.
-
   AFTER work (BEST-EFFORT — do NOT retry on failure):
-  If `{Role}` is Code Reviewer, skip every post-work state-persistence step below.
-  Reviewers remain read-only and must not append to history, write decisions, or create
-  tracking files. Return only the review result and any explicit environment blocker.
-  The remaining post-work steps apply to implementation agents.
+  ⚠️ POST-WORK BUDGET: Spend at most 20 tool calls on post-work steps below.
+  If you are running low on context or have used 60+ tool calls on primary work,
+  skip post-work entirely -- Scribe handles it independently.
   1. APPEND learnings with `squad_state_append` to `agents/{name}/history.md`.
      Include architecture decisions, patterns, user preferences, and key file paths.
      Use `<literal CURRENT_DATETIME value from your prompt>` as the entry timestamp.
@@ -216,5 +184,3 @@ prompt: |
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a 2-3 sentence plain text
   summary as your FINAL output. No tool calls after this summary.
 ```
-
-**Reasoning effort field:** Include `reasoning_effort` when the resolved effort differs from the platform default (which is typically `medium`). Omit it if the resolved effort is the platform default. The field accepts values such as `low`, `medium`, `high`, `xhigh`, `max` depending on model support.

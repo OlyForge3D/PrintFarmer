@@ -14,62 +14,57 @@ Before spawning an agent, determine which model to use. Check these layers in or
 
 **Layer 2 — Charter Preference:** Does the agent's charter have a `## Model` section with `Preferred` set to a specific model (not `auto`)? If yes, use that model.
 
-**Layer 3 — Task-Aware Auto-Selection:** Match the agent's task to the output type, then select accordingly:
+**Layer 3 — Task-Aware Auto-Selection:** Use the governing principle: **cost first, unless code is being written.** Match the agent's task to determine output type, then select accordingly:
 
 | Task Output | Model | Tier | Rule |
 |-------------|-------|------|------|
-| Architecture, security, reviewer gates, complex coordination | `gpt-5.6-sol` | Premium | Use the strongest reasoning default for high-stakes decisions. |
-| Visual/design work under the existing Opus convention | `claude-opus-4.8` | Premium | Preserve the established visual/design model convention. |
-| Code, tests, refactoring, prompt architecture | `claude-sonnet-5` | Standard | Use the standard implementation model. |
-| Docs, planning, triage, mechanical work | `gpt-5.6-luna` | Fast/Cheap | Use the fast policy default for non-code work. |
+| Writing code (implementation, refactoring, test code, bug fixes) | `claude-sonnet-5` | Standard | Quality and accuracy matter for code. Use standard tier. |
+| Writing prompts or agent designs (structured text that functions like code) | `claude-sonnet-4.6` | Standard | Prompts are executable — treat like code. |
+| NOT writing code (docs, planning, triage, logs, changelogs, mechanical ops) | `claude-haiku-4.5` | Fast | Cost first. Haiku handles non-code tasks. |
+| Visual/design work requiring image analysis | `claude-opus-5` | Premium | Vision capability required. Overrides cost rule. |
 
-**Role-to-model mapping:**
+**Role-to-model mapping** (applying cost-first principle):
 
 | Role | Default Model | Why | Override When |
-|------|---------------|-----|---------------|
-| Core Dev / Backend / Frontend | `claude-sonnet-5` | Writes code — quality first | Heavy code generation → `gpt-5.3-codex` |
-| Tester / QA | `claude-sonnet-5` | Writes test code — quality first | Mechanical test updates → `gpt-5.6-luna` |
-| Lead / Architect | auto (per-task) | Mixed architecture and planning work | Architecture/reviewer gates → `gpt-5.6-sol`; planning → `gpt-5.6-luna` |
-| Prompt Engineer | auto (per-task) | Prompt architecture functions like code | Prompt architecture → `claude-sonnet-5`; research → `gpt-5.6-luna` |
-| Copilot SDK Expert | `claude-sonnet-5` | Technical analysis that often touches code | Pure research → `gpt-5.6-luna` |
-| Designer / Visual | `claude-opus-4.8` | Existing Opus visual/design convention | — |
-| DevRel / Writer | `gpt-5.6-luna` | Docs and writing — not code | — |
-| Scribe / Logger | `gpt-5.6-luna` | Mechanical file operations | — |
-| Git / Release | `gpt-5.6-luna` | Mechanical operations | — |
+|------|--------------|-----|---------------|
+| Core Dev / Backend / Frontend | `claude-sonnet-5` | Writes code — quality first | Heavy code gen → `gpt-5.6-luna` |
+| Tester / QA | `claude-sonnet-5` | Writes test code — quality first | Simple test scaffolding → `claude-haiku-4.5` |
+| Lead / Architect | auto (per-task) | Mixed: code review needs quality, planning needs cost | Architecture proposals → premium; triage/planning → haiku |
+| Prompt Engineer | auto (per-task) | Mixed: prompt design is like code, research is not | Prompt architecture → sonnet; research/analysis → haiku |
+| Copilot SDK Expert | `claude-sonnet-5` | Technical analysis that often touches code | Pure research → `claude-haiku-4.5` |
+| Designer / Visual | `claude-opus-5` | Vision-capable model required | — (never downgrade — vision is non-negotiable) |
+| DevRel / Writer | `claude-haiku-4.5` | Docs and writing — not code | — |
+| Scribe / Logger | `claude-haiku-4.5` | Mechanical file ops — cheapest possible | — (never bump Scribe) |
+| Git / Release | `claude-haiku-4.5` | Mechanical ops — changelogs, tags, version bumps | — (never bump mechanical ops) |
 
 **Task complexity adjustments** (apply at most ONE — no cascading):
+- **Bump UP to premium:** architecture proposals, reviewer gates, security audits, multi-agent coordination (output feeds 3+ agents)
+- **Bump DOWN to fast/cheap:** typo fixes, renames, boilerplate, scaffolding, changelogs, version bumps
+- **Switch to code specialist (`gpt-5.6-sol`):** large multi-file refactors, complex implementation from spec, heavy code generation (500+ lines)
+- **Switch to analytical diversity (`gemini-3.1-pro-preview`):** code reviews where a second perspective helps, security reviews, architecture reviews after a rejection
 
-- **Use premium (`gpt-5.6-sol`):** architecture proposals, reviewer gates, security audits, complex multi-agent coordination
-- **Use fast/cheap (`gpt-5.6-luna`):** typo fixes, renames, boilerplate, scaffolding, changelogs, version bumps
-- **Use the heavy code specialist (`gpt-5.3-codex`):** large multi-file refactors, complex implementation from specification, heavy code generation
-- **Use analytical diversity (`gemini-3.1-pro-preview`):** reviews where an independent perspective helps, especially after a rejection
-
-**Layer 4 — Default:** If nothing else matched, use `gpt-5.6-luna`.
+**Layer 4 — Default:** If nothing else matched, use `claude-haiku-4.5`. Cost wins when in doubt, unless code is being produced.
 
 **Fallback chains — when a model is unavailable:**
 
-If a spawn fails because the selected model is unavailable (plan restriction, org policy, rate limit, deprecation, runtime rejection, or any other reason), silently retry with the next model in the applicable chain. Make at most three retries, then omit the model parameter.
+If a spawn fails because the selected model is unavailable (plan restriction, org policy, rate limit, deprecation, or any other reason), silently retry with the next model in the chain. Do NOT tell the user about fallback attempts. Maximum 3 retries before jumping to the nuclear fallback.
 
 ```
-Premium:  gpt-5.6-sol → claude-opus-4.8 → claude-opus-4.7 → claude-sonnet-5 → (omit model param)
-Standard: claude-sonnet-5 → gpt-5.6-terra → gpt-5.5 → claude-sonnet-4.6 → (omit model param)
-Fast:     gpt-5.6-luna → gemini-3.5-flash → claude-haiku-4.5 → gpt-5.4-mini → (omit model param)
-Visual:   claude-opus-4.8 → claude-opus-4.7 → claude-opus-4.6 → (omit model param)
-```
+Premium:  gpt-5.6-sol → claude-opus-5 → gpt-5.6-terra → claude-sonnet-5 → (omit model param)
+Standard: claude-sonnet-5 → gpt-5.6-terra → gpt-5.5 → claude-sonnet-4.6  → (omit model param)
+Fast:     gpt-5.6-luna → gemini-3.5-flash → claude-haiku-4.5 → gpt-5.4-mini→ (omit model param)
+Visual:   claude-opus-5 → claude-opus-4.8 → claude-opus-4.7 → (omit model param)```
 
-`(omit model param)` means calling the spawn tool without a `model` parameter so the platform chooses its runtime default. Runtime rejection overrides this static catalog.
+`(omit model param)` = call the `task` tool WITHOUT the `model` parameter. The platform uses its built-in default. This is the nuclear fallback — it always works.
 
 **Fallback rules:**
-
-- If the user specified a provider (for example, "use Claude"), try compatible models from that provider in chain order, then omit the model parameter
-- Never fall back UP in tier; the Premium chain may fall down to Standard, but Standard and Fast chains never move upward
-- Keep the model ID separate from reasoning effort; never create suffix IDs such as `-xhigh`
-- Drop unsupported reasoning-effort or context-window parameters when a fallback model does not accept them
-- Log fallbacks to the orchestration log for debugging, but do not surface them to the user unless asked
+- If the user specified a provider ("use Claude"), fall back within that provider only before hitting nuclear
+- Never fall back UP in tier — a fast/cheap task should not land on a premium model
+- Log fallbacks to the orchestration log for debugging, but never surface to the user unless asked
 
 **Passing the model to spawns:**
 
-Pass the resolved model as the `model` parameter on every supported spawn tool call:
+Pass the resolved model as the `model` parameter on every `task` tool call:
 
 ```
 agent_type: "general-purpose"
@@ -81,51 +76,26 @@ prompt: |
   ...
 ```
 
-If the fallback chain is exhausted, omit the `model` parameter entirely.
+Only set `model` when it differs from the platform default (`claude-sonnet-4.6`). If the resolved model IS `claude-sonnet-4.6`, you MAY omit the `model` parameter — the platform uses it as default.
+
+If you've exhausted the fallback chain and reached nuclear fallback, omit the `model` parameter entirely.
 
 **Spawn output format — show the model choice:**
 
+When spawning, include the model in your acknowledgment:
+
 ```
-🔧 Fenster (claude-sonnet-5) — refactoring auth module
-🎨 Redfoot (claude-opus-4.8 · visual) — designing color system
-📋 Scribe (gpt-5.6-luna · fast) — logging session
-⚡ Keaton (gpt-5.6-sol · architecture) — reviewing proposal
-🧪 Vasquez (gemini-3.1-pro-preview · analytical diversity) — independently reviewing implementation
+🔧 Fenster (claude-sonnet-4.6) — refactoring auth module
+🎨 Redfoot (claude-opus-4.5 · vision) — designing color system
+📋 Scribe (claude-haiku-4.5 · fast) — logging session
+⚡ Keaton (claude-opus-4.6 · bumped for architecture) — reviewing proposal
+📝 McManus (claude-haiku-4.5 · fast) — updating docs
 ```
 
-Include a tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
-
-### Per-Agent Reasoning Effort
-
-Reasoning effort is resolved independently **after** the model is selected. Check these layers in order:
-
-**Layer 0 — Agent-Specific Override (`.squad/config.json`):** On this machine, specific agents use elevated reasoning effort defined in `agentReasoningEffortOverrides.{agentName}`:
-
-- **Lead/Architect** Dallas (`claude-opus-5`): reasoning effort `max`
-- **Implementation agents** (Lambert, Ripley, Hudson, Gorman, Parker; all `gpt-5.6-sol`): reasoning effort `medium`
-- **Code reviewers:**
-  - Bishop (`claude-opus-5`): reasoning effort `medium`
-  - Hicks (`gpt-5.6-sol`): reasoning effort `medium`
-  - Vasquez (`gemini-3.1-pro-preview`): reasoning effort `medium`
-
-These overrides are automatically resolved when spawning. Work continues until verified and mandatory gates pass. Unavoidable platform/provider hard limits still apply.
-
-**Layer 1 — Session Directive:** Did the user specify reasoning effort for this session? If yes, use that effort for this session.
-
-**Layer 2 — Charter Preference:** Does the agent's charter have a `## Reasoning Effort` section with a preference? If yes, use that effort.
-
-**Layer 3 — Platform Default:** If nothing matched, use the platform's default reasoning effort for the selected model.
-
-Model IDs and reasoning effort are separate parameters. Never encode effort into a model ID. When falling back, omit reasoning-effort or context-window parameters unsupported by the fallback model.
-
-**No-artificial-budget directives:** The machine-local policy removes self-imposed time, tool-call, review-round, and iteration budgets. This does **not** disable unavoidable platform, provider, or infrastructure hard limits (rate limits, timeout limits, resource quotas, etc.).
+Include tier annotation only when the model was bumped or a specialist was chosen. Default-tier spawns just show the model name.
 
 **Valid models (current platform catalog):**
 
 Premium: `gpt-5.6-sol`, `claude-opus-4.8`, `claude-opus-4.7`, `claude-opus-4.6`
 Standard: `claude-sonnet-5`, `gpt-5.6-terra`, `gpt-5.5`, `gpt-5.4`, `gpt-5.3-codex`, `claude-sonnet-4.6`, `claude-sonnet-4.5`, `gemini-3.1-pro-preview`
 Fast/Cheap policy: `gpt-5.6-luna`, `gemini-3.5-flash`, `claude-haiku-4.5`, `gpt-5.4-mini`, `gpt-5-mini`, `mai-code-1-flash-picker`
-
-These are routing tiers, not verified pricing claims. Runtime rejection overrides the static catalog.
-
-> **Local policy note:** These manually maintained references can be overwritten by a future Squad upgrade. Reapply or reconcile this local policy after upgrading; no upstream package is changed by this repository-local customization.

@@ -33,7 +33,7 @@ Format:
 If you need another team member's input, say so in your response. The coordinator will bring them in. Don't try to do work outside your domain.
 
 ### Reviewer Protocol
-If you have reviewer authority and reject work: **the original author fixes it.** There is no author lockout. State clearly *what* is wrong and *why* — do not name who should do the revision. Staffing is the coordinator's call, not yours.
+If you have reviewer authority and reject work: the original author is locked out from revising that artifact. A different agent must own the revision. State who should revise in your rejection response.
 
 ## Anti-Patterns
 - Don't read all agent charters — you only need your own context + decisions.md

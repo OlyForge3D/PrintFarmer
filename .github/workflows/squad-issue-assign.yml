@@ -14,55 +14,18 @@ jobs:
     if: startsWith(github.event.label.name, 'squad:')
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
       - name: Identify assigned member and trigger work
-        uses: actions/github-script@v9
+        uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
-            const path = require('path');
-            const { slugify, isRosterExcluded } = require(
-              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
-            );
             const issue = context.payload.issue;
             const label = context.payload.label.name;
 
-            // Extract member slug from label (e.g. "squad:ripley" → "ripley").
-            // Roster names carry emoji prefixes ("⚛️ Ripley"), so the label
-            // suffix is slugified too — that way both the canonical
-            // `squad:ripley` and the legacy `squad:⚛️ ripley` duplicate resolve
-            // to the same member instead of the canonical form failing to match.
-            const memberName = slugify(label.replace('squad:', ''));
-
-            // Policy (issue #1285): a `squad:*` label can name one of three
-            // things, and each must produce a distinct outcome —
-            //
-            //   1. An active, dispatchable roster row (e.g. `squad:ripley`)
-            //      → resolve and post the normal assignment comment.
-            //   2. A roster row that is *excluded from dispatch* — 📋 Scribe
-            //      (session logger) and 🔄 Ralph (work monitor) are
-            //      infrastructure roles, still listed in `.squad/team.md` for
-            //      documentation, but must never receive new implementation
-            //      work. `squad:scribe` / `squad:ralph` must still resolve to
-            //      a name (so the refusal message is legible) but must refuse
-            //      to produce a new assignment.
-            //   3. A *retired* label whose member has left the roster
-            //      entirely (removed from `.squad/team.md` — e.g. old
-            //      `squad:kaylee` / `squad:mal` / `squad:apone` /
-            //      `squad:crowe` labels on closed issues). These labels exist
-            //      only to preserve historical assignment records and must
-            //      keep falling through to the existing "no member found"
-            //      warning below, unchanged — that path was never an
-            //      assignment claim, so old issues keep rendering exactly as
-            //      they always have.
-            //
-            // `EXCLUDED_SLUGS` and the roster-row comparison both go through
-            // `isRosterExcluded()` / `slugify()` in `scripts/ci/squad-routing.cjs`
-            // — the same shared source of truth used by `squad-triage.yml`,
-            // `sync-squad-labels.yml`, and `.squad/templates/ralph-triage.js` —
-            // so this file cannot drift onto a second comparison rule.
-            const EXCLUDED_SLUGS = ['scribe', 'ralph'];
+            // Extract member name from label (e.g., "squad:ripley" → "ripley")
+            const memberName = label.replace('squad:', '').toLowerCase();
 
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
@@ -77,7 +40,6 @@ jobs:
             const isCopilotAssignment = memberName === 'copilot';
 
             let assignedMember = null;
-            let excludedMember = null;
             if (isCopilotAssignment) {
               assignedMember = { name: '@copilot', role: 'Coding Agent' };
             } else {
@@ -92,37 +54,12 @@ jobs:
                 }
                 if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
                   const cells = line.split('|').map(c => c.trim()).filter(Boolean);
-                  if (cells.length >= 2 && slugify(cells[0]) === memberName) {
-                    if (isRosterExcluded(cells[0], EXCLUDED_SLUGS)) {
-                      excludedMember = { name: cells[0], role: cells[1] };
-                    } else {
-                      assignedMember = { name: cells[0], role: cells[1] };
-                    }
+                  if (cells.length >= 2 && cells[0].toLowerCase() === memberName) {
+                    assignedMember = { name: cells[0], role: cells[1] };
                     break;
                   }
                 }
               }
-            }
-
-            if (excludedMember) {
-              core.warning(
-                `Label "${label}" matches roster entry ${excludedMember.name}, which is excluded from work dispatch — refusing to assign`
-              );
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: issue.number,
-                body: [
-                  `### 🚫 Not a dispatchable owner`,
-                  '',
-                  `**Issue:** #${issue.number} — ${issue.title}`,
-                  '',
-                  `\`${label}\` matches ${excludedMember.name} (${excludedMember.role}), a roster entry excluded from work dispatch. It is an infrastructure role, not an implementation owner, and must never be assigned new work.`,
-                  '',
-                  `> No assignment was made. Remove this label and apply a \`squad:{member}\` label for an active, dispatchable team member instead.`,
-                ].join('\n')
-              });
-              return;
             }
 
             if (!assignedMember) {
@@ -175,7 +112,7 @@ jobs:
       # Separate step: assign @copilot using PAT (required for coding agent)
       - name: Assign @copilot coding agent
         if: github.event.label.name == 'squad:copilot'
-        uses: actions/github-script@v9
+        uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.COPILOT_ASSIGN_TOKEN }}
           script: |

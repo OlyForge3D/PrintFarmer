@@ -58,15 +58,3 @@ If you make a decision that affects other team members, write it to:
 .squad/decisions/inbox/copilot-{brief-slug}.md
 ```
 The Scribe will merge it into the shared decisions file.
-
-## Review Session Precedence
-
-Read-only code-review sessions (including Bishop, Hicks, and Vasquez) are exempt from
-project process-tracking file creation. They MUST NOT create, edit, or delete
-`Copilot-Processing.md`, any other tracking file, or implementation files. They use only
-the read-only tools exposed in the current session and must not assume tool names from
-another host. If a required read-only capability is unavailable, report an explicit
-environment blocker naming the capability and blocked review step.
-
-This exemption does not apply to implementation agents, which retain the full
-`Copilot-Processing.md` requirement.

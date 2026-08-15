@@ -1,6 +1,6 @@
 ---
 name: "reviewer-protocol"
-description: "Reviewer rejection workflow — the author fixes their own work"
+description: "Reviewer rejection workflow and strict lockout semantics"
 domain: "orchestration"
 confidence: "high"
 source: "extracted"
@@ -8,83 +8,72 @@ source: "extracted"
 
 ## Context
 
-When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead), they may approve
-or reject work from other agents.
-
-**On rejection, the original author fixes their own work.** Reviewers report defects; they do not
-assign who fixes them.
-
-> **This skill previously mandated a strict author lockout. That rule has been removed at the
-> repo owner's direction.** It was rescinded more than once and kept resurfacing because it was
-> duplicated across a dozen files. If you find lockout language anywhere else, it is stale — this
-> file and `.github/agents/squad.agent.md` are authoritative.
+When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead), they may approve or reject work from other agents. On rejection, the coordinator enforces strict lockout rules to ensure the original author does NOT self-revise. This prevents defensive feedback loops and ensures independent review.
 
 ## Patterns
 
 ### Reviewer Rejection Protocol
 
+When a team member has a **Reviewer** role:
+
 - Reviewers may **approve** or **reject** work from other agents.
-- On **rejection**, the **original author owns the revision.** They hold the most context on the
-  artifact; handing the fix to a stranger throws that context away and invites new defects.
-- Reviewers state *what* is wrong and *why*. Staffing is a coordinator decision, not a reviewer one.
+- On **rejection**, the Reviewer may choose ONE of:
+  1. **Reassign:** Require a *different* agent to do the revision (not the original author).
+  2. **Escalate:** Require a *new* agent be spawned with specific expertise.
+- The Coordinator MUST enforce this. If the Reviewer says "someone else should fix this," the original agent does NOT get to self-revise.
 - If the Reviewer approves, work proceeds normally.
 
-### There Is No Author Lockout
+### Strict Lockout Semantics
 
-1. **The original author owns the revision by default**, including after a second or third
-   rejection of the same artifact. Repeated rejection means the author needs better information —
-   the specific finding, a failing test, a clearer spec — not a different author.
-2. **Do not track "locked out" agents.** There is no such state. Never exclude an agent from an
-   artifact because they authored a rejected version of it.
-3. **Do not add a team member to work around a rejection.** Grow the roster when the team is
-   genuinely missing a skill or capacity — never to sidestep this.
-4. **Reviewers may not dictate the fix agent.** "Someone else should fix this" is an opinion about
-   the code, not an instruction about staffing. Take the finding; ignore the staffing suggestion.
+When an artifact is **rejected** by a Reviewer:
 
-### When reassignment IS legitimate
-
-Reassign only for a real reason, and say what it is:
-
-- The author is genuinely blocked on a skill or area they do not cover (e.g. a frontend fix turns
-  out to need a database migration).
-- Capacity or parallelism — the author is occupied and the fix is urgent.
-- The user explicitly asks for a different agent.
-
-Reassignment is a routing decision like any other. It is never a consequence of being rejected.
+1. **The original author is locked out.** They may NOT produce the next version of that artifact. No exceptions.
+2. **A different agent MUST own the revision.** The Coordinator selects the revision author based on the Reviewer's recommendation (reassign or escalate).
+3. **The Coordinator enforces this mechanically.** Before spawning a revision agent, the Coordinator MUST verify that the selected agent is NOT the original author. If the Reviewer names the original author as the fix agent, the Coordinator MUST refuse and ask the Reviewer to name a different agent.
+4. **The locked-out author may NOT contribute to the revision** in any form — not as a co-author, advisor, or pair. The revision must be independently produced.
+5. **Lockout scope:** The lockout applies to the specific artifact that was rejected. The original author may still work on other unrelated artifacts.
+6. **Lockout duration:** The lockout persists for that revision cycle. If the revision is also rejected, the same rule applies again — the revision author is now also locked out, and a third agent must revise.
+7. **Deadlock handling:** If all eligible agents have been locked out of an artifact, the Coordinator MUST escalate to the user rather than re-admitting a locked-out author.
 
 ## Examples
 
-**Example 1: Standard rejection — author fixes it**
-1. Fenster writes the authentication module
-2. Hockney (Tester) reviews → rejects: "Error handling is missing on the refresh path"
-3. Coordinator re-spawns **Fenster** with Hockney's specific finding attached
-4. Fenster produces v2
-5. Hockney reviews v2 → approves
+**Example 1: Reassign after rejection**
+1. Fenster writes authentication module
+2. Hockney (Tester) reviews → rejects: "Error handling is missing. Verbal should fix this."
+3. Coordinator: Fenster is now locked out of this artifact
+4. Coordinator spawns Verbal to revise the authentication module
+5. Verbal produces v2
+6. Hockney reviews v2 → approves
+7. Lockout clears for next artifact
 
-**Example 2: Repeated rejection — still the same author**
-1. Fenster writes the module → rejected
-2. Fenster revises → rejected again, for a different reason
-3. Coordinator re-spawns **Fenster** again, this time with both findings and a failing test
-4. The second rejection is a signal the brief was unclear, not that Fenster is the problem
+**Example 2: Escalate for expertise**
+1. Edie writes TypeScript config
+2. Keaton (Lead) reviews → rejects: "Need someone with deeper TS knowledge. Escalate."
+3. Coordinator: Edie is now locked out
+4. Coordinator spawns new agent (or existing TS expert) to revise
+5. New agent produces v2
+6. Keaton reviews v2
 
-**Example 3: Legitimate reassignment**
-1. Edie writes a TypeScript config → rejected: "This needs a change to the build pipeline"
-2. Coordinator reassigns to the DevOps agent — **because the work moved outside Edie's area**,
-   not because Edie was rejected
-3. Coordinator states the reason explicitly when spawning
+**Example 3: Deadlock handling**
+1. Fenster writes module → rejected
+2. Verbal revises → rejected
+3. Hockney revises → rejected
+4. All 3 eligible agents are now locked out
+5. Coordinator: "All eligible agents have been locked out. Escalating to user: [artifact details]"
 
-**Example 4: Reviewer oversteps**
-1. Fenster writes a module → rejected
-2. Hockney says: "Verbal should fix this instead"
-3. Coordinator takes Hockney's technical finding and **ignores the staffing suggestion**.
-   Fenster gets the fix.
+**Example 4: Reviewer accidentally names original author**
+1. Fenster writes module → rejected
+2. Hockney says: "Fenster should fix the error handling"
+3. Coordinator: "Fenster is locked out as the original author. Please name a different agent."
+4. Hockney: "Verbal, then"
+5. Coordinator spawns Verbal
 
 ## Anti-Patterns
 
-- ❌ Locking an author out of their own artifact after a rejection
-- ❌ Tracking who is "locked out" of what
-- ❌ Rotating authors on repeated rejection instead of improving the brief
-- ❌ Adding a new team member to work around a rejection
-- ❌ Letting a reviewer decide who does the fix
-- ❌ Escalating a "deadlock" that only exists because of an artificial lockout
-- ❌ Reassigning without stating a concrete reason unrelated to the rejection itself
+- ❌ Allowing the original author to self-revise after rejection
+- ❌ Treating the locked-out author as an "advisor" or "co-author" on the revision
+- ❌ Re-admitting a locked-out author when deadlock occurs (must escalate to user)
+- ❌ Applying lockout across unrelated artifacts (scope is per-artifact)
+- ❌ Accepting the Reviewer's assignment when they name the original author (must refuse and ask for a different agent)
+- ❌ Clearing lockout before the revision is approved (lockout persists through revision cycle)
+- ❌ Skipping verification that the revision agent is not the original author

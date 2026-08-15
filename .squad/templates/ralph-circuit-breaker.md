@@ -1,69 +1,64 @@
 # Ralph Circuit Breaker — Model Rate Limit Fallback
 
-> Classic circuit breaker behavior applied to Copilot model selection.
-> When the preferred model is rate limited, Ralph follows a bounded fallback chain, omits the model after exhaustion, and probes recovery after cooldown.
+> Classic circuit breaker pattern (Hystrix / Polly / Resilience4j) applied to Copilot model selection.
+> When the preferred model hits rate limits, Ralph automatically degrades to free-tier models, then self-heals.
 
 ## Problem
 
-When multiple Ralph instances run across repositories, model rate limits can cause cascading failures. The circuit breaker limits retries, uses the fast/cheap policy fallback chain, and preserves a reachable recovery path without making pricing or quota claims.
+When running multiple Ralph instances across repos, Copilot model rate limits cause cascading failures.
+All Ralphs fail simultaneously when the preferred model (e.g., `claude-sonnet-4.6`) hits quota.
+
+Premium models burn quota fast:
+| Model | Multiplier | Risk |
+|-------|-----------|------|
+| `claude-sonnet-4.6` | 1x | Moderate with many Ralphs |
+| `claude-opus-4.6` | 10x | High |
+| `gpt-5.4` | 50x | Very high |
+| `gpt-5.4-mini` | **0x** | **Free — unlimited** |
+| `gpt-5-mini` | **0x** | **Free — unlimited** |
+| `gpt-4.1` | **0x** | **Free — unlimited** |
 
 ## Circuit Breaker States
 
 ```
-┌─────────┐   rate limit    ┌────────┐   chain exhausted   ┌───────────┐
-│ CLOSED  │ ──────────────► │  OPEN  │ ──────────────────► │ EXHAUSTED │
-│ normal  │                 │fallback│                     │omit model │
-└────┬────┘                 └───┬────┘                     └─────┬─────┘
-     ▲                          │ cooldown                         │ cooldown
-     │ 2 consecutive successes │ expires                          │ expires
-     │                          ▼                                  ▼
-     └──────────────────── ┌───────────┐ ◄─────────────────────────┘
-                          │ HALF-OPEN │
-                          │   probe   │
-                          └───────────┘
-                                │ rate limit
-                                └──────────────► OPEN
+┌─────────┐   rate limit error    ┌────────┐
+│ CLOSED  │ ───────────────────►  │  OPEN  │
+│ (normal)│                       │(fallback)│
+└────┬────┘   ◄──────────────── └────┬────┘
+     │        2 consecutive          │
+     │        successes              │ cooldown expires
+     │                               ▼
+     │                          ┌──────────┐
+     └───── success ◄────────  │HALF-OPEN │
+             (close)            │ (testing) │
+                                └──────────┘
 ```
 
 ### CLOSED (normal operation)
+- Use preferred model from config
+- Every successful response confirms circuit stays closed
+- On rate limit error → transition to OPEN
 
-- Use the preferred model from configuration
-- Every successful response confirms the circuit stays closed
-- On a rate-limit error, transition to OPEN
-
-### OPEN (fallback active)
-
-- Fall back through this fast/cheap policy chain:
-  1. `gpt-5.6-luna`
-  2. `gemini-3.5-flash`
-  3. `claude-haiku-4.5`
-  4. `gpt-5.4-mini`
-- Make at most three retries after the first fallback attempt
-- Start the cooldown timer (default: 10 minutes)
-- When cooldown expires, transition to HALF-OPEN
-- When the fallback chain is exhausted, transition to EXHAUSTED
-
-### EXHAUSTED (platform default)
-
-- Omit the model parameter entirely so the platform chooses its runtime default
-- Do not reset `openedAt` while EXHAUSTED; the original cooldown remains reachable
-- When cooldown expires, transition to HALF-OPEN and probe the preferred model
+### OPEN (rate limited — fallback active)
+- Fall back through the free-tier model chain:
+  1. `gpt-5.4-mini`
+  2. `gpt-5-mini`
+  3. `gpt-4.1`
+- Start cooldown timer (default: 10 minutes)
+- When cooldown expires → transition to HALF-OPEN
 
 ### HALF-OPEN (testing recovery)
-
-- Try the preferred model again
-- If two consecutive calls succeed, transition to CLOSED
-- If a rate-limit error occurs, transition to OPEN and restart the cooldown
-
-Runtime rejection overrides the static model catalog. Model IDs remain separate from reasoning-effort and context-window parameters; drop unsupported parameters when changing models.
+- Try preferred model again
+- If 2 consecutive successes → transition to CLOSED
+- If rate limit error → back to OPEN, reset cooldown
 
 ## State File: `.squad/ralph-circuit-breaker.json`
 
 ```json
 {
   "state": "closed",
-  "preferredModel": "claude-sonnet-5",
-  "fallbackChain": ["gpt-5.6-luna", "gemini-3.5-flash", "claude-haiku-4.5", "gpt-5.4-mini"],
+  "preferredModel": "claude-sonnet-4.6",
+  "fallbackChain": ["gpt-5.4-mini", "gpt-5-mini", "gpt-4.1"],
   "currentFallbackIndex": 0,
   "cooldownMinutes": 10,
   "openedAt": null,
@@ -80,7 +75,7 @@ Runtime rejection overrides the static model catalog. Model IDs remain separate 
 
 ## PowerShell Functions
 
-Paste these into `ralph-watch.ps1` or source them from a shared module.
+Paste these into your `ralph-watch.ps1` or source them from a shared module.
 
 ### `Get-CircuitBreakerState`
 
@@ -90,15 +85,15 @@ function Get-CircuitBreakerState {
 
     if (-not (Test-Path $StateFile)) {
         $default = @{
-            state                = "closed"
-            preferredModel       = "claude-sonnet-5"
-            fallbackChain        = @("gpt-5.6-luna", "gemini-3.5-flash", "claude-haiku-4.5", "gpt-5.4-mini")
+            state              = "closed"
+            preferredModel     = "claude-sonnet-4.6"
+            fallbackChain      = @("gpt-5.4-mini", "gpt-5-mini", "gpt-4.1")
             currentFallbackIndex = 0
-            cooldownMinutes      = 10
-            openedAt             = $null
-            halfOpenSuccesses    = 0
-            consecutiveFailures  = 0
-            metrics              = @{
+            cooldownMinutes    = 10
+            openedAt           = $null
+            halfOpenSuccesses  = 0
+            consecutiveFailures = 0
+            metrics            = @{
                 totalFallbacks  = 0
                 totalRecoveries = 0
                 lastFallbackAt  = $null
@@ -128,7 +123,7 @@ function Save-CircuitBreakerState {
 
 ### `Get-CurrentModel`
 
-Returns the model Ralph should use. A `$null` return value means the caller must omit the model parameter.
+Returns the model Ralph should use right now, based on circuit state.
 
 ```powershell
 function Get-CurrentModel {
@@ -136,38 +131,35 @@ function Get-CurrentModel {
 
     $cb = Get-CircuitBreakerState -StateFile $StateFile
 
-    if ($cb.state -eq "open" -or $cb.state -eq "exhausted") {
-        if ($cb.openedAt) {
-            $opened = [DateTime]::Parse($cb.openedAt)
-            $elapsed = (Get-Date) - $opened
-            if ($elapsed.TotalMinutes -ge $cb.cooldownMinutes) {
-                $cb.state = "half-open"
-                $cb.halfOpenSuccesses = 0
-                Save-CircuitBreakerState -State $cb -StateFile $StateFile
-                Write-Host "  [circuit-breaker] Cooldown expired. Testing preferred model..." -ForegroundColor Yellow
-                return $cb.preferredModel
+    switch ($cb.state) {
+        "closed" {
+            return $cb.preferredModel
+        }
+        "open" {
+            # Check if cooldown has expired
+            if ($cb.openedAt) {
+                $opened = [DateTime]::Parse($cb.openedAt)
+                $elapsed = (Get-Date) - $opened
+                if ($elapsed.TotalMinutes -ge $cb.cooldownMinutes) {
+                    # Transition to half-open
+                    $cb.state = "half-open"
+                    $cb.halfOpenSuccesses = 0
+                    Save-CircuitBreakerState -State $cb -StateFile $StateFile
+                    Write-Host "  [circuit-breaker] Cooldown expired. Testing preferred model..." -ForegroundColor Yellow
+                    return $cb.preferredModel
+                }
             }
+            # Still in cooldown — use fallback
+            $idx = [Math]::Min($cb.currentFallbackIndex, $cb.fallbackChain.Count - 1)
+            return $cb.fallbackChain[$idx]
         }
-
-        if ($cb.state -eq "exhausted") {
-            return $null
+        "half-open" {
+            return $cb.preferredModel
         }
-
-        if (-not $cb.fallbackChain -or $cb.fallbackChain.Count -eq 0) {
-            $cb.state = "exhausted"
-            Save-CircuitBreakerState -State $cb -StateFile $StateFile
-            return $null
+        default {
+            return $cb.preferredModel
         }
-
-        $idx = [Math]::Min($cb.currentFallbackIndex, $cb.fallbackChain.Count - 1)
-        return $cb.fallbackChain[$idx]
     }
-
-    if ($cb.state -eq "half-open") {
-        return $cb.preferredModel
-    }
-
-    return $cb.preferredModel
 }
 ```
 
@@ -185,6 +177,7 @@ function Update-CircuitBreakerOnSuccess {
     if ($cb.state -eq "half-open") {
         $cb.halfOpenSuccesses++
         if ($cb.halfOpenSuccesses -ge 2) {
+            # Recovery! Close the circuit
             $cb.state = "closed"
             $cb.openedAt = $null
             $cb.halfOpenSuccesses = 0
@@ -195,16 +188,18 @@ function Update-CircuitBreakerOnSuccess {
             Write-Host "  [circuit-breaker] RECOVERED — back to preferred model ($($cb.preferredModel))" -ForegroundColor Green
             return
         }
-
         Save-CircuitBreakerState -State $cb -StateFile $StateFile
         Write-Host "  [circuit-breaker] Half-open success $($cb.halfOpenSuccesses)/2" -ForegroundColor Yellow
+        return
     }
+
+    # closed state — nothing to do
 }
 ```
 
 ### `Update-CircuitBreakerOnRateLimit`
 
-Call when a model response indicates rate limiting (HTTP 429 or an error message containing "rate limit").
+Call when a model response indicates rate limiting (HTTP 429 or error message containing "rate limit").
 
 ```powershell
 function Update-CircuitBreakerOnRateLimit {
@@ -214,6 +209,7 @@ function Update-CircuitBreakerOnRateLimit {
     $cb.consecutiveFailures++
 
     if ($cb.state -eq "closed" -or $cb.state -eq "half-open") {
+        # Open the circuit
         $cb.state = "open"
         $cb.openedAt = (Get-Date).ToString("o")
         $cb.halfOpenSuccesses = 0
@@ -228,41 +224,31 @@ function Update-CircuitBreakerOnRateLimit {
     }
 
     if ($cb.state -eq "open") {
+        # Already open — try next fallback in chain if current one also fails
         if ($cb.currentFallbackIndex -lt ($cb.fallbackChain.Count - 1)) {
             $cb.currentFallbackIndex++
-            $cb.openedAt = (Get-Date).ToString("o")
             $nextModel = $cb.fallbackChain[$cb.currentFallbackIndex]
             Write-Host "  [circuit-breaker] Fallback also limited — trying $nextModel" -ForegroundColor Red
-        } else {
-            $cb.state = "exhausted"
-            Write-Host "  [circuit-breaker] Fallback chain exhausted — omitting the model parameter until cooldown expires" -ForegroundColor Red
         }
-
-        Save-CircuitBreakerState -State $cb -StateFile $StateFile
-        return
-    }
-
-    if ($cb.state -eq "exhausted") {
+        # Reset cooldown timer
+        $cb.openedAt = (Get-Date).ToString("o")
         Save-CircuitBreakerState -State $cb -StateFile $StateFile
     }
 }
 ```
 
-While EXHAUSTED, `Update-CircuitBreakerOnRateLimit` persists failure counters without changing `openedAt`; repeated runtime-default failures therefore cannot postpone the HALF-OPEN recovery probe forever.
+## Integration with ralph-watch.ps1
 
-## Integration with `ralph-watch.ps1`
-
-In the polling loop, omit `--model` when `Get-CurrentModel` returns `$null`:
+In your Ralph polling loop, wrap the model selection:
 
 ```powershell
+# At the top of your polling loop
 $model = Get-CurrentModel
 
-if ($null -eq $model) {
-    $result = copilot-cli ...
-} else {
-    $result = copilot-cli --model $model ...
-}
+# When invoking copilot CLI
+$result = copilot-cli --model $model ...
 
+# After the call
 if ($result -match "rate.?limit" -or $LASTEXITCODE -eq 429) {
     Update-CircuitBreakerOnRateLimit
 } else {
@@ -273,27 +259,27 @@ if ($result -match "rate.?limit" -or $LASTEXITCODE -eq 429) {
 ### Full integration example
 
 ```powershell
+# Source the circuit breaker functions
 . .squad-templates/ralph-circuit-breaker-functions.ps1
 
 while ($true) {
     $model = Get-CurrentModel
-    $invokeParams = @{}
-    if ($null -ne $model) {
-        $invokeParams.Model = $model
-        Write-Host "Polling with model: $model"
-    } else {
-        Write-Host "Polling with platform default (model parameter omitted)"
-    }
+    Write-Host "Polling with model: $model"
 
     try {
-        $response = Invoke-RalphCycle @invokeParams
+        # Your existing Ralph logic here, but pass $model
+        $response = Invoke-RalphCycle -Model $model
+
+        # Success path
         Update-CircuitBreakerOnSuccess
     }
     catch {
         if ($_.Exception.Message -match "rate.?limit|429|quota|Too Many Requests") {
             Update-CircuitBreakerOnRateLimit
+            # Retry immediately with fallback model
             continue
         }
+        # Other errors — handle normally
         throw
     }
 
@@ -307,8 +293,8 @@ Override defaults by editing `.squad/ralph-circuit-breaker.json`:
 
 | Field | Default | Description |
 |-------|---------|-------------|
-| `preferredModel` | `claude-sonnet-5` | Model to use when the circuit is closed |
-| `fallbackChain` | `gpt-5.6-luna`, `gemini-3.5-flash`, `claude-haiku-4.5`, `gpt-5.4-mini` | Ordered fast/cheap policy fallbacks |
+| `preferredModel` | `claude-sonnet-4.6` | Model to use when circuit is closed |
+| `fallbackChain` | `["gpt-5.4-mini", "gpt-5-mini", "gpt-4.1"]` | Ordered fallback models (all free-tier) |
 | `cooldownMinutes` | `10` | How long to wait before testing recovery |
 
 ## Metrics
@@ -316,12 +302,11 @@ Override defaults by editing `.squad/ralph-circuit-breaker.json`:
 The state file tracks operational metrics:
 
 - **totalFallbacks** — How many times the circuit opened
-- **totalRecoveries** — How many times it recovered to the preferred model
-- **lastFallbackAt** — ISO timestamp of the last rate-limit event
-- **lastRecoveryAt** — ISO timestamp of the last successful recovery
+- **totalRecoveries** — How many times it recovered to preferred model
+- **lastFallbackAt** — ISO timestamp of last rate limit event
+- **lastRecoveryAt** — ISO timestamp of last successful recovery
 
 Query metrics with:
-
 ```powershell
 $cb = Get-Content .squad/ralph-circuit-breaker.json | ConvertFrom-Json
 Write-Host "Fallbacks: $($cb.metrics.totalFallbacks) | Recoveries: $($cb.metrics.totalRecoveries)"

@@ -22,14 +22,10 @@
       "command": "npx",
       "args": [
         "-y",
-        "--package=@bradygaster/squad-cli@0.11.0",
-        "--package=@bradygaster/squad-sdk@0.11.0",
-        "squad",
+        "@bradygaster/squad-cli@insider",
         "state-mcp"
       ],
-      "env": {
-        "SQUAD_TEAM_ROOT": "${workspaceFolder}"
-      },
+      "env": {},
       "tools": [
         "*"
       ]

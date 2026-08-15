@@ -11,9 +11,6 @@ permissions:
 jobs:
   triage:
     if: github.event.label.name == 'squad'
-    concurrency:
-      group: squad-triage-${{ github.event.issue.number }}
-      cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -23,19 +20,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const path = require('path');
-            const {
-              canonicalOwnerLabels,
-              countOpenSquadIssuesByMember,
-              hasWord,
-              isRosterExcluded,
-              memberLabel,
-              ownerLabelsToRemove,
-              routeIssue,
-            } = require(
-              path.join(process.env.GITHUB_WORKSPACE, 'scripts/ci/squad-routing.cjs')
-            );
-            let issue = context.payload.issue;
+            const issue = context.payload.issue;
 
             const teamFile = '.squad/team.md';
             if (!fs.existsSync(teamFile)) {
@@ -90,7 +75,7 @@ jobs:
               }
               if (inMembersTable && line.startsWith('|') && !line.includes('---') && !line.includes('Name')) {
                 const cells = line.split('|').map(c => c.trim()).filter(Boolean);
-                if (cells.length >= 2 && !isRosterExcluded(cells[0], ['scribe', 'ralph'])) {
+                if (cells.length >= 2 && cells[0] !== 'Scribe') {
                   members.push({
                     name: cells[0],
                     role: cells[1]
@@ -117,19 +102,11 @@ jobs:
               return;
             }
 
-            ({ data: issue } = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number
-            }));
-            if (canonicalOwnerLabels(issue.labels).length > 0) {
-              core.info(`Issue #${issue.number} already has an owner — skipping triage`);
-              return;
-            }
+            function slugify(t) { return t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 
             // Build triage context
             const memberList = members.map(m =>
-              `- **${m.name}** (${m.role}) → label: \`${memberLabel(m.name)}\``
+              `- **${m.name}** (${m.role}) → label: \`squad:${slugify(m.name)}\``
             ).join('\n');
 
             // Determine best assignee based on issue content and routing
@@ -139,15 +116,11 @@ jobs:
             let triageReason = '';
             let copilotTier = null;
 
-            // First, evaluate @copilot fit if enabled.
-            // Word-boundary matched for the same reason routing is: a raw
-            // `includes('auth')` matches *author*, and `includes('format')`
-            // matches *formatting* — and this block short-circuits routing
-            // entirely, so a false positive never reaches the router at all.
+            // First, evaluate @copilot fit if enabled
             if (hasCopilot) {
-              const isNotSuitable = notSuitableKeywords.some(kw => hasWord(issueText, kw));
-              const isGoodFit = !isNotSuitable && goodFitKeywords.some(kw => hasWord(issueText, kw));
-              const isNeedsReview = !isNotSuitable && !isGoodFit && needsReviewKeywords.some(kw => hasWord(issueText, kw));
+              const isNotSuitable = notSuitableKeywords.some(kw => issueText.includes(kw));
+              const isGoodFit = !isNotSuitable && goodFitKeywords.some(kw => issueText.includes(kw));
+              const isNeedsReview = !isNotSuitable && !isGoodFit && needsReviewKeywords.some(kw => issueText.includes(kw));
 
               if (isGoodFit) {
                 copilotTier = 'good-fit';
@@ -163,31 +136,44 @@ jobs:
               }
             }
 
-            // If not routed to @copilot, use keyword-based routing.
-            // Scoring is domain-outer / member-inner: every domain is scored
-            // independently and the highest scorer wins, so roster ordering no
-            // longer decides the assignment. Low-confidence and narrow-margin
-            // wins fall through to the Lead.
+            // If not routed to @copilot, use keyword-based routing
             if (!assignedMember) {
-              const openIssues = await github.paginate(
-                github.rest.issues.listForRepo,
-                {
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  state: 'open',
-                  per_page: 100
+              for (const member of members) {
+                const role = member.role.toLowerCase();
+                if ((role.includes('frontend') || role.includes('ui')) &&
+                    (issueText.includes('ui') || issueText.includes('frontend') ||
+                     issueText.includes('css') || issueText.includes('component') ||
+                     issueText.includes('button') || issueText.includes('page') ||
+                     issueText.includes('layout') || issueText.includes('design'))) {
+                  assignedMember = member;
+                  triageReason = 'Issue relates to frontend/UI work';
+                  break;
                 }
-              );
-              const openIssueCounts = countOpenSquadIssuesByMember(openIssues, members);
-              const routed = routeIssue(
-                { title: issue.title, body: issue.body },
-                members,
-                lead,
-                openIssueCounts
-              );
-              core.info(`Routing scores: ${JSON.stringify(routed.scores)}`);
-              assignedMember = routed.member;
-              triageReason = routed.reason;
+                if ((role.includes('backend') || role.includes('api') || role.includes('server')) &&
+                    (issueText.includes('api') || issueText.includes('backend') ||
+                     issueText.includes('database') || issueText.includes('endpoint') ||
+                     issueText.includes('server') || issueText.includes('auth'))) {
+                  assignedMember = member;
+                  triageReason = 'Issue relates to backend/API work';
+                  break;
+                }
+                if ((role.includes('test') || role.includes('qa') || role.includes('quality')) &&
+                    (issueText.includes('test') || issueText.includes('bug') ||
+                     issueText.includes('fix') || issueText.includes('regression') ||
+                     issueText.includes('coverage'))) {
+                  assignedMember = member;
+                  triageReason = 'Issue relates to testing/quality work';
+                  break;
+                }
+                if ((role.includes('devops') || role.includes('infra') || role.includes('ops')) &&
+                    (issueText.includes('deploy') || issueText.includes('ci') ||
+                     issueText.includes('pipeline') || issueText.includes('docker') ||
+                     issueText.includes('infrastructure'))) {
+                  assignedMember = member;
+                  triageReason = 'Issue relates to DevOps/infrastructure work';
+                  break;
+                }
+              }
             }
 
             // Default to Lead if no routing match
@@ -197,17 +183,7 @@ jobs:
             }
 
             const isCopilot = assignedMember.name === '@copilot';
-            const assignLabel = isCopilot ? 'squad:copilot' : memberLabel(assignedMember.name);
-
-            const { data: issueBeforeAssignment } = await github.rest.issues.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: issue.number
-            });
-            if (canonicalOwnerLabels(issueBeforeAssignment.labels).length > 0) {
-              core.info(`Issue #${issue.number} was assigned while routing — skipping`);
-              return;
-            }
+            const assignLabel = isCopilot ? 'squad:copilot' : `squad:${slugify(assignedMember.name)}`;
 
             // Add the member-specific label
             await github.rest.issues.addLabels({
@@ -216,22 +192,6 @@ jobs:
               issue_number: issue.number,
               labels: [assignLabel]
             });
-
-            for (const label of ownerLabelsToRemove(issueBeforeAssignment.labels, assignLabel)) {
-              try {
-                await github.rest.issues.removeLabel({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  issue_number: issue.number,
-                  name: label
-                });
-              } catch (err) {
-                if (err.status !== 404) {
-                  throw err;
-                }
-                core.info(`Owner label already removed: ${label}`);
-              }
-            }
 
             // Apply default triage verdict
             await github.rest.issues.addLabels({

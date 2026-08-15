@@ -96,9 +96,9 @@ Decisions that affect other agents go to `.squad/decisions/inbox/fact-checker-{s
 
 When Fact Checker issues a ❌ Contradicted verdict on a user-facing artifact at Pre-Ship time:
 
-1. **Reviewer Rejection Protocol activates** — the original author fixes their own work. There is no author lockout.
-2. **Fact Checker reports the contradiction** — what the claim was and what the evidence says. It does not assign the fix.
-3. **Pair mode** — Fact Checker provides the citations / counter-evidence so the author can revise with grounding
+1. **Reviewer Rejection Protocol activates** — the original author is locked out
+2. **Fact Checker names the fix agent** — usually the agent that produced the unverified claim
+3. **Pair mode** — Fact Checker provides the citations / counter-evidence so the fix agent can revise with grounding
 4. **Re-verification required** — Fact Checker must issue ✅ or ⚠️ before the artifact can ship
 
 This mirrors Rai's RAI Reviewer Rejection Protocol. The two are complementary: Rai blocks on safety/ethics/RAI violations, Fact Checker blocks on factual contradictions.

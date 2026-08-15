@@ -34,9 +34,9 @@ Each platform tracks issue lifecycle differently. Squad normalizes these into a 
 | Open, no assignee | `state: open`, `assignee: null` | `untriaged` |
 | Open, assigned, no branch | `state: open`, `assignee: @user`, no linked PR | `assigned` |
 | Open, branch exists | `state: open`, linked branch exists | `inProgress` |
-| Open, PR opened | No current human approval or verified squad review record | `needsReview` |
-| Open, PR approved | Current human approval or verified `squad/pre-pr-verdict` review record | `readyToMerge` |
-| Open, changes requested | Current human changes request or verified squad rejection | `changesRequested` |
+| Open, PR opened | `state: open`, PR exists, `reviewDecision: null` | `needsReview` |
+| Open, PR approved | `state: open`, PR `reviewDecision: APPROVED` | `readyToMerge` |
+| Open, changes requested | `state: open`, PR `reviewDecision: CHANGES_REQUESTED` | `changesRequested` |
 | Open, CI failure | `state: open`, PR `statusCheckRollup: FAILURE` | `ciFailure` |
 | Closed | `state: closed` | `done` |
 
@@ -250,14 +250,12 @@ gh pr ready {pr-number}
 
 **GitHub (merge commit):**
 ```bash
-gh pr merge {pr-number} --merge --delete-branch \
-  --match-head-commit {verified-head-sha}
+gh pr merge {pr-number} --merge --delete-branch
 ```
 
 **GitHub (squash):**
 ```bash
-gh pr merge {pr-number} --squash --delete-branch \
-  --match-head-commit {verified-head-sha}
+gh pr merge {pr-number} --squash --delete-branch
 ```
 
 **Azure DevOps:**
@@ -328,8 +326,8 @@ Ralph (the work monitor) continuously checks issue and PR state:
 
 1. **Triage:** Detects untriaged issues, assigns `squad:{member}` labels
 2. **Spawn:** Launches agents for assigned issues
-3. **Monitor:** Tracks PR state transitions and verifies SHA-pinned squad verdict evidence
-4. **Merge:** Automatically merges only PRs with a current human approval or a verified (self-attested) squad review record
+3. **Monitor:** Tracks PR state transitions (needsReview → changesRequested → readyToMerge)
+4. **Merge:** Automatically merges approved PRs
 5. **Cleanup:** Marks issues as done when PRs merge
 
 **Ralph's work-check cycle:**
@@ -345,9 +343,9 @@ See `.squad/templates/ralph-reference.md` for Ralph's full lifecycle.
 
 If the project has no human reviewers configured:
 1. PR opens
-2. CI and the repository's explicit automated approval policy run
-3. Ralph verifies that policy's current-head evidence before merging
-4. CI success alone never implies approval unless repository policy says so
+2. CI runs
+3. If CI passes, Ralph auto-merges
+4. Issue closes
 
 ### Human Review Required
 
@@ -358,36 +356,12 @@ If the project requires human approval:
 4. If approved + CI passes, Ralph merges
 5. If changes requested, agent addresses feedback
 
-### Squad Pre-PR Review Record
-
-For repositories with the Bishop, Hicks, and Vasquez pre-PR gate. ⚠️ This is a
-self-attested quality gate, not independent review: every squad agent runs under
-the repository owner's authority, so it provides no separation of duties. See
-`.github/copilot-instructions.md` § "Repository verdict evidence".
-
-1. The trio reviews and approves the exact branch head before PR creation.
-2. After the PR opens, each reviewer posts a canonical record comment naming
-   themselves, the verdict, and the exact head SHA. See
-   `.github/copilot-instructions.md` § "Repository verdict evidence".
-3. `.github/workflows/squad-review-verdict.yml` re-evaluates on every comment,
-   review, and push, and publishes the `squad/pre-pr-verdict` status.
-4. Ralph runs `scripts/ci/verify-squad-verdict.mjs` and accepts only the
-   trusted default-branch workflow run and its exact current-head status.
-5. Any head movement supersedes both the review record and any rejection. The
-   new head returns to `needsReview` until fresh evidence exists.
-6. Free-text comments never count — only the canonical block, and only through
-   the resulting commit status. A repository administrator overrides the gate.
-
-Documentation-only changes use a single reviewer in step 1 instead of the trio; every
-other step above is unchanged. See `.github/copilot-instructions.md` §
-"Documentation-Only Changes: One Reviewer" for the canonical definition.
-
 ### Squad Member Review
 
 If the issue was assigned to a squad member and they authored the PR:
-1. The required squad panel reviews before PR creation
-2. If changes are requested, **the original author addresses them** — there is no rejection lockout
-3. Reviewers record exact-head verdict comments, or a repository administrator approves on GitHub
+1. Another squad member reviews (conflict of interest avoidance)
+2. Original author is locked out from re-working rejected code (rejection lockout)
+3. Reviewer can approve edits or reject outright
 
 ## Common Issue Lifecycle Patterns
 

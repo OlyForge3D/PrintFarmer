@@ -147,6 +147,16 @@ Proceed? (yes / no)
 - **args:** (none)
 - **confirm:** false
 
+### Set Ralph Polling Interval
+
+- **intent:** set ralph interval, change ralph timing, how often does ralph check, ralph every N minutes
+- **summary:** Tell Ralph how frequently to poll for new work
+- **action:** coordinator
+- **command:** Ralph trigger: "Ralph, check every N minutes"
+- **args:**
+  - `interval`: How often should Ralph poll? (in minutes) | default: 10
+- **confirm:** false
+
 ### Start Squad Watch
 
 - **intent:** start watch, squad watch, monitor issues, watch for issues, auto-triage

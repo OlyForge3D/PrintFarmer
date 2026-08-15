@@ -18,25 +18,6 @@ const path = require('node:path');
 const https = require('node:https');
 const { execSync } = require('node:child_process');
 
-// Routing keyword matching is shared with the GitHub Actions triage workflow
-// (.github/workflows/squad-triage.yml) so the two routers cannot drift. Ralph
-// runs from the repository root via squad-heartbeat.yml, but resolve relative
-// to this file so the cwd does not matter.
-// Parity is asserted by scripts/ci/tests/test-squad-routing.mjs — if
-// `squad upgrade` ever overwrites this file and reintroduces substring
-// matching, that test fails loudly in CI.
-const {
-  canonicalMemberLabel,
-  countOpenSquadIssuesByMember,
-  hasWord,
-  isRosterExcluded,
-  memberLabel,
-  routeIssue,
-  slugify,
-} = require(
-  path.join(__dirname, '..', '..', 'scripts', 'ci', 'squad-routing.cjs'),
-);
-
 function parseArgs(argv) {
   let squadDir = '.squad';
   let output = 'triage-results.json';
@@ -73,6 +54,8 @@ function printUsage() {
 function normalizeEol(content) {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
+
+function slugify(text) { return text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 
 function parseRoutingRules(routingMd) {
   const table = parseTableSection(routingMd, /^##\s*work\s*type\s*(?:→|->)\s*agent\b/i);
@@ -131,28 +114,26 @@ function parseRoster(teamMd) {
   const roleIndex = findColumnIndex(table.headers, ['role']);
   if (nameIndex < 0 || roleIndex < 0) return [];
 
-  const excluded = ['scribe', 'ralph'];
+  const excluded = new Set(['scribe', 'ralph']);
   const members = [];
 
   for (const row of table.rows) {
     const name = cleanCell(row[nameIndex] || '');
     const role = cleanCell(row[roleIndex] || '');
     if (!name || !role) continue;
-    // Roster names carry an emoji prefix ("📋 Scribe"), so comparing the raw
-    // name never matched and neither Scribe nor Ralph was actually excluded.
-    if (isRosterExcluded(name, excluded)) continue;
+    if (excluded.has(name.toLowerCase())) continue;
 
     members.push({
       name,
       role,
-      label: memberLabel(name),
+      label: `squad:${slugify(name)}`,
     });
   }
 
   return members;
 }
 
-function triageIssue(issue, rules, modules, roster, openIssueCounts = {}) {
+function triageIssue(issue, rules, modules, roster) {
   const issueText = `${issue.title}\n${issue.body || ''}`.toLowerCase();
   const normalizedIssueText = normalizeTextForPathMatch(issueText);
 
@@ -194,7 +175,7 @@ function triageIssue(issue, rules, modules, roster, openIssueCounts = {}) {
     }
   }
 
-  const roleMatch = findRoleKeywordMatch(issue, roster, openIssueCounts);
+  const roleMatch = findRoleKeywordMatch(issueText, roster);
   if (roleMatch) {
     return {
       agent: roleMatch.agent,
@@ -360,7 +341,7 @@ function findBestRuleMatch(issueText, rules) {
   for (const rule of rules) {
     const matchedKeywords = rule.keywords
       .map((keyword) => keyword.toLowerCase())
-      .filter((keyword) => keyword.length > 0 && hasWord(issueText, keyword));
+      .filter((keyword) => keyword.length > 0 && issueText.includes(keyword));
 
     if (matchedKeywords.length === 0) continue;
 
@@ -375,24 +356,33 @@ function findBestRuleMatch(issueText, rules) {
   return best;
 }
 
-// Delegates to the shared router. The previous implementation looped
-// member-first over the roster and returned on the first raw
-// `issueText.includes('ui')` hit, which matched the "ui" inside build, builder,
-// require, required, quick, suite and guide — so the frontend branch, being
-// first, won nearly every race.
-function findRoleKeywordMatch(issue, roster, openIssueCounts = {}) {
-  const lead = findLeadFallback(roster);
-  if (!lead) return null;
+function findRoleKeywordMatch(issueText, roster) {
+  for (const member of roster) {
+    const role = member.role.toLowerCase();
 
-  const routed = routeIssue(
-    { title: issue.title, body: issue.body },
-    roster,
-    lead,
-    openIssueCounts,
-  );
-  if (!routed.domain) return null;
+    if (
+      (role.includes('frontend') || role.includes('ui')) &&
+      (issueText.includes('ui') || issueText.includes('frontend') || issueText.includes('css'))
+    ) {
+      return { agent: member, reason: 'Matched frontend/UI role keywords' };
+    }
 
-  return { agent: routed.member, reason: routed.reason };
+    if (
+      (role.includes('backend') || role.includes('api') || role.includes('server')) &&
+      (issueText.includes('api') || issueText.includes('backend') || issueText.includes('database'))
+    ) {
+      return { agent: member, reason: 'Matched backend/API role keywords' };
+    }
+
+    if (
+      (role.includes('test') || role.includes('qa')) &&
+      (issueText.includes('test') || issueText.includes('bug') || issueText.includes('fix'))
+    ) {
+      return { agent: member, reason: 'Matched testing/QA role keywords' };
+    }
+  }
+
+  return null;
 }
 
 function findLeadFallback(roster) {
@@ -462,7 +452,7 @@ function githubRequestJson(pathname, token) {
   });
 }
 
-async function fetchOpenIssues(owner, repo, token) {
+async function fetchSquadIssues(owner, repo, token) {
   const all = [];
   let page = 1;
   const perPage = 100;
@@ -470,6 +460,7 @@ async function fetchOpenIssues(owner, repo, token) {
   for (;;) {
     const query = new URLSearchParams({
       state: 'open',
+      labels: 'squad',
       per_page: String(perPage),
       page: String(page),
     });
@@ -495,40 +486,7 @@ function issueHasLabel(issue, labelName) {
 function isUntriagedIssue(issue, memberLabels) {
   if (issue.pull_request) return false;
   if (!issueHasLabel(issue, 'squad')) return false;
-  const rosterLabels = new Set(memberLabels);
-  return !(issue.labels || []).some(
-    (label) => rosterLabels.has(canonicalMemberLabel(label)),
-  );
-}
-
-function triageIssues(issues, rules, modules, roster, openIssueCounts) {
-  const results = [];
-  for (const issue of issues) {
-    const decision = triageIssue(
-      {
-        number: issue.number,
-        title: issue.title || '',
-        body: issue.body || '',
-        labels: issue.labels || [],
-      },
-      rules,
-      modules,
-      roster,
-      openIssueCounts,
-    );
-
-    if (!decision) continue;
-    const label = memberLabel(decision.agent.name);
-    openIssueCounts[label] = (openIssueCounts[label] || 0) + 1;
-    results.push({
-      issueNumber: issue.number,
-      assignTo: decision.agent.name,
-      label,
-      reason: decision.reason,
-      source: decision.source,
-    });
-  }
-  return results;
+  return !memberLabels.some((label) => issueHasLabel(issue, label));
 }
 
 async function main() {
@@ -547,32 +505,41 @@ async function main() {
   const modules = parseModuleOwnership(routingMd);
 
   const { owner, repo } = getOwnerRepoFromGit();
-  const openIssues = await fetchOpenIssues(owner, repo, token);
-  const openIssueCounts = countOpenSquadIssuesByMember(openIssues, roster);
+  const openSquadIssues = await fetchSquadIssues(owner, repo, token);
 
   const memberLabels = roster.map((member) => member.label);
-  const untriaged = openIssues.filter((issue) => isUntriagedIssue(issue, memberLabels));
+  const untriaged = openSquadIssues.filter((issue) => isUntriagedIssue(issue, memberLabels));
 
-  const results = triageIssues(untriaged, rules, modules, roster, openIssueCounts);
+  const results = [];
+  for (const issue of untriaged) {
+    const decision = triageIssue(
+      {
+        number: issue.number,
+        title: issue.title || '',
+        body: issue.body || '',
+        labels: [],
+      },
+      rules,
+      modules,
+      roster,
+    );
+
+    if (!decision) continue;
+    results.push({
+      issueNumber: issue.number,
+      assignTo: decision.agent.name,
+      label: decision.agent.label,
+      reason: decision.reason,
+      source: decision.source,
+    });
+  }
 
   const outputPath = path.resolve(process.cwd(), args.output);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(results, null, 2)}\n`, 'utf8');
 }
 
-if (require.main === module) {
-  main().catch((error) => {
-    console.error(error.message);
-    process.exit(1);
-  });
-}
-
-// Exported for scripts/ci/tests/test-squad-routing.mjs, which asserts Ralph
-// routes identically to .github/workflows/squad-triage.yml.
-module.exports = {
-  findRoleKeywordMatch,
-  isUntriagedIssue,
-  parseRoster,
-  triageIssue,
-  triageIssues,
-};
+main().catch((error) => {
+  console.error(error.message);
+  process.exit(1);
+});
