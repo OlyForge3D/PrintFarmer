@@ -748,7 +748,7 @@ internal static class Program
                                     {
                                         discovered.Add(printerInfo);
                                         Console.Write("\r");
-                                        Console.WriteLine($"  ✓ Found {result.Backend.ToString(),12} at {result.IpAddress,15} ({bestResult.Reason}) ({discovered.Count} total)");
+                                        Console.WriteLine($"  ✓ Found {result.Backend,12} at {result.IpAddress,15} ({bestResult.Reason}) ({discovered.Count} total)");
                                     }
                                 }
                             }
