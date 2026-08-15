@@ -133,7 +133,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         DateTime now = DateTime.UtcNow;
         string folder = ArtifactStorageFileSystem.EnsureArtifactRoot(root);
         Guid artifactId = Guid.NewGuid();
-        string targetFileName = artifactId.ToString() + "-" + sanitized; // ensure uniqueness even if same original name
+        string targetFileName = artifactId + "-" + sanitized; // ensure uniqueness even if same original name
         string fullPath = Path.Join(folder, targetFileName);
 
         bool persisted = false;
@@ -319,7 +319,7 @@ public class ArtifactsService(IWebHostEnvironment env, IArtifactsRepository arti
         DateTime now = DateTime.UtcNow;
         string folder = ArtifactStorageFileSystem.EnsureArtifactRoot(root);
         Guid artifactId = Guid.NewGuid();
-        string targetFileName = artifactId.ToString() + "-" + sanitized;
+        string targetFileName = artifactId + "-" + sanitized;
         string fullPath = Path.Join(folder, targetFileName);
 
         using (ArtifactWriteLease writeLease =
