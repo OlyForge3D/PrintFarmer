@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
@@ -8,6 +8,7 @@ const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined, isLoading: false }))
 );
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
+const printerHistoryModalMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
@@ -42,7 +43,10 @@ vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () 
   FilamentCoverageBreakdown: () => null,
 }));
 
-vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
+vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({
+  PrinterHistoryModal: (props: { isOpen: boolean }) =>
+    printerHistoryModalMock(props),
+}));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
@@ -102,6 +106,23 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
+    printerHistoryModalMock.mockClear();
+  });
+
+  describe('DetailedPrinterCard history modal gating', () => {
+    it('keeps the always-mounted modal closed until history is requested', () => {
+      render(<DetailedPrinterCard printer={makePrinter()} />);
+
+      expect(printerHistoryModalMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOpen: false }),
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'View print history' }));
+
+      expect(printerHistoryModalMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOpen: true }),
+      );
+    });
   });
 
   it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment (#1585 blocker 2)', () => {
@@ -193,9 +214,10 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Printer 1 details' })).toHaveAttribute(
-      'data-layout',
-      'inline',
-    );
+    // `PrinterInlineDetails` is mocked here, so this suite can only prove the
+    // card mounts it. The `data-layout="inline"` contract is asserted against
+    // the real component in PrinterInlineDetails.test.tsx — asserting it here
+    // would only re-read the mock defined a few lines above.
+    expect(screen.getByRole('region', { name: 'Printer 1 details' })).toBeInTheDocument();
   });
 });
