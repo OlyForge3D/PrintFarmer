@@ -20,9 +20,15 @@ vi.mock('@/features/filament-coverage/hooks', () => ({
 
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: ({ onSelect }: { onSelect: (id: number) => void }) => (
-    <button type="button" data-testid="spool-picker" onClick={() => onSelect(99)}>
-      pick
-    </button>
+    <>
+      <button type="button" data-testid="spool-picker" onClick={() => onSelect(99)}>
+        pick
+      </button>
+      {/* The real picker's Eject action reports spool id 0. */}
+      <button type="button" data-testid="spool-picker-eject" onClick={() => onSelect(0)}>
+        eject
+      </button>
+    </>
   ),
 }));
 
@@ -114,6 +120,57 @@ describe('MaterialLoadout', () => {
         reviewedRowVersion: 'rev-1',
       }),
     );
+  });
+
+  it('routes the picker eject action to the clear endpoint, not a spool-0 bind', async () => {
+    // SpoolPickerModal's Eject button reports spool id 0. Forwarding that to
+    // setSpool would persist a bogus zero binding instead of releasing the slot.
+    renderLoadout({
+      mmuStatus: mmu([gate(0), gate(1, { spoolId: 42 }), gate(2), gate(3)]),
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(await screen.findByTestId('spool-picker-eject'));
+
+    await waitFor(() =>
+      expect(clearSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 2,
+        reviewedRowVersion: 'rev-1',
+      }),
+    );
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('still allows clearing a stale binding from a disabled gate', async () => {
+    // Assign is blocked on a disabled gate, but if the device disabled a gate
+    // that still carries a binding, release has to stay reachable. The picker
+    // is unreachable here, so Clear in the drawer is the only path.
+    renderLoadout({
+      mmuStatus: mmu([
+        gate(0),
+        gate(1, { spoolId: 42, status: MmuGateStatus.Disabled }),
+        gate(2),
+        gate(3),
+      ]),
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+    expect(screen.getByRole('button', { name: 'Change' })).toBeDisabled();
+
+    const clear = screen.getByRole('button', { name: 'Clear' });
+    expect(clear).toBeEnabled();
+    fireEvent.click(clear);
+
+    await waitFor(() =>
+      expect(clearSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 2,
+        reviewedRowVersion: 'rev-1',
+      }),
+    );
+    expect(setSpool).not.toHaveBeenCalled();
   });
 
   it('assigns through non-contiguous persisted gate ordering without offset inference', async () => {

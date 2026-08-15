@@ -313,10 +313,10 @@ export function MaterialLoadout({
     }
   };
 
-  const handleClear = async () => {
-    if (!selected) return;
+  const handleClear = async (): Promise<boolean> => {
+    if (!selected) return false;
     const revision = requireRevision();
-    if (!revision) return;
+    if (!revision) return false;
     try {
       await clearSpoolMutation.mutateAsync({
         printerId,
@@ -324,9 +324,26 @@ export function MaterialLoadout({
         reviewedRowVersion: revision,
       });
       onSpoolChange?.();
+      return true;
     } catch {
       // Same reasoning as handleAssign — the mutation's onError toast already
       // told the user what happened; suppress the unhandled rejection.
+      return false;
+    }
+  };
+
+  // The picker's Eject action reports spool id 0, which means "release this
+  // slot" — not "bind spool 0". Route it to the clear endpoint so an eject can
+  // never persist a bogus zero binding. This is checked ahead of handleAssign's
+  // disabled-gate guard because releasing a disabled gate stays deliberately
+  // allowed; only binding to one is blocked.
+  const handlePickerSelect = async (spoolId: number) => {
+    if (spoolId > 0) {
+      await handleAssign(spoolId);
+      return;
+    }
+    if (await handleClear()) {
+      setPickerOpen(false);
     }
   };
 
@@ -445,7 +462,7 @@ export function MaterialLoadout({
                   size="sm"
                   disabled={busy || !canMutate}
                   title={blockedReason}
-                  onClick={handleClear}
+                  onClick={() => void handleClear()}
                 >
                   Clear
                 </Button>
@@ -462,7 +479,7 @@ export function MaterialLoadout({
         <SpoolPickerModal
           isOpen
           onClose={() => setPickerOpen(false)}
-          onSelect={handleAssign}
+          onSelect={handlePickerSelect}
           printerId={printerId}
           activeSpoolId={selected.spoolId}
         />
