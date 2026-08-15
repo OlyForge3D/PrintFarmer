@@ -325,7 +325,10 @@ public class PrintersService(
                 backend);
             foreach (HistoryJob job in response.Jobs)
             {
-                job.ThumbnailUrl = ExtractThumbnailUrl(
+                // Some backends (e.g. PrusaLink) already populate ThumbnailUrl from
+                // backend-specific data (file refs) before metadata-based extraction runs.
+                // Only fall back to metadata-derived extraction when nothing was set.
+                job.ThumbnailUrl ??= ExtractThumbnailUrl(
                     job.Metadata ?? new Dictionary<string, object>(),
                     printer.ServerUrl);
             }
@@ -479,7 +482,7 @@ public class PrintersService(
                 return HistoryJobProbeResult.Error("history_job_id_mismatch");
             }
 
-            job.ThumbnailUrl = ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
+            job.ThumbnailUrl ??= ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
             return HistoryJobProbeResult.Found(job);
         }
         catch (HistoryJobNotFoundException)
