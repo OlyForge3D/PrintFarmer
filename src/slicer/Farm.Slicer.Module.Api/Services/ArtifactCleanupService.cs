@@ -461,26 +461,33 @@ public class ArtifactCleanupService(
                 return false;
             }
 
-            leaseStream = new FileStream(
+            var candidateStream = new FileStream(
                 leasePath,
                 FileMode.Open,
                 FileAccess.ReadWrite,
                 FileShare.None);
-            bool lockAcquired = false;
+
+            // Ownership of the stream transfers to the caller via the `out` parameter when
+            // the lease lock is acquired, so it cannot be wrapped in a `using` statement here
+            // (that would dispose it before the caller could use the acquired lease).
+#pragma warning disable IDISP016 // Don't use disposed instance
             try
             {
-                lockAcquired = ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(
-                    leaseStream);
-                return lockAcquired;
-            }
-            finally
-            {
-                if (!lockAcquired)
+                if (!ArtifactStorageFileSystem.TryAcquireExclusiveLeaseLock(candidateStream))
                 {
-                    leaseStream.Dispose();
-                    leaseStream = null;
+                    candidateStream.Dispose();
+                    return false;
                 }
+
+                leaseStream = candidateStream;
+                return true;
             }
+            catch
+            {
+                candidateStream.Dispose();
+                throw;
+            }
+#pragma warning restore IDISP016 // Don't use disposed instance
         }
         catch (FileNotFoundException)
         {
