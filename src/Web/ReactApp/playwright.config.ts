@@ -10,6 +10,10 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
+  /* Vitest-only unit tests colocated with fixtures (e.g. emulator-setup.unit.test.ts)
+   * are not Playwright specs — they need no browser/live API and are run via
+   * `npm run test:run` instead. See vitest.config.ts. */
+  testIgnore: ['**/*.unit.test.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
