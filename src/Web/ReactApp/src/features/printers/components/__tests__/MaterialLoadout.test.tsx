@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
@@ -104,12 +104,14 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
     fireEvent.click(await screen.findByTestId('spool-picker'));
 
-    expect(setSpool).toHaveBeenCalledWith({
-      printerId: 'printer-1',
-      toolheadIndex: 3,
-      spoolId: 99,
-      reviewedRowVersion: 'rev-1',
-    });
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 3,
+        spoolId: 99,
+        reviewedRowVersion: 'rev-1',
+      }),
+    );
   });
 
   it('clears a spool from the persisted index of the slot the user clicked', () => {
@@ -127,12 +129,16 @@ describe('MaterialLoadout', () => {
     });
   });
 
-  it('refuses to mutate without the printer revision', () => {
+  it('blocks assignment up front when the printer revision is unavailable', () => {
     renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    const assign = screen.getByRole('button', { name: 'Assign' });
 
+    expect(assign).toBeDisabled();
+    expect(screen.getByText(/Printer revision unavailable/)).toBeInTheDocument();
+
+    fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
     expect(setSpool).not.toHaveBeenCalled();
   });
@@ -173,7 +179,7 @@ describe('MaterialLoadout', () => {
     expect(within(drawer).queryByText('Gate')).not.toBeInTheDocument();
   });
 
-  it('sends the unshifted index on a toolchanger', () => {
+  it('sends the unshifted index on a toolchanger', async () => {
     renderLoadout({
       mmuStatus: mmu([gate(0), gate(1)], MmuProtocol.SnapmakerU1),
       toolheads: [persistedQidiBox[0]],
@@ -183,8 +189,10 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
     fireEvent.click(screen.getByTestId('spool-picker'));
 
-    expect(setSpool).toHaveBeenCalledWith(
-      expect.objectContaining({ toolheadIndex: 1 }),
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ toolheadIndex: 1 }),
+      ),
     );
   });
 
