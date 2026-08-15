@@ -211,6 +211,11 @@ export function MaterialLoadout({
   const selectedCoverage = selected ? coverageByIndex.get(selected.gcodeIndex) : undefined;
   const loadedCount = slots.filter((s) => s.material != null || s.spoolId != null).length;
   const busy = setSpoolMutation.isPending || clearSpoolMutation.isPending;
+  // The spool endpoints are optimistically concurrent, so without a revision to
+  // review against no assignment can succeed. Say so before the user picks a
+  // spool rather than failing them afterwards.
+  const canMutate = !!reviewedRowVersion;
+  const blockedReason = canMutate ? undefined : 'Printer revision unavailable — refresh to assign spools';
 
   const requireRevision = (): string | null => {
     if (!reviewedRowVersion) {
@@ -344,18 +349,28 @@ export function MaterialLoadout({
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={busy}
+                disabled={busy || !canMutate}
+                title={blockedReason}
                 onClick={() => setPickerOpen(true)}
               >
                 {selected.spoolId != null ? 'Change' : 'Assign'}
               </Button>
               {selected.spoolId != null && (
-                <Button variant="danger" size="sm" disabled={busy} onClick={handleClear}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  disabled={busy || !canMutate}
+                  title={blockedReason}
+                  onClick={handleClear}
+                >
                   Clear
                 </Button>
               )}
             </div>
           </div>
+          {blockedReason && (
+            <p className="mt-1 text-[10px] text-pf-text-tertiary">{blockedReason}</p>
+          )}
         </div>
       )}
 
