@@ -110,6 +110,15 @@ export function ToolheadSpoolPicker({
   const handleSpoolSelect = async (spoolId: number) => {
     if (selectedToolheadIndex === null) return;
 
+    // The picker's Eject action reports spool id 0, which means "release this
+    // slot" — not "bind spool 0". Route it to the clear endpoint so an eject
+    // can never persist a bogus zero binding.
+    if (spoolId <= 0) {
+      handleClearSpool(selectedToolheadIndex);
+      handleClosePicker();
+      return;
+    }
+
     await setSpoolMutation.mutateAsync({
       printerId,
       toolheadIndex: selectedToolheadIndex,
