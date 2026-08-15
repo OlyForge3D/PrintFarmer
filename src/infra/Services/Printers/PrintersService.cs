@@ -3853,6 +3853,8 @@ public class PrintersService(
         // Find the toolhead by index
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
+        bool previousMultiMaterial = p.MultiMaterial;
+
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
         {
@@ -3868,14 +3870,44 @@ public class PrintersService(
             if (p.MultiMaterial)
             {
                 int gateCount = Math.Max(4, toolheadIndex);
-                List<Toolhead> gates = CreateMmuVirtualToolheads(p, gateCount);
-                if (gates.Count > 0)
+                List<Toolhead> stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                if (stagedGates.Count > 0)
                 {
-                    _unitOfWork.Printers.AddToolheads(gates);
-                    await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    try
+                    {
+                        _unitOfWork.Printers.AddToolheads(stagedGates);
+                        await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+                    }
+                    catch (DbUpdateConcurrencyException ex)
+                    {
+                        // A concurrent request already won the race to create the same gate(s)
+                        // and advanced the printer's RowVersion — identical topology conflict to
+                        // a unique-constraint violation below; the losing request must retry.
+                        RestoreStagedToolheadBinding(
+                            p, previousMultiMaterial, stagedGates, null, null, null, null, null, null);
+                        _logger.LogWarning(
+                            ex,
+                            "ClearToolheadSpoolAsync: concurrent gate materialization conflict (concurrency) for printer {Id} toolhead T{Index}",
+                            id, toolheadIndex);
+                        return new CommandResult(
+                            false,
+                            $"Toolhead T{toolheadIndex} was created by another request; retry clearing the spool");
+                    }
+                    catch (DbUpdateException ex) when (IsToolheadPrinterIndexUniqueViolation(ex))
+                    {
+                        RestoreStagedToolheadBinding(
+                            p, previousMultiMaterial, stagedGates, null, null, null, null, null, null);
+                        _logger.LogWarning(
+                            ex,
+                            "ClearToolheadSpoolAsync: concurrent gate materialization conflict for printer {Id} toolhead T{Index}",
+                            id, toolheadIndex);
+                        return new CommandResult(
+                            false,
+                            $"Toolhead T{toolheadIndex} was created by another request; retry clearing the spool");
+                    }
                 }
 
-                toolhead = gates.FirstOrDefault(t => t.Index == toolheadIndex)
+                toolhead = stagedGates.FirstOrDefault(t => t.Index == toolheadIndex)
                            ?? p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
             }
         }
@@ -3941,17 +3973,15 @@ public class PrintersService(
         }
 
         int existingGates = p.Toolheads.Count(t => t.ToolheadType == ToolheadType.MmuGate);
-        if (existingGates > 0)
+        int targetGateCount = Math.Max(4, existingGates);
+        List<Toolhead> gates = CreateMmuVirtualToolheads(p, targetGateCount);
+        if (gates.Count == 0)
         {
             return new CommandResult(true, $"Printer already has {existingGates} MMU gate(s)");
         }
 
-        List<Toolhead> gates = CreateMmuVirtualToolheads(p);
-        if (gates.Count > 0)
-        {
-            _unitOfWork.Printers.AddToolheads(gates);
-            await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
-        }
+        _unitOfWork.Printers.AddToolheads(gates);
+        await _unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
 
         return new CommandResult(true, $"Created {gates.Count} MMU gate(s) for printer \"{p.Name}\"");
     }
@@ -4069,24 +4099,27 @@ public class PrintersService(
             return [];
         }
 
-        bool hasExistingGates = printer.Toolheads.Any(t => t.ToolheadType == ToolheadType.MmuGate);
-        if (hasExistingGates)
-        {
-            return [];
-        }
+        // Additive gap-fill: only create indices that don't already have a persisted gate.
+        // A partial gate set (e.g. 3 persisted gates while the printer's live hardware
+        // reports 4) must be able to grow to cover the requested/live count without
+        // renumbering or re-binding gates that already exist.
+        HashSet<int> existingGateIndices = [.. printer.Toolheads
+            .Where(t => t.ToolheadType == ToolheadType.MmuGate)
+            .Select(t => t.Index)];
 
         Toolhead? primaryToolhead = printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical && t.IsPrimary)
                                     ?? printer.Toolheads.FirstOrDefault(t => t.ToolheadType == ToolheadType.Physical);
-
-        _logger.LogInformation(
-            "CreateMmuVirtualToolheads: Auto-creating {GateCount} MMU gates for printer {PName} ({Id})",
-            mmuGateCount, LogSanitizer.Sanitize(printer.Name), printer.Id);
 
         var gates = new List<Toolhead>();
 
         // Indices 1..mmuGateCount: T0 is the physical hotend, T1..Tn are AMS gates.
         for (int i = 1; i <= mmuGateCount; i++)
         {
+            if (existingGateIndices.Contains(i))
+            {
+                continue;
+            }
+
             gates.Add(new Toolhead
             {
                 Id = Guid.NewGuid(),
@@ -4104,9 +4137,15 @@ public class PrintersService(
             });
         }
 
-        _logger.LogInformation(
-            "CreateMmuVirtualToolheads: Created {GateCount} MMU gates for printer {PName} ({Id})",
-            gates.Count, LogSanitizer.Sanitize(printer.Name), printer.Id);
+        if (gates.Count > 0)
+        {
+            _logger.LogInformation(
+                "CreateMmuVirtualToolheads: Created {GateCount} MMU gate(s) (indices {Indices}) for printer {PName} ({Id})",
+                gates.Count,
+                string.Join(",", gates.Select(g => g.Index)),
+                LogSanitizer.Sanitize(printer.Name),
+                printer.Id);
+        }
 
         return gates;
     }
