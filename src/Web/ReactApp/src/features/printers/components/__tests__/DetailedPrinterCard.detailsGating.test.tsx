@@ -45,11 +45,8 @@ vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () 
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
-vi.mock('@/features/printers/components/ToolheadSpoolPicker', () => ({
-  ToolheadSpoolPicker: () => <div data-testid="toolhead-spool-picker" />,
-}));
-vi.mock('@/features/printers/components/AmsSlotVisualization', () => ({
-  AmsSlotVisualization: () => <div data-testid="ams-slot-visualization" />,
+vi.mock('@/features/printers/components/MaterialLoadout', () => ({
+  MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,
@@ -124,14 +121,14 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 
-  it('preserves the collapsed Material Slots badge for MMU printers using only mmuStatus (no fetch needed)', () => {
+  it('preserves the collapsed materials module for MMU printers using only mmuStatus (no fetch needed)', () => {
     const printer = makePrinter({
       mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
     } as Partial<Printer>);
 
     render(<DetailedPrinterCard printer={printer} />);
 
-    expect(screen.getByText('Material Slots')).toBeInTheDocument();
+    expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
   });
 
   it('eagerly requests printer details collapsed when there is no MMU/AMS signal at all (narrowest safe gate)', () => {

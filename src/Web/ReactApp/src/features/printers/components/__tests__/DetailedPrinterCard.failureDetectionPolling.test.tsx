@@ -46,11 +46,12 @@ vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () 
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
-vi.mock('@/features/printers/components/ToolheadSpoolPicker', () => ({
-  ToolheadSpoolPicker: () => <div data-testid="toolhead-spool-picker" />,
+vi.mock('@/features/printers/components/MaterialLoadout', () => ({
+  MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
-vi.mock('@/features/printers/components/AmsSlotVisualization', () => ({
-  AmsSlotVisualization: () => <div data-testid="ams-slot-visualization" />,
+// The card renders the details sidebar inline; this suite exercises the card only.
+vi.mock('@/features/printers/components/PrinterDetailsSidebar', () => ({
+  PrinterDetailsSidebar: () => <div data-testid="printer-details-sidebar" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,

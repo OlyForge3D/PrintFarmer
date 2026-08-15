@@ -97,6 +97,7 @@ function SlotButton({
   const swatch = slot.color;
 
   return (
+    // eslint-disable-next-line local/pf-no-raw-html-controls -- Composite slot control: an SVG coverage ring around a filament swatch, which <Button> cannot express
     <button
       type="button"
       onClick={onSelect}
@@ -120,6 +121,17 @@ function SlotButton({
           className={clsx('block -rotate-90', ring.className)}
           aria-hidden="true"
         >
+          {!ring.dashed && ring.fraction < 1 && (
+            <circle
+              cx="22"
+              cy="22"
+              r={RING_RADIUS}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.5"
+              opacity={0.2}
+            />
+          )}
           <circle
             cx="22"
             cy="22"
@@ -141,7 +153,9 @@ function SlotButton({
             'absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full',
             compact ? 'h-6 w-6' : 'h-7 w-7',
             swatch
-              ? isLightColor(swatch) && 'ring-1 ring-pf-border'
+              ? isLightColor(swatch)
+                ? 'ring-1 ring-pf-border'
+                : 'ring-1 ring-white/15'
               : 'border border-dashed border-pf-border-light',
           )}
           style={swatch ? { backgroundColor: swatch } : undefined}
