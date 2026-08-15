@@ -3839,7 +3839,6 @@ public class PrintersService(
         Toolhead? toolhead = p.Toolheads.FirstOrDefault(t => t.Index == toolheadIndex);
 
         bool previousMultiMaterial = p.MultiMaterial;
-        List<Toolhead> stagedGates = [];
 
         // Auto-create MMU gates when the toolhead doesn't exist.
         if (toolhead is null)
@@ -3856,7 +3855,7 @@ public class PrintersService(
             if (p.MultiMaterial)
             {
                 int gateCount = Math.Max(4, toolheadIndex);
-                stagedGates = CreateMmuVirtualToolheads(p, gateCount);
+                List<Toolhead> stagedGates = CreateMmuVirtualToolheads(p, gateCount);
                 if (stagedGates.Count > 0)
                 {
                     try
