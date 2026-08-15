@@ -22,6 +22,8 @@ vi.mock('@/common/hooks/useApi', () => ({
   useJobQueue: () => ({ data: [], isLoading: false }),
   useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
   usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
+  usePrintJobObjects: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  queryKeys: { printJobObjects: (printerId: string) => ['printJobObjects', printerId] },
 }));
 
 vi.mock('@/common/hooks/useSpoolmanConfigured', () => ({
