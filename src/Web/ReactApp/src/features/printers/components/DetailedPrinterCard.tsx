@@ -1,4 +1,4 @@
-import React, { Suspense, useState, useRef, useEffect } from 'react';
+import React, { Suspense, useState, useRef, useEffect, useMemo } from 'react';
 import './DetailedPrinterCard.css';
 import { Zap } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -22,9 +22,8 @@ import type {
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
-import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
-import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
+import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
+import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
@@ -185,14 +184,28 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // available before the fetch, so that one case stays eager. Every other
   // card defers the request until the Z-Offset wizard (this component's
   // other `printerDetails` consumer) is actually opened (#1146 item 4).
+  // Also fetch eagerly when live MMU gates are present — the persisted
+  // toolhead topology is what lets `MaterialLoadout` map live gate indices
+  // (offset by the shared hotend on an MMU) safely to backend API indices.
+  // Without it, an assignment to gate 1 could land on physical hotend index 0.
   const hasMmuGateData = !!(mmuStatus?.gates && mmuStatus.gates.length > 0);
   const needsCollapsedToolheadProbe = !hasMmuGateData;
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled: spoolmanReady && (needsCollapsedToolheadProbe || showZOffsetWizard),
+      enabled:
+        spoolmanReady &&
+        (needsCollapsedToolheadProbe || hasMmuGateData || showZOffsetWizard),
       staleTime: 60000,
     }
+  );
+
+  // One resolution per render, shared by the materials module and the
+  // single-spool fallback below. Calling the resolver separately in each
+  // branch let the two guards drift out of sync (and did the work twice).
+  const materialLoadout = useMemo(
+    () => resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads),
+    [mmuStatus, printerDetails?.toolheads],
   );
 
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
@@ -945,130 +958,95 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           />
       </div>
 
-      {/* AMS/MMU Slot Visualization - Compact view for card */}
-      {(() => {
-        const toolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
-          ? printerDetails.toolheads
-          : mmuStatus?.gates && mmuStatus.gates.length > 0
-            ? mmuGatesToToolheads(mmuStatus.gates)
-            : undefined;
-        if (!toolheads) return null;
-        return (
-          <div className="mb-2">
-            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Material Slots</div>
-            <AmsSlotVisualization
-              toolheads={toolheads}
-              compact
-              printerId={printer.id}
-              reviewedRowVersion={printer.rowVersion}
-            />
-          </div>
-        );
-      })()}
+      {/* Consolidated materials module — replaces the old Material Slots strip
+          and the parallel Spools assignment list, which could disagree. */}
+      {materialLoadout && (
+        <MaterialLoadout
+          printerId={printer.id}
+          mmuStatus={mmuStatus}
+          toolheads={printerDetails?.toolheads}
+          reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
+          compact
+          className="mb-2"
+        />
+      )}
 
-      {/* Spool Info Section - Show when Spoolman is configured (all backends) */}
-      {(spoolmanReady || printer.spoolInfo) && (() => {
-        const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-        const hasMmuGates = !hasMultipleToolheads
-          && mmuStatus?.gates
-          && mmuStatus.gates.length > 0;
-        const hasMultipleSpoolSources = hasMultipleToolheads || hasMmuGates;
-        const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
-
-        const effectiveToolheads = hasMultipleToolheads
-          ? printerDetails!.toolheads!
-          : hasMmuGates
-            ? mmuGatesToToolheads(mmuStatus!.gates)
-            : undefined;
-
-        return (
-          <div className="mb-2">
-            <div className="flex items-center justify-between mb-1">
-              <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">{sectionTitle}</div>
-              {!hasMultipleSpoolSources && (
-                <div className="flex items-center gap-0.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={spoolActionPending}
-                    onClick={() => setShowSpoolPicker(true)}
-                    className="p-0.5! h-auto!"
-                    title="Change spool"
-                    aria-label="Change spool"
-                    iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
-                  ></Button>
-                  {printer.spoolInfo?.hasActiveSpool && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={spoolActionPending}
-                      onClick={async () => {
-                        setSpoolActionPending(true);
-                        try {
-                          if (!printer.rowVersion) {
-                            toast.error('Printer revision unavailable. Refresh and review again.');
-                            return;
-                          }
-                          const nextRowVersion = await apiClient.clearActiveSpool(
-                            printer.id,
-                            printer.rowVersion
-                          );
-                          queryClient.setQueryData<Printer[]>(['printers'], (old) =>
-                            old?.map(p => p.id === printer.id
-                              ? {
-                                  ...p,
-                                  rowVersion: nextRowVersion,
-                                  spoolInfo: { hasActiveSpool: false },
-                                }
-                              : p
-                            )
-                          );
-                        } catch (err) {
-                          console.error('Failed to eject spool:', err);
-                          if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
-                            await queryClient.invalidateQueries({
-                              queryKey: ['printers'],
-                            });
-                          }
-                          toast.error(
-                            mutationErrorMessage(err, 'Failed to eject spool')
-                          );
-                        } finally {
-                          setSpoolActionPending(false);
-                        }
-                      }}
-                      className="p-0.5! h-auto!"
-                      title="Eject spool"
-                      aria-label="Eject spool"
-                      iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
-                    ></Button>
-                  )}
-                </div>
+      {/* Single-spool printers keep the classic spool card; multi-slot printers are
+          fully described by the materials module above. */}
+      {(spoolmanReady || printer.spoolInfo) && !materialLoadout && (
+        <div className="mb-2">
+          <div className="flex items-center justify-between mb-1">
+            <div className="text-xs uppercase text-pf-text-secondary font-bold tracking-wide">Spool</div>
+            <div className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={spoolActionPending}
+                onClick={() => setShowSpoolPicker(true)}
+                className="p-0.5! h-auto!"
+                title="Change spool"
+                aria-label="Change spool"
+                iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
+              ></Button>
+              {printer.spoolInfo?.hasActiveSpool && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={spoolActionPending}
+                  onClick={async () => {
+                    setSpoolActionPending(true);
+                    try {
+                      if (!printer.rowVersion) {
+                        toast.error('Printer revision unavailable. Refresh and review again.');
+                        return;
+                      }
+                      const nextRowVersion = await apiClient.clearActiveSpool(
+                        printer.id,
+                        printer.rowVersion
+                      );
+                      queryClient.setQueryData<Printer[]>(['printers'], (old) =>
+                        old?.map(p => p.id === printer.id
+                          ? {
+                              ...p,
+                              rowVersion: nextRowVersion,
+                              spoolInfo: { hasActiveSpool: false },
+                            }
+                          : p
+                        )
+                      );
+                      // Reconcile the optimistic update with server truth so
+                      // downstream consumers (printer details, coverage) see
+                      // the cleared spool. Awaiting the invalidation prevents
+                      // a follow-up assignment from racing a stale refetch.
+                      await queryClient.invalidateQueries({ queryKey: ['printers'] });
+                    } catch (err) {
+                      console.error('Failed to eject spool:', err);
+                      if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
+                        await queryClient.invalidateQueries({
+                          queryKey: ['printers'],
+                        });
+                      }
+                      toast.error(
+                        mutationErrorMessage(err, 'Failed to eject spool')
+                      );
+                    } finally {
+                      setSpoolActionPending(false);
+                    }
+                  }}
+                  className="p-0.5! h-auto!"
+                  title="Eject spool"
+                  aria-label="Eject spool"
+                  iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
+                ></Button>
               )}
             </div>
-            {hasMultipleSpoolSources && effectiveToolheads ? (
-              <>
-                <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
-                <ToolheadSpoolPicker
-                  printerId={printer.id}
-                  toolheads={effectiveToolheads}
-                  reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
-                  onSpoolChange={() => {
-                    queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                  }}
-                />
-              </>
-            ) : (
-              <>
-                <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
-                <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
-              </>
-            )}
           </div>
-        );
-      })()}
+          <FilamentCoverageBreakdown printerId={printer.id} className="mb-2" />
+          <LoadedFilamentCard spoolInfo={printer.spoolInfo} />
+        </div>
+      )}
 
       {/* Statistics and Version — folded in from the details sidebar (#1584) */}
       <div className="mt-3 space-y-3">

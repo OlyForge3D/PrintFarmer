@@ -2029,9 +2029,11 @@ export function useSetToolheadSpool() {
       spoolId,
       reviewedRowVersion
     ),
-    onSuccess: (_data, { printerId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+      ]);
       toast.success('Spool assigned to toolhead');
     },
     onError: (err: Error) => toast.error(`Failed to assign spool: ${err.message}`),
@@ -2054,9 +2056,11 @@ export function useClearToolheadSpool() {
       toolheadIndex,
       reviewedRowVersion
     ),
-    onSuccess: (_data, { printerId }) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.printers });
+    onSuccess: async (_data, { printerId }) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.printerDetails(printerId) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
+      ]);
       toast.success('Spool cleared from toolhead');
     },
     onError: (err: Error) => toast.error(`Failed to clear spool: ${err.message}`),

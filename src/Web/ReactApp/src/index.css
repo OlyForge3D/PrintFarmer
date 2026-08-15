@@ -198,6 +198,15 @@
   }
 }
 
+/* Composited fade-and-rise for content revealed in place, e.g. the material
+   loadout drawer. Only opacity and transform animate, so no layout is recalculated. */
+@utility pf-animate-rise {
+  animation: pf-settings-content-in 180ms cubic-bezier(0.19, 1, 0.22, 1) both;
+  @media (prefers-reduced-motion: reduce) {
+    animation: none;
+  }
+}
+
 @utility pf-skeleton {
   background: var(--pf-skeleton-bg);
   border-radius: 0.375rem;

@@ -4,7 +4,14 @@ import React from 'react';
 import { renderHook } from '@testing-library/react';
 import { waitFor } from '@testing-library/dom';
 import { act } from '@testing-library/react';
-import { useCreatePrinter, useQueuePrintJob, useUpdatePrinter, queryKeys } from '@/common/hooks/useApi';
+import {
+  queryKeys,
+  useClearToolheadSpool,
+  useCreatePrinter,
+  useQueuePrintJob,
+  useSetToolheadSpool,
+  useUpdatePrinter,
+} from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { PrinterBackend, Printer, QueuedPrintJobWithFileMetaDto } from '@/types/api';
 
@@ -17,6 +24,14 @@ function createTestClient() {
 
 function wrapperFactory(client: QueryClient) {
   return ({ children }: { children: React.ReactNode }) => React.createElement(QueryClientProvider, { client }, children);
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 /**
@@ -157,6 +172,59 @@ describe('optimistic printer update', () => {
       frontendUrl: existing.frontendUrl,
       backendUrl: existing.backendUrl,
     });
+  });
+});
+
+describe('toolhead spool mutation cache synchronization', () => {
+  it('keeps assignment pending until printer invalidations complete', async () => {
+    const client = createTestClient();
+    const wrapper = wrapperFactory(client);
+    const invalidation = deferred();
+    vi.spyOn(apiClient, 'setToolheadSpool').mockResolvedValue('next-version');
+    vi.spyOn(client, 'invalidateQueries').mockImplementation(() => invalidation.promise);
+    const { result } = renderHook(() => useSetToolheadSpool(), { wrapper });
+    let settled = false;
+
+    const mutation = result.current.mutateAsync({
+      printerId: 'printer-1',
+      toolheadIndex: 2,
+      spoolId: 42,
+      reviewedRowVersion: 'reviewed-version',
+    }).then(() => {
+      settled = true;
+    });
+
+    await waitFor(() => expect(apiClient.setToolheadSpool).toHaveBeenCalled());
+    expect(settled).toBe(false);
+
+    invalidation.resolve();
+    await act(async () => mutation);
+    expect(settled).toBe(true);
+  });
+
+  it('keeps clear pending until printer invalidations complete', async () => {
+    const client = createTestClient();
+    const wrapper = wrapperFactory(client);
+    const invalidation = deferred();
+    vi.spyOn(apiClient, 'clearToolheadSpool').mockResolvedValue('next-version');
+    vi.spyOn(client, 'invalidateQueries').mockImplementation(() => invalidation.promise);
+    const { result } = renderHook(() => useClearToolheadSpool(), { wrapper });
+    let settled = false;
+
+    const mutation = result.current.mutateAsync({
+      printerId: 'printer-1',
+      toolheadIndex: 5,
+      reviewedRowVersion: 'reviewed-version',
+    }).then(() => {
+      settled = true;
+    });
+
+    await waitFor(() => expect(apiClient.clearToolheadSpool).toHaveBeenCalled());
+    expect(settled).toBe(false);
+
+    invalidation.resolve();
+    await act(async () => mutation);
+    expect(settled).toBe(true);
   });
 });
 
