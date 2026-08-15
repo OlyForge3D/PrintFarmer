@@ -95,6 +95,13 @@ function SlotButton({
   const size = compact ? 44 : 52;
   const atRisk = coverage?.status === 'runout';
   const swatch = slot.color;
+  // Externals share the g-code tool 0 slot with the first gate, so keying a
+  // testid off `gcodeIndex` alone renders two `loadout-slot-0` nodes. Use the
+  // source-namespaced apiIndex for externals so tests and CSS selectors can
+  // distinguish an external hotend from the first MMU gate on the same card.
+  const slotTestId = slot.source === 'external'
+    ? `loadout-slot-external-${slot.apiIndex}`
+    : `loadout-slot-${slot.gcodeIndex}`;
 
   return (
     // eslint-disable-next-line local/pf-no-raw-html-controls -- Composite slot control: an SVG coverage ring around a filament swatch, which <Button> cannot express
@@ -103,7 +110,8 @@ function SlotButton({
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={describeSlot(slot, kind, coverage)}
-      data-testid={`loadout-slot-${slot.gcodeIndex}`}
+      data-testid={slotTestId}
+      data-source={slot.source}
       data-status={coverage?.status ?? 'unknown'}
       className={clsx(
         'group relative flex shrink-0 flex-col items-center gap-1 rounded-lg px-1.5 py-1.5',
@@ -220,20 +228,38 @@ export function MaterialLoadout({
 
   if (!loadout || loadout.slots.length === 0) return null;
 
-  const { kind, unitLabel, slots } = loadout;
+  const { kind, unitLabel, slots, hasResolvedTopology } = loadout;
   const selected = slots.find((s) => s.key === selectedKey) ?? null;
-  const selectedCoverage = selected ? coverageByIndex.get(selected.gcodeIndex) : undefined;
+  // Externals do not join the shared coverage-by-gcode-index space (see
+  // materialLoadout.ts). Explicitly skip coverage lookup for external slots so
+  // an external hotend never inherits the first gate's remaining-material figure.
+  const coverageForSlot = (slot: LoadoutSlot): ToolheadCoverage | undefined =>
+    slot.gcodeIndex != null ? coverageByIndex.get(slot.gcodeIndex) : undefined;
+  const selectedCoverage = selected ? coverageForSlot(selected) : undefined;
   const loadedCount = slots.filter((s) => s.material != null || s.spoolId != null).length;
   const busy = setSpoolMutation.isPending || clearSpoolMutation.isPending;
   // The spool endpoints are optimistically concurrent, so without a revision to
   // review against no assignment can succeed. Say so before the user picks a
   // spool rather than failing them afterwards.
-  const canMutate = !!reviewedRowVersion;
-  const blockedReason = canMutate ? undefined : 'Printer revision unavailable — refresh to assign spools';
+  //
+  // For live-MMU printers we additionally require persisted toolhead topology
+  // to be resolved: without it the API-index mapping from live gate 0 to
+  // persisted `Toolhead.Index` is a guess and could write a G1 assignment to
+  // the physical hotend at index 0 (#1585 blocker 2).
+  const canMutate = !!reviewedRowVersion && hasResolvedTopology;
+  const blockedReason = !reviewedRowVersion
+    ? 'Printer revision unavailable — refresh to assign spools'
+    : !hasResolvedTopology
+      ? 'Materials topology not yet loaded — refresh to assign spools'
+      : undefined;
 
   const requireRevision = (): string | null => {
     if (!reviewedRowVersion) {
       toast.error('Printer revision unavailable. Refresh and review again.');
+      return null;
+    }
+    if (!hasResolvedTopology) {
+      toast.error('Materials topology not yet loaded. Refresh and review again.');
       return null;
     }
     return reviewedRowVersion;
@@ -243,26 +269,38 @@ export function MaterialLoadout({
     if (!selected) return;
     const revision = requireRevision();
     if (!revision) return;
-    await setSpoolMutation.mutateAsync({
-      printerId,
-      toolheadIndex: selected.apiIndex,
-      spoolId,
-      reviewedRowVersion: revision,
-    });
-    setPickerOpen(false);
-    onSpoolChange?.();
+    try {
+      await setSpoolMutation.mutateAsync({
+        printerId,
+        toolheadIndex: selected.apiIndex,
+        spoolId,
+        reviewedRowVersion: revision,
+      });
+      setPickerOpen(false);
+      onSpoolChange?.();
+    } catch {
+      // Feedback is emitted from the mutation's onError toast. Await so the
+      // caller (spool picker) can react to the completed cycle, and swallow so
+      // React Query doesn't report an unhandled rejection while the picker
+      // stays open for the user to retry.
+    }
   };
 
-  const handleClear = () => {
+  const handleClear = async () => {
     if (!selected) return;
     const revision = requireRevision();
     if (!revision) return;
-    clearSpoolMutation.mutate({
-      printerId,
-      toolheadIndex: selected.apiIndex,
-      reviewedRowVersion: revision,
-    });
-    onSpoolChange?.();
+    try {
+      await clearSpoolMutation.mutateAsync({
+        printerId,
+        toolheadIndex: selected.apiIndex,
+        reviewedRowVersion: revision,
+      });
+      onSpoolChange?.();
+    } catch {
+      // Same reasoning as handleAssign — the mutation's onError toast already
+      // told the user what happened; suppress the unhandled rejection.
+    }
   };
 
   return (
@@ -302,7 +340,7 @@ export function MaterialLoadout({
 
       <div className="flex flex-wrap items-start gap-0.5" role="group" aria-label={`${unitLabel} slots`}>
         {slots.map((slot) => {
-          const slotCoverage = coverageByIndex.get(slot.gcodeIndex);
+          const slotCoverage = coverageForSlot(slot);
           const button = (
             <SlotButton
               key={slot.key}

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
@@ -68,9 +68,9 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/features/printers/components/PrinterDetailsSidebar', () => ({
-  PrinterDetailsSidebar: ({ layout }: { layout?: string }) => (
-    <section aria-label="Printer 1 details" data-layout={layout}>
+vi.mock('@/features/printers/components/PrinterInlineDetails', () => ({
+  PrinterInlineDetails: () => (
+    <section aria-label="Printer 1 details" data-layout="inline">
       <h2>Statistics</h2>
       <h2>Version</h2>
       <h2>Objects</h2>
@@ -108,7 +108,13 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
   });
 
-  it('does not eagerly request printer details when the printer already reports MMU/AMS gate data', () => {
+  it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment (#1585 blocker 2)', () => {
+    // Previously the details fetch was deferred whenever `mmuStatus.gates`
+    // was populated, on the theory that live MMU gates already told the card
+    // enough to render the Materials rail. But without persisted topology the
+    // card cannot safely translate live-gate indices to backend API indices,
+    // so `MaterialLoadout` locks assignment until topology loads. That's a
+    // silent dead end unless topology is actually being fetched. Enable it.
     const printer = makePrinter({
       mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
     } as Partial<Printer>);
@@ -117,7 +123,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
 
     expect(usePrinterDetailsMock).toHaveBeenCalledWith(
       'printer-1',
-      expect.objectContaining({ enabled: false }),
+      expect.objectContaining({ enabled: true }),
     );
   });
 
@@ -137,25 +143,6 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     render(<DetailedPrinterCard printer={printer} />);
 
     expect(usePrinterDetailsMock).toHaveBeenCalledWith(
-      'printer-1',
-      expect.objectContaining({ enabled: true }),
-    );
-  });
-
-  it('requests printer details once the Z-Offset wizard is opened, even for an MMU printer that was otherwise deferred', () => {
-    const printer = makePrinter({
-      mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
-    } as Partial<Printer>);
-
-    render(<DetailedPrinterCard printer={printer} />);
-    expect(usePrinterDetailsMock).toHaveBeenLastCalledWith(
-      'printer-1',
-      expect.objectContaining({ enabled: false }),
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Calibrate Z-Offset' }));
-
-    expect(usePrinterDetailsMock).toHaveBeenLastCalledWith(
       'printer-1',
       expect.objectContaining({ enabled: true }),
     );

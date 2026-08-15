@@ -845,16 +845,44 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
         {
             throw;
         }
-        catch (Exception ex)
+        catch (OperationCanceledException ex)
         {
-            _logger.LogError(
+            // HttpClient reports its own timeout as a cancellation. The controller
+            // classifies TimeoutException as 408, so it must not reach it as an
+            // unclassified fault that reduces to a generic 500.
+            _logger.LogWarning(
                 ex,
-                "PrusaLink history request threw for {BaseUrl} (limit={Limit}, start={Start}, since={Since})",
+                "PrusaLink history request timed out for {BaseUrl} (limit={Limit}, start={Start})",
                 normalizedBaseUrl,
                 limit,
-                start,
-                since);
-            return null;
+                start);
+            throw new TimeoutException(
+                "PrusaLink history request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            // Socket and stream faults are upstream transport failures (502), not
+            // server-side defects (500). Wrap as HttpRequestException so the
+            // service layer's transport branch and the controller's 502 handler
+            // classify it consistently with the thumbnail path.
+            _logger.LogWarning(
+                ex,
+                "PrusaLink history transport failed for {BaseUrl}",
+                normalizedBaseUrl);
+            throw new HttpRequestException(
+                "PrusaLink history transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "PrusaLink history transport failed for {BaseUrl}",
+                normalizedBaseUrl);
+            throw new HttpRequestException(
+                "PrusaLink history transport failed.",
+                ex);
         }
     }
 

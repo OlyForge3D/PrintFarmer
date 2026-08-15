@@ -10,7 +10,7 @@ const coverage = vi.fn();
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
-  useClearToolheadSpool: () => ({ mutate: clearSpool, isPending: false }),
+  useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
 }));
 
 vi.mock('@/features/filament-coverage/hooks', () => ({
@@ -62,7 +62,7 @@ function renderLoadout(props: Partial<React.ComponentProps<typeof MaterialLoadou
 describe('MaterialLoadout', () => {
   beforeEach(() => {
     setSpool.mockReset().mockResolvedValue(undefined);
-    clearSpool.mockReset();
+    clearSpool.mockReset().mockResolvedValue(undefined);
     coverage.mockReset().mockReturnValue(undefined);
   });
 
@@ -202,5 +202,68 @@ describe('MaterialLoadout', () => {
     );
 
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it('gates spool mutation on persisted topology for a live-MMU printer (blocker 2)', () => {
+    // Live MMU status arrives via SignalR before the persisted topology fetch
+    // resolves. Without topology, mapping live G1 to the persisted index is a
+    // guess and could write G1 to physical hotend index 0. Assignment must be
+    // blocked with an explanatory hint until topology arrives.
+    renderLoadout({ toolheads: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toBeDisabled();
+    expect(
+      screen.getByText(/Materials topology not yet loaded/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(assign);
+    expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
+    expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('keeps external hotend testid distinct from the first MMU gate at G-code 0 (blocker 5)', () => {
+    // Persisted-only fallback with an external hotend at physical index 0 and
+    // gates starting at persisted index 1 (gcode 0). The two rows must remain
+    // distinguishable via testids and data-source, and only the gate row must
+    // receive the g-code-indexed coverage entry.
+    coverage.mockReturnValue({
+      printerId: 'printer-1',
+      printerName: 'Qidi Plus 4',
+      status: 'runout',
+      toolheads: [
+        { toolheadIndex: 0, status: 'runout', remainingGrams: 50, totalDemandGrams: 400 },
+      ],
+    });
+
+    render(
+      <MaterialLoadout
+        printerId="printer-1"
+        toolheads={[
+          {
+            id: 'th-0',
+            index: 0,
+            name: 'Hotend',
+            toolheadType: 'Physical',
+            currentMaterial: 'ASA',
+            currentSpoolId: 9,
+          } as ToolheadDto,
+          { id: 'th-1', index: 1, name: 'Gate 1', toolheadType: 'MmuGate' } as ToolheadDto,
+          { id: 'th-2', index: 2, name: 'Gate 2', toolheadType: 'MmuGate' } as ToolheadDto,
+        ]}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    const gateSlot = screen.getByTestId('loadout-slot-0');
+    const externalSlot = screen.getByTestId('loadout-slot-external-0');
+    expect(gateSlot).toHaveAttribute('data-source', 'gate');
+    expect(externalSlot).toHaveAttribute('data-source', 'external');
+    // Only the gate row must inherit the g-code 0 coverage entry — the
+    // external must not pick up the gate's remaining-material figures.
+    expect(gateSlot).toHaveAttribute('data-status', 'runout');
+    expect(externalSlot).toHaveAttribute('data-status', 'unknown');
   });
 });

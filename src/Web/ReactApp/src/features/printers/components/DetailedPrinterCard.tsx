@@ -46,7 +46,7 @@ import { FailureDetectionMonitoringBadge } from '@/features/printers/components/
 import { FailureDetectionMonitoringSummary } from '@/features/printers/components/FailureDetectionMonitoringSummary';
 import { OfflineTroubleshootingGuide } from '@/features/printers/components/OfflineTroubleshootingGuide';
 import { PrinterCameraPreview } from '@/features/printers/components/PrinterCameraPreview';
-import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDetailsSidebar';
+import { PrinterInlineDetails } from '@/features/printers/components/PrinterInlineDetails';
 import {
   canCancel,
   canCooldown,
@@ -79,8 +79,6 @@ import { isSafeHttpUrl, isBrowserReachableUrl, toSafeHref } from '@/common/utils
 const ZOffsetCalibrationWizard = lazyWithPreload<ZOffsetCalibrationWizardProps, React.FC<ZOffsetCalibrationWizardProps>>(
   () => import('@/features/printers/components/ZOffsetCalibrationWizard').then(m => ({ default: m.ZOffsetCalibrationWizard }))
 );
-
-const ignoreInlineClose = () => undefined;
 
 export interface DetailedPrinterCardProps {
   /** Display-ready printer — parents should pass data already merged with SignalR (usePrinterDisplays) */
@@ -133,12 +131,19 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // available before the fetch, so that one case stays eager. Every other
   // card defers the request until the Z-Offset wizard (this component's
   // other `printerDetails` consumer) is actually opened (#1146 item 4).
+  // Also fetch eagerly when live MMU gates are present — the persisted
+  // toolhead topology is what lets `MaterialLoadout` map live gate indices
+  // (1-based on Qidibox, offset from tool 0) safely to backend API indices.
+  // Without it, an assignment to G1 could land on physical hotend index 0.
+  // See #1585 blocker 2.
   const hasMmuGateData = !!(mmuStatus?.gates && mmuStatus.gates.length > 0);
   const needsCollapsedToolheadProbe = !hasMmuGateData;
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled: spoolmanReady && (needsCollapsedToolheadProbe || showZOffsetWizard),
+      enabled:
+        spoolmanReady &&
+        (needsCollapsedToolheadProbe || hasMmuGateData || showZOffsetWizard),
       staleTime: 60000,
     }
   );
@@ -833,6 +838,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                           : p
                         )
                       );
+                      // Reconcile the optimistic update with server truth so
+                      // downstream consumers (printer details, coverage) see
+                      // the cleared spool. Awaiting the invalidation prevents
+                      // a follow-up assignment from racing a stale refetch.
+                      await queryClient.invalidateQueries({ queryKey: ['printers'] });
                     } catch (err) {
                       console.error('Failed to eject spool:', err);
                       if ([412, 428].includes(mutationErrorStatus(err) ?? 0)) {
@@ -860,12 +870,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         </div>
       )}
 
-      <PrinterDetailsSidebar
+      <PrinterInlineDetails
         printerId={printer.id}
         printer={printer}
         backendCapabilities={backendCapabilities}
-        onClose={ignoreInlineClose}
-        layout="inline"
       />
 
       {/* History Modal */}

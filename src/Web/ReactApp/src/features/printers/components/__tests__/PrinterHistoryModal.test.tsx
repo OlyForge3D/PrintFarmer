@@ -156,4 +156,48 @@ describe('PrinterHistoryModal thumbnails', () => {
       expect(getPrinterHistoryThumbnailMock).toHaveBeenCalledTimes(1)
     );
   });
+
+  it('renders a non-proxied backend thumbnail as a plain <img> without hitting the authenticated proxy (#1584 blocker 3)', () => {
+    // Moonraker/OctoPrint/SDCP return direct thumbnails from the printer's own
+    // web server, not `/api/...`. The authenticated proxy is Prusa-only —
+    // routing everyone through it turned every non-Prusa thumbnail into a
+    // permanent placeholder.
+    renderHistory(createJob('http://printer.local/thumbs/job-1.png'));
+
+    const image = screen.getByRole('img', {
+      name: 'calibration.gcode thumbnail',
+    });
+    expect(image).toHaveAttribute('src', 'http://printer.local/thumbs/job-1.png');
+    expect(getPrinterHistoryThumbnailMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the established placeholder when a direct backend thumbnail fails to load', () => {
+    renderHistory(createJob('http://printer.local/thumbs/job-1.png'));
+    const image = screen.getByRole('img', {
+      name: 'calibration.gcode thumbnail',
+    });
+
+    fireEvent.error(image);
+
+    expect(
+      screen.getByRole('img', {
+        name: 'Thumbnail unavailable for calibration.gcode',
+      })
+    ).toBeInTheDocument();
+    expect(getPrinterHistoryThumbnailMock).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a Prusa upstream URL as same-origin proxy (case-insensitive same-origin check only)', () => {
+    // Guard against the Prusa upstream (e.g. `http://prusa/api/v1/job/…`) or
+    // any other backend that happens to include `/api/` mid-path from being
+    // exposed to the browser via the auth-blob loader. Only exact
+    // same-origin `/api/…` refs should be proxied.
+    renderHistory(createJob('http://prusa-mk4.local/api/v1/job/1/thumbnail'));
+
+    const image = screen.getByRole('img', {
+      name: 'calibration.gcode thumbnail',
+    });
+    expect(image).toHaveAttribute('src', 'http://prusa-mk4.local/api/v1/job/1/thumbnail');
+    expect(getPrinterHistoryThumbnailMock).not.toHaveBeenCalled();
+  });
 });

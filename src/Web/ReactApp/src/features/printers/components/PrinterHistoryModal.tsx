@@ -81,7 +81,43 @@ function getStatusColor(status: string): string {
   }
 }
 
-function HistoryThumbnail({
+/**
+ * Detects when a history thumbnail URL points at our own API surface
+ * (e.g. `/api/printers/{id}/history/{jobId}/thumbnail` for PrusaLink) and
+ * therefore must be fetched through the authenticated blob loader in
+ * {@link useHistoryThumbnailPreview}. Any other URL is treated as an
+ * upstream-direct thumbnail (Moonraker, OctoPrint, SDCP, …) and rendered as a
+ * plain `<img>` with an error fallback. See #1584 blocker 3.
+ */
+function isSameOriginApiThumbnail(url: string | null | undefined): boolean {
+  if (!url) return false;
+  const trimmed = url.trim();
+  if (trimmed.length === 0) return false;
+  return trimmed.toLowerCase().startsWith('/api/');
+}
+
+function ThumbnailChrome({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="ml-4 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-pf-border bg-pf-bg-2 text-pf-text-tertiary">
+      {children}
+    </div>
+  );
+}
+
+function ThumbnailPlaceholder({ filename }: { filename: string }) {
+  return (
+    <ImagePlaceholder
+      className="h-16 w-16"
+      ariaLabel={`Thumbnail unavailable for ${filename}`}
+    />
+  );
+}
+
+function ProxiedHistoryThumbnail({
   job,
   printerId,
 }: {
@@ -92,20 +128,13 @@ function HistoryThumbnail({
     thumbnailSrc,
     thumbnailFailed,
     handleThumbnailError,
-  } = useHistoryThumbnailPreview(
-    printerId,
-    job.jobId,
-    Boolean(job.thumbnailUrl)
-  );
-  const showPlaceholder = !job.thumbnailUrl || thumbnailFailed || !thumbnailSrc;
+  } = useHistoryThumbnailPreview(printerId, job.jobId, true);
+  const showPlaceholder = thumbnailFailed || !thumbnailSrc;
 
   return (
-    <div className="ml-4 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-pf-border bg-pf-bg-2 text-pf-text-tertiary">
+    <ThumbnailChrome>
       {showPlaceholder ? (
-        <ImagePlaceholder
-          className="h-16 w-16"
-          ariaLabel={`Thumbnail unavailable for ${job.filename}`}
-        />
+        <ThumbnailPlaceholder filename={job.filename} />
       ) : (
         <img
           src={thumbnailSrc}
@@ -114,8 +143,56 @@ function HistoryThumbnail({
           onError={handleThumbnailError}
         />
       )}
-    </div>
+    </ThumbnailChrome>
   );
+}
+
+function DirectHistoryThumbnail({
+  job,
+}: {
+  job: HistoryJob;
+}) {
+  const [failed, setFailed] = useState(false);
+  const src = job.thumbnailUrl ?? '';
+
+  if (!src || failed) {
+    return (
+      <ThumbnailChrome>
+        <ThumbnailPlaceholder filename={job.filename} />
+      </ThumbnailChrome>
+    );
+  }
+
+  return (
+    <ThumbnailChrome>
+      <img
+        src={src}
+        alt={`${job.filename} thumbnail`}
+        className="h-full w-full object-cover"
+        onError={() => setFailed(true)}
+      />
+    </ThumbnailChrome>
+  );
+}
+
+function HistoryThumbnail({
+  job,
+  printerId,
+}: {
+  job: HistoryJob;
+  printerId: string;
+}) {
+  // PrusaLink thumbnails require the authenticated proxy hook because the
+  // upstream URL isn't reachable from the browser (Digest-auth, LAN-only IP).
+  // Every other backend already returns a direct-loadable URL — either the
+  // printer's own webserver or its origin — so we must render those through a
+  // plain <img> or Moonraker/OctoPrint/SDCP thumbnails disappear behind the
+  // auth loader's 401s and never come back. See #1584 blocker 3.
+  if (isSameOriginApiThumbnail(job.thumbnailUrl)) {
+    return <ProxiedHistoryThumbnail job={job} printerId={printerId} />;
+  }
+
+  return <DirectHistoryThumbnail job={job} />;
 }
 
 export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistoryModalProps) {

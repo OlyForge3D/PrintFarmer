@@ -65,6 +65,29 @@ describe('resolveMaterialLoadout', () => {
     const loadout = resolveMaterialLoadout(mmu([gate(0), gate(1)], MmuProtocol.Qidibox), undefined);
 
     expect(loadout!.slots.map((s) => s.apiIndex)).toEqual([0, 1]);
+    // Without persisted topology we can't confirm the gate offset is correct,
+    // so mutation must be gated. See #1585 blocker 2.
+    expect(loadout!.hasResolvedTopology).toBe(false);
+  });
+
+  it('marks a live-gate loadout as topology-resolved when persisted toolheads are present', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.Qidibox),
+      [toolhead(0), persistedGate(1), persistedGate(2)],
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(true);
+  });
+
+  it('treats a toolchanger as topology-resolved without persisted toolheads', () => {
+    // Toolchangers already report 0-based toolheads directly usable by the API,
+    // so the offset does not need topology to be resolved safely.
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1)], MmuProtocol.SnapmakerU1),
+      undefined,
+    );
+
+    expect(loadout!.hasResolvedTopology).toBe(true);
   });
 
   it('describes a Snapmaker U1 as toolheads rather than AMS gates', () => {
@@ -142,6 +165,34 @@ describe('resolveMaterialLoadout', () => {
     expect(external[0].material).toBe('ASA');
   });
 
+  it('gives an external hotend a distinct identity from the first gate at G-code 0', () => {
+    // The gate at persisted index 1 maps to gcodeIndex 0. A physical hotend at
+    // toolhead index 0 would previously share the same gcodeIndex — colliding
+    // on the React key namespace, the coverage lookup key and the DOM test id.
+    // Verify each identity is now distinct so the two rows cannot clobber each
+    // other. See #1585 blocker 5.
+    const loadout = resolveMaterialLoadout(undefined, [
+      toolhead(0, { id: 'th-0', currentMaterial: 'ASA', currentSpoolId: 7 }),
+      persistedGate(1, { id: 'th-1' }),
+      persistedGate(2, { id: 'th-2' }),
+    ]);
+
+    const gate0 = loadout!.slots.find((s) => s.source === 'gate' && s.label === 'G1')!;
+    const external = loadout!.slots.find((s) => s.source === 'external')!;
+
+    expect(gate0.gcodeIndex).toBe(0);
+    // External slots must not join the shared coverage-by-gcode-index space,
+    // otherwise the external inherits the first gate's remaining-material.
+    expect(external.gcodeIndex).toBeUndefined();
+    // React keys must be distinct so both rows render side by side.
+    expect(external.key).not.toBe(gate0.key);
+    expect(external.key.startsWith('external-')).toBe(true);
+    // API indices remain the underlying toolhead indices so assignments still
+    // land on the correct row on the backend.
+    expect(external.apiIndex).toBe(0);
+    expect(gate0.apiIndex).toBe(1);
+  });
+
   it('returns nothing for a printer with a single filament source', () => {
     expect(resolveMaterialLoadout(undefined, [toolhead(0)])).toBeNull();
     expect(resolveMaterialLoadout(undefined, undefined)).toBeNull();
@@ -163,6 +214,19 @@ describe('isLightColor', () => {
   it('flags pale swatches that need a border to stay visible', () => {
     expect(isLightColor('#ffffff')).toBe(true);
     expect(isLightColor('#000000')).toBe(false);
-    expect(isLightColor('#fff')).toBe(false);
+  });
+
+  it('expands 3-digit hex shorthand before the luminance check', () => {
+    // `#fff` is CSS shorthand for `#ffffff`; treating the short form as
+    // "too short" hid the border on pale swatches from any backend that sent
+    // shorthand hex. Expand `#abc` → `#aabbcc` before deciding.
+    expect(isLightColor('#fff')).toBe(true);
+    expect(isLightColor('#000')).toBe(false);
+    expect(isLightColor('#eee')).toBe(true);
+  });
+
+  it('rejects malformed hex without throwing', () => {
+    expect(isLightColor('#zz')).toBe(false);
+    expect(isLightColor('not-a-color')).toBe(false);
   });
 });

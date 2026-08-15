@@ -49,9 +49,9 @@ vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerM
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
-// The card renders the details sidebar inline; this suite exercises the card only.
-vi.mock('@/features/printers/components/PrinterDetailsSidebar', () => ({
-  PrinterDetailsSidebar: () => <div data-testid="printer-details-sidebar" />,
+// The card renders inline details; this suite exercises the card only.
+vi.mock('@/features/printers/components/PrinterInlineDetails', () => ({
+  PrinterInlineDetails: () => <div data-testid="printer-inline-details" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,

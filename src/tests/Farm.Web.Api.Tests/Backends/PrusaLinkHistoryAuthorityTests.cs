@@ -21,7 +21,7 @@ namespace Farm.Web.Api.Tests.Backends;
 public sealed class PrusaLinkHistoryAuthorityTests
 {
     [Fact]
-    public async Task GetHistoryListAsync_HttpFailure_IsUnavailable()
+    public async Task GetHistoryListAsync_HttpFailure_ThrowsHttpRequestException()
     {
         using var handler = new InlineHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
@@ -30,14 +30,16 @@ public sealed class PrusaLinkHistoryAuthorityTests
             http,
             NullLogger<PrusaLinkApiClient>.Instance);
 
-        HistoryListResponse? history = await client.GetHistoryListAsync(
-            "http://prusalink/");
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync("http://prusalink/");
 
-        history.Should().BeNull();
+        // A backend 5xx is an upstream transport-class fault: the caller must be
+        // able to translate it to 502, not swallow it and reduce to a generic 500.
+        await action.Should().ThrowAsync<HttpRequestException>();
     }
 
     [Fact]
-    public async Task GetHistoryListAsync_TransportException_IsUnavailable()
+    public async Task GetHistoryListAsync_TransportException_PropagatesHttpRequestException()
     {
         using var handler = new InlineHandler(_ =>
             throw new HttpRequestException("connection lost"));
@@ -46,17 +48,84 @@ public sealed class PrusaLinkHistoryAuthorityTests
             http,
             NullLogger<PrusaLinkApiClient>.Instance);
 
-        HistoryListResponse? history = await client.GetHistoryListAsync(
-            "http://prusalink/");
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync("http://prusalink/");
 
-        history.Should().BeNull();
+        await action.Should().ThrowAsync<HttpRequestException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_SocketFailure_IsWrappedAsHttpRequestException()
+    {
+        using var handler = new InlineHandler(_ =>
+            throw new SocketException((int)SocketError.ConnectionReset));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync("http://prusalink/");
+
+        // The service layer transports SocketException through as
+        // TransportUnavailable, so wrapping it in HttpRequestException keeps the
+        // list path aligned with the thumbnail path and the service classifier.
+        (await action.Should().ThrowAsync<HttpRequestException>())
+            .WithInnerExceptionExactly<SocketException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_ClientTimeout_IsClassifiedAsTimeout()
+    {
+        // HttpClient reports its own timeout as a TaskCanceledException whose
+        // inner is TimeoutException. The client must translate that into a plain
+        // TimeoutException so the controller returns 408, not 500.
+        using var handler = new InlineHandler(_ =>
+            throw new TaskCanceledException(
+                "The request was canceled due to the configured HttpClient.Timeout of 5 seconds elapsing.",
+                new TimeoutException("HttpClient timeout")));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync("http://prusalink/");
+
+        await action.Should().ThrowAsync<TimeoutException>();
+    }
+
+    [Fact]
+    public async Task GetHistoryListAsync_CallerCancellation_StaysCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new InlineHandler(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync(
+                "http://prusalink/",
+                ct: cts.Token);
+
+        // Caller cancellation must NOT be reclassified as a timeout; it stays an
+        // OperationCanceledException so the request pipeline treats it as a caller
+        // abort rather than a backend fault.
+        (await action.Should().ThrowAsync<OperationCanceledException>())
+            .Which.Should().NotBeOfType<TimeoutException>();
     }
 
     [Theory]
     [InlineData("not-json")]
     [InlineData("""{"success":true,"count":0}""")]
     [InlineData("""{"success":true,"results":[]}""")]
-    public async Task GetHistoryListAsync_MalformedOrIncompleteEnvelope_IsUnavailable(
+    public async Task GetHistoryListAsync_MalformedOrIncompleteEnvelope_ThrowsInvalidData(
         string payload)
     {
         using var handler = new InlineHandler(_ =>
@@ -66,10 +135,14 @@ public sealed class PrusaLinkHistoryAuthorityTests
             http,
             NullLogger<PrusaLinkApiClient>.Instance);
 
-        HistoryListResponse? history = await client.GetHistoryListAsync(
-            "http://prusalink/");
+        Func<Task> action = async () =>
+            await client.GetHistoryListAsync("http://prusalink/");
 
-        history.Should().BeNull();
+        // Malformed envelopes are upstream data problems, not runtime faults —
+        // the client should surface them as InvalidDataException rather than
+        // reduce them to null (which the service treated as generic "unavailable"
+        // and the controller as 500).
+        await action.Should().ThrowAsync<InvalidDataException>();
     }
 
     [Fact]
