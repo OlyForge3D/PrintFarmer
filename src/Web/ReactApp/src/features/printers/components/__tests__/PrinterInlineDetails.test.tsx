@@ -117,6 +117,13 @@ describe('PrinterInlineDetails', () => {
     renderDetails(capabilities({ supportsObjectExclusion: false }));
 
     expect(screen.getByRole('region', { name: 'Printer 1 details' })).toBeInTheDocument();
+    // The card's gating suite mocks this component out, so its `data-layout`
+    // assertion could only ever re-read its own mock. Pin the contract here,
+    // against the real component, where dropping the attribute actually fails.
+    expect(screen.getByRole('region', { name: 'Printer 1 details' })).toHaveAttribute(
+      'data-layout',
+      'inline',
+    );
     expect(screen.getByRole('button', { name: /statistics/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /version/i })).toBeInTheDocument();
     expect(screen.queryByText('Objects')).not.toBeInTheDocument();

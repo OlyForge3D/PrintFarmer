@@ -73,7 +73,8 @@ function describeSlot(
   const noun = slot.external ? 'external spool' : slotNoun(kind);
   const material = slot.material ? `loaded with ${slot.material}` : 'empty';
   const risk = coverage?.status === 'runout' ? ', runout risk' : '';
-  return `${slot.label} ${noun}, ${material}${risk}`;
+  const disabled = slot.disabled ? ', disabled' : '';
+  return `${slot.label} ${noun}, ${material}${disabled}${risk}`;
 }
 
 function SlotButton({
@@ -112,6 +113,7 @@ function SlotButton({
       aria-label={describeSlot(slot, kind, coverage)}
       data-testid={slotTestId}
       data-source={slot.source}
+      data-disabled={slot.disabled ? 'true' : undefined}
       data-status={coverage?.status ?? 'unknown'}
       className={clsx(
         'group relative flex shrink-0 flex-col items-center gap-1 rounded-lg px-1.5 py-1.5',
@@ -119,6 +121,9 @@ function SlotButton({
         'hover:-translate-y-0.5 motion-reduce:transform-none motion-reduce:transition-none',
         'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-pf-accent',
         selected ? 'bg-pf-bg-2' : 'hover:bg-pf-bg-1',
+        // Kept legible rather than hidden: removing the slot would renumber
+        // every gate after it and break the mapping to the device's own labels.
+        slot.disabled && 'opacity-55 saturate-50',
       )}
     >
       <span className="relative block" style={{ width: size, height: size }}>
@@ -211,6 +216,12 @@ export function MaterialLoadout({
 }: MaterialLoadoutProps) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // Optimistic-concurrency anchor, captured when the user opens a slot rather
+  // than read at dispatch time. If a SignalR `printerupdated` lands while the
+  // drawer is open, the user's decision was made against the *older* state, so
+  // the write must still be validated against that revision — otherwise it
+  // silently overwrites whatever changed underneath instead of returning 412.
+  const [lockedRevision, setLockedRevision] = useState<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
   const { data: coverage } = usePrinterCoverageFromFleet(printerId);
@@ -222,7 +233,7 @@ export function MaterialLoadout({
 
   const coverageByIndex = useMemo(() => {
     const map = new Map<number, ToolheadCoverage>();
-    coverage?.toolheads.forEach((th) => map.set(th.toolheadIndex, th));
+    coverage?.toolheads?.forEach((th) => map.set(th.toolheadIndex, th));
     return map;
   }, [coverage]);
 
@@ -252,9 +263,19 @@ export function MaterialLoadout({
     : !hasResolvedTopology
       ? 'Materials topology not yet loaded — refresh to assign spools'
       : undefined;
+  // Clearing stays available on a disabled gate: if the device disabled a gate
+  // that still carries a stale binding, the user needs a way to release it.
+  const disabledSlotReason = 'Disabled on the device — cannot take a spool';
+
+  const selectSlot = (slot: LoadoutSlot) => {
+    const next = selectedKey === slot.key ? null : slot.key;
+    setSelectedKey(next);
+    // Anchor the revision to the state the user is actually looking at.
+    setLockedRevision(next ? reviewedRowVersion ?? null : null);
+  };
 
   const requireRevision = (): string | null => {
-    if (!reviewedRowVersion) {
+    if (!lockedRevision) {
       toast.error('Printer revision unavailable. Refresh and review again.');
       return null;
     }
@@ -262,11 +283,17 @@ export function MaterialLoadout({
       toast.error('Materials topology not yet loaded. Refresh and review again.');
       return null;
     }
-    return reviewedRowVersion;
+    return lockedRevision;
   };
 
   const handleAssign = async (spoolId: number) => {
     if (!selected) return;
+    // A disabled gate cannot feed filament, so binding a spool to it would
+    // record material the printer can never draw.
+    if (selected.disabled) {
+      toast.error(`${selected.label} is disabled on the device and cannot take a spool.`);
+      return;
+    }
     const revision = requireRevision();
     if (!revision) return;
     try {
@@ -349,7 +376,7 @@ export function MaterialLoadout({
               coverage={slotCoverage}
               compact={compact}
               selected={selected?.key === slot.key}
-              onSelect={() => setSelectedKey(selected?.key === slot.key ? null : slot.key)}
+              onSelect={() => selectSlot(slot)}
             />
           );
           return slot.name && slot.name !== slot.label ? (
@@ -372,6 +399,11 @@ export function MaterialLoadout({
             <Badge variant={selected.external ? 'default' : 'primary'} size="sm">
               {selected.external ? 'External' : kind === 'gate' ? 'Gate' : 'Tool'}
             </Badge>
+            {selected.disabled && (
+              <Badge variant="warning" size="sm">
+                Disabled
+              </Badge>
+            )}
             {selected.spoolId != null ? (
               <>
                 <span className="text-pf-text-primary">{selected.material ?? 'Unknown material'}</span>
@@ -401,8 +433,8 @@ export function MaterialLoadout({
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={busy || !canMutate}
-                title={blockedReason}
+                disabled={busy || !canMutate || selected.disabled}
+                title={selected.disabled ? disabledSlotReason : blockedReason}
                 onClick={() => setPickerOpen(true)}
               >
                 {selected.spoolId != null ? 'Change' : 'Assign'}

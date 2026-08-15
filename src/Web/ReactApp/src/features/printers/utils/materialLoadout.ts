@@ -1,4 +1,5 @@
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
+import { MmuGateStatus } from '@/types/api';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 
 /**
@@ -44,6 +45,12 @@ export interface LoadoutSlot {
   source: LoadoutSource;
   /** A physical hotend fed from an external spool alongside an MMU. */
   external?: boolean;
+  /**
+   * The device reports this gate as disabled ({@link MmuGateStatus.Disabled}), so
+   * it cannot feed filament. It is still rendered — hiding it would renumber the
+   * gates after it — but it must not be presented as assignable.
+   */
+  disabled?: boolean;
 }
 
 export interface MaterialLoadout {
@@ -125,6 +132,9 @@ function slotFromGate(
     color: gate.color,
     spoolId: gate.spoolId > 0 ? gate.spoolId : undefined,
     source: isTool ? 'tool' : 'gate',
+    // A toolchanger reports real toolheads over the MMU channel and has no
+    // notion of a disabled gate, so only flag this for actual MMU gates.
+    disabled: !isTool && gate.status === MmuGateStatus.Disabled,
   };
 }
 

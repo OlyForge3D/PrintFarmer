@@ -2,11 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { resolveMaterialLoadout, isLightColor } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
+import { MmuGateStatus } from '@/types/api';
 
 function gate(index: number, overrides: Partial<MmuGate> = {}): MmuGate {
   return {
     index,
-    status: 'Available',
+    status: MmuGateStatus.Available,
     material: 'PLA',
     color: '#ff0000',
     spoolId: 0,
@@ -220,6 +221,43 @@ describe('resolveMaterialLoadout', () => {
     expect(label(MmuProtocol.Afc)).toBe('AFC');
     expect(label(MmuProtocol.HappyHare)).toBe('MMU');
     expect(label(undefined)).toBe('AMS');
+  });
+
+  it('marks a gate the device reports as disabled', () => {
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1, { status: MmuGateStatus.Disabled }), gate(2)], MmuProtocol.Qidibox),
+      undefined,
+    )!;
+
+    expect(loadout.slots.map((slot) => slot.disabled)).toEqual([false, true, false]);
+  });
+
+  it('does not read gate status as disabled on a toolchanger', () => {
+    // Happy Hare's -1 "gate disabled" sentinel has no meaning for a real
+    // toolhead, so a toolchanger must never be muted by it.
+    const loadout = resolveMaterialLoadout(
+      mmu([gate(0), gate(1, { status: MmuGateStatus.Disabled })], MmuProtocol.SnapmakerU1),
+      undefined,
+    )!;
+
+    expect(loadout.slots.every((slot) => !slot.disabled)).toBe(true);
+  });
+
+  it('leaves empty and unknown gates assignable', () => {
+    // Only the explicit -1 sentinel blocks assignment; an empty gate is the
+    // normal case for a slot the user is about to fill.
+    const loadout = resolveMaterialLoadout(
+      mmu(
+        [
+          gate(0, { status: MmuGateStatus.Empty }),
+          gate(1, { status: MmuGateStatus.Unknown }),
+        ],
+        MmuProtocol.Qidibox,
+      ),
+      undefined,
+    )!;
+
+    expect(loadout.slots.every((slot) => !slot.disabled)).toBe(true);
   });
 });
 
