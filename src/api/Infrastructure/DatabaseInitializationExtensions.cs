@@ -70,6 +70,7 @@ public static class DatabaseInitializationExtensions
                     DatabaseMigrationTarget.Core,
                     logger,
                     startupCts.Token);
+                startupStatus.MarkDatabaseSchemaReady();
             }
             catch (OperationCanceledException)
             {

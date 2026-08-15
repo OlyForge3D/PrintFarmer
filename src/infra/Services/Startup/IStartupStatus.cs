@@ -26,6 +26,9 @@ public interface IStartupStatus
     /// <summary>Gets a value indicating whether the application is ready to serve requests.</summary>
     bool IsReady { get; }
 
+    /// <summary>Gets a value indicating whether the core database schema is ready for queries.</summary>
+    bool IsDatabaseSchemaReady { get; }
+
     /// <summary>Gets a value indicating whether initialization failed.</summary>
     bool IsFailed { get; }
 
@@ -34,6 +37,9 @@ public interface IStartupStatus
 
     /// <summary>Marks the application as ready to serve requests.</summary>
     void MarkReady();
+
+    /// <summary>Marks the core database schema as ready for database-backed services.</summary>
+    void MarkDatabaseSchemaReady();
 
     /// <summary>Marks that initialization failed with an optional exception.</summary>
     void MarkFailed(Exception? ex = null);

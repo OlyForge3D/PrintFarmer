@@ -16,6 +16,7 @@ using Farm.Web.Api.Infrastructure;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -26,6 +27,25 @@ namespace Farm.Web.Api;
 
 internal static class ProgramHelpers
 {
+#pragma warning disable S5332 // HTTP is intentional for the local-development fallback.
+    private const string DefaultHttpUrl = "http://0.0.0.0:5245";
+#pragma warning restore S5332
+
+    internal static void ConfigureDefaultHttpUrl(WebApplicationBuilder builder)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+
+        if (builder.Environment.IsEnvironment("Testing")
+            || !string.IsNullOrWhiteSpace(builder.WebHost.GetSetting(WebHostDefaults.ServerUrlsKey)))
+        {
+            return;
+        }
+
+#pragma warning disable S1075 // Canonical local-development fallback; deployments configure ASPNETCORE_URLS.
+        _ = builder.WebHost.UseUrls(DefaultHttpUrl);
+#pragma warning restore S1075
+    }
+
     internal static void HandleDeferredConsoleRedirection(ILogger? uls, ILogger<Program>? lg)
     {
         try

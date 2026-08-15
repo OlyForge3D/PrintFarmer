@@ -307,24 +307,10 @@ builder.Services.AddPrintFarmerBackgroundServices(builder.Configuration);
 // Add JWT Authentication and Authorization
 builder.Services.AddPrintFarmerAuthentication(builder.Configuration, builder.Environment);
 
-// Bind (HTTP) to configured dev port; using launchSettings.json for default. Override via ASPNETCORE_URLS if needed.
-#pragma warning disable S1075 // URIs should not be hardcoded
-// Only bind HTTP listener in non-testing environments. When running integration
-// tests via WebApplicationFactory/TestServer the test host provides its own
-// in-memory server; calling UseUrls here can interfere with TestServer and
-// result in "server has not been started" errors in CreateClient().
-try
-{
-    if (!builder.Environment.IsEnvironment("Testing"))
-    {
-        _ = builder.WebHost.UseUrls("http://0.0.0.0:5245");
-    }
-}
-catch
-{
-    // Best-effort; do not fail startup if env APIs are not available in some hosts
-}
-#pragma warning restore S1075 // URIs should not be hardcoded
+// Use the canonical local-development port only when the host has no explicit URL binding.
+// Container images set ASPNETCORE_URLS and must retain that deployment-owned binding.
+ProgramHelpers.ConfigureDefaultHttpUrl(builder);
+
 // Capture a few startup/root services from the service collection before building the
 // final application service provider. This avoids sprinkling `app.Services.GetService`
 // callsites around `Program.cs` while still allowing top-level initialization to
