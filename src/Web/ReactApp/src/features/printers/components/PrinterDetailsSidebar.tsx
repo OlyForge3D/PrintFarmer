@@ -70,14 +70,12 @@ import {
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
 import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
-import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
-import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
+import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
-import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
+import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { Modal } from '@/common/components/modals/Modal';
 import { toast } from 'sonner';
@@ -1322,50 +1320,45 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         )}
 
-        {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
+        {/* Consolidated materials module — one slot list drives the rail, the
+            coverage rings and the assignment drawer. */}
         {(() => {
-          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
-          const toolheads = hasLiveMmuGates
-            ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
-            : printerDetails?.toolheads && printerDetails.toolheads.length > 1
-              ? printerDetails.toolheads
-              : undefined;
-          if (!toolheads) return null;
+          const loadout = resolveMaterialLoadout(displayPrinter?.mmuStatus, printerDetails?.toolheads);
+          if (!loadout) return null;
+          const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+            ? printerDetails.toolheads
+            : undefined;
           return (
-            <CollapsibleSection title="Material Slots" expanded={true}>
-              <AmsSlotVisualization
-                toolheads={toolheads}
-                printerId={printerId ?? undefined}
+            <CollapsibleSection title="Materials" expanded={true}>
+              <MaterialLoadout
+                printerId={printer.id}
+                mmuStatus={displayPrinter?.mmuStatus}
+                toolheads={printerDetails?.toolheads}
                 reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+                onSpoolChange={() => {
+                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+                }}
               />
+              {persistedToolheads && (
+                <FallbackGroupsPanel printerId={printer.id} toolheads={persistedToolheads} />
+              )}
             </CollapsibleSection>
           );
         })()}
 
-        {/* Spool Section - hide for live MMU printers and AMS-served toolheads to avoid duplicate assignment UIs */}
+        {/* Single-spool printers keep the classic spool card; multi-slot printers are
+            fully described by the materials module above. */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          if (shouldHideToolheadSpoolPicker(displayPrinter?.mmuStatus?.gates, printerDetails?.toolheads, displayPrinter?.mmuStatus?.mmuType)) return null;
+          if (resolveMaterialLoadout(displayPrinter?.mmuStatus, printerDetails?.toolheads)) return null;
 
-          // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
-          const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-          const hasMultipleSpoolSources = hasMultipleToolheads;
-          const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
-
-          // For multi-spool mode on physical multi-tool printers, use config DB toolheads.
-          const effectiveToolheads = hasMultipleToolheads
-            ? printerDetails!.toolheads!
-            : undefined;
-          
           return (
             <CollapsibleSection
-              title={sectionTitle}
+              title="Spool"
               expanded={isSpoolExpanded}
               onToggle={setIsSpoolExpanded}
               headerActions={
-                // Only show header actions for single-spool mode
-                !hasMultipleSpoolSources ? (
-                  <div className="flex items-center gap-0.5">
-                    {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
+                <div className="flex items-center gap-0.5">
+                  {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -1428,35 +1421,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
                     ></Button>
                   </div>
-                ) : undefined
               }
             >
-              {hasMultipleSpoolSources && effectiveToolheads ? (
-                // Multi-toolhead or MMU spool picker
-                <>
-                  <FilamentCoverageBreakdown printerId={printer.id} />
-                  <ToolheadSpoolPicker
-                    printerId={printer.id}
-                    toolheads={effectiveToolheads}
-                    reviewedRowVersion={
-                      displayPrinter?.rowVersion ?? printer.rowVersion
-                    }
-                    onSpoolChange={() => {
-                      queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                    }}
-                  />
-                  <FallbackGroupsPanel
-                    printerId={printer.id}
-                    toolheads={effectiveToolheads}
-                  />
-                </>
-              ) : (
-                // Single spool display
-                <>
-                  <FilamentCoverageBreakdown printerId={printer.id} />
-                  <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
-                </>
-              )}
+              <FilamentCoverageBreakdown printerId={printer.id} />
+              <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
             </CollapsibleSection>
           );
         })()}

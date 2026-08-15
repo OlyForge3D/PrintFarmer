@@ -28,6 +28,10 @@ public class PrusaLinkClient : PrinterClientBase, IPrusaLinkClient,
     ISupportsHistory,
     ISupportsHistoryThumbnail
 {
+    [SuppressMessage(
+        "IDisposableAnalyzers.Correctness",
+        "IDISP008:Don't assign member with injected and created disposables",
+        Justification = "The direct-construction API client borrows HttpClient; DI owns injected API clients.")]
     private readonly IPrusaLinkApiClient _apiClient;
     private readonly ILogger<PrusaLinkClient>? _logger;
 

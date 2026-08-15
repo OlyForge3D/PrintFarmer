@@ -748,6 +748,43 @@ public sealed class PrusaLinkHistoryAuthorityTests
             .Which.Should().Be("VettedEgress");
     }
 
+    [Fact]
+    public async Task PluginRegistration_ScopeDisposal_DisposesOwnedHttpClientOnce()
+    {
+        var handler = new DisposalTrackingHandler();
+        var factory = new RecordingHttpClientFactory(new HttpClient(handler));
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddOptions<BackendTimeoutSettings>();
+        services.AddSingleton<IHttpClientFactory>(factory);
+        new PrusaLinkBackendPlugin().RegisterAdditionalServices(services);
+        ServiceProvider provider = services.BuildServiceProvider();
+
+        await using (AsyncServiceScope scope = provider.CreateAsyncScope())
+        {
+            _ = scope.ServiceProvider.GetRequiredService<IPrusaLinkApiClient>();
+        }
+
+        handler.DisposeCount.Should().Be(1);
+        await provider.DisposeAsync();
+        handler.DisposeCount.Should().Be(1);
+    }
+
+    [Fact]
+    public void Dispose_BorrowedHttpClient_DoesNotDisposeHandler()
+    {
+        var handler = new DisposalTrackingHandler();
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        client.Dispose();
+        client.Dispose();
+
+        handler.DisposeCount.Should().Be(0);
+    }
+
     private static HttpResponseMessage JsonResponse(
         HttpStatusCode status,
         string payload) =>
@@ -795,6 +832,26 @@ public sealed class PrusaLinkHistoryAuthorityTests
             HttpRequestMessage request,
             CancellationToken cancellationToken) =>
             Task.FromResult(responseFactory(request));
+    }
+
+    private sealed class DisposalTrackingHandler : HttpMessageHandler
+    {
+        public int DisposeCount { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                DisposeCount++;
+            }
+
+            base.Dispose(disposing);
+        }
     }
 
     private sealed class DisposalProbeContent : HttpContent

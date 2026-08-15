@@ -22,12 +22,13 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// - API Key (X-Api-Key header): Read access to most endpoints
 /// - HTTP Digest Authentication: Full access including privileged operations
 /// </summary>
-public class PrusaLinkApiClient : IPrusaLinkApiClient
+public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
     private const int MaxHistoryThumbnailBytes = 10 * 1024 * 1024;
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PrusaLinkApiClient> _logger;
+    private readonly bool _ownsHttpClient;
 
     // Cache digest state by the complete credential pair. A password hash is not a safe
     // identity key because collisions could reuse another credential's Authorization state.
@@ -36,17 +37,53 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     private readonly object _clientLock = new();
     private readonly BackendHttpTransport _transport;
+    private int _disposed;
 
     public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
+        : this(httpClient, logger, ownsHttpClient: false)
+    {
+    }
+
+    internal PrusaLinkApiClient(
+        HttpClient httpClient,
+        ILogger<PrusaLinkApiClient> logger,
+        bool ownsHttpClient)
     {
         _httpClient = httpClient;
         _transport = new BackendHttpTransport(httpClient);
         _logger = logger;
+        _ownsHttpClient = ownsHttpClient;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+    }
+
+    /// <summary>
+    /// Releases the scoped HTTP client created for this API client and clears cached digest
+    /// authentication state. Cached transports borrow that one client and own no handlers.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        lock (_clientLock)
+        {
+            _digestAuthTransports.Clear();
+        }
+
+        if (_ownsHttpClient)
+        {
+#pragma warning disable IDISP007 // This instance explicitly owns factory-created clients when ownsHttpClient is true.
+            _httpClient.Dispose();
+#pragma warning restore IDISP007
+        }
+
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>

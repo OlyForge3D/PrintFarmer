@@ -10,6 +10,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { renderUnknown } from '@/common/utils/renderUnknown';
 import { Button, Select } from '@/common/components/ui';
 import { ImagePlaceholder } from '@/common/components/icons';
+import { useHistoryThumbnailPreview } from '@/features/printers/hooks/useHistoryThumbnailPreview';
 
 interface PrinterHistoryModalProps {
   isOpen: boolean;
@@ -80,20 +81,37 @@ function getStatusColor(status: string): string {
   }
 }
 
-function HistoryThumbnail({ job }: { job: HistoryJob }) {
-  const [failed, setFailed] = useState(false);
-  const showPlaceholder = !job.thumbnailUrl || failed;
+function HistoryThumbnail({
+  job,
+  printerId,
+}: {
+  job: HistoryJob;
+  printerId: string;
+}) {
+  const {
+    thumbnailSrc,
+    thumbnailFailed,
+    handleThumbnailError,
+  } = useHistoryThumbnailPreview(
+    printerId,
+    job.jobId,
+    Boolean(job.thumbnailUrl)
+  );
+  const showPlaceholder = !job.thumbnailUrl || thumbnailFailed || !thumbnailSrc;
 
   return (
     <div className="ml-4 flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-sm border border-pf-border bg-pf-bg-2 text-pf-text-tertiary">
       {showPlaceholder ? (
-        <ImagePlaceholder className="h-16 w-16" />
+        <ImagePlaceholder
+          className="h-16 w-16"
+          ariaLabel={`Thumbnail unavailable for ${job.filename}`}
+        />
       ) : (
         <img
-          src={job.thumbnailUrl}
+          src={thumbnailSrc}
           alt={`${job.filename} thumbnail`}
           className="h-full w-full object-cover"
-          onError={() => setFailed(true)}
+          onError={handleThumbnailError}
         />
       )}
     </div>
@@ -352,7 +370,7 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
                       )}
                     </div>
 
-                    <HistoryThumbnail job={job} />
+                    <HistoryThumbnail job={job} printerId={printer.id} />
                   </div>
                 </div>
               ))}

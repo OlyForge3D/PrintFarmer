@@ -87,7 +87,15 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
             httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
             ILogger<PrusaLinkApiClient> logger =
                 provider.GetRequiredService<ILogger<PrusaLinkApiClient>>();
-            return new PrusaLinkApiClient(httpClient, logger);
+
+            // IHttpClientFactory-created clients should be disposed by their consumer.
+            // The scoped API client is the sole owner; DI tracks and disposes it at scope end.
+#pragma warning disable IDISP005 // DI owns and disposes the scoped implementation returned for this interface.
+            return new PrusaLinkApiClient(
+                httpClient,
+                logger,
+                ownsHttpClient: true);
+#pragma warning restore IDISP005
         });
 
         // Register the PrusaLink client interface with its implementation
