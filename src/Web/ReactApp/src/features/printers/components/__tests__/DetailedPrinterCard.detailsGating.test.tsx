@@ -11,14 +11,22 @@ const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
+  usePrintJobObjects: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  queryKeys: { printJobObjects: (printerId: string) => ['printJobObjects', printerId] },
 }));
 
 vi.mock('@/common/hooks/useSpoolmanConfigured', () => ({
   useSpoolmanConfigured: useSpoolmanConfiguredMock,
 }));
 
+vi.mock('@/services/maintenanceService', () => ({
+  maintenanceService: { getPrinterStatistics: vi.fn() },
+}));
+
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
+  useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
