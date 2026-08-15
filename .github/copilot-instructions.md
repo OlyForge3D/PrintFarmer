@@ -152,6 +152,31 @@ the current `?scope`, `?tab`, and `?sub` search params. See
 
 **All code MUST pass 3-way adversarial review before any PR is opened.** Bishop, Hicks, and Vasquez review the branch together, debate thoroughly, and deliver a single consensus verdict. Do not open a PR until they APPROVE.
 
+### Scope: the gate applies to `squad`-labelled PRs only
+
+The `squad/pre-pr-verdict` status is evaluated **only** for pull requests carrying the
+bare `squad` label. Everything else — Dependabot bumps, hand-written maintainer PRs,
+fork contributions — reports `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad'
+label)`, a green, non-blocking status.
+
+**Squad agents MUST apply the `squad` label when opening a PR** (`gh pr create --label
+squad`). `.github/workflows/squad-pr-label.yml` also applies it automatically when the
+PR author resolves to a squad identity, but identity resolution fails on roughly a
+third of PRs, so do not rely on the automation.
+
+> **⚠️ Opt-in scoping is only safe because of one coupling: no `squad` label means no
+> gate *and* no unattended merge.** Ralph merges only `squad`-labelled PRs, so a
+> forgotten label costs a manual merge — it can never produce an unreviewed
+> auto-merge. **If Ralph's merge scope is ever widened beyond the `squad` label without
+> widening the gate first, this scope check becomes a security hole.** The coupling is
+> restated at each implementation site: `squadScopeLabel` in
+> `scripts/ci/squad-verdict-gate.mjs`, the scope check in
+> `.github/workflows/squad-review-verdict.yml`, the exit-4 comment in
+> `scripts/ci/verify-squad-verdict.mjs`, and `.github/ralph-reference.md`.
+
+Note the bare `squad` label is the scope marker. A `squad:{member}` label is an
+*assignment* label and does not put a PR in scope.
+
 > **⚠️ This is a quality gate, not an independence gate.** Every squad agent — reviewers
 > and authors alike — runs under the repository owner's authority and acts through the
 > owner's token. Bishop reviewing Lambert's work is therefore the owner reviewing the
@@ -168,7 +193,8 @@ Flow:
 2. Request review from Bishop, Hicks, Vasquez (mention all three).
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
-5. Once APPROVED, open the PR via `gh pr create`.
+5. Once APPROVED, open the PR via `gh pr create --label squad` (the label is
+   required — see § "Scope" above).
 6. After the PR exists, each reviewer records their review as a PR comment in the
    canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
    automatically on every comment, review, and push.
@@ -376,14 +402,21 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 - **Legible failure** — the status names the exact failing condition.
 
 The workflow job always succeeds; the gate outcome is the commit status, which
-takes exactly one of four forms:
+takes exactly one of five forms:
 
 | Status | Description | Verifier classification |
 | --- | --- | --- |
+| `success` | `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad' label)` | `NOT_APPLICABLE` (exit 4) |
 | `success` | `REVIEWED (self-attested) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
 | `success` | `APPROVE (owner) @ <sha12> by <login>` | `APPROVED` (exit 0) |
 | `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
 | `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
+
+`NOT_APPLICABLE` means the PR is out of scope and was never evaluated — it is green so
+that an unrelated PR is not decorated with a red status nobody can clear, but it is
+deliberately **not** exit 0: "no review was required" must never read as "reviewed".
+Ralph does not merge on it. Scope is evaluated first, before fork handling and before
+any record is collected, so an out-of-scope PR can never accumulate merge evidence.
 
 `REVIEWED` and `APPROVED` are kept distinct on purpose: only the latter is an
 authorisation by a distinct principal. `REQUEST_CHANGES` is a reviewer decision and

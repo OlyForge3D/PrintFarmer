@@ -61,7 +61,23 @@ gh pr list --state open --draft --json number,title,author,labels,checks --limit
 | **Approved PRs** | Current human or verified squad approval, CI green | Merge and close related issue |
 | **No work found** | All clear | Report: "📋 Board is clear. Ralph is stopping." Then STOP — no timed recheck. Mention `npx @bradygaster/squad-cli watch` in case the human wants persistent polling. |
 
-**Squad merge evidence:** For each non-draft squad PR, run:
+**Scope — Ralph merges only `squad`-labelled PRs.** A pull request is in scope for
+unattended merge if and only if it carries the bare `squad` label (not a
+`squad:{member}` assignment label). `.github/workflows/squad-pr-label.yml` applies it
+automatically when the PR's author resolves to a squad identity, and squad agents
+apply it when opening a PR.
+
+⚠️ **This coupling is load-bearing, not a convenience.** The review gate is also
+scoped to the `squad` label, so an unlabelled PR reports `NOT_APPLICABLE` and has no
+review evidence at all. That is only safe because the same missing label removes
+Ralph's autonomy. **Never merge an unlabelled PR unattended**, and never widen Ralph's
+scope without re-widening the gate first — decoupling them turns "forgot the label"
+into "merged with no review".
+
+An unlabelled PR is not blocked, it is simply not Ralph's to merge: report it and
+leave it for a human. Dependabot and other bot PRs fall here.
+
+**Squad merge evidence:** For each non-draft, `squad`-labelled PR, run:
 
 ```bash
 node scripts/ci/verify-squad-verdict.mjs \
@@ -90,6 +106,10 @@ or rejection from a PR that never had squad evidence.
 - `REVIEWED` and `APPROVED` are valid merge evidence only for the PR's exact
   current head.
 - `CHANGES_REQUESTED` routes the findings back to the original author.
+- `NOT_APPLICABLE` means the PR does not carry the `squad` label, so the gate did
+  not evaluate it and no review evidence exists. It is **not** a passing review.
+  Do not merge it unattended — leave it for a human, or add the `squad` label
+  first if it really is squad work and let the gate run.
 - `SUPERSEDED`, `MISSING`, or `INVALID` is not a review record and does not
   preserve an old rejection. Require fresh panel records naming the new head,
   or an administrator override.
@@ -123,10 +143,13 @@ or rejection from a PR that never had squad evidence.
   `gh pr merge <number> --match-head-commit <reviewedHeadSha> ...`. Never
   leave a force-push window between evidence verification and merge.
 - Exit codes are `0` for `REVIEWED`/`APPROVED`, `2` for `CHANGES_REQUESTED`,
-  `3` for missing, invalid, or superseded evidence, and `1` for verifier/tool
-  failure. Prefer parsing `--json`. Exit `2` and exit `1` block merge. Exit `3`
-  means squad evidence is unavailable and permits only a verified current
-  administrator GitHub approval as fallback.
+  `3` for missing, invalid, or superseded evidence, `4` for `NOT_APPLICABLE`
+  (out of scope — no `squad` label), and `1` for verifier/tool failure. Prefer
+  parsing `--json`. Exit `2` and exit `1` block merge. Exit `3` means squad
+  evidence is unavailable and permits only a verified current administrator
+  GitHub approval as fallback. Exit `4` is deliberately **not** `0`: it means no
+  review was required because the PR is out of scope, which is never the same as
+  a review having happened. Do not merge on it.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

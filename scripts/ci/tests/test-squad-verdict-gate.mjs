@@ -10,6 +10,7 @@ import {
   fullGateFiles,
   fullGatePrefixes,
   hasAdminAccess,
+  hasSquadScopeLabel,
   hasWriteAccess,
   normalizeMember,
   parseVerdictComment,
@@ -55,6 +56,9 @@ function gate(overrides = {}) {
     roster,
     authorMembers: new Set(['parker']),
     authorSource: 'squad: label on linked issue',
+    // Scope defaults to in-scope here so each test exercises the review logic;
+    // the out-of-scope path has its own dedicated tests below.
+    squadLabeled: true,
     ...overrides,
   });
 }
@@ -366,8 +370,10 @@ test('an administrator GitHub approval at the current head satisfies the gate', 
 
 test('the owner override needs no comments, files or roster — the fork path', () => {
   // Fork PRs are evaluated with reviews only, so this call shape must work.
+  // The fork call site declares scope explicitly, matching the workflow.
   const result = evaluateGate({
     headSha,
+    squadLabeled: true,
     reviews: [{ state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true }],
   });
   assert.equal(result.state, 'success');
@@ -377,6 +383,7 @@ test('the owner override needs no comments, files or roster — the fork path', 
   // ...and a non-admin approval on that same path must not pass.
   const outsider = evaluateGate({
     headSha,
+    squadLabeled: true,
     reviews: [{ state: 'APPROVED', commitId: headSha, login: 'stranger', isAdmin: false }],
   });
   assert.equal(outsider.state, 'failure');
@@ -657,4 +664,68 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.doesNotMatch(workflow, /Stale verdicts/);
   assert.doesNotMatch(workflow, /Squad pre-PR verdict gate/);
   assert.doesNotMatch(workflow, /\? 'PASS'/);
+});
+
+test('the gate is scoped to squad-labelled pull requests', () => {
+  // Scope marker recognition.
+  assert.equal(hasSquadScopeLabel([{ name: 'squad' }]), true);
+  assert.equal(hasSquadScopeLabel(['squad']), true);
+  assert.equal(hasSquadScopeLabel([{ name: ' Squad ' }]), true, 'trimmed, case-insensitive');
+  assert.equal(hasSquadScopeLabel([]), false);
+  assert.equal(hasSquadScopeLabel([{ name: 'squadron' }]), false, 'no prefix matching');
+  // A member-assignment label names who is responsible, not that the PR is in
+  // scope; counting it would drag routine triage back into the gate.
+  assert.equal(hasSquadScopeLabel([{ name: 'squad:bishop' }]), false);
+  assert.equal(hasSquadScopeLabel([null, undefined, { }]), false, 'malformed entries');
+
+  // An unlabelled PR is out of scope and says so, rather than emitting a
+  // BLOCKED that nobody can clear without staging a fake agent review.
+  const out = gate({ squadLabeled: false });
+  assert.equal(out.state, 'success');
+  assert.equal(out.scope, 'out-of-scope');
+  assert.match(out.description, /^NOT_APPLICABLE @ [0-9a-f]{12}: not a squad PR \(no 'squad' label\)$/);
+  assert.equal(out.approvals.length, 0);
+
+  // Scope is evaluated before everything else: a full panel of records on an
+  // unlabelled PR still reports out of scope rather than REVIEWED, so an
+  // out-of-scope PR can never accumulate merge evidence.
+  const withRecords = gate({
+    squadLabeled: false,
+    comments: [comment('bishop', 'APPROVE'), comment('hicks', 'APPROVE'), comment('vasquez', 'APPROVE')],
+  });
+  assert.equal(withRecords.scope, 'out-of-scope');
+  assert.doesNotMatch(withRecords.description, /REVIEWED/);
+
+  // Callers that forget the flag must fail safe to out-of-scope, never to an
+  // empty-panel evaluation that could look like a pass.
+  const omitted = evaluateGate({ headSha, changedPaths: ['src/api/Program.cs'], roster });
+  assert.equal(omitted.scope, 'out-of-scope');
+
+  // Labelled PRs still take the full gate.
+  const inScope = gate({ squadLabeled: true });
+  assert.equal(inScope.scope, undefined);
+  assert.match(inScope.description, /^BLOCKED @ [0-9a-f]{12}: no review recorded/);
+});
+
+test('the scoping workflow wiring stays intact', async () => {
+  const workflow = await readFile(
+    path.join(repositoryRoot, '.github/workflows/squad-review-verdict.yml'), 'utf8',
+  );
+  // Scope is checked before the fork branch, and both real call sites declare
+  // their scope explicitly rather than relying on the default.
+  assert.match(workflow, /gate\.hasSquadScopeLabel\(pull\.labels \?\? \[\]\)/);
+  assert.match(workflow, /squadLabeled: false/);
+  assert.match(workflow, /squadLabeled: true/);
+  // The label changes scope, so the status must re-evaluate when it moves.
+  assert.match(workflow, /- labeled/);
+  assert.match(workflow, /- unlabeled/);
+
+  const labeller = await readFile(
+    path.join(repositoryRoot, '.github/workflows/squad-pr-label.yml'), 'utf8',
+  );
+  assert.match(labeller, /pull-requests: write/);
+  assert.match(labeller, /types: \[opened, reopened\]/);
+  assert.match(labeller, /gate\.resolveAuthorMembers/);
+  // Never checks out PR-controlled code to classify the PR.
+  assert.match(labeller, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
 });

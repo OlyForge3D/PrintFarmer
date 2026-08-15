@@ -108,7 +108,16 @@ run-name: "Squad review record for PR #${{ github.event.pull_request.number || g
 
 on:
   pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, edited]
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - edited
+      # Scope is carried by the `squad` label, so the status must be
+      # re-evaluated whenever that label is applied or removed.
+      - labeled
+      - unlabeled
   issue_comment:
     types: [created, edited, deleted]
   pull_request_review:
@@ -195,6 +204,27 @@ jobs:
 
             const isFork = pull.head.repo?.full_name !== repository;
 
+            // Scope check first: the gate covers squad-authored PRs, marked by
+            // the `squad` label. Dependency bumps and ad-hoc human PRs are not
+            // agent output and get NOT_APPLICABLE instead of an unclearable
+            // BLOCKED. Labels come from the API, and only accounts with write
+            // access can apply them, so nothing an outsider controls can move a
+            // PR into or out of scope. Checked before the fork branch so an
+            // out-of-scope fork PR is reported as out of scope rather than as a
+            // fork needing an administrator.
+            //
+            // Safe as opt-in ONLY because Ralph will not auto-merge an
+            // unlabelled PR; see gate.squadScopeLabel and ralph-reference.md.
+            if (!gate.hasSquadScopeLabel(pull.labels ?? [])) {
+              const outOfScope = gate.evaluateGate({ headSha, squadLabeled: false });
+              await postStatus(outOfScope.state, outOfScope.description);
+              core.notice(
+                `squad/pre-pr-verdict NOT_APPLICABLE: ${outOfScope.reason}. ` +
+                `Add the '${gate.squadScopeLabel}' label if this is squad-authored work.`,
+              );
+              return;
+            }
+
             // Author authentication. Both repositories are PUBLIC, so any GitHub
             // user can comment on a PR with no permission at all. Ralph merges
             // autonomously using the owner's write access, so a forgeable record
@@ -262,7 +292,7 @@ jobs:
               // the live head SHA, never fork-controlled input, so fork-PR
               // authorisation stays in code rather than falling back to prose.
               const forkResult = gate.evaluateGate({
-                headSha, reviews: await loadReviews(),
+                headSha, reviews: await loadReviews(), squadLabeled: true,
               });
               if (forkResult.override === 'github-review') {
                 await postStatus(forkResult.state, forkResult.description);
@@ -349,6 +379,7 @@ jobs:
               roster,
               authorMembers: author.members,
               authorSource: author.source,
+              squadLabeled: true,
             });
 
             await postStatus(result.state, result.description);

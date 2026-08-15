@@ -365,11 +365,16 @@ test('every description evaluateGate can emit round-trips through the verifier',
     roster,
     authorMembers: new Set(['parker']),
     authorSource: 'squad: label on linked issue',
+    squadLabeled: true,
   };
   const panel = ['bishop', 'hicks', 'vasquez'];
 
   const scenarios = [
     ['no record at all', { changedPaths: codePaths }, 'MISSING'],
+    // Out of scope must NOT round-trip to REVIEWED/APPROVED: the status is
+    // green, but green here means "no review was required", and treating that
+    // as merge evidence would auto-merge every unlabelled PR.
+    ['no squad label', { changedPaths: codePaths, squadLabeled: false }, 'NOT_APPLICABLE'],
     ['unauthenticated author', {
       changedPaths: codePaths,
       comments: panel.map((m) => record(m, 'APPROVE', reviewedHeadSha, {
