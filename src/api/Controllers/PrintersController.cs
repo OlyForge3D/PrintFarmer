@@ -4810,6 +4810,8 @@ public class PrintersController(
     [HttpGet("{id}/history/totals")]
     [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
@@ -4827,10 +4829,32 @@ public class PrintersController(
         {
             return NotFound();
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history totals for printer {Id}", id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (Exception ex) when (
+            ex is HttpRequestException or SocketException or IOException or InvalidDataException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Upstream failure retrieving history totals for printer {Id}",
+                id);
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "Unable to retrieve authoritative printer history totals");
+        }
         catch (Exception ex)
         {
             _logger.LogError("Failed to get history totals for printer {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
-            return new HistoryTotals { JobTotals = new JobTotals() };
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve printer history totals" });
         }
     }
 

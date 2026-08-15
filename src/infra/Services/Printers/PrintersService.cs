@@ -589,41 +589,33 @@ public class PrintersService(
     {
         Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
 
-        try
+        var backend = (PrinterBackend)printer.Backend;
+
+        if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
+            if (totals != null)
             {
-                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
-                if (totals != null)
-                {
-                    return totals;
-                }
-
-                // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(
-                    printer.BackendUrl,
-                    limit: 10000,
-                    start: 0,
-                    since: null,
-                    before: null,
-                    order: null,
-                    credential: printer.Credential,
-                    ct: ct).ConfigureAwait(false);
-                if (response != null)
-                {
-                    return CalculateOctoPrintHistoryTotals(response.Jobs);
-                }
+                return totals;
             }
 
-            return new HistoryTotals { JobTotals = new JobTotals() };
+            // Fallback: get full history and calculate totals
+            HistoryListResponse? response = await historyClient.GetHistoryListAsync(
+                printer.BackendUrl,
+                limit: 10000,
+                start: 0,
+                since: null,
+                before: null,
+                order: null,
+                credential: printer.Credential,
+                ct: ct).ConfigureAwait(false);
+            if (response != null)
+            {
+                return CalculateOctoPrintHistoryTotals(response.Jobs);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[History] Failed to calculate totals for printer {PrinterId}: {Message}", printerId, ex.Message);
-            return new HistoryTotals { JobTotals = new JobTotals() };
-        }
+
+        return new HistoryTotals { JobTotals = new JobTotals() };
     }
 
     /// <summary>

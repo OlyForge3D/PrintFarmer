@@ -211,13 +211,14 @@ export function PrinterHistoryModal({ isOpen, onClose, printer }: PrinterHistory
     refetch 
   } = usePrinterHistory(
     printer.id, 
-    { limit, order }
+    { limit, order },
+    { enabled: isOpen }
   );
 
   const { 
     data: totalsData,
     isLoading: totalsLoading 
-  } = usePrinterHistoryTotals(printer.id);
+  } = usePrinterHistoryTotals(printer.id, { enabled: isOpen });
 
   const modalBody = (
     <div className="space-y-6">

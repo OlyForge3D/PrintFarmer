@@ -130,6 +130,35 @@ public sealed class PrintersServiceHistoryProbeTests
             .Which.Should().BeOfType(legacyExceptionType);
     }
 
+    [Theory]
+    [InlineData(typeof(HttpRequestException))]
+    [InlineData(typeof(SocketException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(InvalidDataException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task GetHistoryTotalsAsync_AdapterFailure_Propagates(
+        Type exceptionType)
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        Func<Task> action = async () =>
+            await service.GetHistoryTotalsAsync(
+                printer.Id,
+                CancellationToken.None);
+
+        (await action.Should().ThrowAsync<Exception>())
+            .Which.Should().BeOfType(exceptionType);
+    }
+
     [Fact]
     public async Task ProbeHistoryListAsync_UnexpectedAdapterFailureIsError()
     {

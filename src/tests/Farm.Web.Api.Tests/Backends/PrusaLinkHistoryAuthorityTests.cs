@@ -190,7 +190,7 @@ public sealed class PrusaLinkHistoryAuthorityTests
     }
 
     [Fact]
-    public async Task GetHistoryTotalsAsync_UsesSingleUnlimitedHistoryRequest()
+    public async Task GetHistoryTotalsAsync_MixedStatuses_CountsAllJobsAndAggregatesCompletedJobs()
     {
         var requestedUris = new List<Uri>();
         using var handler = new InlineHandler(request =>
@@ -240,11 +240,159 @@ public sealed class PrusaLinkHistoryAuthorityTests
             "http://prusalink/");
 
         requestedUris.Should().ContainSingle();
-        requestedUris[0].PathAndQuery.Should().Be("/api/history?limit=0&start=0");
+        requestedUris[0].PathAndQuery.Should().Be("/api/history?limit=100&start=0");
         totals.Should().NotBeNull();
-        totals!.JobTotals.TotalJobs.Should().Be(2);
+        totals!.JobTotals.TotalJobs.Should().Be(3);
         totals.JobTotals.TotalPrintTime.Should().Be(300);
         totals.JobTotals.TotalFilamentUsed.Should().Be(1000);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_MultiplePages_UsesBoundedSequentialRequests()
+    {
+        var entries = Enumerable.Range(0, 205)
+            .Select(index => new
+            {
+                id = $"job-{index:D3}",
+                state = index % 2 == 0 ? "completed" : "cancelled",
+                startTime = 1700000000 + index,
+                printTime = 1,
+                filament = new { tool0 = new { length = 2 } },
+                job = new { file = new { name = $"job-{index:D3}.gcode" } },
+            })
+            .ToArray();
+        var requestedUris = new List<Uri>();
+        using var handler = new InlineHandler(request =>
+        {
+            requestedUris.Add(request.RequestUri!);
+            int start = ReadQueryInt(request, "start");
+            int limit = ReadQueryInt(request, "limit");
+            return JsonResponse(
+                HttpStatusCode.OK,
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    success = true,
+                    count = entries.Length,
+                    results = entries.Skip(start).Take(limit),
+                }));
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        HistoryTotals? totals = await client.GetHistoryTotalsAsync(
+            "http://prusalink/");
+
+        requestedUris.Select(uri => uri.PathAndQuery).Should().Equal(
+            "/api/history?limit=100&start=0",
+            "/api/history?limit=100&start=100",
+            "/api/history?limit=100&start=200");
+        totals!.JobTotals.TotalJobs.Should().Be(205);
+        totals.JobTotals.TotalPrintTime.Should().Be(103);
+        totals.JobTotals.TotalFilamentUsed.Should().Be(206);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_TruncatedSource_ThrowsInvalidData()
+    {
+        int requestCount = 0;
+        using var handler = new InlineHandler(request =>
+        {
+            requestCount++;
+            int start = ReadQueryInt(request, "start");
+            return JsonResponse(
+                HttpStatusCode.OK,
+                start == 0
+                    ? """
+                      {"success":true,"count":101,"results":[
+                        {"id":"job-1","state":"completed","startTime":1700000000,"job":{"file":{"name":"a.gcode"}}}
+                      ]}
+                      """
+                    : """{"success":true,"count":101,"results":[]}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://prusalink/");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*ended before the advertised source count*");
+        requestCount.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_SourceExceedsEntryBound_FailsAfterOneRequest()
+    {
+        int requestCount = 0;
+        using var handler = new InlineHandler(_ =>
+        {
+            requestCount++;
+            return JsonResponse(
+                HttpStatusCode.OK,
+                """{"success":true,"count":2001,"results":[]}""");
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://prusalink/");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*authoritative totals limit of 2000*");
+        requestCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_ResponseExceedsBodyBound_ThrowsInvalidData()
+    {
+        using var handler = new InlineHandler(_ =>
+        {
+            var response = JsonResponse(
+                HttpStatusCode.OK,
+                """{"success":true,"count":0,"results":[]}""");
+            response.Content.Headers.ContentLength = (2 * 1024 * 1024) + 1;
+            return response;
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync("http://prusalink/");
+
+        await action.Should().ThrowAsync<InvalidDataException>()
+            .WithMessage("*history response exceeded the size limit*");
+    }
+
+    [Fact]
+    public async Task GetHistoryTotalsAsync_CallerCancellation_StaysCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new InlineHandler(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.GetHistoryTotalsAsync(
+                "http://prusalink/",
+                credentials: null,
+                cts.Token);
+
+        (await action.Should().ThrowAsync<OperationCanceledException>())
+            .Which.Should().NotBeOfType<TimeoutException>();
     }
 
     [Theory]

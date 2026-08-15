@@ -24,7 +24,14 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// </summary>
 public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
+    private const int HistoryPageSize = 100;
+    private const int MaxHistoryPagesForTotals = 20;
+    private const int MaxHistoryEntriesForTotals =
+        HistoryPageSize * MaxHistoryPagesForTotals;
+
+    private const int MaxHistoryPageBytes = 2 * 1024 * 1024;
     private const int MaxHistoryThumbnailBytes = 10 * 1024 * 1024;
+
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PrusaLinkApiClient> _logger;
@@ -752,7 +759,6 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 ? (long)requestedStart + requestedLimit.Value
                 : long.MaxValue;
 
-            const int PageSize = 100;
             int offset = 0;
             int sourceCount = 0;
             int examinedCount = 0;
@@ -763,9 +769,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             {
                 int pageSize = !requiresFullScan && requestedLimit.HasValue
                     ? (int)Math.Min(
-                        PageSize,
+                        HistoryPageSize,
                         Math.Max(1L, requestedEnd - allJobs.Count))
-                    : PageSize;
+                    : HistoryPageSize;
                 HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
                     client,
                     normalizedBaseUrl,
@@ -915,7 +921,11 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             CreateRequest(HttpMethod.Get, requestUrl, credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
-        string content = await response.Content.ReadAsStringAsync(ct);
+        string content = await ReadBoundedStringAsync(
+            response.Content,
+            MaxHistoryPageBytes,
+            "PrusaLink history response",
+            ct);
         return ParseOctoPrintHistoryList(content, normalizedBaseUrl)
             ?? throw new InvalidDataException(
                 "PrusaLink returned malformed history list data.");
@@ -1094,14 +1104,12 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
     {
         BackendHttpTransport client = GetClientForCredentials(credentials);
         string normalizedBaseUrl = baseUrl.TrimEnd('/');
-        HistoryListResponse history;
+        IReadOnlyList<HistoryJob> jobs;
         try
         {
-            history = await FetchPrusaLinkHistoryPageAsync(
+            jobs = await FetchCompleteHistoryForTotalsAsync(
                 client,
                 normalizedBaseUrl,
-                limit: 0,
-                start: 0,
                 credentials,
                 ct);
         }
@@ -1130,24 +1138,132 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 
         double totalPrintTime = 0;
         double totalFilamentUsed = 0;
-        int completedCount = 0;
 
-        foreach (HistoryJob job in history.Jobs.Where(job => job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)))
+        foreach (HistoryJob job in jobs.Where(job =>
+                     job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)))
         {
             totalPrintTime += job.PrintDuration;
             totalFilamentUsed += job.FilamentUsed;
-            completedCount++;
         }
 
         return new HistoryTotals
         {
             JobTotals = new JobTotals
             {
-                TotalJobs = completedCount,
+                TotalJobs = jobs.Count,
                 TotalPrintTime = totalPrintTime,
                 TotalFilamentUsed = totalFilamentUsed
             }
         };
+    }
+
+    private static async Task<IReadOnlyList<HistoryJob>>
+        FetchCompleteHistoryForTotalsAsync(
+            BackendHttpTransport client,
+            string normalizedBaseUrl,
+            PrinterCredential? credentials,
+            CancellationToken ct)
+    {
+        var jobs = new List<HistoryJob>();
+        int expectedSourceCount = -1;
+        int offset = 0;
+
+        for (int pageNumber = 0; pageNumber < MaxHistoryPagesForTotals; pageNumber++)
+        {
+            HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
+                client,
+                normalizedBaseUrl,
+                HistoryPageSize,
+                offset,
+                credentials,
+                ct);
+            int examined = page.ExaminedSourceEntries;
+
+            if (expectedSourceCount < 0)
+            {
+                expectedSourceCount = page.Count;
+                if (expectedSourceCount > MaxHistoryEntriesForTotals)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history contains {expectedSourceCount} entries, exceeding the authoritative totals limit of {MaxHistoryEntriesForTotals}.");
+                }
+            }
+            else if (page.Count != expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history count changed while calculating totals.");
+            }
+
+            if (examined > HistoryPageSize ||
+                (examined > 0 && page.Count < offset + examined))
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history page exceeded the requested range.");
+            }
+
+            if (page.ExcludedEntries.Length > 0)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history contained malformed entries, so authoritative totals could not be calculated.");
+            }
+
+            jobs.AddRange(page.Jobs);
+            offset += examined;
+            if (offset == expectedSourceCount)
+            {
+                if (jobs.Count != expectedSourceCount)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history totals did not cover every source entry.");
+                }
+
+                return jobs;
+            }
+
+            if (examined == 0 || offset > expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history ended before the advertised source count.");
+            }
+        }
+
+        throw new InvalidDataException(
+            $"PrusaLink history totals exceeded the authoritative paging limit of {MaxHistoryPagesForTotals} pages.");
+    }
+
+    private static async Task<string> ReadBoundedStringAsync(
+        HttpContent content,
+        int maxBytes,
+        string responseName,
+        CancellationToken ct)
+    {
+        if (content.Headers.ContentLength > maxBytes)
+        {
+            throw new InvalidDataException(
+                $"{responseName} exceeded the size limit.");
+        }
+
+        await using Stream stream = await content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await stream.ReadAsync(chunk, ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new InvalidDataException(
+                    $"{responseName} exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
     public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default)

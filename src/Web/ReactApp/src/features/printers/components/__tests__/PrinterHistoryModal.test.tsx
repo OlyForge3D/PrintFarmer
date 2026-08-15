@@ -67,9 +67,64 @@ describe('PrinterHistoryModal thumbnails', () => {
       configurable: true,
       value: vi.fn(() => 'blob:history-thumbnail'),
     });
+
     Object.defineProperty(URL, 'revokeObjectURL', {
       configurable: true,
       value: vi.fn(),
+    });
+  });
+
+  describe('PrinterHistoryModal query gating', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      usePrinterHistory.mockReturnValue({
+        data: { count: 0, jobs: [] },
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      usePrinterHistoryTotals.mockReturnValue({
+        data: null,
+        isLoading: false,
+      });
+    });
+
+    it('disables history queries while closed and enables them when opened', () => {
+      const { rerender } = render(
+        <PrinterHistoryModal
+          isOpen={false}
+          onClose={vi.fn()}
+          printer={printer}
+        />,
+      );
+
+      expect(usePrinterHistory).toHaveBeenLastCalledWith(
+        'printer-1',
+        { limit: 50, order: 'desc' },
+        { enabled: false },
+      );
+      expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+        'printer-1',
+        { enabled: false },
+      );
+
+      rerender(
+        <PrinterHistoryModal
+          isOpen
+          onClose={vi.fn()}
+          printer={printer}
+        />,
+      );
+
+      expect(usePrinterHistory).toHaveBeenLastCalledWith(
+        'printer-1',
+        { limit: 50, order: 'desc' },
+        { enabled: true },
+      );
+      expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+        'printer-1',
+        { enabled: true },
+      );
     });
   });
 

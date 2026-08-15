@@ -140,6 +140,62 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
         response.StatusCode.Should().Be(HttpStatusCode.RequestTimeout);
     }
 
+    [Theory]
+    [InlineData(typeof(InvalidDataException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(HttpRequestException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(SocketException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(IOException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(TimeoutException), HttpStatusCode.RequestTimeout)]
+    public async Task HistoryTotals_ProviderFailure_ReturnsExplicitStatus(
+        Type exceptionType,
+        HttpStatusCode expectedStatus)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(expectedStatus);
+        response.StatusCode.Should().NotBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task HistoryTotals_HttpClientTimeout_ReturnsRequestTimeout()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException(
+                "timed out",
+                new TimeoutException("HttpClient timeout")));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestTimeout);
+    }
+
+    [Fact]
+    public async Task HistoryTotals_UnexpectedFailure_DoesNotReturnFalseZeroSuccess()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().NotBe(HttpStatusCode.OK);
+    }
+
     [Fact]
     public async Task HistoryThumbnail_InaccessiblePrinter_ReturnsNotFound()
     {
