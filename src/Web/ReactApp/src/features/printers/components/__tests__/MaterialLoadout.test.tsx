@@ -69,8 +69,10 @@ function renderLoadout(props: Partial<React.ComponentProps<typeof MaterialLoadou
 
 describe('MaterialLoadout', () => {
   beforeEach(() => {
-    setSpool.mockReset().mockResolvedValue(undefined);
-    clearSpool.mockReset().mockResolvedValue(undefined);
+    // Real setToolheadSpool/clearToolheadSpool resolve to the new rowVersion
+    // string, which lockedRevision re-anchors to on success.
+    setSpool.mockReset().mockResolvedValue('rev-1');
+    clearSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
   });
 
@@ -197,7 +199,7 @@ describe('MaterialLoadout', () => {
     );
   });
 
-  it('clears a spool from the persisted index of the slot the user clicked', () => {
+  it('clears a spool from the persisted index of the slot the user clicked', async () => {
     renderLoadout({
       mmuStatus: mmu([gate(0), gate(1, { spoolId: 12 }), gate(2), gate(3)]),
     });
@@ -205,11 +207,13 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
     fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
 
-    expect(clearSpool).toHaveBeenCalledWith({
-      printerId: 'printer-1',
-      toolheadIndex: 2,
-      reviewedRowVersion: 'rev-1',
-    });
+    await waitFor(() =>
+      expect(clearSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 2,
+        reviewedRowVersion: 'rev-1',
+      }),
+    );
   });
 
   it('blocks assignment up front when the printer revision is unavailable', () => {
@@ -477,6 +481,36 @@ describe('MaterialLoadout', () => {
 
     await waitFor(() =>
       expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewedRowVersion: 'rev-2' }),
+      ),
+    );
+  });
+
+  it('re-anchors the revision from a successful mutation so the next action in the same drawer is not stale', async () => {
+    // Assign then Clear in one open drawer without the printer round-tripping
+    // a fresh `reviewedRowVersion` prop in between (the mutation's own
+    // success response is the only source of the new revision here). If
+    // lockedRevision were not re-anchored after Assign, Clear would still
+    // send the pre-assign 'rev-1' and 412 against what Assign just wrote.
+    setSpool.mockResolvedValue('rev-2');
+    renderLoadout({
+      mmuStatus: mmu([gate(0), gate(1, { spoolId: 42 }), gate(2), gate(3)]),
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+    fireEvent.click(screen.getByRole('button', { name: 'Change' }));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewedRowVersion: 'rev-1' }),
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() =>
+      expect(clearSpool).toHaveBeenCalledWith(
         expect.objectContaining({ reviewedRowVersion: 'rev-2' }),
       ),
     );
