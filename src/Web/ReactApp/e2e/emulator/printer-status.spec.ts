@@ -174,8 +174,21 @@ test.describe('Printer Status — Moonraker', () => {
 
     await page.reload();
     const alert = page.getByRole('alert');
+    // The shared query client retries a 503 up to 3 times with exponential backoff
+    // before the error branch renders, so the alert (and everything inside it,
+    // including the nested Retry button — both mount in the same React commit)
+    // can legitimately take close to the full backoff window to appear. Waiting on
+    // the alert container's own visibility first — with the same generous,
+    // backoff-aware budget used for the text assertion — before touching anything
+    // nested inside it keeps every assertion here on one consistent wait budget.
+    // Previously the nested Retry button check fell back to Playwright's default
+    // ~5s timeout, a much narrower budget than the text assertion right above it
+    // for state that settles together; under CI scheduling jitter near the tail of
+    // that backoff window, the button check could start its own countdown late and
+    // time out even though the button was about to mount (issue #1574).
+    await expect(alert).toBeVisible({ timeout: 60_000 });
     await expect(alert).toContainText('Unable to Load Printers', { timeout: 60_000 });
-    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible();
+    await expect(alert.getByRole('button', { name: 'Retry' })).toBeVisible({ timeout: 60_000 });
     await expect(page.getByText('No Printers Found')).toHaveCount(0);
 
     await page.unroute(printersCollectionRoute);
