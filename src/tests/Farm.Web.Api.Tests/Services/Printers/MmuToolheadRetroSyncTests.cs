@@ -124,7 +124,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
-    private async Task<Printer> SeedMmuPrinterWithGates()
+    private async Task<Printer> SeedMmuPrinterWithGates(int gateCount = 4, string name = "MMU Printer With Gates")
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -132,13 +132,13 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         Guid manufacturerId = Guid.NewGuid();
         Guid modelId = Guid.NewGuid();
 
-        seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Gates Mfg" });
-        seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = manufacturerId, Name = "Gates Model" });
+        seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = $"{name} Mfg" });
+        seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = manufacturerId, Name = $"{name} Model" });
 
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
-            Name = "MMU Printer With Gates",
+            Name = name,
             ServerUrl = "http://192.168.1.52",
             BackendPort = 7125,
             Backend = (int)PrinterBackend.Moonraker,
@@ -159,7 +159,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         };
         printer.Toolheads.Add(t0);
 
-        for (int i = 1; i < 4; i++)
+        for (int i = 1; i <= gateCount; i++)
         {
             printer.Toolheads.Add(new Toolhead
             {
@@ -249,7 +249,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     [Fact]
     public async Task EnsureMmuToolheadsAsync_IsIdempotent_WhenGatesAlreadyExist()
     {
-        Printer printer = await SeedMmuPrinterWithGates();
+        Printer printer = await SeedMmuPrinterWithGates(gateCount: 4);
 
         CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
 
@@ -257,7 +257,37 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         result.Message.Should().Contain("already has");
 
         int toolheadCount = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
-        toolheadCount.Should().Be(4);
+        toolheadCount.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task EnsureMmuToolheadsAsync_ReconcilesPartialGateSetUpward()
+    {
+        // 3 persisted gates (Index 1-3) while live hardware reports 4 — the exact
+        // Qidi Plus 4 scenario from issue #1588: the gate set must grow to cover
+        // the missing gate rather than reporting success without acting.
+        Printer printer = await SeedMmuPrinterWithGates(gateCount: 3);
+
+        CommandResult result = await _printersService.EnsureMmuToolheadsAsync(printer.Id, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Message.Should().Contain("Created 1");
+
+        List<Toolhead> toolheads = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printer.Id)
+            .OrderBy(t => t.Index)
+            .ToListAsync();
+
+        toolheads.Should().HaveCount(5);
+        toolheads.Should().Contain(t => t.Index == 4 && t.ToolheadType == ToolheadType.MmuGate);
+
+        // Pre-existing gates 1-3 must be untouched (same Ids, not renumbered/re-bound).
+        Toolhead gate1 = toolheads.Single(t => t.Index == 1);
+        Toolhead gate2 = toolheads.Single(t => t.Index == 2);
+        Toolhead gate3 = toolheads.Single(t => t.Index == 3);
+        gate1.ToolheadType.Should().Be(ToolheadType.MmuGate);
+        gate2.ToolheadType.Should().Be(ToolheadType.MmuGate);
+        gate3.ToolheadType.Should().Be(ToolheadType.MmuGate);
     }
 
     [Fact]
@@ -362,5 +392,61 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         reloaded!.MultiMaterial.Should().BeTrue("printer should be promoted to MultiMaterial");
         reloaded.Toolheads.Count.Should().BeGreaterThanOrEqualTo(4, "virtual MMU gates should be created");
         reloaded.Toolheads.Should().Contain(t => t.Index == 1 && t.ToolheadType == ToolheadType.MmuGate);
+    }
+
+    /// <summary>
+    /// Regression test for issue #1588: a printer whose live hardware reports 4 MMU gates
+    /// (e.g. a Qidi Plus 4 QidiBox) but which only has 3 persisted <see cref="ToolheadType.MmuGate"/>
+    /// rows must be able to grow its gate set on demand — assigning a spool to the 4th (live-only)
+    /// gate must succeed by creating exactly the missing gate, without renumbering or re-binding
+    /// gates 1-3 and their existing spool assignments.
+    /// </summary>
+    [Fact]
+    public async Task SetToolheadSpoolAsync_ExtendsPartialGateSet_AssigningToLiveOnlyFourthGate()
+    {
+        Printer printer = await SeedMmuPrinterWithGates(gateCount: 3, name: "Qidi Plus 4");
+
+        // Bind existing gates 1-3 to spools so we can assert they are preserved untouched.
+        List<Toolhead> seededGates = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printer.Id && t.ToolheadType == ToolheadType.MmuGate)
+            .OrderBy(t => t.Index)
+            .ToListAsync();
+        seededGates.Should().HaveCount(3);
+
+        foreach (Toolhead gate in seededGates)
+        {
+            gate.CurrentSpoolId = 100 + gate.Index;
+            gate.CurrentMaterial = $"PLA-{gate.Index}";
+        }
+        await _dbContext.SaveChangesAsync();
+
+        Dictionary<int, (int SpoolId, string Material)> bindingsBefore = seededGates
+            .ToDictionary(g => g.Index, g => (g.CurrentSpoolId!.Value, g.CurrentMaterial!));
+
+        // Live hardware reports gate 4 (mmuStatus.numGates == 4); assign a spool to it.
+        CommandResult result = await _printersService.SetToolheadSpoolAsync(
+            printer.Id, toolheadIndex: 4, spoolId: 4242, CancellationToken.None);
+
+        result.Success.Should().BeTrue("gate 4 should be created and the spool assigned");
+
+        List<Toolhead> toolheads = await _dbContext.Toolheads
+            .Where(t => t.PrinterId == printer.Id)
+            .OrderBy(t => t.Index)
+            .ToListAsync();
+
+        // Physical T0 + 4 gates — only the missing gate (4) was created.
+        toolheads.Should().HaveCount(5);
+        Toolhead gate4 = toolheads.Single(t => t.Index == 4);
+        gate4.ToolheadType.Should().Be(ToolheadType.MmuGate);
+        gate4.CurrentSpoolId.Should().Be(4242);
+
+        // Gates 1-3 keep their original spool bindings — no renumbering, no re-binding.
+        foreach ((int index, (int spoolId, string material)) in bindingsBefore)
+        {
+            Toolhead preserved = toolheads.Single(t => t.Index == index);
+            preserved.ToolheadType.Should().Be(ToolheadType.MmuGate);
+            preserved.CurrentSpoolId.Should().Be(spoolId);
+            preserved.CurrentMaterial.Should().Be(material);
+        }
     }
 }
