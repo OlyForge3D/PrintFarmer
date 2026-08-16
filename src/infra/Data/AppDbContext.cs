@@ -953,7 +953,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             nameof(Printer.MaxTravelAcceleration) or
             nameof(Printer.CalibrationHasHeatedBed) or
             nameof(Printer.CalibrationHasEnclosure) or
-            nameof(Printer.HasHeatedChamber) or
+            nameof(Printer.CalibrationHasHeatedChamber) or
             nameof(Printer.MaxChamberTemp) or
             nameof(Printer.ActiveToolheadIndex) or
             nameof(Printer.SupportsPressureAdvance) or

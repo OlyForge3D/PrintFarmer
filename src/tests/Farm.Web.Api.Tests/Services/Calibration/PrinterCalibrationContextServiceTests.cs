@@ -382,7 +382,7 @@ public sealed class PrinterCalibrationContextServiceTests
         harness.Printer.MaxAcceleration = null;
         harness.Printer.MaxTravelSpeed = null;
         harness.Printer.CalibrationHasHeatedBed = null;
-        harness.Printer.HasHeatedChamber = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
         harness.Printer.CalibrationSlicerEngine = null;
         harness.Printer.CalibrationSlicerDistribution = null;
         harness.Printer.CalibrationSlicerVersion = null;
@@ -524,7 +524,7 @@ public sealed class PrinterCalibrationContextServiceTests
     public async Task GetCandidatesAsync_WithHasHeatedChamberDerivedFromProfile_UsesHeatedChamberNamingConsistently()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
-        harness.Printer.HasHeatedChamber = null;
+        harness.Printer.CalibrationHasHeatedChamber = null;
         harness.Printer.MaxChamberTemp = null;
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
@@ -545,6 +545,26 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
             "max_chamber_temperature_missing");
         _ = candidate.MissingInputs.Should().Contain("maxChamberTemperature");
+    }
+
+    [Fact]
+    public void Printer_HasHeatedChamber_IsRenamedToCalibrationHasHeatedChamberChannel()
+    {
+        // Pins issue #1617's rename: Printer must expose the Calibration*-prefixed channel
+        // for the heated-chamber fact and must not resurrect the old unprefixed name.
+        _ = typeof(Printer).GetProperty(nameof(Printer.CalibrationHasHeatedChamber))
+            .Should().NotBeNull("the renamed calibration channel must exist on Printer");
+        _ = typeof(Printer).GetProperty("HasHeatedChamber")
+            .Should().BeNull("the unprefixed HasHeatedChamber property must not exist on Printer");
+    }
+
+    [Fact]
+    public void Printer_CalibrationHasHeatedChamber_IsNullableBool()
+    {
+        System.Reflection.PropertyInfo? property =
+            typeof(Printer).GetProperty(nameof(Printer.CalibrationHasHeatedChamber));
+        _ = property.Should().NotBeNull();
+        _ = property!.PropertyType.Should().Be(typeof(bool?));
     }
 
     [Fact]
@@ -1179,7 +1199,7 @@ public sealed class PrinterCalibrationContextServiceTests
                 CalibrationHasHeatedBed = true,
                 MaxBedTemp = 120,
                 CalibrationHasEnclosure = false,
-                HasHeatedChamber = false,
+                CalibrationHasHeatedChamber = false,
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,

@@ -17,7 +17,7 @@ namespace Farm.Migrations.PostgreSQL.Migrations
         {
 #pragma warning disable 612, 618
             modelBuilder
-                .HasAnnotation("ProductVersion", "10.0.10")
+                .HasAnnotation("ProductVersion", "10.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 63);
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
@@ -6077,6 +6077,9 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                     b.Property<bool?>("CalibrationHasHeatedBed")
                         .HasColumnType("boolean");
 
+                    b.Property<bool?>("CalibrationHasHeatedChamber")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("CalibrationMachineProfileId")
                         .HasColumnType("uuid");
 
@@ -6159,9 +6162,6 @@ namespace Farm.Migrations.PostgreSQL.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("HasHeatedBed")
-                        .HasColumnType("boolean");
-
-                    b.Property<bool?>("HasHeatedChamber")
                         .HasColumnType("boolean");
 
                     b.Property<bool?>("HasMmu")
