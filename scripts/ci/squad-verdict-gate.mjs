@@ -354,6 +354,158 @@ export function parseVerdictComment(comment) {
 }
 
 /**
+ * Determine whether a record reviewed at an old head SHA may be carried
+ * forward to a new head SHA without a fresh review — the ancestry-based sync
+ * exemption from issue #1633 ("Option A"). This exists so a routine base-branch
+ * sync doesn't cost a full re-review of a contribution nobody touched.
+ *
+ * BOTH conditions must hold:
+ *
+ *   1. The reviewed SHA is a strict ancestor of the new head — nothing was
+ *      rewritten or force-pushed away. This is `recordAncestryStatus`, the
+ *      `status` field GitHub's compare API returns for
+ *      `compare/{reviewedSha}...{newHeadSha}`. Only `'ahead'` satisfies it.
+ *      (`'identical'` never reaches this function — an unchanged head is
+ *      already handled as a direct SHA match upstream — and `'behind'` /
+ *      `'diverged'` mean history was rewritten, so ancestry fails.)
+ *   2. The PR's *own* contribution — its diff against the base branch — is
+ *      byte-for-byte unchanged between the reviewed SHA and the new head.
+ *
+ * Condition 2 is deliberately NOT a check of "every new commit is an ancestor
+ * of base": a plain `git merge development` always creates a fresh merge
+ * commit that is itself not an ancestor of base (base has no idea it exists),
+ * so a naive commit-membership check rejects the exact sync it is meant to
+ * allow. Comparing the PR's own diff instead sidesteps that entirely, and it
+ * is robust to *why* the merge commit exists: a clean sync merge changes no
+ * file the PR's diff already covers, while a conflict resolved by adding new
+ * logic inside the merge commit — the actual threat this guards against —
+ * does change that diff and is correctly rejected.
+ *
+ * The PR's diff at either point in time is obtained the same way GitHub
+ * computes the PR's own file list: a three-dot compare against the base
+ * branch, `compare/{baseRef}...{sha}`. Three-dot compare pivots on the merge
+ * base of the two refs rather than diffing the refs directly, so it keeps
+ * returning "this PR's changes" even after the base branch has advanced:
+ * `compare(baseRef...reviewedSha)` still finds the (older) commit the PR was
+ * built on as its merge base, and `compare(baseRef...newHeadSha)` finds the
+ * current base tip itself (now an ancestor of the head via the sync merge).
+ * Both compares are obtained via `GET /repos/{owner}/{repo}/compare/{basehead}`
+ * without fetching the repository, which matters because the workflow
+ * deliberately checks out only the default branch (see the workflow header).
+ *
+ * `reviewedDiffFiles` / `currentDiffFiles` are each the `files` array from one
+ * of those two compares. Every entry the compare API returns for a change to
+ * matter (rename, add, delete, edit) is compared: `status`, `filename`,
+ * `previous_filename`, `sha` (the resulting blob's SHA) and, when GitHub
+ * supplies it, `patch` — so a same-named file with different content is
+ * detected even if a diff subtlety trims the patch.
+ *
+ * Diff equality alone is NOT sufficient, though: an author could push a
+ * commit that changes the PR's contribution and a *later* commit that
+ * reverts it, landing back at the same final diff while still having
+ * authored real changes in the range — exactly the review-then-push-more
+ * threat model the SHA pin exists to catch, and diff-equality by itself
+ * would wrongly wave it through. `nonBaseCommitsIntroduceNoExtraContent`
+ * closes that gap: it must be true only when every commit introduced since
+ * the review that is NOT already reachable from the base tip introduces
+ * nothing beyond what a clean merge of its own two parents would produce.
+ *
+ * This is deliberately NOT "content-empty against its own first parent" —
+ * an earlier revision of this exemption tried that and it is wrong in
+ * practice: GitHub's single-commit endpoint diffs a merge commit against its
+ * first parent only, and for a REAL sync merge that diff is naturally
+ * non-empty, because it necessarily includes everything the merge pulled in
+ * from the base side. (Confirmed against this repo's own history: a known
+ * clean, conflict-free `git merge development` sync commit reports a
+ * non-empty `files` list via `GET /repos/{owner}/{repo}/commits/{sha}`.)
+ * Rejecting on that basis would reject essentially every legitimate sync,
+ * defeating the whole feature.
+ *
+ * The correct test compares a merge commit's own diff to what merging its
+ * *two parents alone* would produce: for a two-parent merge commit with
+ * parents `[p1, p2]`, `compare(p1...p2)` is a three-dot compare that pivots
+ * on the merge base of p1 and p2, so its `files` are exactly "what p2
+ * contributes beyond its common history with p1" — precisely what a clean,
+ * no-conflict merge of p2 into p1 would add. If the merge commit's own diff
+ * (`GET /repos/{owner}/{repo}/commits/{sha}`, diffed against parent[0] by
+ * GitHub's convention) has the same fingerprint as `compare(p1...p2).files`,
+ * the merge commit added nothing beyond that — no manually-resolved
+ * conflict, no extra edit. A merge commit whose own diff differs from
+ * `compare(p1...p2)` did add something beyond a clean merge (a conflict
+ * resolution that changed logic, most obviously) and is correctly rejected.
+ * A commit with anything other than exactly two parents (an ordinary
+ * single-parent commit, i.e. real author work; or a rare octopus merge with
+ * three or more parents, which this check does not attempt to validate) is
+ * always treated as introducing its own content and disqualifies the record.
+ * `diffFingerprint` (below) is exported specifically so the workflow can
+ * reuse the exact same equality test for this per-commit comparison.
+ *
+ * Fails closed:
+ *
+ *   - An empty `reviewedDiffFiles` is never treated as safe — the caller
+ *     must always supply the PR's real recorded diff, not a default meaning
+ *     "nothing to check".
+ *   - GitHub's compare endpoint caps the `files` array (large diffs are
+ *     silently truncated with no in-band signal). `filesMayBeTruncated` lets
+ *     the caller say "either side may be incomplete"; when true, equality can
+ *     never be proven, so this returns false rather than risk comparing two
+ *     truncated, apparently-equal lists that actually differ past the cutoff.
+ *   - `nonBaseCommitsIntroduceNoExtraContent` defaults to `false`: the caller
+ *     must positively prove every non-base commit is a clean merge (or that
+ *     there are none), not rely on a default meaning "assume clean".
+ *
+ * This function performs no I/O; the workflow computes the compares and the
+ * per-commit lookups and passes their results in.
+ */
+export function isCarriedAcrossSync({
+  recordAncestryStatus,
+  reviewedDiffFiles = [],
+  currentDiffFiles = [],
+  filesMayBeTruncated = false,
+  nonBaseCommitsIntroduceNoExtraContent = false,
+} = {}) {
+  if (recordAncestryStatus !== 'ahead') {
+    return false;
+  }
+  if (filesMayBeTruncated) {
+    return false;
+  }
+  if (!nonBaseCommitsIntroduceNoExtraContent) {
+    return false;
+  }
+  const reviewed = Array.isArray(reviewedDiffFiles) ? reviewedDiffFiles : [];
+  const current = Array.isArray(currentDiffFiles) ? currentDiffFiles : [];
+  if (reviewed.length === 0) {
+    return false;
+  }
+  return diffFingerprint(reviewed) === diffFingerprint(current);
+}
+
+/**
+ * Canonical, order-independent fingerprint of a compare-API `files` array,
+ * used to test two diffs for byte-for-byte equality: once for the PR's own
+ * diff (see `isCarriedAcrossSync`), and again by the workflow to test a
+ * merge commit's own diff against `compare(parent1...parent2).files` when
+ * proving it introduced nothing beyond a clean merge of its two parents.
+ * Not a content hash of anything beyond the fields the compare API actually
+ * exposes, and not used for anything except these equality tests. Exported
+ * so both call sites share one definition of "identical diff".
+ */
+export function diffFingerprint(files) {
+  return files
+    .map((file) => JSON.stringify([
+      file?.status ?? '',
+      file?.previous_filename ?? '',
+      file?.filename ?? '',
+      file?.sha ?? '',
+      file?.patch ?? '',
+    ]))
+    .sort()
+    .join('\n');
+}
+
+
+/**
  * Split trusted verdicts into the reviewer's decision *on the current head* and
  * everything else.
  *
@@ -362,9 +514,19 @@ export function parseVerdictComment(comment) {
  * comment naming an old SHA erase that reviewer's live REQUEST_CHANGES, since
  * the stale record would win on timestamp and then be filtered out of the
  * current pool. A stale comment can never displace a current-head one.
+ *
+ * `carriedShas` (a `Set`/iterable of lowercase SHAs, or an equivalent) names
+ * old head SHAs the caller has already proven, via `isCarriedAcrossSync`, to
+ * introduce nothing but base-branch commits since they were reviewed. A
+ * record pinned to one of those SHAs is treated as current — but tagged
+ * `carriedAcrossSync: true` so the audit trail never silently presents it as
+ * a fresh review of the new head.
  */
-export function collectVerdicts(comments, headSha) {
+export function collectVerdicts(comments, headSha, { carriedShas } = {}) {
   const head = String(headSha ?? '').toLowerCase();
+  const carried = carriedShas instanceof Set
+    ? carriedShas
+    : new Set(carriedShas ?? []);
   const current = new Map();
   const staleLatest = new Map();
   const unauthenticated = [];
@@ -380,13 +542,16 @@ export function collectVerdicts(comments, headSha) {
       unauthenticated.push(record);
       continue;
     }
-    const pool = record.headSha === head ? current : staleLatest;
-    const previous = pool.get(record.reviewer);
+    const isCurrentHead = record.headSha === head;
+    const isCarried = !isCurrentHead && carried.has(record.headSha);
+    const pool = (isCurrentHead || isCarried) ? current : staleLatest;
+    const candidate = isCarried ? { ...record, carriedAcrossSync: true } : record;
+    const previous = pool.get(candidate.reviewer);
     if (
       !previous ||
-      Date.parse(record.recordedAt || 0) >= Date.parse(previous.recordedAt || 0)
+      Date.parse(candidate.recordedAt || 0) >= Date.parse(previous.recordedAt || 0)
     ) {
-      pool.set(record.reviewer, record);
+      pool.set(candidate.reviewer, candidate);
     }
   }
   const stale = [...staleLatest.values()]
@@ -497,6 +662,11 @@ export function evaluateGate({
   authorMembers = new Set(),
   authorSource = 'unresolved',
   squadLabeled = false,
+  // Old head SHAs (see `isCarriedAcrossSync`) the caller has already proven
+  // introduce nothing but base-branch commits since they were reviewed. A
+  // record pinned to one of these stays valid at the current head, tagged
+  // `carriedAcrossSync` so the status and audit trail say so explicitly.
+  carriedShas = new Set(),
 } = {}) {
   const head = String(headSha ?? '').toLowerCase();
   const notes = [];
@@ -616,7 +786,7 @@ export function evaluateGate({
     };
   }
 
-  const { current, stale, unauthenticated } = collectVerdicts(comments, head);
+  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
   if (unauthenticated.length > 0) {
     notes.push(
       `Rejected ${unauthenticated.length} record(s) whose author could not be ` +
@@ -768,6 +938,23 @@ export function evaluateGate({
     };
   }
 
+  // Records carried forward under the sync exemption (see
+  // `isCarriedAcrossSync`) still count toward `approvals`, but the status and
+  // audit trail must say so explicitly — never silently present a carried
+  // record as a fresh review of the current head.
+  const carried = [...eligible.values()]
+    .filter((record) => record.verdict === 'APPROVE' && record.carriedAcrossSync === true);
+  if (carried.length > 0) {
+    notes.push(
+      `Carried across sync: ${carried
+        .map((record) => `${record.reviewer}@${shortSha(record.headSha)}`)
+        .join(', ')} — the PR's own diff against its base branch is proven ` +
+      'byte-for-byte unchanged since that review (a pure base sync), so the ' +
+      'record was carried forward rather than re-earned.',
+    );
+  }
+  const carriedSuffix = carried.length > 0 ? ', carried across sync' : '';
+
   // Deliberately NOT "APPROVE": this is a record that reviewer agents examined
   // this exact commit, self-attested under the owner's authority. Only the owner
   // override path emits an `APPROVE (owner)` status, because only that path is a
@@ -776,14 +963,17 @@ export function evaluateGate({
     state: 'success',
     passed: true,
     description: truncate(
-      `REVIEWED (self-attested) @ ${shortSha(head)} by ${approvals.join('+')}`,
+      `REVIEWED (self-attested${carriedSuffix}) @ ${shortSha(head)} by ${approvals.join('+')}`,
     ),
     reason:
       `${approvals.length} SHA-bound self-attested review record(s) on the ` +
-      'current head',
+      'current head' + (carried.length > 0
+        ? ` (${carried.length} carried forward across a pure base sync)`
+        : ''),
     notes,
     requiredMembers,
     approvals,
     stale,
+    carried: carried.map((record) => record.reviewer),
   };
 }

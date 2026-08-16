@@ -422,6 +422,176 @@ jobs:
 
             const reviews = await loadReviews();
 
+            // Sync-carry-forward exemption (issue #1633, "Option A"). A
+            // record pinned to an old head SHA stays valid at the current
+            // head when (1) the old SHA is a strict ancestor of the current
+            // head, (2) the PR's own diff against the base branch — NOT the
+            // raw commit list, which always contains the sync merge commit
+            // itself even for a clean sync — is byte-for-byte unchanged
+            // between the old SHA and the current head, AND (3) every commit
+            // introduced since review that isn't already reachable from base
+            // introduces nothing beyond what a clean merge of its own two
+            // parents would produce. (3) exists because (1)+(2) alone would
+            // let an author push a commit that changes the PR and a later
+            // commit that reverts it land back on the same final diff while
+            // still containing real author work in the range — exactly what
+            // the SHA pin exists to catch.
+            //
+            // (3) is NOT "the commit's own diff against its first parent is
+            // empty" — GitHub's single-commit endpoint diffs a merge commit
+            // against its first parent only, and that is naturally non-empty
+            // for a real sync merge (it necessarily includes everything
+            // pulled in from the base side; verified against this repo's own
+            // history, where a known clean sync merge reports a non-empty
+            // `files` list this way). Instead, for a two-parent merge commit
+            // `[p1, p2]`, `compare(p1...p2)` is a three-dot compare pivoting
+            // on p1/p2's own merge base, so its `files` are exactly "what p2
+            // contributes beyond its common history with p1" — what a clean,
+            // no-conflict merge of p2 into p1 would add. If the merge
+            // commit's own diff matches that fingerprint, it added nothing
+            // beyond a clean merge; if it differs (a conflict resolved by
+            // changing logic, most obviously), it's disqualifying. A commit
+            // with any other parent count (an ordinary single-parent commit,
+            // i.e. real author work, or a rare octopus merge this check
+            // can't validate) always disqualifies.
+            const distinctOldShas = new Set();
+            for (const raw of rawComments) {
+              const shape = gate.parseVerdictComment({ ...raw, squadWriteAccess: true });
+              if (shape && shape.headSha !== headSha) {
+                distinctOldShas.add(shape.headSha);
+              }
+            }
+
+            const baseRef = pull.base?.ref ?? '';
+            // The compare endpoint silently caps `files` (no in-band
+            // truncation flag), so a diff at or beyond that cap can never be
+            // proven unchanged and must fail closed. 300 is GitHub's
+            // documented ceiling for this endpoint. Its `commits` array is
+            // similarly capped, but DOES expose `total_commits`, so an
+            // incomplete commit list is detectable and must also fail closed.
+            const compareFilesCap = 300;
+            const commitsIncomplete = (compare) =>
+              (compare.total_commits ?? (compare.commits ?? []).length) >
+              (compare.commits ?? []).length;
+            const carriedShas = new Set();
+            for (const oldSha of distinctOldShas) {
+              try {
+                const { data: ancestryCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${oldSha}...${headSha}`,
+                  });
+                const { data: reviewedCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${baseRef}...${oldSha}`,
+                  });
+                const { data: baseAheadCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${baseRef}...${headSha}`,
+                  });
+                const reviewedFiles = reviewedCompare.files ?? [];
+                const currentFiles = baseAheadCompare.files ?? [];
+
+                let nonBaseCommitsIntroduceNoExtraContent = false;
+                if (!commitsIncomplete(ancestryCompare) && !commitsIncomplete(baseAheadCompare)) {
+                  const aheadOfBaseShas = new Set(
+                    (baseAheadCompare.commits ?? []).map((c) => c.sha),
+                  );
+                  const nonBaseShas = (ancestryCompare.commits ?? [])
+                    .map((c) => c.sha)
+                    .filter((sha) => aheadOfBaseShas.has(sha));
+                  let allClean = true;
+                  for (const nonBaseSha of nonBaseShas) {
+                    const { data: singleCommit } = await github.rest.repos.getCommit({
+                      owner, repo, ref: nonBaseSha,
+                    });
+                    const parentShas = (singleCommit.parents ?? []).map((p) => p.sha);
+                    if (parentShas.length !== 2) {
+                      // Ordinary single-parent commit (real author work) or
+                      // an octopus merge this check can't validate.
+                      allClean = false;
+                      break;
+                    }
+                    const singleCommitFiles = singleCommit.files ?? [];
+                    // GitHub's single-commit endpoint exposes `stats.total`
+                    // (additions + deletions summed across the WHOLE commit,
+                    // independent of the 300-file cap on `files`) — verified
+                    // empirically (a real commit with >300 files still
+                    // reports its true total there). Summing the returned
+                    // `files` and comparing to `stats.total` catches most
+                    // truncation, but is not sufficient alone: a truncated
+                    // page whose missing files happen to be pure renames
+                    // (0 additions, 0 deletions) would still sum-match. Keep
+                    // the length-vs-cap heuristic as a second, independent
+                    // check — either signal firing means the list can't be
+                    // trusted.
+                    const singleCommitFilesSum = singleCommitFiles.reduce(
+                      (sum, f) => sum + (f.additions ?? 0) + (f.deletions ?? 0), 0,
+                    );
+                    const singleCommitFilesTruncated =
+                      singleCommitFiles.length >= compareFilesCap ||
+                      (typeof singleCommit.stats?.total === 'number' &&
+                        singleCommitFilesSum !== singleCommit.stats.total);
+                    const { data: parentsCompare } =
+                      await github.rest.repos.compareCommitsWithBasehead({
+                        owner, repo, basehead: `${parentShas[0]}...${parentShas[1]}`,
+                      });
+                    const parentsCompareFiles = parentsCompare.files ?? [];
+                    if (
+                      singleCommitFilesTruncated ||
+                      parentsCompareFiles.length >= compareFilesCap
+                    ) {
+                      // Either side of the equality check may be incomplete
+                      // — a capped/truncated list can never prove the
+                      // fingerprints match (or genuinely differ), so this
+                      // can't be trusted as proof of a clean merge.
+                      allClean = false;
+                      break;
+                    }
+                    if (
+                      gate.diffFingerprint(singleCommitFiles) !==
+                      gate.diffFingerprint(parentsCompareFiles)
+                    ) {
+                      // The merge commit's own diff differs from what
+                      // merging its two parents alone would produce — it
+                      // added something beyond a clean merge.
+                      allClean = false;
+                      break;
+                    }
+                  }
+                  nonBaseCommitsIntroduceNoExtraContent = allClean;
+                }
+
+                const eligible = gate.isCarriedAcrossSync({
+                  recordAncestryStatus: ancestryCompare.status,
+                  reviewedDiffFiles: reviewedFiles,
+                  currentDiffFiles: currentFiles,
+                  filesMayBeTruncated:
+                    reviewedFiles.length >= compareFilesCap ||
+                    currentFiles.length >= compareFilesCap,
+                  nonBaseCommitsIntroduceNoExtraContent,
+                });
+                if (eligible) {
+                  carriedShas.add(oldSha);
+                  core.notice(
+                    `Carrying review record at ${oldSha.slice(0, 12)} forward to ` +
+                    `${headSha.slice(0, 12)}: the PR's own diff against ` +
+                    `${baseRef} is unchanged since review, and every new ` +
+                    'non-base commit since then is a clean merge introducing ' +
+                    'nothing beyond its own two parents.',
+                  );
+                }
+              } catch (error) {
+                // Fails closed: a compare failure (rate limit, unknown SHA,
+                // repository not fetched, etc.) never carries a record
+                // forward — worst case is an unnecessary re-review, not a
+                // skipped one.
+                core.warning(
+                  `Could not evaluate sync carry-forward for ${oldSha}: ${error.message}. ` +
+                  'Treating the record as superseded.',
+                );
+              }
+            }
+
             const result = gate.evaluateGate({
               headSha,
               changedPaths,
@@ -431,6 +601,7 @@ jobs:
               authorMembers: author.members,
               authorSource: author.source,
               squadLabeled: true,
+              carriedShas,
             });
 
             await postStatus(result.state, result.description);
@@ -450,7 +621,11 @@ jobs:
                 ['PR', `#${prNumber}`],
                 ['Head SHA', headSha],
                 ['Result', result.passed
-                  ? (result.override ? 'APPROVE (owner)' : 'REVIEWED (self-attested)')
+                  ? (result.override
+                    ? 'APPROVE (owner)'
+                    : result.carried?.length > 0
+                      ? 'REVIEWED (self-attested, carried across sync)'
+                      : 'REVIEWED (self-attested)')
                   : 'BLOCKED'],
                 ['Reason', result.reason],
                 ['Self-attested review records', result.approvals.join(', ') || '(none)'],
