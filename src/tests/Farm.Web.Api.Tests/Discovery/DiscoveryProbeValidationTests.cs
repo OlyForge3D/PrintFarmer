@@ -156,6 +156,42 @@ public class DiscoveryProbeValidationTests
         reason.Should().Contain("Missing 'result'");
     }
 
+    [Theory]
+    [InlineData(100, 1.0)]
+    [InlineData(90, 0.9)]
+    [InlineData(75, 0.75)]
+    public void MoonrakerOnboardingResolver_MapConfidenceScore_MapsKnownScoresToNormalizedRange(int score, decimal expected)
+    {
+        MoonrakerOnboardingResolver.MapConfidenceScore(score).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData(0, 0.0)]
+    [InlineData(50, 0.5)]
+    [InlineData(150, 1.0)]
+    public void MoonrakerOnboardingResolver_MapConfidenceScore_ClampsUnknownScoresToUnitRange(int score, decimal expected)
+    {
+        MoonrakerOnboardingResolver.MapConfidenceScore(score).Should().Be(expected);
+    }
+
+    [Fact]
+    public void MoonrakerOnboardingResolver_ExtractSoftwareVersion_ReadsFromPrinterInfoResult()
+    {
+        const string content = """{ "result": { "software_version": "v0.12.0-123-g1234567" } }""";
+
+        MoonrakerOnboardingResolver.ExtractSoftwareVersion(content).Should().Be("v0.12.0-123-g1234567");
+    }
+
+    [Theory]
+    [InlineData("""{ "result": { "state_message": "ok" } }""")]  // no software_version field
+    [InlineData("{ }")]  // no result wrapper
+    [InlineData("not json")]  // malformed
+    [InlineData("")]
+    public void MoonrakerOnboardingResolver_ExtractSoftwareVersion_ReturnsNullWhenAbsentOrInvalid(string content)
+    {
+        MoonrakerOnboardingResolver.ExtractSoftwareVersion(content).Should().BeNull();
+    }
+
     [Fact]
     public async Task MoonrakerProbe_Port80SystemInfo_ReturnsSnapmakerU1()
     {
@@ -199,6 +235,15 @@ public class DiscoveryProbeValidationTests
         result.Printer.Model.Should().Be("Snapmaker U1");
         result.ConfidenceScore.Should().Be(100);
         result.Reason.Should().Contain("Snapmaker U1");
+        result.Printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        result.Printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+        result.Printer.FirmwareDetectionSource.Should().Be(FirmwareDetectionSource.Printer);
+        result.Printer.FirmwareDetectionConfidence.Should().Be(1.0m);
+        result.Printer.FirmwareDetectionVersion.Should().Be(MoonrakerOnboardingResolver.FirmwareProbeVersion);
+        result.Printer.FirmwareDetectedAtUtc.Should().NotBeNull();
+
+        // /machine/system_info (Snapmaker U1) does not carry software_version.
+        result.Printer.FirmwareVersion.Should().BeNull();
     }
 
     [Fact]
@@ -209,7 +254,7 @@ public class DiscoveryProbeValidationTests
         {
             if (request.RequestUri?.Port == 7125 && request.RequestUri.AbsolutePath == "/printer/info")
             {
-                return JsonResponse("""{ "result": { "state_message": "ready", "klipper_path": "/home/pi/klipper", "hostname": "voron" } }""");
+                return JsonResponse("""{ "result": { "state_message": "ready", "klipper_path": "/home/pi/klipper", "hostname": "voron", "software_version": "v0.12.0-123-g1234567" } }""");
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound)
@@ -229,6 +274,13 @@ public class DiscoveryProbeValidationTests
         result.Printer.Model.Should().BeNull();
         result.ConfidenceScore.Should().Be(100);
         result.Reason.Should().Contain("Moonraker detected");
+        result.Printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        result.Printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+        result.Printer.FirmwareDetectionSource.Should().Be(FirmwareDetectionSource.Printer);
+        result.Printer.FirmwareDetectionConfidence.Should().Be(1.0m);
+        result.Printer.FirmwareDetectionVersion.Should().Be(MoonrakerOnboardingResolver.FirmwareProbeVersion);
+        result.Printer.FirmwareDetectedAtUtc.Should().NotBeNull();
+        result.Printer.FirmwareVersion.Should().Be("v0.12.0-123-g1234567");
     }
 
     [Fact]
