@@ -4310,6 +4310,138 @@ public class PrintersController(
         }
     }
 
+    private static readonly IReadOnlyDictionary<string, string> ThumbnailContentTypesByExtension =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".png"] = "image/png",
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".gif"] = "image/gif",
+            [".webp"] = "image/webp",
+        };
+
+    private static readonly char[] PathSegmentSeparators = ['/', '\\'];
+
+    /// <summary>
+    /// Determines whether a backend-relative file path contains a path traversal segment
+    /// (<c>.</c> or <c>..</c>) or is rooted, either of which could escape the printer backend's
+    /// intended files subtree (e.g. Moonraker's <c>gcodes</c> root) when the path is later
+    /// combined with the backend's base URL. This check runs before the extension allowlist so a
+    /// traversal-shaped filename ending in an allowed image extension (e.g.
+    /// <c>../../etc/passwd.png</c>) is still rejected.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does NOT use <see cref="System.IO.Path.IsPathRooted(string)"/>: its notion of
+    /// "rooted" is host-OS-dependent (e.g. on Linux, a leading backslash, a UNC <c>\\server\share</c>
+    /// prefix, or a Windows drive letter like <c>C:\</c> are not considered rooted at all), while
+    /// this endpoint must reject those shapes regardless of which OS it happens to run on. The
+    /// checks below are evaluated as plain string patterns so behavior is identical on every host.
+    /// </remarks>
+    private static bool ContainsPathTraversal(string filename)
+    {
+        if (filename.StartsWith('/') || filename.StartsWith('\\'))
+        {
+            // Leading '/' (rooted on any OS) or leading '\' (a Windows-rooted path, and the
+            // common prefix of a UNC share like \\server\share\thumb.png).
+            return true;
+        }
+
+        if (filename.Length >= 2 && char.IsAsciiLetter(filename[0]) && filename[1] == ':')
+        {
+            // A Windows drive-letter prefix (e.g. C:\thumbs\evil.png or C:/thumbs/evil.png) is
+            // never a valid backend-relative path, regardless of the host OS evaluating it.
+            return true;
+        }
+
+        foreach (string segment in filename.Split(PathSegmentSeparators))
+        {
+            if (segment is "." or "..")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Returns an authenticated same-origin thumbnail image for a file on a printer's storage.
+    /// </summary>
+    /// <param name="id">Printer ID.</param>
+    /// <param name="filename">The backend-relative thumbnail path (filename query parameter).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The thumbnail image content, without exposing the printer's private base URL.</returns>
+    /// <remarks>
+    /// Backend clients (e.g. Moonraker) only ever surface backend-relative thumbnail paths to
+    /// callers - never an absolute internal URL - specifically so that this endpoint can proxy
+    /// the bytes through an authenticated, same-origin request. See issue #1650. This is
+    /// deliberately NOT [AllowAnonymous]: unlike GUID-keyed thumbnail endpoints elsewhere, the
+    /// filename here is not an unguessable capability token, so per-printer group access control
+    /// via <see cref="CanAccessPrinterAsync"/> must still apply.
+    /// </remarks>
+    /// <response code="200">Returns the thumbnail image content.</response>
+    /// <response code="400">The filename query parameter is missing, empty, contains a path traversal segment, or is not a recognized image type.</response>
+    /// <response code="404">The printer with the specified ID was not found, or the thumbnail does not exist on the printer.</response>
+    /// <response code="503">An error occurred while retrieving the thumbnail from the printer.</response>
+    [HttpGet("{id:guid}/files/thumbnail")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult> GetFileThumbnailAsync(Guid id, [FromQuery] string filename, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return BadRequest(new { error = "filename query parameter is required" });
+        }
+
+        if (ContainsPathTraversal(filename))
+        {
+            return BadRequest(new { error = "filename must not contain path traversal segments" });
+        }
+
+        string extension = System.IO.Path.GetExtension(filename);
+        if (!ThumbnailContentTypesByExtension.TryGetValue(extension, out string? contentType))
+        {
+            return BadRequest(new { error = "filename must reference a recognized image type" });
+        }
+
+        if (!await CanAccessPrinterAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            byte[]? content = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
+            if (content == null)
+            {
+                return NotFound(new { error = "printer_file_thumbnail_not_found" });
+            }
+
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(content, contentType);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Printer not found" });
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to retrieve a file thumbnail from printer {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_thumbnail_unavailable" });
+        }
+    }
+
     // File operations with body-based parameters (handles special characters in filenames)
     [HttpPost("{id:guid}/print")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]
@@ -5225,6 +5357,53 @@ public class PrintersController(
                     ["code"] = "printer_configuration_update_failed",
                 });
         }
+    }
+
+    /// <summary>
+    /// Re-probes this printer's firmware identity on demand and persists the detected facts.
+    /// </summary>
+    /// <remarks>
+    /// The persisted firmware columns the calibration gate reads are written only during onboarding
+    /// or as a side effect of a discovery scan posting back a matching <c>ServerUrl</c> (throttled to
+    /// <c>Discovery:FirmwareReprobeIntervalHours</c>). A printer registered before firmware detection
+    /// existed therefore has no way back to a calibratable state. This endpoint is that way back.
+    ///
+    /// Note that the live <c>GET /printers/{id}/version</c> reading is a different value entirely: it
+    /// reports firmware straight from the backend through an in-memory cache and never populates
+    /// these columns, which is why a printer can display a firmware version in the UI while
+    /// calibration still reports the firmware inputs as missing.
+    ///
+    /// Detection never marks the identity verified — that stays a human confirm-only action.
+    /// </remarks>
+    /// <param name="id">Printer id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The detected and persisted firmware identity.</returns>
+    /// <response code="200">Returns the detected and persisted firmware identity.</response>
+    /// <response code="404">If the printer does not exist.</response>
+    /// <response code="409">If the printer's backend does not support firmware probing.</response>
+    /// <response code="502">If the printer could not be reached or did not answer a known endpoint.</response>
+    [HttpPost("{id:guid}/firmware/detect")]
+    [ProducesResponseType(typeof(FirmwareDetectionResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    public async Task<IActionResult> DetectPrinterFirmwareAsync(Guid id, CancellationToken ct)
+    {
+        FirmwareDetectionResult result = await _printersService.DetectFirmwareIdentityAsync(id, ct);
+
+        return result.Failure switch
+        {
+            FirmwareDetectionFailure.PrinterNotFound =>
+                NotFound(new { error = $"Printer {id} not found" }),
+            FirmwareDetectionFailure.BackendNotSupported =>
+                Conflict(new { error = "firmware_probe_backend_unsupported" }),
+            FirmwareDetectionFailure.ServerUrlInvalid =>
+                Conflict(new { error = "firmware_probe_server_url_invalid" }),
+            FirmwareDetectionFailure.ProbeFailed =>
+                StatusCode(StatusCodes.Status502BadGateway, new { error = "firmware_probe_failed" }),
+            _ => Ok(result),
+        };
     }
 
     /// <summary>

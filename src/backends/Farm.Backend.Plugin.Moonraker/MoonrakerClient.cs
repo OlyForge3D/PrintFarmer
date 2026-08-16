@@ -1480,8 +1480,9 @@ public class MoonrakerClient(
                             modified = (long)timestamp;
                         }
 
-                        // Get thumbnail URL for this file
-                        string? thumbnailUrl = await GetThumbnailUrlAsync(baseUrl, fileName, cts.Token);
+                        // Get the backend-relative thumbnail path for this file (never an absolute
+                        // internal URL - see GetThumbnailPathAsync remarks).
+                        string? thumbnailPath = await GetThumbnailPathAsync(baseUrl, fileName, cts.Token);
 
                         files.Add(new PrinterFileInfo
                         {
@@ -1489,7 +1490,7 @@ public class MoonrakerClient(
                             Path = fileName,
                             Size = size,
                             Modified = modified,
-                            ThumbnailUrl = thumbnailUrl
+                            ThumbnailPath = thumbnailPath
                         });
                     }
                 }
@@ -1504,13 +1505,20 @@ public class MoonrakerClient(
     }
 
     /// <summary>
-    /// Gets the thumbnail URL for a gcode file if available.
+    /// Gets the backend-relative thumbnail path for a gcode file if available.
     /// Returns null if no thumbnail is found.
     /// </summary>
     /// <param name="baseUrl">The base URL of the Moonraker server.</param>
     /// <param name="filename">The name of the gcode file.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
-    private async Task<string?> GetThumbnailUrlAsync(string baseUrl, string filename, CancellationToken ct = default)
+    /// <remarks>
+    /// Deliberately returns only the relative path (e.g. "thumbs/model-300x300.png"), never an
+    /// absolute URL built from <paramref name="baseUrl"/>. <paramref name="baseUrl"/> may be an
+    /// internal-only Compose hostname that a browser cannot resolve; callers must route the
+    /// relative path through a same-origin, authenticated proxy endpoint instead of exposing it
+    /// directly. See issue #1650.
+    /// </remarks>
+    private async Task<string?> GetThumbnailPathAsync(string baseUrl, string filename, CancellationToken ct = default)
     {
         try
         {
@@ -1521,8 +1529,7 @@ public class MoonrakerClient(
                 (int Width, int Height, string RelativePath) largestThumbnail = thumbnails.OrderByDescending(t => t.Width * t.Height).FirstOrDefault();
                 if (!string.IsNullOrEmpty(largestThumbnail.RelativePath))
                 {
-                    // Build absolute thumbnail URL
-                    return $"{baseUrl}/server/files/gcodes/{Uri.EscapeDataString(largestThumbnail.RelativePath)}";
+                    return largestThumbnail.RelativePath;
                 }
             }
         }

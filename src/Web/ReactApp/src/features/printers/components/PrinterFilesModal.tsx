@@ -4,6 +4,7 @@ import { Button, ProgressBar, Select } from '@/common/components/ui';
 import { Modal, ConfirmationModal } from '@/common/components/modals';
 import { apiClient } from '@/services/api';
 import { signalRService, type SingleFileHarvestProgressEvent, type SingleFileHarvestCompleteEvent } from '@/services/harvest-signalr';
+import { usePrinterFileThumbnails } from '@/features/printers/hooks/usePrinterFileThumbnails';
 import { toast } from 'sonner';
 import type { Printer, PrinterFileDto } from '@/types/api';
 
@@ -26,13 +27,14 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedFile, setCopiedFile] = useState<string | null>(null);
-  const [selectedThumbnail, setSelectedThumbnail] = useState<{ fileName: string; url: string } | null>(null);
+  const [selectedThumbnail, setSelectedThumbnail] = useState<{ fileName: string; thumbnailUrl: string } | null>(null);
   const [sortBy, setSortBy] = useState<SortBy>('name');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState<string | null>(null);
   const [harvestProgress, setHarvestProgress] = useState<Record<string, FileHarvestProgress>>({});
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'print' | 'delete'; file: PrinterFileDto } | null>(null);
+  const { objectUrls: thumbnailObjectUrls } = usePrinterFileThumbnails(files);
 
   const loadFiles = useCallback(async () => {
     try {
@@ -339,13 +341,13 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
                       >
                         <div className="flex items-center justify-between">
                           <div className="flex items-center flex-1 min-w-0 gap-3">
-                            {file.thumbnailUrl ? (
+                            {file.thumbnailUrl && thumbnailObjectUrls[file.thumbnailUrl] ? (
                               <div
                                 className="relative h-12 w-12 shrink-0 rounded-sm bg-pf-bg-2 border border-pf-border overflow-hidden cursor-pointer hover:opacity-80 transition-opacity"
-                                onClick={() => setSelectedThumbnail({ fileName: file.fileName, url: file.thumbnailUrl! })}
+                                onClick={() => setSelectedThumbnail({ fileName: file.fileName, thumbnailUrl: file.thumbnailUrl! })}
                               >
                                 <img
-                                  src={file.thumbnailUrl}
+                                  src={thumbnailObjectUrls[file.thumbnailUrl]}
                                   alt={file.fileName}
                                   className="h-full w-full object-cover"
                                   onError={(e) => {
@@ -484,10 +486,10 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
           onConfirm={() => confirmPrintFile(printConfirmDialog.file.fileName)}
           onCancel={() => setConfirmDialog(null)}
         >
-          {printConfirmDialog.file.thumbnailUrl && (
+          {printConfirmDialog.file.thumbnailUrl && thumbnailObjectUrls[printConfirmDialog.file.thumbnailUrl] && (
             <div className="flex justify-center mb-4 -mx-6 -mt-6 px-6 pt-6 border-b border-pf-border pb-4">
               <img
-                src={printConfirmDialog.file.thumbnailUrl}
+                src={thumbnailObjectUrls[printConfirmDialog.file.thumbnailUrl]}
                 alt={printConfirmDialog.file.fileName}
                 className="rounded-lg max-w-xs max-h-48 object-cover border border-pf-border"
                 onError={(e) => {
@@ -560,7 +562,7 @@ export function PrinterFilesModal({ isOpen, onClose, printer }: PrinterFilesModa
         >
           <div className="flex items-center justify-center bg-pf-bg-2 rounded-lg overflow-hidden max-h-[70vh]">
             <img
-              src={selectedThumbnail.url}
+              src={thumbnailObjectUrls[selectedThumbnail.thumbnailUrl]}
               alt={selectedThumbnail.fileName}
               className="max-w-full max-h-[70vh] object-contain"
               onError={(e) => {

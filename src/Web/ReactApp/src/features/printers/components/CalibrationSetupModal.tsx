@@ -175,6 +175,24 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
     },
   });
 
+  const detectFirmwareMutation = useMutation({
+    mutationFn: () => apiClient.detectPrinterFirmware(printerId),
+    onSuccess: (result) => {
+      // The detected facts land on the printer row, so the calibration context has to be
+      // refetched for the gate to stop reporting the firmware inputs as missing.
+      queryClient.invalidateQueries({ queryKey: calibrationContextQueryKey });
+      queryClient.invalidateQueries({ queryKey: ['printers'] });
+      toast.success(
+        result.version
+          ? `Firmware detected: ${result.family ?? 'Unknown'} ${result.version}`
+          : `Firmware detected: ${result.family ?? 'Unknown'}`
+      );
+    },
+    onError: (error: unknown) => {
+      toast.error(mutationErrorMessage(error, 'Failed to detect firmware'));
+    },
+  });
+
   const handleSave = () => {
     const toolheadDtos: CalibrationToolheadSetupDto[] = toolheads.map((t) => ({
       id: t.id,
@@ -358,12 +376,24 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
                 These facts are detected automatically and cannot be edited here. Confirm them once verified against
                 the physical hardware.
               </p>
-              <div>
+              <p className="text-pf-text-secondary">
+                The firmware version shown elsewhere in the app is read live from the printer and is not the same
+                record calibration reads. If calibration still reports firmware as missing, re-probe here.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => detectFirmwareMutation.mutate()}
+                  disabled={detectFirmwareMutation.isPending || setupMutation.isPending}
+                >
+                  {detectFirmwareMutation.isPending ? 'Detecting…' : 'Re-probe firmware'}
+                </Button>
                 <Button
                   variant={firmware?.verified ? 'secondary' : 'primary'}
                   size="sm"
                   onClick={handleMarkFirmwareVerified}
-                  disabled={setupMutation.isPending}
+                  disabled={setupMutation.isPending || detectFirmwareMutation.isPending}
                 >
                   {firmware?.verified ? 'Firmware verified ✓' : 'Mark firmware verified'}
                 </Button>
