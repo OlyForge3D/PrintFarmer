@@ -382,6 +382,8 @@ public sealed class MoonrakerSubscriptionService(
             }
             catch (OperationCanceledException) when (printerCts.IsCancellationRequested)
             {
+                // Expected: the loop was cancelled by the CancelAsync() call above.
+                _logger.LogDebug("Subscription loop for printer {PrinterId} cancelled while replacing it", printer.Id);
             }
             finally
             {

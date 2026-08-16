@@ -368,6 +368,68 @@ public sealed class MoonrakerUploadOutcomeTests
         listAuxiliary.Units.Should().Be(detailAuxiliary.Units);
     }
 
+    [Fact]
+    public async Task GetFileListAsync_InternalTimeout_DegradesToEmptyList()
+    {
+        // The request never completes, so the method's own CommandTimeout-driven
+        // CancelAfter fires internally - not the caller's token. This must degrade to
+        // an empty list (the historical bare-catch fallback), not propagate an
+        // unhandled OperationCanceledException.
+        using var handler = new AsyncMessageHandler(async (_, ct) =>
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new HttpResponseMessage(HttpStatusCode.OK);
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings
+            {
+                CommandTimeoutSeconds = 1,
+            });
+
+        string[] files = await client.GetFileListAsync(
+            "http://moonraker/",
+            ct: CancellationToken.None);
+
+        files.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetFileListAsync_CallerCancellation_PropagatesCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new AsyncMessageHandler((_, _) =>
+        {
+            cts.Cancel();
+            return Task.FromException<HttpResponseMessage>(
+                new OperationCanceledException(cts.Token));
+        });
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(
+            http,
+            NullLogger<MoonrakerClient>.Instance,
+            new BackendTimeoutSettings());
+
+        Func<Task> action = async () =>
+            await client.GetFileListAsync("http://moonraker/", cts.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private sealed class AsyncMessageHandler(
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            return send(request, cancellationToken);
+        }
+    }
+
     private sealed class ResponseLostAfterContentHandler : HttpMessageHandler
     {
         public bool ContentWasRead { get; private set; }

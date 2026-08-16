@@ -178,12 +178,9 @@ public sealed class PrinterVersionCache(
     // observed) is never removed out from under it.
     private static void SweepExpiredForceRefreshWindows(DateTime nowUtc)
     {
-        foreach (KeyValuePair<Guid, (Guid Token, DateTime ExpiresAtUtc)> entry in ForceRefreshWindows)
+        foreach (KeyValuePair<Guid, (Guid Token, DateTime ExpiresAtUtc)> entry in ForceRefreshWindows.Where(e => e.Value.ExpiresAtUtc <= nowUtc))
         {
-            if (entry.Value.ExpiresAtUtc <= nowUtc)
-            {
-                _ = ForceRefreshWindows.TryRemove(entry);
-            }
+            _ = ForceRefreshWindows.TryRemove(entry);
         }
     }
 }

@@ -81,7 +81,7 @@ function MaintenanceBadge({ days, task }: { days?: number | null; task?: string 
       <CheckCircleIcon className="w-4 h-4 text-pf-success" />
       <div className="flex flex-col">
         <span className="text-pf-text-secondary text-sm">
-          {days} day{days !== 1 ? 's' : ''}
+          {days} days
         </span>
         {task && <span className="text-pf-text-tertiary text-xs truncate max-w-[150px]">{task}</span>}
       </div>
