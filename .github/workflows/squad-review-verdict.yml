@@ -104,6 +104,13 @@ name: Record squad review (self-attested)
 # any time. What the override cannot do there is authorise the UNATTENDED merger,
 # which by design only touches labelled PRs — to hand a PR to Ralph, label it.
 #
+# REMOVING THE LABEL IS NOT A HOLD. On a non-fork PR whose author resolves to a
+# roster member, this workflow re-applies the scope label on the next run, so
+# stripping it does not park the PR. That is the safe direction — it re-imposes
+# the review gate rather than bypassing it — but it means label removal is the
+# wrong tool for holding work back. To stop the unattended merger, record a
+# CHANGES_REQUESTED verdict or mark the PR draft.
+#
 # The job itself always succeeds; the gate result is the `squad/pre-pr-verdict`
 # commit status. Keeping the run conclusion at `success` is what lets
 # scripts/ci/verify-squad-verdict.mjs treat the run as a provenance record —

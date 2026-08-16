@@ -661,6 +661,17 @@ test('auto-scoping refuses forks and unrostered self-declared authors', () => {
     false,
   );
 
+  // Every member must be rostered, not merely one of them: a `some` check would
+  // let an attacker ride along by naming a real member beside themselves.
+  assert.equal(
+    canAutoScope({ authorMembers: new Set(['bishop', 'attacker']), roster, isFork: false }),
+    false,
+  );
+  assert.equal(
+    canAutoScope({ authorMembers: new Set(['bishop', 'hicks']), roster, isFork: false }),
+    true,
+  );
+
   assert.equal(canAutoScope({ authorMembers: new Set(), roster, isFork: false }), false);
   assert.equal(canAutoScope({}), false);
 });
@@ -778,12 +789,23 @@ test('the scoping workflow wiring stays intact', async () => {
   // Labelling must not migrate back out into a dedicated workflow: the default
   // GITHUB_TOKEN does not start new workflow runs, so a separate labeller's
   // `labeled` event would never re-trigger the evaluation that depends on it,
-  // and the two would race on `opened`.
+  // and the two would race on `opened`. Matched by CONTENT, not filename, so a
+  // reintroduced labeller under any other name still fails. Other workflows may
+  // legitimately apply `squad:*` labels (triage, blocked-sync); what is reserved
+  // here is the bare SCOPE label and the guard that governs it.
   const workflowDir = path.join(repositoryRoot, '.github/workflows');
-  const strays = (await readdir(workflowDir))
-    .filter((name) => /^squad-pr-label\.ya?ml$/i.test(name));
+  const names = (await readdir(workflowDir)).filter((n) => /\.ya?ml$/i.test(n));
+  const strays = [];
+  for (const name of names) {
+    if (name === 'squad-review-verdict.yml') continue;
+    const body = await readFile(path.join(workflowDir, name), 'utf8');
+    if (/squadScopeLabel|canAutoScope/.test(body) ||
+        /labels:\s*\[\s*(['"])squad\1\s*\]/.test(body)) {
+      strays.push(name);
+    }
+  }
   assert.deepEqual(
     strays, [],
-    `scope labelling must stay in squad-review-verdict.yml; found: ${strays.join(', ')}`,
+    `squad scope labelling must stay in squad-review-verdict.yml; found: ${strays.join(', ')}`,
   );
 });

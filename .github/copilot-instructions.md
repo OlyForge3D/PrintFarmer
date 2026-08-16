@@ -391,7 +391,8 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   resolved live through the collaborator permission API. Both repositories are public,
   so anyone can comment on a PR; `author_association` is a pre-filter only and is never
   sufficient on its own. Lookups fail closed. See "What keeps outsiders out" above.
-- A repository administrator satisfies the gate unconditionally, either by
+- A repository administrator satisfies the gate unconditionally **on an in-scope
+  PR**, either by
   approving through GitHub's native review UI at the current head, or by posting
   a record whose `Squad-Reviewer` is their own GitHub login. The owner
   is never locked out. Only each administrator's **most recent decisive** review
