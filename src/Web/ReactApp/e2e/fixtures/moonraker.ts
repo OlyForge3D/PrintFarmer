@@ -290,11 +290,31 @@ export async function expectPrinterStatus(card: Locator, label: string): Promise
   await expect(card.getByText(label, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 }
 
-/** Open a printer's detail sidebar and return its `complementary` landmark locator. */
-export async function openPrinterDetails(page: Page, name: string): Promise<Locator> {
+/** Return the detailed card that owns the printer's inline detail controls. */
+export async function getInlinePrinterDetails(page: Page, name: string): Promise<Locator> {
   const card = getPrinterCardByName(page, name);
   await expect(card).toBeVisible({ timeout: 10_000 });
   await dismissTourIfVisible(page);
+  await expect(card.getByRole('button', { name: 'Open details sidebar' })).toHaveCount(0);
+  return card;
+}
+
+/** Select a printer view mode and wait for the page to render it. */
+export async function setPrinterViewMode(
+  page: Page,
+  mode: 'detailed' | 'compact' | 'table'
+): Promise<void> {
+  await page.evaluate((viewMode) => localStorage.setItem('printerViewMode', viewMode), mode);
+  await page.reload();
+  await page.waitForLoadState('domcontentloaded');
+  await dismissTourIfVisible(page);
+}
+
+/** Open a printer's detail sidebar from compact-card mode. */
+export async function openCompactPrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
+  await setPrinterViewMode(page, 'compact');
+  const card = getPrinterCardByName(page, name);
+  await expect(card).toBeVisible({ timeout: 10_000 });
   await card.getByRole('button', { name: 'Open details sidebar' }).click();
 
   const sidebar = page.getByRole('complementary', { name: `${name} details` });
