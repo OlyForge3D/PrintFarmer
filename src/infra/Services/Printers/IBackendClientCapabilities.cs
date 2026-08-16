@@ -836,9 +836,22 @@ public class PrinterFileInfo
 
     /// <summary>
     /// Absolute URL to the file's thumbnail image, or null if no thumbnail available.
-    /// Backend implementations are responsible for constructing the complete URL if thumbnails are supported.
     /// </summary>
+    /// <remarks>
+    /// This may be a private/internal-network URL (e.g., pointing directly at the printer or an
+    /// internal Compose hostname) and must never be handed to a browser as-is. Consumers should
+    /// prefer <see cref="ThumbnailPath"/>, which can be passed to a same-origin, authenticated
+    /// download endpoint to build a browser-reachable thumbnail URL.
+    /// </remarks>
     public string? ThumbnailUrl { get; set; }
+
+    /// <summary>
+    /// Backend-relative path to the file's thumbnail image (e.g., "thumbs/model-300x300.png"),
+    /// or null if no thumbnail is available. This path is relative to the same file root used
+    /// for downloading the file itself, and is safe to expose to a same-origin, authenticated
+    /// download/thumbnail endpoint since it never reveals the backend's private base URL.
+    /// </summary>
+    public string? ThumbnailPath { get; set; }
 }
 
 /// <summary>

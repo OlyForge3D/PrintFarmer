@@ -1088,6 +1088,26 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Re-probes the printer's firmware identity on demand and persists the detected
+   * facts to the columns the calibration gate reads.
+   *
+   * This is deliberately separate from `GET /printers/{id}/version`, which reads
+   * firmware live through an in-memory cache and never writes the database. That
+   * split is why a printer can display a firmware version in the sidebar while
+   * calibration still reports the firmware inputs as missing.
+   *
+   * Detection never marks the identity verified — that stays a human action.
+   */
+  async detectPrinterFirmware(
+    id: string
+  ): Promise<import("@/types/api").FirmwareDetectionResultDto> {
+    const response = await this.client.post<import("@/types/api").FirmwareDetectionResultDto>(
+      `/printers/${id}/firmware/detect`
+    );
+    return response.data;
+  }
+
   async applyModelTemplate(id: string): Promise<void> {
     await this.client.post(`/printers/${id}/apply-template`);
   }
@@ -1490,6 +1510,29 @@ export class ApiClient {
     const response = await this.client.get<PrinterFileDto[]>(
       `/printers/${printerId}/files`
     );
+    return response.data;
+  }
+
+  /**
+   * Fetches a printer file's thumbnail as an authenticated blob.
+   *
+   * `thumbnailUrl` is the same-origin proxy path returned by the backend on
+   * `PrinterFileDto.thumbnailUrl` (e.g. `/api/printers/{id}/files/thumbnail?filename=...`).
+   * The leading `/api` is stripped because `this.client` already has that prefix as its
+   * baseURL - see `NewSliceJobPage.tsx`'s identical `serverModel.url.replace(/^\/api/, '')`
+   * pattern. A bare `<img src>` cannot be used here because auth is JWT-bearer only (no
+   * auth cookie), so the thumbnail must be fetched with the Authorization header and
+   * rendered via an object URL. See issue #1650.
+   */
+  async getPrinterFileThumbnail(
+    thumbnailUrl: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const path = thumbnailUrl.replace(/^\/api/, "");
+    const response = await this.client.get<Blob>(path, {
+      responseType: "blob",
+      signal,
+    });
     return response.data;
   }
 

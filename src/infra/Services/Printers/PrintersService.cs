@@ -610,6 +610,19 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Builds a same-origin, authenticated proxy URL for a printer file's thumbnail from its
+    /// backend-relative path, or null if no thumbnail path is available.
+    /// </summary>
+    /// <remarks>
+    /// Never returns a backend-internal URL directly - browsers may not be able to resolve the
+    /// backend's base URL (e.g. an internal Docker Compose hostname). See issue #1650.
+    /// </remarks>
+    private static string? BuildFileThumbnailProxyUrl(Guid printerId, string? thumbnailPath) =>
+        string.IsNullOrWhiteSpace(thumbnailPath)
+            ? null
+            : $"/api/printers/{printerId:D}/files/thumbnail?filename={Uri.EscapeDataString(thumbnailPath)}";
+
+    /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
     /// </summary>
     /// <param name="printerId">Unique printer identifier (GUID)</param>
@@ -1175,6 +1188,71 @@ public class PrintersService(
         DateTime now = nowUtc ?? DateTime.UtcNow;
         return !printer.FirmwareDetectedAtUtc.HasValue ||
             now - printer.FirmwareDetectedAtUtc.Value >= TimeSpan.FromHours(_firmwareReprobeIntervalHours);
+    }
+
+    /// <summary>
+    /// Probes a registered printer's Moonraker endpoint on demand and persists the firmware
+    /// identity, bypassing the discovery-scan dependency and cadence guard that
+    /// <see cref="RefreshDetectedFirmwareIdentityAsync"/> is subject to. See #1618 / #1613 §4.5.1.
+    /// </summary>
+    public async Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct)
+    {
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
+        if (printer is null)
+        {
+            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
+        }
+
+        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+        {
+            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.BackendNotSupported);
+        }
+
+        if (!Uri.TryCreate(printer.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+        {
+            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ServerUrlInvalid);
+        }
+
+        using HttpClient client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(5);
+
+        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+            client,
+            serverUri,
+            printer.BackendPort,
+            ct);
+
+        if (resolution is null)
+        {
+            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ProbeFailed);
+        }
+
+        DateTime nowUtc = DateTime.UtcNow;
+        decimal confidence = MoonrakerOnboardingResolver.MapConfidenceScore(resolution.ConfidenceScore);
+        string? version = MoonrakerOnboardingResolver.ExtractSoftwareVersion(resolution.ResponseContent);
+
+        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+        printer.FirmwareDetectionConfidence = confidence;
+        printer.FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion;
+        printer.FirmwareDetectedAtUtc = nowUtc;
+
+        // A probe that cannot read software_version must not erase a version recorded earlier.
+        printer.FirmwareVersion = version ?? printer.FirmwareVersion;
+
+        // FirmwareIdentityVerified is intentionally left alone: detection populates facts, a human
+        // attests them (#1613 AC #3).
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        return new FirmwareDetectionResult(
+            Succeeded: true,
+            Failure: FirmwareDetectionFailure.None,
+            Family: printer.FirmwareFamily,
+            Version: printer.FirmwareVersion,
+            DetectionConfidence: confidence,
+            DetectedAtUtc: nowUtc,
+            IdentityVerified: printer.FirmwareIdentityVerified);
     }
 
     /// <summary>
@@ -4557,9 +4635,16 @@ public class PrintersService(
                 return Array.Empty<PrinterFileDto>();
             }
 
-            // Simply convert PrinterFileInfo to PrinterFileDto - backend has already provided all metadata
+            // Simply convert PrinterFileInfo to PrinterFileDto - backend has already provided all metadata.
+            // ThumbnailUrl is rewritten to a same-origin, authenticated proxy URL rather than
+            // forwarding the backend's (potentially internal-only) ThumbnailUrl/base URL directly
+            // to the browser. See issue #1650.
             return fileInfos
-                .Select(f => new PrinterFileDto(f.Name, f.ThumbnailUrl, f.Modified, f.Size))
+                .Select(f => new PrinterFileDto(
+                    f.Name,
+                    BuildFileThumbnailProxyUrl(p.Id, f.ThumbnailPath),
+                    f.Modified,
+                    f.Size))
                 .ToArray();
         }
         catch (Exception ex)

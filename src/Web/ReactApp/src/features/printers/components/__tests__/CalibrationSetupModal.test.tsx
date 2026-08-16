@@ -7,6 +7,7 @@ import type { CalibrationContextDto } from '@/types/api';
 
 const mockGetCalibrationContext = vi.fn();
 const mockUpdateCalibrationSetup = vi.fn();
+const mockDetectPrinterFirmware = vi.fn();
 const mockListExtended = vi.fn();
 
 vi.mock('@/services/slicerProfilesService', () => ({
@@ -19,6 +20,7 @@ vi.mock('@/services/api', () => ({
   apiClient: {
     getCalibrationContext: (...args: unknown[]) => mockGetCalibrationContext(...args),
     updateCalibrationSetup: (...args: unknown[]) => mockUpdateCalibrationSetup(...args),
+    detectPrinterFirmware: (...args: unknown[]) => mockDetectPrinterFirmware(...args),
   },
 }));
 
@@ -131,6 +133,15 @@ describe('CalibrationSetupModal', () => {
       firmware: createContext().firmware,
       toolheads: [],
     });
+    mockDetectPrinterFirmware.mockResolvedValue({
+      succeeded: true,
+      failure: 'None',
+      family: 'Klipper',
+      version: 'v0.12.0-321',
+      detectionConfidence: 1,
+      detectedAtUtc: new Date().toISOString(),
+      identityVerified: false,
+    });
   });
 
   it('does not render when closed', () => {
@@ -168,8 +179,38 @@ describe('CalibrationSetupModal', () => {
     expect(screen.queryByLabelText(/firmware version/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/gcode dialect/i)).not.toBeInTheDocument();
 
-    // The only firmware-related control is the confirm-only verify button.
+    // The firmware facts themselves stay uneditable. The two firmware controls are both
+    // actions, not fields: one re-probes the printer, one attests the result.
     expect(screen.getByRole('button', { name: /mark firmware verified/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /re-probe firmware/i })).toBeInTheDocument();
+  });
+
+  it('re-probing firmware calls the detect endpoint and does not write through the setup endpoint', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('Klipper');
+
+    await user.click(screen.getByRole('button', { name: /re-probe firmware/i }));
+
+    await waitFor(() => expect(mockDetectPrinterFirmware).toHaveBeenCalledWith('printer-1'));
+
+    // Detection is a probe, not an attestation. Routing it through the setup endpoint would
+    // let a re-probe silently set firmwareIdentityVerified, which must stay a human act.
+    expect(mockUpdateCalibrationSetup).not.toHaveBeenCalled();
+  });
+
+  it('marking firmware verified still goes to the setup endpoint, not the probe', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText('Klipper');
+
+    await user.click(screen.getByRole('button', { name: /mark firmware verified/i }));
+
+    await waitFor(() => expect(mockUpdateCalibrationSetup).toHaveBeenCalled());
+
+    // Control for the test above: the same modal, the adjacent button, the opposite routing.
+    // Without this, "detect does not call setup" could hold simply because nothing is wired.
+    expect(mockDetectPrinterFirmware).not.toHaveBeenCalled();
   });
 
   it('confirming firmware verified submits only firmwareIdentityVerified, no override fields', async () => {

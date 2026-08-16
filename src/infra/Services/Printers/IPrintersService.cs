@@ -169,6 +169,24 @@ public interface IPrintersService
     bool IsFirmwareReprobeDue(Printer printer, DateTime? nowUtc = null);
 
     /// <summary>
+    /// Probes a registered printer's Moonraker endpoint on demand and persists the resulting
+    /// firmware identity. This is the operator-initiated counterpart to
+    /// <see cref="RefreshDetectedFirmwareIdentityAsync"/>: that one only runs as a side effect of a
+    /// discovery scan posting back a printer whose <c>ServerUrl</c> matches, and is throttled to a
+    /// multi-hour cadence, so a printer registered before firmware detection existed can otherwise
+    /// stay permanently uncalibratable with no way for an operator to fix it.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately not throttled — an explicit operator action should always re-probe. Deliberately
+    /// does not set <c>FirmwareIdentityVerified</c>: firmware identity remains confirm-only
+    /// (#1613 AC #3), so a probe can populate the detected facts but only a human can attest them.
+    /// </remarks>
+    /// <param name="printerId">The already-registered printer's id.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>The probe outcome, including the persisted firmware identity when it succeeded.</returns>
+    Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct);
+
+    /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
     /// </summary>
     /// <param name="ct">Cancellation token</param>

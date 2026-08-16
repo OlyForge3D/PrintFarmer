@@ -1493,6 +1493,24 @@ export interface CalibrationSlicerIdentityDto {
 }
 
 /**
+ * Outcome of an on-demand firmware re-probe
+ * (`POST /printers/{id}/firmware/detect`).
+ *
+ * `identityVerified` is reported but never *set* by detection: populating the
+ * firmware facts and attesting them are separate acts, and only an operator
+ * performs the second one.
+ */
+export interface FirmwareDetectionResultDto {
+  succeeded: boolean;
+  failure: string;
+  family?: string | null;
+  version?: string | null;
+  detectionConfidence?: number | null;
+  detectedAtUtc?: string | null;
+  identityVerified: boolean;
+}
+
+/**
  * Read-only calibration-eligibility snapshot for a printer, combining
  * profile-owned facts (#1614/#1615) with the residual manual fields this PR
  * exposes. Used to reflect eligibility changes after a calibration-setup
