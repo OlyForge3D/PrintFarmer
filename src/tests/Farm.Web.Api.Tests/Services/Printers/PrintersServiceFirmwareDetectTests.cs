@@ -219,6 +219,16 @@ public sealed class PrintersServiceFirmwareDetectTests
         result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
         PrintersService.HasFirmwareIdentityWriteLockForTests(printerId).Should().BeFalse(
             "a delete discovered only when the write itself fails must still evict this printer's lock-table entry, not just the pre-write recheck path");
+
+        // #1656 / PR #1660 review round 8 (Bishop, blocking): confirming the delete is not
+        // enough on its own -- this scope's `db` must no longer be tracking the deleted `printer`
+        // instance, or a subsequent same-scope repository lookup would be satisfied from the
+        // identity map with this stale, since-deleted instance instead of genuinely re-querying
+        // the database and observing the deletion.
+        entry.State.Should().Be(Microsoft.EntityFrameworkCore.EntityState.Detached,
+            "the confirmed-deleted printer's tracked entity must be detached, otherwise a same-scope FindAsync re-read after this call would still be satisfied from the identity map with the stale pre-delete instance instead of observing the deletion");
+        (await db.Printers.FindAsync(new object?[] { printerId }, CancellationToken.None)).Should().BeNull(
+            "with the tracked entity detached, a same-scope FindAsync re-read must genuinely re-query the database and observe the deletion, not silently return the stale identity-mapped instance");
     }
 
     [Fact]

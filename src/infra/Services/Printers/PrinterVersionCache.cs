@@ -211,8 +211,20 @@ public sealed class PrinterVersionCache(
                 // "declined — lost the cadence race") before returning, so by the time we reach
                 // this line `printer` already reflects whatever is truly persisted. This call is
                 // kept only as defense in depth for the case where the printer row itself was
-                // deleted concurrently (FindByIdAsync then returns null and we fall back to the
-                // in-memory instance).
+                // deleted concurrently.
+                //
+                // #1656 / PR #1660 review round 8 (Bishop, blocking): a concurrent mid-refresh
+                // delete is exactly the case the "defense in depth" comment above assumed
+                // FindByIdAsync would already handle by returning null — but FindByIdAsync is
+                // backed by DbSet.FindAsync, which is satisfied from the identity map, so it
+                // would keep returning this same stale tracked `printer` instance instead of
+                // null. RefreshDetectedFirmwareIdentityAsync's own WasFirmwareIdentityPrinterDeletedAsync
+                // helper now detaches the tracked entity from this DbContext the moment it
+                // confirms the row is genuinely gone, so this FindByIdAsync call is a real,
+                // database-backed re-query in that case and correctly returns null (falling back
+                // to `printer` here only as a last-resort in-memory snapshot for response shaping
+                // — never as a substitute for observing the deletion in RecordedFirmwareIdentity
+                // below, which is computed from the persisted columns).
                 printer = await _printersService.FindByIdAsync(printer.Id, ct) ?? printer;
             }
         }

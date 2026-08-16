@@ -1289,20 +1289,37 @@ public class PrintersService(
     /// concurrency conflict on a token this entity does not have configured; callers still treat
     /// that case defensively (reload and rethrow) rather than assuming it can only mean deletion.
     /// </para>
+    /// <para>
+    /// #1656 / PR #1660 review round 8 (Bishop, blocking): confirming deletion is not enough on
+    /// its own -- the caught exception's tracked entity (<paramref name="ex"/>'s
+    /// <see cref="DbUpdateException.Entries"/>) remains attached to its
+    /// <see cref="Microsoft.EntityFrameworkCore.DbContext"/>'s identity map after this method
+    /// returns. <see cref="EfPrintersRepository.FindByIdAsync"/> is backed by
+    /// <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>, which satisfies a
+    /// lookup by key from a same-scope tracked instance without ever re-querying the database.
+    /// <see cref="PrinterVersionCache.GetAsync"/> does exactly this kind of same-scope re-read
+    /// immediately after <see cref="RefreshDetectedFirmwareIdentityAsync"/> returns, so a deleted
+    /// printer's stale tracked entity would otherwise still be handed back to that caller instead
+    /// of the caller observing the deletion. Detaching each confirmed-deleted entry here, in the
+    /// one place that already proves the row is gone, closes that for every caller uniformly
+    /// rather than requiring each call site to remember to do it.
+    /// </para>
     /// </summary>
     private static async Task<bool> WasFirmwareIdentityPrinterDeletedAsync(DbUpdateConcurrencyException ex, CancellationToken ct)
     {
+        bool anyDeleted = false;
         foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry in ex.Entries)
         {
             Microsoft.EntityFrameworkCore.ChangeTracking.PropertyValues? databaseValues =
                 await entry.GetDatabaseValuesAsync(ct);
             if (databaseValues is null)
             {
-                return true;
+                entry.State = EntityState.Detached;
+                anyDeleted = true;
             }
         }
 
-        return false;
+        return anyDeleted;
     }
 
     /// <summary>
@@ -1499,6 +1516,16 @@ public class PrintersService(
                 // pre-write check, however late, can substitute for this): treat it exactly like
                 // any other "printer not found" outcome, evict the lock-table entry, and return
                 // without rethrowing.
+                //
+                // #1656 / PR #1660 review round 8 (Bishop, blocking): confirming deletion alone
+                // was not enough — WasFirmwareIdentityPrinterDeletedAsync now also detaches the
+                // tracked entity on a confirmed delete, so this method's own `printer` local (the
+                // same instance, since EF's identity map only ever tracks one instance per key)
+                // is no longer attached to this DbContext. That closes the exact bug Bishop
+                // found: PrinterVersionCache.GetAsync's post-refresh FindByIdAsync re-read in
+                // this same scope can no longer be satisfied from the identity map with this
+                // stale, since-deleted instance — it now genuinely re-queries the database and
+                // correctly observes the deletion (returning null).
                 if (await WasFirmwareIdentityPrinterDeletedAsync(ex, CancellationToken.None))
                 {
                     EvictFirmwareIdentityWriteLock(printerId, gate);
@@ -1745,6 +1772,12 @@ public class PrintersService(
                 // WasFirmwareIdentityPrinterDeletedAsync — the write itself is now the atomic
                 // existence check that closes the remaining gap after any number of pre-write
                 // checks.
+                //
+                // #1656 / PR #1660 review round 8 (Bishop, blocking): WasFirmwareIdentityPrinterDeletedAsync
+                // also detaches the tracked entity on a confirmed delete now, so this method's own
+                // `printer` local is no longer attached once we reach here — closing the same
+                // stale-identity-map-reread bug Bishop found via PrinterVersionCache's
+                // post-refresh re-read (see the matching remarks in RefreshDetectedFirmwareIdentityAsync).
                 if (await WasFirmwareIdentityPrinterDeletedAsync(ex, CancellationToken.None))
                 {
                     EvictFirmwareIdentityWriteLock(printerId, gate);
