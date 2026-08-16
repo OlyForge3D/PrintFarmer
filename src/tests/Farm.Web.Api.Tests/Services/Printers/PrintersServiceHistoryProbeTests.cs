@@ -230,15 +230,17 @@ public sealed class PrintersServiceHistoryProbeTests
         Printer printer = CreatePrinter(PrinterBackend.Moonraker);
         var history = new HistoryListResponse
         {
+            Count = 1,
             Jobs =
             [
                 new HistoryJob
                 {
                     JobId = "provider-job",
+                    Filename = "calibration.gcode",
+                    Status = "completed",
                     ThumbnailUrl = "http://moonraker.local/server/files/thumb.png",
                 },
             ],
-            Count = 1,
             AuthorityEvidence = CompleteEvidence(1),
         };
         Mock<ISupportsHistory> historyClient = CreateHistoryClient();
@@ -258,8 +260,10 @@ public sealed class PrintersServiceHistoryProbeTests
         HistoryListProbeResult result = await service.ProbeHistoryListAsync(
             printer.Id, 100, null, null, null, "desc", CancellationToken.None);
 
-        result.History!.Jobs[0].ThumbnailUrl.Should().Be(
-            "http://moonraker.local/server/files/thumb.png");
+        result.Status.Should().Be(HistoryProbeStatus.Authoritative);
+        result.History!.Jobs.Should().ContainSingle()
+            .Which.ThumbnailUrl.Should().Be(
+                "http://moonraker.local/server/files/thumb.png");
     }
 
     [Fact]
@@ -348,6 +352,7 @@ public sealed class PrintersServiceHistoryProbeTests
             .ReturnsAsync(new HistoryJob
             {
                 JobId = "provider-job",
+                Filename = "calibration.gcode",
                 ThumbnailUrl = "http://prusalink.local/thumb.png",
             });
         PrintersService service = CreateService(db, printer, historyClient);
@@ -355,6 +360,7 @@ public sealed class PrintersServiceHistoryProbeTests
         HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
             printer.Id, "provider-job", CancellationToken.None);
 
+        result.Status.Should().Be(HistoryDetailProbeStatus.Found);
         result.Job!.ThumbnailUrl.Should().Be(
             $"/api/printers/{printer.Id:D}/history/provider-job/thumbnail");
     }

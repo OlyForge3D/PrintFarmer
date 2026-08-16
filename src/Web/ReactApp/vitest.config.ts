@@ -22,11 +22,16 @@ export default defineConfig({
     reporters: ['default', 'json'],
     outputFile: { json: './test-results/vitest-results.json' },
 
-    // Exclude e2e tests - they use Playwright and must be run separately with npx playwright test
+    // Exclude e2e tests - they use Playwright and must be run separately with npx playwright test.
+    // `e2e/**/*.spec.ts` (Playwright's own convention, already covered by the blanket
+    // `**/*.spec.ts` rule below) is excluded explicitly for clarity, but plain `e2e/**/*.test.ts`
+    // files are intentionally NOT excluded — see `e2e/fixtures/emulator-setup.unit.test.ts`,
+    // a Vitest-only unit test for fixture logic that needs no browser/live API and is ignored
+    // by Playwright's own runner via `testIgnore` in playwright.config.ts.
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
-      '**/e2e/**',
+      '**/e2e/**/*.spec.ts',
       '**/*.spec.ts'
     ],
     coverage: {

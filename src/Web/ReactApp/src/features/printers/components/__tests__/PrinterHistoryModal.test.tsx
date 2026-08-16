@@ -21,6 +21,7 @@ vi.mock('@/services/api', () => ({
 const printer = {
   id: 'printer-1',
   name: 'Prusa MK4',
+  isOnline: true,
 } as Printer;
 
 function createJob(thumbnailUrl?: string): HistoryJob {
@@ -254,5 +255,111 @@ describe('PrinterHistoryModal thumbnails', () => {
     });
     expect(image).toHaveAttribute('src', 'http://prusa-mk4.local/api/v1/job/1/thumbnail');
     expect(getPrinterHistoryThumbnailMock).not.toHaveBeenCalled();
+  });
+});
+
+// Regression coverage for #1589: PrinterHistoryModal is mounted unconditionally
+// by the printer cards (visibility is controlled via the `isOpen` prop), so its
+// history/totals queries must only be enabled while the modal is actually open
+// and the printer is reachable. Without that gate, every printer card - including
+// offline ones - fires `GET /api/printers/{id}/history` on render, and
+// react-query's default retries turn a single 502 into four requests.
+describe('PrinterHistoryModal reachability gating', () => {
+  const offlinePrinter = {
+    id: 'printer-offline-1',
+    name: 'Offline Printer',
+    state: 'Offline',
+    isOnline: false,
+    isEnabled: true,
+    printerBackend: 'Moonraker',
+    url: 'http://offline-printer.local',
+  } as unknown as Printer;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePrinterHistory.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    usePrinterHistoryTotals.mockReturnValue({ data: undefined, isLoading: false });
+  });
+
+  it('does not enable history/totals queries when mounted closed for an offline printer', () => {
+    render(
+      <PrinterHistoryModal isOpen={false} onClose={vi.fn()} printer={offlinePrinter} />,
+    );
+
+    expect(usePrinterHistory).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { limit: 50, order: 'desc' },
+      { enabled: false },
+    );
+    expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { enabled: false },
+    );
+  });
+
+  it('does not enable history/totals queries for an offline printer even when isOpen is true', () => {
+    // Defense-in-depth: canOpenHistory() already disables the "History" button
+    // for offline printers, but the modal itself must not fetch for one either.
+    render(
+      <PrinterHistoryModal isOpen onClose={vi.fn()} printer={offlinePrinter} />,
+    );
+
+    expect(usePrinterHistory).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { limit: 50, order: 'desc' },
+      { enabled: false },
+    );
+    expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { enabled: false },
+    );
+  });
+
+  it('enables history/totals queries when open for an online printer', () => {
+    const onlinePrinter: Printer = { ...offlinePrinter, isOnline: true, state: 'Idle' };
+
+    render(
+      <PrinterHistoryModal isOpen onClose={vi.fn()} printer={onlinePrinter} />,
+    );
+
+    expect(usePrinterHistory).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { limit: 50, order: 'desc' },
+      { enabled: true },
+    );
+    expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { enabled: true },
+    );
+  });
+
+  it('coerces a missing isOnline to disabled instead of undefined (which react-query treats as enabled)', () => {
+    // Defensive-coding regression: `enabled: undefined` is NOT the same as
+    // `enabled: false` to react-query — it's treated as "unspecified" and the
+    // query runs anyway. If printer.isOnline is ever missing/undefined at
+    // runtime, the gate must still resolve to a real `false`, not `undefined`.
+    const printerWithMissingIsOnline = {
+      ...offlinePrinter,
+      isOnline: undefined,
+    } as unknown as Printer;
+
+    render(
+      <PrinterHistoryModal isOpen onClose={vi.fn()} printer={printerWithMissingIsOnline} />,
+    );
+
+    expect(usePrinterHistory).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { limit: 50, order: 'desc' },
+      { enabled: false },
+    );
+    expect(usePrinterHistoryTotals).toHaveBeenLastCalledWith(
+      'printer-offline-1',
+      { enabled: false },
+    );
   });
 });

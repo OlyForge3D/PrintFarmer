@@ -48,11 +48,13 @@ describe('resolveMaterialLoadout', () => {
     expect(loadout!.unitLabel).toBe('QidiBox');
     expect(loadout!.kind).toBe('gate');
     // The count contradiction is fixed, but this shape is still not safely
-    // assignable: the backend never extends a partial gate set (#1588), so
-    // slot 4 has no persisted toolhead to write to. Reporting topology as
-    // unresolved makes the module block assignment up front rather than
-    // letting the user pick a spool and fail with "Toolhead 4 not found".
-    // When #1588 lands the backend will persist gate 4 and this becomes true.
+    // assignable: slot 4 has no persisted toolhead to write to. Reporting
+    // topology as unresolved makes the module block assignment up front rather
+    // than letting the user pick a spool and fail with "Toolhead 4 not found".
+    // #1588 stopped the backend from *producing* this shape (it now extends a
+    // partial gate set), so this is a defence against a stale or degraded
+    // topology response rather than the everyday Qidi path — the fully
+    // persisted case is covered by the next test.
     expect(loadout!.hasResolvedTopology).toBe(false);
   });
 

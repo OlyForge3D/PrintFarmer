@@ -243,8 +243,8 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
             UpdatedAt = DateTime.UtcNow
         });
 
-        // Pre-create MMU gates
-        for (int i = 1; i < 4; i++)
+        // Pre-create a full MMU gate set (indices 1-4)
+        for (int i = 1; i <= 4; i++)
         {
             printer.Toolheads.Add(new Toolhead
             {
@@ -267,7 +267,7 @@ public class MmuGateAutoCreationTests : IAsyncLifetime
         result.Success.Should().BeTrue();
 
         int totalToolheads = await _dbContext.Toolheads.CountAsync(t => t.PrinterId == printer.Id);
-        totalToolheads.Should().Be(4, "should not create duplicate gates");
+        totalToolheads.Should().Be(5, "should not create duplicate gates when the gate set is already complete");
     }
 
     // ------- Toggle MultiMaterial off removes MmuGate toolheads -------

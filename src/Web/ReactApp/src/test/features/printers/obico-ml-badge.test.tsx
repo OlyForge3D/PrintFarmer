@@ -22,6 +22,8 @@ vi.mock('@/common/hooks/useApi', () => ({
   useJobQueue: () => ({ data: [], isLoading: false }),
   useFailureDetectionHistory: () => ({ data: [], isLoading: false, isError: false }),
   usePrintSessionTimeline: () => ({ data: undefined, isLoading: false, isError: false }),
+  usePrintJobObjects: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  queryKeys: { printJobObjects: (printerId: string) => ['printJobObjects', printerId] },
 }));
 
 vi.mock('@/common/hooks/useSpoolmanConfigured', () => ({
@@ -117,11 +119,6 @@ vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
 
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
   MaterialLoadout: () => <div data-testid="material-loadout" />,
-}));
-
-// The card renders inline details; this suite exercises the card only.
-vi.mock('@/features/printers/components/PrinterInlineDetails', () => ({
-  PrinterInlineDetails: () => <div data-testid="printer-inline-details" />,
 }));
 
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({

@@ -12,14 +12,22 @@ const printerHistoryModalMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
+  usePrintJobObjects: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  queryKeys: { printJobObjects: (printerId: string) => ['printJobObjects', printerId] },
 }));
 
 vi.mock('@/common/hooks/useSpoolmanConfigured', () => ({
   useSpoolmanConfigured: useSpoolmanConfiguredMock,
 }));
 
+vi.mock('@/services/maintenanceService', () => ({
+  maintenanceService: { getPrinterStatistics: vi.fn() },
+}));
+
 vi.mock('@tanstack/react-query', () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
+  useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
+  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
@@ -72,11 +80,6 @@ vi.mock('@/features/printers/components/FailureDetectionMonitoringBadge', () => 
 vi.mock('@/features/printers/components/FailureDetectionMonitoringSummary', () => ({ FailureDetectionMonitoringSummary: () => null }));
 vi.mock('@/features/printers/components/OfflineTroubleshootingGuide', () => ({ OfflineTroubleshootingGuide: () => null }));
 vi.mock('@/features/printers/components/PrinterCameraPreview', () => ({ PrinterCameraPreview: () => <div data-testid="camera-preview" /> }));
-vi.mock('@/features/printers/components/PrinterInlineDetails', () => ({
-  PrinterInlineDetails: () => (
-    <section aria-label="Printer 1 details" data-layout="inline" />
-  ),
-}));
 vi.mock('@/features/printers/components/ZOffsetCalibrationWizard', () => ({
   ZOffsetCalibrationWizard: () => <div data-testid="zoffset-wizard" />,
 }));
@@ -128,7 +131,7 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
   it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment (#1585 blocker 2)', () => {
     // Previously the details fetch was deferred whenever `mmuStatus.gates`
     // was populated, on the theory that live MMU gates already told the card
-    // enough to render the Materials rail. But without persisted topology the
+    // enough to render the materials rail. But without persisted topology the
     // card cannot safely translate live-gate indices to backend API indices,
     // so `MaterialLoadout` locks assignment until topology loads. That's a
     // silent dead end unless topology is actually being fetched. Enable it.
@@ -210,14 +213,14 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
 });
 
 describe('DetailedPrinterCard inline details (#1584)', () => {
-  it('mounts the dedicated inline detail composition without an Open details sidebar control', () => {
+  it('renders the inline detail sections without an Open details sidebar control', () => {
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
-    // `PrinterInlineDetails` is mocked here, so this suite can only prove the
-    // card mounts it. The `data-layout="inline"` contract is asserted against
-    // the real component in PrinterInlineDetails.test.tsx — asserting it here
-    // would only re-read the mock defined a few lines above.
-    expect(screen.getByRole('region', { name: 'Printer 1 details' })).toBeInTheDocument();
+    // The card folds the sidebar's informational sections in directly, so the
+    // detail is reachable without opening a sidebar. Field-level coverage of
+    // those sections lives in DetailedPrinterCard.inlineDetails.test.tsx.
+    expect(screen.getByText('Statistics')).toBeInTheDocument();
+    expect(screen.getByText('Version')).toBeInTheDocument();
   });
 });

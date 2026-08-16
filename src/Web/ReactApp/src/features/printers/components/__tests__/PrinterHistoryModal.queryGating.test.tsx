@@ -19,6 +19,9 @@ import { PrinterHistoryModal } from '@/features/printers/components/PrinterHisto
 const printer = {
   id: 'printer-1',
   name: 'Prusa MK4',
+  // The modal also gates fetching on reachability (#1589), so an online
+  // printer is required for the "opened" half of this test to fetch at all.
+  isOnline: true,
 } as Printer;
 
 describe('PrinterHistoryModal data query gating', () => {

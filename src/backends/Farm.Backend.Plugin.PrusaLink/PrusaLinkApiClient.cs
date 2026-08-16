@@ -1462,6 +1462,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                     filename = nameProp.GetString();
                 }
 
+                // PrusaLink's history entries mirror the /api/v1/files file shape, exposing a
+                // relative thumbnail reference under job.file.refs.thumbnail.
                 if (fileProp.TryGetProperty("refs", out JsonElement refsProp) &&
                     refsProp.ValueKind == JsonValueKind.Object &&
                     refsProp.TryGetProperty("thumbnail", out JsonElement thumbnailProp) &&
@@ -1527,6 +1529,12 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
         }
     }
 
+    /// <summary>
+    /// Resolves a possibly-relative PrusaLink thumbnail reference (e.g. from
+    /// job.file.refs.thumbnail) to an absolute URL against the printer's base URL, matching
+    /// the pattern used for live job status thumbnails elsewhere in the PrusaLink integration.
+    /// References that do not resolve to an http/https URL are rejected.
+    /// </summary>
     private static string? ResolveThumbnailUrl(
         string baseUrl,
         string thumbnailReference)

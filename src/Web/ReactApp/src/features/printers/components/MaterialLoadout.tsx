@@ -221,6 +221,10 @@ export function MaterialLoadout({
   // drawer is open, the user's decision was made against the *older* state, so
   // the write must still be validated against that revision — otherwise it
   // silently overwrites whatever changed underneath instead of returning 412.
+  // Re-anchored to the response revision after each successful mutation (see
+  // handleAssign/handleClear) so a second action in the same open drawer (e.g.
+  // Assign then Clear) posts the just-written revision instead of the stale
+  // one it opened with, and does not spuriously 412 against its own write.
   const [lockedRevision, setLockedRevision] = useState<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
@@ -241,11 +245,26 @@ export function MaterialLoadout({
 
   const { kind, unitLabel, slots, hasResolvedTopology } = loadout;
   const selected = slots.find((s) => s.key === selectedKey) ?? null;
+  // Mirrors the non-contiguous defence in persistedGateIndicesByLiveIndex()
+  // (materialLoadout.ts): coverage is keyed by a 0-based g-code index, and
+  // joining it to `gcodeIndex` only reflects the right hardware when every
+  // gate-derived index is present and contiguous from 0. The backend only
+  // ever creates contiguous `1..N` gates today, so this never trips in
+  // production — but if it ever didn't, a gappy set of indices could
+  // silently join a slot to the wrong toolhead's coverage figures instead of
+  // falling back to "unknown".
+  const gcodeIndices = slots
+    .map((s) => s.gcodeIndex)
+    .filter((i): i is number => i != null)
+    .sort((a, b) => a - b);
+  const hasContiguousGcodeIndices = gcodeIndices.every((index, position) => index === position);
   // Externals do not join the shared coverage-by-gcode-index space (see
   // materialLoadout.ts). Explicitly skip coverage lookup for external slots so
   // an external hotend never inherits the first gate's remaining-material figure.
   const coverageForSlot = (slot: LoadoutSlot): ToolheadCoverage | undefined =>
-    slot.gcodeIndex != null ? coverageByIndex.get(slot.gcodeIndex) : undefined;
+    slot.gcodeIndex != null && hasContiguousGcodeIndices
+      ? coverageByIndex.get(slot.gcodeIndex)
+      : undefined;
   const selectedCoverage = selected ? coverageForSlot(selected) : undefined;
   const loadedCount = slots.filter((s) => s.material != null || s.spoolId != null).length;
   const busy = setSpoolMutation.isPending || clearSpoolMutation.isPending;
@@ -257,8 +276,14 @@ export function MaterialLoadout({
   // to be resolved: without it the API-index mapping from live gate 0 to
   // persisted `Toolhead.Index` is a guess and could write a G1 assignment to
   // the physical hotend at index 0 (#1585 blocker 2).
-  const canMutate = !!reviewedRowVersion && hasResolvedTopology;
-  const blockedReason = !reviewedRowVersion
+  //
+  // Read the *locked* revision here, not the live `reviewedRowVersion` prop:
+  // both of these gate whether a click can actually succeed, and
+  // requireRevision() below checks the locked value too. If this read the live
+  // prop instead, the button could show enabled a moment before a click would
+  // still fail against the older locked revision.
+  const canMutate = !!lockedRevision && hasResolvedTopology;
+  const blockedReason = !lockedRevision
     ? 'Printer revision unavailable — refresh to assign spools'
     : !hasResolvedTopology
       ? 'Materials topology not yet loaded — refresh to assign spools'
@@ -297,12 +322,16 @@ export function MaterialLoadout({
     const revision = requireRevision();
     if (!revision) return;
     try {
-      await setSpoolMutation.mutateAsync({
+      const newRevision = await setSpoolMutation.mutateAsync({
         printerId,
         toolheadIndex: selected.apiIndex,
         spoolId,
         reviewedRowVersion: revision,
       });
+      // Re-anchor to the revision this write just produced so a second action
+      // in the same open drawer (e.g. Change then Clear) validates against
+      // what is now persisted, not the stale revision the drawer opened with.
+      setLockedRevision(newRevision);
       setPickerOpen(false);
       onSpoolChange?.();
     } catch {
@@ -318,11 +347,14 @@ export function MaterialLoadout({
     const revision = requireRevision();
     if (!revision) return false;
     try {
-      await clearSpoolMutation.mutateAsync({
+      const newRevision = await clearSpoolMutation.mutateAsync({
         printerId,
         toolheadIndex: selected.apiIndex,
         reviewedRowVersion: revision,
       });
+      // Same reasoning as handleAssign — re-anchor so a subsequent action in
+      // this open drawer sees the just-cleared state's revision.
+      setLockedRevision(newRevision);
       onSpoolChange?.();
       return true;
     } catch {
