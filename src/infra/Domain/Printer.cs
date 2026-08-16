@@ -257,8 +257,20 @@ public class Printer : IRevisionedEntity
 
     public double? MaxBuildVolumeZ { get; set; }
 
+    /// <summary>
+    /// General heated-bed capability, retained for dispatch capability advertisement and
+    /// model/template application (see <c>DispatchSafetyGates</c>, <c>PrintersService</c>).
+    /// Deprecated for calibration eligibility purposes: the calibration read path uses
+    /// <see cref="CalibrationHasHeatedBed"/> exclusively (issue #1614/PR-1).
+    /// </summary>
     public bool HasHeatedBed { get; set; } = true;
 
+    /// <summary>
+    /// General enclosure capability, retained for dispatch capability advertisement and
+    /// model/template application (see <c>DispatchSafetyGates</c>, <c>PrintersService</c>).
+    /// Deprecated for calibration eligibility purposes: the calibration read path uses
+    /// <see cref="CalibrationHasEnclosure"/> exclusively (issue #1614/PR-1).
+    /// </summary>
     public bool HasEnclosure { get; set; }
 
     /// <summary>
@@ -322,8 +334,12 @@ public class Printer : IRevisionedEntity
     /// </summary>
     public bool? CalibrationHasEnclosure { get; set; }
 
-    /// <summary>Whether the printer has an actively heated chamber.</summary>
-    public bool? HasHeatedChamber { get; set; }
+    /// <summary>
+    /// Explicit heated-chamber value for calibration. This is separate from legacy catalog
+    /// defaults (unlike bed/enclosure, there was never a distinct general-purpose column for
+    /// this fact, so this single nullable column also backs dispatch capability advertisement).
+    /// </summary>
+    public bool? CalibrationHasHeatedChamber { get; set; }
 
     /// <summary>Maximum chamber temperature in degrees Celsius.</summary>
     public int? MaxChamberTemp { get; set; }

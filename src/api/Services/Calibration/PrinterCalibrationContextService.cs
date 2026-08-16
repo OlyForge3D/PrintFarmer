@@ -532,7 +532,7 @@ public sealed class PrinterCalibrationContextService(
             printer.MaxAcceleration is null ||
             printer.MaxTravelSpeed is null ||
             printer.CalibrationHasHeatedBed is null ||
-            printer.HasHeatedChamber is null ||
+            printer.CalibrationHasHeatedChamber is null ||
             printer.CalibrationSlicerEngine is null ||
             printer.CalibrationSlicerDistribution is null ||
             printer.CalibrationSlicerVersion is null ||
@@ -1315,7 +1315,7 @@ public sealed class PrinterCalibrationContextService(
         int? maxAcceleration = printer.MaxAcceleration ?? derivedFacts.MaxAcceleration;
         int? maxTravelSpeed = printer.MaxTravelSpeed ?? derivedFacts.MaxTravelSpeed;
         bool? hasHeatedBed = printer.CalibrationHasHeatedBed ?? derivedFacts.HasHeatedBed;
-        bool? hasHeatedChamber = printer.HasHeatedChamber ?? derivedFacts.HasHeatedChamber;
+        bool? hasHeatedChamber = printer.CalibrationHasHeatedChamber ?? derivedFacts.HasHeatedChamber;
 
         RequirePositive(
             buildVolumeX,

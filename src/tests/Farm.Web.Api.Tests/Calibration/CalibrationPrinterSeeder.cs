@@ -104,7 +104,7 @@ internal static class CalibrationPrinterSeeder
                 CalibrationHasHeatedBed = deriveHardwareFromMachineProfile ? null : true,
                 MaxBedTemp = 120,
                 CalibrationHasEnclosure = false,
-                HasHeatedChamber = deriveHardwareFromMachineProfile ? null : false,
+                CalibrationHasHeatedChamber = deriveHardwareFromMachineProfile ? null : false,
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,
