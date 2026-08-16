@@ -360,7 +360,10 @@ If the project requires human approval:
 
 If the issue was assigned to a squad member and they authored the PR:
 1. Another squad member reviews (conflict of interest avoidance)
-2. Original author is locked out from re-working rejected code (rejection lockout)
+2. If changes are requested, the original author addresses them by default; the reviewer
+   may instead explicitly invoke rejection lockout (see
+   `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" for the
+   canonical rule)
 3. Reviewer can approve edits or reject outright
 
 ## Common Issue Lifecycle Patterns
