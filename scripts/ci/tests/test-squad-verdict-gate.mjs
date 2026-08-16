@@ -8,6 +8,7 @@ import {
   canAutoScope,
   classifyChangeScope,
   collectVerdicts,
+  diffFingerprint,
   evaluateGate,
   fullGateFiles,
   fullGatePrefixes,
@@ -337,14 +338,15 @@ function file(overrides = {}) {
   };
 }
 
-test('a pure base-sync merge (identical PR diff, content-empty merge commit) is carried forward', () => {
+test('a pure base-sync merge (identical PR diff, clean merge commit) is carried forward', () => {
   // Both compares recover exactly the PR's own contribution: three-dot
   // compare pivots on the merge base, so `compare(base...oldSha)` still
   // finds the PR's original diff and `compare(base...newHead)` finds the
   // same diff again now that the sync merge has folded base in. Nothing
   // about the PR's own changes moved, only unrelated base history did — and
-  // the workflow has already proven the sync merge commit is content-empty
-  // against its own first parent.
+  // the workflow has already proven the sync merge commit's own diff matches
+  // `compare(parent1...parent2)`, i.e. it introduced nothing beyond merging
+  // its two parents.
   const reviewedDiffFiles = [file({ filename: 'src/Foo.cs' }), file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) })];
   const currentDiffFiles = [file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) }), file({ filename: 'src/Foo.cs' })];
   assert.equal(
@@ -352,7 +354,7 @@ test('a pure base-sync merge (identical PR diff, content-empty merge commit) is 
       recordAncestryStatus: 'ahead',
       reviewedDiffFiles,
       currentDiffFiles,
-      nonBaseCommitsHaveNoOwnChanges: true,
+      nonBaseCommitsIntroduceNoExtraContent: true,
     }),
     true,
   );
@@ -370,7 +372,7 @@ test('a new author commit that changes the PR diff is not carried forward', () =
       recordAncestryStatus: 'ahead',
       reviewedDiffFiles,
       currentDiffFiles,
-      nonBaseCommitsHaveNoOwnChanges: true,
+      nonBaseCommitsIntroduceNoExtraContent: true,
     }),
     false,
   );
@@ -384,7 +386,7 @@ test('a new author commit that adds a file to the PR diff is not carried forward
       recordAncestryStatus: 'ahead',
       reviewedDiffFiles,
       currentDiffFiles,
-      nonBaseCommitsHaveNoOwnChanges: true,
+      nonBaseCommitsIntroduceNoExtraContent: true,
     }),
     false,
   );
@@ -393,11 +395,11 @@ test('a new author commit that adds a file to the PR diff is not carried forward
 test('a revert-then-readd of the same final diff is NOT carried forward (regression for Bishop\'s second finding)', () => {
   // An author pushes a commit changing the PR, then a later commit reverting
   // it, landing back on the exact same final diff — diff-equality (condition
-  // 2) alone would wrongly approve this. The workflow could never prove the
-  // non-base commits in this range are content-empty (at least one of the
-  // add/revert pair changed real files), so it reports
-  // nonBaseCommitsHaveNoOwnChanges: false, and that alone must block carry
-  // forward regardless of how the final diffs compare.
+  // 2) alone would wrongly approve this. Neither of those commits is a
+  // two-parent merge commit whose own diff matches `compare(p1...p2)`, so the
+  // workflow can never prove they introduce nothing beyond a clean merge; it
+  // reports nonBaseCommitsIntroduceNoExtraContent: false, and that alone must
+  // block carry forward regardless of how the final diffs compare.
   const reviewedDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'a'.repeat(40) })];
   const currentDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'a'.repeat(40) })]; // identical to reviewed
   assert.equal(
@@ -405,15 +407,16 @@ test('a revert-then-readd of the same final diff is NOT carried forward (regress
       recordAncestryStatus: 'ahead',
       reviewedDiffFiles,
       currentDiffFiles,
-      nonBaseCommitsHaveNoOwnChanges: false,
+      nonBaseCommitsIntroduceNoExtraContent: false,
     }),
     false,
   );
 });
 
-test('isCarriedAcrossSync fails closed when nonBaseCommitsHaveNoOwnChanges is omitted', () => {
-  // The caller must positively prove every non-base commit is content-empty;
-  // omitting the flag must never default to "assume clean".
+test('isCarriedAcrossSync fails closed when nonBaseCommitsIntroduceNoExtraContent is omitted', () => {
+  // The caller must positively prove every non-base commit is a clean merge
+  // (or that there are none); omitting the flag must never default to
+  // "assume clean".
   const reviewedDiffFiles = [file()];
   assert.equal(
     isCarriedAcrossSync({
@@ -436,7 +439,7 @@ test('isCarriedAcrossSync fails closed when the record SHA is not a strict ances
         recordAncestryStatus: status,
         reviewedDiffFiles,
         currentDiffFiles: reviewedDiffFiles,
-        nonBaseCommitsHaveNoOwnChanges: true,
+        nonBaseCommitsIntroduceNoExtraContent: true,
       }),
       false,
       String(status),
@@ -452,7 +455,7 @@ test('isCarriedAcrossSync fails closed on an empty reviewed diff', () => {
       recordAncestryStatus: 'ahead',
       reviewedDiffFiles: [],
       currentDiffFiles: [],
-      nonBaseCommitsHaveNoOwnChanges: true,
+      nonBaseCommitsIntroduceNoExtraContent: true,
     }),
     false,
   );
@@ -469,9 +472,25 @@ test('isCarriedAcrossSync fails closed when either diff may be truncated', () =>
       reviewedDiffFiles,
       currentDiffFiles: reviewedDiffFiles,
       filesMayBeTruncated: true,
-      nonBaseCommitsHaveNoOwnChanges: true,
+      nonBaseCommitsIntroduceNoExtraContent: true,
     }),
     false,
+  );
+});
+
+test('diffFingerprint is order-independent and detects content changes (regression for the merge-cleanliness check)', () => {
+  // The workflow reuses this exact function to compare a merge commit's own
+  // diff against `compare(parent1...parent2).files`, proving the merge
+  // introduced nothing beyond its two parents (see the module docstring for
+  // why the naive "commit's own diff against first parent is empty" check is
+  // wrong: that diff is naturally non-empty for a real sync merge).
+  const a = file({ filename: 'src/Foo.cs' });
+  const b = file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) });
+  assert.equal(diffFingerprint([a, b]), diffFingerprint([b, a]), 'order must not matter');
+  assert.notEqual(
+    diffFingerprint([a]),
+    diffFingerprint([file({ filename: 'src/Foo.cs', patch: '@@ -1 +1 @@\n-old\n+different' })]),
+    'a changed patch must change the fingerprint',
   );
 });
 
@@ -1019,8 +1038,11 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   // directly into the gate — and must thread the resulting `carriedShas`
   // into `gate.evaluateGate`. A silent revert back to the commit-list design
   // would reintroduce a feature that never actually fires for a real
-  // `git merge` sync. It must also still verify every non-base commit is
-  // content-empty (regression coverage for the revert-then-readd gap).
+  // `git merge` sync. It must also still verify every non-base commit
+  // introduces nothing beyond a clean merge of its own two parents
+  // (regression coverage for the revert-then-readd gap, AND for the
+  // follow-up bug where "content-empty against first parent" was proven
+  // wrong against this repo's own history — see the module docstring).
   const workflow = await readFile(
     path.join(repositoryRoot, '.github/workflows/squad-review-verdict.yml'), 'utf8',
   );
@@ -1034,21 +1056,29 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   assert.match(workflow, /basehead: `\$\{baseRef\}\.\.\.\$\{headSha\}`/);
 
   // The gate call receives file lists, not raw commit-SHA sets, plus the
-  // ancestry status, a files-truncation guard, and the content-emptiness
-  // proof for non-base commits (condition 3).
+  // ancestry status, a files-truncation guard, and the clean-merge proof for
+  // non-base commits (condition 3).
   assert.match(workflow, /reviewedDiffFiles:\s*reviewedFiles/);
   assert.match(workflow, /currentDiffFiles:\s*currentFiles/);
   assert.match(workflow, /recordAncestryStatus:\s*ancestryCompare\.status/);
   assert.match(workflow, /filesMayBeTruncated:/);
   assert.match(workflow, /compareFilesCap/);
-  assert.match(workflow, /nonBaseCommitsHaveNoOwnChanges/);
+  assert.match(workflow, /nonBaseCommitsIntroduceNoExtraContent/);
 
-  // Condition 3's own per-commit lookup: the workflow must call the
-  // single-commit endpoint and check ITS OWN file list, not just infer
-  // emptiness from the bulk commit lists (which are what caused the
-  // original merge-commit bug).
+  // Condition 3's own per-commit check: for each non-base commit, the
+  // workflow must fetch its parents, require EXACTLY two (reject ordinary
+  // single-parent commits and octopus merges outright), and compare the
+  // commit's own diff against `compare(parent1...parent2)` — NOT check for
+  // an empty own-diff, which is a real, verified-wrong assumption for a
+  // clean merge (its own diff against first parent naturally includes
+  // everything pulled in from the base side).
   assert.match(workflow, /getCommit\(/);
-  assert.match(workflow, /singleCommit\.files/);
+  assert.match(workflow, /parentShas\.length !== 2/);
+  assert.match(workflow, /basehead: `\$\{parentShas\[0\]\}\.\.\.\$\{parentShas\[1\]\}`/);
+  assert.match(workflow, /gate\.diffFingerprint\(singleCommit\.files/);
+  assert.match(workflow, /gate\.diffFingerprint\(parentsCompare\.files/);
+  assert.doesNotMatch(workflow, /singleCommit\.files\s*\?\?\s*\[\]\)\.length\s*>\s*0/);
+
   // The bulk commit lists that feed condition 3 must be checked for
   // truncation too — otherwise Vasquez's pagination concern reopens the
   // instant commit lists come back into the picture for condition 3.

@@ -561,16 +561,30 @@ landing back on the exact same final diff while still having authored real chang
 in the range — this "revert-then-readd" trick would satisfy diff-equality while
 still being exactly the review-then-push-more case the SHA-binding exists to catch.
 Condition 3 closes it by checking every commit introduced since review that is not
-already reachable from base (via `GET /repos/{owner}/{repo}/commits/{sha}`, its own
-diff against its first parent) and requiring each to be content-empty. A clean sync
-merge's own commit is content-empty (a conflict-free merge changes nothing beyond
-what each side already had); an add/revert pair necessarily has at least one
-non-empty commit in the range and is rejected regardless of what the final diff
-looks like. This reintroduces some per-commit inspection, so it carries the same
-truncation risk as the diff comparison: the workflow checks the bulk commit lists'
-`total_commits` against the returned `commits` array length and, if either compare's
-list is incomplete, treats condition 3 as unproven (fails closed) rather than
-guessing.
+already reachable from base and requiring each to be a **clean merge introducing
+nothing beyond its own two parents**. This is deliberately NOT "the commit's own
+diff against its first parent is empty" — an earlier revision of this exemption
+tried exactly that and it is wrong in practice: GitHub's single-commit endpoint
+diffs a merge commit against its first parent only, and for a real sync merge that
+diff is naturally non-empty, because it necessarily includes everything the merge
+pulled in from the base side (verified against this repo's own history: a known
+clean, conflict-free `git merge development` sync commit reports a non-empty `files`
+list via `GET /repos/{owner}/{repo}/commits/{sha}`). Rejecting on that basis would
+reject essentially every legitimate sync, defeating the whole feature — this was
+caught in review before merge. The correct test instead compares a two-parent merge
+commit's own diff to what merging its two parents *alone* would produce: for parents
+`[p1, p2]`, `compare(p1...p2)` is a three-dot compare pivoting on p1/p2's own merge
+base, so its `files` are exactly "what p2 contributes beyond its common history with
+p1" — what a clean, no-conflict merge of p2 into p1 would add. If the merge commit's
+own diff matches that fingerprint, it added nothing beyond a clean merge; if it
+differs (a conflict resolved by changing logic, most obviously), it fails condition 3
+regardless of what the final PR diff looks like. Any commit with anything other than
+exactly two parents (an ordinary single-parent commit, i.e. real author work, or a
+rare octopus merge this check doesn't attempt to validate) always fails condition 3.
+This reintroduces some per-commit inspection, so it carries the same truncation risk
+as the diff comparison: the workflow checks the bulk commit lists' `total_commits`
+against the returned `commits` array length and, if either compare's list is
+incomplete, treats condition 3 as unproven (fails closed) rather than guessing.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare

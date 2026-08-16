@@ -405,16 +405,40 @@ export function parseVerdictComment(comment) {
  * reverts it, landing back at the same final diff while still having
  * authored real changes in the range — exactly the review-then-push-more
  * threat model the SHA pin exists to catch, and diff-equality by itself
- * would wrongly wave it through. `nonBaseCommitsHaveNoOwnChanges` closes
- * that gap: it must be true only when every commit introduced since the
- * review that is NOT already reachable from the base tip is itself
- * content-empty against its own first parent (i.e. `GET
- * /repos/{owner}/{repo}/commits/{sha}` reports no `files`). A clean
- * `git merge development` sync's merge commit is content-empty this way —
- * merging cleanly changes nothing beyond what each side already had — while
- * a merge commit that resolved a conflict by adding logic, or any ordinary
- * add-then-revert pair, has at least one non-empty commit in the range and
- * fails this check even if the final diff happens to match.
+ * would wrongly wave it through. `nonBaseCommitsIntroduceNoExtraContent`
+ * closes that gap: it must be true only when every commit introduced since
+ * the review that is NOT already reachable from the base tip introduces
+ * nothing beyond what a clean merge of its own two parents would produce.
+ *
+ * This is deliberately NOT "content-empty against its own first parent" —
+ * an earlier revision of this exemption tried that and it is wrong in
+ * practice: GitHub's single-commit endpoint diffs a merge commit against its
+ * first parent only, and for a REAL sync merge that diff is naturally
+ * non-empty, because it necessarily includes everything the merge pulled in
+ * from the base side. (Confirmed against this repo's own history: a known
+ * clean, conflict-free `git merge development` sync commit reports a
+ * non-empty `files` list via `GET /repos/{owner}/{repo}/commits/{sha}`.)
+ * Rejecting on that basis would reject essentially every legitimate sync,
+ * defeating the whole feature.
+ *
+ * The correct test compares a merge commit's own diff to what merging its
+ * *two parents alone* would produce: for a two-parent merge commit with
+ * parents `[p1, p2]`, `compare(p1...p2)` is a three-dot compare that pivots
+ * on the merge base of p1 and p2, so its `files` are exactly "what p2
+ * contributes beyond its common history with p1" — precisely what a clean,
+ * no-conflict merge of p2 into p1 would add. If the merge commit's own diff
+ * (`GET /repos/{owner}/{repo}/commits/{sha}`, diffed against parent[0] by
+ * GitHub's convention) has the same fingerprint as `compare(p1...p2).files`,
+ * the merge commit added nothing beyond that — no manually-resolved
+ * conflict, no extra edit. A merge commit whose own diff differs from
+ * `compare(p1...p2)` did add something beyond a clean merge (a conflict
+ * resolution that changed logic, most obviously) and is correctly rejected.
+ * A commit with anything other than exactly two parents (an ordinary
+ * single-parent commit, i.e. real author work; or a rare octopus merge with
+ * three or more parents, which this check does not attempt to validate) is
+ * always treated as introducing its own content and disqualifies the record.
+ * `diffFingerprint` (below) is exported specifically so the workflow can
+ * reuse the exact same equality test for this per-commit comparison.
  *
  * Fails closed:
  *
@@ -426,9 +450,9 @@ export function parseVerdictComment(comment) {
  *     the caller say "either side may be incomplete"; when true, equality can
  *     never be proven, so this returns false rather than risk comparing two
  *     truncated, apparently-equal lists that actually differ past the cutoff.
- *   - `nonBaseCommitsHaveNoOwnChanges` defaults to `false`: the caller must
- *     positively prove every non-base commit is content-empty, not rely on a
- *     default meaning "assume clean".
+ *   - `nonBaseCommitsIntroduceNoExtraContent` defaults to `false`: the caller
+ *     must positively prove every non-base commit is a clean merge (or that
+ *     there are none), not rely on a default meaning "assume clean".
  *
  * This function performs no I/O; the workflow computes the compares and the
  * per-commit lookups and passes their results in.
@@ -438,7 +462,7 @@ export function isCarriedAcrossSync({
   reviewedDiffFiles = [],
   currentDiffFiles = [],
   filesMayBeTruncated = false,
-  nonBaseCommitsHaveNoOwnChanges = false,
+  nonBaseCommitsIntroduceNoExtraContent = false,
 } = {}) {
   if (recordAncestryStatus !== 'ahead') {
     return false;
@@ -446,7 +470,7 @@ export function isCarriedAcrossSync({
   if (filesMayBeTruncated) {
     return false;
   }
-  if (!nonBaseCommitsHaveNoOwnChanges) {
+  if (!nonBaseCommitsIntroduceNoExtraContent) {
     return false;
   }
   const reviewed = Array.isArray(reviewedDiffFiles) ? reviewedDiffFiles : [];
@@ -459,12 +483,15 @@ export function isCarriedAcrossSync({
 
 /**
  * Canonical, order-independent fingerprint of a compare-API `files` array,
- * used only to test two diffs for byte-for-byte equality (see
- * `isCarriedAcrossSync`). Not a content hash of anything beyond the fields
- * the compare API actually exposes, and not used for anything except that
- * equality test.
+ * used to test two diffs for byte-for-byte equality: once for the PR's own
+ * diff (see `isCarriedAcrossSync`), and again by the workflow to test a
+ * merge commit's own diff against `compare(parent1...parent2).files` when
+ * proving it introduced nothing beyond a clean merge of its two parents.
+ * Not a content hash of anything beyond the fields the compare API actually
+ * exposes, and not used for anything except these equality tests. Exported
+ * so both call sites share one definition of "identical diff".
  */
-function diffFingerprint(files) {
+export function diffFingerprint(files) {
   return files
     .map((file) => JSON.stringify([
       file?.status ?? '',
