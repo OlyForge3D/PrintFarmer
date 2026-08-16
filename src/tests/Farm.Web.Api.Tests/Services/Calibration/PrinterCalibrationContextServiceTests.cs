@@ -102,6 +102,105 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetCandidatesAsync_WithUnsetGcodeDialectAndKlipperFirmwareFamily_DerivesKlipperDialectFromFirmware()
+    {
+        // #1614 AC-2/§4.5.1 regression: firmware.gcodeDialect is sourced from firmware
+        // detection only, never from the resolved machine profile. When the explicit
+        // GcodeDialect column is unset but the detected FirmwareFamily is Klipper, the
+        // effective dialect must fall back to Klipper rather than blocking eligibility.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.GcodeDialect = PrinterGcodeDialect.Unknown;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+        _ = candidate.Firmware.GcodeDialect.Should().Be("Klipper");
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().NotContain(
+            "gcode_dialect_unknown");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithUnsetGcodeDialectAndNonKlipperFirmwareFamily_LeavesDialectUnknown()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.GcodeDialect = PrinterGcodeDialect.Unknown;
+        harness.Printer.FirmwareFamily = PrinterFirmwareFamily.Other;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.Firmware.GcodeDialect.Should().Be("Unknown");
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "gcode_dialect_unknown");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithMultiplePhysicalToolheads_OnlyActiveToolheadDerivesFromMachineProfile()
+    {
+        // #1613 §4.6 regression: the machine profile describes only the currently-active
+        // tool, so non-active physical toolheads must never be coalesced with
+        // profile-derived nozzle facts, even when their own explicit values are null.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.ActiveToolheadIndex = 0;
+        Toolhead active = harness.Printer.Toolheads.Single();
+        active.NozzleDiameter = null;
+        active.NozzleType = null;
+        active.NozzleMaxTemperature = null;
+        active.HotendMaxTemperature = null;
+        Toolhead inactive = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = harness.Printer.Id,
+            Name = "T1",
+            Index = 1,
+            ToolheadType = ToolheadType.Physical,
+            NozzleDiameter = null,
+            NozzleType = null,
+            NozzleMaterial = "brass",
+            NozzleMaxTemperature = null,
+            NozzleIsHardened = false,
+            HotendMaxTemperature = null,
+            SupportedMaterials = ["PLA"],
+        };
+        _ = harness.Db.Toolheads.Add(inactive);
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson =
+                    """
+                    {
+                        "gcode_flavor": "klipper",
+                        "nozzle_diameter": [0.4],
+                        "nozzle_type": "brass",
+                        "max_hotend_temp": [300]
+                    }
+                    """,
+            },
+        };
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        CalibrationToolheadDto activeDto =
+            candidate.Toolheads.Should().ContainSingle(t => t.Index == 0).Which;
+        _ = activeDto.NozzleDiameter.Should().Be(0.4);
+        _ = activeDto.NozzleType.Should().Be("Brass");
+        _ = activeDto.HotendMaxTemperature.Should().Be(300);
+        _ = candidate.RejectionReasons.Select(reason => reason.Field).Should().Contain(
+            field => field == "toolheads[1].nozzleDiameter");
+    }
+
+    [Fact]
     public async Task GetCandidatesAsync_WithNonKlipperOrNonUpstreamIdentity_ReturnsTypedReasons()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
