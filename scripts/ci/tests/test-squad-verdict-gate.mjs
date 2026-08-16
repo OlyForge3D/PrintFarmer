@@ -789,21 +789,65 @@ test('the scoping workflow wiring stays intact', async () => {
   // Labelling must not migrate back out into a dedicated workflow: the default
   // GITHUB_TOKEN does not start new workflow runs, so a separate labeller's
   // `labeled` event would never re-trigger the evaluation that depends on it,
-  // and the two would race on `opened`. Matched by CONTENT, not filename, so a
-  // reintroduced labeller under any other name still fails. Other workflows may
-  // legitimately apply `squad:*` labels (triage, blocked-sync); what is reserved
-  // here is the bare SCOPE label and the guard that governs it.
+  // and the two would race on `opened`.
+  //
+  // Enumerating the ways a workflow can write a label is whack-a-mole — Octokit,
+  // `gh pr edit --add-label`, actions/labeler, raw REST, an indirected variable.
+  // So the primary guard is FAIL-CLOSED: any workflow that writes labels by any
+  // detected mechanism must be on the allowlist below. A reintroduced labeller
+  // shows up as a new entrant and fails this test regardless of its filename or
+  // its choice of transport. Adding an entry is a deliberate act that must be
+  // reviewed, because any label writer could apply the bare scope label and
+  // silently place a PR in scope.
   const workflowDir = path.join(repositoryRoot, '.github/workflows');
   const names = (await readdir(workflowDir)).filter((n) => /\.ya?ml$/i.test(n));
-  const strays = [];
+
+  const labelWriteMechanisms = [
+    /(?:addLabels|setLabels|removeLabel|_addLabels)\s*\(/,  // Octokit
+    /--add-label|--remove-label/,                           // gh CLI
+    /gh\s+(?:pr|issue)\s+edit/,                             // gh CLI, flag may be indirected
+    /actions\/labeler/,                                     // marketplace action
+    /issues\/[^\s'"]*\/labels/,                             // raw REST
+  ];
+  const permittedLabelWriters = new Set([
+    'squad-blocked-label-sync.yml',
+    'squad-heartbeat.yml',
+    'squad-label-enforce.yml',
+    'squad-review-verdict.yml',
+    'squad-triage.yml',
+  ]);
+
+  const bodies = new Map();
   for (const name of names) {
-    if (name === 'squad-review-verdict.yml') continue;
-    const body = await readFile(path.join(workflowDir, name), 'utf8');
-    if (/squadScopeLabel|canAutoScope/.test(body) ||
-        /labels:\s*\[\s*(['"])squad\1\s*\]/.test(body)) {
-      strays.push(name);
-    }
+    bodies.set(name, await readFile(path.join(workflowDir, name), 'utf8'));
   }
+
+  const writers = names.filter(
+    (n) => labelWriteMechanisms.some((re) => re.test(bodies.get(n))),
+  );
+  assert.deepEqual(
+    writers.filter((n) => !permittedLabelWriters.has(n)), [],
+    'a workflow not on the label-writer allowlist writes labels; if it is legitimate ' +
+    'add it above, but first confirm it cannot apply the bare squad scope label',
+  );
+  // Fail closed in the other direction too: a stale allowlist entry silently
+  // widens the set of names a reintroduced labeller could occupy.
+  assert.deepEqual(
+    [...permittedLabelWriters].filter((n) => !writers.includes(n)), [],
+    'the label-writer allowlist names a workflow that no longer writes labels; prune it',
+  );
+
+  // Sharper second guard: an ALREADY-permitted workflow must not start applying
+  // the bare scope label either. Those four apply `squad:*` labels, never `squad`.
+  const bareScopeLabel = [
+    /squadScopeLabel|canAutoScope/,
+    /labels:\s*\[[^\]]*(['"])squad\1/,
+    /--add-label[=\s]+['"]?squad['"]?(?![\w:-])/,
+  ];
+  const strays = writers.filter(
+    (n) => n !== 'squad-review-verdict.yml' &&
+           bareScopeLabel.some((re) => re.test(bodies.get(n))),
+  );
   assert.deepEqual(
     strays, [],
     `squad scope labelling must stay in squad-review-verdict.yml; found: ${strays.join(', ')}`,
