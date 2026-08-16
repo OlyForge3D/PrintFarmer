@@ -8,6 +8,14 @@ namespace Farm.Infrastructure;
 /// Version information for a specific printer backend.
 /// Values are best-effort and may be null/empty when not available.
 /// </summary>
+/// <param name="PrinterId">The printer this version information was retrieved for.</param>
+/// <param name="Backend">The printer's backend implementation.</param>
+/// <param name="Supported">Whether this backend implements <c>ISupportsPrinterInformation</c>.</param>
+/// <param name="FirmwareVersion">The firmware version reading, when available.</param>
+/// <param name="BackendVersion">The backend software version reading, when available.</param>
+/// <param name="ApiVersion">The backend API version reading, when available.</param>
+/// <param name="RetrievedAtUtc">When this version information was retrieved.</param>
+/// <param name="Message">An optional human-readable message, e.g. describing a probe failure.</param>
 /// <param name="RecordedFirmwareIdentity">
 /// The recorded/persisted firmware identity from the printer's <c>Firmware*</c> columns — the
 /// same authoritative fact <c>PrinterCalibrationContextService.ValidateFirmware</c> reads.
@@ -26,4 +34,3 @@ public sealed record PrinterVersionInfoDto(
     DateTime RetrievedAtUtc,
     string? Message = null,
     CalibrationFirmwareIdentityDto? RecordedFirmwareIdentity = null);
-
