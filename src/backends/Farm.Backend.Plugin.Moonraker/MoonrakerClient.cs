@@ -1498,8 +1498,14 @@ public class MoonrakerClient(
 
             return files;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Failed to get file list from {BaseUrl}", baseUrl);
             return [];
         }
     }
