@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
 import { Button, Alert, Input, Select, CollapsibleSection } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
+import { slicerProfilesService } from '@/services/slicerProfilesService';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import type {
   CalibrationContextDto,
@@ -11,6 +12,11 @@ import type {
   CalibrationSetupRequestDto,
   CalibrationToolheadSetupDto,
 } from '@/types/api';
+
+/** The all-zero Guid the calibration-setup endpoint interprets as "clear this binding".
+ * Omitting the field means "leave unchanged", so an explicit sentinel is required to
+ * distinguish an operator unbinding a profile from an operator not touching it. */
+const CLEAR_PROFILE_ID = '00000000-0000-0000-0000-000000000000';
 
 export interface CalibrationSetupModalProps {
   isOpen: boolean;
@@ -112,7 +118,16 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
   const [hardwareVerifiedAtUtc, setHardwareVerifiedAtUtc] = useState<string | null>(null);
   const [regions, setRegions] = useState<RegionFormState[]>([]);
   const [toolheads, setToolheads] = useState<ToolheadFormState[]>([]);
+  const [machineProfileId, setMachineProfileId] = useState<string>('');
+  const [processProfileId, setProcessProfileId] = useState<string>('');
+  const [filamentProfileId, setFilamentProfileId] = useState<string>('');
   const [latestRowVersion, setLatestRowVersion] = useState<string | null>(rowVersion ?? null);
+
+  const profilesQuery = useQuery({
+    queryKey: ['slicer-profiles', 'extended'],
+    queryFn: () => slicerProfilesService.listExtended(),
+    enabled: isOpen,
+  });
 
   // The form state below is seeded from the query result once it resolves.
   // We adjust state during rendering (comparing against the last-synced data
@@ -129,6 +144,9 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
     setHardwareVerifiedAtUtc(data.calibrationHardwareVerifiedAtUtc ?? null);
     setRegions(regionsFromContext(data.excludedRegions ?? []));
     setToolheads((data.toolheads ?? []).map(toolheadFromContext));
+    setMachineProfileId(data.slicer?.machineProfileId ?? '');
+    setProcessProfileId(data.slicer?.processProfileId ?? '');
+    setFilamentProfileId(data.slicer?.filamentProfileId ?? '');
   }
 
   if (rowVersion && rowVersion !== latestRowVersion) {
@@ -183,6 +201,11 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
       supportsPressureAdvance,
       supportsFirmwareRetraction,
       toolheads: toolheadDtos,
+      // An empty selection is submitted as the clear sentinel rather than omitted,
+      // so deliberately unbinding a profile is saved instead of silently ignored.
+      machineProfileId: machineProfileId === '' ? CLEAR_PROFILE_ID : machineProfileId,
+      processProfileId: processProfileId === '' ? CLEAR_PROFILE_ID : processProfileId,
+      filamentProfileId: filamentProfileId === '' ? CLEAR_PROFILE_ID : filamentProfileId,
     };
     setupMutation.mutate(request);
   };
@@ -263,6 +286,66 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
               ? 'This printer is currently eligible for calibration.'
               : `Not yet eligible. Missing: ${contextQuery.data.missingInputs.join(', ') || 'unknown'}`}
           </Alert>
+
+          <CollapsibleSection title="Slicer profiles" defaultExpanded>
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-pf-text-secondary">
+                Calibration sources bed origin, printable area, motion limits, and nozzle facts from the bound
+                machine profile. All three profiles must be bound before this printer can be calibrated.
+              </p>
+              {profilesQuery.isError && (
+                <Alert type="error">Failed to load slicer profiles. Try reopening this dialog.</Alert>
+              )}
+              <label className="flex flex-col gap-1 text-xs">
+                Machine profile
+                <Select
+                  aria-label="Machine profile"
+                  value={machineProfileId}
+                  disabled={profilesQuery.isLoading}
+                  onChange={(e) => setMachineProfileId(e.target.value)}
+                >
+                  <option value="">Not bound</option>
+                  {(profilesQuery.data?.machineProfiles ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.manufacturer ? `${p.manufacturer} — ${p.name}` : p.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                Process profile
+                <Select
+                  aria-label="Process profile"
+                  value={processProfileId}
+                  disabled={profilesQuery.isLoading}
+                  onChange={(e) => setProcessProfileId(e.target.value)}
+                >
+                  <option value="">Not bound</option>
+                  {(profilesQuery.data?.processProfiles ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                Filament profile
+                <Select
+                  aria-label="Filament profile"
+                  value={filamentProfileId}
+                  disabled={profilesQuery.isLoading}
+                  onChange={(e) => setFilamentProfileId(e.target.value)}
+                >
+                  <option value="">Not bound</option>
+                  {(profilesQuery.data?.filamentProfiles ?? []).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            </div>
+          </CollapsibleSection>
 
           <CollapsibleSection title="Firmware identity (read-only)">
             <div className="flex flex-col gap-2 text-sm">
