@@ -200,7 +200,9 @@ Flow:
 1. Commit code to a feature branch (do not push yet).
 2. Request review from Bishop, Hicks, Vasquez (mention all three).
 3. Reviewers converge adversarially on the branch — no serial review or independence.
-4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
+4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the
+   branch and re-request — subject to § "Post-Rejection Revision Ownership" below, which
+   governs whether the original author may make that fix themselves.
 5. Once APPROVED, open the PR via `gh pr create --label squad` (the label is
    required — see § "Scope" above).
 6. After the PR exists, each reviewer records their review as a PR comment in the
@@ -211,6 +213,52 @@ This is a hard gate enforced by team policy. The trio's consensus verdict gates 
 
 The single exception is a documentation-only change — see the next section. Nothing else
 reduces the trio to fewer than three reviewers.
+
+### Post-Rejection Revision Ownership
+
+**This section is the canonical definition of who may revise an artifact after a
+reviewer rejects it. Every other mention of revision ownership in this repository —
+including `.github/skills/reviewer-protocol/SKILL.md` — must link here rather than
+restate the rule, so the two cannot drift apart again.**
+
+**Self-revision is permitted by default.** When a reviewer rejects work (REQUEST_CHANGES
+or BLOCK), the original author fixes the code on the same branch and re-requests review,
+per step 4 above. This is the normal path and requires no special invocation — it is how
+most rejections in this repository are resolved, and it is faster and keeps context with
+the agent that already has it.
+
+**Strict lockout is reviewer-invoked, not default-on.** A reviewer who judges that
+self-revision would perpetuate a defensive feedback loop — rather than genuinely fix the
+issue — may explicitly invoke lockout instead of a plain rejection, for example by stating
+"a different agent must revise this" or "escalate to someone else." Only that explicit
+invocation triggers the rules below; a bare REQUEST_CHANGES/BLOCK does not. This is what
+happened in PR #1619's round 5: five earlier rounds ran as ordinary self-revision, and
+lockout activated only when a reviewer chose to invoke it.
+
+Once invoked, the following apply to that artifact:
+
+1. **The original author is locked out.** They may not produce the next version of that
+   artifact, and may not contribute to the revision as co-author, advisor, or pair — the
+   revision must be independently produced by a different agent.
+2. **The Coordinator enforces this mechanically.** Before spawning a revision agent, it
+   verifies the selected agent is not the locked-out author, and refuses (asking the
+   reviewer to name someone else) if it is.
+3. **Lockout scope is per-artifact.** The original author may continue unrelated work; the
+   lockout does not follow them elsewhere.
+4. **Lockout compounds on repeated rejection.** If the revision produced by the new agent
+   is also rejected, that agent becomes locked out too, and a further different agent must
+   take the next revision. Each rejection can add one more locked-out agent to the set for
+   that artifact — this is what carried PR #1619 from round 5 (original author locked out)
+   through round 6 (second agent rejected and locked out) to round 7 (third agent, clean).
+5. **Roster exhaustion escalates to the user.** If every eligible agent has been locked out
+   of an artifact, the Coordinator must escalate to the user rather than re-admitting a
+   locked-out author. This is the natural end state of compounding lockout on a small
+   roster, so a long adversarial cycle can reach it — whether it has depends on whether
+   lockout was ever invoked for that artifact, per the default-on/reviewer-invoked
+   distinction above.
+
+See `.github/skills/reviewer-protocol/SKILL.md` for the Coordinator-facing mechanics,
+examples, and anti-patterns that operationalize these rules once lockout is invoked.
 
 ### Documentation-Only Changes: One Reviewer
 
