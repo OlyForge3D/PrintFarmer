@@ -582,9 +582,13 @@ regardless of what the final PR diff looks like. Any commit with anything other 
 exactly two parents (an ordinary single-parent commit, i.e. real author work, or a
 rare octopus merge this check doesn't attempt to validate) always fails condition 3.
 This reintroduces some per-commit inspection, so it carries the same truncation risk
-as the diff comparison: the workflow checks the bulk commit lists' `total_commits`
-against the returned `commits` array length and, if either compare's list is
-incomplete, treats condition 3 as unproven (fails closed) rather than guessing.
+as the diff comparison at two separate levels: the workflow checks the bulk commit
+lists' `total_commits` against the returned `commits` array length (identifying which
+SHAs are non-base in the first place), and separately checks both `singleCommit.files`
+and `parentsCompare.files` against the same `compareFilesCap` threshold used for the
+top-level diffs before trusting their fingerprint comparison — a capped list on either
+side could hide a real mismatch and falsely appear clean. Either truncation signal
+fails condition 3 closed (treats it as unproven) rather than guessing.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare

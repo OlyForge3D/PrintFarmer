@@ -1075,9 +1075,16 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   assert.match(workflow, /getCommit\(/);
   assert.match(workflow, /parentShas\.length !== 2/);
   assert.match(workflow, /basehead: `\$\{parentShas\[0\]\}\.\.\.\$\{parentShas\[1\]\}`/);
-  assert.match(workflow, /gate\.diffFingerprint\(singleCommit\.files/);
-  assert.match(workflow, /gate\.diffFingerprint\(parentsCompare\.files/);
+  assert.match(workflow, /gate\.diffFingerprint\(singleCommitFiles\)/);
+  assert.match(workflow, /gate\.diffFingerprint\(parentsCompareFiles\)/);
   assert.doesNotMatch(workflow, /singleCommit\.files\s*\?\?\s*\[\]\)\.length\s*>\s*0/);
+  // This per-commit equality check has its own truncation exposure —
+  // `parentsCompare.files` (and, in principle, `singleCommit.files`) can be
+  // silently capped just like the top-level diffs, and a capped list can
+  // never prove the fingerprints genuinely match. It must fail closed
+  // (disqualify), reusing the same `compareFilesCap` threshold.
+  assert.match(workflow, /singleCommitFiles\.length >= compareFilesCap/);
+  assert.match(workflow, /parentsCompareFiles\.length >= compareFilesCap/);
 
   // The bulk commit lists that feed condition 3 must be checked for
   // truncation too — otherwise Vasquez's pagination concern reopens the

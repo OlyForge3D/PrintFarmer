@@ -511,13 +511,27 @@ jobs:
                       allClean = false;
                       break;
                     }
+                    const singleCommitFiles = singleCommit.files ?? [];
                     const { data: parentsCompare } =
                       await github.rest.repos.compareCommitsWithBasehead({
                         owner, repo, basehead: `${parentShas[0]}...${parentShas[1]}`,
                       });
+                    const parentsCompareFiles = parentsCompare.files ?? [];
                     if (
-                      gate.diffFingerprint(singleCommit.files ?? []) !==
-                      gate.diffFingerprint(parentsCompare.files ?? [])
+                      singleCommitFiles.length >= compareFilesCap ||
+                      parentsCompareFiles.length >= compareFilesCap
+                    ) {
+                      // Either side of the equality check may be silently
+                      // capped, same as the top-level diff comparison — a
+                      // capped list can never prove the fingerprints match
+                      // (or genuinely differ), so this can't be trusted as
+                      // proof of a clean merge.
+                      allClean = false;
+                      break;
+                    }
+                    if (
+                      gate.diffFingerprint(singleCommitFiles) !==
+                      gate.diffFingerprint(parentsCompareFiles)
                     ) {
                       // The merge commit's own diff differs from what
                       // merging its two parents alone would produce — it
