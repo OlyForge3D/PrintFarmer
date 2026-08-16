@@ -13,6 +13,7 @@ import { getPrinterDisplayState } from '@/common/utils/printerStateDisplay';
 import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type PrinterBackendCapabilitiesDto, type PrintJobObjectDto, type PrintJobObjectListDto, type TempTargets } from '@/types/api';
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
+import { CalibrationSetupModal } from '@/features/printers/components/CalibrationSetupModal';
 import {
   canCancel,
   canCooldown,
@@ -68,6 +69,7 @@ import {
   FilamentUnloadIcon,
   FilamentChangeIcon,
   EjectIcon,
+  RulerIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
@@ -240,6 +242,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   const [showHistory, setShowHistory] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
+  const [showCalibrationSetup, setShowCalibrationSetup] = useState(false);
   const [hotendTemp, setHotendTemp] = useState<number | ''>('');
   const [bedTemp, setBedTemp] = useState<number | ''>('');
   const [moveX, setMoveX] = useState<number | ''>('');
@@ -904,6 +907,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 >
                   <HistoryIcon className="h-4 w-4" />
                 </ControlPadButton>
+                <ControlPadButton
+                  onClick={() => setShowCalibrationSetup(true)}
+                  title="Calibration setup"
+                  aria-label="Calibration setup"
+                  padSize="small"
+                >
+                  <RulerIcon className="h-4 w-4" />
+                </ControlPadButton>
               </div>
             </div>
           </div>
@@ -1447,6 +1458,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         isOpen={showFiles}
         onClose={() => setShowFiles(false)}
         printer={printer}
+      />
+
+      {/* Calibration Setup Modal (#1616) */}
+      <CalibrationSetupModal
+        isOpen={showCalibrationSetup}
+        onClose={() => setShowCalibrationSetup(false)}
+        printerId={printer.id}
+        printerName={printer.name}
+        rowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
       />
 
       <Modal

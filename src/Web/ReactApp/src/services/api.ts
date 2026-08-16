@@ -1051,6 +1051,43 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Fetches the read-only calibration-eligibility context for a printer
+   * (issue #1616): eligibility, missing inputs, and every profile-owned and
+   * residual manual field currently persisted.
+   */
+  async getCalibrationContext(
+    id: string,
+    slicerType = "OrcaSlicer"
+  ): Promise<import("@/types/api").CalibrationContextDto> {
+    const response = await this.client.get<import("@/types/api").CalibrationContextDto>(
+      `/printers/${id}/calibration-context`,
+      { params: { slicerType } }
+    );
+    return response.data;
+  }
+
+  /**
+   * Sets or edits the residual calibration-eligibility fields that remain
+   * manual after profile-owned sourcing (issue #1616, PR-3): per-toolhead
+   * metrology, the hardware sign-off timestamp, excludedRegions (explicit
+   * `[]` is honored), activeToolheadIndex, capability flags, and the
+   * confirm-only firmware-identity-verified flag. Additive and distinct
+   * from `updatePrinter` — never touches firmware family/version/dialect.
+   */
+  async updateCalibrationSetup(
+    id: string,
+    request: import("@/types/api").CalibrationSetupRequestDto,
+    reviewedRowVersion: string
+  ): Promise<import("@/types/api").CalibrationSetupResultDto> {
+    const response = await this.client.put<import("@/types/api").CalibrationSetupResultDto>(
+      `/printers/${id}/calibration-setup`,
+      request,
+      { headers: { "If-Match": this.reviewedEtag(reviewedRowVersion, "The reviewed printer") } }
+    );
+    return response.data;
+  }
+
   async applyModelTemplate(id: string): Promise<void> {
     await this.client.post(`/printers/${id}/apply-template`);
   }

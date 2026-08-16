@@ -1346,6 +1346,141 @@ export interface PrinterDetails {
   supportsPerToolAttribution?: boolean;
 }
 
+// ---------------------------------------------------------------------------
+// Calibration setup (issue #1616, PR-3 of the #1613 calibration-eligibility
+// decomposition): the residual manual fields that remain after profile-owned
+// sourcing (#1614/#1615), exposed via PUT /api/printers/{id}/calibration-setup.
+// ---------------------------------------------------------------------------
+
+export interface CalibrationPointDto {
+  x: number;
+  y: number;
+}
+
+export interface CalibrationExcludedRegionDto {
+  name?: string | null;
+  polygon: CalibrationPointDto[];
+}
+
+export interface CalibrationFirmwareIdentityDto {
+  family: string;
+  gcodeDialect: string;
+  detectionSource: string;
+  version?: string | null;
+  detectionVersion?: string | null;
+  detectionConfidence?: number | null;
+  detectedAtUtc?: string | null;
+  verified: boolean;
+}
+
+/** Per-toolhead manual metrology request fields. All are optional; omitted fields are left unchanged. */
+export interface CalibrationToolheadSetupDto {
+  id: string;
+  offsetX?: number | null;
+  offsetY?: number | null;
+  offsetZ?: number | null;
+  nozzleMaterial?: string | null;
+  nozzleIsHardened?: boolean | null;
+  maxVolumetricFlow?: number | null;
+  driveType?: string | null;
+  isDirectDrive?: boolean | null;
+  extruderGearRatio?: string | null;
+}
+
+/**
+ * Request payload for the calibration-setup endpoint. Deliberately has no
+ * firmware family/version/gcodeDialect property — firmware identity is
+ * read-only/display-only; `firmwareIdentityVerified` is a confirm-only
+ * sign-off, never an override of detected firmware facts.
+ */
+export interface CalibrationSetupRequestDto {
+  activeToolheadIndex?: number | null;
+  /** Explicit `[]` clears all excluded regions; omitting the field leaves it unchanged. */
+  excludedRegions?: CalibrationExcludedRegionDto[] | null;
+  supportsPressureAdvance?: boolean | null;
+  supportsFirmwareRetraction?: boolean | null;
+  calibrationHardwareVerifiedAtUtc?: string | null;
+  firmwareIdentityVerified?: boolean | null;
+  toolheads?: CalibrationToolheadSetupDto[] | null;
+}
+
+/** Persisted state of a single toolhead's manual metrology, echoed back after a setup write. */
+export interface CalibrationToolheadSetupResultDto {
+  id: string;
+  index: number;
+  name?: string | null;
+  offsetX?: number | null;
+  offsetY?: number | null;
+  offsetZ?: number | null;
+  nozzleMaterial?: string | null;
+  nozzleIsHardened?: boolean | null;
+  maxVolumetricFlow?: number | null;
+  driveType?: string | null;
+  isDirectDrive?: boolean | null;
+  extruderGearRatio?: string | null;
+}
+
+/** Response returned by the calibration-setup endpoint: full persisted residual-field state. */
+export interface CalibrationSetupResultDto {
+  printerId: string;
+  configurationRevision: number;
+  rowVersion?: string | null;
+  activeToolheadIndex?: number | null;
+  excludedRegions: CalibrationExcludedRegionDto[];
+  supportsPressureAdvance?: boolean | null;
+  supportsFirmwareRetraction?: boolean | null;
+  calibrationHardwareVerifiedAtUtc?: string | null;
+  firmware: CalibrationFirmwareIdentityDto;
+  toolheads: CalibrationToolheadSetupResultDto[];
+}
+
+/** A single missing-input rejection reason returned by the calibration-context endpoint. */
+export interface CalibrationRejectionReasonDto {
+  code: string;
+  field: string;
+  message: string;
+}
+
+/** Full toolhead state, both profile-derived and manual, as reported by GET .../calibration-context. */
+export interface CalibrationToolheadDto {
+  id: string;
+  index: number;
+  name?: string | null;
+  isPrimary: boolean;
+  offset: { x?: number | null; y?: number | null; z?: number | null };
+  nozzleDiameter?: number | null;
+  nozzleType?: string | null;
+  nozzleMaterial?: string | null;
+  nozzleMaxTemperature?: number | null;
+  nozzleIsHardened?: boolean | null;
+  hotendMaxTemperature?: number | null;
+  maxVolumetricFlow?: number | null;
+  driveType?: string | null;
+  isDirectDrive?: boolean | null;
+  extruderGearRatio?: string | null;
+  supportedMaterials?: string[] | null;
+}
+
+/**
+ * Read-only calibration-eligibility snapshot for a printer, combining
+ * profile-owned facts (#1614/#1615) with the residual manual fields this PR
+ * exposes. Used to reflect eligibility changes after a calibration-setup
+ * write (AC #4).
+ */
+export interface CalibrationContextDto {
+  id: string;
+  eligible: boolean;
+  missingInputs: string[];
+  rejectionReasons: CalibrationRejectionReasonDto[];
+  activeToolheadIndex?: number | null;
+  excludedRegions: CalibrationExcludedRegionDto[];
+  supportsPressureAdvance?: boolean | null;
+  supportsFirmwareRetraction?: boolean | null;
+  calibrationHardwareVerifiedAtUtc?: string | null;
+  firmware: CalibrationFirmwareIdentityDto;
+  toolheads: CalibrationToolheadDto[];
+}
+
 // Temperature targets
 export interface TempTargets {
   hotend: number;
