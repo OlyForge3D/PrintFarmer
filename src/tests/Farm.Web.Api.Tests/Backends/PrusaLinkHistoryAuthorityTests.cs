@@ -1212,6 +1212,51 @@ public sealed class PrusaLinkHistoryAuthorityTests
         requestContent.IsDisposed.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task DeleteHistoryJobAsync_CallerCancellation_StaysCancellation()
+    {
+        using var cts = new CancellationTokenSource();
+        using var handler = new InlineHandler(_ =>
+        {
+            cts.Cancel();
+            throw new OperationCanceledException(cts.Token);
+        });
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        Func<Task> action = async () =>
+            await client.DeleteHistoryJobAsync(
+                "http://prusalink/",
+                "job-1",
+                ct: cts.Token);
+
+        // Caller cancellation must NOT be swallowed into a `false` return; it must
+        // propagate as an OperationCanceledException so callers can distinguish an
+        // aborted request from a genuine delete failure.
+        await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task DeleteHistoryJobAsync_UnexpectedFailure_ReturnsFalse()
+    {
+        using var handler = new InlineHandler(_ =>
+            throw new HttpRequestException("connection reset"));
+        using var http = new HttpClient(handler);
+        var client = new PrusaLinkApiClient(
+            http,
+            NullLogger<PrusaLinkApiClient>.Instance);
+
+        bool deleted = await client.DeleteHistoryJobAsync(
+            "http://prusalink/",
+            "job-1");
+
+        // Non-cancellation failures keep the existing "never throws" contract for
+        // this best-effort delete: they are logged and reported as `false`.
+        deleted.Should().BeFalse();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.BadRequest)]
     [InlineData(HttpStatusCode.Forbidden)]
