@@ -135,36 +135,44 @@ public sealed class PrinterVersionCacheTests
         // to return instead of also needing a live fetch.
         await cache.GetAsync(printer.Id, CancellationToken.None);
 
-        // Force genuine overlap at the throttle-claim point itself: GetAsync looks up the
-        // printer via FindByIdAsync immediately before making its throttle-claim decision, so
-        // gating both callers on a two-party barrier there guarantees neither thread can reach
-        // the throttle claim until the other has too. Without this, a downstream delay (e.g. in
-        // the backend call) does not reliably reproduce the race — a non-atomic
-        // TryGetValue-then-Set implementation could still pass spuriously depending on scheduler
-        // timing, since nothing forces both callers to actually contend for the claim at the
-        // same instant.
+        // Force genuine overlap at the atomic claim itself — not merely at an earlier step in
+        // the method. Gating two threads at an earlier point (e.g. the printer lookup) only
+        // guarantees they are *released* together; it does not guarantee they reach the
+        // AddOrUpdate call at the same instant, so a test built that way could still pass
+        // against a non-atomic implementation depending on scheduler luck. PrinterVersionCache
+        // exposes a test-only hook (TestOnlyBeforeThrottleClaim) invoked immediately before the
+        // claim, so both threads rendezvous on a two-party barrier right there, with essentially
+        // nothing but the atomic call itself between release and contention. Assert the barrier's
+        // return value explicitly: a missed rendezvous must be a loud, immediate test failure,
+        // not a silent 5-second stall that could let a flaky/slow CI run pass without the
+        // intended two-party gate ever having happened.
         using var claimBarrier = new Barrier(2);
-        printersService
-            .Setup(s => s.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
-            {
-                claimBarrier.SignalAndWait(TimeSpan.FromSeconds(5));
-                return printer;
-            });
+        PrinterVersionCache.TestOnlyBeforeThrottleClaim = _ =>
+        {
+            bool bothArrived = claimBarrier.SignalAndWait(TimeSpan.FromSeconds(5));
+            Assert.True(bothArrived, "both concurrent forceRefresh calls must reach the throttle claim together");
+        };
 
-        Task<PrinterVersionInfoDto?> call1 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
-        Task<PrinterVersionInfoDto?> call2 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
+        try
+        {
+            Task<PrinterVersionInfoDto?> call1 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
+            Task<PrinterVersionInfoDto?> call2 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
 
-        PrinterVersionInfoDto?[] results = await Task.WhenAll(call1, call2);
+            PrinterVersionInfoDto?[] results = await Task.WhenAll(call1, call2);
 
-        results[0].Should().NotBeNull();
-        results[1].Should().NotBeNull();
+            results[0].Should().NotBeNull();
+            results[1].Should().NotBeNull();
 
-        // One backend call from warming the cache, plus exactly one more from whichever
-        // forceRefresh call won the throttle window — the loser must not trigger a second.
-        infoClientMock.As<ISupportsPrinterInformation>().Verify(
-            c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+            // One backend call from warming the cache, plus exactly one more from whichever
+            // forceRefresh call won the throttle window — the loser must not trigger a second.
+            infoClientMock.As<ISupportsPrinterInformation>().Verify(
+                c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()),
+                Times.Exactly(2));
+        }
+        finally
+        {
+            PrinterVersionCache.TestOnlyBeforeThrottleClaim = null;
+        }
     }
 
     [Fact]

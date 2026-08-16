@@ -42,6 +42,15 @@ public sealed class PrinterVersionCache(
 
     private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
 
+    // Test-only synchronization seam invoked immediately before the atomic throttle claim
+    // below. Gating two racing threads at an earlier point (e.g. the printer lookup) only
+    // guarantees they are *released* together — it does not guarantee they reach the
+    // AddOrUpdate call itself at the same instant, so a test built that way could still pass
+    // against a non-atomic implementation depending on scheduler luck. This hook lets a test
+    // put both threads on a barrier immediately before the claim, closing that gap. It is
+    // null (a no-op) in production and must never be set outside a test.
+    internal static Action<Guid>? TestOnlyBeforeThrottleClaim { get; set; }
+
     public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
     {
         // Automatic polling (forceRefresh=false) never needs the printer lookup or the
@@ -67,6 +76,8 @@ public sealed class PrinterVersionCache(
         // printer ids can never grow the throttle table.
         if (forceRefresh)
         {
+            TestOnlyBeforeThrottleClaim?.Invoke(printerId);
+
             DateTime nowUtc = DateTime.UtcNow;
             SweepExpiredForceRefreshWindows(nowUtc);
 
