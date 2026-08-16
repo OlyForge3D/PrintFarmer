@@ -193,13 +193,28 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // would leave the materials module permanently unable to assign a spool.
   // Do not reintroduce a condition on MMU gate presence — a gate-based
   // predicate is what silently produced that dead end.
+  // Also fetch when the card's own printer object lacks a concurrency token
+  // (`!printer.rowVersion`): the compact list DTO can omit `rowVersion`, and the
+  // spool mutation guards below need an authoritative token to review against.
+  // Gating that fallback on `spoolmanReady` made it flaky — a user who could see
+  // an eject button could not always press it. `spoolmanReady || !printer.rowVersion`
+  // is a strict superset of the previous condition, so topology still resolves
+  // whenever it did before. Once the list DTO carries `rowVersion` the extra
+  // fetch stops triggering.
   const { data: printerDetails } = usePrinterDetails(
     printer.id,
     {
-      enabled: spoolmanReady,
+      enabled: spoolmanReady || !printer.rowVersion,
       staleTime: 60000,
     }
   );
+
+  // Authoritative reviewed revision for spool mutations. Prefer the card's own
+  // token, fall back to the details record. Never fabricate one — an unresolved
+  // token blocks the action rather than sending an unreviewed mutation.
+  const spoolReviewedRowVersion = printer.rowVersion ?? printerDetails?.rowVersion ?? null;
+  const spoolRevisionUnavailable = !spoolReviewedRowVersion;
+  const spoolRevisionBlockedReason = 'Printer revision unavailable — refresh to manage spools';
 
   // One resolution per render, shared by the materials module and the
   // single-spool fallback below. Calling the resolver separately in each
@@ -966,7 +981,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           printerId={printer.id}
           mmuStatus={mmuStatus}
           toolheads={printerDetails?.toolheads}
-          reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
+          reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           compact
           className="mb-2"
         />
@@ -983,11 +998,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={spoolActionPending}
+                disabled={spoolActionPending || spoolRevisionUnavailable}
                 onClick={() => setShowSpoolPicker(true)}
                 className="p-0.5! h-auto!"
-                title="Change spool"
-                aria-label="Change spool"
+                title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
+                aria-label={spoolRevisionUnavailable ? `Change spool — ${spoolRevisionBlockedReason}` : 'Change spool'}
                 iconCenter={<FilamentChangeIcon className="h-3.5 w-3.5" />}
               ></Button>
               {printer.spoolInfo?.hasActiveSpool && (
@@ -995,11 +1010,11 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={spoolActionPending}
+                  disabled={spoolActionPending || spoolRevisionUnavailable}
                   onClick={async () => {
                     setSpoolActionPending(true);
                     try {
-                      const reviewedRowVersion = printer.rowVersion ?? printerDetails?.rowVersion;
+                      const reviewedRowVersion = spoolReviewedRowVersion;
                       if (!reviewedRowVersion) {
                         toast.error('Printer revision unavailable. Refresh and review again.');
                         return;
@@ -1042,8 +1057,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                     }
                   }}
                   className="p-0.5! h-auto!"
-                  title="Eject spool"
-                  aria-label="Eject spool"
+                  title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Eject spool'}
+                  aria-label={spoolRevisionUnavailable ? `Eject spool — ${spoolRevisionBlockedReason}` : 'Eject spool'}
                   iconCenter={<EjectIcon className="h-3.5 w-3.5" />}
                 ></Button>
               )}
@@ -1221,7 +1236,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            const reviewedRowVersion = printer.rowVersion ?? printerDetails?.rowVersion;
+            const reviewedRowVersion = spoolReviewedRowVersion;
             if (!reviewedRowVersion) {
               toast.error('Printer revision unavailable. Refresh and review again.');
               return;
@@ -1276,7 +1291,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           <ZOffsetCalibrationWizard
             isOpen={showZOffsetWizard}
             onClose={() => setShowZOffsetWizard(false)}
-            printer={printer}
+            printer={spoolRevisionUnavailable ? printer : { ...printer, rowVersion: spoolReviewedRowVersion }}
             bedSizeX={printerDetails?.capabilities?.maxBuildVolumeX ?? 220}
             bedSizeY={printerDetails?.capabilities?.maxBuildVolumeY ?? 220}
           />
