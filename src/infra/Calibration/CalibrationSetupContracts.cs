@@ -29,6 +29,17 @@ public sealed record CalibrationToolheadSetupDto(
 /// read-only/display-only here; <c>FirmwareIdentityVerified</c> is the only
 /// firmware-related field, and it is a confirm-only sign-off, not an override.
 /// </summary>
+/// <remarks>
+/// The three OrcaSlicer profile references are part of this contract because profile
+/// <em>selection</em> is itself a residual manual input: nothing can be derived from a
+/// machine profile until one is bound, so the binding cannot come from profile-owned
+/// sourcing. Binding them is a calibration operation and is therefore reachable with
+/// <c>calibration:update</c> rather than requiring <c>printers:admin</c> on the raw
+/// <c>PUT /api/printers/{id}</c> contract.
+///
+/// Per-field semantics follow the shared update mapper: <see langword="null"/> leaves the
+/// stored value untouched, and <see cref="Guid.Empty"/> clears it.
+/// </remarks>
 public sealed record CalibrationSetupRequestDto(
     int? ActiveToolheadIndex = null,
     CalibrationExcludedRegionDto[]? ExcludedRegions = null,
@@ -36,7 +47,10 @@ public sealed record CalibrationSetupRequestDto(
     bool? SupportsFirmwareRetraction = null,
     DateTime? CalibrationHardwareVerifiedAtUtc = null,
     bool? FirmwareIdentityVerified = null,
-    CalibrationToolheadSetupDto[]? Toolheads = null);
+    CalibrationToolheadSetupDto[]? Toolheads = null,
+    Guid? MachineProfileId = null,
+    Guid? ProcessProfileId = null,
+    Guid? FilamentProfileId = null);
 
 /// <summary>Persisted state of a single toolhead's manual metrology, echoed back after a setup write.</summary>
 public sealed record CalibrationToolheadSetupResultDto(
@@ -69,7 +83,10 @@ public sealed record CalibrationSetupResultDto(
     bool? SupportsFirmwareRetraction,
     DateTime? CalibrationHardwareVerifiedAtUtc,
     CalibrationFirmwareIdentityDto Firmware,
-    IReadOnlyList<CalibrationToolheadSetupResultDto> Toolheads);
+    IReadOnlyList<CalibrationToolheadSetupResultDto> Toolheads,
+    Guid? MachineProfileId = null,
+    Guid? ProcessProfileId = null,
+    Guid? FilamentProfileId = null);
 
 /// <summary>
 /// Bounds/format validation for the manual toolhead metrology fields exposed by the

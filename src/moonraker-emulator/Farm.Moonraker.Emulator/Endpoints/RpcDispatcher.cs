@@ -167,17 +167,12 @@ public static class RpcDispatcher
 
         foreach (JsonProperty prop in objects.EnumerateObject())
         {
-            if (prop.Value.ValueKind == JsonValueKind.Array)
-            {
-                result[prop.Name] = prop.Value.EnumerateArray()
+            result[prop.Name] = prop.Value.ValueKind == JsonValueKind.Array
+                ? prop.Value.EnumerateArray()
                     .Where(e => e.ValueKind == JsonValueKind.String)
                     .Select(e => e.GetString()!)
-                    .ToArray();
-            }
-            else
-            {
-                result[prop.Name] = null;
-            }
+                    .ToArray()
+                : null;
         }
 
         return result;
