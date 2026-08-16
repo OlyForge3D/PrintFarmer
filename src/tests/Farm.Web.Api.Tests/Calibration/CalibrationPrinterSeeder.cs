@@ -30,11 +30,19 @@ internal static class CalibrationPrinterSeeder
     /// <param name="services">The API host's service provider.</param>
     /// <param name="profilesPublic">Whether the seeded profiles are visible to everyone.</param>
     /// <param name="profileOwnerUserId">Owner recorded on the profiles.</param>
+    /// <param name="deriveHardwareFromMachineProfile">
+    /// When <see langword="true"/>, leaves every #1614 AC-2 derivable <c>Calibration*</c>/
+    /// <c>Toolhead</c> column null and seeds a fully-specified machine profile
+    /// <c>RawJson</c> so the eligibility pipeline must source those fields from the resolved
+    /// machine profile — the split-deployment counterpart of the in-process derivation unit
+    /// test, proving parity across both deployment topologies (test plan item 6).
+    /// </param>
     /// <returns>The seeded identifiers.</returns>
     public static async Task<SeededPrinter> SeedAsync(
         IServiceProvider services,
         bool profilesPublic = true,
-        Guid? profileOwnerUserId = null)
+        Guid? profileOwnerUserId = null,
+        bool deriveHardwareFromMachineProfile = false)
     {
         Guid printerId = Guid.NewGuid();
         Guid manufacturerId = Guid.NewGuid();
@@ -78,23 +86,25 @@ internal static class CalibrationPrinterSeeder
                 FirmwareIdentityVerified = true,
                 BackendVersion = "v0.9.3",
                 BackendApiVersion = "v1",
-                MaxBuildVolumeX = 250,
-                MaxBuildVolumeY = 250,
-                MaxBuildVolumeZ = 250,
-                BedOriginX = 0,
-                BedOriginY = 0,
-                PrintablePolygonJson =
-                    """[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250},{"x":0,"y":250}]""",
+                MaxBuildVolumeX = deriveHardwareFromMachineProfile ? null : 250,
+                MaxBuildVolumeY = deriveHardwareFromMachineProfile ? null : 250,
+                MaxBuildVolumeZ = deriveHardwareFromMachineProfile ? null : 250,
+                BedOriginX = deriveHardwareFromMachineProfile ? null : 0,
+                BedOriginY = deriveHardwareFromMachineProfile ? null : 0,
+                PrintablePolygonJson = deriveHardwareFromMachineProfile
+                    ? null
+                    : """[{"x":0,"y":0},{"x":250,"y":0},{"x":250,"y":250},{"x":0,"y":250}]""",
                 ExcludedRegionsJson = "[]",
-                CalibrationMotionType = CalibrationMotionType.CoreXY,
+                CalibrationMotionType =
+                    deriveHardwareFromMachineProfile ? null : CalibrationMotionType.CoreXY,
                 MaxPrintSpeed = 300,
-                MaxTravelSpeed = 500,
-                MaxAcceleration = 10000,
+                MaxTravelSpeed = deriveHardwareFromMachineProfile ? null : 500,
+                MaxAcceleration = deriveHardwareFromMachineProfile ? null : 10000,
                 MaxTravelAcceleration = 12000,
-                CalibrationHasHeatedBed = true,
+                CalibrationHasHeatedBed = deriveHardwareFromMachineProfile ? null : true,
                 MaxBedTemp = 120,
                 CalibrationHasEnclosure = false,
-                HasHeatedChamber = false,
+                HasHeatedChamber = deriveHardwareFromMachineProfile ? null : false,
                 ActiveToolheadIndex = 0,
                 SupportsPressureAdvance = true,
                 SupportsFirmwareRetraction = true,
@@ -122,12 +132,12 @@ internal static class CalibrationPrinterSeeder
                         OffsetX = 0,
                         OffsetY = 0,
                         OffsetZ = 0,
-                        NozzleDiameter = 0.4,
-                        NozzleType = NozzleType.Brass,
+                        NozzleDiameter = deriveHardwareFromMachineProfile ? null : 0.4,
+                        NozzleType = deriveHardwareFromMachineProfile ? null : NozzleType.Brass,
                         NozzleMaterial = "brass",
-                        NozzleMaxTemperature = 300,
+                        NozzleMaxTemperature = deriveHardwareFromMachineProfile ? null : 300,
                         NozzleIsHardened = false,
-                        HotendMaxTemperature = 300,
+                        HotendMaxTemperature = deriveHardwareFromMachineProfile ? null : 300,
                         MaxVolumetricFlow = 15,
                         DriveType = "direct",
                         IsDirectDrive = true,
@@ -148,8 +158,24 @@ internal static class CalibrationPrinterSeeder
             _ = await db.SaveChangesAsync();
         }
 
-        string machineJson =
-            $$"""{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"printer_variant":"{{machineProfileId}}"}""";
+        string machineJson = deriveHardwareFromMachineProfile
+            ? $$"""
+                {
+                    "gcode_flavor": "klipper",
+                    "printer_variant": "{{machineProfileId}}",
+                    "printable_area": ["0x0", "250x0", "250x250", "0x250"],
+                    "printable_height": 250,
+                    "machine_max_acceleration_x": [10000],
+                    "machine_max_speed_x": [500],
+                    "has_heated_bed": true,
+                    "has_heated_chamber": false,
+                    "nozzle_diameter": [0.4],
+                    "nozzle_type": "brass",
+                    "max_hotend_temp": [300],
+                    "printer_type": "corexy"
+                }
+                """
+            : $$"""{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"printer_variant":"{{machineProfileId}}"}""";
         string processJson =
             $$"""{"layer_height":0.2,"infill_density":20,"process_variant":"{{processProfileId}}"}""";
         string filamentJson =

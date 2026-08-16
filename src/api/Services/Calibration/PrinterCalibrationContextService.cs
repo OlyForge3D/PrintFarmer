@@ -339,21 +339,77 @@ public sealed class PrinterCalibrationContextService(
                 "The printer is in maintenance mode.");
         }
 
-        ValidateFirmware(printer, nowUtc, reasons, missingInputs);
-        ValidateSlicerIdentity(printer, reasons, missingInputs);
+        CalibrationProfileSelection? profileSelection =
+            ValidateProfileSelection(printer, reasons, missingInputs);
+
+        List<Toolhead> physicalToolheads = printer.Toolheads
+            .Where(toolhead => toolhead.ToolheadType == ToolheadType.Physical)
+            .OrderBy(toolhead => toolhead.Index)
+            .ThenBy(toolhead => toolhead.Id)
+            .ToList();
+
+        ResolvedCalibrationProfiles? resolved = null;
+        if (profileSelection is not null)
+        {
+            if (resolveProfiles)
+            {
+                // GetContextAsync's caller preserves the existing contract of propagating
+                // CalibrationProfileResolverUnavailableException uncaught.
+                resolved = await ResolveProfilesAsync(
+                    profileSelection,
+                    profileAccessScope,
+                    cancellationToken);
+            }
+            else if (NeedsMachineProfileDerivation(printer, physicalToolheads))
+            {
+                // The candidates path must still resolve profiles once when (and only when)
+                // AC-2-derivable fields are missing, so eligibility reflects sourced values.
+                // A resolver failure here degrades to a typed rejection rather than throwing,
+                // preserving GetCandidatesAsync's existing zero-resolver-call test guarantees
+                // for fully-populated printers.
+                try
+                {
+                    resolved = await ResolveProfilesAsync(
+                        profileSelection,
+                        profileAccessScope,
+                        cancellationToken);
+                }
+                catch (CalibrationProfileResolverUnavailableException ex)
+                {
+                    Reject(
+                        reasons,
+                        missingInputs,
+                        ex.ErrorCode,
+                        "machineProfile",
+                        "The calibration profile resolver is unavailable.");
+                }
+            }
+        }
+
+        DerivedMachineFacts derivedFacts =
+            CalibrationMachineProfileDeriver.Derive(resolved?.Machine?.RawJson);
+
+        PrinterGcodeDialect effectiveGcodeDialect =
+            ValidateFirmware(printer, nowUtc, reasons, missingInputs);
+        CalibrationSlicerIdentityDto slicerIdentity =
+            ValidateSlicerIdentity(printer, resolved?.Machine, reasons, missingInputs);
 
         IReadOnlyList<CalibrationPointDto>? printablePolygon =
-            ParseJsonList<CalibrationPointDto>(
-                printer.PrintablePolygonJson,
-                "printablePolygon",
-                reasons,
-                missingInputs);
+            printer.PrintablePolygonJson is null
+                ? derivedFacts.PrintablePolygon
+                : ParseJsonList<CalibrationPointDto>(
+                    printer.PrintablePolygonJson,
+                    "printablePolygon",
+                    reasons,
+                    missingInputs);
         IReadOnlyList<CalibrationExcludedRegionDto>? excludedRegions =
-            ParseJsonList<CalibrationExcludedRegionDto>(
-                printer.ExcludedRegionsJson,
-                "excludedRegions",
-                reasons,
-                missingInputs);
+            printer.ExcludedRegionsJson is null
+                ? []
+                : ParseJsonList<CalibrationExcludedRegionDto>(
+                    printer.ExcludedRegionsJson,
+                    "excludedRegions",
+                    reasons,
+                    missingInputs);
         if (printablePolygon is { Count: < 3 })
         {
             Reject(
@@ -364,37 +420,30 @@ public sealed class PrinterCalibrationContextService(
                 "The printable polygon must contain at least three points.");
         }
 
-        List<Toolhead> physicalToolheads = printer.Toolheads
-            .Where(toolhead => toolhead.ToolheadType == ToolheadType.Physical)
-            .OrderBy(toolhead => toolhead.Index)
-            .ThenBy(toolhead => toolhead.Id)
-            .ToList();
         CalibrationToolheadDto[] toolheads = physicalToolheads
-            .Select(MapToolhead)
+            .Select(toolhead => MapToolhead(toolhead, printer.ActiveToolheadIndex, derivedFacts))
             .ToArray();
 
-        ValidateHardware(
+        EffectiveHardwareFacts hardwareFacts = ValidateHardware(
             printer,
             physicalToolheads,
             printablePolygon,
-            excludedRegions,
+            derivedFacts,
             supportsMultiExtruderStatus,
             nowUtc,
             reasons,
             missingInputs);
-        CalibrationProfileSelection? profileSelection =
-            ValidateProfileSelection(printer, reasons, missingInputs);
 
         CalibrationProfileEvaluation profileEvaluation =
-            resolveProfiles && profileSelection is not null
-            ? await EvaluateProfilesAsync(
+            resolveProfiles && profileSelection is not null && resolved is not null
+            ? EvaluateProfiles(
                 printer,
-                profileSelection,
+                resolved,
                 physicalToolheads,
+                toolheads,
+                hardwareFacts,
                 reasons,
-                missingInputs,
-                profileAccessScope,
-                cancellationToken)
+                missingInputs)
             : CalibrationProfileEvaluation.Empty;
 
         CalibrationCandidateDto candidate = new()
@@ -423,27 +472,27 @@ public sealed class PrinterCalibrationContextService(
             SupportsDirectCommand = supportsDirectCommand,
             SupportsMultiExtruderStatus = supportsMultiExtruderStatus,
             BuildVolume = new(
-                printer.MaxBuildVolumeX,
-                printer.MaxBuildVolumeY,
-                printer.MaxBuildVolumeZ),
-            BedOrigin = new(printer.BedOriginX, printer.BedOriginY),
+                hardwareFacts.BuildVolumeX,
+                hardwareFacts.BuildVolumeY,
+                hardwareFacts.BuildVolumeZ),
+            BedOrigin = new(hardwareFacts.BedOriginX, hardwareFacts.BedOriginY),
             PrintablePolygon = printablePolygon,
             ExcludedRegions = excludedRegions,
-            MotionType = printer.CalibrationMotionType?.ToString(),
+            MotionType = hardwareFacts.MotionType?.ToString(),
             MaxPrintSpeed = printer.MaxPrintSpeed,
-            MaxTravelSpeed = printer.MaxTravelSpeed,
-            MaxAcceleration = printer.MaxAcceleration,
+            MaxTravelSpeed = hardwareFacts.MaxTravelSpeed,
+            MaxAcceleration = hardwareFacts.MaxAcceleration,
             MaxTravelAcceleration = printer.MaxTravelAcceleration,
             PhysicalToolheadCount = physicalToolheads.Count,
             ActiveToolheadIndex = printer.ActiveToolheadIndex,
             Toolheads = toolheads,
-            HasHeatedBed = printer.CalibrationHasHeatedBed,
+            HasHeatedBed = hardwareFacts.HasHeatedBed,
             MaxBedTemperature = printer.MaxBedTemp,
             HasEnclosure = printer.CalibrationHasEnclosure,
-            HasHeatedChamber = printer.HasHeatedChamber,
+            HasHeatedChamber = hardwareFacts.HasHeatedChamber,
             MaxChamberTemperature = printer.MaxChamberTemp,
-            Firmware = MapFirmware(printer),
-            Slicer = MapSlicer(printer),
+            Firmware = MapFirmware(printer, effectiveGcodeDialect),
+            Slicer = slicerIdentity,
             ProfilesEvaluated = resolveProfiles,
             Eligible = reasons.Count == 0,
             MissingInputs = missingInputs.Order(StringComparer.Ordinal).ToArray(),
@@ -459,6 +508,47 @@ public sealed class PrinterCalibrationContextService(
             profileEvaluation.BaselineSettings,
             profileEvaluation.RawEffectiveSettings,
             profileEvaluation.FilamentProducts);
+    }
+
+    /// <summary>
+    /// Pure check (no resolver calls) for whether any AC-2-derivable field is missing its
+    /// explicit value, in which case the candidates path must resolve the machine profile once
+    /// to source it. firmware.gcodeDialect is intentionally excluded: it is sourced from
+    /// firmware detection only, never from the profile (#1613 §4.5/§4.5.1).
+    /// </summary>
+    private static bool NeedsMachineProfileDerivation(
+        Printer printer,
+        List<Toolhead> physicalToolheads)
+    {
+        if (printer.MaxBuildVolumeX is null ||
+            printer.MaxBuildVolumeY is null ||
+            printer.MaxBuildVolumeZ is null ||
+            printer.BedOriginX is null ||
+            printer.BedOriginY is null ||
+            printer.PrintablePolygonJson is null ||
+            printer.CalibrationMotionType is null or
+                Farm.Infrastructure.Domain.CalibrationMotionType.Unknown ||
+            printer.MaxAcceleration is null ||
+            printer.MaxTravelSpeed is null ||
+            printer.CalibrationHasHeatedBed is null ||
+            printer.HasHeatedChamber is null ||
+            printer.CalibrationSlicerEngine is null ||
+            printer.CalibrationSlicerDistribution is null ||
+            printer.CalibrationSlicerVersion is null ||
+            printer.CalibrationProfileFormat is null)
+        {
+            return true;
+        }
+
+        Toolhead? activeToolhead = printer.ActiveToolheadIndex.HasValue
+            ? physicalToolheads.FirstOrDefault(
+                toolhead => toolhead.Index == printer.ActiveToolheadIndex.Value)
+            : null;
+        return activeToolhead is not null &&
+            (activeToolhead.NozzleDiameter is null ||
+                activeToolhead.NozzleType is null ||
+                activeToolhead.NozzleMaxTemperature is null ||
+                activeToolhead.HotendMaxTemperature is null);
     }
 
     private static CalibrationProfileSelection? ValidateProfileSelection(
@@ -513,24 +603,30 @@ public sealed class PrinterCalibrationContextService(
             : null;
     }
 
-    private async Task<CalibrationProfileEvaluation> EvaluateProfilesAsync(
-        Printer printer,
+    private Task<ResolvedCalibrationProfiles> ResolveProfilesAsync(
         CalibrationProfileSelection profileSelection,
-        List<Toolhead> physicalToolheads,
-        List<CalibrationRejectionReasonDto> reasons,
-        HashSet<string> missingInputs,
         CalibrationProfileAccessScope profileAccessScope,
         CancellationToken cancellationToken)
     {
         ICalibrationProfileResolver resolver = profileResolver
             ?? throw new CalibrationProfileResolverUnavailableException();
-        ResolvedCalibrationProfiles resolved = await resolver.ResolveAsync(
+        return resolver.ResolveAsync(
             profileSelection.MachineProfileId,
             profileSelection.ProcessProfileId,
             profileSelection.FilamentProfileId,
             profileAccessScope,
             cancellationToken);
+    }
 
+    private CalibrationProfileEvaluation EvaluateProfiles(
+        Printer printer,
+        ResolvedCalibrationProfiles resolved,
+        List<Toolhead> physicalToolheads,
+        CalibrationToolheadDto[] toolheads,
+        EffectiveHardwareFacts hardwareFacts,
+        List<CalibrationRejectionReasonDto> reasons,
+        HashSet<string> missingInputs)
+    {
         if (resolved.Machine is null)
         {
             RejectMissing(
@@ -584,7 +680,7 @@ public sealed class PrinterCalibrationContextService(
         {
             ValidateMachineProfile(
                 machine.Json,
-                physicalToolheads,
+                toolheads,
                 reasons,
                 missingInputs);
         }
@@ -611,12 +707,16 @@ public sealed class PrinterCalibrationContextService(
 
         Toolhead? activeToolhead = physicalToolheads
             .SingleOrDefault(toolhead => toolhead.Index == printer.ActiveToolheadIndex);
+        CalibrationToolheadDto? activeToolheadFacts = toolheads
+            .SingleOrDefault(toolhead => toolhead.Index == printer.ActiveToolheadIndex);
         if (resolved.Filament is not null && activeToolhead is not null)
         {
             ValidateFilamentSafety(
                 resolved.Filament,
                 filament.Json,
                 activeToolhead,
+                activeToolheadFacts?.HotendMaxTemperature,
+                hardwareFacts.HasHeatedBed,
                 printer,
                 reasons,
                 missingInputs);
@@ -625,7 +725,7 @@ public sealed class PrinterCalibrationContextService(
         double? maxVolumetricFlow = activeToolhead?.MaxVolumetricFlow ??
             GetFirstNumber(filament.Json, "filament_max_volumetric_speed");
         CalibrationBaselineSettingsDto baseline = new(
-            activeToolhead?.NozzleDiameter,
+            activeToolheadFacts?.NozzleDiameter,
             resolved.Process?.LayerHeight,
             resolved.Process?.InfillPercentage,
             resolved.Process?.PrintSpeed,
@@ -818,7 +918,7 @@ public sealed class PrinterCalibrationContextService(
 
     private static void ValidateMachineProfile(
         JsonElement? json,
-        List<Toolhead> physicalToolheads,
+        CalibrationToolheadDto[] toolheads,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
@@ -860,13 +960,16 @@ public sealed class PrinterCalibrationContextService(
             return;
         }
 
-        double[] installedNozzles = physicalToolheads
+        // #1614 AC-3: cross-validate against the effective (explicit-override-or-derived)
+        // nozzle diameter, not the raw column, so a toolhead relying on profile derivation is
+        // not spuriously flagged as mismatched against the very profile that supplies it.
+        double[] installedNozzles = toolheads
             .Where(toolhead => toolhead.NozzleDiameter.HasValue)
             .Select(toolhead => toolhead.NozzleDiameter!.Value)
             .Order()
             .ToArray();
         double[] selectedNozzles = profileNozzles.Order().ToArray();
-        if (installedNozzles.Length != physicalToolheads.Count ||
+        if (installedNozzles.Length != toolheads.Length ||
             selectedNozzles.Length != installedNozzles.Length ||
             selectedNozzles.Where((diameter, index) =>
                 Math.Abs(diameter - installedNozzles[index]) > NumericTolerance).Any())
@@ -919,6 +1022,8 @@ public sealed class PrinterCalibrationContextService(
         ResolvedCalibrationProfile filament,
         JsonElement? json,
         Toolhead activeToolhead,
+        int? effectiveHotendMaxTemperature,
+        bool? effectiveHasHeatedBed,
         Printer printer,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
@@ -947,9 +1052,12 @@ public sealed class PrinterCalibrationContextService(
                 "The active toolhead does not declare support for the selected filament material.");
         }
 
+        // #1614 AC-3: validate against the effective (explicit-override-or-derived) hotend
+        // limit, not the raw column, so a toolhead relying on profile derivation is not
+        // silently skipped by this safety check.
         if (filament.NozzleTemperature.HasValue &&
-            activeToolhead.HotendMaxTemperature.HasValue &&
-            filament.NozzleTemperature.Value > activeToolhead.HotendMaxTemperature.Value)
+            effectiveHotendMaxTemperature.HasValue &&
+            filament.NozzleTemperature.Value > effectiveHotendMaxTemperature.Value)
         {
             Reject(
                 reasons,
@@ -960,7 +1068,7 @@ public sealed class PrinterCalibrationContextService(
         }
 
         if (filament.BedTemperature > 0 &&
-            printer.CalibrationHasHeatedBed == false)
+            effectiveHasHeatedBed == false)
         {
             Reject(
                 reasons,
@@ -970,7 +1078,7 @@ public sealed class PrinterCalibrationContextService(
                 "The filament profile requires a heated bed that the printer does not have.");
         }
         else if (filament.BedTemperature.HasValue &&
-            printer.CalibrationHasHeatedBed == true &&
+            effectiveHasHeatedBed == true &&
             printer.MaxBedTemp.HasValue &&
             filament.BedTemperature.Value > printer.MaxBedTemp.Value)
         {
@@ -994,7 +1102,7 @@ public sealed class PrinterCalibrationContextService(
         }
     }
 
-    private void ValidateFirmware(
+    private PrinterGcodeDialect ValidateFirmware(
         Printer printer,
         DateTime nowUtc,
         List<CalibrationRejectionReasonDto> reasons,
@@ -1019,7 +1127,16 @@ public sealed class PrinterCalibrationContextService(
                 "Printer Calibration currently requires Klipper firmware.");
         }
 
-        if (printer.GcodeDialect == PrinterGcodeDialect.Unknown)
+        // firmware.gcodeDialect is sourced from firmware detection only, never from the
+        // resolved machine profile (#1613 §4.5/§4.5.1): when the explicit dialect column is
+        // unset, fall back to the dialect implied by the detected firmware family.
+        PrinterGcodeDialect effectiveGcodeDialect = printer.GcodeDialect != PrinterGcodeDialect.Unknown
+            ? printer.GcodeDialect
+            : printer.FirmwareFamily == PrinterFirmwareFamily.Klipper
+                ? PrinterGcodeDialect.Klipper
+                : PrinterGcodeDialect.Unknown;
+
+        if (effectiveGcodeDialect == PrinterGcodeDialect.Unknown)
         {
             RejectMissing(
                 reasons,
@@ -1028,7 +1145,7 @@ public sealed class PrinterCalibrationContextService(
                 "firmware.gcodeDialect",
                 "G-code dialect has not been explicitly identified.");
         }
-        else if (printer.GcodeDialect != PrinterGcodeDialect.Klipper)
+        else if (effectiveGcodeDialect != PrinterGcodeDialect.Klipper)
         {
             Reject(
                 reasons,
@@ -1111,15 +1228,24 @@ public sealed class PrinterCalibrationContextService(
                 "firmware.detectedAtUtc",
                 "Firmware identity metadata is stale.");
         }
+
+        return effectiveGcodeDialect;
     }
 
-    private void ValidateSlicerIdentity(
+    private CalibrationSlicerIdentityDto ValidateSlicerIdentity(
         Printer printer,
+        ResolvedCalibrationProfile? derivedMachine,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
+        string? slicerEngine = printer.CalibrationSlicerEngine ?? derivedMachine?.SlicerType;
+        string? slicerDistribution =
+            printer.CalibrationSlicerDistribution ?? derivedMachine?.SlicerDistribution;
+        string? slicerVersion = printer.CalibrationSlicerVersion ?? derivedMachine?.SlicerVersion;
+        string? profileFormat = printer.CalibrationProfileFormat ?? derivedMachine?.ProfileFormat;
+
         ValidateIdentityValue(
-            printer.CalibrationSlicerEngine,
+            slicerEngine,
             CalibrationContractConstants.SlicerEngine,
             "slicer_engine_missing",
             "slicer_engine_unsupported",
@@ -1127,14 +1253,14 @@ public sealed class PrinterCalibrationContextService(
             reasons,
             missingInputs);
         ValidateIdentityValue(
-            printer.CalibrationSlicerDistribution,
+            slicerDistribution,
             CalibrationContractConstants.SlicerDistribution,
             "slicer_distribution_missing",
             "slicer_distribution_unsupported",
             "slicer.distribution",
             reasons,
             missingInputs);
-        if (string.IsNullOrWhiteSpace(printer.CalibrationSlicerVersion))
+        if (string.IsNullOrWhiteSpace(slicerVersion))
         {
             RejectMissing(
                 reasons,
@@ -1143,7 +1269,7 @@ public sealed class PrinterCalibrationContextService(
                 "slicer.version",
                 "slicer.version is required.");
         }
-        else if (!_compatibilityPolicy.IsSupported(printer.CalibrationSlicerVersion))
+        else if (!_compatibilityPolicy.IsSupported(slicerVersion))
         {
             Reject(
                 reasons,
@@ -1154,51 +1280,68 @@ public sealed class PrinterCalibrationContextService(
         }
 
         ValidateIdentityValue(
-            printer.CalibrationProfileFormat,
+            profileFormat,
             CalibrationContractConstants.ProfileFormat,
             "profile_format_missing",
             "profile_format_unsupported",
             "slicer.profileFormat",
             reasons,
             missingInputs);
+
+        return new(slicerEngine, slicerDistribution, slicerVersion, profileFormat);
     }
 
-    private void ValidateHardware(
+    private EffectiveHardwareFacts ValidateHardware(
         Printer printer,
         List<Toolhead> physicalToolheads,
         IReadOnlyList<CalibrationPointDto>? printablePolygon,
-        IReadOnlyList<CalibrationExcludedRegionDto>? excludedRegions,
+        DerivedMachineFacts derivedFacts,
         bool supportsMultiExtruderStatus,
         DateTime nowUtc,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
+        double? buildVolumeX = printer.MaxBuildVolumeX ?? derivedFacts.BuildVolumeX;
+        double? buildVolumeY = printer.MaxBuildVolumeY ?? derivedFacts.BuildVolumeY;
+        double? buildVolumeZ = printer.MaxBuildVolumeZ ?? derivedFacts.BuildVolumeZ;
+        double? bedOriginX = printer.BedOriginX ?? derivedFacts.BedOriginX;
+        double? bedOriginY = printer.BedOriginY ?? derivedFacts.BedOriginY;
+        Farm.Infrastructure.Domain.CalibrationMotionType? motionType =
+            printer.CalibrationMotionType is null or
+                Farm.Infrastructure.Domain.CalibrationMotionType.Unknown
+                ? derivedFacts.MotionType
+                : printer.CalibrationMotionType;
+        int? maxAcceleration = printer.MaxAcceleration ?? derivedFacts.MaxAcceleration;
+        int? maxTravelSpeed = printer.MaxTravelSpeed ?? derivedFacts.MaxTravelSpeed;
+        bool? hasHeatedBed = printer.CalibrationHasHeatedBed ?? derivedFacts.HasHeatedBed;
+        bool? hasHeatedChamber = printer.HasHeatedChamber ?? derivedFacts.HasHeatedChamber;
+
         RequirePositive(
-            printer.MaxBuildVolumeX,
+            buildVolumeX,
             "build_volume_x_missing",
             "buildVolume.x",
             reasons,
             missingInputs);
         RequirePositive(
-            printer.MaxBuildVolumeY,
+            buildVolumeY,
             "build_volume_y_missing",
             "buildVolume.y",
             reasons,
             missingInputs);
         RequirePositive(
-            printer.MaxBuildVolumeZ,
+            buildVolumeZ,
             "build_volume_z_missing",
             "buildVolume.z",
             reasons,
             missingInputs);
         RequireValue(
-            printer.BedOriginX,
+            bedOriginX,
             "bed_origin_x_missing",
             "bedOrigin.x",
             reasons,
             missingInputs);
         RequireValue(
-            printer.BedOriginY,
+            bedOriginY,
             "bed_origin_y_missing",
             "bedOrigin.y",
             reasons,
@@ -1213,19 +1356,8 @@ public sealed class PrinterCalibrationContextService(
                 "Printable polygon is required.");
         }
 
-        if (excludedRegions is null)
-        {
-            RejectMissing(
-                reasons,
-                missingInputs,
-                "excluded_regions_missing",
-                "excludedRegions",
-                "Excluded regions must be explicitly supplied, including an empty list.");
-        }
-
-        if (!printer.CalibrationMotionType.HasValue ||
-            printer.CalibrationMotionType ==
-                Farm.Infrastructure.Domain.CalibrationMotionType.Unknown)
+        if (!motionType.HasValue ||
+            motionType == Farm.Infrastructure.Domain.CalibrationMotionType.Unknown)
         {
             RejectMissing(
                 reasons,
@@ -1242,13 +1374,13 @@ public sealed class PrinterCalibrationContextService(
             reasons,
             missingInputs);
         RequirePositive(
-            printer.MaxTravelSpeed,
+            maxTravelSpeed,
             "max_travel_speed_missing",
             "maxTravelSpeed",
             reasons,
             missingInputs);
         RequirePositive(
-            printer.MaxAcceleration,
+            maxAcceleration,
             "max_acceleration_missing",
             "maxAcceleration",
             reasons,
@@ -1261,12 +1393,12 @@ public sealed class PrinterCalibrationContextService(
             missingInputs);
 
         RequireValue(
-            printer.CalibrationHasHeatedBed,
+            hasHeatedBed,
             "heated_bed_state_missing",
             "hasHeatedBed",
             reasons,
             missingInputs);
-        if (printer.CalibrationHasHeatedBed == true)
+        if (hasHeatedBed == true)
         {
             RequirePositive(
                 printer.MaxBedTemp,
@@ -1283,12 +1415,12 @@ public sealed class PrinterCalibrationContextService(
             reasons,
             missingInputs);
         RequireValue(
-            printer.HasHeatedChamber,
+            hasHeatedChamber,
             "heated_chamber_state_missing",
             "hasHeatedChamber",
             reasons,
             missingInputs);
-        if (printer.HasHeatedChamber == true)
+        if (hasHeatedChamber == true)
         {
             RequirePositive(
                 printer.MaxChamberTemp,
@@ -1374,6 +1506,11 @@ public sealed class PrinterCalibrationContextService(
         foreach (Toolhead toolhead in physicalToolheads)
         {
             string field = $"toolheads[{toolhead.Index}]";
+            bool isActiveToolhead = printer.ActiveToolheadIndex.HasValue &&
+                toolhead.Index == printer.ActiveToolheadIndex.Value;
+            (double? nozzleDiameter, Farm.Infrastructure.Domain.NozzleType? nozzleType,
+                int? nozzleMaxTemperature, int? hotendMaxTemperature) = ResolveActiveToolheadFacts(
+                toolhead, isActiveToolhead, derivedFacts);
             RequireValue(
                 toolhead.OffsetX,
                 "toolhead_offset_x_missing",
@@ -1393,13 +1530,13 @@ public sealed class PrinterCalibrationContextService(
                 reasons,
                 missingInputs);
             RequirePositive(
-                toolhead.NozzleDiameter,
+                nozzleDiameter,
                 "nozzle_diameter_missing",
                 $"{field}.nozzleDiameter",
                 reasons,
                 missingInputs);
             RequireValue(
-                toolhead.NozzleType,
+                nozzleType,
                 "nozzle_type_missing",
                 $"{field}.nozzleType",
                 reasons,
@@ -1412,7 +1549,7 @@ public sealed class PrinterCalibrationContextService(
                 reasons,
                 missingInputs);
             RequirePositive(
-                toolhead.NozzleMaxTemperature,
+                nozzleMaxTemperature,
                 "nozzle_max_temperature_missing",
                 $"{field}.nozzleMaxTemperature",
                 reasons,
@@ -1424,7 +1561,7 @@ public sealed class PrinterCalibrationContextService(
                 reasons,
                 missingInputs);
             RequirePositive(
-                toolhead.HotendMaxTemperature,
+                hotendMaxTemperature,
                 "hotend_max_temperature_missing",
                 $"{field}.hotendMaxTemperature",
                 reasons,
@@ -1466,28 +1603,76 @@ public sealed class PrinterCalibrationContextService(
                     "Supported materials are required.");
             }
         }
+
+        return new(
+            buildVolumeX,
+            buildVolumeY,
+            buildVolumeZ,
+            bedOriginX,
+            bedOriginY,
+            motionType,
+            maxAcceleration,
+            maxTravelSpeed,
+            hasHeatedBed,
+            hasHeatedChamber);
     }
 
-    private static CalibrationToolheadDto MapToolhead(Toolhead toolhead) =>
-        new(
+    /// <summary>
+    /// Coalesces the active toolhead's explicit nozzle facts with the resolved machine
+    /// profile's derived facts (#1613 §4.6). Non-active toolheads are never coalesced: the
+    /// machine profile describes only the currently-active tool.
+    /// </summary>
+    private static (
+        double? NozzleDiameter,
+        Farm.Infrastructure.Domain.NozzleType? NozzleType,
+        int? NozzleMaxTemperature,
+        int? HotendMaxTemperature) ResolveActiveToolheadFacts(
+        Toolhead toolhead,
+        bool isActiveToolhead,
+        DerivedMachineFacts derivedFacts) =>
+        isActiveToolhead
+            ? (toolhead.NozzleDiameter ?? derivedFacts.NozzleDiameter,
+                toolhead.NozzleType ?? derivedFacts.NozzleType,
+                toolhead.NozzleMaxTemperature ?? derivedFacts.NozzleMaxTemperature,
+                toolhead.HotendMaxTemperature ?? derivedFacts.HotendMaxTemperature)
+            : (toolhead.NozzleDiameter,
+                toolhead.NozzleType,
+                toolhead.NozzleMaxTemperature,
+                toolhead.HotendMaxTemperature);
+
+    private static CalibrationToolheadDto MapToolhead(
+        Toolhead toolhead,
+        int? activeToolheadIndex,
+        DerivedMachineFacts derivedFacts)
+    {
+        bool isActiveToolhead = activeToolheadIndex.HasValue &&
+            toolhead.Index == activeToolheadIndex.Value;
+        (double? nozzleDiameter, Farm.Infrastructure.Domain.NozzleType? nozzleType,
+            int? nozzleMaxTemperature, int? hotendMaxTemperature) = ResolveActiveToolheadFacts(
+            toolhead, isActiveToolhead, derivedFacts);
+        return new(
             toolhead.Id,
             toolhead.Index,
             toolhead.Name,
             toolhead.IsPrimary,
             new(toolhead.OffsetX, toolhead.OffsetY, toolhead.OffsetZ),
-            toolhead.NozzleDiameter,
-            toolhead.NozzleType?.ToString(),
+            nozzleDiameter,
+            nozzleType?.ToString(),
             toolhead.NozzleMaterial,
-            toolhead.NozzleMaxTemperature,
+            nozzleMaxTemperature,
             toolhead.NozzleIsHardened,
-            toolhead.HotendMaxTemperature,
+            hotendMaxTemperature,
             toolhead.MaxVolumetricFlow,
             toolhead.DriveType,
             toolhead.IsDirectDrive,
             toolhead.ExtruderGearRatio,
             toolhead.SupportedMaterials);
+    }
 
-    private static CalibrationFirmwareIdentityDto MapFirmware(Printer printer)
+
+    private static CalibrationFirmwareIdentityDto MapFirmware(
+        Printer printer,
+        PrinterGcodeDialect effectiveGcodeDialect)
     {
         string detectionSource = printer.FirmwareDetectionSource switch
         {
@@ -1497,7 +1682,7 @@ public sealed class PrinterCalibrationContextService(
         };
         return new(
             printer.FirmwareFamily.ToString(),
-            printer.GcodeDialect.ToString(),
+            effectiveGcodeDialect.ToString(),
             detectionSource,
             printer.FirmwareVersion,
             printer.FirmwareDetectionVersion,
@@ -1505,13 +1690,6 @@ public sealed class PrinterCalibrationContextService(
             printer.FirmwareDetectedAtUtc,
             printer.FirmwareIdentityVerified);
     }
-
-    private static CalibrationSlicerIdentityDto MapSlicer(Printer printer) =>
-        new(
-            printer.CalibrationSlicerEngine,
-            printer.CalibrationSlicerDistribution,
-            printer.CalibrationSlicerVersion,
-            printer.CalibrationProfileFormat);
 
     private static CalibrationProfileDto? MapProfile(
         ResolvedCalibrationProfile? profile,
@@ -1849,6 +2027,23 @@ public sealed class PrinterCalibrationContextService(
         Guid MachineProfileId,
         Guid ProcessProfileId,
         Guid FilamentProfileId);
+
+    /// <summary>
+    /// The effective (explicit-override-or-profile-derived) hardware facts produced by
+    /// <see cref="ValidateHardware"/>, reused for the final <see cref="CalibrationCandidateDto"/>
+    /// so validated and reported values never diverge (#1613 §4.2/§4.3).
+    /// </summary>
+    private readonly record struct EffectiveHardwareFacts(
+        double? BuildVolumeX,
+        double? BuildVolumeY,
+        double? BuildVolumeZ,
+        double? BedOriginX,
+        double? BedOriginY,
+        Farm.Infrastructure.Domain.CalibrationMotionType? MotionType,
+        int? MaxAcceleration,
+        int? MaxTravelSpeed,
+        bool? HasHeatedBed,
+        bool? HasHeatedChamber);
 
     private sealed record CalibrationProfileEvaluation(
         CalibrationProfileSetDto Profiles,

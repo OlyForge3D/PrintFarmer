@@ -102,6 +102,105 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetCandidatesAsync_WithUnsetGcodeDialectAndKlipperFirmwareFamily_DerivesKlipperDialectFromFirmware()
+    {
+        // #1614 AC-2/§4.5.1 regression: firmware.gcodeDialect is sourced from firmware
+        // detection only, never from the resolved machine profile. When the explicit
+        // GcodeDialect column is unset but the detected FirmwareFamily is Klipper, the
+        // effective dialect must fall back to Klipper rather than blocking eligibility.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.GcodeDialect = PrinterGcodeDialect.Unknown;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue(
+            string.Join(", ", candidate.RejectionReasons.Select(reason => reason.Code)));
+        _ = candidate.Firmware.GcodeDialect.Should().Be("Klipper");
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().NotContain(
+            "gcode_dialect_unknown");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithUnsetGcodeDialectAndNonKlipperFirmwareFamily_LeavesDialectUnknown()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.GcodeDialect = PrinterGcodeDialect.Unknown;
+        harness.Printer.FirmwareFamily = PrinterFirmwareFamily.Other;
+        _ = await harness.Db.SaveChangesAsync();
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.Firmware.GcodeDialect.Should().Be("Unknown");
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "gcode_dialect_unknown");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithMultiplePhysicalToolheads_OnlyActiveToolheadDerivesFromMachineProfile()
+    {
+        // #1613 §4.6 regression: the machine profile describes only the currently-active
+        // tool, so non-active physical toolheads must never be coalesced with
+        // profile-derived nozzle facts, even when their own explicit values are null.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.ActiveToolheadIndex = 0;
+        Toolhead active = harness.Printer.Toolheads.Single();
+        active.NozzleDiameter = null;
+        active.NozzleType = null;
+        active.NozzleMaxTemperature = null;
+        active.HotendMaxTemperature = null;
+        Toolhead inactive = new()
+        {
+            Id = Guid.NewGuid(),
+            PrinterId = harness.Printer.Id,
+            Name = "T1",
+            Index = 1,
+            ToolheadType = ToolheadType.Physical,
+            NozzleDiameter = null,
+            NozzleType = null,
+            NozzleMaterial = "brass",
+            NozzleMaxTemperature = null,
+            NozzleIsHardened = false,
+            HotendMaxTemperature = null,
+            SupportedMaterials = ["PLA"],
+        };
+        _ = harness.Db.Toolheads.Add(inactive);
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson =
+                    """
+                    {
+                        "gcode_flavor": "klipper",
+                        "nozzle_diameter": [0.4],
+                        "nozzle_type": "brass",
+                        "max_hotend_temp": [300]
+                    }
+                    """,
+            },
+        };
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        CalibrationToolheadDto activeDto =
+            candidate.Toolheads.Should().ContainSingle(t => t.Index == 0).Which;
+        _ = activeDto.NozzleDiameter.Should().Be(0.4);
+        _ = activeDto.NozzleType.Should().Be("Brass");
+        _ = activeDto.HotendMaxTemperature.Should().Be(300);
+        _ = candidate.RejectionReasons.Select(reason => reason.Field).Should().Contain(
+            field => field == "toolheads[1].nozzleDiameter");
+    }
+
+    [Fact]
     public async Task GetCandidatesAsync_WithNonKlipperOrNonUpstreamIdentity_ReturnsTypedReasons()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
@@ -246,6 +345,225 @@ public sealed class PrinterCalibrationContextServiceTests
             .Which.Index.Should().Be(0);
         _ = candidate.RejectionReasons.Should().NotContain(reason =>
             reason.Field.StartsWith("toolheads[1]", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A machine profile RawJson that fully supplies every AC-2-derivable fact (#1614): printable
+    /// area/height, motion type, acceleration/feedrate, heated-bed/chamber flags, and active
+    /// toolhead nozzle facts.
+    /// </summary>
+    private const string FullyDerivableMachineProfileJson =
+        """
+        {
+            "printable_area": ["0x0", "250x0", "250x250", "0x250"],
+            "printable_height": 250,
+            "machine_max_acceleration_x": [10000],
+            "machine_max_speed_x": [500],
+            "has_heated_bed": true,
+            "has_heated_chamber": false,
+            "nozzle_diameter": [0.4],
+            "nozzle_type": "brass",
+            "max_hotend_temp": [300],
+            "printer_type": "corexy"
+        }
+        """;
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithDerivableFieldsNullAndMachineProfileSupplyingThem_ReturnsEligibleCandidate()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.MaxBuildVolumeX = null;
+        harness.Printer.MaxBuildVolumeY = null;
+        harness.Printer.MaxBuildVolumeZ = null;
+        harness.Printer.BedOriginX = null;
+        harness.Printer.BedOriginY = null;
+        harness.Printer.PrintablePolygonJson = null;
+        harness.Printer.CalibrationMotionType = null;
+        harness.Printer.MaxAcceleration = null;
+        harness.Printer.MaxTravelSpeed = null;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        harness.Printer.HasHeatedChamber = null;
+        harness.Printer.CalibrationSlicerEngine = null;
+        harness.Printer.CalibrationSlicerDistribution = null;
+        harness.Printer.CalibrationSlicerVersion = null;
+        harness.Printer.CalibrationProfileFormat = null;
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.NozzleDiameter = null;
+        toolhead.NozzleType = null;
+        toolhead.NozzleMaxTemperature = null;
+        toolhead.HotendMaxTemperature = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson = FullyDerivableMachineProfileJson,
+            },
+        };
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeTrue();
+        _ = candidate.RejectionReasons.Should().BeEmpty();
+        _ = candidate.MissingInputs.Should().BeEmpty();
+        _ = candidate.BuildVolume.X.Should().Be(250);
+        _ = candidate.BuildVolume.Y.Should().Be(250);
+        _ = candidate.BedOrigin.X.Should().Be(0);
+        _ = candidate.BedOrigin.Y.Should().Be(0);
+        _ = candidate.MotionType.Should().Be("CoreXY");
+        _ = candidate.MaxAcceleration.Should().Be(10000);
+        _ = candidate.MaxTravelSpeed.Should().Be(500);
+        _ = candidate.HasHeatedBed.Should().BeTrue();
+        _ = candidate.HasHeatedChamber.Should().BeFalse();
+        CalibrationToolheadDto activeToolhead = candidate.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.4);
+        _ = activeToolhead.NozzleType.Should().Be("Brass");
+        _ = activeToolhead.NozzleMaxTemperature.Should().Be(300);
+        _ = activeToolhead.HotendMaxTemperature.Should().Be(300);
+        harness.VerifySingleProfileResolution();
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithExplicitNozzleDiameterOverridingProfile_PrefersOverrideButStillFlagsMismatch()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.Toolheads.Single().NozzleDiameter = 0.6;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson = """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""",
+            },
+        };
+
+        CalibrationContextDto context = await harness.GetContextAsync();
+
+        CalibrationToolheadDto activeToolhead =
+            context.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.6);
+        _ = context.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "profile_nozzle_mismatch");
+    }
+
+    [Fact]
+    public async Task GetContextAsync_WithDerivedToolheadFactsAndMatchingProfile_DoesNotRunCrossValidationAgainstStaleRawColumns()
+    {
+        // #1614 AC-3 regression: the pre-existing profile cross-checks
+        // (ValidateMachineProfile's nozzle-layout comparison and ValidateFilamentSafety's
+        // hotend/heated-bed checks) must run against the *effective* (explicit-or-derived)
+        // values, not the raw (now-null) Calibration*/Toolhead columns. Otherwise a printer
+        // relying entirely on profile derivation for these fields is spuriously rejected by
+        // the very profile that supplies them, or has its safety checks silently skipped.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.CalibrationHasHeatedBed = null;
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.NozzleDiameter = null;
+        toolhead.HotendMaxTemperature = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson =
+                    """
+                    {
+                        "gcode_flavor": "klipper",
+                        "nozzle_diameter": [0.4],
+                        "max_hotend_temp": [300],
+                        "has_heated_bed": true
+                    }
+                    """,
+            },
+        };
+
+        CalibrationContextDto context = await harness.GetContextAsync();
+
+        CalibrationToolheadDto activeToolhead =
+            context.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.4);
+        _ = activeToolhead.HotendMaxTemperature.Should().Be(300);
+        _ = context.HasHeatedBed.Should().BeTrue();
+        _ = context.Eligible.Should().BeTrue(
+            string.Join(", ", context.RejectionReasons.Select(reason => reason.Code)));
+        _ = context.RejectionReasons.Select(reason => reason.Code).Should().NotContain(
+            "profile_nozzle_mismatch",
+            "filament_hotend_temperature_exceeds_limit",
+            "filament_bed_temperature_requires_heated_bed");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithNullCalibrationHasHeatedBedAndProfileSilentOnHeatedBed_DoesNotFallBackToGeneralColumn()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.HasHeatedBed = true;
+        harness.Printer.CalibrationHasHeatedBed = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson = """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""",
+            },
+        };
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.HasHeatedBed.Should().BeNull();
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "heated_bed_state_missing");
+        _ = candidate.MissingInputs.Should().Contain("hasHeatedBed");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithHasHeatedChamberDerivedFromProfile_UsesHeatedChamberNamingConsistently()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.HasHeatedChamber = null;
+        harness.Printer.MaxChamberTemp = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson =
+                    """{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"has_heated_chamber":true}""",
+            },
+        };
+
+        CalibrationCandidateDto candidate =
+            (await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None))
+            .Value.Should().ContainSingle().Which;
+
+        _ = candidate.HasHeatedChamber.Should().BeTrue();
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.RejectionReasons.Select(reason => reason.Code).Should().Contain(
+            "max_chamber_temperature_missing");
+        _ = candidate.MissingInputs.Should().Contain("maxChamberTemperature");
+    }
+
+    [Fact]
+    public async Task GetCandidatesAsync_WithResolverUnavailableDuringDerivation_ReturnsTypedRejectionWithoutThrowing()
+    {
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.CalibrationMotionType = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.MakeProfileResolverUnavailable();
+
+        CalibrationServiceResult<IReadOnlyList<CalibrationCandidateDto>> result =
+            await harness.Service.GetCandidatesAsync(ProfileAccess, CancellationToken.None);
+
+        _ = result.ErrorCode.Should().BeNull();
+        CalibrationCandidateDto candidate = result.Value.Should().ContainSingle().Which;
+        _ = candidate.Eligible.Should().BeFalse();
+        _ = candidate.RejectionReasons.Should().ContainSingle(reason =>
+            reason.Code == "profile_service_unavailable" &&
+            reason.Field == "machineProfile");
     }
 
     [Fact]

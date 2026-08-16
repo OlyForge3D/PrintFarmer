@@ -939,6 +939,33 @@
       }
     },
     {
+      "id": "calibration-machine-profile-deriver",
+      "destinationPath": "src/api/Services/Calibration/CalibrationMachineProfileDeriver.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1614",
+        "https://github.com/SoftFever/OrcaSlicer/wiki/Calibration"
+      ],
+      "statement": "Independent PrintFarmer implementation of the issue #1614 machine-profile field derivation; the upstream OrcaSlicer wiki and profile JSON shape were used only as behavioral/format reference and no external source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-15",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-machine-profile-deriver-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationMachineProfileDeriverTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1614"
+      ],
+      "statement": "Independent PrintFarmer test implementation of the issue #1614 machine-profile derivation fail-safe contract; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-15",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-persistence-authorization-tests",
       "destinationPath": "src/tests/Farm.Web.Api.Tests/Security/CalibrationPersistenceAuthorizationTests.cs",
       "referenceUrls": [
@@ -1312,6 +1339,20 @@
       "review": {
         "reviewer": "Copilot App",
         "reviewDate": "2026-07-25",
+        "decision": "approved"
+      }
+    },
+    {
+      "id": "calibration-profile-service-boundary-tests",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Calibration/CalibrationProfileServiceBoundaryTests.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1613",
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1614"
+      ],
+      "statement": "Independent PrintFarmer architecture-boundary test asserting Farm.Web.Api gains no compile-time or runtime dependency on orcaslicer-worker/ISlicerProfilesService/ProfileCacheDb per the issue #1613 §5 service-boundary decision; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-15",
         "decision": "approved"
       }
     },
