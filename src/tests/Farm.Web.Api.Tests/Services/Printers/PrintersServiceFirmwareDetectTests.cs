@@ -96,6 +96,48 @@ public sealed class PrintersServiceFirmwareDetectTests
             "a nonexistent printer id must be rejected by the cheap existence check before any lock-table entry is allocated or the tracked entity is loaded");
     }
 
+    /// <summary>
+    /// #1656 / PR #1660 review round 6 (Vasquez, blocking): the round-5 pre-lock existence check
+    /// only closes the window before this call acquires the per-printer lock — a concurrent delete
+    /// from a different scope/request between that check and lock acquisition (or while waiting on
+    /// it) must still be caught, and must not leave the lock-table entry retained forever.
+    /// FindByIdAsync alone cannot be trusted to detect this: it is backed by DbSet.FindAsync
+    /// (identity-map lookup), which can return an already-tracked, non-null instance without ever
+    /// re-querying the database. This simulates the delete-after-exists window with ExistsAsync
+    /// answering "yes" pre-lock and "no" post-lock, and asserts the write path never reaches
+    /// FindByIdAsync/SaveChangesAsync once the printer is confirmed gone, and that the lock-table
+    /// entry allocated for the pre-lock check is evicted rather than leaked.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_PrinterDeletedAfterPreLockExistsCheck_DoesNotWriteAndEvictsLock()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Guid printerId = Guid.NewGuid();
+
+        var repository = new Mock<IPrintersRepository>();
+        repository
+            .SetupSequence(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)  // pre-lock check: printer is still real
+            .ReturnsAsync(false); // post-lock check: printer vanished while waiting for/after the lock
+        repository
+            .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "FindByIdAsync must never be called once the post-lock existence recheck reports the printer gone."));
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(printerId, CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        repository.Verify(r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        PrintersService.HasFirmwareIdentityWriteLockForTests(printerId).Should().BeFalse(
+            "the lock-table entry allocated for the pre-lock existence check must be evicted once the printer is confirmed deleted, not retained forever");
+    }
+
     [Fact]
     public async Task DetectFirmwareIdentityAsync_NonMoonrakerBackend_ReturnsBackendNotSupported()
     {

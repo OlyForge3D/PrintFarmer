@@ -1163,10 +1163,39 @@ public class PrintersService(
     // for a *real* id — the entire read-modify-write critical section for a confirmed-existing
     // printer is still fully serialized behind the same per-printer semaphore as before; only the
     // point at which a nonexistent id gets discarded moves earlier, before any table growth.
+    //
+    // #1656 / PR #1660 review round 6 (Vasquez, blocking): the round-5 fix above only closes the
+    // window *before* lock acquisition — a printer can still be deleted by a different
+    // scope/request between that pre-lock check and this call actually acquiring the semaphore
+    // (or even while waiting on it), and the deleted id's semaphore would then be retained in this
+    // dictionary forever, since nothing ever removes an entry once allocated. Worse, the two
+    // writers below used to re-confirm existence *after* acquiring the lock purely by checking
+    // whether FindByIdAsync (backed by DbSet.FindAsync) returned null — but FindAsync returns an
+    // already-tracked instance straight from this scope's change-tracker identity map without ever
+    // re-querying the database (see the concurrency remarks on
+    // RefreshDetectedFirmwareIdentityAsync). If this scope already tracked the printer earlier
+    // (e.g. PrinterVersionCache.GetAsync's own FindByIdAsync call that produced printerId before
+    // ever calling in here), that stale identity-map hit would look non-null even though the row
+    // was deleted moments before — silently proceeding to write a now-nonexistent row and leaving
+    // the lock-table entry allocated forever. Both writers now re-check existence immediately after
+    // acquiring the lock via ExistsAsync (Printers.AnyAsync — a fresh SQL query that always hits
+    // the database regardless of tracking state, so it cannot be fooled by the identity map), and
+    // evict the lock-table entry for that id the moment it is found gone, so a deleted printer's
+    // semaphore is not retained indefinitely.
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> FirmwareIdentityWriteLocks = new();
 
     private static SemaphoreSlim GetFirmwareIdentityWriteLock(Guid printerId) =>
         FirmwareIdentityWriteLocks.GetOrAdd(printerId, static _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Test-only seam (gated by <c>InternalsVisibleTo("Farm.Web.Api.Tests")</c>) exposing whether
+    /// <see cref="FirmwareIdentityWriteLocks"/> currently retains an entry for
+    /// <paramref name="printerId"/>. Used to assert the round-6 eviction fix actually removes a
+    /// deleted printer's lock-table entry instead of leaking it — production code never needs to
+    /// inspect the table's contents.
+    /// </summary>
+    internal static bool HasFirmwareIdentityWriteLockForTests(Guid printerId) =>
+        FirmwareIdentityWriteLocks.ContainsKey(printerId);
 
     /// <summary>
     /// Confirms <paramref name="printerId"/> refers to a real, already-registered printer before
@@ -1179,6 +1208,22 @@ public class PrintersService(
     /// </summary>
     private async Task<bool> FirmwarePrinterExistsAsync(Guid printerId, CancellationToken ct) =>
         await _unitOfWork.Printers.ExistsAsync(printerId, ct);
+
+    /// <summary>
+    /// Removes <paramref name="printerId"/>'s entry from <see cref="FirmwareIdentityWriteLocks"/>,
+    /// but only if it still maps to <paramref name="gate"/> — the exact semaphore instance the
+    /// caller acquired. See the round-6 remarks on <see cref="FirmwareIdentityWriteLocks"/>: this
+    /// is called once a caller holding the lock has confirmed (via a genuine, untracked database
+    /// query) that the printer no longer exists, so its lock-table entry does not sit there
+    /// forever. Matching on the exact instance (rather than just the key) avoids evicting a
+    /// different semaphore that a racing caller may have already installed for the same id in the
+    /// (practically unreachable, since printer ids are never reused) event of a concurrent
+    /// replacement. The removed semaphore is never disposed here: another caller may already be
+    /// waiting on it via a reference obtained before this removal, and simply dropping it from the
+    /// dictionary is sufficient to stop it from being handed out to *new* callers.
+    /// </summary>
+    private static void EvictFirmwareIdentityWriteLock(Guid printerId, SemaphoreSlim gate) =>
+        FirmwareIdentityWriteLocks.TryRemove(new KeyValuePair<Guid, SemaphoreSlim>(printerId, gate));
 
     /// <summary>
     /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
@@ -1225,6 +1270,23 @@ public class PrintersService(
     /// last wrote.
     /// </para>
     /// <para>
+    /// Concurrency, continued (Vasquez, PR #1660 review round 6): the round-5 pre-lock existence
+    /// check only closes the window *before* this call acquires the lock — a printer can still be
+    /// deleted, by a different scope/request, between that check and the point the lock is
+    /// actually acquired (or while this call is waiting on it). Once the lock is held, this method
+    /// re-confirms existence with <see cref="FirmwarePrinterExistsAsync"/> again (a fresh
+    /// <c>Printers.AnyAsync</c> query that always hits the database, never the identity map) rather
+    /// than relying solely on the immediately-following <c>FindByIdAsync</c> null-check: that call
+    /// is backed by <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>, which
+    /// would silently return the already-tracked instance from this scope's identity map — without
+    /// re-querying the database at all — if the printer was already tracked earlier in this same
+    /// scope (as it typically is here: see <see cref="PrinterVersionCache"/>'s own
+    /// <c>FindByIdAsync</c> call before it ever reaches this method), masking a concurrent delete
+    /// entirely. If the post-lock existence check finds the printer gone, the lock-table entry for
+    /// it is evicted (<see cref="EvictFirmwareIdentityWriteLock"/>) so a deleted printer's
+    /// semaphore is not retained in <see cref="FirmwareIdentityWriteLocks"/> forever.
+    /// </para>
+    /// <para>
     /// If <c>SaveChangesAsync</c> throws, the in-memory property mutations above have already
     /// been applied to that shared tracked entity even though nothing was persisted — reporting
     /// them to a caller would be exactly the same split-brain. On failure the original field
@@ -1253,9 +1315,24 @@ public class PrintersService(
         await gate.WaitAsync(ct);
         try
         {
+            // #1656 / PR #1660 review round 6 (Vasquez): re-confirm existence with a genuine,
+            // untracked database query now that the lock is held — see the round-6 remarks on
+            // FirmwareIdentityWriteLocks. FindByIdAsync's own null-check below is not sufficient
+            // on its own: it is backed by DbSet.FindAsync, which can return an already-tracked
+            // instance from this scope's identity map without ever re-querying the database if
+            // this scope loaded the printer earlier (e.g. PrinterVersionCache.GetAsync's own
+            // FindByIdAsync call before it ever reaches here), silently masking a delete that
+            // happened between the pre-lock existence check above and this point.
+            if (!await FirmwarePrinterExistsAsync(printerId, ct))
+            {
+                EvictFirmwareIdentityWriteLock(printerId, gate);
+                return false;
+            }
+
             Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
             if (printer is null)
             {
+                EvictFirmwareIdentityWriteLock(printerId, gate);
                 return false;
             }
 
@@ -1402,6 +1479,17 @@ public class PrintersService(
     /// detection for ids that were never real. See the round-5 remarks on
     /// <see cref="FirmwareIdentityWriteLocks"/>.
     /// </para>
+    /// <para>
+    /// #1656 / PR #1660 review round 6 (Vasquez, blocking): the pre-lock existence check above
+    /// only closes the window before this call acquires the lock. Once it is held, this method
+    /// re-confirms existence a second time with a fresh, untracked <c>Printers.AnyAsync</c> query
+    /// rather than trusting the following <c>FindByIdAsync</c> call's null-check alone — that call
+    /// can return an already-tracked (and therefore possibly stale-but-non-null) instance straight
+    /// from this scope's identity map without ever re-querying the database, masking a concurrent
+    /// delete. If the printer is found gone at that point, its lock-table entry is evicted so it is
+    /// not retained forever. See the matching round-6 remarks on
+    /// <see cref="RefreshDetectedFirmwareIdentityAsync"/> and <see cref="FirmwareIdentityWriteLocks"/>.
+    /// </para>
     /// </remarks>
     public async Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct)
     {
@@ -1414,9 +1502,21 @@ public class PrintersService(
         await gate.WaitAsync(ct);
         try
         {
+            // #1656 / PR #1660 review round 6 (Vasquez): see the matching remarks in
+            // RefreshDetectedFirmwareIdentityAsync — re-confirm existence with a genuine,
+            // untracked database query now that the lock is held, rather than trusting
+            // FindByIdAsync's null-check alone, which can be fooled by this scope's own identity
+            // map if the printer was already tracked here before this call.
+            if (!await FirmwarePrinterExistsAsync(printerId, ct))
+            {
+                EvictFirmwareIdentityWriteLock(printerId, gate);
+                return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
+            }
+
             Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
             if (printer is null)
             {
+                EvictFirmwareIdentityWriteLock(printerId, gate);
                 return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
             }
 
