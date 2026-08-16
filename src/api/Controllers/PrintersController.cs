@@ -19,6 +19,7 @@ using Farm.Infrastructure.Discovery;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services;
 using Farm.Infrastructure.Services.Discovery;
@@ -5224,6 +5225,175 @@ public class PrintersController(
                     ["code"] = "printer_configuration_update_failed",
                 });
         }
+    }
+
+    /// <summary>
+    /// Sets or edits the residual calibration-eligibility fields that remain manual
+    /// after profile-owned sourcing (issue #1616, PR-3 of the #1613 decomposition):
+    /// per-toolhead metrology (offsets, drive type, isDirectDrive, extruder gear ratio,
+    /// max volumetric flow, nozzle material/hardness), the hardware sign-off timestamp,
+    /// excludedRegions (explicit empty array is honored), activeToolheadIndex, the
+    /// pressure-advance/firmware-retraction capability flags, and a confirm-only
+    /// firmware-identity-verified flag.
+    /// This endpoint is additive: it is distinct from and does not change the behavior
+    /// of the raw <c>PUT /api/printers/{id}</c> catch-all. It intentionally exposes no
+    /// property for firmware family/version/gcodeDialect — those remain read-only and
+    /// are only ever set by firmware detection or the raw update contract.
+    /// </summary>
+    /// <param name="id">The unique identifier of the printer.</param>
+    /// <param name="request">The calibration-setup fields to apply.</param>
+    /// <param name="ct">Cancellation token for the operation.</param>
+    /// <response code="200">Returns the persisted calibration-setup state.</response>
+    /// <response code="400">If a referenced toolhead id does not belong to this printer.</response>
+    /// <response code="404">If the printer does not exist.</response>
+    /// <response code="412">If the If-Match header does not match the current printer revision.</response>
+    /// <response code="428">If the If-Match header is missing.</response>
+    [HttpPut("{id:guid}/calibration-setup")]
+    [ProducesResponseType(typeof(CalibrationSetupResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status412PreconditionFailed)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    public async Task<IActionResult> UpdateCalibrationSetupAsync(
+        Guid id,
+        [FromBody] CalibrationSetupRequestDto request,
+        CancellationToken ct)
+    {
+        Printer? printer = await _printersService.FindByIdForTemplateUpdateAsync(id, ct);
+        if (printer is null)
+        {
+            return NotFound(new { error = $"Printer {id} not found" });
+        }
+
+        if (BindPrinterIfMatch(printer) is { } precondition)
+        {
+            return precondition;
+        }
+
+        if (request.Toolheads is { Length: > 0 })
+        {
+            Guid[] unknownIds = request.Toolheads
+                .Select(t => t.Id)
+                .Where(toolheadId => printer.Toolheads is null ||
+                    printer.Toolheads.All(t => t.Id != toolheadId))
+                .ToArray();
+            if (unknownIds.Length > 0)
+            {
+                return BadRequest(new
+                {
+                    error = "toolhead_not_found",
+                    toolheadIds = unknownIds,
+                });
+            }
+
+            foreach (CalibrationToolheadSetupDto toolheadRequest in request.Toolheads)
+            {
+                if (CalibrationSetupValidation.ValidateToolheadMetrology(toolheadRequest) is { } toolheadError)
+                {
+                    return BadRequest(toolheadError);
+                }
+            }
+        }
+
+        if (request.ActiveToolheadIndex is { } activeToolheadIndex &&
+            (printer.Toolheads is null || printer.Toolheads.All(t => t.Index != activeToolheadIndex)))
+        {
+            return BadRequest(new
+            {
+                error = "active_toolhead_index_not_found",
+                activeToolheadIndex,
+            });
+        }
+
+        UpdatePrinterDto printerUpdate = new(
+            ActiveToolheadIndex: request.ActiveToolheadIndex,
+            ExcludedRegions: request.ExcludedRegions,
+            SupportsPressureAdvance: request.SupportsPressureAdvance,
+            SupportsFirmwareRetraction: request.SupportsFirmwareRetraction,
+            CalibrationHardwareVerifiedAtUtc: request.CalibrationHardwareVerifiedAtUtc,
+            FirmwareIdentityVerified: request.FirmwareIdentityVerified);
+        _ = Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(printer, printerUpdate);
+
+        if (request.Toolheads is { Length: > 0 } && printer.Toolheads is not null)
+        {
+            foreach (CalibrationToolheadSetupDto toolheadRequest in request.Toolheads)
+            {
+                Toolhead toolhead = printer.Toolheads.First(t => t.Id == toolheadRequest.Id);
+                UpdateToolheadDto toolheadUpdate = new(
+                    Id: toolheadRequest.Id,
+                    OffsetX: toolheadRequest.OffsetX,
+                    OffsetY: toolheadRequest.OffsetY,
+                    OffsetZ: toolheadRequest.OffsetZ,
+                    NozzleMaterial: toolheadRequest.NozzleMaterial,
+                    NozzleIsHardened: toolheadRequest.NozzleIsHardened,
+                    MaxVolumetricFlow: toolheadRequest.MaxVolumetricFlow,
+                    DriveType: toolheadRequest.DriveType,
+                    IsDirectDrive: toolheadRequest.IsDirectDrive,
+                    ExtruderGearRatio: toolheadRequest.ExtruderGearRatio);
+                _ = Services.Calibration.CalibrationPrinterUpdateMapper.ApplyToolhead(toolhead, toolheadUpdate);
+            }
+        }
+
+        try
+        {
+            await _printersService.SaveChangesAsync(ct);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException)
+        {
+            return PrinterRevisionConflict();
+        }
+
+        WritePrinterEtag(printer);
+
+        CalibrationFirmwareIdentityDto firmware = new(
+            printer.FirmwareFamily.ToString(),
+            printer.GcodeDialect.ToString(),
+            printer.FirmwareDetectionSource switch
+            {
+                FirmwareDetectionSource.Printer => "printer",
+                FirmwareDetectionSource.Configured => "configured",
+                _ => "unknown",
+            },
+            printer.FirmwareVersion,
+            printer.FirmwareDetectionVersion,
+            printer.FirmwareDetectionConfidence,
+            printer.FirmwareDetectedAtUtc,
+            printer.FirmwareIdentityVerified);
+
+        CalibrationExcludedRegionDto[] excludedRegions =
+            string.IsNullOrWhiteSpace(printer.ExcludedRegionsJson)
+                ? []
+                : JsonSerializer.Deserialize<CalibrationExcludedRegionDto[]>(printer.ExcludedRegionsJson) ?? [];
+
+        CalibrationSetupResultDto result = new(
+            PrinterId: printer.Id,
+            ConfigurationRevision: printer.ConfigurationRevision,
+            RowVersion: EncodeRowVersion(printer.RowVersion),
+            ActiveToolheadIndex: printer.ActiveToolheadIndex,
+            ExcludedRegions: excludedRegions,
+            SupportsPressureAdvance: printer.SupportsPressureAdvance,
+            SupportsFirmwareRetraction: printer.SupportsFirmwareRetraction,
+            CalibrationHardwareVerifiedAtUtc: printer.CalibrationHardwareVerifiedAtUtc,
+            Firmware: firmware,
+            Toolheads: (printer.Toolheads ?? Enumerable.Empty<Toolhead>())
+                .OrderBy(t => t.Index)
+                .Select(t => new CalibrationToolheadSetupResultDto(
+                    t.Id,
+                    t.Index,
+                    t.Name,
+                    t.OffsetX,
+                    t.OffsetY,
+                    t.OffsetZ,
+                    t.NozzleMaterial,
+                    t.NozzleIsHardened,
+                    t.MaxVolumetricFlow,
+                    t.DriveType,
+                    t.IsDirectDrive,
+                    t.ExtruderGearRatio))
+                .ToList());
+
+        return Ok(result);
     }
 
     #region Discovery Stream Endpoints

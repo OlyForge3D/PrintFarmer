@@ -236,6 +236,7 @@ public sealed class PrinterCalibrationContextService(
             CapturedBySubject = capturedBySubject,
             SupportsPressureAdvance = printer.SupportsPressureAdvance,
             SupportsFirmwareRetraction = printer.SupportsFirmwareRetraction,
+            CalibrationHardwareVerifiedAtUtc = printer.CalibrationHardwareVerifiedAtUtc,
             Snapshot = snapshot,
         };
         return new(context);

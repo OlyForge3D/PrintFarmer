@@ -262,6 +262,14 @@ public sealed class CalibrationContextDto : CalibrationCandidateDto
 
     public bool? SupportsFirmwareRetraction { get; init; }
 
+    /// <summary>
+    /// UTC timestamp of the last operator-confirmed hardware/safety sign-off
+    /// (issue #1616). Echoed here so callers reading the eligibility context
+    /// can display the current sign-off state without a second round trip to
+    /// the calibration-setup write endpoint's own response.
+    /// </summary>
+    public DateTime? CalibrationHardwareVerifiedAtUtc { get; init; }
+
     public PrinterConfigurationSnapshotDto Snapshot { get; init; } = new();
 }
 
