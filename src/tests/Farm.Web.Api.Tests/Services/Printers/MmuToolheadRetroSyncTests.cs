@@ -83,7 +83,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         return printer;
     }
 
-    private async Task<Printer> SeedSingleToolheadPrinter()
+    private async Task<Printer> SeedSingleToolheadPrinter(bool hasMmu = false)
     {
         await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
         AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -112,6 +112,7 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
             BackendPort = 7125,
             Backend = (int)PrinterBackend.Moonraker,
             MultiMaterial = false,
+            HasMmu = hasMmu,
             ManufacturerId = manufacturerId,
             ModelId = modelId
         };
@@ -203,6 +204,57 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         };
 
         for (int i = 0; i < 4; i++)
+        {
+            printer.Toolheads.Add(new Toolhead
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = $"T{i}",
+                Index = i,
+                ToolheadType = ToolheadType.Physical,
+                IsPrimary = i == 0,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        seedDb.Printers.Add(printer);
+        await seedDb.SaveChangesAsync();
+        return printer;
+    }
+
+    /// <summary>
+    /// A toolchanger that has (incorrectly, or via stale/mis-set data) a confirmed HasMmu
+    /// signal, but already carries &gt;1 persisted physical toolheads. This is the scenario
+    /// where CreateMmuVirtualToolheads' own residual toolchanger defense
+    /// (physicalToolheadCount &gt; 1) declines gate creation even though HasConfirmedMmuSignal
+    /// authorized a tentative promotion — used to prove the same-call rollback path.
+    /// </summary>
+    private async Task<Printer> SeedToolchangerWithConfirmedMmuSignalPrinter()
+    {
+        await using AsyncServiceScope seedScope = _factory.Services.CreateAsyncScope();
+        AppDbContext seedDb = seedScope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        Guid manufacturerId = Guid.NewGuid();
+        Guid modelId = Guid.NewGuid();
+        string uniqueSuffix = Guid.NewGuid().ToString("N");
+
+        seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = $"Toolchanger {uniqueSuffix}" });
+        seedDb.PrinterModels.Add(new PrinterModel { Id = modelId, ManufacturerId = manufacturerId, Name = $"Model {uniqueSuffix}" });
+
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Toolchanger With Confirmed Signal",
+            ServerUrl = "http://192.168.1.54",
+            BackendPort = 80,
+            Backend = (int)PrinterBackend.Moonraker,
+            MultiMaterial = false,
+            HasMmu = true,
+            ManufacturerId = manufacturerId,
+            ModelId = modelId
+        };
+
+        for (int i = 0; i < 2; i++)
         {
             printer.Toolheads.Add(new Toolhead
             {
@@ -376,9 +428,12 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task SetToolheadSpoolAsync_AutoPromotesMultiMaterial_ForNonMmuPrinterMissingToolhead()
+    public async Task SetToolheadSpoolAsync_AutoPromotesMultiMaterial_ForConfirmedMmuPrinterMissingToolhead()
     {
-        Printer printer = await SeedSingleToolheadPrinter();
+        // HasMmu=true is the positive hardware-reported signal (e.g. PrusaLink polling)
+        // that this printer really has an AMS/MMU — auto-promotion is only legitimate
+        // when that signal is present. See issue #1600.
+        Printer printer = await SeedSingleToolheadPrinter(hasMmu: true);
 
         CommandResult result = await _printersService.SetToolheadSpoolAsync(printer.Id, 1, spoolId: 999, CancellationToken.None);
 
@@ -392,6 +447,90 @@ public class MmuToolheadRetroSyncTests : IAsyncLifetime
         reloaded!.MultiMaterial.Should().BeTrue("printer should be promoted to MultiMaterial");
         reloaded.Toolheads.Count.Should().BeGreaterThanOrEqualTo(4, "virtual MMU gates should be created");
         reloaded.Toolheads.Should().Contain(t => t.Index == 1 && t.ToolheadType == ToolheadType.MmuGate);
+    }
+
+    /// <summary>
+    /// Regression test for issue #1600: binding a spool to a toolchanger's real toolhead
+    /// (index > 0) that hasn't been synced/persisted yet must NOT promote the printer to
+    /// MultiMaterial and must NOT create phantom MmuGate toolheads, because there is no
+    /// positive signal (HasMmu or a persisted MmuGate) that this printer actually has an
+    /// MMU/AMS. The old `physicalToolheadCount > 1` defense inside CreateMmuVirtualToolheads
+    /// is order-dependent and does not fire here, since only T0 is persisted.
+    /// </summary>
+    [Fact]
+    public async Task SetToolheadSpoolAsync_DoesNotPromoteMultiMaterial_ForToolchangerMissingToolhead()
+    {
+        Printer printer = await SeedSingleToolheadPrinter(hasMmu: false);
+
+        CommandResult result = await _printersService.SetToolheadSpoolAsync(printer.Id, 1, spoolId: 999, CancellationToken.None);
+
+        result.Success.Should().BeFalse("toolhead 1 has not been synced yet and there is no confirmed MMU signal");
+
+        Printer? reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == printer.Id);
+
+        reloaded!.MultiMaterial.Should().BeFalse("a toolchanger must never be promoted as a side effect of binding a real toolhead");
+        reloaded.Toolheads.Should().HaveCount(1, "no phantom MmuGate toolheads should be materialized");
+        reloaded.Toolheads.Should().OnlyContain(t => t.ToolheadType == ToolheadType.Physical);
+    }
+
+    /// <summary>
+    /// Mirror of the above for <see cref="IPrintersService.ClearToolheadSpoolAsync"/> — clearing
+    /// a spool on a toolchanger's un-synced real toolhead must not promote MultiMaterial or
+    /// create phantom gates either. See issue #1600.
+    /// </summary>
+    [Fact]
+    public async Task ClearToolheadSpoolAsync_DoesNotPromoteMultiMaterial_ForToolchangerMissingToolhead()
+    {
+        Printer printer = await SeedSingleToolheadPrinter(hasMmu: false);
+
+        CommandResult result = await _printersService.ClearToolheadSpoolAsync(printer.Id, 1, CancellationToken.None);
+
+        result.Success.Should().BeFalse("toolhead 1 has not been synced yet and there is no confirmed MMU signal");
+
+        Printer? reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == printer.Id);
+
+        reloaded!.MultiMaterial.Should().BeFalse("a toolchanger must never be promoted as a side effect of clearing a real toolhead's spool");
+        reloaded.Toolheads.Should().HaveCount(1, "no phantom MmuGate toolheads should be materialized");
+        reloaded.Toolheads.Should().OnlyContain(t => t.ToolheadType == ToolheadType.Physical);
+    }
+
+    /// <summary>
+    /// Regression test for issue #1600's "must be rolled back rather than persisted" acceptance
+    /// criterion: a printer with a confirmed HasMmu signal (so HasConfirmedMmuSignal authorizes a
+    /// tentative promotion) but that already carries &gt;1 persisted physical toolheads hits
+    /// CreateMmuVirtualToolheads' own residual toolchanger defense and gets zero gates created.
+    /// The in-memory MultiMaterial=true flip made earlier in the same
+    /// ClearToolheadSpoolAsync call must be reverted before returning, so it can never leak into
+    /// a later SaveChangesAsync on the shared scoped DbContext.
+    /// </summary>
+    [Fact]
+    public async Task ClearToolheadSpoolAsync_RollsBackMultiMaterial_WhenGateCreationDeclinedAfterPromotion()
+    {
+        Printer printer = await SeedToolchangerWithConfirmedMmuSignalPrinter();
+
+        CommandResult result = await _printersService.ClearToolheadSpoolAsync(printer.Id, 5, CancellationToken.None);
+
+        result.Success.Should().BeFalse("toolhead 5 does not exist and gate creation is declined for a >1-physical-toolhead printer");
+
+        Printer? reloaded = await _dbContext.Printers
+            .Include(p => p.Toolheads)
+            .FirstOrDefaultAsync(p => p.Id == printer.Id);
+
+        reloaded!.MultiMaterial.Should().BeFalse("the tentative promotion must be rolled back when gate creation is declined");
+        reloaded.Toolheads.Should().HaveCount(2, "no phantom MmuGate toolheads should be materialized");
+        reloaded.Toolheads.Should().OnlyContain(t => t.ToolheadType == ToolheadType.Physical);
+
+        // Verify the rollback didn't just revert in-memory but is durable: saving unrelated
+        // changes on the same tracked entity later must not resurrect MultiMaterial=true.
+        await _dbContext.SaveChangesAsync();
+        Printer? afterSave = await _dbContext.Printers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == printer.Id);
+        afterSave!.MultiMaterial.Should().BeFalse("rollback must survive a later SaveChangesAsync on the same scoped DbContext");
     }
 
     /// <summary>
