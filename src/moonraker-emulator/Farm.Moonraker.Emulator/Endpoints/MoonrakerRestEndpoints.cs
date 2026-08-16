@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Linq;
+using System.Text;
 using Farm.Moonraker.Emulator.Domain;
 using Farm.Moonraker.Emulator.Json;
 
@@ -157,12 +158,10 @@ public static class MoonrakerRestEndpoints
             }
 
             var filtered = new Dictionary<string, object?>(StringComparer.Ordinal);
-            foreach (string field in fieldFilter.Split(',', StringSplitOptions.RemoveEmptyEntries))
+            foreach (string field in fieldFilter.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Where(fields.ContainsKey))
             {
-                if (fields.TryGetValue(field, out object? fieldValue))
-                {
-                    filtered[field] = fieldValue;
-                }
+                filtered[field] = fields[field];
             }
 
             status[name] = filtered;

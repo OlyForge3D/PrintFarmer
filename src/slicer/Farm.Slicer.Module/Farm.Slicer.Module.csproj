@@ -14,6 +14,7 @@
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
     <ProjectReference Include="../../settings/Farm.Settings.Abstractions/Farm.Settings.Abstractions.csproj" />
     <ProjectReference Include="../Farm.Slicer.Plugin.Core/Farm.Slicer.Plugin.Core.csproj" />
+    <ProjectReference Include="../Farm.Slicer.ProfileParsing/Farm.Slicer.ProfileParsing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

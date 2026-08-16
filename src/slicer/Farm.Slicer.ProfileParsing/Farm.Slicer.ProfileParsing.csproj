@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Farm.Slicer.ProfileParsing</RootNamespace>
+    <AssemblyName>Farm.Slicer.ProfileParsing</AssemblyName>
+    <Description>Shared, dependency-free OrcaSlicer profile JSON field-extraction helpers.
+Consumed by both orcaslicer-worker (profile ingestion) and Farm.Slicer.Module
+(calibration profile resolution) so the two never drift (#1613/#1615). Intentionally
+has no reference to Farm.Infrastructure or any other project so it stays a pure
+System.Text.Json parsing library that either side of the src/api boundary can share.</Description>
+  </PropertyGroup>
+
+</Project>

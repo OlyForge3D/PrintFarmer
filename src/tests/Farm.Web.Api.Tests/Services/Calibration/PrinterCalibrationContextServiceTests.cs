@@ -173,18 +173,15 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson =
-                    """
-                    {
-                        "gcode_flavor": "klipper",
-                        "nozzle_diameter": [0.4],
-                        "nozzle_type": "brass",
-                        "max_hotend_temp": [300]
-                    }
-                    """,
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """
+                {
+                    "gcode_flavor": "klipper",
+                    "nozzle_diameter": [0.4],
+                    "nozzle_type": "brass",
+                    "max_hotend_temp": [300]
+                }
+                """),
         };
 
         CalibrationCandidateDto candidate =
@@ -395,10 +392,7 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson = FullyDerivableMachineProfileJson,
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(FullyDerivableMachineProfileJson),
         };
 
         CalibrationCandidateDto candidate =
@@ -433,10 +427,8 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson = """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""",
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}"""),
         };
 
         CalibrationContextDto context = await harness.GetContextAsync();
@@ -465,18 +457,15 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson =
-                    """
-                    {
-                        "gcode_flavor": "klipper",
-                        "nozzle_diameter": [0.4],
-                        "max_hotend_temp": [300],
-                        "has_heated_bed": true
-                    }
-                    """,
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """
+                {
+                    "gcode_flavor": "klipper",
+                    "nozzle_diameter": [0.4],
+                    "max_hotend_temp": [300],
+                    "has_heated_bed": true
+                }
+                """),
         };
 
         CalibrationContextDto context = await harness.GetContextAsync();
@@ -503,10 +492,8 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson = """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""",
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}"""),
         };
 
         CalibrationCandidateDto candidate =
@@ -529,11 +516,8 @@ public sealed class PrinterCalibrationContextServiceTests
         _ = await harness.Db.SaveChangesAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson =
-                    """{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"has_heated_chamber":true}""",
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"has_heated_chamber":true}"""),
         };
 
         CalibrationCandidateDto candidate =
@@ -592,9 +576,9 @@ public sealed class PrinterCalibrationContextServiceTests
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"gcode_flavor":"klipper","nozzle_diameter":[0.6]}""") with
             {
-                RawJson = """{"gcode_flavor":"klipper","nozzle_diameter":[0.6]}""",
                 StoredSha256 = new string('0', 64),
             },
             Filament = harness.Profiles.Filament! with
@@ -859,11 +843,8 @@ public sealed class PrinterCalibrationContextServiceTests
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson =
-                    """{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"api_key":"secret-value"}""",
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"gcode_flavor":"klipper","nozzle_diameter":[0.4],"api_key":"secret-value"}"""),
         };
 
         CalibrationContextDto context =
@@ -904,7 +885,7 @@ public sealed class PrinterCalibrationContextServiceTests
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with { RawJson = rawJson },
+            Machine = harness.Profiles.Machine!.WithRawJson(rawJson),
         };
 
         CalibrationContextDto context =
@@ -942,10 +923,8 @@ public sealed class PrinterCalibrationContextServiceTests
 
         harness.Profiles = harness.Profiles with
         {
-            Machine = harness.Profiles.Machine! with
-            {
-                RawJson = """{"nozzle_diameter":[0.4],"gcode_flavor":"klipper"}""",
-            },
+            Machine = harness.Profiles.Machine!.WithRawJson(
+                """{"nozzle_diameter":[0.4],"gcode_flavor":"klipper"}"""),
             Process = harness.Profiles.Process! with
             {
                 RawJson = """{"infill_density":2e1,"layer_height":0.20}""",
@@ -1247,7 +1226,7 @@ public sealed class PrinterCalibrationContextServiceTests
             Printer printer,
             DateTime updatedAtUtc)
         {
-            ResolvedCalibrationProfile machine = new(
+            ResolvedCalibrationProfile machine = new ResolvedCalibrationProfile(
                 Id: printer.CalibrationMachineProfileId!.Value,
                 Kind: "machine",
                 Name: "Test Machine",
@@ -1256,7 +1235,7 @@ public sealed class PrinterCalibrationContextServiceTests
                 SlicerVersion: CalibrationContractConstants.SlicerVersion,
                 ProfileFormat: CalibrationContractConstants.ProfileFormat,
                 UpdatedAtUtc: updatedAtUtc,
-                RawJson: """{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""",
+                RawJson: null,
                 StoredSha256: null,
                 PrinterModelId: printer.ModelId,
                 SpecificPrinterId: null,
@@ -1269,7 +1248,8 @@ public sealed class PrinterCalibrationContextServiceTests
                 MaxVolumetricFlow: null,
                 Material: null,
                 Manufacturer: "Test",
-                Sku: null);
+                Sku: null)
+                .WithRawJson("""{"gcode_flavor":"klipper","nozzle_diameter":[0.4]}""");
             ResolvedCalibrationProfile process = new(
                 Id: printer.CalibrationProcessProfileId!.Value,
                 Kind: "process",
