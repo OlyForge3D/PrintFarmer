@@ -157,6 +157,18 @@ public interface IPrintersService
     Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct);
 
     /// <summary>
+    /// Reports whether a firmware re-probe is due for the given printer under the same
+    /// <c>Discovery:FirmwareReprobeIntervalHours</c> cadence guard enforced by
+    /// <see cref="RefreshDetectedFirmwareIdentityAsync"/>. Callers (notably the read-through
+    /// version-info cache, #1656) use this to decide whether to contact the physical printer at
+    /// all before probing, so the cadence guard bounds probe frequency, not just DB writes.
+    /// </summary>
+    /// <param name="printer">The printer to evaluate.</param>
+    /// <param name="nowUtc">Optional current time override for testing; defaults to <see cref="DateTime.UtcNow"/>.</param>
+    /// <returns>True if no firmware has ever been detected, or the last detection is older than the configured cadence.</returns>
+    bool IsFirmwareReprobeDue(Printer printer, DateTime? nowUtc = null);
+
+    /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
     /// </summary>
     /// <param name="ct">Cancellation token</param>

@@ -148,6 +148,54 @@ public sealed class PrintersServiceFirmwareRefreshTests
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Fact]
+    public async Task IsFirmwareReprobeDue_NeverProbed_ReturnsTrue()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        printer.FirmwareDetectedAtUtc = null;
+        var unitOfWork = CreateUnitOfWork(printer, out _);
+        PrintersService service = CreateService(db, unitOfWork.Object);
+
+        service.IsFirmwareReprobeDue(printer).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task IsFirmwareReprobeDue_WithinCadenceWindow_ReturnsFalse()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        printer.FirmwareDetectedAtUtc = DateTime.UtcNow.AddHours(-1); // well within the default 6h cadence
+        var unitOfWork = CreateUnitOfWork(printer, out _);
+        PrintersService service = CreateService(db, unitOfWork.Object);
+
+        service.IsFirmwareReprobeDue(printer).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsFirmwareReprobeDue_PastCadenceWindow_ReturnsTrue()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        printer.FirmwareDetectedAtUtc = DateTime.UtcNow.AddHours(-7); // past the default 6h cadence
+        var unitOfWork = CreateUnitOfWork(printer, out _);
+        PrintersService service = CreateService(db, unitOfWork.Object);
+
+        service.IsFirmwareReprobeDue(printer).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsFirmwareReprobeDue_NullPrinter_Throws()
+    {
+        using AppDbContext db = CreateDbContext();
+        var unitOfWork = new Mock<IUnitOfWork>();
+        PrintersService service = CreateService(db, unitOfWork.Object);
+
+        Action act = () => service.IsFirmwareReprobeDue(null!);
+
+        act.Should().Throw<ArgumentNullException>();
+    }
+
     private static AppDbContext CreateDbContext()
     {
         DbContextOptions<AppDbContext> options =

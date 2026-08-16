@@ -5345,20 +5345,7 @@ public class PrintersController(
 
         WritePrinterEtag(printer);
 
-        CalibrationFirmwareIdentityDto firmware = new(
-            printer.FirmwareFamily.ToString(),
-            printer.GcodeDialect.ToString(),
-            printer.FirmwareDetectionSource switch
-            {
-                FirmwareDetectionSource.Printer => "printer",
-                FirmwareDetectionSource.Configured => "configured",
-                _ => "unknown",
-            },
-            printer.FirmwareVersion,
-            printer.FirmwareDetectionVersion,
-            printer.FirmwareDetectionConfidence,
-            printer.FirmwareDetectedAtUtc,
-            printer.FirmwareIdentityVerified);
+        CalibrationFirmwareIdentityDto firmware = CalibrationFirmwareIdentityDto.FromPrinter(printer);
 
         CalibrationExcludedRegionDto[] excludedRegions =
             string.IsNullOrWhiteSpace(printer.ExcludedRegionsJson)

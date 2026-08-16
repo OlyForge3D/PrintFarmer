@@ -816,6 +816,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               <div>
                 <dt className="text-xs text-pf-text-secondary">Firmware</dt>
                 <dd className="font-medium text-pf-text-primary">{printerVersionQuery.data.firmwareVersion || '—'}</dd>
+                <dd className="text-[11px] text-pf-text-secondary">
+                  {printerVersionQuery.data.recordedFirmwareIdentity
+                    ? 'Recorded — used for calibration eligibility'
+                    : 'Live reading only — not used for calibration eligibility'}
+                </dd>
               </div>
               <div>
                 <dt className="text-xs text-pf-text-secondary">Backend</dt>

@@ -1129,8 +1129,7 @@ public class PrintersService(
         }
 
         DateTime nowUtc = DateTime.UtcNow;
-        if (printer.FirmwareDetectedAtUtc.HasValue &&
-            nowUtc - printer.FirmwareDetectedAtUtc.Value < TimeSpan.FromHours(_firmwareReprobeIntervalHours))
+        if (!IsFirmwareReprobeDue(printer, nowUtc))
         {
             return false;
         }
@@ -1145,6 +1144,16 @@ public class PrintersService(
 
         await _unitOfWork.SaveChangesAsync(ct);
         return true;
+    }
+
+    /// <inheritdoc />
+    public bool IsFirmwareReprobeDue(Printer printer, DateTime? nowUtc = null)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        DateTime now = nowUtc ?? DateTime.UtcNow;
+        return !printer.FirmwareDetectedAtUtc.HasValue ||
+            now - printer.FirmwareDetectedAtUtc.Value >= TimeSpan.FromHours(_firmwareReprobeIntervalHours);
     }
 
     /// <summary>

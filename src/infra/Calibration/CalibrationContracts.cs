@@ -79,7 +79,36 @@ public sealed record CalibrationFirmwareIdentityDto(
     string? DetectionVersion,
     decimal? DetectionConfidence,
     DateTime? DetectedAtUtc,
-    bool Verified);
+    bool Verified)
+{
+    /// <summary>
+    /// Builds the recorded firmware identity view directly from a printer's persisted
+    /// <c>Firmware*</c> columns. This is the single mapping shared by the calibration
+    /// setup endpoint and the printer version endpoint (#1656) so the two views of the
+    /// same authoritative store can never diverge from each other.
+    /// </summary>
+    public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+
+        string detectionSource = printer.FirmwareDetectionSource switch
+        {
+            FirmwareDetectionSource.Printer => "printer",
+            FirmwareDetectionSource.Configured => "configured",
+            _ => "unknown",
+        };
+
+        return new CalibrationFirmwareIdentityDto(
+            printer.FirmwareFamily.ToString(),
+            printer.GcodeDialect.ToString(),
+            detectionSource,
+            printer.FirmwareVersion,
+            printer.FirmwareDetectionVersion,
+            printer.FirmwareDetectionConfidence,
+            printer.FirmwareDetectedAtUtc,
+            printer.FirmwareIdentityVerified);
+    }
+}
 
 public sealed record CalibrationSlicerIdentityDto(
     string? Engine,
