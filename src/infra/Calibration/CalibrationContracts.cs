@@ -110,11 +110,20 @@ public sealed record CalibrationFirmwareIdentityDto(
     }
 }
 
+/// <summary>
+/// Slicer identity for calibration, including which stored slicer profiles are bound to the
+/// printer. The three profile ids are exposed on the read side so an operator surface can show
+/// and preselect the current binding; without them a client could write a binding through
+/// <c>PUT /api/printers/{id}/calibration-setup</c> but never read back what is bound.
+/// </summary>
 public sealed record CalibrationSlicerIdentityDto(
     string? Engine,
     string? Distribution,
     string? Version,
-    string? ProfileFormat);
+    string? ProfileFormat,
+    Guid? MachineProfileId = null,
+    Guid? ProcessProfileId = null,
+    Guid? FilamentProfileId = null);
 
 public sealed record CalibrationToolheadDto(
     Guid Id,

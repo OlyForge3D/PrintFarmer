@@ -5235,6 +5235,11 @@ public class PrintersController(
     /// excludedRegions (explicit empty array is honored), activeToolheadIndex, the
     /// pressure-advance/firmware-retraction capability flags, and a confirm-only
     /// firmware-identity-verified flag.
+    /// It also binds the three upstream OrcaSlicer profile references
+    /// (machine/process/filament). Those are manual by nature — profile-derived
+    /// sourcing cannot begin until a machine profile is bound — and binding them is a
+    /// calibration operation, so it is reachable with <c>calibration:update</c> instead
+    /// of requiring <c>printers:admin</c>.
     /// This endpoint is additive: it is distinct from and does not change the behavior
     /// of the raw <c>PUT /api/printers/{id}</c> catch-all. It intentionally exposes no
     /// property for firmware family/version/gcodeDialect — those remain read-only and
@@ -5311,7 +5316,10 @@ public class PrintersController(
             SupportsPressureAdvance: request.SupportsPressureAdvance,
             SupportsFirmwareRetraction: request.SupportsFirmwareRetraction,
             CalibrationHardwareVerifiedAtUtc: request.CalibrationHardwareVerifiedAtUtc,
-            FirmwareIdentityVerified: request.FirmwareIdentityVerified);
+            FirmwareIdentityVerified: request.FirmwareIdentityVerified,
+            CalibrationMachineProfileId: request.MachineProfileId,
+            CalibrationProcessProfileId: request.ProcessProfileId,
+            CalibrationFilamentProfileId: request.FilamentProfileId);
         _ = Services.Calibration.CalibrationPrinterUpdateMapper.ApplyPrinter(printer, printerUpdate);
 
         if (request.Toolheads is { Length: > 0 } && printer.Toolheads is not null)
@@ -5377,7 +5385,10 @@ public class PrintersController(
                     t.DriveType,
                     t.IsDirectDrive,
                     t.ExtruderGearRatio))
-                .ToList());
+                .ToList(),
+            MachineProfileId: printer.CalibrationMachineProfileId,
+            ProcessProfileId: printer.CalibrationProcessProfileId,
+            FilamentProfileId: printer.CalibrationFilamentProfileId);
 
         return Ok(result);
     }

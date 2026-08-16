@@ -1289,7 +1289,14 @@ public sealed class PrinterCalibrationContextService(
             reasons,
             missingInputs);
 
-        return new(slicerEngine, slicerDistribution, slicerVersion, profileFormat);
+        return new(
+            slicerEngine,
+            slicerDistribution,
+            slicerVersion,
+            profileFormat,
+            printer.CalibrationMachineProfileId,
+            printer.CalibrationProcessProfileId,
+            printer.CalibrationFilamentProfileId);
     }
 
     private EffectiveHardwareFacts ValidateHardware(
