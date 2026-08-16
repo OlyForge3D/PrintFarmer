@@ -65,10 +65,15 @@ public sealed class PrinterVersionCache(
     /// <c>Printer.Firmware*</c> columns are the single authoritative store, so the version
     /// endpoint reports exactly what <c>PrinterCalibrationContextService.ValidateFirmware</c>
     /// reads — it can never show a firmware identity the calibration gate considers missing.
-    /// A live probe of the physical printer is only performed when
-    /// <see cref="IPrintersService.IsFirmwareReprobeDue"/> says a re-probe is due, reusing the
-    /// same <c>Discovery:FirmwareReprobeIntervalHours</c> cadence guard that already governs DB
-    /// writes, so this hot read path cannot hammer the printer or the database.
+    /// A live probe of the physical printer runs on every cache miss, exactly as it always has
+    /// (this is unchanged from the pre-#1656 thin-probe behavior, so no new printer traffic is
+    /// introduced), and still supplies <c>BackendVersion</c>/<c>ApiVersion</c> for display.
+    /// Persisting the probed firmware identity to the database — the part of this flow that can
+    /// mutate state and therefore needs throttling — is gated by
+    /// <see cref="IPrintersService.IsFirmwareReprobeDue"/>, reusing the same
+    /// <c>Discovery:FirmwareReprobeIntervalHours</c> cadence guard that already governs discovery
+    /// writes, so this hot read path cannot write the database more often than that cadence
+    /// allows.
     /// </summary>
     private async Task<PrinterVersionInfoDto> GetMoonrakerVersionAsync(
         Printer printer,
@@ -77,51 +82,60 @@ public sealed class PrinterVersionCache(
         CancellationToken ct)
     {
         string? message = null;
+        string? liveBackendVersion = null;
+        string? liveApiVersion = null;
 
-        if (_printersService.IsFirmwareReprobeDue(printer))
+        try
         {
-            try
-            {
-                StandardPrinterInfo info = await infoClient.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, ct);
-                string? firmware = string.IsNullOrWhiteSpace(info.Firmware) ? null : info.Firmware;
+            StandardPrinterInfo info = await infoClient.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, ct);
+            string? firmware = string.IsNullOrWhiteSpace(info.Firmware) ? null : info.Firmware;
+            liveBackendVersion = string.IsNullOrWhiteSpace(info.BackendVersion) ? null : info.BackendVersion;
+            liveApiVersion = string.IsNullOrWhiteSpace(info.ApiVersion) ? null : info.ApiVersion;
 
-                if (firmware is not null)
+            if (firmware is not null && _printersService.IsFirmwareReprobeDue(printer))
+            {
+                // The thin probe (StandardPrinterInfo) only carries the firmware version
+                // string. Family/dialect/detection-source/confidence/detection-version are
+                // supplied as known constants here (not re-derived via the full
+                // MoonrakerOnboardingResolver candidate scan) because the backend type is
+                // already registered as Moonraker, not merely guessed during discovery.
+                var discovered = new DiscoveredPrinterDto
                 {
-                    // The thin probe (StandardPrinterInfo) only carries the firmware version
-                    // string. Family/dialect/detection-source/confidence/detection-version are
-                    // supplied as known constants here (not re-derived via the full
-                    // MoonrakerOnboardingResolver candidate scan) because the backend type is
-                    // already registered as Moonraker, not merely guessed during discovery.
-                    var discovered = new DiscoveredPrinterDto
-                    {
-                        Name = printer.Name,
-                        ServerUrl = printer.BackendUrl,
-                        Backend = backend,
-                        FirmwareFamily = PrinterFirmwareFamily.Klipper,
-                        GcodeDialect = PrinterGcodeDialect.Klipper,
-                        FirmwareDetectionSource = Domain.FirmwareDetectionSource.Printer,
-                        FirmwareVersion = firmware,
-                        FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion,
-                        FirmwareDetectionConfidence = MoonrakerOnboardingResolver.MapConfidenceScore(100),
-                        FirmwareDetectedAtUtc = DateTime.UtcNow,
-                    };
+                    Name = printer.Name,
+                    ServerUrl = printer.BackendUrl,
+                    Backend = backend,
+                    FirmwareFamily = PrinterFirmwareFamily.Klipper,
+                    GcodeDialect = PrinterGcodeDialect.Klipper,
+                    FirmwareDetectionSource = Domain.FirmwareDetectionSource.Printer,
+                    FirmwareVersion = firmware,
+                    FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion,
+                    FirmwareDetectionConfidence = MoonrakerOnboardingResolver.MapConfidenceScore(100),
+                    FirmwareDetectedAtUtc = DateTime.UtcNow,
+                };
 
-                    _ = await _printersService.RefreshDetectedFirmwareIdentityAsync(printer.Id, discovered, ct);
+                _ = await _printersService.RefreshDetectedFirmwareIdentityAsync(printer.Id, discovered, ct);
 
-                    // Re-read so the response reflects exactly what was persisted (defense in
-                    // depth: RefreshDetectedFirmwareIdentityAsync re-checks the cadence guard
-                    // itself and may have declined to write if it lost a race).
-                    printer = await _printersService.FindByIdAsync(printer.Id, ct) ?? printer;
-                }
+                // Re-read so the response reflects exactly what was persisted (defense in
+                // depth: RefreshDetectedFirmwareIdentityAsync re-checks the cadence guard
+                // itself and may have declined to write if it lost a race).
+                printer = await _printersService.FindByIdAsync(printer.Id, ct) ?? printer;
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                message = ex.Message;
-            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Never surface a raw exception message to API clients here: unlike the
+            // thin-probe path (which only ever talks HTTP to the printer), this path also
+            // touches the database via RefreshDetectedFirmwareIdentityAsync, so an
+            // unexpected exception type could otherwise leak connection details. Network
+            // failures reaching the printer are safe to relay verbatim; anything else is
+            // reduced to a generic message.
+            message = ex is HttpRequestException or TimeoutException
+                ? ex.Message
+                : "Firmware re-probe failed; showing last recorded firmware identity.";
         }
 
         return new PrinterVersionInfoDto(
@@ -129,8 +143,8 @@ public sealed class PrinterVersionCache(
             Backend: backend,
             Supported: true,
             FirmwareVersion: printer.FirmwareVersion,
-            BackendVersion: printer.BackendVersion,
-            ApiVersion: printer.BackendApiVersion,
+            BackendVersion: liveBackendVersion ?? printer.BackendVersion,
+            ApiVersion: liveApiVersion ?? printer.BackendApiVersion,
             RetrievedAtUtc: DateTime.UtcNow,
             Message: message,
             RecordedFirmwareIdentity: CalibrationFirmwareIdentityDto.FromPrinter(printer));

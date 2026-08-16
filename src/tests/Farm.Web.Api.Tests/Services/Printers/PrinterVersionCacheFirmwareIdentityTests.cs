@@ -197,7 +197,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
-    public async Task GetAsync_RecentlyProbedMoonrakerPrinter_DoesNotReprobeAndServesPersistedValues()
+    public async Task GetAsync_RecentlyProbedMoonrakerPrinter_ProbesLiveVersionInfoButDoesNotRewriteFirmwareIdentity()
     {
         Printer printer = CreateNeverProbedMoonrakerPrinter();
         printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
@@ -213,7 +213,7 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = await db.SaveChangesAsync();
 
         (Mock<IBackendClientFactory> backendFactory, Mock<ISupportsPrinterInformation> info) =
-            CreateMockedInfoBackend(PrinterBackend.Moonraker, "v99.99.99");
+            CreateMockedInfoBackend(PrinterBackend.Moonraker, "v99.99.99", backendVersion: "v1.2.3", apiVersion: "v2");
 
         PrintersService printersService = CreatePrintersService(db, backendFactory.Object);
         PrinterVersionCache cache = new(
@@ -224,11 +224,23 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
         PrinterVersionInfoDto? dto = await cache.GetAsync(printer.Id, CancellationToken.None);
 
-        _ = dto.Should().NotBeNull();
-        _ = dto!.FirmwareVersion.Should().Be("v0.11.0");
+        // The live probe still runs on every cache miss — matching the pre-#1656 thin-probe
+        // cadence exactly, so BackendVersion/ApiVersion (fields the calibration gate never reads)
+        // stay live and this is not a functional regression versus the old behavior.
         info.Verify(
             c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()),
-            Times.Never);
+            Times.Once);
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.BackendVersion.Should().Be("v1.2.3");
+        _ = dto.ApiVersion.Should().Be("v2");
+
+        // The firmware identity itself — the single authoritative fact the calibration gate also
+        // reads — is untouched: the cadence guard blocks the DB write, so the persisted (and
+        // reported) version stays the last recorded value, never the fresh probe's reading.
+        _ = dto.FirmwareVersion.Should().Be("v0.11.0");
+        Printer? reread = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == printer.Id);
+        _ = reread.FirmwareVersion.Should().Be("v0.11.0");
     }
 
     [Theory]
@@ -299,5 +311,93 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = dto.Should().NotBeNull();
         _ = dto!.FirmwareVersion.Should().Be("v0.10.0");
         _ = dto.Message.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AgreesWithCalibrationGateOnEffectiveDialect()
+    {
+        // A printer whose FirmwareFamily was set (e.g. via manual-add onboarding hints or an
+        // earlier detection pass) but whose GcodeDialect column was never separately populated —
+        // both the version endpoint and the calibration gate must apply the same
+        // family-implies-dialect fallback, or the two would disagree on GcodeDialect specifically
+        // (a Hicks/Bishop review finding for #1656).
+        Printer printer = CreateNeverProbedMoonrakerPrinter();
+        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        printer.GcodeDialect = PrinterGcodeDialect.Unknown; // never explicitly populated
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Configured;
+        printer.FirmwareVersion = "v0.9.0";
+        printer.FirmwareDetectedAtUtc = DateTime.UtcNow.AddHours(-1); // within cadence — no reprobe
+
+        string dbName = $"firmware-identity-{Guid.NewGuid()}";
+        await using (AppDbContext seedDb = NewDb(dbName))
+        {
+            _ = seedDb.Printers.Add(printer);
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        (Mock<IBackendClientFactory> backendFactory, _) = CreateMockedInfoBackend(PrinterBackend.Moonraker, "v99.99.99");
+
+        PrinterVersionInfoDto? dto;
+        await using (AppDbContext cacheDb = NewDb(dbName))
+        {
+            PrintersService printersService = CreatePrintersService(cacheDb, backendFactory.Object);
+            PrinterVersionCache cache = new(
+                new MemoryCache(new MemoryCacheOptions()),
+                Options.Create(new PrinterVersionCacheOptions()),
+                printersService,
+                backendFactory.Object);
+
+            dto = await cache.GetAsync(printer.Id, CancellationToken.None);
+        }
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.RecordedFirmwareIdentity.Should().NotBeNull();
+        _ = dto.RecordedFirmwareIdentity!.GcodeDialect.Should().Be(nameof(PrinterGcodeDialect.Klipper));
+
+        await using (AppDbContext calibrationDb = NewDb(dbName))
+        {
+            PrinterCalibrationContextService calibrationService = CreateCalibrationService(calibrationDb);
+            CalibrationCandidateDto candidate = (await calibrationService.GetCandidatesAsync(
+                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
+                CancellationToken.None)).Value!.Should().ContainSingle().Which;
+
+            _ = candidate.Firmware.GcodeDialect.Should().Be(dto.RecordedFirmwareIdentity.GcodeDialect);
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_MoonrakerPrinterWithConfiguredNonKlipperFamily_OverwritesFamilyOnSuccessfulProbe()
+    {
+        // Documents an intentional trade-off: the backend type (Moonraker) is already registered
+        // and is only ever Klipper-family in this codebase, so a due, successful probe always
+        // writes FirmwareFamily = Klipper — even overwriting a stale/incorrect operator-configured
+        // family — because a Moonraker backend cannot actually be anything else.
+        Printer printer = CreateNeverProbedMoonrakerPrinter();
+        printer.FirmwareFamily = PrinterFirmwareFamily.Other;
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Configured;
+        printer.FirmwareVersion = "stale-manual-entry";
+        printer.FirmwareDetectedAtUtc = null; // due for re-probe
+
+        await using AppDbContext db = NewDb($"firmware-identity-{Guid.NewGuid()}");
+        _ = db.Printers.Add(printer);
+        _ = await db.SaveChangesAsync();
+
+        (Mock<IBackendClientFactory> backendFactory, _) = CreateMockedInfoBackend(PrinterBackend.Moonraker, "v0.12.0");
+
+        PrintersService printersService = CreatePrintersService(db, backendFactory.Object);
+        PrinterVersionCache cache = new(
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new PrinterVersionCacheOptions()),
+            printersService,
+            backendFactory.Object);
+
+        PrinterVersionInfoDto? dto = await cache.GetAsync(printer.Id, CancellationToken.None);
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.RecordedFirmwareIdentity!.Family.Should().Be(nameof(PrinterFirmwareFamily.Klipper));
+        _ = dto.FirmwareVersion.Should().Be("v0.12.0");
+
+        Printer? reread = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == printer.Id);
+        _ = reread.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
     }
 }

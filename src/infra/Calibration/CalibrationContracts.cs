@@ -87,7 +87,17 @@ public sealed record CalibrationFirmwareIdentityDto(
     /// setup endpoint and the printer version endpoint (#1656) so the two views of the
     /// same authoritative store can never diverge from each other.
     /// </summary>
-    public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer)
+    public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer) =>
+        FromPrinter(printer, EffectiveGcodeDialect(printer));
+
+    /// <summary>
+    /// Overload for callers (the calibration eligibility gate) that have already computed the
+    /// effective g-code dialect as part of their own validation flow — passing it in avoids
+    /// computing it twice while guaranteeing both callers use the exact same fallback rule
+    /// (below), so the displayed dialect can never disagree with what the calibration gate
+    /// validated.
+    /// </summary>
+    public static CalibrationFirmwareIdentityDto FromPrinter(Printer printer, PrinterGcodeDialect effectiveGcodeDialect)
     {
         ArgumentNullException.ThrowIfNull(printer);
 
@@ -100,7 +110,7 @@ public sealed record CalibrationFirmwareIdentityDto(
 
         return new CalibrationFirmwareIdentityDto(
             printer.FirmwareFamily.ToString(),
-            printer.GcodeDialect.ToString(),
+            effectiveGcodeDialect.ToString(),
             detectionSource,
             printer.FirmwareVersion,
             printer.FirmwareDetectionVersion,
@@ -108,6 +118,21 @@ public sealed record CalibrationFirmwareIdentityDto(
             printer.FirmwareDetectedAtUtc,
             printer.FirmwareIdentityVerified);
     }
+
+    /// <summary>
+    /// <c>firmware.gcodeDialect</c> is sourced from firmware detection only, never from the
+    /// resolved machine profile (#1613 §4.5/§4.5.1): when the explicit dialect column is unset,
+    /// fall back to the dialect implied by the detected firmware family. Mirrors the fallback
+    /// the calibration gate's firmware validation applies, so a printer whose firmware family is
+    /// known but whose dialect column was never separately populated (e.g. via manual-add
+    /// onboarding hints) shows the same effective dialect everywhere.
+    /// </summary>
+    private static PrinterGcodeDialect EffectiveGcodeDialect(Printer printer) =>
+        printer.GcodeDialect != PrinterGcodeDialect.Unknown
+            ? printer.GcodeDialect
+            : printer.FirmwareFamily == PrinterFirmwareFamily.Klipper
+                ? PrinterGcodeDialect.Klipper
+                : PrinterGcodeDialect.Unknown;
 }
 
 /// <summary>

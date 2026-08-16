@@ -492,7 +492,7 @@ public sealed class PrinterCalibrationContextService(
             HasEnclosure = printer.CalibrationHasEnclosure,
             HasHeatedChamber = hardwareFacts.HasHeatedChamber,
             MaxChamberTemperature = printer.MaxChamberTemp,
-            Firmware = MapFirmware(printer, effectiveGcodeDialect),
+            Firmware = CalibrationFirmwareIdentityDto.FromPrinter(printer, effectiveGcodeDialect),
             Slicer = slicerIdentity,
             ProfilesEvaluated = resolveProfiles,
             Eligible = reasons.Count == 0,
@@ -1675,28 +1675,6 @@ public sealed class PrinterCalibrationContextService(
             toolhead.IsDirectDrive,
             toolhead.ExtruderGearRatio,
             toolhead.SupportedMaterials);
-    }
-
-
-    private static CalibrationFirmwareIdentityDto MapFirmware(
-        Printer printer,
-        PrinterGcodeDialect effectiveGcodeDialect)
-    {
-        string detectionSource = printer.FirmwareDetectionSource switch
-        {
-            FirmwareDetectionSource.Printer => "printer",
-            FirmwareDetectionSource.Configured => "configured",
-            _ => "unknown",
-        };
-        return new(
-            printer.FirmwareFamily.ToString(),
-            effectiveGcodeDialect.ToString(),
-            detectionSource,
-            printer.FirmwareVersion,
-            printer.FirmwareDetectionVersion,
-            printer.FirmwareDetectionConfidence,
-            printer.FirmwareDetectedAtUtc,
-            printer.FirmwareIdentityVerified);
     }
 
     private static CalibrationProfileDto? MapProfile(

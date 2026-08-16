@@ -1115,6 +1115,18 @@ public class PrintersService(
     /// discovery data, subject to the <see cref="_firmwareReprobeIntervalHours"/> cadence guard.
     /// See #1618 / #1613 PR-5.
     /// </summary>
+    /// <remarks>
+    /// #1656: this is now also reachable from the hot <c>GET /printers/{id}/version</c> read
+    /// path (<see cref="PrinterVersionCache"/>), which re-reads the same tracked
+    /// <see cref="Printer"/> entity after this call returns to build its response. If
+    /// <see cref="Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork.SaveChangesAsync"/>
+    /// throws, the in-memory property mutations above have already been applied to that shared
+    /// tracked entity even though nothing was persisted — reporting them to a caller would be
+    /// exactly the split-brain #1656 exists to eliminate. On failure, reload the entity from the
+    /// database to discard the unsaved mutation before propagating the exception, so a caller
+    /// that swallows the exception and reads the entity afterward only ever sees genuinely
+    /// persisted values.
+    /// </remarks>
     public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
     {
         if (discovered is null || discovered.FirmwareFamily is null)
@@ -1142,7 +1154,16 @@ public class PrintersService(
         printer.FirmwareDetectionConfidence = discovered.FirmwareDetectionConfidence ?? printer.FirmwareDetectionConfidence;
         printer.FirmwareDetectedAtUtc = discovered.FirmwareDetectedAtUtc ?? nowUtc;
 
-        await _unitOfWork.SaveChangesAsync(ct);
+        try
+        {
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+            throw;
+        }
+
         return true;
     }
 
