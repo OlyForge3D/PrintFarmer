@@ -305,32 +305,104 @@ test('rejects verdicts pinned to a stale SHA', () => {
 // --- Sync carry-forward exemption (issue #1633, "Option A") ----------------
 //
 // A record at an old head SHA stays valid at the new head when (1) the old
-// SHA is a strict ancestor of the new head, and (2) every commit introduced
-// since then is already reachable from the base branch tip — i.e. the only
-// thing that happened is the author merging base in, not new author work.
-// `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a caller
-// (the workflow, having already computed the two compares) tells
+// SHA is a strict ancestor of the new head, and (2) the PR's own diff against
+// the base branch is byte-for-byte unchanged between the old SHA and the new
+// head. `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a
+// caller (the workflow, having already computed the compares) tells
 // `collectVerdicts`/`evaluateGate` which old SHAs satisfy it.
+//
+// Condition 2 is deliberately a diff-equality check, not "every new commit is
+// an ancestor of base": a plain `git merge development` always creates a
+// fresh merge commit that is itself NOT an ancestor of base (base has no idea
+// it exists), so a naive commit-membership check would reject the very sync
+// this feature exists to allow.
 
-test('ancestry check: a commit reachable from the base tip is not "ahead of base"', () => {
-  // This models exactly what the two GitHub compare calls hand back: the
-  // `commits` array from compare(reviewedSha...newHead) is `newCommitShas`,
-  // and the `commits` array from compare(baseTip...newHead) is
-  // `aheadOfBaseShas` — commits in head that are NOT yet reachable from base.
-  // A pure base-branch merge introduces only commits base already has, so
-  // none of them show up in the "ahead of base" set.
-  const mergeCommitSha = 'c'.repeat(40);
+function file(overrides = {}) {
+  return {
+    status: 'modified',
+    filename: 'src/Foo.cs',
+    sha: 'a'.repeat(40),
+    patch: '@@ -1 +1 @@\n-old\n+new',
+    ...overrides,
+  };
+}
+
+test('a pure base-sync merge (identical PR diff) is carried forward', () => {
+  // Both compares recover exactly the PR's own contribution: three-dot
+  // compare pivots on the merge base, so `compare(base...oldSha)` still
+  // finds the PR's original diff and `compare(base...newHead)` finds the
+  // same diff again now that the sync merge has folded base in. Nothing
+  // about the PR's own changes moved, only unrelated base history did.
+  const reviewedDiffFiles = [file({ filename: 'src/Foo.cs' }), file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) })];
+  const currentDiffFiles = [file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) }), file({ filename: 'src/Foo.cs' })];
+  assert.equal(
+    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    true,
+  );
+});
+
+test('a new author commit that changes the PR diff is not carried forward', () => {
+  const reviewedDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'a'.repeat(40) })];
+  // Same file, but its resulting content (and patch) changed since review —
+  // this is exactly what a new author-authored commit looks like, whether it
+  // stands alone or was folded into the sync merge commit as a "conflict
+  // resolution".
+  const currentDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'c'.repeat(40), patch: '@@ -1 +1 @@\n-old\n+malicious' })];
+  assert.equal(
+    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    false,
+  );
+});
+
+test('a new author commit that adds a file to the PR diff is not carried forward', () => {
+  const reviewedDiffFiles = [file({ filename: 'src/Foo.cs' })];
+  const currentDiffFiles = [file({ filename: 'src/Foo.cs' }), file({ filename: 'src/NewFile.cs', sha: 'd'.repeat(40) })];
+  assert.equal(
+    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    false,
+  );
+});
+
+test('isCarriedAcrossSync fails closed when the record SHA is not a strict ancestor', () => {
+  // A rebase or force-push rewrites history: GitHub's compare status is
+  // 'diverged' or 'behind' rather than 'ahead', so ancestry condition (1)
+  // fails regardless of whether the diffs happen to match.
+  const reviewedDiffFiles = [file()];
+  for (const status of ['diverged', 'behind', 'identical', undefined]) {
+    assert.equal(
+      isCarriedAcrossSync({
+        recordAncestryStatus: status,
+        reviewedDiffFiles,
+        currentDiffFiles: reviewedDiffFiles,
+      }),
+      false,
+      String(status),
+    );
+  }
+});
+
+test('isCarriedAcrossSync fails closed on an empty reviewed diff', () => {
+  // The caller must always supply the PR's actual recorded diff; an empty
+  // list never means "safe by default".
+  assert.equal(
+    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles: [], currentDiffFiles: [] }),
+    false,
+  );
+});
+
+test('isCarriedAcrossSync fails closed when either diff may be truncated', () => {
+  // GitHub's compare endpoint silently caps `files` with no in-band
+  // truncation signal, so a diff at or beyond that cap can never be proven
+  // unchanged — equality would be unprovable, not merely unproven.
+  const reviewedDiffFiles = [file()];
   assert.equal(
     isCarriedAcrossSync({
       recordAncestryStatus: 'ahead',
-      newCommitShas: [mergeCommitSha],
-      // The merge commit landed in the PR branch but base itself is not
-      // ahead of anything here — i.e. every commit the PR gained is already
-      // part of base's own history, so compare(base...head) does not list it
-      // as base-ahead-of-head content the gate has to worry about.
-      aheadOfBaseShas: [],
+      reviewedDiffFiles,
+      currentDiffFiles: reviewedDiffFiles,
+      filesMayBeTruncated: true,
     }),
-    true,
+    false,
   );
 });
 
@@ -373,10 +445,10 @@ test('a mix of fresh and carried approvals is still reported and still carries',
 });
 
 test('any author commit in the sync range still supersedes the record normally', () => {
-  // The ancestry/base-reachability conditions failed (e.g. the compare showed
-  // an author commit ahead of base), so the workflow never adds the old SHA
-  // to `carriedShas`. The record must supersede exactly as it does today —
-  // regression coverage for the review-then-push-more threat model.
+  // The workflow's diff-equality check failed (the PR's own diff changed
+  // since review), so `carriedShas` was never populated. The record must
+  // supersede exactly as it does today — regression coverage for the
+  // review-then-push-more threat model.
   const result = gate({
     comments: [
       comment('bishop', 'APPROVE', staleSha),
@@ -388,47 +460,6 @@ test('any author commit in the sync range still supersedes the record normally',
   assert.equal(result.state, 'failure');
   assert.equal(result.stale.length, 3);
   assert.match(result.description, /^BLOCKED @ /);
-});
-
-test('isCarriedAcrossSync fails closed when an author commit is in the introduced range', () => {
-  const authorCommitSha = 'd'.repeat(40);
-  const baseMergeCommitSha = 'e'.repeat(40);
-  assert.equal(
-    isCarriedAcrossSync({
-      recordAncestryStatus: 'ahead',
-      newCommitShas: [baseMergeCommitSha, authorCommitSha],
-      // The author's new commit has not landed in base yet, so it shows up
-      // as one of the commits head is ahead of base by.
-      aheadOfBaseShas: [authorCommitSha],
-    }),
-    false,
-  );
-});
-
-test('isCarriedAcrossSync fails closed when the record SHA is not a strict ancestor', () => {
-  // A rebase or force-push rewrites history: GitHub's compare status is
-  // 'diverged' or 'behind' rather than 'ahead', so ancestry condition (1)
-  // fails regardless of what the commit lists say.
-  for (const status of ['diverged', 'behind', 'identical', undefined]) {
-    assert.equal(
-      isCarriedAcrossSync({
-        recordAncestryStatus: status,
-        newCommitShas: ['f'.repeat(40)],
-        aheadOfBaseShas: [],
-      }),
-      false,
-      String(status),
-    );
-  }
-});
-
-test('isCarriedAcrossSync fails closed on an empty introduced-commit list', () => {
-  // The caller must always supply the concrete commits it observed; an empty
-  // list never means "safe by default".
-  assert.equal(
-    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', newCommitShas: [], aheadOfBaseShas: [] }),
-    false,
-  );
 });
 
 test('carriedShas is keyed on the reviewed SHA, not the current head', () => {
@@ -910,6 +941,44 @@ test('the gate is scoped to squad-labelled pull requests', () => {
   const inScope = gate({ squadLabeled: true });
   assert.equal(inScope.scope, undefined);
   assert.match(inScope.description, /^BLOCKED @ [0-9a-f]{12}: no review recorded/);
+});
+
+test('the sync carry-forward workflow wiring stays intact', async () => {
+  // Regression coverage for the merge-commit bug this rewrite fixes: the
+  // workflow must compute the ancestry check AND the diff-equality check
+  // against the base ref — not the old commit-membership shape — and must
+  // thread the resulting `carriedShas` into `gate.evaluateGate`. A silent
+  // revert back to the commit-list design would reintroduce a feature that
+  // never actually fires for a real `git merge` sync.
+  const workflow = await readFile(
+    path.join(repositoryRoot, '.github/workflows/squad-review-verdict.yml'), 'utf8',
+  );
+
+  // Ancestry compare (condition 1) still targets old-sha...head.
+  assert.match(workflow, /basehead: `\$\{oldSha\}\.\.\.\$\{headSha\}`/);
+  // Diff-equality compares (condition 2) target the base ref on BOTH sides —
+  // not old-sha...head or base...head alone, which is the exact shape that
+  // let a sync merge commit sit in both "new" and "ahead of base" sets.
+  assert.match(workflow, /basehead: `\$\{baseRef\}\.\.\.\$\{oldSha\}`/);
+  assert.match(workflow, /basehead: `\$\{baseRef\}\.\.\.\$\{headSha\}`/);
+
+  // The gate call receives file lists, not commit lists, plus the ancestry
+  // status and a truncation guard.
+  assert.match(workflow, /reviewedDiffFiles:\s*reviewedFiles/);
+  assert.match(workflow, /currentDiffFiles:\s*currentFiles/);
+  assert.match(workflow, /recordAncestryStatus:\s*ancestryCompare\.status/);
+  assert.match(workflow, /filesMayBeTruncated:/);
+  assert.match(workflow, /compareFilesCap/);
+
+  // The old commit-membership shape must be gone entirely — its presence
+  // would mean the buggy design crept back in alongside the new one.
+  assert.doesNotMatch(workflow, /newCommitShas/);
+  assert.doesNotMatch(workflow, /aheadOfBaseShas/);
+
+  // Eligibility still fails closed and still threads into evaluateGate.
+  assert.match(workflow, /carriedShas\.add\(oldSha\)/);
+  assert.match(workflow, /carriedShas,\s*\n/);
+  assert.match(workflow, /Treating the record as superseded\./);
 });
 
 test('the scoping workflow wiring stays intact', async () => {

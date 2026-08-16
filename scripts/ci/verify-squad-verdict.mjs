@@ -118,8 +118,9 @@ function parseDisplayTitle(displayTitle) {
 // The record encodes its outcome in the status state and description:
 //   success  `REVIEWED (self-attested) @ <sha12> by <agents>`             -> agents reviewed
 //   success  `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>`
-//            -> agents reviewed an earlier head; every commit since then is a
-//               proven pure base-branch sync, so the record was carried
+//            -> agents reviewed an earlier head, and the PR's own diff against
+//               its base branch is proven byte-for-byte unchanged since then
+//               (a pure base-branch sync merge), so the record was carried
 //               forward rather than re-earned (issue #1633, "Option A")
 //   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
 //   success  `NOT_APPLICABLE @ <sha12>: <reason>`             -> out of gate scope

@@ -425,10 +425,11 @@ jobs:
             // Sync-carry-forward exemption (issue #1633, "Option A"). A
             // record pinned to an old head SHA stays valid at the current
             // head when (1) the old SHA is a strict ancestor of the current
-            // head, and (2) every commit introduced since then is already
-            // reachable from the base branch tip — i.e. the only thing that
-            // happened is the author merging base in, not new author work.
-            // Both conditions are checked purely via the compare API, with no
+            // head, and (2) the PR's own diff against the base branch —
+            // NOT the raw commit list, which always contains the sync
+            // merge commit itself even for a clean sync — is byte-for-byte
+            // unchanged between the old SHA and the current head. Both
+            // conditions are checked purely via the compare API, with no
             // repository fetch, matching the checkout above.
             const distinctOldShas = new Set();
             for (const raw of rawComments) {
@@ -439,27 +440,42 @@ jobs:
             }
 
             const baseRef = pull.base?.ref ?? '';
+            // The compare endpoint silently caps `files` (no in-band
+            // truncation flag), so a diff at or beyond that cap can never be
+            // proven unchanged and must fail closed. 300 is GitHub's
+            // documented ceiling for this endpoint.
+            const compareFilesCap = 300;
             const carriedShas = new Set();
             for (const oldSha of distinctOldShas) {
               try {
-                const { data: recordCompare } =
+                const { data: ancestryCompare } =
                   await github.rest.repos.compareCommitsWithBasehead({
                     owner, repo, basehead: `${oldSha}...${headSha}`,
                   });
-                const { data: baseCompare } =
+                const { data: reviewedCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${baseRef}...${oldSha}`,
+                  });
+                const { data: currentCompare } =
                   await github.rest.repos.compareCommitsWithBasehead({
                     owner, repo, basehead: `${baseRef}...${headSha}`,
                   });
+                const reviewedFiles = reviewedCompare.files ?? [];
+                const currentFiles = currentCompare.files ?? [];
                 const eligible = gate.isCarriedAcrossSync({
-                  recordAncestryStatus: recordCompare.status,
-                  newCommitShas: (recordCompare.commits ?? []).map((c) => c.sha),
-                  aheadOfBaseShas: (baseCompare.commits ?? []).map((c) => c.sha),
+                  recordAncestryStatus: ancestryCompare.status,
+                  reviewedDiffFiles: reviewedFiles,
+                  currentDiffFiles: currentFiles,
+                  filesMayBeTruncated:
+                    reviewedFiles.length >= compareFilesCap ||
+                    currentFiles.length >= compareFilesCap,
                 });
                 if (eligible) {
                   carriedShas.add(oldSha);
                   core.notice(
                     `Carrying review record at ${oldSha.slice(0, 12)} forward to ` +
-                    `${headSha.slice(0, 12)}: only base-branch commits arrived since review.`,
+                    `${headSha.slice(0, 12)}: the PR's own diff against ` +
+                    `${baseRef} is unchanged since review.`,
                   );
                 }
               } catch (error) {

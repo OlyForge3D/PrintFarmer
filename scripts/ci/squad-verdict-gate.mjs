@@ -359,7 +359,7 @@ export function parseVerdictComment(comment) {
  * exemption from issue #1633 ("Option A"). This exists so a routine base-branch
  * sync doesn't cost a full re-review of a contribution nobody touched.
  *
- * BOTH conditions must hold, matching the issue's proposed fix exactly:
+ * BOTH conditions must hold:
  *
  *   1. The reviewed SHA is a strict ancestor of the new head — nothing was
  *      rewritten or force-pushed away. This is `recordAncestryStatus`, the
@@ -368,47 +368,90 @@ export function parseVerdictComment(comment) {
  *      (`'identical'` never reaches this function — an unchanged head is
  *      already handled as a direct SHA match upstream — and `'behind'` /
  *      `'diverged'` mean history was rewritten, so ancestry fails.)
- *   2. Every commit introduced since the review (`newCommitShas`, the
- *      `commits` array from that same compare call) is already reachable
- *      from the base branch tip — i.e. it arrived via a base sync, not new
- *      author work. `aheadOfBaseShas` is the `commits` array from a second
- *      compare, `compare/{baseTip}...{newHeadSha}`: GitHub's compare API
- *      lists there exactly the commits that are ancestors of the head but
- *      NOT ancestors of the base, so anything absent from that set is, by
- *      construction, already an ancestor of the base tip.
+ *   2. The PR's *own* contribution — its diff against the base branch — is
+ *      byte-for-byte unchanged between the reviewed SHA and the new head.
  *
+ * Condition 2 is deliberately NOT a check of "every new commit is an ancestor
+ * of base": a plain `git merge development` always creates a fresh merge
+ * commit that is itself not an ancestor of base (base has no idea it exists),
+ * so a naive commit-membership check rejects the exact sync it is meant to
+ * allow. Comparing the PR's own diff instead sidesteps that entirely, and it
+ * is robust to *why* the merge commit exists: a clean sync merge changes no
+ * file the PR's diff already covers, while a conflict resolved by adding new
+ * logic inside the merge commit — the actual threat this guards against —
+ * does change that diff and is correctly rejected.
+ *
+ * The PR's diff at either point in time is obtained the same way GitHub
+ * computes the PR's own file list: a three-dot compare against the base
+ * branch, `compare/{baseRef}...{sha}`. Three-dot compare pivots on the merge
+ * base of the two refs rather than diffing the refs directly, so it keeps
+ * returning "this PR's changes" even after the base branch has advanced:
+ * `compare(baseRef...reviewedSha)` still finds the (older) commit the PR was
+ * built on as its merge base, and `compare(baseRef...newHeadSha)` finds the
+ * current base tip itself (now an ancestor of the head via the sync merge).
  * Both compares are obtained via `GET /repos/{owner}/{repo}/compare/{basehead}`
  * without fetching the repository, which matters because the workflow
  * deliberately checks out only the default branch (see the workflow header).
  *
- * Fails closed: an empty `newCommitShas` list is never treated as safe — the
- * caller must always supply the concrete commit list it observed rather than
- * a default meaning "nothing to check". Any single author-authored commit in
- * the range breaks condition 2 and this returns false — exactly the
- * review-then-push-more threat model the SHA pin exists to catch (see the
- * module header and issue #1633's "Security note"). This function performs no
- * I/O; the workflow computes the two compares and passes their result in.
+ * `reviewedDiffFiles` / `currentDiffFiles` are each the `files` array from one
+ * of those two compares. Every entry the compare API returns for a change to
+ * matter (rename, add, delete, edit) is compared: `status`, `filename`,
+ * `previous_filename`, `sha` (the resulting blob's SHA) and, when GitHub
+ * supplies it, `patch` — so a same-named file with different content is
+ * detected even if a diff subtlety trims the patch. Fails closed:
+ *
+ *   - An empty `reviewedDiffFiles` is never treated as safe — the caller
+ *     must always supply the PR's real recorded diff, not a default meaning
+ *     "nothing to check".
+ *   - GitHub's compare endpoint caps the `files` array (large diffs are
+ *     silently truncated with no in-band signal). `filesMayBeTruncated` lets
+ *     the caller say "either side may be incomplete"; when true, equality can
+ *     never be proven, so this returns false rather than risk comparing two
+ *     truncated, apparently-equal lists that actually differ past the cutoff.
+ *
+ * This function performs no I/O; the workflow computes the compares and
+ * passes their results in.
  */
 export function isCarriedAcrossSync({
   recordAncestryStatus,
-  newCommitShas = [],
-  aheadOfBaseShas = [],
+  reviewedDiffFiles = [],
+  currentDiffFiles = [],
+  filesMayBeTruncated = false,
 } = {}) {
   if (recordAncestryStatus !== 'ahead') {
     return false;
   }
-  const introduced = (Array.isArray(newCommitShas) ? newCommitShas : [])
-    .map((sha) => String(sha ?? '').toLowerCase())
-    .filter(Boolean);
-  if (introduced.length === 0) {
+  if (filesMayBeTruncated) {
     return false;
   }
-  const aheadOfBase = new Set(
-    (Array.isArray(aheadOfBaseShas) ? aheadOfBaseShas : [])
-      .map((sha) => String(sha ?? '').toLowerCase()),
-  );
-  return introduced.every((sha) => !aheadOfBase.has(sha));
+  const reviewed = Array.isArray(reviewedDiffFiles) ? reviewedDiffFiles : [];
+  const current = Array.isArray(currentDiffFiles) ? currentDiffFiles : [];
+  if (reviewed.length === 0) {
+    return false;
+  }
+  return diffFingerprint(reviewed) === diffFingerprint(current);
 }
+
+/**
+ * Canonical, order-independent fingerprint of a compare-API `files` array,
+ * used only to test two diffs for byte-for-byte equality (see
+ * `isCarriedAcrossSync`). Not a content hash of anything beyond the fields
+ * the compare API actually exposes, and not used for anything except that
+ * equality test.
+ */
+function diffFingerprint(files) {
+  return files
+    .map((file) => JSON.stringify([
+      file?.status ?? '',
+      file?.previous_filename ?? '',
+      file?.filename ?? '',
+      file?.sha ?? '',
+      file?.patch ?? '',
+    ]))
+    .sort()
+    .join('\n');
+}
+
 
 /**
  * Split trusted verdicts into the reviewer's decision *on the current head* and

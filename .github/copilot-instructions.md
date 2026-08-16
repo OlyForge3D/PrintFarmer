@@ -533,15 +533,25 @@ A record pinned to an old head SHA `SHA_r` is carried forward, unchanged in mean
 but relabelled, to a new head `SHA_h` only when **both** hold: (1) `SHA_r` is a
 strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 `compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
-force-push always fails this), and (2) every commit introduced in `SHA_r..SHA_h` is
-already reachable from the base branch tip, i.e. `compare(SHA_r...SHA_h)`'s commit
-list and `compare(<base>...SHA_h)`'s commit list share no entries — the only new
-commits are ones the author merged in from `development`, not new author work. Both
-checks run purely against the compare API (`GET /repos/{owner}/{repo}/compare/{base}`),
-matching the workflow's existing default-branch-only checkout — no repository fetch
-is needed. This repo is squash-only onto `development`, so in practice this exemption
-only fires when an author syncs with `git merge` (not `git rebase`); rebasing or
+force-push always fails this), and (2) the PR's own diff against the base branch —
+not its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`.
+Condition 2 is deliberately a diff comparison rather than "every new commit is
+reachable from the base tip": a plain `git merge development` sync always creates a
+fresh merge commit that is itself not an ancestor of base (base has no idea it
+exists), so a commit-membership check rejects the exact sync it exists to allow — an
+earlier revision of this exemption shipped exactly that bug and was caught in review
+before merge. Comparing the PR's diff sidesteps it: three-dot compare pivots on the
+merge base, so `compare(<base>...SHA_r)` still recovers the PR's diff as reviewed and
+`compare(<base>...SHA_h)` recovers its current diff, and the two are compared file by
+file (path, status, resulting blob SHA, and patch text). Both compares run purely
+against the compare API (`GET /repos/{owner}/{repo}/compare/{base}`), matching the
+workflow's existing default-branch-only checkout — no repository fetch is needed.
+This repo is squash-only onto `development`, so in practice this exemption only
+fires when an author syncs with `git merge` (not `git rebase`); rebasing or
 force-pushing always supersedes normally, by design, since it fails condition (1).
+The compare endpoint silently caps its file list with no in-band truncation signal,
+so a diff at or beyond that cap can never be proven unchanged and is treated as not
+carried, same as a compare-API failure.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare
