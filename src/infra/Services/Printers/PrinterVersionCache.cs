@@ -42,13 +42,14 @@ public sealed class PrinterVersionCache(
 
     private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
 
-    // Test-only synchronization seam invoked immediately before the atomic throttle claim
-    // below. Gating two racing threads at an earlier point (e.g. the printer lookup) only
-    // guarantees they are *released* together — it does not guarantee they reach the
-    // AddOrUpdate call itself at the same instant, so a test built that way could still pass
-    // against a non-atomic implementation depending on scheduler luck. This hook lets a test
-    // put both threads on a barrier immediately before the claim, closing that gap. It is
-    // null (a no-op) in production and must never be set outside a test.
+    // Test-only synchronization seam invoked as the last statement before the atomic
+    // AddOrUpdate throttle claim below — after nowUtc/the sweep/myWindow are already computed,
+    // with nothing but the atomic call itself remaining. Gating two racing threads at an
+    // earlier point (even one statement earlier) only guarantees they are *released* together
+    // — it does not guarantee they reach AddOrUpdate at the same instant, so a test built that
+    // way could still pass against a non-atomic implementation depending on scheduler luck.
+    // This hook lets a test put both threads on a barrier at that exact boundary, closing the
+    // gap. It is null (a no-op) in production and must never be set outside a test.
     internal static Action<Guid>? TestOnlyBeforeThrottleClaim { get; set; }
 
     public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
@@ -76,12 +77,19 @@ public sealed class PrinterVersionCache(
         // printer ids can never grow the throttle table.
         if (forceRefresh)
         {
-            TestOnlyBeforeThrottleClaim?.Invoke(printerId);
-
             DateTime nowUtc = DateTime.UtcNow;
             SweepExpiredForceRefreshWindows(nowUtc);
 
             (Guid Token, DateTime ExpiresAtUtc) myWindow = (Guid.NewGuid(), nowUtc.Add(ForceRefreshMinInterval));
+
+            // Invoked as the very last statement before the atomic claim itself, after every
+            // other per-attempt value (nowUtc, the sweep, myWindow) is already computed, so a
+            // test gating both threads here has nothing but the AddOrUpdate call left between
+            // release and contention. Firing this any earlier (e.g. before nowUtc/sweep/myWindow)
+            // reintroduces a scheduler gap where one thread could race ahead through those steps
+            // and complete the claim before the other even attempts it, letting a non-atomic
+            // implementation slip through undetected.
+            TestOnlyBeforeThrottleClaim?.Invoke(printerId);
 
             (Guid Token, DateTime ExpiresAtUtc) activeWindow = ForceRefreshWindows.AddOrUpdate(
                 printerId,
