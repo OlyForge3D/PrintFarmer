@@ -73,6 +73,7 @@ public static class CalibrationProfileResolutionContract
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         NumberHandling = JsonNumberHandling.Strict,
         MaxDepth = 8,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     /// <summary>

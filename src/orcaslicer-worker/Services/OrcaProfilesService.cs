@@ -7,8 +7,10 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Dtos;
+using Farm.Slicer.ProfileParsing;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Logging;
+using static Farm.Slicer.ProfileParsing.OrcaRawValueParser;
 
 namespace Farm.OrcaSlicer.Worker.Services;
 
@@ -1197,7 +1199,17 @@ public class OrcaProfilesService : ISlicerProfilesService
         {
             profile.PrintableArea = ParseStringValue(areaElem);
 
-            // Parse dimensions from printable_area like "0x0,220x0,220x220,0x220"
+            // Parse dimensions from printable_area like "0x0,220x0,220x220,0x220". This
+            // intentionally does NOT call the shared Farm.Slicer.ProfileParsing point-list
+            // parser (#1615 PR-2): that parser reads printable_area from the raw JSON element
+            // directly, so it also handles the JSON-array-of-strings shape, whereas this worker
+            // has only ever split the single ParseStringValue(areaElem) result (which collapses
+            // an array to its first element) by comma. Reusing the shared parser here would
+            // silently start populating BuildVolumeX/Y for array-shaped printable_area where the
+            // worker previously always left them null — an unrequested, untested behavior change.
+            // The typed producer-side path (MachineProfileDerivedFieldsExtractor) is the one that
+            // uses the shared parser's full point-list extraction; this worker keeps its original,
+            // narrower semantics unchanged.
             string? area = profile.PrintableArea;
             if (!string.IsNullOrEmpty(area))
             {
@@ -1568,120 +1580,10 @@ public class OrcaProfilesService : ISlicerProfilesService
         return fallback;
     }
 
-    private static int? ParseIntValue(JsonElement elem)
-    {
-        if (elem.ValueKind == JsonValueKind.Number)
-        {
-            return elem.TryGetInt32(out int val) ? val : null;
-        }
-        else if (elem.ValueKind == JsonValueKind.String)
-        {
-            return int.TryParse(elem.GetString(), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int val) ? val : null;
-        }
-        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
-        {
-            // OrcaSlicer stores many values as single-element arrays like ["260"]
-            JsonElement firstElem = elem[0];
-            return ParseIntValue(firstElem);
-        }
-
-        return null;
-    }
-
-    private static double? ParseDoubleValue(JsonElement elem)
-    {
-        if (elem.ValueKind == JsonValueKind.Number)
-        {
-            return elem.TryGetDouble(out double val) ? val : null;
-        }
-        else if (elem.ValueKind == JsonValueKind.String)
-        {
-            return double.TryParse(elem.GetString(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double val) ? val : null;
-        }
-        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
-        {
-            // OrcaSlicer stores many values as single-element arrays like ["0.2"]
-            JsonElement firstElem = elem[0];
-            return ParseDoubleValue(firstElem);
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Safely parse a string value from a JsonElement that could be a string or array.
-    /// OrcaSlicer stores many values as single-element arrays like ["PLA"].
-    /// </summary>
-    private static string? ParseStringValue(JsonElement elem)
-    {
-        if (elem.ValueKind == JsonValueKind.String)
-        {
-            return elem.GetString();
-        }
-        else if (elem.ValueKind == JsonValueKind.Array && elem.GetArrayLength() > 0)
-        {
-            JsonElement firstElem = elem[0];
-            return ParseStringValue(firstElem);
-        }
-
-        return null;
-    }
-
-    private static bool ParseBoolValue(JsonElement elem)
-    {
-        if (elem.ValueKind == JsonValueKind.True)
-        {
-            return true;
-        }
-        else if (elem.ValueKind == JsonValueKind.String)
-        {
-            string? val = elem.GetString();
-            return string.Equals(val, "true", StringComparison.OrdinalIgnoreCase) || val == "1";
-        }
-
-        return false;
-    }
-
-    private static int? ParseOptionalInt(JsonElement root, string key)
-    {
-        if (root.TryGetProperty(key, out JsonElement elem))
-        {
-            return ParseIntValue(elem);
-        }
-
-        return null;
-    }
-
-    private static double? ParseOptionalDouble(JsonElement root, string key)
-    {
-        if (root.TryGetProperty(key, out JsonElement elem))
-        {
-            return ParseDoubleValue(elem);
-        }
-
-        return null;
-    }
-
-    private static bool? ParseOptionalBool(JsonElement root, string key)
-    {
-        if (root.TryGetProperty(key, out JsonElement elem))
-        {
-            return ParseBoolValue(elem);
-        }
-
-        return null;
-    }
-
-    private static string? ParseOptionalString(JsonElement root, string key)
-    {
-        if (root.TryGetProperty(key, out JsonElement elem))
-        {
-            return ParseStringValue(elem);
-        }
-
-        return null;
-    }
-
+    // ParseIntValue/ParseDoubleValue/ParseStringValue/ParseBoolValue and their Parse-Optional-*
+    // wrappers moved to the shared Farm.Slicer.ProfileParsing.OrcaRawValueParser (#1615 PR-2),
+    // imported above via `using static`, so calibration's producer-side extraction shares the
+    // exact same parsing instead of a second, independently-maintained copy.
     internal static Dictionary<string, object> SerializeElementToDict(JsonElement elem)
     {
         Dictionary<string, object> dict = [];

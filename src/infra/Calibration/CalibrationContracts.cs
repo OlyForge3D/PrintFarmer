@@ -427,7 +427,31 @@ public sealed record ResolvedCalibrationProfile(
     double? MaxVolumetricFlow,
     string? Material,
     string? Manufacturer,
-    string? Sku);
+    string? Sku,
+    IReadOnlyList<CalibrationPointDto>? PrintablePolygon = null,
+    double? BedOriginX = null,
+    double? BedOriginY = null,
+    double? BuildVolumeX = null,
+    double? BuildVolumeY = null,
+    double? BuildVolumeZ = null,
+    CalibrationMotionType? MotionType = null,
+    int? MaxAcceleration = null,
+    int? MaxTravelSpeed = null,
+    bool? HasHeatedBed = null,
+    bool? HasHeatedChamber = null,
+    double? NozzleDiameter = null,
+    NozzleType? NozzleType = null,
+    int? NozzleMaxTemperature = null,
+    int? HotendMaxTemperature = null)
+{
+    /// <summary>
+    /// Machine-profile facts derivable from <see cref="RawJson"/> (#1613 §4.3, #1615 PR-2).
+    /// Populated once by the producer (<c>CalibrationProfileResolver.MapMachine</c>) via the
+    /// shared <c>Farm.Slicer.ProfileParsing</c> library, so both the monolith and split
+    /// deployments expose the same typed facts over this DTO without <c>src/api</c> ever parsing
+    /// OrcaSlicer JSON itself. Only ever populated on the <c>"machine"</c>-kind profile.
+    /// </summary>
+}
 
 public sealed record ResolvedCalibrationProfiles(
     ResolvedCalibrationProfile? Machine,

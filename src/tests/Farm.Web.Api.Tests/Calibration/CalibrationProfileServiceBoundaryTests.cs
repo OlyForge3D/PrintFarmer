@@ -15,12 +15,17 @@ public sealed class CalibrationProfileServiceBoundaryTests
     /// <summary>
     /// Assembly names that must never appear in <c>Farm.Web.Api</c>'s referenced-assembly
     /// closure. <c>Farm.OrcaSlicer.Worker</c> hosts <c>ProfileCacheDb</c>; <c>Farm.Slicer.Worker.Core</c>
-    /// (the <c>worker-shared</c> project) hosts <c>ISlicerProfilesService</c>.
+    /// (the <c>worker-shared</c> project) hosts <c>ISlicerProfilesService</c>. <c>Farm.Slicer.ProfileParsing</c>
+    /// (#1615 PR-2) is the new shared Orca JSON field-extraction library; nothing in this plan
+    /// causes <c>src/api</c> to reference it directly (typed facts arrive pre-populated on
+    /// <c>ResolvedCalibrationProfile</c>), but the guard is extended defensively per the issue's
+    /// test plan.
     /// </summary>
     private static readonly string[] ForbiddenAssemblyNames =
     [
         "Farm.OrcaSlicer.Worker",
         "Farm.Slicer.Worker.Core",
+        "Farm.Slicer.ProfileParsing",
     ];
 
     [Fact]

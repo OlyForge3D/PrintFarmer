@@ -110,32 +110,53 @@ public sealed class CalibrationProfileResolver(
             MapFilament(filament));
     }
 
-    private static ResolvedCalibrationProfile? MapMachine(MachineProfile? profile) =>
-        profile is null
-            ? null
-            : new(
-                profile.Id,
-                "machine",
-                profile.Name,
-                profile.SlicerType.ToString(),
-                profile.SlicerDistribution,
-                profile.SlicerVersion,
-                profile.ProfileFormat,
-                NormalizeUtc(profile.UpdatedAt),
-                profile.RawJson,
-                profile.Hash,
-                profile.PrinterModelId,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                profile.Manufacturer,
-                null);
+    private static ResolvedCalibrationProfile? MapMachine(MachineProfile? profile)
+    {
+        if (profile is null)
+        {
+            return null;
+        }
+
+        MachineProfileDerivedFields derived = MachineProfileDerivedFieldsExtractor.Extract(profile.RawJson);
+        return new(
+            profile.Id,
+            "machine",
+            profile.Name,
+            profile.SlicerType.ToString(),
+            profile.SlicerDistribution,
+            profile.SlicerVersion,
+            profile.ProfileFormat,
+            NormalizeUtc(profile.UpdatedAt),
+            profile.RawJson,
+            profile.Hash,
+            profile.PrinterModelId,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            profile.Manufacturer,
+            null,
+            derived.PrintablePolygon,
+            derived.BedOriginX,
+            derived.BedOriginY,
+            derived.BuildVolumeX,
+            derived.BuildVolumeY,
+            derived.BuildVolumeZ,
+            derived.MotionType,
+            derived.MaxAcceleration,
+            derived.MaxTravelSpeed,
+            derived.HasHeatedBed,
+            derived.HasHeatedChamber,
+            derived.NozzleDiameter,
+            derived.NozzleType,
+            derived.NozzleMaxTemperature,
+            derived.HotendMaxTemperature);
+    }
 
     private static ResolvedCalibrationProfile? MapProcess(ProcessProfile? profile) =>
         profile is null
