@@ -91,6 +91,38 @@ public sealed record CalibrationFirmwareIdentityDto(
         FromPrinter(printer, EffectiveGcodeDialect(printer));
 
     /// <summary>
+    /// Whether <paramref name="printer"/> has a meaningful, semantically-complete recorded
+    /// firmware identity — as opposed to a never-probed printer whose <c>Firmware*</c> columns
+    /// are still at their unset defaults (<see cref="PrinterFirmwareFamily.Unknown"/>,
+    /// <c>null</c> version). This deliberately mirrors the two conditions
+    /// <c>PrinterCalibrationContextService.ValidateFirmware</c> treats as an outright-missing
+    /// firmware identity (as opposed to merely "not Klipper", which is a different rejection):
+    /// an unset family, or a missing version string. A caller that shows "Recorded" identity in
+    /// the UI (#1656, PR #1660 review round 5/Hicks finding) must gate on this — not on mere
+    /// non-nullness of a <see cref="CalibrationFirmwareIdentityDto"/> instance — so it can never
+    /// present a firmware identity as "recorded" for a printer the calibration gate still
+    /// considers to have none at all (e.g. a never-probed printer whose very first live probe
+    /// attempt also fails).
+    /// </summary>
+    public static bool HasRecordedIdentity(Printer printer)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        return printer.FirmwareFamily != PrinterFirmwareFamily.Unknown &&
+               !string.IsNullOrWhiteSpace(printer.FirmwareVersion);
+    }
+
+    /// <summary>
+    /// Builds the recorded firmware identity view only when <see cref="HasRecordedIdentity"/> is
+    /// true for <paramref name="printer"/>; otherwise returns <c>null</c>. Use this (rather than
+    /// the unconditional <see cref="FromPrinter(Printer)"/> overload) for any read path that is
+    /// allowed to report "no recorded identity yet" — currently
+    /// <see cref="Farm.Infrastructure.Services.Printers.PrinterVersionCache"/> — so a
+    /// semantically-empty identity object is never mistaken for a genuinely recorded one.
+    /// </summary>
+    public static CalibrationFirmwareIdentityDto? FromPrinterIfRecorded(Printer printer) =>
+        HasRecordedIdentity(printer) ? FromPrinter(printer) : null;
+
+    /// <summary>
     /// Overload for callers (the calibration eligibility gate) that have already computed the
     /// effective g-code dialect as part of their own validation flow — passing it in avoids
     /// computing it twice while guaranteeing both callers use the exact same fallback rule

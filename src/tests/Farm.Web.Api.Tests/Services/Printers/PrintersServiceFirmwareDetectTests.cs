@@ -44,6 +44,12 @@ public sealed class PrintersServiceFirmwareDetectTests
         repository
             .Setup(r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Printer?)null);
+        // #1656 round 5 (Vasquez): the id used below is never registered, so the existence
+        // pre-check (added to stop the lock table from growing for nonexistent ids) must also
+        // report it as absent.
+        repository
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
@@ -54,6 +60,40 @@ public sealed class PrintersServiceFirmwareDetectTests
         result.Succeeded.Should().BeFalse();
         result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// #1656 / PR #1660 review round 5 (Vasquez, blocking): DetectFirmwareIdentityAsync is
+    /// reachable from POST /printers/{id}/firmware/detect with the raw, caller-supplied route id.
+    /// Before the fix, a lock-table entry (FirmwareIdentityWriteLocks, a static, never-evicted
+    /// ConcurrentDictionary) was allocated for whatever id was passed in *before* confirming the
+    /// printer existed, so any authenticated caller could grow that table without bound just by
+    /// repeatedly requesting detection for nonexistent GUIDs — an unbounded process-memory sink.
+    /// This proves a request for a nonexistent id never even touches the repository's write path
+    /// (FindByIdAsync is never called), which is the observable proxy for "no lock entry was
+    /// allocated for this id" available from this test's vantage point.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_PrinterDoesNotExist_NeverCallsFindByIdAsync()
+    {
+        await using AppDbContext db = CreateDbContext();
+        var repository = new Mock<IPrintersRepository>();
+        repository
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(Guid.NewGuid(), CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        repository.Verify(
+            r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a nonexistent printer id must be rejected by the cheap existence check before any lock-table entry is allocated or the tracked entity is loaded");
     }
 
     [Fact]
@@ -225,6 +265,11 @@ public sealed class PrintersServiceFirmwareDetectTests
         repository
             .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
+        // #1656 round 5 (Vasquez): DetectFirmwareIdentityAsync now confirms existence before
+        // allocating a lock-table entry; this printer id is real.
+        repository
+            .Setup(r => r.ExistsAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         return unitOfWork;

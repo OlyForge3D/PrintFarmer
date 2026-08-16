@@ -315,6 +315,72 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
     }
 
     [Fact]
+    public async Task GetAsync_NeverProbedMoonrakerPrinter_ProbeFails_RecordedFirmwareIdentityStaysNull()
+    {
+        // #1656, PR #1660 review round 5 (Hicks, blocking): the prior probe-failure test above
+        // seeds a printer that already has a fully-recorded firmware identity, so it never
+        // exercised the case this test targets — a printer whose Firmware* columns are still at
+        // their never-probed defaults (FirmwareFamily == Unknown, FirmwareVersion == null) AND
+        // whose very first live probe attempt also fails. FromPrinter(printer) unconditionally
+        // would still build a non-null CalibrationFirmwareIdentityDto (Family="Unknown",
+        // Version=null), which the UI would render as "Recorded — used for calibration
+        // eligibility" even though the calibration gate — reading the exact same row — reports
+        // firmware.family and firmware.version as entirely missing. RecordedFirmwareIdentity
+        // must stay null here so the UI can never disagree with the calibration gate about
+        // whether a firmware identity has been recorded at all.
+        string dbName = $"firmware-identity-{Guid.NewGuid()}";
+        Printer printer = CreateNeverProbedMoonrakerPrinter();
+
+        await using (AppDbContext seedDb = NewDb(dbName))
+        {
+            _ = seedDb.Printers.Add(printer);
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        Mock<IBackendClient> client = new();
+        Mock<ISupportsPrinterInformation> info = client.As<ISupportsPrinterInformation>();
+        _ = info
+            .Setup(c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("printer unreachable"));
+        Mock<IBackendClientFactory> backendFactory = new();
+        _ = backendFactory.Setup(f => f.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+
+        PrinterVersionInfoDto? dto;
+        await using (AppDbContext cacheDb = NewDb(dbName))
+        {
+            PrintersService printersService = CreatePrintersService(cacheDb, backendFactory.Object);
+            PrinterVersionCache cache = new(
+                new MemoryCache(new MemoryCacheOptions()),
+                Options.Create(new PrinterVersionCacheOptions()),
+                printersService,
+                backendFactory.Object);
+
+            dto = await cache.GetAsync(printer.Id, CancellationToken.None);
+        }
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.FirmwareVersion.Should().BeNull();
+        _ = dto.Message.Should().NotBeNullOrEmpty();
+        _ = dto.RecordedFirmwareIdentity.Should().BeNull(
+            "the printer has never had a meaningful firmware identity recorded, and the failed " +
+            "probe did not record one either — the UI must never show 'Recorded' for a printer " +
+            "the calibration gate still reports as having no firmware identity at all");
+
+        // The calibration gate, reading the same row, agrees: firmware is still entirely
+        // missing.
+        await using (AppDbContext calibrationDb = NewDb(dbName))
+        {
+            PrinterCalibrationContextService calibrationService = CreateCalibrationService(calibrationDb);
+            CalibrationCandidateDto candidate = (await calibrationService.GetCandidatesAsync(
+                new CalibrationProfileAccessScope(UserId: null, BypassOwnership: true),
+                CancellationToken.None)).Value!.Should().ContainSingle().Which;
+
+            _ = candidate.MissingInputs.Should().Contain(
+                "firmware.family", "firmware.gcodeDialect", "firmware.detectionSource", "firmware.version");
+        }
+    }
+
+    [Fact]
     public async Task GetAsync_LegacyKlipperPrinterWithUnsetGcodeDialect_AgreesWithCalibrationGateOnEffectiveDialect()
     {
         // A printer whose FirmwareFamily was set (e.g. via manual-add onboarding hints or an

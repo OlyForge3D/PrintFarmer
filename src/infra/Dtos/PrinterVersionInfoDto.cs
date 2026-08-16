@@ -20,9 +20,16 @@ namespace Farm.Infrastructure;
 /// The recorded/persisted firmware identity from the printer's <c>Firmware*</c> columns — the
 /// same authoritative fact <c>PrinterCalibrationContextService.ValidateFirmware</c> reads.
 /// Non-null only for backends whose live firmware reading is read-through-persisted (currently
-/// Moonraker/Klipper, #1656); null for backends that only ever report a thin, non-persisted live
-/// probe (e.g. PrusaLink, OctoPrint, SDCP), since those can never satisfy the Klipper-only
-/// calibration gate regardless of the value shown here.
+/// Moonraker/Klipper, #1656) AND only once
+/// <see cref="CalibrationFirmwareIdentityDto.HasRecordedIdentity"/> is true for the printer
+/// (#1656, PR #1660 review round 5/Hicks): a never-probed printer whose very first probe attempt
+/// fails still has <c>FirmwareFamily == Unknown</c>/<c>FirmwareVersion == null</c>, and must
+/// report <c>null</c> here — not a semantically-empty
+/// <see cref="CalibrationFirmwareIdentityDto"/> — so the UI can never render "Recorded" for a
+/// printer the calibration gate still considers to have no firmware identity at all. Always null
+/// for backends that only ever report a thin, non-persisted live probe (e.g. PrusaLink,
+/// OctoPrint, SDCP), since those can never satisfy the Klipper-only calibration gate regardless
+/// of the value shown here.
 /// </param>
 public sealed record PrinterVersionInfoDto(
     Guid PrinterId,

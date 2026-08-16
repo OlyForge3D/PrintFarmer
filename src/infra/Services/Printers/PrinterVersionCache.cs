@@ -242,7 +242,16 @@ public sealed class PrinterVersionCache(
             ApiVersion: liveApiVersion ?? printer.BackendApiVersion,
             RetrievedAtUtc: DateTime.UtcNow,
             Message: message,
-            RecordedFirmwareIdentity: CalibrationFirmwareIdentityDto.FromPrinter(printer));
+            // #1656, PR #1660 review round 5 (Hicks, blocking): a never-probed printer whose
+            // very first live probe attempt fails still has FirmwareFamily == Unknown and
+            // FirmwareVersion == null — FromPrinter(printer) unconditionally would still build a
+            // non-null CalibrationFirmwareIdentityDto (with Family="Unknown", Version=null),
+            // which the UI renders as "Recorded — used for calibration eligibility" even though
+            // the calibration gate reports firmware.family and firmware.version as missing for
+            // that same printer. FromPrinterIfRecorded suppresses the recorded identity entirely
+            // until it is semantically complete, so the two read paths can never disagree about
+            // whether an identity has been recorded at all.
+            RecordedFirmwareIdentity: CalibrationFirmwareIdentityDto.FromPrinterIfRecorded(printer));
     }
 
     /// <summary>

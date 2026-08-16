@@ -1147,13 +1147,38 @@ public class PrintersService(
     // PrintJobManagementService.PrinterHistorySyncLocks) — the main API is not currently deployed
     // with multiple concurrently-writing replicas, and a lock scoped to one process is the
     // lightest fix that fully closes the race described by Bishop/Vasquez for that deployment
-    // shape. The set of distinct printer ids is bounded by the number of real, already-registered
-    // printers (both writers below only ever run for an id that FindByIdAsync has already
-    // confirmed exists), so this table cannot be grown unboundedly by arbitrary/unknown ids.
+    // shape.
+    //
+    // #1656 / PR #1660 review round 5 (Vasquez, blocking): the set of distinct printer ids was
+    // *intended* to be bounded by real, already-registered printers, but that invariant was never
+    // actually enforced — both writers below allocated (via GetOrAdd) a permanent dictionary entry
+    // for whatever id was passed in *before* confirming the printer exists. DetectFirmwareIdentityAsync
+    // is reachable from POST /printers/{id}/firmware/detect with the raw, caller-supplied route id,
+    // so any authenticated caller holding Calibration.Update could grow this table without bound by
+    // repeatedly requesting detection for nonexistent GUIDs — an unbounded process-memory sink,
+    // which is exactly the class of problem this single-process lock was supposed to avoid
+    // introducing. The fix restores the intended invariant explicitly: callers must confirm the
+    // printer id is real (via the repository's existence check, which does not track/load the full
+    // entity) before a lock entry for it is ever allocated. This does not reopen the round-3 race
+    // for a *real* id — the entire read-modify-write critical section for a confirmed-existing
+    // printer is still fully serialized behind the same per-printer semaphore as before; only the
+    // point at which a nonexistent id gets discarded moves earlier, before any table growth.
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> FirmwareIdentityWriteLocks = new();
 
     private static SemaphoreSlim GetFirmwareIdentityWriteLock(Guid printerId) =>
         FirmwareIdentityWriteLocks.GetOrAdd(printerId, static _ => new SemaphoreSlim(1, 1));
+
+    /// <summary>
+    /// Confirms <paramref name="printerId"/> refers to a real, already-registered printer before
+    /// any caller acquires a per-printer firmware-identity write lock for it. See the round-5
+    /// remarks on <see cref="FirmwareIdentityWriteLocks"/>: without this guard, a caller could grow
+    /// that dictionary without bound just by requesting firmware detection for ids that were never
+    /// real. <see cref="IPrintersRepository.ExistsAsync"/> is a lightweight existence check — it
+    /// does not load or track the full entity, so a caller supplying a nonexistent id costs one
+    /// cheap query and nothing else.
+    /// </summary>
+    private async Task<bool> FirmwarePrinterExistsAsync(Guid printerId, CancellationToken ct) =>
+        await _unitOfWork.Printers.ExistsAsync(printerId, ct);
 
     /// <summary>
     /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
@@ -1212,6 +1237,14 @@ public class PrintersService(
     public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
     {
         if (discovered is null || discovered.FirmwareFamily is null)
+        {
+            return false;
+        }
+
+        // #1656 / PR #1660 review round 5 (Vasquez): confirm the printer is real before ever
+        // allocating a lock-table entry for it. See the round-5 remarks on
+        // FirmwareIdentityWriteLocks above.
+        if (!await FirmwarePrinterExistsAsync(printerId, ct))
         {
             return false;
         }
@@ -1360,9 +1393,23 @@ public class PrintersService(
     /// columns on <see cref="Printer"/>. Without a shared gate, this on-demand path and the
     /// cadence-gated automatic path could still race each other even though each is individually
     /// serialized against concurrent calls to itself.
+    /// <para>
+    /// #1656 / PR #1660 review round 5 (Vasquez, blocking): this method is reachable from
+    /// <c>POST /printers/{id}/firmware/detect</c> with the caller-supplied route id verbatim, so it
+    /// must confirm the printer actually exists *before* ever allocating a
+    /// <see cref="FirmwareIdentityWriteLocks"/> entry for it — otherwise any authenticated caller
+    /// with <c>Calibration.Update</c> could grow that table without bound simply by requesting
+    /// detection for ids that were never real. See the round-5 remarks on
+    /// <see cref="FirmwareIdentityWriteLocks"/>.
+    /// </para>
     /// </remarks>
     public async Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct)
     {
+        if (!await FirmwarePrinterExistsAsync(printerId, ct))
+        {
+            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
+        }
+
         SemaphoreSlim gate = GetFirmwareIdentityWriteLock(printerId);
         await gate.WaitAsync(ct);
         try

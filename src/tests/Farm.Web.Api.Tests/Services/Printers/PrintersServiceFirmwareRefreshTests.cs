@@ -43,6 +43,12 @@ public sealed class PrintersServiceFirmwareRefreshTests
         repository
             .Setup(r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Printer?)null);
+        // #1656 round 5 (Vasquez): the printer id used below is never registered, so the new
+        // existence pre-check (added to stop lock-table growth for nonexistent ids) must also
+        // report it as absent.
+        repository
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         PrintersService service = CreateService(db, unitOfWork.Object);
@@ -201,31 +207,56 @@ public sealed class PrintersServiceFirmwareRefreshTests
     {
         // Bishop round-3 finding: the original fix (reload the entity from the database on
         // SaveChangesAsync failure) still left a gap — if the reload itself also fails to find or
-        // restore the row (as happens here, since this test's `db` never actually persisted
-        // `printer`), the tracked entity could keep the failed mutation. The fix restores the
+        // restore the row, the tracked entity could keep the failed mutation. The fix restores the
         // pre-mutation snapshot on the tracked entity directly (no I/O dependency) before
         // attempting the best-effort reload, so this must hold regardless of what the reload does.
-        await using AppDbContext db = CreateDbContext();
-        Printer printer = CreatePrinter();
-        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
-        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
-        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
-        printer.FirmwareVersion = "v0.11.0";
-        printer.FirmwareDetectionVersion = "moonraker-printer-info-v1";
-        printer.FirmwareDetectionConfidence = 1.0m;
+        //
+        // Hicks, PR #1660 review round 5 (blocking): the previous version of this test never
+        // added `printer` to `db`, so `FindByIdAsync` (mocked directly) just handed back a plain
+        // CLR object EF had never seen — proving only that reassigning C# properties on an
+        // arbitrary object works, not that the restore is correct against a *genuinely
+        // EF-tracked* entity (where the change tracker has already recorded the mutated values
+        // as "Modified" against its own original-value snapshot). This version seeds the printer
+        // into a real `AppDbContext`/table first, loads it through the real
+        // `EfPrintersRepository` (so `printer` is the actual tracked instance EF's identity map
+        // hands back — exactly what `PrinterVersionCache` holds a reference to in production),
+        // and only mocks `IUnitOfWork.SaveChangesAsync` itself to fail — never touching the real
+        // `AppDbContext.SaveChangesAsync`, so nothing the mutation touched is ever actually
+        // persisted, and a fresh read from a separate context can independently confirm that.
+        string dbName = $"PrintersServiceFirmwareRefreshTests_SaveFails_{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
         DateTime originalDetectedAt = DateTime.UtcNow.AddHours(-7); // past the default 6h cadence
-        printer.FirmwareDetectedAtUtc = originalDetectedAt;
 
-        var repository = new Mock<IPrintersRepository>();
-        repository
-            .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(printer);
+        await using (AppDbContext seedDb = CreateDbContext(dbName))
+        {
+            Printer seed = CreatePrinter();
+            seed.Id = printerId;
+            seed.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+            seed.GcodeDialect = PrinterGcodeDialect.Klipper;
+            seed.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+            seed.FirmwareVersion = "v0.11.0";
+            seed.FirmwareDetectionVersion = "moonraker-printer-info-v1";
+            seed.FirmwareDetectionConfidence = 1.0m;
+            seed.FirmwareDetectedAtUtc = originalDetectedAt;
+            seedDb.Printers.Add(seed);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext requestDb = CreateDbContext(dbName);
         var unitOfWork = new Mock<IUnitOfWork>();
-        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        unitOfWork.Setup(work => work.Printers)
+            .Returns(new EfPrintersRepository(requestDb, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
         unitOfWork
             .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("simulated database outage"));
-        PrintersService service = CreateService(db, unitOfWork.Object);
+        PrintersService service = CreateService(requestDb, unitOfWork.Object);
+
+        // Load the printer through the real repository first, exactly as
+        // RefreshDetectedFirmwareIdentityAsync itself will — this is the genuinely tracked
+        // instance whose change-tracker state (not just its CLR property values) must end up
+        // consistent after the restore.
+        Printer trackedPrinter = (await unitOfWork.Object.Printers.FindByIdAsync(printerId, CancellationToken.None))!;
+        trackedPrinter.FirmwareVersion.Should().Be("v0.11.0");
 
         DiscoveredPrinterDto discovered = new()
         {
@@ -238,19 +269,31 @@ public sealed class PrintersServiceFirmwareRefreshTests
             FirmwareDetectedAtUtc = DateTime.UtcNow,
         };
 
-        Func<Task> act = () => service.RefreshDetectedFirmwareIdentityAsync(printer.Id, discovered, CancellationToken.None);
+        Func<Task> act = () => service.RefreshDetectedFirmwareIdentityAsync(printerId, discovered, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
 
-        // `printer` was never added to `db`, so the best-effort ReloadAsync call finds no
-        // matching row and cannot itself restore anything — proving the manual snapshot/restore
-        // (not the reload) is what guarantees no caller ever observes the failed mutation.
-        printer.FirmwareVersion.Should().Be("v0.11.0");
-        printer.FirmwareDetectionVersion.Should().Be("moonraker-printer-info-v1");
-        printer.FirmwareDetectionConfidence.Should().Be(1.0m);
-        printer.FirmwareDetectedAtUtc.Should().Be(originalDetectedAt);
-        printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
-        printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+        // The tracked entity — the same instance a caller such as PrinterVersionCache would be
+        // holding a reference to — must show the pre-mutation values, not the discovered probe's
+        // rejected values, even though EF's change tracker had already recorded the mutation
+        // in-place on this exact object.
+        trackedPrinter.FirmwareVersion.Should().Be("v0.11.0");
+        trackedPrinter.FirmwareDetectionVersion.Should().Be("moonraker-printer-info-v1");
+        trackedPrinter.FirmwareDetectionConfidence.Should().Be(1.0m);
+        trackedPrinter.FirmwareDetectedAtUtc.Should().Be(originalDetectedAt);
+        trackedPrinter.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        trackedPrinter.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+
+        // Independent confirmation from a fresh context/change-tracker: the failed save was
+        // truly never persisted (IUnitOfWork.SaveChangesAsync was mocked to throw before ever
+        // reaching the real AppDbContext.SaveChangesAsync), so the database itself still holds
+        // exactly the original values.
+        await using AppDbContext verifyDb = CreateDbContext(dbName);
+        Printer? persisted = await verifyDb.Printers.AsNoTracking().SingleOrDefaultAsync(p => p.Id == printerId);
+        persisted.Should().NotBeNull();
+        persisted!.FirmwareVersion.Should().Be("v0.11.0");
+        persisted.FirmwareDetectionVersion.Should().Be("moonraker-printer-info-v1");
+        persisted.FirmwareDetectedAtUtc.Should().Be(originalDetectedAt);
     }
 
     [Fact]
@@ -472,6 +515,11 @@ public sealed class PrintersServiceFirmwareRefreshTests
         repository
             .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
+        // #1656 round 5 (Vasquez): RefreshDetectedFirmwareIdentityAsync/DetectFirmwareIdentityAsync
+        // now confirm existence before allocating a lock-table entry; this printer id is real.
+        repository
+            .Setup(r => r.ExistsAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         return unitOfWork;
