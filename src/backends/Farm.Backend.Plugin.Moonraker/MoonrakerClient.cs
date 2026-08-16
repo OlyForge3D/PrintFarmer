@@ -1498,8 +1498,21 @@ public class MoonrakerClient(
 
             return files;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Expected when cancellation is requested
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            // Internal command timeout (cts.CancelAfter) fired, not caller cancellation -
+            // degrade to an empty list, matching the prior bare-catch fallback behavior.
+            _logger.LogDebug(ex, "Timed out getting file list from {BaseUrl}", baseUrl);
+            return [];
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to get file list from {BaseUrl}", baseUrl);
             return [];
         }
     }

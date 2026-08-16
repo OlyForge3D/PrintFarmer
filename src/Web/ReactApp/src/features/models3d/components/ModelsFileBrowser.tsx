@@ -430,7 +430,7 @@ export const ModelsFileBrowser = ({
       );
     },
     [handleSliceModel, onOpenModel, onShowSingleTagModal, handleDownload, handleDeleteClick]
-  )
+  );
 
   const extraToolbarActions = (
     <>
@@ -491,7 +491,7 @@ export const ModelsFileBrowser = ({
         </Button>
       )}
     </>
-  )
+  );
 
   return (
     <>

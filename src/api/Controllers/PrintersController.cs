@@ -4358,15 +4358,7 @@ public class PrintersController(
             return true;
         }
 
-        foreach (string segment in filename.Split(PathSegmentSeparators))
-        {
-            if (segment is "." or "..")
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return filename.Split(PathSegmentSeparators).Any(segment => segment is "." or "..");
     }
 
     /// <summary>
