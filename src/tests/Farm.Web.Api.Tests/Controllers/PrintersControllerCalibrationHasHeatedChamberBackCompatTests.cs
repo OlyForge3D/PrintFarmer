@@ -120,6 +120,25 @@ public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsy
             because: "CalibrationHasHeatedChamber must win over the deprecated legacy HasHeatedChamber alias when both are supplied");
     }
 
+    // Reviewer note (Hicks): the fact above alone (true/false -> true) would also pass under an
+    // incorrect OR-like implementation (either field true wins). This inverse case (false/true ->
+    // false) is the one that actually proves ?? null-coalescing precedence rather than an OR.
+    [Fact]
+    public async Task UpdatePrinter_WhenBothHasHeatedChamberFieldsSupplied_CanonicalFalseWinsOverLegacyTrue()
+    {
+        Guid id = await SeedPrinterAsync();
+        var dto = new UpdatePrinterDto(
+            CalibrationHasHeatedChamber: false,
+            HasHeatedChamber: true);
+
+        HttpResponseMessage response = await PutPrinterAsync(id, dto);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
+        persisted.Should().BeFalse(
+            because: "CalibrationHasHeatedChamber must win via ?? precedence even when it is explicitly false and the legacy alias is true");
+    }
+
     private async Task<bool?> GetPersistedCalibrationHasHeatedChamberAsync(Guid printerId)
     {
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
