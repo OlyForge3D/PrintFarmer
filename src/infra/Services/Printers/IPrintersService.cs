@@ -315,6 +315,18 @@ public interface IPrintersService
     Task<HistoryJob> GetHistoryJobAsync(Guid printerId, string jobId, CancellationToken ct);
 
     /// <summary>
+    /// Retrieves validated thumbnail image content for a historical print job.
+    /// </summary>
+    /// <param name="printerId">The printer ID.</param>
+    /// <param name="jobId">The backend-specific history job identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Validated image bytes and media type.</returns>
+    Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct);
+
+    /// <summary>
     /// Probes one exact backend history ID without treating malformed, unavailable,
     /// or unsupported responses as authoritative absence.
     /// </summary>

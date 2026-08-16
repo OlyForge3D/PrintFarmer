@@ -1,5 +1,6 @@
 ﻿using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,25 +22,79 @@ namespace Farm.Backend.Plugin.PrusaLink;
 /// - API Key (X-Api-Key header): Read access to most endpoints
 /// - HTTP Digest Authentication: Full access including privileged operations
 /// </summary>
-public class PrusaLinkApiClient : IPrusaLinkApiClient
+public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 {
+    private const int HistoryPageSize = 100;
+    private const int MaxHistoryPagesForList = 20;
+    private const int MaxHistoryEntriesForList =
+        HistoryPageSize * MaxHistoryPagesForList;
+
+    private const int MaxHistoryPagesForTotals = 20;
+    private const int MaxHistoryEntriesForTotals =
+        HistoryPageSize * MaxHistoryPagesForTotals;
+
+    private const int MaxHistoryPageBytes = 2 * 1024 * 1024;
+    private const int MaxHistoryThumbnailBytes = 10 * 1024 * 1024;
+
     private readonly HttpClient _httpClient;
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly ILogger<PrusaLinkApiClient> _logger;
+    private readonly bool _ownsHttpClient;
 
-    // Cache for digest auth clients - keyed by username:password hash
-    private readonly Dictionary<string, HttpClient> _digestAuthClients = new();
+    // Cache digest state by the complete credential pair. A password hash is not a safe
+    // identity key because collisions could reuse another credential's Authorization state.
+    private readonly Dictionary<(string Username, string Password), BackendHttpTransport>
+        _digestAuthTransports = new();
+
     private readonly object _clientLock = new();
+    private readonly BackendHttpTransport _transport;
+    private int _disposed;
 
     public PrusaLinkApiClient(HttpClient httpClient, ILogger<PrusaLinkApiClient> logger)
+        : this(httpClient, logger, ownsHttpClient: false)
+    {
+    }
+
+    internal PrusaLinkApiClient(
+        HttpClient httpClient,
+        ILogger<PrusaLinkApiClient> logger,
+        bool ownsHttpClient)
     {
         _httpClient = httpClient;
+        _transport = new BackendHttpTransport(httpClient);
         _logger = logger;
+        _ownsHttpClient = ownsHttpClient;
         _jsonOptions = new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
             DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
         };
+    }
+
+    /// <summary>
+    /// Releases the scoped HTTP client created for this API client and clears cached digest
+    /// authentication state. Cached transports borrow that one client and own no handlers.
+    /// </summary>
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        lock (_clientLock)
+        {
+            _digestAuthTransports.Clear();
+        }
+
+        if (_ownsHttpClient)
+        {
+#pragma warning disable IDISP007 // This instance explicitly owns factory-created clients when ownsHttpClient is true.
+            _httpClient.Dispose();
+#pragma warning restore IDISP007
+        }
+
+        GC.SuppressFinalize(this);
     }
 
     /// <summary>
@@ -69,36 +124,36 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         return null;
     }
 
-    // Intentionally caches HttpClient instances per credential set for connection reuse
-#pragma warning disable IDISP015 // Member should not return created and cached instance
-    private HttpClient GetClientForCredentials(PrinterCredential? credentials)
-#pragma warning restore IDISP015
+    // Intentionally caches transports per credential set: DigestAuthenticator keeps per-credential
+    // challenge/nonce state, and reusing it avoids a 401 round-trip on every request.
+    private BackendHttpTransport GetClientForCredentials(PrinterCredential? credentials)
     {
         var auth = ResolvePrusaLinkDigestAuth(credentials);
         if (auth == null)
         {
-            return _httpClient;
+            return _transport;
         }
 
-        // Create a cache key for these credentials
-        string cacheKey = $"{auth.Value.Username}:{auth.Value.Password.GetHashCode()}";
+        (string Username, string Password) cacheKey =
+            (auth.Value.Username, auth.Value.Password);
 
         lock (_clientLock)
         {
-            if (_digestAuthClients.TryGetValue(cacheKey, out HttpClient? cachedClient))
+            if (_digestAuthTransports.TryGetValue(cacheKey, out BackendHttpTransport? cachedTransport))
             {
-                return cachedClient;
+                return cachedTransport;
             }
 
-            // Create a new HttpClient with DigestAuthHandler
-            DigestAuthHandler handler = new(auth.Value.Username, auth.Value.Password);
-            HttpClient newClient = new(handler, disposeHandler: true)
-            {
-                Timeout = _httpClient.Timeout
-            };
+            // Digest auth layers onto the injected client rather than dialing out through its
+            // own HttpClientHandler, so privileged requests keep any caller-applied destination
+            // pinning plus the named client's redirect guard, timeout, and pooled connections.
+            BackendHttpTransport newTransport = new(
+                _httpClient,
+                auth.Value.Username,
+                auth.Value.Password);
 
-            _digestAuthClients[cacheKey] = newClient;
-            return newClient;
+            _digestAuthTransports[cacheKey] = newTransport;
+            return newTransport;
         }
     }
 
@@ -129,7 +184,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<VersionInfo> GetVersionAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/version").ToString();
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         try
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
@@ -165,7 +220,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         ArgumentNullException.ThrowIfNull(baseUrl);
 
         Uri url = new(baseUrl, "api/version");
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         try
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url.ToString(), credentials);
@@ -199,7 +254,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<PrinterInfo> GetInfoAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/info").ToString();
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         try
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
@@ -233,7 +288,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<StatusInfo> GetStatusAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
         string url = new Uri(EnsureBaseUri(baseUrl), "api/v1/status").ToString();
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         try
         {
             using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
@@ -266,7 +321,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     // Job Management
     public async Task<Job?> GetJobAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/job").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -282,7 +337,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> StopJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -290,7 +345,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> PauseJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/pause").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -298,7 +353,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> ResumeJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/resume").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -306,7 +361,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> ContinueJobAsync(string baseUrl, int jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), $"api/v1/job/{jobId}/continue").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -315,7 +370,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     // Storage Management
     public async Task<StorageListResponse> GetStorageAsync(string baseUrl, PrinterCredential? credentials = null, string? acceptLanguage = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/storage").ToString(), credentials);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
         {
@@ -331,7 +386,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     // Transfer Management
     public async Task<Transfer?> GetTransferAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/transfer").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -347,7 +402,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> StopTransferAsync(string baseUrl, int transferId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/transfer/{transferId}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -357,7 +412,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<FileInfoBase> GetFileInfoAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         string? acceptLanguage = null, string? accept = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString();
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
         if (!string.IsNullOrWhiteSpace(acceptLanguage))
@@ -401,7 +456,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     {
         ArgumentNullException.ThrowIfNull(fileStream);
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string uploadUrl = new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString();
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, uploadUrl, credentials);
 
@@ -432,7 +487,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> StartPrintAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
         request.Content = new StringContent(string.Empty);
 
@@ -442,7 +497,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<FileStatus> CheckFileStatusAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Head, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -462,7 +517,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     public async Task<bool> DeleteFileAsync(string baseUrl, string storagePath, string filePath, PrinterCredential? credentials = null,
         bool force = false, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/files{storagePath}{filePath}").ToString(), credentials);
         request.Headers.Add("Force", force ? "?1" : "?0");
 
@@ -473,7 +528,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     // Camera Management
     public async Task<Farm.Infrastructure.Contracts.Printers.PrusaLink.Camera[]> GetCamerasAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
@@ -483,7 +538,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> SetCameraOrderAsync(string baseUrl, string[] cameraIds, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Put, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(cameraIds, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
@@ -493,7 +548,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<CameraConfig> GetCameraConfigAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         _ = response.EnsureSuccessStatusCode();
@@ -503,7 +558,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> SetupCameraAsync(string baseUrl, string cameraId, CameraConfigSet config, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
@@ -513,7 +568,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> DeleteCameraAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -521,7 +576,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), "api/v1/cameras/snap").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -536,7 +591,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<byte[]?> TakeSnapshotAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -551,7 +606,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<byte[]?> TriggerSnapshotAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/snap").ToString(), credentials);
         request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
         using HttpResponseMessage response = await client.SendAsync(request, ct);
@@ -561,7 +616,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> UpdateCameraConfigAsync(string baseUrl, string cameraId, CameraConfigSet config, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Patch, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
         string jsonContent = JsonSerializer.Serialize(config, _jsonOptions);
         request.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
@@ -571,7 +626,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> ResetCameraConfigAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/config").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -579,7 +634,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> RegisterCameraToConnectAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -587,7 +642,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> UnregisterCameraFromConnectAsync(string baseUrl, string cameraId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, new Uri(EnsureBaseUri(baseUrl), $"api/v1/cameras/{cameraId}/connection").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -596,7 +651,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     // Update Management
     public async Task<UpdateInfo?> GetUpdateInfoAsync(string baseUrl, string environment = "prusalink", PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
 
@@ -621,7 +676,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     public async Task<bool> StartUpdateAsync(string baseUrl, string environment = "prusalink", PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, new Uri(EnsureBaseUri(baseUrl), $"api/v1/update/{environment}").ToString(), credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         return response.IsSuccessStatusCode;
@@ -638,7 +693,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     /// <param name="ct">The cancellation token.</param>
     public async Task<List<FileChild>> GetFilesLegacyAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/files").ToString();
         using HttpRequestMessage request = CreateRequest(HttpMethod.Get, url, credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
@@ -693,7 +748,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         PrinterCredential? credentials = null,
         CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string normalizedBaseUrl = baseUrl.TrimEnd('/');
         try
         {
@@ -708,10 +763,10 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 ? (long)requestedStart + requestedLimit.Value
                 : long.MaxValue;
 
-            const int PageSize = 100;
             int offset = 0;
-            int sourceCount = 0;
+            int sourceCount = -1;
             int examinedCount = 0;
+            int pagesFetched = 0;
             bool reachedSourceEnd = false;
             var allJobs = new List<HistoryJob>();
             var excludedEntries = new List<HistoryExcludedEntryEvidence>();
@@ -719,9 +774,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             {
                 int pageSize = !requiresFullScan && requestedLimit.HasValue
                     ? (int)Math.Min(
-                        PageSize,
+                        HistoryPageSize,
                         Math.Max(1L, requestedEnd - allJobs.Count))
-                    : PageSize;
+                    : HistoryPageSize;
                 HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
                     client,
                     normalizedBaseUrl,
@@ -729,26 +784,62 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                     offset,
                     credentials,
                     ct);
+                pagesFetched++;
                 int examined = page.ExaminedSourceEntries;
-                if (examined > 0 && page.Count < offset + examined)
+                if (examined > pageSize ||
+                    (examined > 0 && page.Count < offset + examined))
                 {
                     throw new InvalidDataException(
                         "PrusaLink history count did not cover the returned source page.");
                 }
 
-                sourceCount = Math.Max(sourceCount, page.Count);
+                if (sourceCount < 0)
+                {
+                    sourceCount = page.Count;
+                    if (requiresFullScan &&
+                        sourceCount > MaxHistoryEntriesForList)
+                    {
+                        throw new InvalidDataException(
+                            $"PrusaLink history contains {sourceCount} entries, exceeding the authoritative list scan limit of {MaxHistoryEntriesForList}.");
+                    }
+                }
+                else if (page.Count != sourceCount)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history count changed during an authoritative list scan.");
+                }
+
                 allJobs.AddRange(page.Jobs);
                 excludedEntries.AddRange(page.ExcludedEntries);
                 examinedCount += examined;
+                if (examinedCount > MaxHistoryEntriesForList)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history list exceeded the authoritative scan limit of {MaxHistoryEntriesForList} source entries.");
+                }
+
                 offset += examined;
-                reachedSourceEnd = offset >= sourceCount;
+                reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
                     requestedLimit.HasValue &&
                     allJobs.Count >= requestedEnd;
-                if (examined == 0 || reachedSourceEnd || requestedRangeFilled)
+                if (reachedSourceEnd || requestedRangeFilled)
                 {
                     break;
+                }
+
+                if (examined == 0 || offset > sourceCount)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history ended before the advertised source count.");
+                }
+
+                if (pagesFetched >= MaxHistoryPagesForList ||
+                    examinedCount >= MaxHistoryEntriesForList)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history list exceeded the authoritative scan bounds of {MaxHistoryPagesForList} pages and {MaxHistoryEntriesForList} source entries.");
                 }
             }
 
@@ -777,9 +868,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 .Skip(requestedStart)
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
-            foreach (HistoryJob job in requestedJobs)
+            if (!requiresFullScan &&
+                requestedLimit.HasValue &&
+                requestedEnd <= sourceCount &&
+                requestedJobs.Length < requestedLimit.Value)
             {
-                job.ThumbnailUrl = ResolveThumbnailUrl(normalizedBaseUrl, job.ThumbnailUrl);
+                throw new InvalidDataException(
+                    "PrusaLink history contained excluded entries that prevented proving the requested range.");
             }
 
             bool coversRequestedRange = requiresFullScan
@@ -806,16 +901,44 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         {
             throw;
         }
-        catch (Exception ex)
+        catch (OperationCanceledException ex)
         {
-            _logger.LogError(
+            // HttpClient reports its own timeout as a cancellation. The controller
+            // classifies TimeoutException as 408, so it must not reach it as an
+            // unclassified fault that reduces to a generic 500.
+            _logger.LogWarning(
                 ex,
-                "PrusaLink history request threw for {BaseUrl} (limit={Limit}, start={Start}, since={Since})",
+                "PrusaLink history request timed out for {BaseUrl} (limit={Limit}, start={Start})",
                 normalizedBaseUrl,
                 limit,
-                start,
-                since);
-            return null;
+                start);
+            throw new TimeoutException(
+                "PrusaLink history request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            // Socket and stream faults are upstream transport failures (502), not
+            // server-side defects (500). Wrap as HttpRequestException so the
+            // service layer's transport branch and the controller's 502 handler
+            // classify it consistently with the thumbnail path.
+            _logger.LogWarning(
+                ex,
+                "PrusaLink history transport failed for {BaseUrl}",
+                normalizedBaseUrl);
+            throw new HttpRequestException(
+                "PrusaLink history transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "PrusaLink history transport failed for {BaseUrl}",
+                normalizedBaseUrl);
+            throw new HttpRequestException(
+                "PrusaLink history transport failed.",
+                ex);
         }
     }
 
@@ -828,7 +951,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         };
 
     private static async Task<HistoryListResponse> FetchPrusaLinkHistoryPageAsync(
-        HttpClient client,
+        BackendHttpTransport client,
         string normalizedBaseUrl,
         int? limit,
         int start,
@@ -848,17 +971,21 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             CreateRequest(HttpMethod.Get, requestUrl, credentials);
         using HttpResponseMessage response = await client.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
-        string content = await response.Content.ReadAsStringAsync(ct);
-        return ParseOctoPrintHistoryList(content)
+        string content = await ReadBoundedStringAsync(
+            response.Content,
+            MaxHistoryPageBytes,
+            "PrusaLink history response",
+            ct);
+        return ParseOctoPrintHistoryList(content, normalizedBaseUrl)
             ?? throw new InvalidDataException(
                 "PrusaLink returned malformed history list data.");
     }
 
     public async Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string normalizedBaseUrl = baseUrl.TrimEnd('/');
-        HttpRequestMessage request = CreateRequest(HttpMethod.Get, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
 
         try
         {
@@ -871,14 +998,13 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
             response.EnsureSuccessStatusCode();
             string content = await response.Content.ReadAsStringAsync(ct);
-            HistoryJob? parsed = ParseOctoPrintHistoryJob(content);
+            HistoryJob? parsed = ParseOctoPrintHistoryJob(content, normalizedBaseUrl);
             if (parsed is null || string.IsNullOrWhiteSpace(parsed.JobId))
             {
                 throw new InvalidDataException(
                     $"PrusaLink returned malformed history detail for {jobId}.");
             }
 
-            parsed.ThumbnailUrl = ResolveThumbnailUrl(normalizedBaseUrl, parsed.ThumbnailUrl);
             return parsed;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -895,49 +1021,306 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
+    public async Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            return await FetchHistoryThumbnailAsync(baseUrl, jobId, credentials, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            // HttpClient reports its own timeout as a cancellation. Callers classify a
+            // timeout as 408, so it must not reach them looking like an unexpected fault.
+            throw new TimeoutException(
+                "PrusaLink thumbnail request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            // Socket and stream faults are upstream transport failures (502), not
+            // server-side defects (500). Keep the original exception as the inner cause.
+            throw new HttpRequestException(
+                "PrusaLink thumbnail transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            throw new HttpRequestException(
+                "PrusaLink thumbnail transport failed.",
+                ex);
+        }
+    }
+
+    private async Task<HistoryThumbnailContent> FetchHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credentials,
+        CancellationToken ct)
+    {
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        HistoryJob? job = await GetHistoryJobAsync(
+            normalizedBaseUrl,
+            jobId,
+            credentials,
+            ct);
+        if (string.IsNullOrWhiteSpace(job?.ThumbnailUrl))
+        {
+            throw new KeyNotFoundException(
+                $"PrusaLink history job {jobId} does not have a thumbnail.");
+        }
+
+        Uri configuredEndpoint = EnsureBaseUri(normalizedBaseUrl);
+        if (!Uri.TryCreate(job.ThumbnailUrl, UriKind.Absolute, out Uri? thumbnailUri) ||
+            !IsSameOrigin(configuredEndpoint, thumbnailUri) ||
+            !string.IsNullOrEmpty(thumbnailUri.UserInfo))
+        {
+            throw new InvalidDataException(
+                "PrusaLink returned a thumbnail outside the configured printer endpoint.");
+        }
+
+        BackendHttpTransport client = GetClientForCredentials(credentials);
+        using var request = CreateRequest(HttpMethod.Get, thumbnailUri.ToString(), credentials);
+        using HttpResponseMessage response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            throw new KeyNotFoundException(
+                $"PrusaLink history thumbnail for job {jobId} was not found.");
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                "PrusaLink thumbnail request failed.",
+                inner: null,
+                response.StatusCode);
+        }
+
+        string? contentType = response.Content.Headers.ContentType?.MediaType;
+        if (string.IsNullOrWhiteSpace(contentType) ||
+            !IsSupportedThumbnailContentType(contentType))
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response was not an image.");
+        }
+
+        if (response.Content.Headers.ContentLength is > MaxHistoryThumbnailBytes)
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response exceeded the size limit.");
+        }
+
+        await using Stream content = await response.Content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await content.ReadAsync(chunk, ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > MaxHistoryThumbnailBytes)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink thumbnail response exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+
+        byte[] bytes = buffer.ToArray();
+        if (!HasValidImageSignature(contentType, bytes))
+        {
+            throw new InvalidDataException(
+                "PrusaLink thumbnail response did not contain a valid image.");
+        }
+
+        return new HistoryThumbnailContent(bytes, contentType);
+    }
+
     public async Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HistoryListResponse? history = await GetHistoryListAsync(
-            baseUrl,
-            limit: 10000,
-            start: 0,
-            since: null,
-            before: null,
-            order: null,
-            credentials: credentials,
-            ct: ct);
-        if (history == null)
+        BackendHttpTransport client = GetClientForCredentials(credentials);
+        string normalizedBaseUrl = baseUrl.TrimEnd('/');
+        IReadOnlyList<HistoryJob> jobs;
+        try
         {
-            return null;
+            jobs = await FetchCompleteHistoryForTotalsAsync(
+                client,
+                normalizedBaseUrl,
+                credentials,
+                ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException ex)
+        {
+            throw new TimeoutException(
+                "PrusaLink history totals request timed out.",
+                ex);
+        }
+        catch (SocketException ex)
+        {
+            throw new HttpRequestException(
+                "PrusaLink history totals transport failed.",
+                ex);
+        }
+        catch (IOException ex)
+        {
+            throw new HttpRequestException(
+                "PrusaLink history totals transport failed.",
+                ex);
         }
 
         double totalPrintTime = 0;
         double totalFilamentUsed = 0;
-        int completedCount = 0;
 
-        foreach (HistoryJob job in history.Jobs.Where(job => job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)))
+        foreach (HistoryJob job in jobs.Where(job =>
+                     job.Status.Equals("completed", StringComparison.OrdinalIgnoreCase)))
         {
             totalPrintTime += job.PrintDuration;
             totalFilamentUsed += job.FilamentUsed;
-            completedCount++;
         }
 
         return new HistoryTotals
         {
             JobTotals = new JobTotals
             {
-                TotalJobs = completedCount,
+                TotalJobs = jobs.Count,
                 TotalPrintTime = totalPrintTime,
                 TotalFilamentUsed = totalFilamentUsed
             }
         };
     }
 
+    private static async Task<IReadOnlyList<HistoryJob>>
+        FetchCompleteHistoryForTotalsAsync(
+            BackendHttpTransport client,
+            string normalizedBaseUrl,
+            PrinterCredential? credentials,
+            CancellationToken ct)
+    {
+        var jobs = new List<HistoryJob>();
+        int expectedSourceCount = -1;
+        int offset = 0;
+
+        for (int pageNumber = 0; pageNumber < MaxHistoryPagesForTotals; pageNumber++)
+        {
+            HistoryListResponse page = await FetchPrusaLinkHistoryPageAsync(
+                client,
+                normalizedBaseUrl,
+                HistoryPageSize,
+                offset,
+                credentials,
+                ct);
+            int examined = page.ExaminedSourceEntries;
+
+            if (expectedSourceCount < 0)
+            {
+                expectedSourceCount = page.Count;
+                if (expectedSourceCount > MaxHistoryEntriesForTotals)
+                {
+                    throw new InvalidDataException(
+                        $"PrusaLink history contains {expectedSourceCount} entries, exceeding the authoritative totals limit of {MaxHistoryEntriesForTotals}.");
+                }
+            }
+            else if (page.Count != expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history count changed while calculating totals.");
+            }
+
+            if (examined > HistoryPageSize ||
+                (examined > 0 && page.Count < offset + examined))
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history page exceeded the requested range.");
+            }
+
+            if (page.ExcludedEntries.Length > 0)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history contained malformed entries, so authoritative totals could not be calculated.");
+            }
+
+            jobs.AddRange(page.Jobs);
+            offset += examined;
+            if (offset == expectedSourceCount)
+            {
+                if (jobs.Count != expectedSourceCount)
+                {
+                    throw new InvalidDataException(
+                        "PrusaLink history totals did not cover every source entry.");
+                }
+
+                return jobs;
+            }
+
+            if (examined == 0 || offset > expectedSourceCount)
+            {
+                throw new InvalidDataException(
+                    "PrusaLink history ended before the advertised source count.");
+            }
+        }
+
+        throw new InvalidDataException(
+            $"PrusaLink history totals exceeded the authoritative paging limit of {MaxHistoryPagesForTotals} pages.");
+    }
+
+    private static async Task<string> ReadBoundedStringAsync(
+        HttpContent content,
+        int maxBytes,
+        string responseName,
+        CancellationToken ct)
+    {
+        if (content.Headers.ContentLength > maxBytes)
+        {
+            throw new InvalidDataException(
+                $"{responseName} exceeded the size limit.");
+        }
+
+        await using Stream stream = await content.ReadAsStreamAsync(ct);
+        using var buffer = new MemoryStream();
+        byte[] chunk = new byte[81920];
+        while (true)
+        {
+            int read = await stream.ReadAsync(chunk, ct);
+            if (read == 0)
+            {
+                break;
+            }
+
+            if (buffer.Length + read > maxBytes)
+            {
+                throw new InvalidDataException(
+                    $"{responseName} exceeded the size limit.");
+            }
+
+            await buffer.WriteAsync(chunk.AsMemory(0, read), ct);
+        }
+
+        return Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+    }
+
     public async Task<bool> DeleteHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default)
     {
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string normalizedBaseUrl = baseUrl.TrimEnd('/');
-        HttpRequestMessage request = CreateRequest(HttpMethod.Delete, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Delete, $"{normalizedBaseUrl}/api/history/{Uri.EscapeDataString(jobId)}", credentials);
 
         try
         {
@@ -950,7 +1333,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    private static HistoryListResponse? ParseOctoPrintHistoryList(string historyJson)
+    private static HistoryListResponse? ParseOctoPrintHistoryList(
+        string historyJson,
+        string baseUrl)
     {
         try
         {
@@ -975,6 +1360,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             {
                 HistoryJob? job = ParseOctoPrintJobElement(
                     jobElement,
+                    baseUrl,
                     requireCompleteListEntry: true);
                 if (job is null)
                 {
@@ -1020,12 +1406,14 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
         }
     }
 
-    private static HistoryJob? ParseOctoPrintHistoryJob(string jobJson)
+    private static HistoryJob? ParseOctoPrintHistoryJob(
+        string jobJson,
+        string baseUrl)
     {
         try
         {
             using JsonDocument doc = JsonDocument.Parse(jobJson);
-            return ParseOctoPrintJobElement(doc.RootElement);
+            return ParseOctoPrintJobElement(doc.RootElement, baseUrl);
         }
         catch (JsonException)
         {
@@ -1035,6 +1423,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     private static HistoryJob? ParseOctoPrintJobElement(
         JsonElement jobElement,
+        string baseUrl,
         bool requireCompleteListEntry = false)
     {
         if (jobElement.ValueKind != JsonValueKind.Object)
@@ -1061,25 +1450,26 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 stateProp.ValueKind == JsonValueKind.String &&
                 !string.IsNullOrWhiteSpace(stateProp.GetString());
             string? filename = null;
-            string? thumbnailRelativePath = null;
+            string? thumbnailReference = null;
             if (jobElement.TryGetProperty("job", out JsonElement jobProp) &&
                 jobProp.ValueKind == JsonValueKind.Object &&
                 jobProp.TryGetProperty("file", out JsonElement fileProp) &&
-                fileProp.ValueKind == JsonValueKind.Object &&
-                fileProp.TryGetProperty("name", out JsonElement nameProp) &&
-                nameProp.ValueKind == JsonValueKind.String)
+                fileProp.ValueKind == JsonValueKind.Object)
             {
-                filename = nameProp.GetString();
+                if (fileProp.TryGetProperty("name", out JsonElement nameProp) &&
+                    nameProp.ValueKind == JsonValueKind.String)
+                {
+                    filename = nameProp.GetString();
+                }
 
                 // PrusaLink's history entries mirror the /api/v1/files file shape, exposing a
-                // relative thumbnail reference under job.file.refs.thumbnail. Capture it here;
-                // callers resolve it to an absolute URL once the request base URL is known.
+                // relative thumbnail reference under job.file.refs.thumbnail.
                 if (fileProp.TryGetProperty("refs", out JsonElement refsProp) &&
                     refsProp.ValueKind == JsonValueKind.Object &&
                     refsProp.TryGetProperty("thumbnail", out JsonElement thumbnailProp) &&
                     thumbnailProp.ValueKind == JsonValueKind.String)
                 {
-                    thumbnailRelativePath = thumbnailProp.GetString();
+                    thumbnailReference = thumbnailProp.GetString();
                 }
             }
 
@@ -1103,11 +1493,9 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
                 job.Filename = filename!;
             }
 
-            if (!string.IsNullOrWhiteSpace(thumbnailRelativePath))
+            if (!string.IsNullOrWhiteSpace(thumbnailReference))
             {
-                // Stored as-is (possibly relative) here; resolved to an absolute URL by the
-                // caller, which knows the request's base URL.
-                job.ThumbnailUrl = thumbnailRelativePath;
+                job.ThumbnailUrl = ResolveThumbnailUrl(baseUrl, thumbnailReference);
             }
 
             if (jobElement.TryGetProperty("printTime", out JsonElement printTimeProp) && printTimeProp.ValueKind == JsonValueKind.Number)
@@ -1145,21 +1533,81 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
     /// Resolves a possibly-relative PrusaLink thumbnail reference (e.g. from
     /// job.file.refs.thumbnail) to an absolute URL against the printer's base URL, matching
     /// the pattern used for live job status thumbnails elsewhere in the PrusaLink integration.
+    /// References that do not resolve to an http/https URL are rejected.
     /// </summary>
-    private static string? ResolveThumbnailUrl(string baseUrl, string? thumbnailPath)
+    private static string? ResolveThumbnailUrl(
+        string baseUrl,
+        string thumbnailReference)
     {
-        if (string.IsNullOrWhiteSpace(thumbnailPath))
+        Uri baseUri = new(baseUrl.TrimEnd('/') + "/", UriKind.Absolute);
+        if (!Uri.TryCreate(baseUri, thumbnailReference, out Uri? resolved) ||
+            (resolved.Scheme != Uri.UriSchemeHttp &&
+             resolved.Scheme != Uri.UriSchemeHttps))
         {
             return null;
         }
 
-        if (thumbnailPath.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        return resolved.ToString();
+    }
+
+    private static bool IsSupportedThumbnailContentType(string contentType) =>
+        contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase) ||
+        contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasValidImageSignature(
+        string contentType,
+        ReadOnlySpan<byte> bytes)
+    {
+        if (contentType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
         {
-            return thumbnailPath;
+            return bytes.Length >= 8 &&
+                bytes[0] == 0x89 &&
+                bytes[1] == 0x50 &&
+                bytes[2] == 0x4E &&
+                bytes[3] == 0x47 &&
+                bytes[4] == 0x0D &&
+                bytes[5] == 0x0A &&
+                bytes[6] == 0x1A &&
+                bytes[7] == 0x0A;
         }
 
-        return new Uri(new Uri(baseUrl.TrimEnd('/')), thumbnailPath).ToString();
+        if (contentType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase))
+        {
+            return bytes.Length >= 3 &&
+                bytes[0] == 0xFF &&
+                bytes[1] == 0xD8 &&
+                bytes[2] == 0xFF;
+        }
+
+        if (contentType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
+        {
+            return bytes.Length >= 6 &&
+                bytes[0] == 0x47 &&
+                bytes[1] == 0x49 &&
+                bytes[2] == 0x46 &&
+                bytes[3] == 0x38 &&
+                (bytes[4] == 0x37 || bytes[4] == 0x39) &&
+                bytes[5] == 0x61;
+        }
+
+        return contentType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) &&
+            bytes.Length >= 12 &&
+            bytes[..4].SequenceEqual("RIFF"u8) &&
+            bytes.Slice(8, 4).SequenceEqual("WEBP"u8);
     }
+
+    private static bool IsSameOrigin(Uri configuredEndpoint, Uri target) =>
+        string.Equals(
+            configuredEndpoint.Scheme,
+            target.Scheme,
+            StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(
+            configuredEndpoint.Host,
+            target.Host,
+            StringComparison.OrdinalIgnoreCase) &&
+        configuredEndpoint.Port == target.Port;
 
     private static HistoryExcludedEntryEvidence CreateExcludedHistoryEvidence(
         JsonElement entry)
@@ -1212,7 +1660,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
 
     /// <summary>
     /// Creates an HTTP request message with appropriate authentication headers.
-    /// Digest authentication is handled by DigestAuthHandler at the HttpClient level.
+    /// Digest authentication is applied by <see cref="BackendHttpTransport"/> while every
+    /// send remains on the injected vetted client.
     /// </summary>
     private static HttpRequestMessage CreateRequest(HttpMethod method, string url, PrinterCredential? credentials)
     {
@@ -1238,7 +1687,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/job").ToString();
 
         try
@@ -1268,7 +1717,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/job").ToString();
 
         try
@@ -1298,7 +1747,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/tool").ToString();
 
         try
@@ -1342,7 +1791,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/bed").ToString();
 
         try
@@ -1382,7 +1831,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
 
         try
@@ -1429,7 +1878,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient
             return false;
         }
 
-        HttpClient client = GetClientForCredentials(credentials);
+        BackendHttpTransport client = GetClientForCredentials(credentials);
         string url = new Uri(EnsureBaseUri(baseUrl), "api/printer/printhead").ToString();
 
         try

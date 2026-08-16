@@ -142,6 +142,13 @@ public class HistoryJob
 }
 
 /// <summary>
+/// Validated image content retrieved from a printer history provider.
+/// </summary>
+/// <param name="Content">The thumbnail bytes.</param>
+/// <param name="ContentType">The validated image media type.</param>
+public sealed record HistoryThumbnailContent(byte[] Content, string ContentType);
+
+/// <summary>
 /// Additional provider-specific metadata associated with a history job.
 /// </summary>
 public class AuxiliaryData

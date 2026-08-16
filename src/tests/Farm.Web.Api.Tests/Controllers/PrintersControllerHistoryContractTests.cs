@@ -79,6 +79,236 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
     }
 
     [Theory]
+    [InlineData("limit=1")]
+    [InlineData("limit=2000")]
+    [InlineData("start=0")]
+    [InlineData("start=2000")]
+    [InlineData("start=1999&limit=1")]
+    public async Task HistoryList_QueryAtSupportedBoundary_InvokesService(
+        string query)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryListAsync(
+                printerId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryListResponse
+            {
+                Count = 0,
+                Jobs = [],
+            });
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history?{query}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        _printers.Verify(service => service.GetHistoryListAsync(
+                printerId,
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Theory]
+    [InlineData("limit=0")]
+    [InlineData("limit=-1")]
+    [InlineData("limit=2001")]
+    [InlineData("start=-1")]
+    [InlineData("start=2001")]
+    [InlineData("start=1&limit=2000")]
+    public async Task HistoryList_QueryOutsideSupportedWindow_ReturnsBadRequestWithoutService(
+        string query)
+    {
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history?{query}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _printers.Verify(service => service.GetHistoryListAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_AnonymousRequest_IsUnauthorized()
+    {
+        await using var productionAuthFactory =
+            new CustomWebApplicationFactory(
+                new Dictionary<string, string?>
+                {
+                    ["Security:DevModeBypassAuth"] = "false",
+                });
+        using HttpClient anonymousClient = productionAuthFactory.CreateClient();
+
+        HttpResponseMessage response = await anonymousClient.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_ValidImage_ReturnsSameOriginContent()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryThumbnailContent([1, 2, 3], "image/png"));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("image/png");
+        response.Headers.GetValues("X-Content-Type-Options")
+            .Should().ContainSingle("nosniff");
+        (await response.Content.ReadAsByteArrayAsync()).Should().Equal(1, 2, 3);
+    }
+
+    [Theory]
+    [InlineData(typeof(KeyNotFoundException), HttpStatusCode.NotFound)]
+    [InlineData(typeof(InvalidDataException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(HttpRequestException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(SocketException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(IOException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(TimeoutException), HttpStatusCode.RequestTimeout)]
+    public async Task HistoryThumbnail_ProviderFailure_ReturnsExplicitStatus(
+        Type exceptionType,
+        HttpStatusCode expectedStatus)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(expectedStatus);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_HttpClientTimeout_ReturnsRequestTimeout()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryThumbnailAsync(
+                printerId,
+                "job-1",
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException(
+                "timed out",
+                new TimeoutException("HttpClient timeout")));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestTimeout);
+    }
+
+    [Theory]
+    [InlineData(typeof(InvalidDataException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(HttpRequestException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(SocketException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(IOException), HttpStatusCode.BadGateway)]
+    [InlineData(typeof(TimeoutException), HttpStatusCode.RequestTimeout)]
+    public async Task HistoryTotals_ProviderFailure_ReturnsExplicitStatus(
+        Type exceptionType,
+        HttpStatusCode expectedStatus)
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(expectedStatus);
+        response.StatusCode.Should().NotBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task HistoryTotals_HttpClientTimeout_ReturnsRequestTimeout()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException(
+                "timed out",
+                new TimeoutException("HttpClient timeout")));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(HttpStatusCode.RequestTimeout);
+    }
+
+    [Fact]
+    public async Task HistoryTotals_UnexpectedFailure_DoesNotReturnFalseZeroSuccess()
+    {
+        Guid printerId = Guid.NewGuid();
+        _printers.Setup(service => service.GetHistoryTotalsAsync(
+                printerId,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("unexpected"));
+
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{printerId}/history/totals");
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        response.StatusCode.Should().NotBe(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task HistoryThumbnail_InaccessiblePrinter_ReturnsNotFound()
+    {
+        var authorization =
+            new Mock<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+        authorization
+            .Setup(service => service.CanAccessPrinterAsync(
+                It.IsAny<System.Security.Claims.ClaimsPrincipal>(),
+                It.IsAny<Guid>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        await using var factory =
+            new HistoryContractFactory(_printers.Object, authorization.Object);
+        using HttpClient client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add(
+            "X-Test-User-Id",
+            Guid.NewGuid().ToString());
+
+        HttpResponseMessage response = await client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/history/job-1/thumbnail");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        _printers.Verify(
+            service => service.GetHistoryThumbnailAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
     [InlineData(false, typeof(HttpRequestException), HttpStatusCode.BadGateway)]
     [InlineData(false, typeof(SocketException), HttpStatusCode.BadGateway)]
     [InlineData(false, typeof(TimeoutException), HttpStatusCode.RequestTimeout)]
@@ -425,7 +655,9 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             Task.FromResult(responseFactory(request));
     }
 
-    private sealed class HistoryContractFactory(IPrintersService printers)
+    private sealed class HistoryContractFactory(
+        IPrintersService printers,
+        Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? authorization = null)
         : CustomWebApplicationFactory(
             new Dictionary<string, string?>
             {
@@ -440,6 +672,11 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime
             {
                 services.RemoveAll<IPrintersService>();
                 services.AddSingleton(printers);
+                if (authorization is not null)
+                {
+                    services.RemoveAll<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService>();
+                    services.AddSingleton(authorization);
+                }
             });
         }
     }

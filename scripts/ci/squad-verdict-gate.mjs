@@ -33,6 +33,82 @@ export const verdictContext = 'squad/pre-pr-verdict';
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 
 /**
+ * Label that marks a pull request as squad-authored and therefore in scope.
+ *
+ * SCOPING RULE: the gate applies to squad-authored PRs only. Dependency-bot
+ * bumps and ad-hoc human PRs are not agent output, so demanding a three-agent
+ * adversarial panel on them produced noise and nothing else — every open
+ * Dependabot PR sat blocked, several having already burned a reviewer dispatch.
+ *
+ * WHY AN OPT-IN LABEL IS SAFE HERE, when opt-in scoping normally is not: the
+ * absence of this label removes the gate AND Ralph's autonomy together. An
+ * unlabelled PR is not auto-merged at all — a human merges it deliberately (see
+ * .github/ralph-reference.md). So the fail-open direction that would otherwise
+ * make opt-in scoping dangerous — "forget the label, unreviewed agent code
+ * auto-lands" — does not exist. Forgetting the label degrades to "a human has
+ * to merge this by hand", which is strictly more conservative, not less.
+ *
+ * Two further properties keep it honest:
+ *   * Scope is not outsider-influenceable. Applying a label by hand needs write
+ *     access, and the automatic path (see `canAutoScope`) refuses to label a
+ *     fork and requires the resolved author to be a real roster member — so
+ *     neither the PR body nor the branch name, both attacker-controlled on a
+ *     fork, can move a PR into scope.
+ *   * The verdict workflow applies the label itself, in the same run that
+ *     evaluates the gate, so the common path does not depend on an agent
+ *     remembering and cannot race a separate labelling workflow.
+ */
+export const squadScopeLabel = 'squad';
+
+/**
+ * True when the pull request's labels put it in scope for the review gate.
+ *
+ * Matching is exact on the bare `squad` label. A `squad:{member}` assignment
+ * label deliberately does NOT count: those name a responsible member and are
+ * routinely applied to issues and PRs for triage, so treating them as scope
+ * markers would drag unrelated work back into the gate.
+ */
+export function hasSquadScopeLabel(labels = []) {
+  for (const label of labels) {
+    const name = typeof label === 'string' ? label : label?.name;
+    if (typeof name === 'string' && name.trim().toLowerCase() === squadScopeLabel) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True when a pull request may have the scope label applied automatically.
+ *
+ * The verdict workflow applies the label itself rather than delegating to a
+ * separate labelling workflow. Two guards matter, and both close real holes:
+ *
+ *   * NEVER auto-label a fork. `resolveAuthorMembers` reads the PR body and the
+ *     head branch name, BOTH of which a fork PR author fully controls, so an
+ *     outsider could otherwise place their own PR into scope. Fork PRs are
+ *     already handled conservatively once in scope (they need an administrator),
+ *     but scope must not be outsider-influenceable at all — that property is
+ *     what justifies opt-in scoping in the first place.
+ *
+ *   * Require every resolved member to be a real roster member. A declared
+ *     `Squad-Author:` line is NOT validated against the roster by
+ *     `resolveAuthorMembers` (by design — the gate only uses it to stop an agent
+ *     reviewing its own work), so without this check one arbitrary line of PR
+ *     body text would be enough to self-scope.
+ *
+ * A maintainer can still label anything by hand; that requires write access, so
+ * it stays inside the trust boundary.
+ */
+export function canAutoScope({ authorMembers, roster, isFork } = {}) {
+  if (isFork) return false;
+  const members = [...(authorMembers ?? [])];
+  if (members.length === 0) return false;
+  const known = roster ?? new Set();
+  return members.every((member) => known.has(member));
+}
+
+/**
  * Comment `author_association` values accepted as a cheap PRE-FILTER only.
  *
  * ⚠️ This is NOT the authorisation check. Both repositories are public, so ANY
@@ -405,6 +481,12 @@ function truncate(text, limit = 140) {
  *
  * Returns the commit-status state plus a precise, single-line reason. The
  * caller posts this as `squad/pre-pr-verdict` on `headSha`.
+ *
+ * `squadLabeled` scopes the gate to squad-authored PRs — see `squadScopeLabel`
+ * for why opt-in scoping is safe here and what must stay true for it to remain
+ * safe. Callers MUST pass it explicitly; it defaults to `false` so that a caller
+ * which forgets produces a harmless out-of-scope result rather than silently
+ * evaluating a PR against an empty review panel.
  */
 export function evaluateGate({
   headSha,
@@ -414,6 +496,7 @@ export function evaluateGate({
   roster = new Set(),
   authorMembers = new Set(),
   authorSource = 'unresolved',
+  squadLabeled = false,
 } = {}) {
   const head = String(headSha ?? '').toLowerCase();
   const notes = [];
@@ -424,6 +507,38 @@ export function evaluateGate({
       description: 'Cannot evaluate: PR head SHA is unavailable.',
       reason: 'missing head sha',
       notes,
+      requiredMembers: [],
+      approvals: [],
+      stale: [],
+    };
+  }
+
+  // 0. Scope. The gate covers squad-authored PRs, identified by the `squad`
+  //    label. Everything else — dependency bumps, ad-hoc human PRs — is out of
+  //    scope and reports NOT_APPLICABLE rather than a red BLOCKED that no one
+  //    can clear without staging a fake agent review.
+  //
+  //    This is safe as opt-in scoping ONLY because Ralph refuses to auto-merge
+  //    an unlabelled PR (see squadScopeLabel). Out of scope means "a human
+  //    merges this deliberately", never "this merges itself unreviewed". If that
+  //    coupling is ever broken, this check becomes a hole — keep them together.
+  if (!squadLabeled) {
+    return {
+      state: 'success',
+      passed: true,
+      scope: 'out-of-scope',
+      description: truncate(
+        `NOT_APPLICABLE @ ${shortSha(head)}: not a squad PR (no '${squadScopeLabel}' label)`,
+      ),
+      reason:
+        `the '${squadScopeLabel}' label is absent, so this PR is outside the ` +
+        'squad review gate; it is not eligible for unattended merge either',
+      notes: [
+        `Out of scope: no '${squadScopeLabel}' label on this pull request.`,
+        'The squad review gate applies to squad-authored PRs. Unlabelled PRs ' +
+        'are merged by a human rather than by the unattended merger, so no ' +
+        'agent review record is required or accepted here.',
+      ],
       requiredMembers: [],
       approvals: [],
       stale: [],
