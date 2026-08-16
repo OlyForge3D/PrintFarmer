@@ -416,6 +416,123 @@ public sealed class PrinterCalibrationSetupControllerTests : IAsyncLifetime
         _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
     }
 
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_WithProfileIds_BindsAndEchoesThem()
+    {
+        Guid printerId = await SeedPrinterAsync();
+        await ClearProfileBindingsAsync(printerId);
+        using HttpClient client = CreateCalibrationUpdateClient();
+        Guid machineProfileId = Guid.NewGuid();
+        Guid processProfileId = Guid.NewGuid();
+        Guid filamentProfileId = Guid.NewGuid();
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(
+            client,
+            printerId,
+            $$"""
+            {
+              "machineProfileId": "{{machineProfileId}}",
+              "processProfileId": "{{processProfileId}}",
+              "filamentProfileId": "{{filamentProfileId}}"
+            }
+            """);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        CalibrationSetupResultDto? result = JsonSerializer.Deserialize<CalibrationSetupResultDto>(
+            body,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        _ = result!.MachineProfileId.Should().Be(machineProfileId);
+        _ = result.ProcessProfileId.Should().Be(processProfileId);
+        _ = result.FilamentProfileId.Should().Be(filamentProfileId);
+
+        (Guid? machine, Guid? process, Guid? filament) = await GetProfileBindingAsync(printerId);
+        _ = machine.Should().Be(machineProfileId);
+        _ = process.Should().Be(processProfileId);
+        _ = filament.Should().Be(filamentProfileId);
+    }
+
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_WithoutProfileIds_LeavesExistingBindingUntouched()
+    {
+        // Control for the binding test above: an omitted id must mean "leave alone",
+        // not "clear". Without this, a setup write that only edits toolhead metrology
+        // would silently unbind the printer's profiles.
+        Guid printerId = await SeedPrinterAsync();
+        (Guid? machineBefore, Guid? processBefore, Guid? filamentBefore) =
+            await GetProfileBindingAsync(printerId);
+        _ = machineBefore.Should().NotBeNull();
+        using HttpClient client = CreateCalibrationUpdateClient();
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(
+            client,
+            printerId,
+            """{"supportsPressureAdvance":true}""");
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        (Guid? machineAfter, Guid? processAfter, Guid? filamentAfter) =
+            await GetProfileBindingAsync(printerId);
+        _ = machineAfter.Should().Be(machineBefore);
+        _ = processAfter.Should().Be(processBefore);
+        _ = filamentAfter.Should().Be(filamentBefore);
+    }
+
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_WithEmptyGuidProfileId_ClearsBinding()
+    {
+        Guid printerId = await SeedPrinterAsync();
+        using HttpClient client = CreateCalibrationUpdateClient();
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(
+            client,
+            printerId,
+            $$"""{"machineProfileId":"{{Guid.Empty}}"}""");
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        (Guid? machine, _, _) = await GetProfileBindingAsync(printerId);
+        _ = machine.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_EndToEnd_ProfileBindingClearsMachineProfileMissing()
+    {
+        // The real-world gap this endpoint change closes: a printer with no machine
+        // profile bound reports slicer.machineProfileId as a missing input and cannot
+        // be calibrated, and until now no client could bind one.
+        Guid printerId = await SeedPrinterAsync();
+        (Guid? machineProfileId, Guid? processProfileId, Guid? filamentProfileId) =
+            await GetProfileBindingAsync(printerId);
+        await ClearProfileBindingsAsync(printerId);
+
+        using HttpClient calibrationClient = CreateCalibrationReaderClient();
+        using HttpClient setupClient = CreateCalibrationUpdateClient();
+
+        string[] missingBefore = await GetMissingInputsAsync(calibrationClient, printerId);
+        _ = missingBefore.Should().Contain("slicer.machineProfileId");
+        _ = missingBefore.Should().Contain("slicer.processProfileId");
+        _ = missingBefore.Should().Contain("slicer.filamentProfileId");
+
+        HttpResponseMessage setupResponse = await PutCalibrationSetupAsync(
+            setupClient,
+            printerId,
+            $$"""
+            {
+              "machineProfileId": "{{machineProfileId}}",
+              "processProfileId": "{{processProfileId}}",
+              "filamentProfileId": "{{filamentProfileId}}"
+            }
+            """);
+        string setupBody = await setupResponse.Content.ReadAsStringAsync();
+        _ = setupResponse.StatusCode.Should().Be(HttpStatusCode.OK, setupBody);
+
+        string[] missingAfter = await GetMissingInputsAsync(calibrationClient, printerId);
+        _ = missingAfter.Should().NotContain("slicer.machineProfileId");
+        _ = missingAfter.Should().NotContain("slicer.processProfileId");
+        _ = missingAfter.Should().NotContain("slicer.filamentProfileId");
+    }
+
     private static async Task<HttpResponseMessage> PutCalibrationSetupAsync(
         HttpClient client,
         Guid printerId,
@@ -504,6 +621,45 @@ public sealed class PrinterCalibrationSetupControllerTests : IAsyncLifetime
         Printer printer = await db.Printers.FindAsync(printerId)
             ?? throw new InvalidOperationException("Missing seeded printer.");
         return printer.ExcludedRegionsJson;
+    }
+
+    private static async Task<string[]> GetMissingInputsAsync(HttpClient client, Guid printerId)
+    {
+        HttpResponseMessage response = await client.GetAsync(
+            $"/api/printers/{printerId}/calibration-context?slicerType=OrcaSlicer");
+        string body = await response.Content.ReadAsStringAsync();
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        return document.RootElement
+            .GetProperty("missingInputs")
+            .EnumerateArray()
+            .Select(e => e.GetString() ?? string.Empty)
+            .ToArray();
+    }
+
+    private async Task<(Guid? Machine, Guid? Process, Guid? Filament)> GetProfileBindingAsync(
+        Guid printerId)
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = await db.Printers.FindAsync(printerId)
+            ?? throw new InvalidOperationException("Missing seeded printer.");
+        return (
+            printer.CalibrationMachineProfileId,
+            printer.CalibrationProcessProfileId,
+            printer.CalibrationFilamentProfileId);
+    }
+
+    private async Task ClearProfileBindingsAsync(Guid printerId)
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        Printer printer = await db.Printers.FindAsync(printerId)
+            ?? throw new InvalidOperationException("Missing seeded printer.");
+        printer.CalibrationMachineProfileId = null;
+        printer.CalibrationProcessProfileId = null;
+        printer.CalibrationFilamentProfileId = null;
+        _ = await db.SaveChangesAsync();
     }
 
     private async Task SetExcludedRegionsAsync(Guid printerId, string excludedRegionsJson)

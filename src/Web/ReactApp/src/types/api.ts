@@ -1402,6 +1402,15 @@ export interface CalibrationSetupRequestDto {
   calibrationHardwareVerifiedAtUtc?: string | null;
   firmwareIdentityVerified?: boolean | null;
   toolheads?: CalibrationToolheadSetupDto[] | null;
+  /**
+   * Slicer profile binding. Omitting an id leaves the existing binding
+   * untouched; the all-zero Guid clears it. Calibration requires all three to
+   * be bound — the machine profile in particular is what sources bed origin,
+   * printable area, motion limits, and nozzle facts.
+   */
+  machineProfileId?: string | null;
+  processProfileId?: string | null;
+  filamentProfileId?: string | null;
 }
 
 /** Persisted state of a single toolhead's manual metrology, echoed back after a setup write. */
@@ -1432,6 +1441,9 @@ export interface CalibrationSetupResultDto {
   calibrationHardwareVerifiedAtUtc?: string | null;
   firmware: CalibrationFirmwareIdentityDto;
   toolheads: CalibrationToolheadSetupResultDto[];
+  machineProfileId?: string | null;
+  processProfileId?: string | null;
+  filamentProfileId?: string | null;
 }
 
 /** A single missing-input rejection reason returned by the calibration-context endpoint. */
@@ -1461,6 +1473,17 @@ export interface CalibrationToolheadDto {
   supportedMaterials?: string[] | null;
 }
 
+/** Slicer identity and the stored profiles bound to the printer for calibration. */
+export interface CalibrationSlicerIdentityDto {
+  engine?: string | null;
+  distribution?: string | null;
+  version?: string | null;
+  profileFormat?: string | null;
+  machineProfileId?: string | null;
+  processProfileId?: string | null;
+  filamentProfileId?: string | null;
+}
+
 /**
  * Read-only calibration-eligibility snapshot for a printer, combining
  * profile-owned facts (#1614/#1615) with the residual manual fields this PR
@@ -1478,6 +1501,7 @@ export interface CalibrationContextDto {
   supportsFirmwareRetraction?: boolean | null;
   calibrationHardwareVerifiedAtUtc?: string | null;
   firmware: CalibrationFirmwareIdentityDto;
+  slicer?: CalibrationSlicerIdentityDto | null;
   toolheads: CalibrationToolheadDto[];
 }
 

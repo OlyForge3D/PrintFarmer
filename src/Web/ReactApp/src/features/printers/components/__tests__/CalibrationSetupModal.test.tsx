@@ -7,6 +7,13 @@ import type { CalibrationContextDto } from '@/types/api';
 
 const mockGetCalibrationContext = vi.fn();
 const mockUpdateCalibrationSetup = vi.fn();
+const mockListExtended = vi.fn();
+
+vi.mock('@/services/slicerProfilesService', () => ({
+  slicerProfilesService: {
+    listExtended: (...args: unknown[]) => mockListExtended(...args),
+  },
+}));
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -105,6 +112,13 @@ function renderModal(overrides: Partial<CalibrationContextDto> = {}) {
 describe('CalibrationSetupModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockListExtended.mockResolvedValue({
+      machineProfiles: [
+        { id: 'machine-1', name: 'Qidi Plus 4 0.4 nozzle', manufacturer: 'Qidi', profileType: 'machine' },
+      ],
+      processProfiles: [{ id: 'process-1', name: '0.2mm Standard', profileType: 'process' }],
+      filamentProfiles: [{ id: 'filament-1', name: 'Generic PLA', profileType: 'filament' }],
+    });
     mockUpdateCalibrationSetup.mockResolvedValue({
       printerId: 'printer-1',
       configurationRevision: 2,
@@ -278,5 +292,70 @@ describe('CalibrationSetupModal', () => {
     expect(request.toolheads).toEqual([
       expect.objectContaining({ id: 'toolhead-1', isDirectDrive: false }),
     ]);
+  });
+
+  it('binds all three slicer profiles and submits their ids', async () => {
+    // The gap this section closes: a printer with no machine profile bound reports
+    // ~19 missing calibration inputs, and until now no client wrote these ids at all.
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText(/Toolhead metrology — Extruder/);
+
+    await user.selectOptions(screen.getByLabelText(/machine profile/i), 'machine-1');
+    await user.selectOptions(screen.getByLabelText(/process profile/i), 'process-1');
+    await user.selectOptions(screen.getByLabelText(/filament profile/i), 'filament-1');
+
+    await user.click(screen.getByRole('button', { name: /save calibration setup/i }));
+
+    await waitFor(() => expect(mockUpdateCalibrationSetup).toHaveBeenCalled());
+    const [, request] = mockUpdateCalibrationSetup.mock.calls[0];
+    expect(request.machineProfileId).toBe('machine-1');
+    expect(request.processProfileId).toBe('process-1');
+    expect(request.filamentProfileId).toBe('filament-1');
+  });
+
+  it('preselects the currently bound profiles from the calibration context', async () => {
+    renderModal({
+      slicer: {
+        engine: 'OrcaSlicer',
+        distribution: 'upstream',
+        version: '2.0.0',
+        profileFormat: 'orca-json',
+        machineProfileId: 'machine-1',
+        processProfileId: 'process-1',
+        filamentProfileId: 'filament-1',
+      },
+    });
+
+    await waitFor(() => expect(screen.getByLabelText(/machine profile/i)).toHaveValue('machine-1'));
+    expect(screen.getByLabelText(/process profile/i)).toHaveValue('process-1');
+    expect(screen.getByLabelText(/filament profile/i)).toHaveValue('filament-1');
+  });
+
+  it('submits the clear sentinel rather than omitting an unbound profile', async () => {
+    // Control for the binding test: the endpoint treats an omitted id as "leave
+    // unchanged", so clearing a selection has to be an explicit all-zero Guid or
+    // the operator's unbind would be silently discarded.
+    const user = userEvent.setup();
+    renderModal({
+      slicer: {
+        engine: 'OrcaSlicer',
+        distribution: 'upstream',
+        version: '2.0.0',
+        profileFormat: 'orca-json',
+        machineProfileId: 'machine-1',
+        processProfileId: 'process-1',
+        filamentProfileId: 'filament-1',
+      },
+    });
+    await waitFor(() => expect(screen.getByLabelText(/machine profile/i)).toHaveValue('machine-1'));
+
+    await user.selectOptions(screen.getByLabelText(/machine profile/i), '');
+    await user.click(screen.getByRole('button', { name: /save calibration setup/i }));
+
+    await waitFor(() => expect(mockUpdateCalibrationSetup).toHaveBeenCalled());
+    const [, request] = mockUpdateCalibrationSetup.mock.calls[0];
+    expect(request.machineProfileId).toBe('00000000-0000-0000-0000-000000000000');
+    expect(request.processProfileId).toBe('process-1');
   });
 });
