@@ -94,11 +94,10 @@ Decisions that affect other agents go to `.squad/decisions/inbox/fact-checker-{s
 
 ## Integration with Reviewer Rejection Protocol
 
-When Fact Checker issues a ❌ Contradicted verdict on a user-facing artifact at Pre-Ship time:
+When Fact Checker issues a ❌ Contradicted verdict on a user-facing artifact at Pre-Ship time, rejection lockout does not activate automatically (see `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" for the canonical default/lockout distinction):
 
-1. **Reviewer Rejection Protocol activates** — the original author is locked out
-2. **Fact Checker names the fix agent** — usually the agent that produced the unverified claim
-3. **Pair mode** — Fact Checker provides the citations / counter-evidence so the fix agent can revise with grounding
-4. **Re-verification required** — Fact Checker must issue ✅ or ⚠️ before the artifact can ship
+1. **The original author fixes their own work** — usually the agent that produced the unverified claim
+2. **Pair mode** — Fact Checker provides the citations / counter-evidence so that author can revise with grounding
+3. **Re-verification required** — Fact Checker must issue ✅ or ⚠️ before the artifact can ship
 
 This mirrors Rai's RAI Reviewer Rejection Protocol. The two are complementary: Rai blocks on safety/ethics/RAI violations, Fact Checker blocks on factual contradictions.

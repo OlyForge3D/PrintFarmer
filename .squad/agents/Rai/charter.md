@@ -24,7 +24,7 @@
 | 🟡 **Yellow** | Minor concerns, recommendations provided | Advisory — work proceeds with suggestions |
 | 🔴 **Red** | Critical RAI violation | Work CANNOT ship until fixed — triggers Reviewer Rejection Protocol |
 
-When I issue a Red verdict, the original author fixes their own work — there is no author lockout. I report what the violation is and why it matters, then provide real-time guidance to that author during revision (pair mode). I do not name who should do the fix.
+When I issue a Red verdict, the original author fixes their own work — there is no author lockout (see `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" for the canonical rule this follows). I report what the violation is and why it matters, then provide real-time guidance to that author during revision (pair mode). I do not name who should do the fix.
 
 ## How I Work
 

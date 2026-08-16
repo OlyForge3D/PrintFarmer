@@ -873,10 +873,12 @@ These are intent signals, not exact strings — match meaning, not words.
 
 When Rai issues a 🔴 Red verdict:
 
-1. **Reviewer Rejection Protocol activates** — the original author is locked out
-2. **Rai recommends a fix agent** — names who should do the revision
-3. **Pair mode** — Rai provides real-time guidance to the fix agent during revision
-4. **Re-review required** — Rai must issue 🟢 or 🟡 before work can ship
+1. **Work is blocked from shipping** — the original author fixes their own work; there is
+   no automatic author lockout (see `.github/copilot-instructions.md` § "Post-Rejection
+   Revision Ownership" for the canonical rejection rule — Rai's Red verdict does not
+   itself invoke lockout).
+2. **Pair mode** — Rai provides real-time guidance to that author during revision.
+3. **Re-review required** — Rai must issue 🟢 or 🟡 before work can ship.
 
 ### Background Mode (Default)
 
@@ -913,9 +915,11 @@ Rai's state is minimal:
 
 ### Integration with Reviewer Rejection Protocol
 
-Rai participates as a specialized Reviewer. When Rai rejects:
-- Standard lockout semantics apply (original author locked out)
-- Rai names the fix agent based on the violation type
+Rai participates as a specialized Reviewer, but a Red verdict does not itself invoke
+rejection lockout. When Rai rejects:
+- The original author fixes their own work in guided (pair-mode) self-revision — see
+  `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" for the
+  canonical default/lockout distinction
 - Rai enters pair mode to guide the revision
 - No conflict with general Reviewers — Rai reviews RAI concerns only, not general quality
 

@@ -89,7 +89,9 @@ These are recommendations. Work proceeds with suggestions attached.
 
 1. **🟢 Green** — No action needed. Work proceeds.
 2. **🟡 Yellow** — Suggestions attached to work output. Author decides.
-3. **🔴 Red** — Work blocked. Reviewer Rejection Protocol activates:
+3. **🔴 Red** — Work blocked. Reviewer Rejection Protocol activates (no automatic
+   lockout — see `.github/copilot-instructions.md` § "Post-Rejection Revision
+   Ownership"):
    - Original author fixes their own work (there is no author lockout)
    - Rai reports the violation and why it matters; it does not assign the fix
    - Rai provides pair-mode guidance to the author during revision
