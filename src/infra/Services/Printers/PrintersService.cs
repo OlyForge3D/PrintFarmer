@@ -1131,15 +1131,42 @@ public class PrintersService(
     /// <remarks>
     /// #1656: this is now also reachable from the hot <c>GET /printers/{id}/version</c> read
     /// path (<see cref="PrinterVersionCache"/>), which re-reads the same tracked
-    /// <see cref="Printer"/> entity after this call returns to build its response. If
+    /// <see cref="Printer"/> entity after this call returns to build its response.
+    /// <para>
+    /// Concurrency (Vasquez, PR #1660 review round 2): <c>Printer</c> has no concurrency
+    /// token, and EF Core's <see cref="Microsoft.EntityFrameworkCore.DbSet{TEntity}.FindAsync"/>
+    /// (used by the repository) returns the already-tracked instance for a given key straight
+    /// from the change tracker's identity map without ever re-querying the database. That means
+    /// a caller's subsequent "re-read" of the same entity in the same scope is a no-op: it can
+    /// never observe a competing write committed by a different request/DbContext, even one that
+    /// committed a moment after this one. Two concurrent cache misses for the same printer can
+    /// therefore both pass the cadence guard below, both probe, and both call
     /// <see cref="Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork.SaveChangesAsync"/>
-    /// throws, the in-memory property mutations above have already been applied to that shared
-    /// tracked entity even though nothing was persisted — reporting them to a caller would be
-    /// exactly the split-brain #1656 exists to eliminate. On failure the original field values
-    /// are restored on the tracked entity first (so a caller sees pre-mutation state even if the
-    /// subsequent best-effort reload from the database also fails, e.g. because the DB is
+    /// successfully — but whichever commits first is then silently overwritten (last-write-wins,
+    /// no exception) by the other. Without an explicit reload, the "loser" would report/cache its
+    /// own now-superseded values for the full success TTL while the calibration gate (a fresh
+    /// <c>DbContext</c> per read) sees the winner's row — recreating the exact split-brain #1656
+    /// exists to eliminate.
+    /// </para>
+    /// <para>
+    /// To close that window, every return path below performs an explicit
+    /// <see cref="Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry.ReloadAsync"/> —a real
+    /// database round-trip that overwrites the tracked entity's current property values in
+    /// place— immediately before returning, whether this call declined to reprobe (cadence guard
+    /// not due) or completed its own write. The tracked <see cref="Printer"/> instance a caller
+    /// already holds a reference to (via the identity map) is therefore refreshed in place to
+    /// reflect whatever is actually persisted at that moment, not merely what this call itself
+    /// last wrote.
+    /// </para>
+    /// <para>
+    /// If <c>SaveChangesAsync</c> throws, the in-memory property mutations above have already
+    /// been applied to that shared tracked entity even though nothing was persisted — reporting
+    /// them to a caller would be exactly the same split-brain. On failure the original field
+    /// values are restored on the tracked entity first (so a caller sees pre-mutation state even
+    /// if the subsequent best-effort reload from the database also fails, e.g. because the DB is
     /// unreachable), then a reload is attempted to fully resync with whatever is actually
     /// persisted, before propagating the exception.
+    /// </para>
     /// </remarks>
     public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
     {
@@ -1157,6 +1184,11 @@ public class PrintersService(
         DateTime nowUtc = DateTime.UtcNow;
         if (!IsFirmwareReprobeDue(printer, nowUtc))
         {
+            // #1656: a concurrent request/scope may already have written a newer firmware
+            // identity for this printer between when it was first loaded in this scope and this
+            // cadence check. Reload before returning so this shared tracked entity reflects that
+            // newer row rather than whatever (possibly stale) values it was loaded with.
+            await ReloadTrackedPrinterBestEffortAsync(printer, ct);
             return false;
         }
 
@@ -1207,7 +1239,39 @@ public class PrintersService(
             throw;
         }
 
+        // #1656: our own SaveChangesAsync just succeeded, but with no concurrency token on
+        // Printer a concurrent writer in a different scope could have committed a still-newer
+        // firmware identity for this same printer a moment later (no exception either way —
+        // plain last-write-wins). Reload so the tracked entity — and any caller reading it via
+        // the identity map — reflects whatever is actually persisted right now rather than
+        // assuming our own write is necessarily the final word.
+        await ReloadTrackedPrinterBestEffortAsync(printer, ct);
+
         return true;
+    }
+
+    /// <summary>
+    /// Best-effort <see cref="Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry.ReloadAsync"/>
+    /// of a tracked <see cref="Printer"/> so it reflects the current database row in place. See
+    /// the concurrency remarks on <see cref="RefreshDetectedFirmwareIdentityAsync"/>. Swallows
+    /// failures deliberately: a failed reload here never leaves the tracked entity worse off than
+    /// it already was (callers already hold whatever values it had before this call), so it must
+    /// not turn an otherwise-successful read/write path into a hard failure.
+    /// </summary>
+    private async Task ReloadTrackedPrinterBestEffortAsync(Printer printer, CancellationToken ct)
+    {
+        try
+        {
+            await _db.Entry(printer).ReloadAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            // Best-effort only — see summary above.
+        }
     }
 
     /// <inheritdoc />

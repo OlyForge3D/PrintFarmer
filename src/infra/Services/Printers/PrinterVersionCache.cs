@@ -120,9 +120,20 @@ public sealed class PrinterVersionCache(
 
                 _ = await _printersService.RefreshDetectedFirmwareIdentityAsync(printer.Id, discovered, ct);
 
-                // Re-read so the response reflects exactly what was persisted (defense in
-                // depth: RefreshDetectedFirmwareIdentityAsync re-checks the cadence guard
-                // itself and may have declined to write if it lost a race).
+                // #1656 (Vasquez, PR #1660 review round 2): FindByIdAsync alone cannot be a
+                // genuine re-read here — this `printer` instance is already tracked in this
+                // scope's DbContext, and EF Core's identity map returns that same in-memory
+                // object for a repeat lookup by key without ever re-querying the database. If a
+                // concurrent request in a different scope committed a competing firmware write
+                // for this printer, this call would otherwise just hand back our own
+                // now-possibly-superseded values. The actual fix lives inside
+                // RefreshDetectedFirmwareIdentityAsync, which always performs an explicit
+                // database reload of this same tracked entity (on every return path, including
+                // "declined — lost the cadence race") before returning, so by the time we reach
+                // this line `printer` already reflects whatever is truly persisted. This call is
+                // kept only as defense in depth for the case where the printer row itself was
+                // deleted concurrently (FindByIdAsync then returns null and we fall back to the
+                // in-memory instance).
                 printer = await _printersService.FindByIdAsync(printer.Id, ct) ?? printer;
             }
         }

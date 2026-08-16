@@ -253,11 +253,85 @@ public sealed class PrintersServiceFirmwareRefreshTests
         printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
     }
 
-    private static AppDbContext CreateDbContext()
+    [Fact]
+    public async Task RefreshDetectedFirmwareIdentityAsync_DeclinedButConcurrentWriterAlreadyCommittedNewerIdentity_ReloadsInsteadOfServingStaleValue()
+    {
+        // Vasquez, PR #1660 review round 2 (blocking): "concurrent cache misses can both pass
+        // the reprobe guard, write different firmware identities, and then have the slower
+        // request return/cache its older tracked value instead of the row that actually won in
+        // the database." This reproduces exactly that shape for the "declined — lost the
+        // cadence race" branch: this scope's own `printer` was loaded (and its cadence decision
+        // made) against firmware data that a *different* scope has since superseded in the
+        // database. Without the fix, this scope's own tracked entity — which is what a caller
+        // like PrinterVersionCache reads afterward — would still show the stale value it was
+        // loaded with, even though the row it names no longer contains that value.
+        string dbName = $"PrintersServiceFirmwareRefreshTests_ConcurrentDeclined_{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
+
+        await using (AppDbContext seedDb = CreateDbContext(dbName))
+        {
+            Printer seed = CreatePrinter();
+            seed.Id = printerId;
+            seed.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+            seed.GcodeDialect = PrinterGcodeDialect.Klipper;
+            seed.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+            seed.FirmwareVersion = "v-request-scope-original";
+            seed.FirmwareDetectedAtUtc = DateTime.UtcNow.AddHours(-1); // within the default 6h cadence
+            seedDb.Printers.Add(seed);
+            await seedDb.SaveChangesAsync();
+        }
+
+        // This scope ("the slower request"): loads its own tracked copy of the printer. Its
+        // FirmwareDetectedAtUtc (1h old) is within the cadence window, so this scope will decide
+        // *not* to reprobe — matching the "lost the cadence race" branch of
+        // RefreshDetectedFirmwareIdentityAsync.
+        await using AppDbContext requestDb = CreateDbContext(dbName);
+        var requestUnitOfWork = new Mock<IUnitOfWork>();
+        requestUnitOfWork.Setup(work => work.Printers)
+            .Returns(new EfPrintersRepository(requestDb, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
+        requestUnitOfWork
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => requestDb.SaveChangesAsync(token));
+        PrintersService requestService = CreateService(requestDb, requestUnitOfWork.Object);
+
+        Printer trackedInRequestScope = (await requestUnitOfWork.Object.Printers.FindByIdAsync(printerId, CancellationToken.None))!;
+        trackedInRequestScope.FirmwareVersion.Should().Be("v-request-scope-original");
+
+        // "A different scope's request" wins the race: it committed a newer firmware identity
+        // for the same printer, using its own separate DbContext, *after* this scope already
+        // loaded (and formed its cadence decision on) the row above.
+        await using (AppDbContext concurrentWriterDb = CreateDbContext(dbName))
+        {
+            Printer fromConcurrentWriter = (await concurrentWriterDb.Printers.FindAsync(printerId))!;
+            fromConcurrentWriter.FirmwareVersion = "v-concurrent-winner";
+            fromConcurrentWriter.FirmwareDetectedAtUtc = DateTime.UtcNow.AddMinutes(-1);
+            await concurrentWriterDb.SaveChangesAsync();
+        }
+
+        DiscoveredPrinterDto discovered = new()
+        {
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            FirmwareVersion = "v-this-request-would-have-written",
+            FirmwareDetectedAtUtc = DateTime.UtcNow,
+        };
+
+        bool refreshed = await requestService.RefreshDetectedFirmwareIdentityAsync(printerId, discovered, CancellationToken.None);
+
+        refreshed.Should().BeFalse("this scope's own cadence decision (made before the concurrent write) declined to reprobe");
+        requestUnitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+
+        // The fix: this scope's tracked `printer` instance — the exact object a caller such as
+        // PrinterVersionCache holds a reference to — must be reloaded from the database before
+        // this method returns, so it reflects the concurrent winner's row rather than the
+        // now-superseded value it happened to be loaded with.
+        trackedInRequestScope.FirmwareVersion.Should().Be("v-concurrent-winner");
+    }
+
+    private static AppDbContext CreateDbContext(string? name = null)
     {
         DbContextOptions<AppDbContext> options =
             new DbContextOptionsBuilder<AppDbContext>()
-                .UseInMemoryDatabase($"PrintersServiceFirmwareRefreshTests_{Guid.NewGuid():N}")
+                .UseInMemoryDatabase(name ?? $"PrintersServiceFirmwareRefreshTests_{Guid.NewGuid():N}")
                 .Options;
         return new AppDbContext(options);
     }
