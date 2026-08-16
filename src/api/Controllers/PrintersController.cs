@@ -1444,6 +1444,16 @@ public class PrintersController(
                 if (existing != null)
                 {
                     _logger.LogInformation("Printer already registered: {ExistingName} ({ExistingId})", existing.Name, existing.Id);
+
+                    // Periodic firmware re-probe/refresh producer (#1618 / #1613 PR-5): reuses this
+                    // existing discovery scan tick rather than a new scheduler, throttled internally
+                    // to the configured Discovery:FirmwareReprobeIntervalHours cadence.
+                    bool firmwareRefreshed = await _printersService.RefreshDetectedFirmwareIdentityAsync(existing.Id, discovered, ct);
+                    if (firmwareRefreshed)
+                    {
+                        _logger.LogInformation("Refreshed firmware identity for printer {ExistingId} from periodic re-probe", existing.Id);
+                    }
+
                     PrinterDto existingDto = await _printersService.GetPrinterDtoAsync(existing.Id, ct);
                     if (existingDto != null)
                     {

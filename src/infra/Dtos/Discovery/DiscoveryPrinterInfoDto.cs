@@ -74,4 +74,29 @@ public class DiscoveryPrinterInfoDto
 
     /// <summary>Whether the printer is currently reachable</summary>
     public bool IsReachable { get; set; }
+
+    /// <summary>
+    /// Firmware family detected during the discovery probe (e.g. Klipper). Authoritative for
+    /// <see cref="GcodeDialect"/> — independent of, and may legitimately disagree with, a machine
+    /// profile's own gcode_flavor assertion (see #1618 / #1613 §4.5.1).
+    /// </summary>
+    public PrinterFirmwareFamily? FirmwareFamily { get; set; }
+
+    /// <summary>G-code dialect implied by the detected <see cref="FirmwareFamily"/>.</summary>
+    public PrinterGcodeDialect? GcodeDialect { get; set; }
+
+    /// <summary>How firmware identity was determined (live probe vs. operator-configured).</summary>
+    public FirmwareDetectionSource? FirmwareDetectionSource { get; set; }
+
+    /// <summary>Firmware/software version string extracted from the probe response, when available.</summary>
+    public string? FirmwareVersion { get; set; }
+
+    /// <summary>Detector/probe-logic version stamp (e.g. "moonraker-probe-v1"), not the firmware's own version.</summary>
+    public string? FirmwareDetectionVersion { get; set; }
+
+    /// <summary>Detection confidence normalized to 0.0-1.0, mapped from the probe's raw match score.</summary>
+    public decimal? FirmwareDetectionConfidence { get; set; }
+
+    /// <summary>UTC timestamp when firmware identity was last (re-)detected.</summary>
+    public DateTime? FirmwareDetectedAtUtc { get; set; }
 }

@@ -98,6 +98,9 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                         await DiscoverCameraUrlsAsync(ipAddress, endpoint.BackendPort, frontendPort.Value, client, timeoutMs, cancellationToken);
                 }
 
+                // Both /printer/info and /machine/system_info (Snapmaker U1) candidates are still
+                // Klipper/Moonraker; gcodeDialect follows from the detected firmware family, not
+                // from any machine profile's independent gcode_flavor assertion (#1618 / #1613 §4.5.1).
                 DiscoveredPrinterDto dto = new DiscoveredPrinterDto
                 {
                     IpAddress = ipAddress,
@@ -109,7 +112,14 @@ public class MoonrakerDiscoveryProbe : INetworkDiscoveryProbe
                     Manufacturer = u1Metadata?.Manufacturer,
                     Model = u1Metadata?.Model,
                     CameraStreamUrl = cameraStreamUrl,
-                    CameraSnapshotUrl = cameraSnapshotUrl
+                    CameraSnapshotUrl = cameraSnapshotUrl,
+                    FirmwareFamily = PrinterFirmwareFamily.Klipper,
+                    GcodeDialect = PrinterGcodeDialect.Klipper,
+                    FirmwareDetectionSource = FirmwareDetectionSource.Printer,
+                    FirmwareDetectionConfidence = MoonrakerOnboardingResolver.MapConfidenceScore(confidence),
+                    FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion,
+                    FirmwareDetectedAtUtc = DateTime.UtcNow,
+                    FirmwareVersion = MoonrakerOnboardingResolver.ExtractSoftwareVersion(content)
                 };
 
                 return new ProbeResult(dto, confidence, u1Metadata is not null ? "Snapmaker U1 Moonraker detected via /machine/system_info" : reason);

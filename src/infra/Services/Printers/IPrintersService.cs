@@ -143,6 +143,20 @@ public interface IPrintersService
     Task<Printer?> FindByServerUrlAsync(string serverUrl, CancellationToken ct);
 
     /// <summary>
+    /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
+    /// discovery data, subject to a re-probe cadence guard (<c>Discovery:FirmwareReprobeIntervalHours</c>,
+    /// default 6h) so writes are not made on every discovery scan tick. This is the periodic
+    /// re-probe/refresh producer for #1618 / #1613 PR-5: it feeds the existing calibration
+    /// firmware-staleness gate (<c>Calibration:FirmwareMetadataStaleAfterSeconds</c>) by reusing the
+    /// existing discovery/health-check polling cadence rather than a new scheduler.
+    /// </summary>
+    /// <param name="printerId">The already-registered printer's id.</param>
+    /// <param name="discovered">Freshly probed discovery data for that printer.</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <returns>True if the printer's firmware identity was updated; false if throttled, the printer was not found, or the probe carried no firmware detection.</returns>
+    Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct);
+
+    /// <summary>
     /// Retrieves all printers with current status information (online/offline, printer state).
     /// </summary>
     /// <param name="ct">Cancellation token</param>
