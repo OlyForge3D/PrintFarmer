@@ -231,4 +231,52 @@ describe('CalibrationSetupModal', () => {
       expect.objectContaining({ id: 'toolhead-1', offsetX: 12.5 }),
     ]);
   });
+
+  it('editing an unrelated field preserves unanswered tri-state flags as null, never coercing them to false', async () => {
+    // Regression test: isDirectDrive/nozzleIsHardened/supportsPressureAdvance/
+    // supportsFirmwareRetraction are bool? domain fields where null means
+    // "operator hasn't answered yet" — a state distinct from an explicit false.
+    // Editing an unrelated field (here, offsetX) must not silently coerce any of
+    // these to false in the save payload.
+    const user = userEvent.setup();
+    renderModal({ supportsPressureAdvance: null, supportsFirmwareRetraction: null });
+    await screen.findByText(/Toolhead metrology — Extruder/);
+
+    const offsetXInput = screen.getByLabelText(/offset x/i);
+    await user.clear(offsetXInput);
+    await user.type(offsetXInput, '3');
+
+    await user.click(screen.getByRole('button', { name: /save calibration setup/i }));
+
+    await waitFor(() => expect(mockUpdateCalibrationSetup).toHaveBeenCalled());
+    const [, request] = mockUpdateCalibrationSetup.mock.calls[0];
+    expect(request.supportsPressureAdvance).toBeNull();
+    expect(request.supportsFirmwareRetraction).toBeNull();
+    expect(request.toolheads).toEqual([
+      expect.objectContaining({
+        id: 'toolhead-1',
+        offsetX: 3,
+        isDirectDrive: null,
+        nozzleIsHardened: null,
+      }),
+    ]);
+  });
+
+  it('lets an operator explicitly set a tri-state capability flag to Yes or No, distinct from leaving it unknown', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await screen.findByText(/Toolhead metrology — Extruder/);
+
+    await user.selectOptions(screen.getByLabelText(/supports pressure advance/i), 'true');
+    await user.selectOptions(screen.getByLabelText(/is direct drive/i), 'false');
+
+    await user.click(screen.getByRole('button', { name: /save calibration setup/i }));
+
+    await waitFor(() => expect(mockUpdateCalibrationSetup).toHaveBeenCalled());
+    const [, request] = mockUpdateCalibrationSetup.mock.calls[0];
+    expect(request.supportsPressureAdvance).toBe(true);
+    expect(request.toolheads).toEqual([
+      expect.objectContaining({ id: 'toolhead-1', isDirectDrive: false }),
+    ]);
+  });
 });

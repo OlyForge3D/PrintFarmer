@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.PrinterCalibration;
+﻿using System.Text.RegularExpressions;
+
+namespace Farm.Infrastructure.PrinterCalibration;
 
 /// <summary>
 /// Per-toolhead manual metrology fields that are never derivable from a resolved
@@ -68,3 +70,77 @@ public sealed record CalibrationSetupResultDto(
     DateTime? CalibrationHardwareVerifiedAtUtc,
     CalibrationFirmwareIdentityDto Firmware,
     IReadOnlyList<CalibrationToolheadSetupResultDto> Toolheads);
+
+/// <summary>
+/// Bounds/format validation for the manual toolhead metrology fields exposed by the
+/// calibration-setup endpoint. These values feed calibration eligibility and,
+/// downstream, slicer/G-code generation, so physically nonsensical input (e.g. a
+/// nozzle offset of 1e300mm or a negative max volumetric flow) must be rejected with
+/// 400 rather than silently persisted — a caller only needs the distinct
+/// <c>calibration:update</c> permission (not <c>printers:admin</c>) to reach this
+/// endpoint.
+/// </summary>
+public static class CalibrationSetupValidation
+{
+    /// <summary>Generous but finite bound on nozzle offsets, in millimeters.</summary>
+    private const double MaxOffsetMagnitudeMm = 100;
+
+    /// <summary>Generous upper bound on max volumetric flow, in mm^3/s.</summary>
+    private const double MaxVolumetricFlowCeiling = 200;
+
+    private static readonly Regex GearRatioPattern =
+        new(@"^\d+(\.\d+)?\s*:\s*\d+(\.\d+)?$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Validates one toolhead's metrology fields, returning a problem payload
+    /// (suitable for <c>BadRequest</c>) on the first violation, or <see langword="null"/>
+    /// if every present field is within bounds.
+    /// </summary>
+    public static object? ValidateToolheadMetrology(CalibrationToolheadSetupDto toolhead)
+    {
+        foreach ((string field, double? value) in new (string, double?)[]
+        {
+            ("offsetX", toolhead.OffsetX),
+            ("offsetY", toolhead.OffsetY),
+            ("offsetZ", toolhead.OffsetZ),
+        })
+        {
+            if (value is { } offset && (!double.IsFinite(offset) || Math.Abs(offset) > MaxOffsetMagnitudeMm))
+            {
+                return new
+                {
+                    error = "invalid_toolhead_metrology",
+                    toolheadId = toolhead.Id,
+                    field,
+                    message = $"{field} must be a finite value within +/-{MaxOffsetMagnitudeMm}mm.",
+                };
+            }
+        }
+
+        if (toolhead.MaxVolumetricFlow is { } flow &&
+            (!double.IsFinite(flow) || flow <= 0 || flow > MaxVolumetricFlowCeiling))
+        {
+            return new
+            {
+                error = "invalid_toolhead_metrology",
+                toolheadId = toolhead.Id,
+                field = "maxVolumetricFlow",
+                message = $"maxVolumetricFlow must be greater than 0 and at most {MaxVolumetricFlowCeiling}mm^3/s.",
+            };
+        }
+
+        if (!string.IsNullOrWhiteSpace(toolhead.ExtruderGearRatio) &&
+            !GearRatioPattern.IsMatch(toolhead.ExtruderGearRatio))
+        {
+            return new
+            {
+                error = "invalid_toolhead_metrology",
+                toolheadId = toolhead.Id,
+                field = "extruderGearRatio",
+                message = "extruderGearRatio must be formatted as 'numerator:denominator' (e.g. '3:1').",
+            };
+        }
+
+        return null;
+    }
+}

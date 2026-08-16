@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Modal } from '@/common/components/modals/Modal';
-import { Button, Alert, Checkbox, Input, Select, CollapsibleSection } from '@/common/components/ui';
+import { Button, Alert, Input, Select, CollapsibleSection } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import type {
@@ -29,11 +29,27 @@ interface ToolheadFormState {
   offsetY: string;
   offsetZ: string;
   driveType: string;
-  isDirectDrive: boolean;
+  isDirectDrive: boolean | null;
   extruderGearRatio: string;
   maxVolumetricFlow: string;
   nozzleMaterial: string;
-  nozzleIsHardened: boolean;
+  nozzleIsHardened: boolean | null;
+}
+
+/** Renders a tri-state (unknown/yes/no) selector for a nullable boolean fact,
+ * so leaving a field untouched never coerces "unknown" into an explicit
+ * `false` on save (these flags are `bool?` on the backend, where `null` means
+ * "not yet answered" and is distinct from a confirmed `false`). */
+function triStateToOption(value: boolean | null): string {
+  if (value === true) return 'true';
+  if (value === false) return 'false';
+  return '';
+}
+
+function optionToTriState(value: string): boolean | null {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
 }
 
 interface RegionFormState {
@@ -50,11 +66,11 @@ function toolheadFromContext(t: CalibrationContextDto['toolheads'][number]): Too
     offsetY: t.offset.y != null ? String(t.offset.y) : '',
     offsetZ: t.offset.z != null ? String(t.offset.z) : '',
     driveType: t.driveType ?? '',
-    isDirectDrive: t.isDirectDrive ?? false,
+    isDirectDrive: t.isDirectDrive ?? null,
     extruderGearRatio: t.extruderGearRatio ?? '',
     maxVolumetricFlow: t.maxVolumetricFlow != null ? String(t.maxVolumetricFlow) : '',
     nozzleMaterial: t.nozzleMaterial ?? '',
-    nozzleIsHardened: t.nozzleIsHardened ?? false,
+    nozzleIsHardened: t.nozzleIsHardened ?? null,
   };
 }
 
@@ -91,8 +107,8 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
   });
 
   const [activeToolheadIndex, setActiveToolheadIndex] = useState<number | null>(null);
-  const [supportsPressureAdvance, setSupportsPressureAdvance] = useState(false);
-  const [supportsFirmwareRetraction, setSupportsFirmwareRetraction] = useState(false);
+  const [supportsPressureAdvance, setSupportsPressureAdvance] = useState<boolean | null>(null);
+  const [supportsFirmwareRetraction, setSupportsFirmwareRetraction] = useState<boolean | null>(null);
   const [hardwareVerifiedAtUtc, setHardwareVerifiedAtUtc] = useState<string | null>(null);
   const [regions, setRegions] = useState<RegionFormState[]>([]);
   const [toolheads, setToolheads] = useState<ToolheadFormState[]>([]);
@@ -108,8 +124,8 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
     const data = contextQuery.data;
     setSyncedData(data);
     setActiveToolheadIndex(data.activeToolheadIndex ?? null);
-    setSupportsPressureAdvance(data.supportsPressureAdvance ?? false);
-    setSupportsFirmwareRetraction(data.supportsFirmwareRetraction ?? false);
+    setSupportsPressureAdvance(data.supportsPressureAdvance ?? null);
+    setSupportsFirmwareRetraction(data.supportsFirmwareRetraction ?? null);
     setHardwareVerifiedAtUtc(data.calibrationHardwareVerifiedAtUtc ?? null);
     setRegions(regionsFromContext(data.excludedRegions ?? []));
     setToolheads((data.toolheads ?? []).map(toolheadFromContext));
@@ -288,16 +304,30 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
 
           <CollapsibleSection title="Capability flags">
             <div className="flex flex-col gap-2">
-              <Checkbox
-                label="Supports pressure advance"
-                checked={supportsPressureAdvance}
-                onChange={(e) => setSupportsPressureAdvance(e.target.checked)}
-              />
-              <Checkbox
-                label="Supports firmware retraction"
-                checked={supportsFirmwareRetraction}
-                onChange={(e) => setSupportsFirmwareRetraction(e.target.checked)}
-              />
+              <label className="flex flex-col gap-1 text-xs">
+                Supports pressure advance
+                <Select
+                  aria-label="Supports pressure advance"
+                  value={triStateToOption(supportsPressureAdvance)}
+                  onChange={(e) => setSupportsPressureAdvance(optionToTriState(e.target.value))}
+                >
+                  <option value="">Unknown</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </Select>
+              </label>
+              <label className="flex flex-col gap-1 text-xs">
+                Supports firmware retraction
+                <Select
+                  aria-label="Supports firmware retraction"
+                  value={triStateToOption(supportsFirmwareRetraction)}
+                  onChange={(e) => setSupportsFirmwareRetraction(optionToTriState(e.target.value))}
+                >
+                  <option value="">Unknown</option>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </Select>
+              </label>
             </div>
           </CollapsibleSection>
 
@@ -415,12 +445,17 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
                     <option value="bowden">Bowden</option>
                   </Select>
                 </label>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={toolhead.isDirectDrive}
-                    onChange={(e) => updateToolhead(index, { isDirectDrive: e.target.checked })}
-                  />
+                <label className="flex flex-col gap-1 text-xs">
                   Is direct drive
+                  <Select
+                    aria-label={`${toolhead.name} is direct drive`}
+                    value={triStateToOption(toolhead.isDirectDrive)}
+                    onChange={(e) => updateToolhead(index, { isDirectDrive: optionToTriState(e.target.value) })}
+                  >
+                    <option value="">Unknown</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </Select>
                 </label>
                 <label className="flex flex-col gap-1 text-xs">
                   Extruder gear ratio
@@ -445,12 +480,17 @@ export function CalibrationSetupModal({ isOpen, onClose, printerId, printerName,
                     onChange={(e) => updateToolhead(index, { nozzleMaterial: e.target.value })}
                   />
                 </label>
-                <label className="flex items-center gap-2 text-xs">
-                  <Checkbox
-                    checked={toolhead.nozzleIsHardened}
-                    onChange={(e) => updateToolhead(index, { nozzleIsHardened: e.target.checked })}
-                  />
+                <label className="flex flex-col gap-1 text-xs">
                   Nozzle is hardened
+                  <Select
+                    aria-label={`${toolhead.name} nozzle is hardened`}
+                    value={triStateToOption(toolhead.nozzleIsHardened)}
+                    onChange={(e) => updateToolhead(index, { nozzleIsHardened: optionToTriState(e.target.value) })}
+                  >
+                    <option value="">Unknown</option>
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                  </Select>
                 </label>
               </div>
             </CollapsibleSection>

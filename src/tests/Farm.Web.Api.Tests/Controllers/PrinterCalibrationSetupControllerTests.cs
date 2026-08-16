@@ -293,6 +293,113 @@ public sealed class PrinterCalibrationSetupControllerTests : IAsyncLifetime
         _ = afterResponse.StatusCode.Should().Be(HttpStatusCode.OK, afterBody);
         using JsonDocument afterDocument = JsonDocument.Parse(afterBody);
         _ = afterDocument.RootElement.GetProperty("eligible").GetBoolean().Should().BeTrue();
+
+        // The read-side calibration-context DTO must echo the sign-off timestamp,
+        // not just the write endpoint's own response — otherwise a UI that reloads
+        // the context (e.g. after cache invalidation) would show "not verified"
+        // again despite the successful write.
+        _ = afterDocument.RootElement.TryGetProperty(
+            "calibrationHardwareVerifiedAtUtc",
+            out JsonElement verifiedAtElement).Should().BeTrue();
+        _ = verifiedAtElement.ValueKind.Should().NotBe(JsonValueKind.Null);
+    }
+
+    [Theory]
+    [InlineData("offsetX", "150")]
+    [InlineData("offsetY", "-150")]
+    [InlineData("offsetZ", "1e300")]
+    public async Task UpdateCalibrationSetupAsync_WithOutOfRangeOffset_ReturnsBadRequest(
+        string field,
+        string value)
+    {
+        Guid printerId = await SeedPrinterAsync();
+        Guid toolheadId = await GetToolheadIdAsync(printerId);
+        using HttpClient client = CreateCalibrationUpdateClient();
+        string payload = $$"""
+            {"toolheads":[{"id":"{{toolheadId}}","{{field}}":{{value}}}]}
+            """;
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        _ = document.RootElement.GetProperty("error").GetString().Should().Be("invalid_toolhead_metrology");
+    }
+
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-5")]
+    [InlineData("999")]
+    public async Task UpdateCalibrationSetupAsync_WithOutOfRangeMaxVolumetricFlow_ReturnsBadRequest(string value)
+    {
+        Guid printerId = await SeedPrinterAsync();
+        Guid toolheadId = await GetToolheadIdAsync(printerId);
+        using HttpClient client = CreateCalibrationUpdateClient();
+        string payload = $$"""
+            {"toolheads":[{"id":"{{toolheadId}}","maxVolumetricFlow":{{value}}}]}
+            """;
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        _ = document.RootElement.GetProperty("error").GetString().Should().Be("invalid_toolhead_metrology");
+    }
+
+    [Theory]
+    [InlineData("garbage")]
+    [InlineData("3-1")]
+    [InlineData(":")]
+    public async Task UpdateCalibrationSetupAsync_WithInvalidGearRatioFormat_ReturnsBadRequest(string value)
+    {
+        Guid printerId = await SeedPrinterAsync();
+        Guid toolheadId = await GetToolheadIdAsync(printerId);
+        using HttpClient client = CreateCalibrationUpdateClient();
+        string payload = $$"""
+            {"toolheads":[{"id":"{{toolheadId}}","extruderGearRatio":"{{value}}"}]}
+            """;
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        _ = document.RootElement.GetProperty("error").GetString().Should().Be("invalid_toolhead_metrology");
+    }
+
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_WithValidGearRatioFormat_Succeeds()
+    {
+        Guid printerId = await SeedPrinterAsync();
+        Guid toolheadId = await GetToolheadIdAsync(printerId);
+        using HttpClient client = CreateCalibrationUpdateClient();
+        string payload = $$"""
+            {"toolheads":[{"id":"{{toolheadId}}","extruderGearRatio":"3.5:1"}]}
+            """;
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(client, printerId, payload);
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+    }
+
+    [Fact]
+    public async Task UpdateCalibrationSetupAsync_WithUnknownActiveToolheadIndex_ReturnsBadRequest()
+    {
+        Guid printerId = await SeedPrinterAsync();
+        using HttpClient client = CreateCalibrationUpdateClient();
+
+        HttpResponseMessage response = await PutCalibrationSetupAsync(
+            client,
+            printerId,
+            """{"activeToolheadIndex":99}""");
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.BadRequest, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        _ = document.RootElement.GetProperty("error").GetString().Should().Be("active_toolhead_index_not_found");
     }
 
     [Fact]

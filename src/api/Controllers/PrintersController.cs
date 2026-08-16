@@ -5286,6 +5286,24 @@ public class PrintersController(
                     toolheadIds = unknownIds,
                 });
             }
+
+            foreach (CalibrationToolheadSetupDto toolheadRequest in request.Toolheads)
+            {
+                if (CalibrationSetupValidation.ValidateToolheadMetrology(toolheadRequest) is { } toolheadError)
+                {
+                    return BadRequest(toolheadError);
+                }
+            }
+        }
+
+        if (request.ActiveToolheadIndex is { } activeToolheadIndex &&
+            (printer.Toolheads is null || printer.Toolheads.All(t => t.Index != activeToolheadIndex)))
+        {
+            return BadRequest(new
+            {
+                error = "active_toolhead_index_not_found",
+                activeToolheadIndex,
+            });
         }
 
         UpdatePrinterDto printerUpdate = new(
