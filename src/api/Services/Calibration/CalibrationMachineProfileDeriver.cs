@@ -117,19 +117,26 @@ internal static class CalibrationMachineProfileDeriver
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
         }
 
-        List<(double X, double Y)> points = [];
-        foreach (string pointString in pointStrings)
-        {
-            string[] parts = pointString.Split('x', 'X');
-            if (parts.Length == 2 &&
-                double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double x) &&
-                double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double y))
-            {
-                points.Add((x, y));
-            }
-        }
+        List<(double X, double Y)> points = pointStrings
+            .Select(TryParsePoint)
+            .Where(point => point.HasValue)
+            .Select(point => point!.Value)
+            .ToList();
 
         return points.Count > 0 ? points : null;
+    }
+
+    private static (double X, double Y)? TryParsePoint(string pointString)
+    {
+        string[] parts = pointString.Split('x', 'X');
+        if (parts.Length == 2 &&
+            double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out double x) &&
+            double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double y))
+        {
+            return (x, y);
+        }
+
+        return null;
     }
 
     private static NozzleType? ParseNozzleType(string? rawValue)
