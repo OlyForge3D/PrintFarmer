@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { Badge, Button, Tooltip } from '@/common/components/ui';
@@ -240,12 +240,7 @@ export function MaterialLoadout({
   });
   const { data: coverage } = usePrinterCoverageFromFleet(printerId);
   const effectiveRowVersion = reviewedRowVersion ?? revisionSource?.rowVersion ?? null;
-
-  useEffect(() => {
-    if (selectedKey && !lockedRevision && effectiveRowVersion) {
-      setLockedRevision(effectiveRowVersion);
-    }
-  }, [effectiveRowVersion, lockedRevision, selectedKey]);
+  const activeRevision = lockedRevision ?? effectiveRowVersion;
 
   const loadout = useMemo(
     () => resolveMaterialLoadout(mmuStatus, toolheads),
@@ -294,13 +289,10 @@ export function MaterialLoadout({
   // persisted `Toolhead.Index` is a guess and could write a G1 assignment to
   // the physical hotend at index 0 (#1585 blocker 2).
   //
-  // Read the *locked* revision here, not the live `reviewedRowVersion` prop:
-  // both of these gate whether a click can actually succeed, and
-  // requireRevision() below checks the locked value too. If this read the live
-  // prop instead, the button could show enabled a moment before a click would
-  // still fail against the older locked revision.
-  const canMutate = !!lockedRevision && hasResolvedTopology;
-  const blockedReason = !lockedRevision
+  // Preserve the revision present when the drawer opens. If the card omitted
+  // one, use the just-fetched detail revision once it becomes available.
+  const canMutate = !!activeRevision && hasResolvedTopology;
+  const blockedReason = !activeRevision
     ? 'Printer revision unavailable — refresh to assign spools'
     : !hasResolvedTopology
       ? 'Materials topology not yet loaded — refresh to assign spools'
@@ -323,7 +315,7 @@ export function MaterialLoadout({
   };
 
   const requireRevision = (): string | null => {
-    if (!lockedRevision) {
+    if (!activeRevision) {
       toast.error('Printer revision unavailable. Refresh and review again.');
       return null;
     }
@@ -331,7 +323,7 @@ export function MaterialLoadout({
       toast.error('Materials topology not yet loaded. Refresh and review again.');
       return null;
     }
-    return lockedRevision;
+    return activeRevision;
   };
 
   const handleAssign = async (spoolId: number) => {
