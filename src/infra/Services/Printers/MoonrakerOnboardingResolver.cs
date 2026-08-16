@@ -56,7 +56,7 @@ public static class MoonrakerOnboardingResolver
                     ? versionElem.GetString()
                     : null;
         }
-        catch
+        catch (JsonException)
         {
             return null;
         }
