@@ -7,14 +7,13 @@ import 'driver.js/dist/driver.css'
 import App from './App.tsx'
 import { SpoolmanProvider } from './contexts/SpoolmanContext'
 
-// Service worker control: allow disabling & forced unregister via build-time flag
-// Set VITE_DISABLE_SW=true to completely unregister and clear caches.
-// Otherwise (in production) we register sw.js for PWA/offline support.
-// Dev-local safety: always unregister service workers and clear caches when running on localhost or in dev mode.
-// This prevents stale cached assets from being served during active development.
+// Service worker control: set VITE_DISABLE_SW=true to unregister it and clear
+// caches. Development builds also unregister it so local assets cannot become
+// stale during active development.
 if ('serviceWorker' in navigator) {
-  const isLocalDev = location.hostname === 'localhost' || location.hostname === '127.0.0.1' || import.meta.env.DEV;
-  if (isLocalDev) {
+  const disableServiceWorker = import.meta.env.VITE_DISABLE_SW === 'true';
+  const isLocalDev = import.meta.env.DEV;
+  if (disableServiceWorker || isLocalDev) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.getRegistrations()
         .then(regs => Promise.all(regs.map(r => r.unregister())))
@@ -30,8 +29,8 @@ if ('serviceWorker' in navigator) {
     });
   }
 }
-// Production: register PWA service worker
-if ('serviceWorker' in navigator && import.meta.env.PROD) {
+// Production: register PWA service worker unless explicitly disabled.
+if ('serviceWorker' in navigator && import.meta.env.PROD && import.meta.env.VITE_DISABLE_SW !== 'true') {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {/* ignore */})
   })

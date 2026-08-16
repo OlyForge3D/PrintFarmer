@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import react from '@vitejs/plugin-react';
 import tsconfigPaths from 'vite-tsconfig-paths';
 import { execSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 
 const buildTime = new Date().toISOString();
 
@@ -32,6 +32,11 @@ function emitVersionJson() {
           resolve(outDir, 'version.json'),
           JSON.stringify({ service: 'frontend', commit: gitHash, buildTime }, null, 2),
         );
+        const serviceWorkerPath = resolve(outDir, 'sw.js');
+        const serviceWorker = readFileSync(serviceWorkerPath, 'utf8')
+          .replaceAll('__PRINTFARMER_BUILD_TIME__', buildTime)
+          .replaceAll('__PRINTFARMER_GIT_HASH__', gitHash);
+        writeFileSync(serviceWorkerPath, serviceWorker);
       } catch { /* non-fatal: version.json is best-effort */ }
     },
   };
