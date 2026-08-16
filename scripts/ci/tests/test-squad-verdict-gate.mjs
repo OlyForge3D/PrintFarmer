@@ -3,6 +3,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
 import {
   canAutoScope,
   classifyChangeScope,
@@ -824,42 +825,66 @@ test('the scoping workflow wiring stays intact', async () => {
   }
 
   // GITHUB_TOKEN can be granted label-write capability in several YAML shapes,
-  // all of which GitHub Actions accepts. The earlier line-anchored regex only
-  // recognised block style and was defeated by flow style (Hicks' finding: a
-  // `permissions: { issues: write }` labeller passed the whole gate). We match
-  // every form below. Over-matching is deliberately the safe direction: a false
-  // positive merely forces a conscious allowlist entry, whereas a false negative
-  // silently admits a label writer.
+  // all of which GitHub Actions accepts and all of which a regex over the raw
+  // text kept missing — three rounds running, each defeat a piece of valid YAML:
   //
-  //   permissions: write-all               scalar shorthand -> grants everything
-  //   permissions:                         block mapping
-  //     issues: write
   //   permissions: { issues: write }       flow mapping (grant not on its own line)
-  //   permissions: {issues: write, ...}    flow mapping nested under a job
+  //   permissions:                         block mapping with a quoted inner
+  //     'issues': "write"                   key and value
+  //   "permissions": {"issues": "write"}   quoted OUTER key, defeating both the
+  //                                         capability regex and the /^permissions:/
+  //                                         "inherits default" filter at once
   //
-  // plus quoted keys/values ('issues': "write") and trailing "# comments".
-  const grantsLabelWrite = (body) => {
-    // Optional, balanced quotes around the key and the value (\1 / \2), so
-    // `issues`, 'issues' and "issues" (and likewise for write) all match.
-    const key = `(['"]?)(?:issues|pull-requests)\\1`;
-    const write = `(['"]?)write\\2`;
-
-    // Scalar shorthand: `permissions: write-all` on the permissions line itself,
-    // optionally quoted, optionally trailed by a comment.
-    if (/^\s*permissions:\s*(['"]?)write-all\1\s*(?:#.*)?$/mi.test(body)) return true;
-
-    // Block style: the grant sits on its own line at any indentation (workflow-
-    // or job-level). `\s*` before `:` tolerates `issues : write`; the trailing
-    // `(?:#.*)?` tolerates `issues: write  # needed for labels`.
-    const blockGrant = new RegExp(`^\\s*${key}\\s*:\\s*${write}\\s*(?:#.*)?$`, 'mi');
-    if (blockGrant.test(body)) return true;
-
-    // Flow style: `permissions: { ... issues: write ... }`. The grant is NOT on
-    // its own line, so the block regex never sees it; scan inside the braces.
-    // `[^}]*` spans the rest of the flow mapping (including any newlines).
-    const flowGrant = new RegExp(`permissions:\\s*\\{[^}]*${key}\\s*:\\s*${write}[^}]*\\}`, 'mi');
-    return flowGrant.test(body);
+  // Block vs flow, quoted vs unquoted, outer-quoted vs bare — these are surface
+  // syntax that all parse to the SAME structure. So DO NOT match text here: parse
+  // the workflow with a real YAML parser and inspect the resulting object. Every
+  // regex attempt was correct-but-incomplete, and an incomplete capability check
+  // is worse than none because a miss silently admits a label writer. Parsing
+  // makes the whole "valid YAML the regex didn't anticipate" class disappear —
+  // if you are tempted to "simplify" this back to a regex, re-read this note.
+  const parseWorkflow = (name) => {
+    try {
+      return yaml.load(bodies.get(name)) ?? {};
+    } catch (error) {
+      // Fail loudly and closed. An unparseable workflow must never be silently
+      // treated as non-capable; it must break this test instead.
+      assert.fail(`workflow ${name} is not parseable YAML: ${error.message}`);
+    }
   };
+  const docs = new Map(names.map((n) => [n, parseWorkflow(n)]));
+
+  // Every permissions mapping declared in a file: the top-level one plus each
+  // job's own `jobs.<id>.permissions`. A grant at either level is a capability.
+  const permissionBlocks = (doc) => {
+    const blocks = [];
+    if (doc && typeof doc === 'object' && 'permissions' in doc) {
+      blocks.push(doc.permissions);
+    }
+    const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
+    if (jobs && typeof jobs === 'object') {
+      for (const job of Object.values(jobs)) {
+        if (job && typeof job === 'object' && 'permissions' in job) {
+          blocks.push(job.permissions);
+        }
+      }
+    }
+    return blocks;
+  };
+
+  // A single permissions value grants label write if it is the `write-all`
+  // scalar shorthand, or a mapping granting `issues: write` or
+  // `pull-requests: write`. `permissions: {}` parses to an empty object and
+  // grants nothing (a reviewer probe pins this); `read-all`, `read`, `none`,
+  // and an absent block likewise grant nothing.
+  const blockGrantsLabelWrite = (permissions) => {
+    if (permissions === 'write-all') return true;
+    if (typeof permissions !== 'object' || permissions === null) return false;
+    return permissions.issues === 'write' ||
+      permissions['pull-requests'] === 'write';
+  };
+
+  const grantsLabelWrite = (name) =>
+    permissionBlocks(docs.get(name)).some(blockGrantsLabelWrite);
 
   // Workflows permitted to hold label-write capability. Adding an entry is a
   // deliberate act: any of these could apply the bare scope label and silently
@@ -875,7 +900,7 @@ test('the scoping workflow wiring stays intact', async () => {
     'sync-squad-labels.yml',
   ]);
 
-  const capable = names.filter((n) => grantsLabelWrite(bodies.get(n)));
+  const capable = names.filter((n) => grantsLabelWrite(n));
   assert.deepEqual(
     capable.filter((n) => !permittedLabelWriters.has(n)), [],
     'a workflow not on the allowlist grants itself issues/pull-requests write and could ' +
@@ -894,6 +919,12 @@ test('the scoping workflow wiring stays intact', async () => {
   // explicit `permissions:` block — an added block might grant label write, and a
   // removed one drops the file back onto the (unknown) repository default.
   //
+  // "Has no explicit permissions block" is decided from the PARSED object, not
+  // from text: the earlier `/^\s*permissions:/m` filter shared the quoted-outer-
+  // key blind spot (`"permissions": {...}`), so a file could grant label write
+  // yet still be counted as inheriting the default. `permissionBlocks(...)`
+  // reflects the real structure at both the top level and every job.
+  //
   // What this does NOT detect: the value of the repository-wide
   // `default_workflow_permissions` API setting. This test reads workflow files
   // only; it cannot see that setting, so flipping it from restricted to
@@ -901,7 +932,7 @@ test('the scoping workflow wiring stays intact', async () => {
   // changing any file here and WITHOUT failing this test. That flip is guarded
   // elsewhere (org/repo settings), not by this assertion.
   const inheritsDefault = names
-    .filter((n) => !/^\s*permissions:/m.test(bodies.get(n)))
+    .filter((n) => permissionBlocks(docs.get(n)).length === 0)
     .sort();
   assert.deepEqual(
     inheritsDefault,
