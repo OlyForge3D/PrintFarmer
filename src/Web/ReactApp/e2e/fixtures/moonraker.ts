@@ -290,12 +290,44 @@ export async function expectPrinterStatus(card: Locator, label: string): Promise
   await expect(card.getByText(label, { exact: true }).first()).toBeVisible({ timeout: 15_000 });
 }
 
-/** Open a printer's detail sidebar and return its `complementary` landmark locator. */
-export async function openPrinterDetails(page: Page, name: string): Promise<Locator> {
+/** Return the detailed card that owns the printer's inline detail controls. */
+export async function getInlinePrinterDetails(page: Page, name: string): Promise<Locator> {
   const card = getPrinterCardByName(page, name);
   await expect(card).toBeVisible({ timeout: 10_000 });
   await dismissTourIfVisible(page);
+  await expect(card.getByRole('button', { name: 'Open details sidebar' })).toHaveCount(0);
+  return card;
+}
+
+/** Select a printer view mode and wait for the page to render it. */
+export async function setPrinterViewMode(
+  page: Page,
+  mode: 'detailed' | 'collapsed' | 'table'
+): Promise<void> {
+  await page.evaluate((viewMode) => localStorage.setItem('printerViewMode', viewMode), mode);
+  await page.reload();
+  await page.waitForLoadState('domcontentloaded');
+  await dismissTourIfVisible(page);
+}
+
+/** Open a printer's detail sidebar from collapsed-card mode. */
+export async function openCollapsedPrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
+  await setPrinterViewMode(page, 'collapsed');
+  const card = getPrinterCardByName(page, name);
+  await expect(card).toBeVisible({ timeout: 10_000 });
   await card.getByRole('button', { name: 'Open details sidebar' }).click();
+
+  const sidebar = page.getByRole('complementary', { name: `${name} details` });
+  await expect(sidebar).toBeVisible({ timeout: 10_000 });
+  return sidebar;
+}
+
+/** Open a printer's detail sidebar from table mode. */
+export async function openTablePrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
+  await setPrinterViewMode(page, 'table');
+  const row = page.getByRole('row').filter({ hasText: name }).first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.getByRole('button', { name: `Open details for ${name}` }).click();
 
   const sidebar = page.getByRole('complementary', { name: `${name} details` });
   await expect(sidebar).toBeVisible({ timeout: 10_000 });
