@@ -159,13 +159,14 @@ bare `squad` label. Everything else — Dependabot bumps, hand-written maintaine
 fork contributions — reports `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad'
 label)`, a green, non-blocking status.
 
-**Squad agents MUST apply the `squad` label when opening a PR** (`gh pr create --label
-squad`). `.github/workflows/squad-review-verdict.yml` also applies it automatically, in
-the same run that evaluates the gate, when the PR author resolves to a roster member —
-but identity resolution fails on roughly a third of PRs, so do not rely on it. Automatic
-labelling never applies to a fork, and never trusts a `Squad-Author:` line naming someone
-outside the roster: both the PR body and the branch name are attacker-controlled on a
-fork, so neither may move a PR into scope. Applying the label by hand needs write access.
+**Squad agents MUST apply the `squad` label when opening a PR.** `.github/workflows/squad-review-verdict.yml`
+also applies it automatically, in the same run that evaluates the gate, when the PR
+author resolves to a roster member — but identity resolution fails on roughly a third of
+PRs, so do not rely on it. Automatic labelling never applies to a fork, and never trusts a
+`Squad-Author:` line naming someone outside the roster: both the PR body and the branch
+name are attacker-controlled on a fork, so neither may move a PR into scope. Applying the
+label by hand needs write access. See § "PR creation: tool preference" below for exactly
+how to apply it depending on which creation path is used.
 
 An administrator's override does not apply to an out-of-scope PR and does not need to:
 the override exists to clear a `BLOCKED` status, and `NOT_APPLICABLE` is green, so an
@@ -201,13 +202,33 @@ Flow:
 2. Request review from Bishop, Hicks, Vasquez (mention all three).
 3. Reviewers converge adversarially on the branch — no serial review or independence.
 4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the branch and re-request.
-5. Once APPROVED, open the PR via `gh pr create --label squad` (the label is
-   required — see § "Scope" above).
+5. Once APPROVED, open the PR — see § "PR creation: tool preference" immediately below
+   for exactly how, and apply the `squad` label as part of that step (required — see
+   § "Scope" above).
 6. After the PR exists, each reviewer records their review as a PR comment in the
    canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
    automatically on every comment, review, and push.
 
 This is a hard gate enforced by team policy. The trio's consensus verdict gates the PR creation step itself.
+
+### PR creation: tool preference
+
+**When running as a Copilot CLI session-backed agent, prefer the app's
+`create_pull_request` tool over `gh pr create` to open the PR.** The app tool links the
+new PR to the current session so it appears in the app's UI (sidebar, PR status, etc.); a
+PR opened via `gh pr create` is invisible to that tracking and — confirmed on PR #1621 —
+cannot be retroactively linked once created outside the app's own creation flow.
+
+- `create_pull_request` has no label parameter, so immediately follow it with
+  `gh pr edit <num> --add-label squad` to apply the required label — do not skip this
+  step just because the tool doesn't expose it directly.
+- Fall back to `gh pr create --label squad` directly only when the app tool is
+  unavailable (non-session environments) or fails outright, or for the cross-account /
+  fork scenarios covered by `.copilot/skills/gh-auth-isolation/SKILL.md` (targeting an
+  upstream repo from a personal fork under a different `gh` identity — the app tool only
+  targets the current session's own branch/repo).
+- Either path still requires `Closes #N` in the PR body per § "Pull Request Issue
+  Linkage" below — the tool choice doesn't change the issue-linkage rules.
 
 The single exception is a documentation-only change — see the next section. Nothing else
 reduces the trio to fewer than three reviewers.

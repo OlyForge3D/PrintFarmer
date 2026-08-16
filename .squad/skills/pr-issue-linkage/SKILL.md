@@ -39,13 +39,42 @@ If the output includes the issue number(s), GitHub will auto-close them on merge
 
 ## Examples
 
-**Correct builder flow:**
+**Correct builder flow (session-backed agent — preferred path):**
 ```bash
 # Create feature branch and commit work
 git checkout -b feat/printables-import
 git commit -m "Implement printables import"
+```
 
-# Open PR WITH issue links in body, and label it `squad`
+Then open the PR with the app's `create_pull_request` tool (not `gh pr create`) so it
+gets linked to the session:
+
+```
+create_pull_request(
+  title: "feat(models): Printables 2-step import modal",
+  body: "## Summary
+Adds two-step modal for importing printables.
+
+## Linked issues
+Closes #350
+Closes #351
+
+## Test plan
+- Manual test in dev
+- Run npm run test:run
+"
+)
+```
+
+The tool has no label parameter, so immediately follow up:
+
+```bash
+gh pr edit <num> --add-label squad
+gh pr view <num> --json closingIssuesReferences,labels
+```
+
+**Correct builder flow (no session-backed tool available, or fork/cross-account — fallback):**
+```bash
 gh pr create \
   --title "feat(models): Printables 2-step import modal" \
   --label squad \
@@ -65,10 +94,24 @@ Closes #351
 gh pr view <num> --json closingIssuesReferences
 ```
 
+## Why prefer `create_pull_request` over `gh pr create`
+
+The Copilot CLI app links a PR to its originating session only when the PR is created
+through its own `create_pull_request` tool. A PR opened via `gh pr create` (shell) never
+gets that association, and it **cannot be established retroactively** — even a successful
+`update_pull_request` call on an existing PR does not backfill the session link (confirmed
+empirically on PR #1621). Prefer the tool by default; fall back to `gh pr create --label
+squad` only when the tool is unavailable, fails outright, or for the fork/cross-account
+scenarios in `.copilot/skills/gh-auth-isolation/SKILL.md` (the tool only targets the
+current session's own branch/repo, so it can't open a PR from a personal fork against an
+upstream repo under a different `gh` identity).
+
 ## The `squad` Label
 
 **Every squad-authored PR MUST carry the bare `squad` label.** Pass `--label squad` to
-`gh pr create`, or add it afterwards with `gh pr edit <num> --add-label squad`.
+`gh pr create` when using that fallback path, or add it afterwards with
+`gh pr edit <num> --add-label squad` — which is the required follow-up when using
+`create_pull_request`, since that tool has no label parameter.
 
 This is not cosmetic. The label is what puts a PR **in scope for two things at once**:
 
