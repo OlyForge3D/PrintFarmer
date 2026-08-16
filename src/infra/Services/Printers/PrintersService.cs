@@ -610,6 +610,19 @@ public class PrintersService(
     }
 
     /// <summary>
+    /// Builds a same-origin, authenticated proxy URL for a printer file's thumbnail from its
+    /// backend-relative path, or null if no thumbnail path is available.
+    /// </summary>
+    /// <remarks>
+    /// Never returns a backend-internal URL directly - browsers may not be able to resolve the
+    /// backend's base URL (e.g. an internal Docker Compose hostname). See issue #1650.
+    /// </remarks>
+    private static string? BuildFileThumbnailProxyUrl(Guid printerId, string? thumbnailPath) =>
+        string.IsNullOrWhiteSpace(thumbnailPath)
+            ? null
+            : $"/api/printers/{printerId:D}/files/thumbnail?filename={Uri.EscapeDataString(thumbnailPath)}";
+
+    /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
     /// </summary>
     /// <param name="printerId">Unique printer identifier (GUID)</param>
@@ -4527,9 +4540,16 @@ public class PrintersService(
                 return Array.Empty<PrinterFileDto>();
             }
 
-            // Simply convert PrinterFileInfo to PrinterFileDto - backend has already provided all metadata
+            // Simply convert PrinterFileInfo to PrinterFileDto - backend has already provided all metadata.
+            // ThumbnailUrl is rewritten to a same-origin, authenticated proxy URL rather than
+            // forwarding the backend's (potentially internal-only) ThumbnailUrl/base URL directly
+            // to the browser. See issue #1650.
             return fileInfos
-                .Select(f => new PrinterFileDto(f.Name, f.ThumbnailUrl, f.Modified, f.Size))
+                .Select(f => new PrinterFileDto(
+                    f.Name,
+                    BuildFileThumbnailProxyUrl(p.Id, f.ThumbnailPath),
+                    f.Modified,
+                    f.Size))
                 .ToArray();
         }
         catch (Exception ex)

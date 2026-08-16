@@ -4310,6 +4310,89 @@ public class PrintersController(
         }
     }
 
+    private static readonly IReadOnlyDictionary<string, string> ThumbnailContentTypesByExtension =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".png"] = "image/png",
+            [".jpg"] = "image/jpeg",
+            [".jpeg"] = "image/jpeg",
+            [".gif"] = "image/gif",
+            [".webp"] = "image/webp",
+        };
+
+    /// <summary>
+    /// Returns an authenticated same-origin thumbnail image for a file on a printer's storage.
+    /// </summary>
+    /// <param name="id">Printer ID.</param>
+    /// <param name="filename">The backend-relative thumbnail path (filename query parameter).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The thumbnail image content, without exposing the printer's private base URL.</returns>
+    /// <remarks>
+    /// Backend clients (e.g. Moonraker) only ever surface backend-relative thumbnail paths to
+    /// callers - never an absolute internal URL - specifically so that this endpoint can proxy
+    /// the bytes through an authenticated, same-origin request. See issue #1650. This is
+    /// deliberately NOT [AllowAnonymous]: unlike GUID-keyed thumbnail endpoints elsewhere, the
+    /// filename here is not an unguessable capability token, so per-printer group access control
+    /// via <see cref="CanAccessPrinterAsync"/> must still apply.
+    /// </remarks>
+    /// <response code="200">Returns the thumbnail image content.</response>
+    /// <response code="400">The filename query parameter is missing, empty, or not a recognized image type.</response>
+    /// <response code="404">The printer with the specified ID was not found, or the thumbnail does not exist on the printer.</response>
+    /// <response code="503">An error occurred while retrieving the thumbnail from the printer.</response>
+    [HttpGet("{id:guid}/files/thumbnail")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult> GetFileThumbnailAsync(Guid id, [FromQuery] string filename, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(filename))
+        {
+            return BadRequest(new { error = "filename query parameter is required" });
+        }
+
+        string extension = System.IO.Path.GetExtension(filename);
+        if (!ThumbnailContentTypesByExtension.TryGetValue(extension, out string? contentType))
+        {
+            return BadRequest(new { error = "filename must reference a recognized image type" });
+        }
+
+        if (!await CanAccessPrinterAsync(
+                id,
+                PrinterGroupAccessLevel.View,
+                ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            byte[]? content = await _printersService.DownloadPrinterFileAsync(id, filename, ct);
+            if (content == null)
+            {
+                return NotFound(new { error = "printer_file_thumbnail_not_found" });
+            }
+
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(content, contentType);
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound(new { error = "Printer not found" });
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(
+                exception,
+                "Failed to retrieve a file thumbnail from printer {PrinterId}",
+                id);
+            return StatusCode(
+                StatusCodes.Status503ServiceUnavailable,
+                new { error = "printer_file_thumbnail_unavailable" });
+        }
+    }
+
     // File operations with body-based parameters (handles special characters in filenames)
     [HttpPost("{id:guid}/print")]
     [RequirePermission(PrintFarmerPermissions.Queue.Start)]

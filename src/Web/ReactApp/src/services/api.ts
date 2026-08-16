@@ -1493,6 +1493,29 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Fetches a printer file's thumbnail as an authenticated blob.
+   *
+   * `thumbnailUrl` is the same-origin proxy path returned by the backend on
+   * `PrinterFileDto.thumbnailUrl` (e.g. `/api/printers/{id}/files/thumbnail?filename=...`).
+   * The leading `/api` is stripped because `this.client` already has that prefix as its
+   * baseURL - see `NewSliceJobPage.tsx`'s identical `serverModel.url.replace(/^\/api/, '')`
+   * pattern. A bare `<img src>` cannot be used here because auth is JWT-bearer only (no
+   * auth cookie), so the thumbnail must be fetched with the Authorization header and
+   * rendered via an object URL. See issue #1650.
+   */
+  async getPrinterFileThumbnail(
+    thumbnailUrl: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const path = thumbnailUrl.replace(/^\/api/, "");
+    const response = await this.client.get<Blob>(path, {
+      responseType: "blob",
+      signal,
+    });
+    return response.data;
+  }
+
   // ============ Printer Groups API methods ============
 
   async getPrinterGroups(): Promise<PrinterGroup[]> {

@@ -124,6 +124,35 @@ public sealed class RealMoonrakerClientIntegrationTests : IClassFixture<RealEmul
     }
 
     [Fact]
+    public async Task GetFileListAsync_ForSeededFile_ExposesRelativeThumbnailPathNotInternalBaseUrl()
+    {
+        // Regression test for #1650: the file-list thumbnail must never be an absolute URL built
+        // from the backend's (potentially internal-only) base URL - only a backend-relative path
+        // that a same-origin proxy endpoint can resolve. The emulator seeds both a 32x32 and a
+        // 300x300 thumbnail variant for benchy.gcode; the largest (300x300) must be selected.
+        ISupportsFileList fileListClient = _client;
+
+        List<PrinterFileInfo> files = await fileListClient.GetFileListAsync(_host.BaseUrl);
+
+        PrinterFileInfo benchy = files.Should().ContainSingle(f => f.Name == "benchy.gcode").Subject;
+        benchy.ThumbnailUrl.Should().BeNull(
+            "the file-list thumbnail must not carry the backend's internal base URL");
+        benchy.ThumbnailPath.Should().Be("thumbs/benchy-300x300.png");
+        benchy.ThumbnailPath.Should().NotContain(_host.BaseUrl);
+
+        // The relative path must still actually resolve through the same download route the
+        // proxy endpoint reuses (server/files/gcodes/{relative_path}).
+        ISupportsFileDownload downloadClient = _client;
+        byte[]? bytes = await downloadClient.DownloadFileAsync(_host.BaseUrl, benchy.ThumbnailPath!);
+        bytes.Should().NotBeNull();
+        bytes!.Length.Should().BeGreaterThan(4);
+        bytes[0].Should().Be(0x89);
+        bytes[1].Should().Be(0x50);
+        bytes[2].Should().Be(0x4E);
+        bytes[3].Should().Be(0x47);
+    }
+
+    [Fact]
     public async Task PrintControl_PauseThenResumeThenCancel_AllSucceedThroughRealClient()
     {
         await SwitchScenarioAsync("Printing");
