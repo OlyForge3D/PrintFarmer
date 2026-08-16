@@ -305,17 +305,27 @@ test('rejects verdicts pinned to a stale SHA', () => {
 // --- Sync carry-forward exemption (issue #1633, "Option A") ----------------
 //
 // A record at an old head SHA stays valid at the new head when (1) the old
-// SHA is a strict ancestor of the new head, and (2) the PR's own diff against
-// the base branch is byte-for-byte unchanged between the old SHA and the new
-// head. `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a
-// caller (the workflow, having already computed the compares) tells
-// `collectVerdicts`/`evaluateGate` which old SHAs satisfy it.
+// SHA is a strict ancestor of the new head, (2) the PR's own diff against the
+// base branch is byte-for-byte unchanged between the old SHA and the new
+// head, AND (3) every commit introduced since review that isn't already
+// reachable from base is itself content-empty against its own first parent.
+// `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a caller
+// (the workflow, having already computed the compares and per-commit
+// lookups) tells `collectVerdicts`/`evaluateGate` which old SHAs satisfy it.
 //
 // Condition 2 is deliberately a diff-equality check, not "every new commit is
 // an ancestor of base": a plain `git merge development` always creates a
 // fresh merge commit that is itself NOT an ancestor of base (base has no idea
 // it exists), so a naive commit-membership check would reject the very sync
 // this feature exists to allow.
+//
+// Condition 3 exists because (1)+(2) alone permit a revert-then-readd trick:
+// an author pushes a commit that changes the PR's contribution and a later
+// commit that reverts it, landing back on the same final diff while still
+// having authored real changes in the range. A clean merge sync's merge
+// commit is content-empty against its own first parent (merging cleanly
+// changes nothing beyond what each side already had); a merge commit that
+// resolved a conflict by adding logic, or any add/revert pair, is not.
 
 function file(overrides = {}) {
   return {
@@ -327,16 +337,23 @@ function file(overrides = {}) {
   };
 }
 
-test('a pure base-sync merge (identical PR diff) is carried forward', () => {
+test('a pure base-sync merge (identical PR diff, content-empty merge commit) is carried forward', () => {
   // Both compares recover exactly the PR's own contribution: three-dot
   // compare pivots on the merge base, so `compare(base...oldSha)` still
   // finds the PR's original diff and `compare(base...newHead)` finds the
   // same diff again now that the sync merge has folded base in. Nothing
-  // about the PR's own changes moved, only unrelated base history did.
+  // about the PR's own changes moved, only unrelated base history did — and
+  // the workflow has already proven the sync merge commit is content-empty
+  // against its own first parent.
   const reviewedDiffFiles = [file({ filename: 'src/Foo.cs' }), file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) })];
   const currentDiffFiles = [file({ filename: 'src/Bar.cs', sha: 'b'.repeat(40) }), file({ filename: 'src/Foo.cs' })];
   assert.equal(
-    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles,
+      currentDiffFiles,
+      nonBaseCommitsHaveNoOwnChanges: true,
+    }),
     true,
   );
 });
@@ -349,7 +366,12 @@ test('a new author commit that changes the PR diff is not carried forward', () =
   // resolution".
   const currentDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'c'.repeat(40), patch: '@@ -1 +1 @@\n-old\n+malicious' })];
   assert.equal(
-    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles,
+      currentDiffFiles,
+      nonBaseCommitsHaveNoOwnChanges: true,
+    }),
     false,
   );
 });
@@ -358,7 +380,47 @@ test('a new author commit that adds a file to the PR diff is not carried forward
   const reviewedDiffFiles = [file({ filename: 'src/Foo.cs' })];
   const currentDiffFiles = [file({ filename: 'src/Foo.cs' }), file({ filename: 'src/NewFile.cs', sha: 'd'.repeat(40) })];
   assert.equal(
-    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles, currentDiffFiles }),
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles,
+      currentDiffFiles,
+      nonBaseCommitsHaveNoOwnChanges: true,
+    }),
+    false,
+  );
+});
+
+test('a revert-then-readd of the same final diff is NOT carried forward (regression for Bishop\'s second finding)', () => {
+  // An author pushes a commit changing the PR, then a later commit reverting
+  // it, landing back on the exact same final diff — diff-equality (condition
+  // 2) alone would wrongly approve this. The workflow could never prove the
+  // non-base commits in this range are content-empty (at least one of the
+  // add/revert pair changed real files), so it reports
+  // nonBaseCommitsHaveNoOwnChanges: false, and that alone must block carry
+  // forward regardless of how the final diffs compare.
+  const reviewedDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'a'.repeat(40) })];
+  const currentDiffFiles = [file({ filename: 'src/Foo.cs', sha: 'a'.repeat(40) })]; // identical to reviewed
+  assert.equal(
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles,
+      currentDiffFiles,
+      nonBaseCommitsHaveNoOwnChanges: false,
+    }),
+    false,
+  );
+});
+
+test('isCarriedAcrossSync fails closed when nonBaseCommitsHaveNoOwnChanges is omitted', () => {
+  // The caller must positively prove every non-base commit is content-empty;
+  // omitting the flag must never default to "assume clean".
+  const reviewedDiffFiles = [file()];
+  assert.equal(
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles,
+      currentDiffFiles: reviewedDiffFiles,
+    }),
     false,
   );
 });
@@ -374,6 +436,7 @@ test('isCarriedAcrossSync fails closed when the record SHA is not a strict ances
         recordAncestryStatus: status,
         reviewedDiffFiles,
         currentDiffFiles: reviewedDiffFiles,
+        nonBaseCommitsHaveNoOwnChanges: true,
       }),
       false,
       String(status),
@@ -385,7 +448,12 @@ test('isCarriedAcrossSync fails closed on an empty reviewed diff', () => {
   // The caller must always supply the PR's actual recorded diff; an empty
   // list never means "safe by default".
   assert.equal(
-    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', reviewedDiffFiles: [], currentDiffFiles: [] }),
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      reviewedDiffFiles: [],
+      currentDiffFiles: [],
+      nonBaseCommitsHaveNoOwnChanges: true,
+    }),
     false,
   );
 });
@@ -401,6 +469,7 @@ test('isCarriedAcrossSync fails closed when either diff may be truncated', () =>
       reviewedDiffFiles,
       currentDiffFiles: reviewedDiffFiles,
       filesMayBeTruncated: true,
+      nonBaseCommitsHaveNoOwnChanges: true,
     }),
     false,
   );
@@ -946,10 +1015,12 @@ test('the gate is scoped to squad-labelled pull requests', () => {
 test('the sync carry-forward workflow wiring stays intact', async () => {
   // Regression coverage for the merge-commit bug this rewrite fixes: the
   // workflow must compute the ancestry check AND the diff-equality check
-  // against the base ref — not the old commit-membership shape — and must
-  // thread the resulting `carriedShas` into `gate.evaluateGate`. A silent
-  // revert back to the commit-list design would reintroduce a feature that
-  // never actually fires for a real `git merge` sync.
+  // against the base ref — not the old commit-SET-membership shape passed
+  // directly into the gate — and must thread the resulting `carriedShas`
+  // into `gate.evaluateGate`. A silent revert back to the commit-list design
+  // would reintroduce a feature that never actually fires for a real
+  // `git merge` sync. It must also still verify every non-base commit is
+  // content-empty (regression coverage for the revert-then-readd gap).
   const workflow = await readFile(
     path.join(repositoryRoot, '.github/workflows/squad-review-verdict.yml'), 'utf8',
   );
@@ -962,18 +1033,32 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   assert.match(workflow, /basehead: `\$\{baseRef\}\.\.\.\$\{oldSha\}`/);
   assert.match(workflow, /basehead: `\$\{baseRef\}\.\.\.\$\{headSha\}`/);
 
-  // The gate call receives file lists, not commit lists, plus the ancestry
-  // status and a truncation guard.
+  // The gate call receives file lists, not raw commit-SHA sets, plus the
+  // ancestry status, a files-truncation guard, and the content-emptiness
+  // proof for non-base commits (condition 3).
   assert.match(workflow, /reviewedDiffFiles:\s*reviewedFiles/);
   assert.match(workflow, /currentDiffFiles:\s*currentFiles/);
   assert.match(workflow, /recordAncestryStatus:\s*ancestryCompare\.status/);
   assert.match(workflow, /filesMayBeTruncated:/);
   assert.match(workflow, /compareFilesCap/);
+  assert.match(workflow, /nonBaseCommitsHaveNoOwnChanges/);
 
-  // The old commit-membership shape must be gone entirely — its presence
-  // would mean the buggy design crept back in alongside the new one.
+  // Condition 3's own per-commit lookup: the workflow must call the
+  // single-commit endpoint and check ITS OWN file list, not just infer
+  // emptiness from the bulk commit lists (which are what caused the
+  // original merge-commit bug).
+  assert.match(workflow, /getCommit\(/);
+  assert.match(workflow, /singleCommit\.files/);
+  // The bulk commit lists that feed condition 3 must be checked for
+  // truncation too — otherwise Vasquez's pagination concern reopens the
+  // instant commit lists come back into the picture for condition 3.
+  assert.match(workflow, /commitsIncomplete/);
+  assert.match(workflow, /total_commits/);
+
+  // The old shape (raw commit-SHA sets passed directly as the gate's own
+  // condition-2 inputs) must be gone entirely — its presence would mean the
+  // original buggy design crept back in alongside the new one.
   assert.doesNotMatch(workflow, /newCommitShas/);
-  assert.doesNotMatch(workflow, /aheadOfBaseShas/);
 
   // Eligibility still fails closed and still threads into evaluateGate.
   assert.match(workflow, /carriedShas\.add\(oldSha\)/);

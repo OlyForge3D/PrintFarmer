@@ -425,12 +425,18 @@ jobs:
             // Sync-carry-forward exemption (issue #1633, "Option A"). A
             // record pinned to an old head SHA stays valid at the current
             // head when (1) the old SHA is a strict ancestor of the current
-            // head, and (2) the PR's own diff against the base branch —
-            // NOT the raw commit list, which always contains the sync
-            // merge commit itself even for a clean sync — is byte-for-byte
-            // unchanged between the old SHA and the current head. Both
-            // conditions are checked purely via the compare API, with no
-            // repository fetch, matching the checkout above.
+            // head, (2) the PR's own diff against the base branch — NOT the
+            // raw commit list, which always contains the sync merge commit
+            // itself even for a clean sync — is byte-for-byte unchanged
+            // between the old SHA and the current head, AND (3) every commit
+            // introduced since review that isn't already reachable from base
+            // is itself content-empty against its own first parent. (3)
+            // exists because (1)+(2) alone would let an author push a commit
+            // that changes the PR and a later commit that reverts it land
+            // back on the same final diff while still containing real
+            // author work in the range — exactly what the SHA pin exists to
+            // catch. All three are checked purely via the compare/commit
+            // APIs, with no repository fetch, matching the checkout above.
             const distinctOldShas = new Set();
             for (const raw of rawComments) {
               const shape = gate.parseVerdictComment({ ...raw, squadWriteAccess: true });
@@ -443,8 +449,13 @@ jobs:
             // The compare endpoint silently caps `files` (no in-band
             // truncation flag), so a diff at or beyond that cap can never be
             // proven unchanged and must fail closed. 300 is GitHub's
-            // documented ceiling for this endpoint.
+            // documented ceiling for this endpoint. Its `commits` array is
+            // similarly capped, but DOES expose `total_commits`, so an
+            // incomplete commit list is detectable and must also fail closed.
             const compareFilesCap = 300;
+            const commitsIncomplete = (compare) =>
+              (compare.total_commits ?? (compare.commits ?? []).length) >
+              (compare.commits ?? []).length;
             const carriedShas = new Set();
             for (const oldSha of distinctOldShas) {
               try {
@@ -456,12 +467,34 @@ jobs:
                   await github.rest.repos.compareCommitsWithBasehead({
                     owner, repo, basehead: `${baseRef}...${oldSha}`,
                   });
-                const { data: currentCompare } =
+                const { data: baseAheadCompare } =
                   await github.rest.repos.compareCommitsWithBasehead({
                     owner, repo, basehead: `${baseRef}...${headSha}`,
                   });
                 const reviewedFiles = reviewedCompare.files ?? [];
-                const currentFiles = currentCompare.files ?? [];
+                const currentFiles = baseAheadCompare.files ?? [];
+
+                let nonBaseCommitsHaveNoOwnChanges = false;
+                if (!commitsIncomplete(ancestryCompare) && !commitsIncomplete(baseAheadCompare)) {
+                  const aheadOfBaseShas = new Set(
+                    (baseAheadCompare.commits ?? []).map((c) => c.sha),
+                  );
+                  const nonBaseShas = (ancestryCompare.commits ?? [])
+                    .map((c) => c.sha)
+                    .filter((sha) => aheadOfBaseShas.has(sha));
+                  let allEmpty = true;
+                  for (const nonBaseSha of nonBaseShas) {
+                    const { data: singleCommit } = await github.rest.repos.getCommit({
+                      owner, repo, ref: nonBaseSha,
+                    });
+                    if ((singleCommit.files ?? []).length > 0) {
+                      allEmpty = false;
+                      break;
+                    }
+                  }
+                  nonBaseCommitsHaveNoOwnChanges = allEmpty;
+                }
+
                 const eligible = gate.isCarriedAcrossSync({
                   recordAncestryStatus: ancestryCompare.status,
                   reviewedDiffFiles: reviewedFiles,
@@ -469,13 +502,15 @@ jobs:
                   filesMayBeTruncated:
                     reviewedFiles.length >= compareFilesCap ||
                     currentFiles.length >= compareFilesCap,
+                  nonBaseCommitsHaveNoOwnChanges,
                 });
                 if (eligible) {
                   carriedShas.add(oldSha);
                   core.notice(
                     `Carrying review record at ${oldSha.slice(0, 12)} forward to ` +
                     `${headSha.slice(0, 12)}: the PR's own diff against ` +
-                    `${baseRef} is unchanged since review.`,
+                    `${baseRef} is unchanged since review, and every new ` +
+                    'non-base commit since then is content-empty.',
                   );
                 }
               } catch (error) {

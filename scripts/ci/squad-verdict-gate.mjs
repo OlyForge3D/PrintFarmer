@@ -398,7 +398,25 @@ export function parseVerdictComment(comment) {
  * matter (rename, add, delete, edit) is compared: `status`, `filename`,
  * `previous_filename`, `sha` (the resulting blob's SHA) and, when GitHub
  * supplies it, `patch` — so a same-named file with different content is
- * detected even if a diff subtlety trims the patch. Fails closed:
+ * detected even if a diff subtlety trims the patch.
+ *
+ * Diff equality alone is NOT sufficient, though: an author could push a
+ * commit that changes the PR's contribution and a *later* commit that
+ * reverts it, landing back at the same final diff while still having
+ * authored real changes in the range — exactly the review-then-push-more
+ * threat model the SHA pin exists to catch, and diff-equality by itself
+ * would wrongly wave it through. `nonBaseCommitsHaveNoOwnChanges` closes
+ * that gap: it must be true only when every commit introduced since the
+ * review that is NOT already reachable from the base tip is itself
+ * content-empty against its own first parent (i.e. `GET
+ * /repos/{owner}/{repo}/commits/{sha}` reports no `files`). A clean
+ * `git merge development` sync's merge commit is content-empty this way —
+ * merging cleanly changes nothing beyond what each side already had — while
+ * a merge commit that resolved a conflict by adding logic, or any ordinary
+ * add-then-revert pair, has at least one non-empty commit in the range and
+ * fails this check even if the final diff happens to match.
+ *
+ * Fails closed:
  *
  *   - An empty `reviewedDiffFiles` is never treated as safe — the caller
  *     must always supply the PR's real recorded diff, not a default meaning
@@ -408,20 +426,27 @@ export function parseVerdictComment(comment) {
  *     the caller say "either side may be incomplete"; when true, equality can
  *     never be proven, so this returns false rather than risk comparing two
  *     truncated, apparently-equal lists that actually differ past the cutoff.
+ *   - `nonBaseCommitsHaveNoOwnChanges` defaults to `false`: the caller must
+ *     positively prove every non-base commit is content-empty, not rely on a
+ *     default meaning "assume clean".
  *
- * This function performs no I/O; the workflow computes the compares and
- * passes their results in.
+ * This function performs no I/O; the workflow computes the compares and the
+ * per-commit lookups and passes their results in.
  */
 export function isCarriedAcrossSync({
   recordAncestryStatus,
   reviewedDiffFiles = [],
   currentDiffFiles = [],
   filesMayBeTruncated = false,
+  nonBaseCommitsHaveNoOwnChanges = false,
 } = {}) {
   if (recordAncestryStatus !== 'ahead') {
     return false;
   }
   if (filesMayBeTruncated) {
+    return false;
+  }
+  if (!nonBaseCommitsHaveNoOwnChanges) {
     return false;
   }
   const reviewed = Array.isArray(reviewedDiffFiles) ? reviewedDiffFiles : [];
@@ -896,9 +921,9 @@ export function evaluateGate({
     notes.push(
       `Carried across sync: ${carried
         .map((record) => `${record.reviewer}@${shortSha(record.headSha)}`)
-        .join(', ')} — every commit since that review is already reachable ` +
-      'from the base branch tip (a pure base sync), so the record was ' +
-      'carried forward rather than re-earned.',
+        .join(', ')} — the PR's own diff against its base branch is proven ` +
+      'byte-for-byte unchanged since that review (a pure base sync), so the ' +
+      'record was carried forward rather than re-earned.',
     );
   }
   const carriedSuffix = carried.length > 0 ? ', carried across sync' : '';

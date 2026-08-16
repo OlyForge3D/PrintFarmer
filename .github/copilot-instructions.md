@@ -530,18 +530,20 @@ review after the PR head may have moved. The verifier then reports
 
 Any head movement supersedes the recorded review — **with one narrow exception**.
 A record pinned to an old head SHA `SHA_r` is carried forward, unchanged in meaning
-but relabelled, to a new head `SHA_h` only when **both** hold: (1) `SHA_r` is a
+but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` is a
 strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 `compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
-force-push always fails this), and (2) the PR's own diff against the base branch —
-not its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`.
-Condition 2 is deliberately a diff comparison rather than "every new commit is
-reachable from the base tip": a plain `git merge development` sync always creates a
-fresh merge commit that is itself not an ancestor of base (base has no idea it
-exists), so a commit-membership check rejects the exact sync it exists to allow — an
-earlier revision of this exemption shipped exactly that bug and was caught in review
-before merge. Comparing the PR's diff sidesteps it: three-dot compare pivots on the
-merge base, so `compare(<base>...SHA_r)` still recovers the PR's diff as reviewed and
+force-push always fails this), (2) the PR's own diff against the base branch — not
+its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
+(3) every commit introduced since review that isn't already reachable from base is
+itself content-empty against its own first parent. Condition 2 is deliberately a
+diff comparison rather than "every new commit is reachable from the base tip": a
+plain `git merge development` sync always creates a fresh merge commit that is
+itself not an ancestor of base (base has no idea it exists), so a commit-membership
+check rejects the exact sync it exists to allow — an earlier revision of this
+exemption shipped exactly that bug and was caught in review before merge. Comparing
+the PR's diff sidesteps it: three-dot compare pivots on the merge base, so
+`compare(<base>...SHA_r)` still recovers the PR's diff as reviewed and
 `compare(<base>...SHA_h)` recovers its current diff, and the two are compared file by
 file (path, status, resulting blob SHA, and patch text). Both compares run purely
 against the compare API (`GET /repos/{owner}/{repo}/compare/{base}`), matching the
@@ -552,6 +554,23 @@ force-pushing always supersedes normally, by design, since it fails condition (1
 The compare endpoint silently caps its file list with no in-band truncation signal,
 so a diff at or beyond that cap can never be proven unchanged and is treated as not
 carried, same as a compare-API failure.
+
+Condition 3 exists because (1)+(2) alone are not enough: an author could push a
+commit that changes the PR's contribution and a later commit that reverts it,
+landing back on the exact same final diff while still having authored real changes
+in the range — this "revert-then-readd" trick would satisfy diff-equality while
+still being exactly the review-then-push-more case the SHA-binding exists to catch.
+Condition 3 closes it by checking every commit introduced since review that is not
+already reachable from base (via `GET /repos/{owner}/{repo}/commits/{sha}`, its own
+diff against its first parent) and requiring each to be content-empty. A clean sync
+merge's own commit is content-empty (a conflict-free merge changes nothing beyond
+what each side already had); an add/revert pair necessarily has at least one
+non-empty commit in the range and is rejected regardless of what the final diff
+looks like. This reintroduces some per-commit inspection, so it carries the same
+truncation risk as the diff comparison: the workflow checks the bulk commit lists'
+`total_commits` against the returned `commits` array length and, if either compare's
+list is incomplete, treats condition 3 as unproven (fails closed) rather than
+guessing.
 
 When a record is carried forward this way, the status and audit trail say so
 explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare
