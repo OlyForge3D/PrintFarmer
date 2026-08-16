@@ -512,20 +512,36 @@ jobs:
                       break;
                     }
                     const singleCommitFiles = singleCommit.files ?? [];
+                    // GitHub's single-commit endpoint exposes `stats.total`
+                    // (additions + deletions summed across the WHOLE commit,
+                    // independent of the 300-file cap on `files`) — verified
+                    // empirically (a real commit with >300 files still
+                    // reports its true total there). Summing the returned
+                    // `files` and comparing to `stats.total` is a reliable
+                    // truncation proof, unlike a bare length check, which
+                    // can't distinguish "exactly at the cap" from "capped".
+                    // Fall back to the length heuristic only if `stats` is
+                    // ever absent.
+                    const singleCommitFilesSum = singleCommitFiles.reduce(
+                      (sum, f) => sum + (f.additions ?? 0) + (f.deletions ?? 0), 0,
+                    );
+                    const singleCommitFilesTruncated =
+                      typeof singleCommit.stats?.total === 'number'
+                        ? singleCommitFilesSum !== singleCommit.stats.total
+                        : singleCommitFiles.length >= compareFilesCap;
                     const { data: parentsCompare } =
                       await github.rest.repos.compareCommitsWithBasehead({
                         owner, repo, basehead: `${parentShas[0]}...${parentShas[1]}`,
                       });
                     const parentsCompareFiles = parentsCompare.files ?? [];
                     if (
-                      singleCommitFiles.length >= compareFilesCap ||
+                      singleCommitFilesTruncated ||
                       parentsCompareFiles.length >= compareFilesCap
                     ) {
-                      // Either side of the equality check may be silently
-                      // capped, same as the top-level diff comparison — a
-                      // capped list can never prove the fingerprints match
-                      // (or genuinely differ), so this can't be trusted as
-                      // proof of a clean merge.
+                      // Either side of the equality check may be incomplete
+                      // — a capped/truncated list can never prove the
+                      // fingerprints match (or genuinely differ), so this
+                      // can't be trusted as proof of a clean merge.
                       allClean = false;
                       break;
                     }

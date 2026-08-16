@@ -536,7 +536,9 @@ strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
 force-push always fails this), (2) the PR's own diff against the base branch — not
 its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
 (3) every commit introduced since review that isn't already reachable from base is
-itself content-empty against its own first parent. Condition 2 is deliberately a
+a clean two-parent merge introducing nothing beyond its own two parents (see below —
+NOT "content-empty against its own first parent", which is a real, verified-wrong
+assumption for this case). Condition 2 is deliberately a
 diff comparison rather than "every new commit is reachable from the base tip": a
 plain `git merge development` sync always creates a fresh merge commit that is
 itself not an ancestor of base (base has no idea it exists), so a commit-membership
@@ -584,10 +586,16 @@ rare octopus merge this check doesn't attempt to validate) always fails conditio
 This reintroduces some per-commit inspection, so it carries the same truncation risk
 as the diff comparison at two separate levels: the workflow checks the bulk commit
 lists' `total_commits` against the returned `commits` array length (identifying which
-SHAs are non-base in the first place), and separately checks both `singleCommit.files`
-and `parentsCompare.files` against the same `compareFilesCap` threshold used for the
-top-level diffs before trusting their fingerprint comparison — a capped list on either
-side could hide a real mismatch and falsely appear clean. Either truncation signal
+SHAs are non-base in the first place), and separately proves both `singleCommit.files`
+and `parentsCompare.files` complete before trusting their fingerprint comparison. For
+`singleCommit`, GitHub's single-commit endpoint exposes `stats.total` (additions plus
+deletions summed across the *whole* commit, independent of the 300-file cap on
+`files` — verified empirically against a real commit with over 300 changed files,
+which still reports its true total there); summing the returned `files` and comparing
+to `stats.total` gives a reliable truncation proof rather than a bare length check,
+which can't distinguish "exactly at the cap" from "capped". `compare(parent1...parent2)`
+exposes no equivalent total, so `parentsCompare.files` falls back to the same
+length-vs-`compareFilesCap` heuristic used for the top-level diffs. Either signal
 fails condition 3 closed (treats it as unproven) rather than guessing.
 
 When a record is carried forward this way, the status and audit trail say so

@@ -1078,12 +1078,18 @@ test('the sync carry-forward workflow wiring stays intact', async () => {
   assert.match(workflow, /gate\.diffFingerprint\(singleCommitFiles\)/);
   assert.match(workflow, /gate\.diffFingerprint\(parentsCompareFiles\)/);
   assert.doesNotMatch(workflow, /singleCommit\.files\s*\?\?\s*\[\]\)\.length\s*>\s*0/);
-  // This per-commit equality check has its own truncation exposure —
-  // `parentsCompare.files` (and, in principle, `singleCommit.files`) can be
-  // silently capped just like the top-level diffs, and a capped list can
-  // never prove the fingerprints genuinely match. It must fail closed
-  // (disqualify), reusing the same `compareFilesCap` threshold.
-  assert.match(workflow, /singleCommitFiles\.length >= compareFilesCap/);
+  // This per-commit equality check has its own truncation exposure. For
+  // `singleCommit`, the workflow uses a strictly better signal than a bare
+  // length check: `stats.total` (additions + deletions summed across the
+  // WHOLE commit, independent of the 300-file cap on `files` — verified
+  // empirically against a real commit with >300 changed files) must equal
+  // the sum computed from the returned `files`, or the list is truncated.
+  // `compare(parent1...parent2)` has no such total, so `parentsCompare.files`
+  // still falls back to the length-vs-cap heuristic used for the top-level
+  // diffs. Either signal must fail closed (disqualify) when it fires.
+  assert.match(workflow, /singleCommit\.stats\?\.total/);
+  assert.match(workflow, /singleCommitFilesSum !== singleCommit\.stats\.total/);
+  assert.match(workflow, /singleCommitFilesTruncated/);
   assert.match(workflow, /parentsCompareFiles\.length >= compareFilesCap/);
 
   // The bulk commit lists that feed condition 3 must be checked for
