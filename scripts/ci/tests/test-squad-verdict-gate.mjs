@@ -309,7 +309,10 @@ test('rejects verdicts pinned to a stale SHA', () => {
 // SHA is a strict ancestor of the new head, (2) the PR's own diff against the
 // base branch is byte-for-byte unchanged between the old SHA and the new
 // head, AND (3) every commit introduced since review that isn't already
-// reachable from base is itself content-empty against its own first parent.
+// reachable from base is a clean two-parent merge introducing nothing beyond
+// merging its own two parents (proven via `compare(parent1...parent2)` — see
+// below, NOT "content-empty against its own first parent", which is a real,
+// verified-wrong assumption for this case).
 // `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a caller
 // (the workflow, having already computed the compares and per-commit
 // lookups) tells `collectVerdicts`/`evaluateGate` which old SHAs satisfy it.
@@ -323,10 +326,10 @@ test('rejects verdicts pinned to a stale SHA', () => {
 // Condition 3 exists because (1)+(2) alone permit a revert-then-readd trick:
 // an author pushes a commit that changes the PR's contribution and a later
 // commit that reverts it, landing back on the same final diff while still
-// having authored real changes in the range. A clean merge sync's merge
-// commit is content-empty against its own first parent (merging cleanly
-// changes nothing beyond what each side already had); a merge commit that
-// resolved a conflict by adding logic, or any add/revert pair, is not.
+// having authored real changes in the range. A clean two-parent merge
+// introduces nothing beyond merging its own two parents; a merge commit that
+// resolved a conflict by adding logic, or any add/revert pair, introduces
+// something extra and fails this check.
 
 function file(overrides = {}) {
   return {
