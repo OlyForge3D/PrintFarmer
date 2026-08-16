@@ -108,6 +108,22 @@ public sealed class MachineProfileDerivedFieldsExtractorTests
         _ = result.BuildVolumeY.Should().Be(220);
     }
 
+    [Fact]
+    public void Extract_WithNonZeroOriginPrintableArea_DerivesBedOriginAsMinAndBuildVolumeAsSpan()
+    {
+        // A non-origin-anchored bed exercises the actual bounding-box math (bedOrigin = min,
+        // buildVolume = max - min) rather than the degenerate all-zero-origin case where every
+        // fixture elsewhere happens to make min == 0 and max - min == max indistinguishable.
+        MachineProfileDerivedFields result = MachineProfileDerivedFieldsExtractor.Extract(
+            """{"printable_area": ["50x30", "300x30", "300x300", "50x300"]}""");
+
+        _ = result.PrintablePolygon.Should().HaveCount(4);
+        _ = result.BedOriginX.Should().Be(50);
+        _ = result.BedOriginY.Should().Be(30);
+        _ = result.BuildVolumeX.Should().Be(250);
+        _ = result.BuildVolumeY.Should().Be(270);
+    }
+
     [Theory]
     [InlineData("not-a-real-nozzle-type")]
     [InlineData("")]

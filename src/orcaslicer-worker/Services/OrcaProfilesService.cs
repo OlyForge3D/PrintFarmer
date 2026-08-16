@@ -7,7 +7,6 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Farm.Slicer.Module.Dtos;
-using Farm.Slicer.ProfileParsing;
 using Farm.Slicer.Worker.Core;
 using Microsoft.Extensions.Logging;
 using static Farm.Slicer.ProfileParsing.OrcaRawValueParser;
