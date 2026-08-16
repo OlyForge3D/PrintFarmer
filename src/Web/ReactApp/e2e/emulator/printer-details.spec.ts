@@ -8,7 +8,8 @@ import {
   MOONRAKER_PRINTERS,
   getPrinterCardByName,
   getInlinePrinterDetails,
-  openCompactPrinterDetailsSidebar,
+  openCollapsedPrinterDetailsSidebar,
+  openTablePrinterDetailsSidebar,
 } from '../fixtures/moonraker';
 
 /**
@@ -42,11 +43,11 @@ test.describe('Printer Details — Moonraker', () => {
     const details = await getInlinePrinterDetails(page, MOONRAKER_PRINTERS.ready);
 
     await details.getByRole('button', { name: 'Version' }).click();
-    await expect(details.getByText('Version unavailable.')).toHaveCount(0);
     await expect(details.getByText('Firmware', { exact: true }).locator('..')).toContainText('v0.9.2-emulator');
     await expect(details.getByText('Backend', { exact: true }).locator('..')).toContainText('v0.9.2-emulator');
     await expect(details.getByText('API', { exact: true }).locator('..')).toContainText('1.5.0');
     await expect(details.getByText('Supported', { exact: true }).locator('..')).toContainText('Yes');
+    await expect(details.getByText('Version unavailable.')).toHaveCount(0);
   });
 
   test('expanding Statistics shows real print totals, not the unavailable fallback', async ({ page }) => {
@@ -54,11 +55,11 @@ test.describe('Printer Details — Moonraker', () => {
 
     await details.getByRole('button', { name: 'Statistics' }).click();
     const statistics = details.locator('dl').filter({ hasText: 'Print time' });
-    await expect(statistics.getByText('Statistics unavailable.')).toHaveCount(0);
     await expect(statistics.getByText('Print time', { exact: true }).locator('..')).toContainText('1.0h');
     await expect(statistics.getByText('Filament', { exact: true }).locator('..')).toContainText('0g');
     await expect(statistics.getByText('Completed', { exact: true }).locator('..')).toContainText('1');
     await expect(statistics.getByText('Failed', { exact: true }).locator('..')).toContainText('0');
+    await expect(details.getByText('Statistics unavailable.')).toHaveCount(0);
   });
 
   test('telemetry values and movement/temperature controls mutate the emulator through the real backend', async ({ page, request }) => {
@@ -145,9 +146,16 @@ test.describe('Printer Details — Moonraker', () => {
     await expect(modal).toBeHidden();
   });
 
-  test('closing the compact-card sidebar removes its landmark from the page', async ({ page }) => {
-    const sidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.shutdown);
+  test('closing the collapsed-card sidebar removes its landmark from the page', async ({ page }) => {
+    const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.shutdown);
     await sidebar.getByRole('button', { name: 'Close sidebar' }).click();
     await expect(page.getByRole('complementary', { name: `${MOONRAKER_PRINTERS.shutdown} details` })).toHaveCount(0);
+  });
+
+  test('the table details action opens the named sidebar landmark', async ({ page }) => {
+    const sidebar = await openTablePrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    await expect(sidebar).toContainText(MOONRAKER_PRINTERS.ready);
+    await sidebar.getByRole('button', { name: 'Close sidebar' }).click();
+    await expect(page.getByRole('complementary', { name: `${MOONRAKER_PRINTERS.ready} details` })).toHaveCount(0);
   });
 });

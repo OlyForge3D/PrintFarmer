@@ -4,7 +4,7 @@ import {
   expect,
   MOONRAKER_PRINTERS,
   getPrinterCardByName,
-  openCompactPrinterDetailsSidebar,
+  openCollapsedPrinterDetailsSidebar,
   openPrinterFiles,
   createMoonrakerControl,
   setPrinterViewMode,
@@ -49,8 +49,8 @@ test.describe('Printer Accessibility — Moonraker', () => {
     await expect(card.getByText('Paused', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('the compact-card details action is keyboard-reachable and opens the sidebar via Enter', async ({ page }) => {
-    await setPrinterViewMode(page, 'compact');
+  test('the collapsed-card details action is keyboard-reachable and opens the sidebar via Enter', async ({ page }) => {
+    await setPrinterViewMode(page, 'collapsed');
     const card = getPrinterCardByName(page, MOONRAKER_PRINTERS.ready);
     const openButton = card.getByRole('button', { name: 'Open details sidebar' });
     await openButton.focus();
@@ -80,12 +80,12 @@ test.describe('Printer Accessibility — Moonraker', () => {
   });
 
   test('the detail sidebar landmark has a name distinguishing it from other printers', async ({ page }) => {
-    const readySidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    const readySidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     await expect(readySidebar).toBeVisible();
     await readySidebar.getByRole('button', { name: 'Close sidebar' }).click();
     await expect(readySidebar).toHaveCount(0);
 
-    const pausedSidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.paused);
+    const pausedSidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.paused);
     await expect(pausedSidebar).toBeVisible();
     await expect(pausedSidebar).toContainText(MOONRAKER_PRINTERS.paused);
     await expect(pausedSidebar).not.toContainText(MOONRAKER_PRINTERS.ready);

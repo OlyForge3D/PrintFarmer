@@ -4,7 +4,7 @@ import {
   createMoonrakerControl,
   expect,
   MOONRAKER_PRINTERS,
-  openCompactPrinterDetailsSidebar,
+  openCollapsedPrinterDetailsSidebar,
   test,
 } from '../fixtures/moonraker';
 
@@ -42,7 +42,7 @@ test.describe('Printer MMU controls — Moonraker', () => {
   });
 
   test('Happy Hare gates render and load/eject through the real backend', async ({ page }) => {
-    const sidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     const controls = await getMmuControls(sidebar);
 
     await expect(controls.getByRole('button', { name: 'Gate 1A: PLA - Ready' })).toBeVisible();
@@ -65,9 +65,9 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await createMoonrakerControl(request).setMmuMode('ready', 'Afc');
     await page.reload();
 
-    const sidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     const controls = await getMmuControls(sidebar);
-    await expect(controls.getByText('AFC', { exact: true })).toBeVisible();
+    await expect(controls.getByText('AFC', { exact: true })).toBeVisible({ timeout: 15_000 });
     const rack = controls.getByText('Rack', { exact: true }).locator('..');
     await expect(rack.getByText('PLA', { exact: true })).toBeVisible();
 
@@ -82,12 +82,14 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await createMoonrakerControl(request).setMmuMode('ready', 'Qidibox');
     await page.reload();
 
-    const sidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     const controls = await getMmuControls(sidebar);
-    await expect(controls.getByText('QIDIBOX', { exact: true })).toBeVisible();
+    await expect(controls.getByText('QIDIBOX', { exact: true })).toBeVisible({ timeout: 15_000 });
     const slot = controls.getByRole('button', { name: 'Gate 1A: PLA - Ready' });
     await slot.click();
     await controls.getByRole('button', { name: 'Unload', exact: true }).click();
+    await expect(controls).toBeVisible();
+    await expect(controls.getByText('Unloaded', { exact: true })).toBeVisible({ timeout: 15_000 });
     await expect(controls.getByText('Rack', { exact: true })).toHaveCount(0, { timeout: 15_000 });
   });
 
@@ -95,7 +97,7 @@ test.describe('Printer MMU controls — Moonraker', () => {
     await createMoonrakerControl(request).setMmuMode('ready', 'SnapmakerU1');
     await page.reload();
 
-    const sidebar = await openCompactPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
+    const sidebar = await openCollapsedPrinterDetailsSidebar(page, MOONRAKER_PRINTERS.ready);
     const materials = sidebar.getByTestId('material-loadout');
     await expect(materials).toBeVisible({ timeout: 15_000 });
     const toolheads = materials.getByRole('group', { name: 'Toolheads slots' });

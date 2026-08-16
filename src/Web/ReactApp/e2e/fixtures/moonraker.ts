@@ -302,7 +302,7 @@ export async function getInlinePrinterDetails(page: Page, name: string): Promise
 /** Select a printer view mode and wait for the page to render it. */
 export async function setPrinterViewMode(
   page: Page,
-  mode: 'detailed' | 'compact' | 'table'
+  mode: 'detailed' | 'collapsed' | 'table'
 ): Promise<void> {
   await page.evaluate((viewMode) => localStorage.setItem('printerViewMode', viewMode), mode);
   await page.reload();
@@ -310,12 +310,24 @@ export async function setPrinterViewMode(
   await dismissTourIfVisible(page);
 }
 
-/** Open a printer's detail sidebar from compact-card mode. */
-export async function openCompactPrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
-  await setPrinterViewMode(page, 'compact');
+/** Open a printer's detail sidebar from collapsed-card mode. */
+export async function openCollapsedPrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
+  await setPrinterViewMode(page, 'collapsed');
   const card = getPrinterCardByName(page, name);
   await expect(card).toBeVisible({ timeout: 10_000 });
   await card.getByRole('button', { name: 'Open details sidebar' }).click();
+
+  const sidebar = page.getByRole('complementary', { name: `${name} details` });
+  await expect(sidebar).toBeVisible({ timeout: 10_000 });
+  return sidebar;
+}
+
+/** Open a printer's detail sidebar from table mode. */
+export async function openTablePrinterDetailsSidebar(page: Page, name: string): Promise<Locator> {
+  await setPrinterViewMode(page, 'table');
+  const row = page.getByRole('row').filter({ hasText: name }).first();
+  await expect(row).toBeVisible({ timeout: 10_000 });
+  await row.getByRole('button', { name: `Open details for ${name}` }).click();
 
   const sidebar = page.getByRole('complementary', { name: `${name} details` });
   await expect(sidebar).toBeVisible({ timeout: 10_000 });
