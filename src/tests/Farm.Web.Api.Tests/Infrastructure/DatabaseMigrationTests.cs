@@ -46,7 +46,8 @@ public sealed class DatabaseMigrationTests
             "20260808054302_AddNfcDeviceApproval",
             "20260808162833_AddPowerReadingCompositeIndex",
             "20260811235527_AddRoleUpdatedAtConcurrencyToken",
-            "20260812020851_HardenBedClearReplayStorage");
+            "20260812020851_HardenBedClearReplayStorage",
+            "20260816094836_RenameHasHeatedChamberToCalibrationHasHeatedChamber");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -311,7 +312,8 @@ public sealed class DatabaseMigrationTests
             "20260808054302_AddNfcDeviceApproval",
             "20260808162833_AddPowerReadingCompositeIndex",
             "20260811235527_AddRoleUpdatedAtConcurrencyToken",
-            "20260812020851_HardenBedClearReplayStorage");
+            "20260812020851_HardenBedClearReplayStorage",
+            "20260816094836_RenameHasHeatedChamberToCalibrationHasHeatedChamber");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -667,6 +669,7 @@ public sealed class DatabaseMigrationTests
                 "20260808162502_AddPowerReadingCompositeIndex",
                 "20260811230934_AddRoleUpdatedAtConcurrencyToken",
                 "20260812020851_HardenBedClearReplayStorage",
+                "20260816094354_RenameHasHeatedChamberToCalibrationHasHeatedChamber",
             ]
             :
             [
@@ -678,6 +681,7 @@ public sealed class DatabaseMigrationTests
                 "20260811230948_AddRoleUpdatedAtConcurrencyToken",
                 "20260812011119_UseBinaryBedClearIdempotencyKeys",
                 "20260812020851_HardenBedClearReplayStorage",
+                "20260816094405_RenameHasHeatedChamberToCalibrationHasHeatedChamber",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");
