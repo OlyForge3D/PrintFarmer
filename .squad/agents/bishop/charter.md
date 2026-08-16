@@ -55,7 +55,7 @@ When reviewing:
 
 ## STANDING RULE — PRE-PR BRANCH REVIEW GATE (effective 2026-05-31)
 
-ALL code MUST pass 3-way adversarial review (Bishop + Hicks + Vasquez consensus APPROVE) on the BRANCH before any `gh pr create` is executed. No more "ship PR then review." Flow:
+ALL code MUST pass 3-way adversarial review (Bishop + Hicks + Vasquez consensus APPROVE) on the BRANCH before any PR is opened (via `create_pull_request` or `gh pr create`). No more "ship PR then review." Flow:
 1. Builder pushes branch (no PR yet)
 2. Trio reviews branch HEAD (diff against development)
 3. Consensus 3/3 APPROVE → builder (or wrangler) opens PR

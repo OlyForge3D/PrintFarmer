@@ -55,7 +55,7 @@ If I need another team member's input, say so — the coordinator will bring the
 
 ## STANDING RULE — PR ISSUE LINKAGE GATE (effective 2026-05-31)
 
-When opening a PR with `gh pr create`, the `--body` MUST contain `Closes #<issue-number>` for every GitHub issue this PR resolves. Parenthetical refs in the title (`(#350)`), bead-style footers (`[closes PFarm1-350]`), or `relates to #N` are NOT acceptable — GitHub does not auto-close on those. For multiple issues, use one `Closes #N` per line. Verify after creation: `gh pr view <num> --json closingIssuesReferences` should list the issue(s).
+Prefer the app's `create_pull_request` tool over `gh pr create` to open the PR (it links the PR to the session; `gh pr create` does not, and this can't be fixed retroactively). Follow it with `gh pr edit <num> --add-label squad` since the tool has no label parameter. Fall back to `gh pr create --label squad` only when the tool is unavailable, fails, or for fork/cross-account scenarios (see `.copilot/skills/gh-auth-isolation/SKILL.md`). Either way, the PR body MUST contain `Closes #<issue-number>` for every GitHub issue this PR resolves. Parenthetical refs in the title (`(#350)`), bead-style footers (`[closes PFarm1-350]`), or `relates to #N` are NOT acceptable — GitHub does not auto-close on those. For multiple issues, use one `Closes #N` per line. Verify after creation: `gh pr view <num> --json closingIssuesReferences` should list the issue(s).
 
 ## Voice
 

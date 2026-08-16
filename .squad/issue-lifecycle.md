@@ -178,9 +178,15 @@ git push -u origin squad/{issue-number}-{slug}
 
 **PR creation commands:**
 
-**GitHub:**
+**GitHub (session-backed agent — preferred):** use the app's `create_pull_request` tool
+(title + body as below), then apply the label: `gh pr edit <num> --add-label squad`. The
+tool links the PR to the session, which plain `gh pr create` does not and cannot be fixed
+retroactively.
+
+**GitHub (fallback — tool unavailable, fork/cross-account):**
 ```bash
 gh pr create --title "{title}" \
+  --label squad \
   --body "Closes #{issue-number}\n\n{description}" \
   --head squad/{issue-number}-{slug} \
   --base main
@@ -313,10 +319,10 @@ When spawning an agent to work on an issue, include this context block:
 **After completing work:**
 1. Commit with message referencing issue number
 2. Push branch
-3. Open PR using:
-   ```
-   gh pr create --title "{title}" --body "Closes #{number}\n\n{description}" --head squad/{issue-number}-{slug} --base {base-branch}
-   ```
+3. Open PR: prefer the app's `create_pull_request` tool (title/body as above), then
+   `gh pr edit <num> --add-label squad`. Fall back to `gh pr create --label squad
+   --title "{title}" --body "Closes #{number}\n\n{description}" --head
+   squad/{issue-number}-{slug} --base {base-branch}` only if the tool is unavailable.
 4. Report PR URL to coordinator
 ```
 
