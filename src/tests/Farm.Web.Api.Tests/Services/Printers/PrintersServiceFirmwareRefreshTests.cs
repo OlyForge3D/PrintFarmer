@@ -196,6 +196,63 @@ public sealed class PrintersServiceFirmwareRefreshTests
         act.Should().Throw<ArgumentNullException>();
     }
 
+    [Fact]
+    public async Task RefreshDetectedFirmwareIdentityAsync_SaveFails_RestoresOriginalFirmwareValuesBeforeRethrow()
+    {
+        // Bishop round-3 finding: the original fix (reload the entity from the database on
+        // SaveChangesAsync failure) still left a gap — if the reload itself also fails to find or
+        // restore the row (as happens here, since this test's `db` never actually persisted
+        // `printer`), the tracked entity could keep the failed mutation. The fix restores the
+        // pre-mutation snapshot on the tracked entity directly (no I/O dependency) before
+        // attempting the best-effort reload, so this must hold regardless of what the reload does.
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter();
+        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+        printer.FirmwareVersion = "v0.11.0";
+        printer.FirmwareDetectionVersion = "moonraker-printer-info-v1";
+        printer.FirmwareDetectionConfidence = 1.0m;
+        DateTime originalDetectedAt = DateTime.UtcNow.AddHours(-7); // past the default 6h cadence
+        printer.FirmwareDetectedAtUtc = originalDetectedAt;
+
+        var repository = new Mock<IPrintersRepository>();
+        repository
+            .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(printer);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        unitOfWork
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated database outage"));
+        PrintersService service = CreateService(db, unitOfWork.Object);
+
+        DiscoveredPrinterDto discovered = new()
+        {
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            GcodeDialect = PrinterGcodeDialect.Klipper,
+            FirmwareDetectionSource = FirmwareDetectionSource.Printer,
+            FirmwareVersion = "v99.99.99", // must never leak through on a failed save
+            FirmwareDetectionVersion = "moonraker-printer-info-v2",
+            FirmwareDetectionConfidence = 0.5m,
+            FirmwareDetectedAtUtc = DateTime.UtcNow,
+        };
+
+        Func<Task> act = () => service.RefreshDetectedFirmwareIdentityAsync(printer.Id, discovered, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+
+        // `printer` was never added to `db`, so the best-effort ReloadAsync call finds no
+        // matching row and cannot itself restore anything — proving the manual snapshot/restore
+        // (not the reload) is what guarantees no caller ever observes the failed mutation.
+        printer.FirmwareVersion.Should().Be("v0.11.0");
+        printer.FirmwareDetectionVersion.Should().Be("moonraker-printer-info-v1");
+        printer.FirmwareDetectionConfidence.Should().Be(1.0m);
+        printer.FirmwareDetectedAtUtc.Should().Be(originalDetectedAt);
+        printer.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+        printer.GcodeDialect.Should().Be(PrinterGcodeDialect.Klipper);
+    }
+
     private static AppDbContext CreateDbContext()
     {
         DbContextOptions<AppDbContext> options =

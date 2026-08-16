@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Threading;
@@ -399,5 +400,125 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
 
         Printer? reread = await db.Printers.AsNoTracking().SingleAsync(p => p.Id == printer.Id);
         _ = reread.FirmwareFamily.Should().Be(PrinterFirmwareFamily.Klipper);
+    }
+
+    [Fact]
+    public async Task GetAsync_MoonrakerProbeThrows_CachesFailureForShortTtlNotFullSuccessTtl()
+    {
+        // Bishop round-3 finding: the cache TTL selection previously only checked
+        // dto.FirmwareVersion is not null, so a failed probe that fell back to a stale persisted
+        // FirmwareVersion (still non-null) was cached for the full 10-minute success TTL instead
+        // of the short failure TTL — hiding a transient failure/blocking a manual retry far
+        // longer than intended.
+        Printer printer = CreateNeverProbedMoonrakerPrinter();
+        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
+        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+        printer.FirmwareVersion = "v0.10.0"; // stale persisted value the fallback will serve
+        printer.FirmwareDetectedAtUtc = null; // due for re-probe
+
+        await using AppDbContext db = NewDb($"firmware-identity-{Guid.NewGuid()}");
+        _ = db.Printers.Add(printer);
+        _ = await db.SaveChangesAsync();
+
+        Mock<IBackendClient> client = new();
+        Mock<ISupportsPrinterInformation> info = client.As<ISupportsPrinterInformation>();
+        _ = info
+            .Setup(c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("printer unreachable"));
+        Mock<IBackendClientFactory> backendFactory = new();
+        _ = backendFactory.Setup(f => f.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
+
+        PrintersService printersService = CreatePrintersService(db, backendFactory.Object);
+        var capturingCache = new ExpirationCapturingMemoryCache();
+        PrinterVersionCache cache = new(
+            capturingCache,
+            Options.Create(new PrinterVersionCacheOptions()),
+            printersService,
+            backendFactory.Object);
+
+        PrinterVersionInfoDto? dto = await cache.GetAsync(printer.Id, CancellationToken.None);
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.FirmwareVersion.Should().Be("v0.10.0");
+        _ = dto.Message.Should().NotBeNullOrEmpty();
+        _ = capturingCache.LastAbsoluteExpirationRelativeToNow.Should().Be(TimeSpan.FromSeconds(30));
+    }
+
+    [Fact]
+    public async Task GetAsync_MoonrakerProbeSucceeds_CachesForFullSuccessTtl()
+    {
+        Printer printer = CreateNeverProbedMoonrakerPrinter();
+
+        await using AppDbContext db = NewDb($"firmware-identity-{Guid.NewGuid()}");
+        _ = db.Printers.Add(printer);
+        _ = await db.SaveChangesAsync();
+
+        (Mock<IBackendClientFactory> backendFactory, _) = CreateMockedInfoBackend(PrinterBackend.Moonraker, "v0.12.0");
+
+        PrintersService printersService = CreatePrintersService(db, backendFactory.Object);
+        var capturingCache = new ExpirationCapturingMemoryCache();
+        var options = new PrinterVersionCacheOptions();
+        PrinterVersionCache cache = new(
+            capturingCache,
+            Options.Create(options),
+            printersService,
+            backendFactory.Object);
+
+        PrinterVersionInfoDto? dto = await cache.GetAsync(printer.Id, CancellationToken.None);
+
+        _ = dto.Should().NotBeNull();
+        _ = dto!.Message.Should().BeNullOrEmpty();
+        _ = capturingCache.LastAbsoluteExpirationRelativeToNow.Should().Be(options.Ttl);
+    }
+
+    /// <summary>
+    /// Minimal <see cref="IMemoryCache"/> test double that never serves a hit (so
+    /// <see cref="PrinterVersionCache.GetAsync"/> always exercises the fetch path) and records
+    /// the <see cref="ICacheEntry.AbsoluteExpirationRelativeToNow"/> passed to the most recent
+    /// <c>Set</c> call, so tests can assert on which TTL a given outcome was cached with.
+    /// </summary>
+    private sealed class ExpirationCapturingMemoryCache : IMemoryCache
+    {
+        public TimeSpan? LastAbsoluteExpirationRelativeToNow { get; private set; }
+
+        public ICacheEntry CreateEntry(object key) => new CapturingEntry(this);
+
+        public void Dispose()
+        {
+        }
+
+        public void Remove(object key)
+        {
+        }
+
+        public bool TryGetValue(object key, out object? value)
+        {
+            value = null;
+            return false;
+        }
+
+        private sealed class CapturingEntry(ExpirationCapturingMemoryCache owner) : ICacheEntry
+        {
+            public object Key { get; } = new object();
+
+            public object? Value { get; set; }
+
+            public DateTimeOffset? AbsoluteExpiration { get; set; }
+
+            public TimeSpan? AbsoluteExpirationRelativeToNow { get; set; }
+
+            public TimeSpan? SlidingExpiration { get; set; }
+
+            public IList<Microsoft.Extensions.Primitives.IChangeToken> ExpirationTokens { get; } = new List<Microsoft.Extensions.Primitives.IChangeToken>();
+
+            public IList<PostEvictionCallbackRegistration> PostEvictionCallbacks { get; } = new List<PostEvictionCallbackRegistration>();
+
+            public CacheItemPriority Priority { get; set; }
+
+            public long? Size { get; set; }
+
+            public void Dispose() => owner.LastAbsoluteExpirationRelativeToNow = AbsoluteExpirationRelativeToNow;
+        }
     }
 }

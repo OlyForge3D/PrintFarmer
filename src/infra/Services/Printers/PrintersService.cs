@@ -1135,10 +1135,11 @@ public class PrintersService(
     /// <see cref="Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork.SaveChangesAsync"/>
     /// throws, the in-memory property mutations above have already been applied to that shared
     /// tracked entity even though nothing was persisted — reporting them to a caller would be
-    /// exactly the split-brain #1656 exists to eliminate. On failure, reload the entity from the
-    /// database to discard the unsaved mutation before propagating the exception, so a caller
-    /// that swallows the exception and reads the entity afterward only ever sees genuinely
-    /// persisted values.
+    /// exactly the split-brain #1656 exists to eliminate. On failure the original field values
+    /// are restored on the tracked entity first (so a caller sees pre-mutation state even if the
+    /// subsequent best-effort reload from the database also fails, e.g. because the DB is
+    /// unreachable), then a reload is attempted to fully resync with whatever is actually
+    /// persisted, before propagating the exception.
     /// </remarks>
     public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
     {
@@ -1159,6 +1160,14 @@ public class PrintersService(
             return false;
         }
 
+        PrinterFirmwareFamily originalFirmwareFamily = printer.FirmwareFamily;
+        PrinterGcodeDialect originalGcodeDialect = printer.GcodeDialect;
+        FirmwareDetectionSource originalFirmwareDetectionSource = printer.FirmwareDetectionSource;
+        string? originalFirmwareVersion = printer.FirmwareVersion;
+        string? originalFirmwareDetectionVersion = printer.FirmwareDetectionVersion;
+        decimal? originalFirmwareDetectionConfidence = printer.FirmwareDetectionConfidence;
+        DateTime? originalFirmwareDetectedAtUtc = printer.FirmwareDetectedAtUtc;
+
         printer.FirmwareFamily = discovered.FirmwareFamily.Value;
         printer.GcodeDialect = discovered.GcodeDialect ?? printer.GcodeDialect;
         printer.FirmwareDetectionSource = discovered.FirmwareDetectionSource ?? FirmwareDetectionSource.Printer;
@@ -1173,7 +1182,28 @@ public class PrintersService(
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
-            await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+            // Restore the pre-mutation values on the tracked entity first: this guarantees no
+            // caller can observe unsaved mutations even if the reload below also fails (e.g. the
+            // database is unreachable, which is exactly the scenario SaveChangesAsync just hit).
+            printer.FirmwareFamily = originalFirmwareFamily;
+            printer.GcodeDialect = originalGcodeDialect;
+            printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
+            printer.FirmwareVersion = originalFirmwareVersion;
+            printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
+            printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
+            printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+
+            try
+            {
+                await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+            }
+            catch (Exception)
+            {
+                // Best-effort only: the manual restore above already guarantees the tracked
+                // entity's firmware fields reflect the pre-mutation (last known persisted) state,
+                // so a failed reload here does not reintroduce the split-brain risk.
+            }
+
             throw;
         }
 

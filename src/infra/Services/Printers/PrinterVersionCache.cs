@@ -56,7 +56,12 @@ public sealed class PrinterVersionCache(
             ? await GetMoonrakerVersionAsync(printer, backend, infoClient, ct)
             : await GetThinProbeVersionAsync(printer, backend, infoClient, ct);
 
-        _ = _cache.Set(Key(printerId), dto, dto.Supported && dto.FirmwareVersion is not null ? _options.Ttl : TimeSpan.FromSeconds(30));
+        // A non-null Message on a Supported DTO means the live probe failed (see the catch
+        // blocks in GetMoonrakerVersionAsync/GetThinProbeVersionAsync) — cache that outcome only
+        // briefly so a transient failure can't keep serving a stale failure message/versions, or
+        // block a manual refresh, for the full success TTL.
+        bool isFailure = dto.Message is not null;
+        _ = _cache.Set(Key(printerId), dto, dto.Supported && dto.FirmwareVersion is not null && !isFailure ? _options.Ttl : TimeSpan.FromSeconds(30));
         return dto;
     }
 
