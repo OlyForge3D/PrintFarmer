@@ -480,12 +480,13 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 - **Legible failure** — the status names the exact failing condition.
 
 The workflow job always succeeds; the gate outcome is the commit status, which
-takes exactly one of five forms:
+takes exactly one of six forms:
 
 | Status | Description | Verifier classification |
 | --- | --- | --- |
 | `success` | `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad' label)` | `NOT_APPLICABLE` (exit 4) |
 | `success` | `REVIEWED (self-attested) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
+| `success` | `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
 | `success` | `APPROVE (owner) @ <sha12> by <login>` | `APPROVED` (exit 0) |
 | `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
 | `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
@@ -527,9 +528,35 @@ Pass `--expected-head <recorded-sha>` when auditing a previously recorded
 review after the PR head may have moved. The verifier then reports
 `SUPERSEDED` for either an old review record or an old rejection.
 
-Any head movement supersedes the recorded review. This rule applies equally
-to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including rebases and force
-pushes. The panel must review the new head and record fresh reviews naming it.
+Any head movement supersedes the recorded review — **with one narrow exception**.
+A record pinned to an old head SHA `SHA_r` is carried forward, unchanged in meaning
+but relabelled, to a new head `SHA_h` only when **both** hold: (1) `SHA_r` is a
+strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
+`compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
+force-push always fails this), and (2) every commit introduced in `SHA_r..SHA_h` is
+already reachable from the base branch tip, i.e. `compare(SHA_r...SHA_h)`'s commit
+list and `compare(<base>...SHA_h)`'s commit list share no entries — the only new
+commits are ones the author merged in from `development`, not new author work. Both
+checks run purely against the compare API (`GET /repos/{owner}/{repo}/compare/{base}`),
+matching the workflow's existing default-branch-only checkout — no repository fetch
+is needed. This repo is squash-only onto `development`, so in practice this exemption
+only fires when an author syncs with `git merge` (not `git rebase`); rebasing or
+force-pushing always supersedes normally, by design, since it fails condition (1).
+
+When a record is carried forward this way, the status and audit trail say so
+explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare
+`REVIEWED` — so nobody mistakes "the reviewed diff is provably unchanged" for "this
+exact commit was freshly reviewed". Any author-authored commit anywhere in the range
+still supersedes the record exactly as before: this exemption narrows *when* a stale
+SHA is discarded, it does not weaken the review-then-push-more threat model the
+SHA-binding exists to close. A compare-API failure (rate limit, unresolvable SHA,
+etc.) fails closed — the record supersedes normally rather than being carried on
+unproven grounds.
+
+Outside this one exemption, any head movement supersedes the recorded review. This
+rule applies equally to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including
+rebases and force pushes. The panel must review the new head and record fresh
+reviews naming it.
 
 Missing, invalid, or superseded squad evidence never becomes a review record.
 After verification, merge with

@@ -14,6 +14,7 @@ import {
   hasAdminAccess,
   hasSquadScopeLabel,
   hasWriteAccess,
+  isCarriedAcrossSync,
   normalizeMember,
   parseVerdictComment,
   resolveAuthorMembers,
@@ -299,6 +300,153 @@ test('rejects verdicts pinned to a stale SHA', () => {
   assert.equal(result.stale.length, 3);
   assert.match(result.reason, /every recorded review is stale/);
   assert.match(result.description, /^BLOCKED @ /);
+});
+
+// --- Sync carry-forward exemption (issue #1633, "Option A") ----------------
+//
+// A record at an old head SHA stays valid at the new head when (1) the old
+// SHA is a strict ancestor of the new head, and (2) every commit introduced
+// since then is already reachable from the base branch tip — i.e. the only
+// thing that happened is the author merging base in, not new author work.
+// `isCarriedAcrossSync` is the pure predicate; `carriedShas` is how a caller
+// (the workflow, having already computed the two compares) tells
+// `collectVerdicts`/`evaluateGate` which old SHAs satisfy it.
+
+test('ancestry check: a commit reachable from the base tip is not "ahead of base"', () => {
+  // This models exactly what the two GitHub compare calls hand back: the
+  // `commits` array from compare(reviewedSha...newHead) is `newCommitShas`,
+  // and the `commits` array from compare(baseTip...newHead) is
+  // `aheadOfBaseShas` — commits in head that are NOT yet reachable from base.
+  // A pure base-branch merge introduces only commits base already has, so
+  // none of them show up in the "ahead of base" set.
+  const mergeCommitSha = 'c'.repeat(40);
+  assert.equal(
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      newCommitShas: [mergeCommitSha],
+      // The merge commit landed in the PR branch but base itself is not
+      // ahead of anything here — i.e. every commit the PR gained is already
+      // part of base's own history, so compare(base...head) does not list it
+      // as base-ahead-of-head content the gate has to worry about.
+      aheadOfBaseShas: [],
+    }),
+    true,
+  );
+});
+
+test('a pure base-sync merge carries the record forward with the carried-status wording', () => {
+  const reviewedSha = staleSha;
+  const result = gate({
+    comments: [
+      comment('bishop', 'APPROVE', reviewedSha),
+      comment('hicks', 'APPROVE', reviewedSha),
+      comment('vasquez', 'APPROVE', reviewedSha),
+    ],
+    carriedShas: new Set([reviewedSha]),
+  });
+  assert.equal(result.state, 'success');
+  assert.equal(result.stale.length, 0);
+  assert.equal(
+    result.description,
+    `REVIEWED (self-attested, carried across sync) @ ${headSha.slice(0, 12)} by bishop+hicks+vasquez`,
+  );
+  assert.match(result.reason, /3 carried forward across a pure base sync/);
+  assert.deepEqual(result.carried.sort(), ['bishop', 'hicks', 'vasquez']);
+  assert.ok(
+    result.notes.some((note) => note.startsWith('Carried across sync:')),
+    'the audit trail must record that records were carried, not freshly earned',
+  );
+});
+
+test('a mix of fresh and carried approvals is still reported and still carries', () => {
+  const result = gate({
+    comments: [
+      comment('bishop', 'APPROVE', staleSha),
+      comment('hicks', 'APPROVE'), // already at the current head
+      comment('vasquez', 'APPROVE'),
+    ],
+    carriedShas: new Set([staleSha]),
+  });
+  assert.equal(result.state, 'success');
+  assert.match(result.description, /^REVIEWED \(self-attested, carried across sync\) @/);
+  assert.deepEqual(result.carried, ['bishop']);
+});
+
+test('any author commit in the sync range still supersedes the record normally', () => {
+  // The ancestry/base-reachability conditions failed (e.g. the compare showed
+  // an author commit ahead of base), so the workflow never adds the old SHA
+  // to `carriedShas`. The record must supersede exactly as it does today —
+  // regression coverage for the review-then-push-more threat model.
+  const result = gate({
+    comments: [
+      comment('bishop', 'APPROVE', staleSha),
+      comment('hicks', 'APPROVE', staleSha),
+      comment('vasquez', 'APPROVE', staleSha),
+    ],
+    carriedShas: new Set(), // nothing proven carry-forward eligible
+  });
+  assert.equal(result.state, 'failure');
+  assert.equal(result.stale.length, 3);
+  assert.match(result.description, /^BLOCKED @ /);
+});
+
+test('isCarriedAcrossSync fails closed when an author commit is in the introduced range', () => {
+  const authorCommitSha = 'd'.repeat(40);
+  const baseMergeCommitSha = 'e'.repeat(40);
+  assert.equal(
+    isCarriedAcrossSync({
+      recordAncestryStatus: 'ahead',
+      newCommitShas: [baseMergeCommitSha, authorCommitSha],
+      // The author's new commit has not landed in base yet, so it shows up
+      // as one of the commits head is ahead of base by.
+      aheadOfBaseShas: [authorCommitSha],
+    }),
+    false,
+  );
+});
+
+test('isCarriedAcrossSync fails closed when the record SHA is not a strict ancestor', () => {
+  // A rebase or force-push rewrites history: GitHub's compare status is
+  // 'diverged' or 'behind' rather than 'ahead', so ancestry condition (1)
+  // fails regardless of what the commit lists say.
+  for (const status of ['diverged', 'behind', 'identical', undefined]) {
+    assert.equal(
+      isCarriedAcrossSync({
+        recordAncestryStatus: status,
+        newCommitShas: ['f'.repeat(40)],
+        aheadOfBaseShas: [],
+      }),
+      false,
+      String(status),
+    );
+  }
+});
+
+test('isCarriedAcrossSync fails closed on an empty introduced-commit list', () => {
+  // The caller must always supply the concrete commits it observed; an empty
+  // list never means "safe by default".
+  assert.equal(
+    isCarriedAcrossSync({ recordAncestryStatus: 'ahead', newCommitShas: [], aheadOfBaseShas: [] }),
+    false,
+  );
+});
+
+test('carriedShas is keyed on the reviewed SHA, not the current head', () => {
+  // Carrying record at SHA X forward to head Y must not accidentally validate
+  // an unrelated record pinned to some other stale SHA Z.
+  const otherStaleSha = 'c'.repeat(40);
+  const { current, stale } = collectVerdicts(
+    [
+      comment('bishop', 'APPROVE', staleSha),
+      comment('hicks', 'APPROVE', otherStaleSha),
+    ],
+    headSha,
+    { carriedShas: new Set([staleSha]) },
+  );
+  assert.equal(current.get('bishop').carriedAcrossSync, true);
+  assert.equal(current.has('hicks'), false);
+  assert.equal(stale.length, 1);
+  assert.equal(stale[0].reviewer, 'hicks');
 });
 
 test('a single approval never satisfies a code change', () => {

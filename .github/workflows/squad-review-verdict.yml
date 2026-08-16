@@ -422,6 +422,58 @@ jobs:
 
             const reviews = await loadReviews();
 
+            // Sync-carry-forward exemption (issue #1633, "Option A"). A
+            // record pinned to an old head SHA stays valid at the current
+            // head when (1) the old SHA is a strict ancestor of the current
+            // head, and (2) every commit introduced since then is already
+            // reachable from the base branch tip — i.e. the only thing that
+            // happened is the author merging base in, not new author work.
+            // Both conditions are checked purely via the compare API, with no
+            // repository fetch, matching the checkout above.
+            const distinctOldShas = new Set();
+            for (const raw of rawComments) {
+              const shape = gate.parseVerdictComment({ ...raw, squadWriteAccess: true });
+              if (shape && shape.headSha !== headSha) {
+                distinctOldShas.add(shape.headSha);
+              }
+            }
+
+            const baseRef = pull.base?.ref ?? '';
+            const carriedShas = new Set();
+            for (const oldSha of distinctOldShas) {
+              try {
+                const { data: recordCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${oldSha}...${headSha}`,
+                  });
+                const { data: baseCompare } =
+                  await github.rest.repos.compareCommitsWithBasehead({
+                    owner, repo, basehead: `${baseRef}...${headSha}`,
+                  });
+                const eligible = gate.isCarriedAcrossSync({
+                  recordAncestryStatus: recordCompare.status,
+                  newCommitShas: (recordCompare.commits ?? []).map((c) => c.sha),
+                  aheadOfBaseShas: (baseCompare.commits ?? []).map((c) => c.sha),
+                });
+                if (eligible) {
+                  carriedShas.add(oldSha);
+                  core.notice(
+                    `Carrying review record at ${oldSha.slice(0, 12)} forward to ` +
+                    `${headSha.slice(0, 12)}: only base-branch commits arrived since review.`,
+                  );
+                }
+              } catch (error) {
+                // Fails closed: a compare failure (rate limit, unknown SHA,
+                // repository not fetched, etc.) never carries a record
+                // forward — worst case is an unnecessary re-review, not a
+                // skipped one.
+                core.warning(
+                  `Could not evaluate sync carry-forward for ${oldSha}: ${error.message}. ` +
+                  'Treating the record as superseded.',
+                );
+              }
+            }
+
             const result = gate.evaluateGate({
               headSha,
               changedPaths,
@@ -431,6 +483,7 @@ jobs:
               authorMembers: author.members,
               authorSource: author.source,
               squadLabeled: true,
+              carriedShas,
             });
 
             await postStatus(result.state, result.description);
@@ -450,7 +503,11 @@ jobs:
                 ['PR', `#${prNumber}`],
                 ['Head SHA', headSha],
                 ['Result', result.passed
-                  ? (result.override ? 'APPROVE (owner)' : 'REVIEWED (self-attested)')
+                  ? (result.override
+                    ? 'APPROVE (owner)'
+                    : result.carried?.length > 0
+                      ? 'REVIEWED (self-attested, carried across sync)'
+                      : 'REVIEWED (self-attested)')
                   : 'BLOCKED'],
                 ['Reason', result.reason],
                 ['Self-attested review records', result.approvals.join(', ') || '(none)'],

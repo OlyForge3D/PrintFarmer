@@ -73,6 +73,26 @@ test('accepts a trusted approval for the exact current head', () => {
   assert.equal(verdict.classification, 'REVIEWED');
   assert.equal(verdict.reviewedHeadSha, reviewedHeadSha);
   assert.equal(verdict.actor, 'bishop+hicks+vasquez');
+  assert.equal(verdict.carriedAcrossSync, false);
+});
+
+test('a carried-across-sync description is classified REVIEWED and flagged as such', () => {
+  const evidence = fixture();
+  evidence.status.description =
+    `REVIEWED (self-attested, carried across sync) @ ${shortSha} by bishop+hicks+vasquez`;
+  const verdict = verifySquadVerdict(evidence);
+  assert.equal(verdict.classification, 'REVIEWED');
+  assert.equal(verdict.actor, 'bishop+hicks+vasquez');
+  assert.equal(verdict.carriedAcrossSync, true);
+  assert.match(verdict.reason, /carried forward across a pure base sync/);
+});
+
+test('a plain reviewed description (no sync suffix) is not flagged as carried', () => {
+  const evidence = fixture();
+  const verdict = verifySquadVerdict(evidence);
+  assert.equal(verdict.classification, 'REVIEWED');
+  assert.equal(verdict.carriedAcrossSync, false);
+  assert.doesNotMatch(verdict.reason, /carried forward/);
 });
 
 test('accepts the agent-verdict events the gate actually runs on', () => {
@@ -401,6 +421,11 @@ test('every description evaluateGate can emit round-trips through the verifier',
     }, 'CHANGES_REQUESTED'],
     ['full panel recorded a review', {
       changedPaths: codePaths, comments: panel.map((m) => record(m, 'APPROVE')),
+    }, 'REVIEWED'],
+    ['full panel review carried forward across a base sync', {
+      changedPaths: codePaths,
+      comments: panel.map((m) => record(m, 'APPROVE', movedHeadSha)),
+      carriedShas: new Set([movedHeadSha]),
     }, 'REVIEWED'],
     ['docs-only, one record', {
       changedPaths: docPaths, comments: [record('dallas', 'APPROVE')],

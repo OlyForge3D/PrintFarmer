@@ -354,6 +354,63 @@ export function parseVerdictComment(comment) {
 }
 
 /**
+ * Determine whether a record reviewed at an old head SHA may be carried
+ * forward to a new head SHA without a fresh review — the ancestry-based sync
+ * exemption from issue #1633 ("Option A"). This exists so a routine base-branch
+ * sync doesn't cost a full re-review of a contribution nobody touched.
+ *
+ * BOTH conditions must hold, matching the issue's proposed fix exactly:
+ *
+ *   1. The reviewed SHA is a strict ancestor of the new head — nothing was
+ *      rewritten or force-pushed away. This is `recordAncestryStatus`, the
+ *      `status` field GitHub's compare API returns for
+ *      `compare/{reviewedSha}...{newHeadSha}`. Only `'ahead'` satisfies it.
+ *      (`'identical'` never reaches this function — an unchanged head is
+ *      already handled as a direct SHA match upstream — and `'behind'` /
+ *      `'diverged'` mean history was rewritten, so ancestry fails.)
+ *   2. Every commit introduced since the review (`newCommitShas`, the
+ *      `commits` array from that same compare call) is already reachable
+ *      from the base branch tip — i.e. it arrived via a base sync, not new
+ *      author work. `aheadOfBaseShas` is the `commits` array from a second
+ *      compare, `compare/{baseTip}...{newHeadSha}`: GitHub's compare API
+ *      lists there exactly the commits that are ancestors of the head but
+ *      NOT ancestors of the base, so anything absent from that set is, by
+ *      construction, already an ancestor of the base tip.
+ *
+ * Both compares are obtained via `GET /repos/{owner}/{repo}/compare/{basehead}`
+ * without fetching the repository, which matters because the workflow
+ * deliberately checks out only the default branch (see the workflow header).
+ *
+ * Fails closed: an empty `newCommitShas` list is never treated as safe — the
+ * caller must always supply the concrete commit list it observed rather than
+ * a default meaning "nothing to check". Any single author-authored commit in
+ * the range breaks condition 2 and this returns false — exactly the
+ * review-then-push-more threat model the SHA pin exists to catch (see the
+ * module header and issue #1633's "Security note"). This function performs no
+ * I/O; the workflow computes the two compares and passes their result in.
+ */
+export function isCarriedAcrossSync({
+  recordAncestryStatus,
+  newCommitShas = [],
+  aheadOfBaseShas = [],
+} = {}) {
+  if (recordAncestryStatus !== 'ahead') {
+    return false;
+  }
+  const introduced = (Array.isArray(newCommitShas) ? newCommitShas : [])
+    .map((sha) => String(sha ?? '').toLowerCase())
+    .filter(Boolean);
+  if (introduced.length === 0) {
+    return false;
+  }
+  const aheadOfBase = new Set(
+    (Array.isArray(aheadOfBaseShas) ? aheadOfBaseShas : [])
+      .map((sha) => String(sha ?? '').toLowerCase()),
+  );
+  return introduced.every((sha) => !aheadOfBase.has(sha));
+}
+
+/**
  * Split trusted verdicts into the reviewer's decision *on the current head* and
  * everything else.
  *
@@ -362,9 +419,19 @@ export function parseVerdictComment(comment) {
  * comment naming an old SHA erase that reviewer's live REQUEST_CHANGES, since
  * the stale record would win on timestamp and then be filtered out of the
  * current pool. A stale comment can never displace a current-head one.
+ *
+ * `carriedShas` (a `Set`/iterable of lowercase SHAs, or an equivalent) names
+ * old head SHAs the caller has already proven, via `isCarriedAcrossSync`, to
+ * introduce nothing but base-branch commits since they were reviewed. A
+ * record pinned to one of those SHAs is treated as current — but tagged
+ * `carriedAcrossSync: true` so the audit trail never silently presents it as
+ * a fresh review of the new head.
  */
-export function collectVerdicts(comments, headSha) {
+export function collectVerdicts(comments, headSha, { carriedShas } = {}) {
   const head = String(headSha ?? '').toLowerCase();
+  const carried = carriedShas instanceof Set
+    ? carriedShas
+    : new Set(carriedShas ?? []);
   const current = new Map();
   const staleLatest = new Map();
   const unauthenticated = [];
@@ -380,13 +447,16 @@ export function collectVerdicts(comments, headSha) {
       unauthenticated.push(record);
       continue;
     }
-    const pool = record.headSha === head ? current : staleLatest;
-    const previous = pool.get(record.reviewer);
+    const isCurrentHead = record.headSha === head;
+    const isCarried = !isCurrentHead && carried.has(record.headSha);
+    const pool = (isCurrentHead || isCarried) ? current : staleLatest;
+    const candidate = isCarried ? { ...record, carriedAcrossSync: true } : record;
+    const previous = pool.get(candidate.reviewer);
     if (
       !previous ||
-      Date.parse(record.recordedAt || 0) >= Date.parse(previous.recordedAt || 0)
+      Date.parse(candidate.recordedAt || 0) >= Date.parse(previous.recordedAt || 0)
     ) {
-      pool.set(record.reviewer, record);
+      pool.set(candidate.reviewer, candidate);
     }
   }
   const stale = [...staleLatest.values()]
@@ -497,6 +567,11 @@ export function evaluateGate({
   authorMembers = new Set(),
   authorSource = 'unresolved',
   squadLabeled = false,
+  // Old head SHAs (see `isCarriedAcrossSync`) the caller has already proven
+  // introduce nothing but base-branch commits since they were reviewed. A
+  // record pinned to one of these stays valid at the current head, tagged
+  // `carriedAcrossSync` so the status and audit trail say so explicitly.
+  carriedShas = new Set(),
 } = {}) {
   const head = String(headSha ?? '').toLowerCase();
   const notes = [];
@@ -616,7 +691,7 @@ export function evaluateGate({
     };
   }
 
-  const { current, stale, unauthenticated } = collectVerdicts(comments, head);
+  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
   if (unauthenticated.length > 0) {
     notes.push(
       `Rejected ${unauthenticated.length} record(s) whose author could not be ` +
@@ -768,6 +843,23 @@ export function evaluateGate({
     };
   }
 
+  // Records carried forward under the sync exemption (see
+  // `isCarriedAcrossSync`) still count toward `approvals`, but the status and
+  // audit trail must say so explicitly — never silently present a carried
+  // record as a fresh review of the current head.
+  const carried = [...eligible.values()]
+    .filter((record) => record.verdict === 'APPROVE' && record.carriedAcrossSync === true);
+  if (carried.length > 0) {
+    notes.push(
+      `Carried across sync: ${carried
+        .map((record) => `${record.reviewer}@${shortSha(record.headSha)}`)
+        .join(', ')} — every commit since that review is already reachable ` +
+      'from the base branch tip (a pure base sync), so the record was ' +
+      'carried forward rather than re-earned.',
+    );
+  }
+  const carriedSuffix = carried.length > 0 ? ', carried across sync' : '';
+
   // Deliberately NOT "APPROVE": this is a record that reviewer agents examined
   // this exact commit, self-attested under the owner's authority. Only the owner
   // override path emits an `APPROVE (owner)` status, because only that path is a
@@ -776,14 +868,17 @@ export function evaluateGate({
     state: 'success',
     passed: true,
     description: truncate(
-      `REVIEWED (self-attested) @ ${shortSha(head)} by ${approvals.join('+')}`,
+      `REVIEWED (self-attested${carriedSuffix}) @ ${shortSha(head)} by ${approvals.join('+')}`,
     ),
     reason:
       `${approvals.length} SHA-bound self-attested review record(s) on the ` +
-      'current head',
+      'current head' + (carried.length > 0
+        ? ` (${carried.length} carried forward across a pure base sync)`
+        : ''),
     notes,
     requiredMembers,
     approvals,
     stale,
+    carried: carried.map((record) => record.reviewer),
   };
 }
