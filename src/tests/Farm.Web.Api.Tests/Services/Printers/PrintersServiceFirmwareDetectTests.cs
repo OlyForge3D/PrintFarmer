@@ -138,6 +138,89 @@ public sealed class PrintersServiceFirmwareDetectTests
             "the lock-table entry allocated for the pre-lock existence check must be evicted once the printer is confirmed deleted, not retained forever");
     }
 
+    /// <summary>
+    /// #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): round 6 only closed the
+    /// window up to and including the post-lock existence recheck — a delete landing after that
+    /// recheck but before/during the write itself was never caught, since every fix so far was
+    /// another check-then-act layer with its own gap after it. The structural fix makes the write
+    /// (SaveChangesAsync) itself the atomic existence boundary. This simulates that shape: both
+    /// existence rechecks still report the printer present, and only SaveChangesAsync itself
+    /// discovers the row is gone via a genuine DbUpdateConcurrencyException wrapping an
+    /// EntityEntry whose current database values are null — exactly what
+    /// WasFirmwareIdentityPrinterDeletedAsync looks for.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_SaveChangesThrowsConcurrencyExceptionForDeletedRow_ReturnsPrinterNotFoundAndEvictsLock()
+    {
+        string dbName = $"PrintersServiceFirmwareDetectTests_ConcurrencyDeleted_{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
+
+        await using (AppDbContext seedDb = CreateDbContext(dbName))
+        {
+            Printer seed = CreatePrinter();
+            seed.Id = printerId;
+            seedDb.Printers.Add(seed);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = CreateDbContext(dbName);
+
+        // Load the printer through this scope's own context, exactly as production code would --
+        // this is the tracked instance/EntityEntry whose database values will be re-queried by
+        // WasFirmwareIdentityPrinterDeletedAsync.
+        Printer printer = (await db.Printers.SingleAsync(p => p.Id == printerId))!;
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry = db.Entry(printer);
+        var updateEntry = (Microsoft.EntityFrameworkCore.Update.IUpdateEntry)
+            ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<Microsoft.EntityFrameworkCore.ChangeTracking.Internal.InternalEntityEntry>)entry).Instance;
+
+        // A wholly separate scope deletes the row for real, out from under this scope's own
+        // tracked entity -- this scope's own context is not aware the row is gone until it
+        // re-queries the (shared, same-name) underlying store, which is exactly what
+        // GetDatabaseValuesAsync (used by WasFirmwareIdentityPrinterDeletedAsync) does.
+        await using (AppDbContext concurrentWriterDb = CreateDbContext(dbName))
+        {
+            Printer toDelete = (await concurrentWriterDb.Printers.SingleAsync(p => p.Id == printerId))!;
+            concurrentWriterDb.Printers.Remove(toDelete);
+            await concurrentWriterDb.SaveChangesAsync();
+        }
+
+        var repository = new Mock<IPrintersRepository>();
+        // The pre-lock and post-lock existence rechecks (round 5/6) are mocked to still report
+        // the printer present -- from their point of view, nothing has happened yet. Only the
+        // write itself (below) discovers the row is genuinely gone.
+        repository.Setup(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        repository.Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        unitOfWork
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(_ =>
+            {
+                // Mocking SaveChangesAsync directly bypasses EF's real save pipeline, which
+                // normally calls ChangeTracker.DetectChanges() before evaluating entity states --
+                // without it, `entry` would still read as Unchanged (production's field mutations
+                // just above are not yet detected), and DbUpdateException.Entries filters out
+                // anything that isn't Added/Modified/Deleted at the moment it's first accessed.
+                // Detecting changes here, at the same point the real SaveChangesAsync would, is
+                // what makes the constructed exception genuinely equivalent to one EF would throw.
+                db.ChangeTracker.DetectChanges();
+                return Task.FromException<int>(new DbUpdateConcurrencyException(
+                    "simulated concurrency conflict: row deleted mid-write",
+                    new[] { updateEntry }));
+            });
+
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(printerId, CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        PrintersService.HasFirmwareIdentityWriteLockForTests(printerId).Should().BeFalse(
+            "a delete discovered only when the write itself fails must still evict this printer's lock-table entry, not just the pre-write recheck path");
+    }
+
     [Fact]
     public async Task DetectFirmwareIdentityAsync_NonMoonrakerBackend_ReturnsBackendNotSupported()
     {
@@ -283,11 +366,11 @@ public sealed class PrintersServiceFirmwareDetectTests
         printer.FirmwareVersion.Should().Be("v0.12.0-321");
     }
 
-    private static AppDbContext CreateDbContext()
+    private static AppDbContext CreateDbContext(string? name = null)
     {
         DbContextOptions<AppDbContext> options =
             new DbContextOptionsBuilder<AppDbContext>()
-                .UseInMemoryDatabase($"PrintersServiceFirmwareDetectTests_{Guid.NewGuid():N}")
+                .UseInMemoryDatabase(name ?? $"PrintersServiceFirmwareDetectTests_{Guid.NewGuid():N}")
                 .Options;
         return new AppDbContext(options);
     }

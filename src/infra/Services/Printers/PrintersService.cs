@@ -808,6 +808,25 @@ public class PrintersService(
         // Discard any accumulated per-tool activity so a deleted printer's buckets do not linger
         // (issue #711, round-14). Best-effort: the accumulator is a shared in-memory singleton.
         _activityAccumulator?.Reset(p.Id);
+
+        // #1656 / PR #1660 review round 7 (Vasquez, blocking): round 6 only evicted a
+        // FirmwareIdentityWriteLocks entry when a refresh/detect call *itself* discovered
+        // mid-flight that the printer had vanished -- a printer deleted by a wholly separate
+        // request, at any later time, with no refresh/detect racing it, left that entry
+        // retained in the static process-lifetime dictionary forever, since nothing tied
+        // eviction to the printer's actual lifecycle. IPrintersRepository.RemoveAsync above
+        // owns and commits its own transaction (see EfPrintersRepository.RemoveAsync), so by
+        // this point the row is genuinely, durably gone -- reclaim this printer's lock-table
+        // entry unconditionally here, regardless of whether any refresh/detect call is, or
+        // ever was, holding or waiting on it. This is safe for a concurrently in-flight
+        // refresh/detect for this same printer: that caller already holds its own direct
+        // object reference to the semaphore (obtained via GetFirmwareIdentityWriteLock before
+        // this eviction could possibly run), so removing the dictionary entry here does not
+        // disturb its wait/hold/release -- it will independently discover the deletion via
+        // the SaveChangesAsync-time DbUpdateConcurrencyException check (see the round-7
+        // remarks on RefreshDetectedFirmwareIdentityAsync/DetectFirmwareIdentityAsync), which
+        // is the structural fix for the write-side of this same round-7 finding.
+        FirmwareIdentityWriteLocks.TryRemove(p.Id, out _);
     }
 
     /// <summary>
@@ -1182,6 +1201,20 @@ public class PrintersService(
     // the database regardless of tracking state, so it cannot be fooled by the identity map), and
     // evict the lock-table entry for that id the moment it is found gone, so a deleted printer's
     // semaphore is not retained indefinitely.
+    //
+    // #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): round 6 was still just
+    // another check-then-act layer — a delete landing after the post-lock existence check but
+    // before/during the write itself was not caught by anything, and eviction only ever fired
+    // when a refresh/detect call *itself* discovered the printer gone mid-flight, so a printer
+    // deleted at any other time (no in-flight refresh/detect racing it) leaked its entry forever.
+    // Both gaps are now closed structurally rather than narrowed further: the write
+    // (SaveChangesAsync) itself is the atomic existence check (see
+    // WasFirmwareIdentityPrinterDeletedAsync — a delete racing the write surfaces as
+    // DbUpdateConcurrencyException, since EF's generated UPDATE is scoped by primary key and EF
+    // always verifies affected-row counts even without an explicit concurrency token), and
+    // RemoveAsync(Printer, CancellationToken) unconditionally evicts this table's entry for a
+    // printer the moment its row is actually, durably deleted, regardless of what else is or
+    // isn't racing it at the time.
     private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> FirmwareIdentityWriteLocks = new();
 
     private static SemaphoreSlim GetFirmwareIdentityWriteLock(Guid printerId) =>
@@ -1224,6 +1257,53 @@ public class PrintersService(
     /// </summary>
     private static void EvictFirmwareIdentityWriteLock(Guid printerId, SemaphoreSlim gate) =>
         FirmwareIdentityWriteLocks.TryRemove(new KeyValuePair<Guid, SemaphoreSlim>(printerId, gate));
+
+    /// <summary>
+    /// #1656 / PR #1660 review round 7 (Bishop, Vasquez, blocking): every existence check added
+    /// in rounds 5 and 6 is still a check-then-act pair with an inherent gap between "confirmed
+    /// exists" and "wrote" -- a delete landing in that remaining gap (including during the
+    /// <c>SaveChangesAsync</c> call itself) could not be caught by any of them, and adding yet
+    /// another pre-write check would only narrow the window again rather than close it.
+    /// <para>
+    /// <see cref="Printer"/> has no application-level concurrency token configured (see
+    /// <c>PrinterConfiguration</c>), but EF Core's generated <c>UPDATE</c> statement is still
+    /// scoped by the primary key (<c>WHERE Id = @id</c>), and EF Core always checks the number of
+    /// rows a data-modification command actually affected against how many it expected. If the
+    /// row was deleted by any other request at any point up to and including this exact
+    /// <c>SaveChangesAsync</c> call -- regardless of how the caller's own tracked
+    /// <see cref="Printer"/> instance got there, and regardless of how many prior
+    /// existence-check layers ran -- the <c>UPDATE</c> affects zero rows, and EF Core surfaces
+    /// that as <see cref="DbUpdateConcurrencyException"/> here. This makes the write itself the
+    /// single atomic boundary for "does this printer still exist": there is no longer a
+    /// meaningful gap to close, because nothing this method does between loading the entity and
+    /// calling <c>SaveChangesAsync</c> can make that exception any less reliable a signal.
+    /// </para>
+    /// <para>
+    /// This helper inspects a caught <see cref="DbUpdateConcurrencyException"/> and confirms the
+    /// row is genuinely gone (as opposed to some other concurrency conflict) via
+    /// <see cref="Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry.GetDatabaseValuesAsync(CancellationToken)"/>
+    /// returning <see langword="null"/> -- the same idiom <see cref="SaveChangesWithRetryAsync"/>
+    /// already uses to distinguish "row deleted" from "row updated concurrently". Since neither
+    /// <see cref="RefreshDetectedFirmwareIdentityAsync"/> nor <see cref="DetectFirmwareIdentityAsync"/>
+    /// modifies any other tracked entity, a non-null result here would indicate an unexpected
+    /// concurrency conflict on a token this entity does not have configured; callers still treat
+    /// that case defensively (reload and rethrow) rather than assuming it can only mean deletion.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> WasFirmwareIdentityPrinterDeletedAsync(DbUpdateConcurrencyException ex, CancellationToken ct)
+    {
+        foreach (Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry in ex.Entries)
+        {
+            Microsoft.EntityFrameworkCore.ChangeTracking.PropertyValues? databaseValues =
+                await entry.GetDatabaseValuesAsync(ct);
+            if (databaseValues is null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
@@ -1295,6 +1375,30 @@ public class PrintersService(
     /// unreachable), then a reload is attempted to fully resync with whatever is actually
     /// persisted, before propagating the exception.
     /// </para>
+    /// <para>
+    /// Concurrency, continued (Bishop + Vasquez, PR #1660 review round 7): rounds 5 and 6 kept
+    /// adding pre-write existence checks, but each one is itself a check-then-act pair with its
+    /// own gap between "confirmed exists" and "wrote" — a delete landing in whatever gap remains
+    /// (including during the <c>SaveChangesAsync</c> call itself) could not be caught by any of
+    /// them, and the lock-table entry for a printer deleted at any point <em>other than</em>
+    /// inside an in-flight call to this method or <see cref="DetectFirmwareIdentityAsync"/> was
+    /// never reclaimed at all. This closes both gaps structurally instead of narrowing them
+    /// further:
+    /// <list type="bullet">
+    /// <item>The <c>SaveChangesAsync</c> call itself is now the single atomic existence check —
+    /// see <see cref="WasFirmwareIdentityPrinterDeletedAsync"/>. A delete at any point up to and
+    /// including the write is caught here via <see cref="DbUpdateConcurrencyException"/>, so no
+    /// further pre-write check is load-bearing for correctness (the pre-lock and post-lock
+    /// <see cref="FirmwarePrinterExistsAsync"/> checks above remain purely as fast-path
+    /// optimizations that avoid a wasted probe/mutation for an id that is already known-gone).
+    /// </item>
+    /// <item>Lock-table eviction is now also tied to the printer's actual delete lifecycle: see
+    /// <see cref="RemoveAsync(Printer, CancellationToken)"/>, which unconditionally reclaims the
+    /// <see cref="FirmwareIdentityWriteLocks"/> entry for a printer the moment its row is
+    /// actually, durably deleted — regardless of whether any refresh/detect call ever raced it.
+    /// </item>
+    /// </list>
+    /// </para>
     /// </remarks>
     public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
     {
@@ -1357,6 +1461,21 @@ public class PrintersService(
             decimal? originalFirmwareDetectionConfidence = printer.FirmwareDetectionConfidence;
             DateTime? originalFirmwareDetectedAtUtc = printer.FirmwareDetectedAtUtc;
 
+            void RestoreOriginalFirmwareValues()
+            {
+                // Restore the pre-mutation values on the tracked entity first: this guarantees no
+                // caller can observe unsaved mutations even if a subsequent best-effort reload
+                // also fails (e.g. the database is unreachable, which is exactly the scenario
+                // SaveChangesAsync just hit).
+                printer.FirmwareFamily = originalFirmwareFamily;
+                printer.GcodeDialect = originalGcodeDialect;
+                printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
+                printer.FirmwareVersion = originalFirmwareVersion;
+                printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
+                printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
+                printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+            }
+
             printer.FirmwareFamily = discovered.FirmwareFamily.Value;
             printer.GcodeDialect = discovered.GcodeDialect ?? printer.GcodeDialect;
             printer.FirmwareDetectionSource = discovered.FirmwareDetectionSource ?? FirmwareDetectionSource.Printer;
@@ -1369,19 +1488,40 @@ public class PrintersService(
             {
                 await _unitOfWork.SaveChangesAsync(ct);
             }
+            catch (DbUpdateConcurrencyException ex) when (!ct.IsCancellationRequested)
+            {
+                RestoreOriginalFirmwareValues();
+
+                // #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): the write itself
+                // is the atomic boundary now — see the round-7 remarks on
+                // WasFirmwareIdentityPrinterDeletedAsync. If this exception fired because the
+                // row is genuinely gone, that closes the remaining gap Bishop identified (no
+                // pre-write check, however late, can substitute for this): treat it exactly like
+                // any other "printer not found" outcome, evict the lock-table entry, and return
+                // without rethrowing.
+                if (await WasFirmwareIdentityPrinterDeletedAsync(ex, CancellationToken.None))
+                {
+                    EvictFirmwareIdentityWriteLock(printerId, gate);
+                    return false;
+                }
+
+                // Printer has no configured concurrency token today, so reaching here would mean
+                // some other, currently-unforeseen conflict — handled defensively rather than
+                // assumed impossible: resync the tracked entity and propagate.
+                try
+                {
+                    await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Best-effort only — see the general-failure remarks below.
+                }
+
+                throw;
+            }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
-                // Restore the pre-mutation values on the tracked entity first: this guarantees no
-                // caller can observe unsaved mutations even if the reload below also fails (e.g.
-                // the database is unreachable, which is exactly the scenario SaveChangesAsync
-                // just hit).
-                printer.FirmwareFamily = originalFirmwareFamily;
-                printer.GcodeDialect = originalGcodeDialect;
-                printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
-                printer.FirmwareVersion = originalFirmwareVersion;
-                printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
-                printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
-                printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+                RestoreOriginalFirmwareValues();
 
                 try
                 {
@@ -1490,6 +1630,16 @@ public class PrintersService(
     /// not retained forever. See the matching round-6 remarks on
     /// <see cref="RefreshDetectedFirmwareIdentityAsync"/> and <see cref="FirmwareIdentityWriteLocks"/>.
     /// </para>
+    /// <para>
+    /// #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): see the full round-7 remarks
+    /// on <see cref="RefreshDetectedFirmwareIdentityAsync"/> — the same structural fix applies
+    /// here. The <c>SaveChangesAsync</c> call is now the single atomic existence check (a delete
+    /// racing the write itself surfaces as <see cref="DbUpdateConcurrencyException"/>, see
+    /// <see cref="WasFirmwareIdentityPrinterDeletedAsync"/>), and lock-table eviction for a
+    /// printer deleted at any other time is handled unconditionally by
+    /// <see cref="RemoveAsync(Printer, CancellationToken)"/> rather than only from inside this
+    /// method's own in-call race window.
+    /// </para>
     /// </remarks>
     public async Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct)
     {
@@ -1548,6 +1698,28 @@ public class PrintersService(
             decimal confidence = MoonrakerOnboardingResolver.MapConfidenceScore(resolution.ConfidenceScore);
             string? version = MoonrakerOnboardingResolver.ExtractSoftwareVersion(resolution.ResponseContent);
 
+            PrinterFirmwareFamily originalFirmwareFamily = printer.FirmwareFamily;
+            PrinterGcodeDialect originalGcodeDialect = printer.GcodeDialect;
+            FirmwareDetectionSource originalFirmwareDetectionSource = printer.FirmwareDetectionSource;
+            string? originalFirmwareVersion = printer.FirmwareVersion;
+            string? originalFirmwareDetectionVersion = printer.FirmwareDetectionVersion;
+            decimal? originalFirmwareDetectionConfidence = printer.FirmwareDetectionConfidence;
+            DateTime? originalFirmwareDetectedAtUtc = printer.FirmwareDetectedAtUtc;
+
+            void RestoreOriginalFirmwareValues()
+            {
+                // See the matching remarks on RefreshDetectedFirmwareIdentityAsync: restore the
+                // pre-mutation values on the tracked entity first, so no caller can observe
+                // unsaved mutations even if a subsequent best-effort reload also fails.
+                printer.FirmwareFamily = originalFirmwareFamily;
+                printer.GcodeDialect = originalGcodeDialect;
+                printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
+                printer.FirmwareVersion = originalFirmwareVersion;
+                printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
+                printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
+                printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+            }
+
             printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
             printer.GcodeDialect = PrinterGcodeDialect.Klipper;
             printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
@@ -1560,7 +1732,53 @@ public class PrintersService(
 
             // FirmwareIdentityVerified is intentionally left alone: detection populates facts, a
             // human attests them (#1613 AC #3).
-            await _unitOfWork.SaveChangesAsync(ct);
+            try
+            {
+                await _unitOfWork.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException ex) when (!ct.IsCancellationRequested)
+            {
+                RestoreOriginalFirmwareValues();
+
+                // #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): see the matching
+                // remarks on RefreshDetectedFirmwareIdentityAsync and
+                // WasFirmwareIdentityPrinterDeletedAsync — the write itself is now the atomic
+                // existence check that closes the remaining gap after any number of pre-write
+                // checks.
+                if (await WasFirmwareIdentityPrinterDeletedAsync(ex, CancellationToken.None))
+                {
+                    EvictFirmwareIdentityWriteLock(printerId, gate);
+                    return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
+                }
+
+                try
+                {
+                    await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Best-effort only — see the general-failure remarks below.
+                }
+
+                throw;
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                RestoreOriginalFirmwareValues();
+
+                try
+                {
+                    await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Best-effort only: the manual restore above already guarantees the tracked
+                    // entity's firmware fields reflect the pre-mutation (last known persisted)
+                    // state, so a failed reload here does not reintroduce the split-brain risk.
+                }
+
+                throw;
+            }
 
             return new FirmwareDetectionResult(
                 Succeeded: true,
