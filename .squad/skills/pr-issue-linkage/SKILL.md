@@ -45,9 +45,10 @@ If the output includes the issue number(s), GitHub will auto-close them on merge
 git checkout -b feat/printables-import
 git commit -m "Implement printables import"
 
-# Open PR WITH issue links in body
+# Open PR WITH issue links in body, and label it `squad`
 gh pr create \
   --title "feat(models): Printables 2-step import modal" \
+  --label squad \
   --body "## Summary
 Adds two-step modal for importing printables.
 
@@ -64,6 +65,35 @@ Closes #351
 gh pr view <num> --json closingIssuesReferences
 ```
 
+## The `squad` Label
+
+**Every squad-authored PR MUST carry the bare `squad` label.** Pass `--label squad` to
+`gh pr create`, or add it afterwards with `gh pr edit <num> --add-label squad`.
+
+This is not cosmetic. The label is what puts a PR **in scope for two things at once**:
+
+- the `squad/pre-pr-verdict` review gate, and
+- Ralph's unattended merge.
+
+An unlabelled PR reports `NOT_APPLICABLE` (green, non-blocking) and is **not** eligible
+for unattended merge — a human must merge it deliberately. That coupling is what makes
+the label safe to forget: forgetting it removes the gate *and* the autonomy together,
+so the worst case is extra manual work, never an unreviewed auto-merge.
+
+`.github/workflows/squad-review-verdict.yml` applies the label automatically, in the same
+run that evaluates the gate, when the PR author resolves to a roster member (via
+`Squad-Author:` in the body or a `squad:{member}` label on a linked issue), but roughly a
+third of PRs don't resolve and forks never auto-label. **Do not rely on the automation** —
+set the label yourself.
+
+Note `squad` is the bare label. A `squad:{member}` label is an *assignment* label and
+does not put a PR in scope.
+
+**Verification:**
+```bash
+gh pr view <num> --json labels --jq '.labels[].name'
+```
+
 **Incorrect builder flow (will NOT auto-close):**
 ```bash
 # ❌ Wrong: issue number only in title, not in body
@@ -78,16 +108,22 @@ gh pr create \
 - **Parenthetical refs in title only** — Builders assume `(#350)` in the title will trigger auto-close. It won't. Must be in body.
 - **Bead-style legacy syntax** — `[closes PFarm1-350]` was used in legacy issue tracking. GitHub doesn't recognize this.
 - **Missing issue links entirely** — Builders open PR without mentioning any issue, then expect reviewers to find and link manually.
+- **Missing the `squad` label** — Opening a squad PR without `--label squad`. The PR
+  falls out of scope for the review gate and is not eligible for unattended merge, so
+  it silently stalls waiting for a human instead of flowing through Ralph.
 - **Relates to vs Closes** — Using `relates to #350` instead of `Closes #350`. Different semantics; only Closes/Fixes/Resolves auto-close.
 
 ## Reviewer Gate
 
 When reviewing a PR before merge, check:
 ```bash
-gh pr view <num> --json closingIssuesReferences
+gh pr view <num> --json closingIssuesReferences,labels
 ```
 
-If the PR links to an issue but this command returns empty, **REJECT the PR** and ask the builder to update the PR body with `Closes #N`.
+If the PR links to an issue but `closingIssuesReferences` is empty, **REJECT the PR** and ask the builder to update the PR body with `Closes #N`.
+
+If it is squad work and `labels` has no bare `squad` entry, ask the builder to add it —
+without it the PR is out of gate scope and Ralph will not merge it.
 
 **Rejection language:**
 > PR body is missing `Closes #N` for issue #350. Without this, the issue won't auto-close when the PR merges. Update the PR body to include `Closes #350`, then I'll re-review.

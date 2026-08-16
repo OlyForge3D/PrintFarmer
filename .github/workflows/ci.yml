@@ -113,6 +113,9 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Install tooling dependencies
+        run: npm ci
+
       - name: Install shellcheck
         run: |
           sudo apt-get update -qq
