@@ -772,7 +772,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             var excludedEntries = new List<HistoryExcludedEntryEvidence>();
             while (true)
             {
-                int pageSize = !requiresFullScan && requestedLimit.HasValue
+                int pageSize = !requiresFullScan
                     ? (int)Math.Min(
                         HistoryPageSize,
                         Math.Max(1L, requestedEnd - allJobs.Count))
@@ -822,7 +822,6 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 reachedSourceEnd = offset == sourceCount;
                 bool requestedRangeFilled =
                     !requiresFullScan &&
-                    requestedLimit.HasValue &&
                     allJobs.Count >= requestedEnd;
                 if (reachedSourceEnd || requestedRangeFilled)
                 {
@@ -869,9 +868,8 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
                 .Take(requestedLimit ?? int.MaxValue)
                 .ToArray();
             if (!requiresFullScan &&
-                requestedLimit.HasValue &&
                 requestedEnd <= sourceCount &&
-                requestedJobs.Length < requestedLimit.Value)
+                requestedJobs.Length < requestedLimit!.Value)
             {
                 throw new InvalidDataException(
                     "PrusaLink history contained excluded entries that prevented proving the requested range.");
