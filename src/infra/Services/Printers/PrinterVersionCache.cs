@@ -16,7 +16,15 @@ public sealed class PrinterVersionCache(
     private readonly IPrintersService _printersService = printersService;
     private readonly IBackendClientFactory _backendClientFactory = backendClientFactory;
 
+    // Throttles repeated explicit refreshes for the same printer so that hammering the
+    // "Refresh version info" action cannot force unbounded live backend round-trips; the
+    // normal cache TTL already rate-limits automatic polling, but forceRefresh intentionally
+    // bypasses that, so it needs its own short, independent minimum interval.
+    private static readonly TimeSpan ForceRefreshMinInterval = TimeSpan.FromSeconds(5);
+
     private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
+
+    private static string ForceRefreshThrottleKey(Guid printerId) => $"printer:version:force:{printerId:N}";
 
     public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
     {
@@ -25,9 +33,21 @@ public sealed class PrinterVersionCache(
         // (e.g. Klippy unavailable) was active — so it can observe recovery immediately instead
         // of waiting out the normal cache TTL. Automatic polling always passes forceRefresh=false
         // and keeps the normal cache policy below untouched.
+        if (forceRefresh && _cache.TryGetValue(ForceRefreshThrottleKey(printerId), out bool _))
+        {
+            // A forced refresh already ran for this printer within the throttle window; fall
+            // back to the normal cache-read behavior instead of forcing another live call.
+            forceRefresh = false;
+        }
+
         if (!forceRefresh && _cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cached) && cached is not null)
         {
             return cached;
+        }
+
+        if (forceRefresh)
+        {
+            _cache.Set(ForceRefreshThrottleKey(printerId), true, ForceRefreshMinInterval);
         }
 
         Printer? printer = await _printersService.FindByIdAsync(printerId, ct);

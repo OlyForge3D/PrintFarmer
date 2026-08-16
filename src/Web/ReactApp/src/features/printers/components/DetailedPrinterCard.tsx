@@ -318,6 +318,9 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
     onSuccess: (data) => {
       queryClient.setQueryData(['printerVersion', printer.id], data);
     },
+    onError: (error) => {
+      toast.error(mutationErrorMessage(error, 'Failed to refresh version info'));
+    },
   });
 
   const isActivePrintForObjectQuery = isPrinting || isPaused;

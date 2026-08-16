@@ -237,7 +237,7 @@ public class PrintersController(
     [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, [FromQuery] bool forceRefresh, CancellationToken ct)
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, [FromQuery] bool forceRefresh = false, CancellationToken ct = default)
     {
         if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
         {

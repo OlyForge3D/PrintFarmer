@@ -246,6 +246,9 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     onSuccess: (data) => {
       queryClient.setQueryData(['printerVersion', printerId], data);
     },
+    onError: (error) => {
+      toast.error(mutationErrorMessage(error, 'Failed to refresh version info'));
+    },
   });
 
   // Use provided printer or fall back to API data, merged with realtime SignalR updates
