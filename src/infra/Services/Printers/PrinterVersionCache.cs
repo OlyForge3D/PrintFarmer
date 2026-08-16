@@ -18,9 +18,14 @@ public sealed class PrinterVersionCache(
 
     private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
 
-    public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct)
+    public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
     {
-        if (_cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cached) && cached is not null)
+        // An explicit operator-initiated refresh (forceRefresh=true) must bypass any cached
+        // result — including a cached partial result recorded while a transient backend fault
+        // (e.g. Klippy unavailable) was active — so it can observe recovery immediately instead
+        // of waiting out the normal cache TTL. Automatic polling always passes forceRefresh=false
+        // and keeps the normal cache policy below untouched.
+        if (!forceRefresh && _cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cached) && cached is not null)
         {
             return cached;
         }

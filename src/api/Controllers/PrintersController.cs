@@ -227,12 +227,17 @@ public class PrintersController(
     /// Values are best-effort and may be null when not available.
     /// </summary>
     /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="forceRefresh">
+    /// When <c>true</c>, bypasses any cached version result (including a cached partial result
+    /// recorded during a transient backend fault) and re-queries the backend live. Intended for
+    /// the explicit "Refresh version info" operator action; automatic polling should omit this.
+    /// </param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpGet("{printerId:guid}/version")]
     [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, [FromQuery] bool forceRefresh, CancellationToken ct)
     {
         if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
         {
@@ -241,7 +246,7 @@ public class PrintersController(
 
         try
         {
-            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
+            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct, forceRefresh);
             return dto == null ? NotFound($"Printer with ID {printerId} not found") : Ok(dto);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))

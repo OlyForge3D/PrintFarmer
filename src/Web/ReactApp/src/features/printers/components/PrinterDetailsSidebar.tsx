@@ -236,6 +236,18 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     refetchOnWindowFocus: false,
   });
 
+  // Explicit "Refresh version info" bypasses the backend's partial-result cache (#1651) so a
+  // recovered Backend/API version is visible immediately instead of waiting out its ~10 minute
+  // TTL. This is deliberately a separate mutation from printerVersionQuery's own refetch(), which
+  // would just re-read the same stale cache entry — automatic/lazy polling keeps using the
+  // normal query above, untouched.
+  const refreshVersionMutation = useMutation({
+    mutationFn: () => apiClient.getPrinterVersionInfo(printerId!, { forceRefresh: true }),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['printerVersion', printerId], data);
+    },
+  });
+
   // Use provided printer or fall back to API data, merged with realtime SignalR updates
   const basePrinter = printerProp || apiPrinter;
   const printer = usePrinterDisplay((basePrinter || {}) as Printer);
@@ -801,10 +813,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => void printerVersionQuery.refetch()}
+              onClick={() => void refreshVersionMutation.mutate()}
               className="p-1! h-auto!"
               title="Refresh version info"
               aria-label="Refresh version info"
+              disabled={refreshVersionMutation.isPending}
               iconCenter={<RefreshIcon className="h-4 w-4" />}
             ></Button>
           }
