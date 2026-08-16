@@ -5287,12 +5287,11 @@ public class PrintersController(
                 });
             }
 
-            foreach (CalibrationToolheadSetupDto toolheadRequest in request.Toolheads)
+            foreach ((_, object? toolheadError) in request.Toolheads
+                .Select(t => (Toolhead: t, Error: CalibrationSetupValidation.ValidateToolheadMetrology(t)))
+                .Where(x => x.Error is not null))
             {
-                if (CalibrationSetupValidation.ValidateToolheadMetrology(toolheadRequest) is { } toolheadError)
-                {
-                    return BadRequest(toolheadError);
-                }
+                return BadRequest(toolheadError);
             }
         }
 
