@@ -174,6 +174,41 @@ against those, because they are loaded earlier and treated as governance.
 Historical records in `decisions.md` and `decisions-archive.md` are left intact — they document
 what happened at the time and are append-only. This entry is the current word.
 
+---
+# 2026-08-15: Reviewer-rejection revision ownership — canonical rule reinstated (reviewer-invoked lockout)
+
+**By:** Dallas (Lead), resolving GitHub issue #1622, per repo-owner-authored task instructions.
+**Status:** Authoritative. Supersedes the "RESCINDED" entry above for any future ambiguity.
+
+## Decision
+
+The blanket "there is no author lockout, ever" position above does not match this repository's
+actual practice: PR #1619 shows a reviewer (Hicks) explicitly invoking lockout in round 5, which
+was honored and compounded through round 7 to a clean merge. Issue #1622 asked for a deliberate
+policy decision reconciling that practice with `.github/copilot-instructions.md`'s Pre-PR Review
+Gate flow (which read as always-self-revise) and `.github/skills/reviewer-protocol/SKILL.md`
+(which read as always-locked-out).
+
+**The canonical rule, now recorded in `.github/copilot-instructions.md` § "Post-Rejection
+Revision Ownership":**
+
+- Self-revision is permitted **by default** on an ordinary rejection.
+- Strict lockout activates **only when a reviewer explicitly invokes it** (e.g. "a different
+  agent must revise this") — never automatically from a bare REQUEST_CHANGES/BLOCK.
+- Once invoked, lockout compounds on repeated rejection, and roster exhaustion escalates to
+  the user, per the rules in that section.
+
+All files listed in the "Files corrected" table above (`squad.agent.md`, both reviewer/
+agent-collaboration skills, the Rai/Fact Checker charter and policy copies, both
+issue-lifecycle copies) have been re-aligned to this rule: none of them assert unconditional
+lockout, and none of them assert lockout can never be invoked. Each links to
+`.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" as canonical rather
+than restating the rule, so this cannot drift a third time.
+
+This entry does not touch agent `history.md` files or `drake/charter.md` — those are
+per-agent learning/staffing records outside this task's scope; if they still cite the
+"no lockout ever" position, treat this entry as superseding that citation.
+
 ## Cost of the rule, for the record
 
 During epic #931 a fourth frontend dev (**Drake**) was added purely because Ripley, Newt and Lambert

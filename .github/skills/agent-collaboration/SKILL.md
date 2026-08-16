@@ -33,7 +33,7 @@ Format:
 If you need another team member's input, say so in your response. The coordinator will bring them in. Don't try to do work outside your domain.
 
 ### Reviewer Protocol
-If you have reviewer authority and reject work: the original author is locked out from revising that artifact. A different agent must own the revision. State who should revise in your rejection response.
+If you have reviewer authority and reject work, the default is that the original author self-revises and re-requests review. Only if you explicitly invoke lockout — because self-revision would perpetuate a defensive feedback loop — is the original author locked out from revising that artifact; in that case a different agent must own the revision, and you should state who in your rejection response. See `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership" for the canonical rule.
 
 ## Anti-Patterns
 - Don't read all agent charters — you only need your own context + decisions.md
