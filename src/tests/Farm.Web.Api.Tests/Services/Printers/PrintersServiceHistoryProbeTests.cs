@@ -305,7 +305,13 @@ public sealed class PrintersServiceHistoryProbeTests
         thumbnailUrl.Should().Be(
             $"/api/printers/{printer.Id:D}/history/provider%2Fjob/thumbnail");
         thumbnailUrl.Should().NotContain("prusalink.local");
-        Uri.TryCreate(thumbnailUrl, UriKind.Absolute, out _).Should().BeFalse();
+
+        // Uri.TryCreate parses a leading-slash path as an absolute file:// URI on Unix
+        // but not on Windows, so assert the origin-preserving property directly instead:
+        // resolving the proxy path against any origin must stay on that origin.
+        Uri resolved = new(new Uri("https://farm.example"), thumbnailUrl);
+        resolved.Scheme.Should().Be("https");
+        resolved.Host.Should().Be("farm.example");
     }
 
     [Fact]
