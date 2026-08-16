@@ -14,11 +14,10 @@ using Xunit;
 namespace Farm.Web.Api.Tests.Controllers;
 
 /// <summary>
-/// Integration tests verifying PUT /api/printers/{id} backward compatibility for issue #1617's
-/// Printer.HasHeatedChamber -&gt; Printer.CalibrationHasHeatedChamber rename: the deprecated
-/// UpdatePrinterDto.HasHeatedChamber alias must still be accepted during the deprecation window,
-/// the new UpdatePrinterDto.CalibrationHasHeatedChamber field must work standalone, and when both
-/// are supplied on the same request the new field must take precedence.
+/// Integration test verifying PUT /api/printers/{id} persists the canonical
+/// UpdatePrinterDto.CalibrationHasHeatedChamber field (issue #1617's
+/// Printer.HasHeatedChamber -&gt; Printer.CalibrationHasHeatedChamber rename). The deprecated
+/// UpdatePrinterDto.HasHeatedChamber legacy alias was removed in issue #1640.
 /// </summary>
 [Trait("Category", "Integration")]
 public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsyncLifetime
@@ -78,20 +77,6 @@ public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsy
     }
 
     [Fact]
-    public async Task UpdatePrinter_WhenLegacyHasHeatedChamberFieldSupplied_PersistsToCalibrationHasHeatedChamber()
-    {
-        Guid id = await SeedPrinterAsync();
-        var dto = new UpdatePrinterDto(HasHeatedChamber: true);
-
-        HttpResponseMessage response = await PutPrinterAsync(id, dto);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
-        persisted.Should().BeTrue(
-            because: "the deprecated legacy field must still be accepted during the deprecation window (issue #1617)");
-    }
-
-    [Fact]
     public async Task UpdatePrinter_WhenCanonicalCalibrationHasHeatedChamberFieldSupplied_PersistsToCalibrationHasHeatedChamber()
     {
         Guid id = await SeedPrinterAsync();
@@ -102,41 +87,6 @@ public class PrintersControllerCalibrationHasHeatedChamberBackCompatTests : IAsy
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
         persisted.Should().BeTrue(because: "the new canonical field must be accepted and persisted");
-    }
-
-    [Fact]
-    public async Task UpdatePrinter_WhenBothHasHeatedChamberFieldsSupplied_CanonicalFieldTakesPrecedence()
-    {
-        Guid id = await SeedPrinterAsync();
-        var dto = new UpdatePrinterDto(
-            CalibrationHasHeatedChamber: true,
-            HasHeatedChamber: false);
-
-        HttpResponseMessage response = await PutPrinterAsync(id, dto);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
-        persisted.Should().BeTrue(
-            because: "CalibrationHasHeatedChamber must win over the deprecated legacy HasHeatedChamber alias when both are supplied");
-    }
-
-    // Reviewer note (Hicks): the fact above alone (true/false -> true) would also pass under an
-    // incorrect OR-like implementation (either field true wins). This inverse case (false/true ->
-    // false) is the one that actually proves ?? null-coalescing precedence rather than an OR.
-    [Fact]
-    public async Task UpdatePrinter_WhenBothHasHeatedChamberFieldsSupplied_CanonicalFalseWinsOverLegacyTrue()
-    {
-        Guid id = await SeedPrinterAsync();
-        var dto = new UpdatePrinterDto(
-            CalibrationHasHeatedChamber: false,
-            HasHeatedChamber: true);
-
-        HttpResponseMessage response = await PutPrinterAsync(id, dto);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        bool? persisted = await GetPersistedCalibrationHasHeatedChamberAsync(id);
-        persisted.Should().BeFalse(
-            because: "CalibrationHasHeatedChamber must win via ?? precedence even when it is explicitly false and the legacy alias is true");
     }
 
     private async Task<bool?> GetPersistedCalibrationHasHeatedChamberAsync(Guid printerId)

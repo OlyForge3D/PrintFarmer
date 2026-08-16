@@ -92,13 +92,6 @@ public record UpdatePrinterDto(
     bool? CalibrationHasHeatedBed = null,
     bool? CalibrationHasEnclosure = null,
     bool? CalibrationHasHeatedChamber = null,
-
-    // Deprecated alias for CalibrationHasHeatedChamber, accepted during a deprecation
-    // window for backward compatibility (issue #1617). When both fields are supplied,
-    // CalibrationHasHeatedChamber takes precedence. New callers should send
-    // CalibrationHasHeatedChamber instead. Scheduled for removal via a follow-up
-    // tracking issue once no caller sends this legacy field.
-    bool? HasHeatedChamber = null,
     int? MaxChamberTemp = null,
     int? ActiveToolheadIndex = null,
     bool? SupportsPressureAdvance = null,

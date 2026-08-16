@@ -31,11 +31,7 @@ internal static class CalibrationPrinterUpdateMapper
         changed |= Set(update.MaxTravelAcceleration, printer.MaxTravelAcceleration, value => printer.MaxTravelAcceleration = value);
         changed |= Set(update.CalibrationHasHeatedBed, printer.CalibrationHasHeatedBed, value => printer.CalibrationHasHeatedBed = value);
         changed |= Set(update.CalibrationHasEnclosure, printer.CalibrationHasEnclosure, value => printer.CalibrationHasEnclosure = value);
-
-        // CalibrationHasHeatedChamber wins if both the canonical field and the deprecated
-        // legacy alias (HasHeatedChamber) are supplied on the same request (issue #1617).
-        bool? requestedHasHeatedChamber = update.CalibrationHasHeatedChamber ?? update.HasHeatedChamber;
-        changed |= Set(requestedHasHeatedChamber, printer.CalibrationHasHeatedChamber, value => printer.CalibrationHasHeatedChamber = value);
+        changed |= Set(update.CalibrationHasHeatedChamber, printer.CalibrationHasHeatedChamber, value => printer.CalibrationHasHeatedChamber = value);
         changed |= Set(update.MaxChamberTemp, printer.MaxChamberTemp, value => printer.MaxChamberTemp = value);
         changed |= Set(update.ActiveToolheadIndex, printer.ActiveToolheadIndex, value => printer.ActiveToolheadIndex = value);
         changed |= Set(update.SupportsPressureAdvance, printer.SupportsPressureAdvance, value => printer.SupportsPressureAdvance = value);
