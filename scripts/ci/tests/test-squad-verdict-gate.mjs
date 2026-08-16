@@ -791,14 +791,24 @@ test('the scoping workflow wiring stays intact', async () => {
   // `labeled` event would never re-trigger the evaluation that depends on it,
   // and the two would race on `opened`.
   //
-  // The primary guard keys on CAPABILITY, not on call sites. A workflow cannot
-  // write a label by ANY mechanism — issues.addLabels, issues.update, GraphQL
-  // addLabelsToLabelable, `gh pr edit --add-label`, actions/labeler, raw REST —
-  // without `issues: write` or `pull-requests: write`. GitHub enforces that;
-  // scanning for call sites cannot, because the transports are open-ended and
-  // the label value can be indirected through a variable. The answerable
-  // question is "which workflows COULD label", which the permissions block
-  // decides; "which workflows DO label" is not decidable by regex.
+  // The primary guard keys on CAPABILITY, not on call sites. Scoped precisely:
+  // a workflow cannot write a label using GITHUB_TOKEN by ANY mechanism —
+  // issues.addLabels, issues.update, GraphQL addLabelsToLabelable, `gh pr edit
+  // --add-label`, actions/labeler, raw REST — without granting GITHUB_TOKEN
+  // `issues: write` or `pull-requests: write` (or `write-all`). GitHub enforces
+  // that at the token level; scanning for call sites cannot, because the
+  // transports are open-ended and the label value can be indirected through a
+  // variable. The answerable question is "which workflows COULD label with the
+  // default token", which the permissions block decides; "which workflows DO
+  // label" is not decidable by regex.
+  //
+  // KNOWN, ACCEPTED RESIDUAL: the `permissions:` block constrains only
+  // GITHUB_TOKEN. A workflow holding just `contents: write` that runs, say,
+  // `gh pr edit --add-label squad` authenticated with a `secrets.*` PAT or a
+  // GitHub App token bypasses this guard entirely, because that token's scopes
+  // are not visible in the workflow file. Detecting it is out of scope here and
+  // ruled non-blocking; it lives within the documented residual below. Do not
+  // read the capability claim as absolute — it is a GITHUB_TOKEN claim only.
   //
   // RESIDUAL, stated plainly: this is defence-in-depth against a future refactor
   // reintroducing a standalone labeller. It is NOT the enforced safety property.
@@ -813,11 +823,43 @@ test('the scoping workflow wiring stays intact', async () => {
     bodies.set(name, await readFile(path.join(workflowDir, name), 'utf8'));
   }
 
-  // Matches workflow-level and job-level blocks alike. Over-matching is the safe
-  // direction: it forces an allowlist entry rather than silently permitting one.
-  const grantsLabelWrite = (body) =>
-    /^\s*(?:issues|pull-requests):\s*write\s*$/m.test(body) ||
-    /^\s*permissions:\s*write-all\s*$/m.test(body);
+  // GITHUB_TOKEN can be granted label-write capability in several YAML shapes,
+  // all of which GitHub Actions accepts. The earlier line-anchored regex only
+  // recognised block style and was defeated by flow style (Hicks' finding: a
+  // `permissions: { issues: write }` labeller passed the whole gate). We match
+  // every form below. Over-matching is deliberately the safe direction: a false
+  // positive merely forces a conscious allowlist entry, whereas a false negative
+  // silently admits a label writer.
+  //
+  //   permissions: write-all               scalar shorthand -> grants everything
+  //   permissions:                         block mapping
+  //     issues: write
+  //   permissions: { issues: write }       flow mapping (grant not on its own line)
+  //   permissions: {issues: write, ...}    flow mapping nested under a job
+  //
+  // plus quoted keys/values ('issues': "write") and trailing "# comments".
+  const grantsLabelWrite = (body) => {
+    // Optional, balanced quotes around the key and the value (\1 / \2), so
+    // `issues`, 'issues' and "issues" (and likewise for write) all match.
+    const key = `(['"]?)(?:issues|pull-requests)\\1`;
+    const write = `(['"]?)write\\2`;
+
+    // Scalar shorthand: `permissions: write-all` on the permissions line itself,
+    // optionally quoted, optionally trailed by a comment.
+    if (/^\s*permissions:\s*(['"]?)write-all\1\s*(?:#.*)?$/mi.test(body)) return true;
+
+    // Block style: the grant sits on its own line at any indentation (workflow-
+    // or job-level). `\s*` before `:` tolerates `issues : write`; the trailing
+    // `(?:#.*)?` tolerates `issues: write  # needed for labels`.
+    const blockGrant = new RegExp(`^\\s*${key}\\s*:\\s*${write}\\s*(?:#.*)?$`, 'mi');
+    if (blockGrant.test(body)) return true;
+
+    // Flow style: `permissions: { ... issues: write ... }`. The grant is NOT on
+    // its own line, so the block regex never sees it; scan inside the braces.
+    // `[^}]*` spans the rest of the flow mapping (including any newlines).
+    const flowGrant = new RegExp(`permissions:\\s*\\{[^}]*${key}\\s*:\\s*${write}[^}]*\\}`, 'mi');
+    return flowGrant.test(body);
+  };
 
   // Workflows permitted to hold label-write capability. Adding an entry is a
   // deliberate act: any of these could apply the bare scope label and silently
@@ -847,10 +889,17 @@ test('the scoping workflow wiring stays intact', async () => {
     'the allowlist names a workflow that no longer holds label-write capability; prune it',
   );
 
-  // A workflow omitting `permissions` inherits the repository default, which is
-  // `read` (verified via actions/permissions/workflow). Pinning the set here means
-  // flipping that default to permissive — which would silently make every one of
-  // these label-capable — fails this test rather than passing unnoticed.
+  // A workflow omitting `permissions` inherits the repository default. Pinning
+  // the exact set of blockless workflows catches a workflow GAINING or LOSING an
+  // explicit `permissions:` block — an added block might grant label write, and a
+  // removed one drops the file back onto the (unknown) repository default.
+  //
+  // What this does NOT detect: the value of the repository-wide
+  // `default_workflow_permissions` API setting. This test reads workflow files
+  // only; it cannot see that setting, so flipping it from restricted to
+  // permissive would make every blockless workflow label-capable WITHOUT
+  // changing any file here and WITHOUT failing this test. That flip is guarded
+  // elsewhere (org/repo settings), not by this assertion.
   const inheritsDefault = names
     .filter((n) => !/^\s*permissions:/m.test(bodies.get(n)))
     .sort();
@@ -865,6 +914,15 @@ test('the scoping workflow wiring stays intact', async () => {
   // Secondary guard: a permitted writer must not start applying the BARE scope
   // label. Those seven apply `squad:*`, never `squad`. Covers the literal forms
   // plus assignment to a variable, which is how an indirected CLI call reads it.
+  //
+  // The last pattern (any `key: squad` line) is intentionally broad and WILL
+  // also flag an innocuous line such as `name: squad` in a permitted writer.
+  // That is left as-is on purpose: it fails toward MORE review, matching the
+  // over-match doctrine above, and — critically — it is the only form that still
+  // catches a label indirected through a variable like `SCOPE_LABEL: squad`,
+  // which a reviewer specifically required. Narrowing it to exclude `name:`
+  // would trade a harmless, self-announcing false positive (a failing test with
+  // the offending file named) for the risk of a silent gap, a bad trade here.
   const bareScopeLabel = [
     /squadScopeLabel|canAutoScope/,
     /labels:\s*\[[^\]]*(['"])squad\1/,
