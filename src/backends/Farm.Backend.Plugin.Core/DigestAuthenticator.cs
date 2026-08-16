@@ -254,19 +254,11 @@ public sealed class DigestAuthenticator
         string ha2 = ComputeMd5Hash($"{method}:{uri}");
 
         // Compute response based on QOP
-        string response;
-        if (!string.IsNullOrEmpty(challenge.Qop))
-        {
-            // QOP is present (auth or auth-int)
-            // response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
-            response = ComputeMd5Hash($"{ha1}:{challenge.Nonce}:{nc}:{cnonce}:{challenge.Qop}:{ha2}");
-        }
-        else
-        {
-            // Legacy mode without QOP
-            // response = MD5(HA1:nonce:HA2)
-            response = ComputeMd5Hash($"{ha1}:{challenge.Nonce}:{ha2}");
-        }
+        // QOP present (auth or auth-int): response = MD5(HA1:nonce:nc:cnonce:qop:HA2)
+        // Legacy mode without QOP:        response = MD5(HA1:nonce:HA2)
+        string response = !string.IsNullOrEmpty(challenge.Qop)
+            ? ComputeMd5Hash($"{ha1}:{challenge.Nonce}:{nc}:{cnonce}:{challenge.Qop}:{ha2}")
+            : ComputeMd5Hash($"{ha1}:{challenge.Nonce}:{ha2}");
 
         // Build the Authorization header value
         StringBuilder sb = new();
