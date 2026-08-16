@@ -194,10 +194,32 @@ export class RouteErrorBoundary extends Component<RouteErrorBoundaryProps, State
     // Reloading recreates the registry and re-fetches the chunk from the
     // network. Wrapped in a guard so tests / SSR-like environments where
     // reload is a stubbed no-op still exercise the same path.
+    //
+    // A plain reload is not enough when the service worker is serving a
+    // previous build's chunks cache-first: the reload replays the same stale
+    // modules and fails identically, which is why only a *hard* reload used
+    // to recover. Purge the SW caches (best effort, never blocking) so the
+    // reload refetches from the network.
+    void this.purgeCachesThenReload();
+  };
+
+  private async purgeCachesThenReload() {
+    try {
+      if (typeof caches !== 'undefined') {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys
+            .filter((key) => key.startsWith('pf-shell-') || key.startsWith('pf-runtime-'))
+            .map((key) => caches.delete(key))
+        );
+      }
+    } catch {
+      // Cache purge is best effort — reload regardless.
+    }
     if (typeof window !== 'undefined' && window.location) {
       window.location.reload();
     }
-  };
+  }
 
   render() {
     if (this.state.hasError) {

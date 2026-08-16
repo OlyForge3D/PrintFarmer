@@ -1,14 +1,17 @@
 // Enhanced versioned service worker (manual) for PrintFarmer
 // Provides build-versioned shell caching, runtime caching for assets & images, and navigation fallback.
 
-// Build time constant injected via Vite define
-// Build time injected constant (defined via Vite define); fallback to 'dev' in development
-// @ts-ignore - injected define constants
-const BUILD_TIME = self.__BUILD_TIME__ || 'dev';
-// @ts-ignore
-const GIT_HASH = self.__GIT_HASH__ || 'dev';
+// These placeholders are replaced by the Vite build plugin. Public assets are
+// copied verbatim, so Vite's `define` entries cannot inject these values.
+const BUILD_TIME = '__PRINTFARMER_BUILD_TIME__';
+const GIT_HASH = '__PRINTFARMER_GIT_HASH__';
 const SHELL_CACHE = `pf-shell-${GIT_HASH}-${BUILD_TIME}`;
-const RUNTIME_CACHE = 'pf-runtime-v1';
+// Version-scoped like the shell cache. A fixed key (the old `pf-runtime-v1`)
+// meant the cache-first script handler below kept serving a previous build's
+// route chunk forever; that stale chunk then dynamically imported a hashed
+// module which no longer exists on the server, producing "Failed to fetch
+// dynamically imported module" until the user hard-reloaded past the SW.
+const RUNTIME_CACHE = `pf-runtime-${GIT_HASH}-${BUILD_TIME}`;
 
 const CORE = [
   '/',
@@ -26,7 +29,12 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter(k => k.startsWith('pf-shell-') && k !== SHELL_CACHE).map(k => caches.delete(k)));
+    await Promise.all(
+      keys
+        .filter(k => (k.startsWith('pf-shell-') && k !== SHELL_CACHE) ||
+                     (k.startsWith('pf-runtime-') && k !== RUNTIME_CACHE))
+        .map(k => caches.delete(k))
+    );
     await self.clients.claim();
   })());
 });
@@ -34,6 +42,15 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
+  // Never cache authenticated or live application traffic. Cache keys do not
+  // vary by Authorization, and serving an API response from a shared browser
+  // cache can expose stale or another user's data.
+  const requestPath = new URL(req.url).pathname;
+  if (requestPath === '/api' || requestPath.startsWith('/api/') ||
+      requestPath === '/hubs' || requestPath.startsWith('/hubs/')) {
+    return;
+  }
 
   if (req.mode === 'navigate') {
     event.respondWith((async () => {
