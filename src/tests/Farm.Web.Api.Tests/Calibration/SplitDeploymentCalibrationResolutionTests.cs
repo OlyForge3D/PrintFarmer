@@ -152,6 +152,44 @@ public sealed class SplitDeploymentCalibrationResolutionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task GetCandidates_WithDerivableFieldsNullReachesTheSlicerHostAndDerivesHardwareFacts()
+    {
+        // #1614 AC-2/test-plan item 6: the split deployment must derive the same hardware facts
+        // from the resolved machine profile as the monolith (in-process resolver) path — proving
+        // ICalibrationProfileResolver is the sole boundary, regardless of topology.
+        CalibrationPrinterSeeder.SeededPrinter seeded = await CalibrationPrinterSeeder.SeedAsync(
+            _factory.Services,
+            deriveHardwareFromMachineProfile: true);
+        using HttpClient client = CreateCalibrationReaderClient();
+
+        HttpResponseMessage response = await client.GetAsync("/api/printers/calibration-candidates");
+        string body = await response.Content.ReadAsStringAsync();
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+        using JsonDocument document = JsonDocument.Parse(body);
+        JsonElement candidate = document.RootElement.EnumerateArray()
+            .Single(element => element.GetProperty("id").GetGuid() == seeded.PrinterId);
+
+        _ = candidate.GetProperty("eligible").GetBoolean().Should().BeTrue(body);
+        _ = candidate.GetProperty("rejectionReasons").GetArrayLength().Should().Be(0, body);
+        _ = candidate.GetProperty("buildVolume").GetProperty("x").GetDouble().Should().Be(250);
+        _ = candidate.GetProperty("buildVolume").GetProperty("y").GetDouble().Should().Be(250);
+        _ = candidate.GetProperty("buildVolume").GetProperty("z").GetDouble().Should().Be(250);
+        _ = candidate.GetProperty("bedOrigin").GetProperty("x").GetDouble().Should().Be(0);
+        _ = candidate.GetProperty("bedOrigin").GetProperty("y").GetDouble().Should().Be(0);
+        _ = candidate.GetProperty("motionType").GetString().Should().Be("CoreXY");
+        _ = candidate.GetProperty("maxAcceleration").GetInt32().Should().Be(10000);
+        _ = candidate.GetProperty("maxTravelSpeed").GetInt32().Should().Be(500);
+        _ = candidate.GetProperty("hasHeatedBed").GetBoolean().Should().BeTrue();
+        _ = candidate.GetProperty("hasHeatedChamber").GetBoolean().Should().BeFalse();
+        JsonElement toolhead = candidate.GetProperty("toolheads").EnumerateArray().Single();
+        _ = toolhead.GetProperty("nozzleDiameter").GetDouble().Should().Be(0.4);
+        _ = toolhead.GetProperty("nozzleType").GetString().Should().Be("Brass");
+        _ = toolhead.GetProperty("nozzleMaxTemperature").GetInt32().Should().Be(300);
+        _ = toolhead.GetProperty("hotendMaxTemperature").GetInt32().Should().Be(300);
+    }
+
+    [Fact]
     public async Task Capabilities_ReportCalibrationContextEnabledOnceTheSlicerHostAnswers()
     {
         using HttpClient client = CreateCalibrationReaderClient();
