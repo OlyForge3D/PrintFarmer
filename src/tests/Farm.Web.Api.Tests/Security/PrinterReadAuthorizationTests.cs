@@ -33,8 +33,8 @@ public sealed class PrinterReadAuthorizationTests : IAsyncLifetime
         _factory = new PrinterReadFactory(_printers, _versionCache, _swapValidator);
 
         _versionCache
-            .Setup(cache => cache.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid id, CancellationToken _) => new PrinterVersionInfoDto(
+            .Setup(cache => cache.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .ReturnsAsync((Guid id, CancellationToken _, bool _) => new PrinterVersionInfoDto(
                 id,
                 PrinterBackend.Moonraker,
                 Supported: true,

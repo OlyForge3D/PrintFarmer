@@ -850,8 +850,13 @@ export class ApiClient {
     return response.data;
   }
 
-  async getPrinterVersionInfo(printerId: string): Promise<PrinterVersionInfo> {
-    const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`);
+  async getPrinterVersionInfo(
+    printerId: string,
+    options?: { forceRefresh?: boolean }
+  ): Promise<PrinterVersionInfo> {
+    const response = await this.client.get<PrinterVersionInfo>(`/printers/${printerId}/version`, {
+      params: options?.forceRefresh ? { forceRefresh: true } : undefined,
+    });
     return response.data;
   }
 
