@@ -480,12 +480,13 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
 - **Legible failure** — the status names the exact failing condition.
 
 The workflow job always succeeds; the gate outcome is the commit status, which
-takes exactly one of five forms:
+takes exactly one of six forms:
 
 | Status | Description | Verifier classification |
 | --- | --- | --- |
 | `success` | `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad' label)` | `NOT_APPLICABLE` (exit 4) |
 | `success` | `REVIEWED (self-attested) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
+| `success` | `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
 | `success` | `APPROVE (owner) @ <sha12> by <login>` | `APPROVED` (exit 0) |
 | `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
 | `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
@@ -527,9 +528,93 @@ Pass `--expected-head <recorded-sha>` when auditing a previously recorded
 review after the PR head may have moved. The verifier then reports
 `SUPERSEDED` for either an old review record or an old rejection.
 
-Any head movement supersedes the recorded review. This rule applies equally
-to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including rebases and force
-pushes. The panel must review the new head and record fresh reviews naming it.
+Any head movement supersedes the recorded review — **with one narrow exception**.
+A record pinned to an old head SHA `SHA_r` is carried forward, unchanged in meaning
+but relabelled, to a new head `SHA_h` only when **all three** hold: (1) `SHA_r` is a
+strict ancestor of `SHA_h` (GitHub's compare API reports `status: 'ahead'` for
+`compare(SHA_r...SHA_h)`, never `'behind'`/`'diverged'`/`'identical'` — a rebase or
+force-push always fails this), (2) the PR's own diff against the base branch — not
+its raw commit list — is byte-for-byte unchanged between `SHA_r` and `SHA_h`, and
+(3) every commit introduced since review that isn't already reachable from base is
+a clean two-parent merge introducing nothing beyond its own two parents (see below —
+NOT "content-empty against its own first parent", which is a real, verified-wrong
+assumption for this case). Condition 2 is deliberately a
+diff comparison rather than "every new commit is reachable from the base tip": a
+plain `git merge development` sync always creates a fresh merge commit that is
+itself not an ancestor of base (base has no idea it exists), so a commit-membership
+check rejects the exact sync it exists to allow — an earlier revision of this
+exemption shipped exactly that bug and was caught in review before merge. Comparing
+the PR's diff sidesteps it: three-dot compare pivots on the merge base, so
+`compare(<base>...SHA_r)` still recovers the PR's diff as reviewed and
+`compare(<base>...SHA_h)` recovers its current diff, and the two are compared file by
+file (path, status, resulting blob SHA, and patch text). Both compares run purely
+against the compare API (`GET /repos/{owner}/{repo}/compare/{base}`), matching the
+workflow's existing default-branch-only checkout — no repository fetch is needed.
+This repo is squash-only onto `development`, so in practice this exemption only
+fires when an author syncs with `git merge` (not `git rebase`); rebasing or
+force-pushing always supersedes normally, by design, since it fails condition (1).
+The compare endpoint silently caps its file list with no in-band truncation signal,
+so a diff at or beyond that cap can never be proven unchanged and is treated as not
+carried, same as a compare-API failure.
+
+Condition 3 exists because (1)+(2) alone are not enough: an author could push a
+commit that changes the PR's contribution and a later commit that reverts it,
+landing back on the exact same final diff while still having authored real changes
+in the range — this "revert-then-readd" trick would satisfy diff-equality while
+still being exactly the review-then-push-more case the SHA-binding exists to catch.
+Condition 3 closes it by checking every commit introduced since review that is not
+already reachable from base and requiring each to be a **clean merge introducing
+nothing beyond its own two parents**. This is deliberately NOT "the commit's own
+diff against its first parent is empty" — an earlier revision of this exemption
+tried exactly that and it is wrong in practice: GitHub's single-commit endpoint
+diffs a merge commit against its first parent only, and for a real sync merge that
+diff is naturally non-empty, because it necessarily includes everything the merge
+pulled in from the base side (verified against this repo's own history: a known
+clean, conflict-free `git merge development` sync commit reports a non-empty `files`
+list via `GET /repos/{owner}/{repo}/commits/{sha}`). Rejecting on that basis would
+reject essentially every legitimate sync, defeating the whole feature — this was
+caught in review before merge. The correct test instead compares a two-parent merge
+commit's own diff to what merging its two parents *alone* would produce: for parents
+`[p1, p2]`, `compare(p1...p2)` is a three-dot compare pivoting on p1/p2's own merge
+base, so its `files` are exactly "what p2 contributes beyond its common history with
+p1" — what a clean, no-conflict merge of p2 into p1 would add. If the merge commit's
+own diff matches that fingerprint, it added nothing beyond a clean merge; if it
+differs (a conflict resolved by changing logic, most obviously), it fails condition 3
+regardless of what the final PR diff looks like. Any commit with anything other than
+exactly two parents (an ordinary single-parent commit, i.e. real author work, or a
+rare octopus merge this check doesn't attempt to validate) always fails condition 3.
+This reintroduces some per-commit inspection, so it carries the same truncation risk
+as the diff comparison at two separate levels: the workflow checks the bulk commit
+lists' `total_commits` against the returned `commits` array length (identifying which
+SHAs are non-base in the first place), and separately proves both `singleCommit.files`
+and `parentsCompare.files` complete before trusting their fingerprint comparison. For
+`singleCommit`, GitHub's single-commit endpoint exposes `stats.total` (additions plus
+deletions summed across the *whole* commit, independent of the 300-file cap on
+`files` — verified empirically against a real commit with over 300 changed files,
+which still reports its true total there); summing the returned `files` and comparing
+to `stats.total` catches most truncation, but is not sufficient alone — a truncated
+page whose missing files happen to be pure renames (0 additions, 0 deletions) would
+still sum-match. The workflow therefore checks the `stats.total` mismatch AND the
+length-vs-`compareFilesCap` heuristic together for `singleCommit.files`, disqualifying
+if either fires. `compare(parent1...parent2)` exposes no equivalent total, so
+`parentsCompare.files` uses only the length-vs-cap heuristic used for the top-level
+diffs. Either signal
+fails condition 3 closed (treats it as unproven) rather than guessing.
+
+When a record is carried forward this way, the status and audit trail say so
+explicitly — `REVIEWED (self-attested, carried across sync)`, never a bare
+`REVIEWED` — so nobody mistakes "the reviewed diff is provably unchanged" for "this
+exact commit was freshly reviewed". Any author-authored commit anywhere in the range
+still supersedes the record exactly as before: this exemption narrows *when* a stale
+SHA is discarded, it does not weaken the review-then-push-more threat model the
+SHA-binding exists to close. A compare-API failure (rate limit, unresolvable SHA,
+etc.) fails closed — the record supersedes normally rather than being carried on
+unproven grounds.
+
+Outside this one exemption, any head movement supersedes the recorded review. This
+rule applies equally to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including
+rebases and force pushes. The panel must review the new head and record fresh
+reviews naming it.
 
 Missing, invalid, or superseded squad evidence never becomes a review record.
 After verification, merge with

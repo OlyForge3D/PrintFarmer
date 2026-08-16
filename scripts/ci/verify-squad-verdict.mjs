@@ -116,7 +116,12 @@ function parseDisplayTitle(displayTitle) {
 }
 
 // The record encodes its outcome in the status state and description:
-//   success  `REVIEWED (self-attested) @ <sha12> by <agents>` -> agents reviewed
+//   success  `REVIEWED (self-attested) @ <sha12> by <agents>`             -> agents reviewed
+//   success  `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>`
+//            -> agents reviewed an earlier head, and the PR's own diff against
+//               its base branch is proven byte-for-byte unchanged since then
+//               (a pure base-branch sync merge), so the record was carried
+//               forward rather than re-earned (issue #1633, "Option A")
 //   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
 //   success  `NOT_APPLICABLE @ <sha12>: <reason>`             -> out of gate scope
 //   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>`        -> findings raised
@@ -125,7 +130,11 @@ function parseDisplayTitle(displayTitle) {
 // REVIEWED and APPROVE are kept distinct on purpose. Only the owner path is a
 // real authorisation by a distinct principal; REVIEWED is a self-attested record
 // that reviewer agents examined the commit, and must never be reported as though
-// an independent party approved it.
+// an independent party approved it. The "carried across sync" qualifier is
+// likewise never dropped: it is the one thing that distinguishes "reviewed this
+// exact diff" from "reviewed an earlier diff that a base sync provably did not
+// change", and collapsing the two would let a sync silently read as a fresh
+// review of new content.
 //
 // NOT_APPLICABLE is a `success` state so an out-of-scope PR is not decorated
 // with a red status nobody can clear, but it is emphatically NOT merge evidence:
@@ -139,10 +148,14 @@ function parseStatusDescription(status, statusSha) {
   const shortSha = escapeRegExp(statusSha.slice(0, 12));
   if (status.state === 'success') {
     const reviewed = new RegExp(
-      `^REVIEWED \\(self-attested\\) @ ${shortSha} by (\\S.*)$`,
+      `^REVIEWED \\(self-attested(?<carried>, carried across sync)?\\) @ ${shortSha} by (\\S.*)$`,
     ).exec(description);
     if (reviewed) {
-      return { verdict: 'REVIEWED', reviewers: reviewed[1] };
+      return {
+        verdict: 'REVIEWED',
+        reviewers: reviewed[2],
+        carriedAcrossSync: Boolean(reviewed.groups?.carried),
+      };
     }
     const notApplicable = new RegExp(
       `^NOT_APPLICABLE @ ${shortSha}: (\\S.*)$`,
@@ -321,14 +334,25 @@ export function verifySquadVerdict({ pull, status, run }) {
     : outcome.verdict === 'APPROVE'
       ? 'APPROVED'
       : 'CHANGES_REQUESTED';
+  // The carried-across-sync qualifier is preserved through to the reason text
+  // rather than folded away: it is the fact that distinguishes "this exact
+  // diff was reviewed" from "an earlier diff was reviewed and a base sync
+  // provably introduced no author content since", and both the status and
+  // this verifier must keep saying so explicitly.
+  const carriedAcrossSync = classification === 'REVIEWED' &&
+    outcome.carriedAcrossSync === true;
   const reason = classification === 'REVIEWED'
-    ? 'Verified SHA-pinned self-attested squad review record (not independent review).'
+    ? (carriedAcrossSync
+      ? 'Verified SHA-pinned self-attested squad review record, carried ' +
+        'forward across a pure base sync (not independent review).'
+      : 'Verified SHA-pinned self-attested squad review record (not independent review).')
     : 'Verified SHA-pinned squad record.';
   return result(classification, reason, {
     verdict: outcome.verdict,
     reviewedHeadSha: statusSha,
     actor: outcome.reviewers,
     workflowRunUrl: run.html_url,
+    ...(classification === 'REVIEWED' ? { carriedAcrossSync } : {}),
   });
 }
 
