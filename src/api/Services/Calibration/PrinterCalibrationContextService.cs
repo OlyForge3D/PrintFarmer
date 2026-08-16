@@ -388,7 +388,7 @@ public sealed class PrinterCalibrationContextService(
         }
 
         DerivedMachineFacts derivedFacts =
-            CalibrationMachineProfileDeriver.Derive(resolved?.Machine?.RawJson);
+            CalibrationMachineProfileDeriver.Derive(resolved?.Machine);
 
         PrinterGcodeDialect effectiveGcodeDialect =
             ValidateFirmware(printer, nowUtc, reasons, missingInputs);

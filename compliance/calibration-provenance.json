@@ -1396,6 +1396,19 @@
       }
     },
     {
+      "id": "calibration-resolved-profile-test-extensions",
+      "destinationPath": "src/tests/Farm.Web.Api.Tests/Services/Calibration/ResolvedCalibrationProfileTestExtensions.cs",
+      "referenceUrls": [
+        "https://github.com/OlyForge3D/PrintFarmer/issues/1615"
+      ],
+      "statement": "Independent PrintFarmer test helper that recomputes the issue #1615 typed derived fields on ResolvedCalibrationProfile via the production MachineProfileDerivedFieldsExtractor; no external calibration source code was copied or adapted.",
+      "review": {
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-08-16",
+        "decision": "approved"
+      }
+    },
+    {
       "id": "calibration-setup-contracts",
       "destinationPath": "src/infra/Calibration/CalibrationSetupContracts.cs",
       "referenceUrls": [
