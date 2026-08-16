@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Linq;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Farm.Slicer.Module.Models;
 
@@ -293,15 +294,24 @@ public sealed class OrcaBundleParsingService : IOrcaBundleParsingService
     // Helper methods to extract values with multiple key aliases
     private string? GetStringValue(JsonObject obj, params string[] keys)
     {
-        foreach (string key in keys)
+        foreach ((bool found, string? value) in keys
+            .Select(key => TryGetStringValue(obj, key))
+            .Where(result => result.found))
         {
-            if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value && value.TryGetValue(out string? str))
-            {
-                return str;
-            }
+            return value;
         }
 
         return null;
+    }
+
+    private static (bool found, string? value) TryGetStringValue(JsonObject obj, string key)
+    {
+        if (obj.TryGetPropertyValue(key, out JsonNode? node) && node is JsonValue value && value.TryGetValue(out string? str))
+        {
+            return (true, str);
+        }
+
+        return (false, null);
     }
 
     private double? GetDoubleValue(JsonObject obj, params string[] keys)
