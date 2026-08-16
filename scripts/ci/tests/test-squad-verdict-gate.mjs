@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import yaml from 'js-yaml';
 import {
+  canAutoScope,
   classifyChangeScope,
   collectVerdicts,
   evaluateGate,
   fullGateFiles,
   fullGatePrefixes,
   hasAdminAccess,
+  hasSquadScopeLabel,
   hasWriteAccess,
   normalizeMember,
   parseVerdictComment,
@@ -55,6 +58,9 @@ function gate(overrides = {}) {
     roster,
     authorMembers: new Set(['parker']),
     authorSource: 'squad: label on linked issue',
+    // Scope defaults to in-scope here so each test exercises the review logic;
+    // the out-of-scope path has its own dedicated tests below.
+    squadLabeled: true,
     ...overrides,
   });
 }
@@ -366,8 +372,10 @@ test('an administrator GitHub approval at the current head satisfies the gate', 
 
 test('the owner override needs no comments, files or roster — the fork path', () => {
   // Fork PRs are evaluated with reviews only, so this call shape must work.
+  // The fork call site declares scope explicitly, matching the workflow.
   const result = evaluateGate({
     headSha,
+    squadLabeled: true,
     reviews: [{ state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true }],
   });
   assert.equal(result.state, 'success');
@@ -377,6 +385,7 @@ test('the owner override needs no comments, files or roster — the fork path', 
   // ...and a non-admin approval on that same path must not pass.
   const outsider = evaluateGate({
     headSha,
+    squadLabeled: true,
     reviews: [{ state: 'APPROVED', commitId: headSha, login: 'stranger', isAdmin: false }],
   });
   assert.equal(outsider.state, 'failure');
@@ -614,8 +623,58 @@ test('a panel member who authored the PR is substitutable, not a deadlock', () =
     roster,
     authorMembers: new Set(['bishop']),
     authorSource: 'PR body Squad-Author',
+    squadLabeled: true,
   });
-  assert.equal(result.state, 'success');
+  // Assert the substitution actually happened rather than only that the gate
+  // went green: without squadLabeled this returns success as out-of-scope, so a
+  // bare state check would pass while exercising none of this logic.
+  assert.equal(result.scope, undefined);
+  assert.equal(result.passed, true);
+  assert.ok(
+    result.description.startsWith('REVIEWED'),
+    `expected a REVIEWED record, got: ${result.description}`,
+  );
+  assert.ok(
+    result.description.includes('dallas'),
+    `expected dallas to substitute for the authoring reviewer: ${result.description}`,
+  );
+});
+
+test('auto-scoping refuses forks and unrostered self-declared authors', () => {
+  const inRoster = { authorMembers: new Set(['bishop']), roster, isFork: false };
+  assert.equal(canAutoScope(inRoster), true);
+
+  // A fork PR controls both its body and its branch name, which are exactly the
+  // inputs resolveAuthorMembers reads. If forks could auto-scope, an outsider
+  // could place their own PR into the gate's scope.
+  assert.equal(canAutoScope({ ...inRoster, isFork: true }), false);
+
+  // resolveAuthorMembers does NOT validate a declared Squad-Author against the
+  // roster, so canAutoScope must, or one line of PR body text self-scopes.
+  const declared = resolveAuthorMembers({
+    prBody: 'Squad-Author: attacker',
+    branchName: 'feature/x',
+    roster,
+  });
+  assert.deepEqual([...declared.members], ['attacker']);
+  assert.equal(
+    canAutoScope({ authorMembers: declared.members, roster, isFork: false }),
+    false,
+  );
+
+  // Every member must be rostered, not merely one of them: a `some` check would
+  // let an attacker ride along by naming a real member beside themselves.
+  assert.equal(
+    canAutoScope({ authorMembers: new Set(['bishop', 'attacker']), roster, isFork: false }),
+    false,
+  );
+  assert.equal(
+    canAutoScope({ authorMembers: new Set(['bishop', 'hicks']), roster, isFork: false }),
+    true,
+  );
+
+  assert.equal(canAutoScope({ authorMembers: new Set(), roster, isFork: false }), false);
+  assert.equal(canAutoScope({}), false);
 });
 
 test('workflow keeps its default-branch, SHA-binding and least-privilege controls', async () => {
@@ -625,8 +684,13 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   )).replaceAll('\r\n', '\n');
 
   assert.match(workflow, /^\s+statuses: write$/m);
-  assert.doesNotMatch(workflow, /pull-requests: write/);
+  // pull-requests: write is intentional — this workflow applies the scope label
+  // itself. It is the ONLY write scope beyond statuses, and it does not let a PR
+  // influence the judgement: the gate logic is always read from the default
+  // branch. contents: write would, so it stays out.
+  assert.match(workflow, /^\s+pull-requests: write$/m);
   assert.doesNotMatch(workflow, /contents: write/);
+  assert.doesNotMatch(workflow, /(?:actions|checks|packages|id-token): write/);
   // A pull_request (head-ref) trigger would let a PR rewrite its own gate.
   assert.doesNotMatch(workflow, /^\s{2}pull_request:$/m);
   assert.match(workflow, /^\s{2}pull_request_target:$/m);
@@ -657,4 +721,251 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.doesNotMatch(workflow, /Stale verdicts/);
   assert.doesNotMatch(workflow, /Squad pre-PR verdict gate/);
   assert.doesNotMatch(workflow, /\? 'PASS'/);
+});
+
+test('the gate is scoped to squad-labelled pull requests', () => {
+  // Scope marker recognition.
+  assert.equal(hasSquadScopeLabel([{ name: 'squad' }]), true);
+  assert.equal(hasSquadScopeLabel(['squad']), true);
+  assert.equal(hasSquadScopeLabel([{ name: ' Squad ' }]), true, 'trimmed, case-insensitive');
+  assert.equal(hasSquadScopeLabel([]), false);
+  assert.equal(hasSquadScopeLabel([{ name: 'squadron' }]), false, 'no prefix matching');
+  // A member-assignment label names who is responsible, not that the PR is in
+  // scope; counting it would drag routine triage back into the gate.
+  assert.equal(hasSquadScopeLabel([{ name: 'squad:bishop' }]), false);
+  assert.equal(hasSquadScopeLabel([null, undefined, { }]), false, 'malformed entries');
+
+  // An unlabelled PR is out of scope and says so, rather than emitting a
+  // BLOCKED that nobody can clear without staging a fake agent review.
+  const out = gate({ squadLabeled: false });
+  assert.equal(out.state, 'success');
+  assert.equal(out.scope, 'out-of-scope');
+  assert.match(out.description, /^NOT_APPLICABLE @ [0-9a-f]{12}: not a squad PR \(no 'squad' label\)$/);
+  assert.equal(out.approvals.length, 0);
+
+  // Scope is evaluated before everything else: a full panel of records on an
+  // unlabelled PR still reports out of scope rather than REVIEWED, so an
+  // out-of-scope PR can never accumulate merge evidence.
+  const withRecords = gate({
+    squadLabeled: false,
+    comments: [comment('bishop', 'APPROVE'), comment('hicks', 'APPROVE'), comment('vasquez', 'APPROVE')],
+  });
+  assert.equal(withRecords.scope, 'out-of-scope');
+  assert.doesNotMatch(withRecords.description, /REVIEWED/);
+
+  // Callers that forget the flag must fail safe to out-of-scope, never to an
+  // empty-panel evaluation that could look like a pass.
+  const omitted = evaluateGate({ headSha, changedPaths: ['src/api/Program.cs'], roster });
+  assert.equal(omitted.scope, 'out-of-scope');
+
+  // Labelled PRs still take the full gate.
+  const inScope = gate({ squadLabeled: true });
+  assert.equal(inScope.scope, undefined);
+  assert.match(inScope.description, /^BLOCKED @ [0-9a-f]{12}: no review recorded/);
+});
+
+test('the scoping workflow wiring stays intact', async () => {
+  const workflow = await readFile(
+    path.join(repositoryRoot, '.github/workflows/squad-review-verdict.yml'), 'utf8',
+  );
+  // Scope is checked before the fork branch, and both real call sites declare
+  // their scope explicitly rather than relying on the default.
+  assert.match(workflow, /gate\.hasSquadScopeLabel\(pull\.labels \?\? \[\]\)/);
+  assert.match(workflow, /squadLabeled: false/);
+  assert.match(workflow, /squadLabeled: true/);
+  // The label changes scope, so the status must re-evaluate when it moves.
+  assert.match(workflow, /- labeled/);
+  assert.match(workflow, /- unlabeled/);
+
+  // Labelling lives in THIS workflow, guarded by canAutoScope, and needs write
+  // access to do it. A separate labelling workflow is not a valid refactor: the
+  // default GITHUB_TOKEN does not start new workflow runs, so its `labeled`
+  // event would never re-trigger the evaluation that depends on it, and the two
+  // workflows would race on `opened`.
+  assert.match(workflow, /gate\.canAutoScope\(/);
+  assert.match(workflow, /issues\.addLabels/);
+  assert.match(workflow, /pull-requests: write/);
+  assert.match(workflow, /isFork/);
+
+  // Labelling must not migrate back out into a dedicated workflow: the default
+  // GITHUB_TOKEN does not start new workflow runs, so a separate labeller's
+  // `labeled` event would never re-trigger the evaluation that depends on it,
+  // and the two would race on `opened`.
+  //
+  // The primary guard keys on CAPABILITY, not on call sites. Scoped precisely:
+  // a workflow cannot write a label using GITHUB_TOKEN by ANY mechanism —
+  // issues.addLabels, issues.update, GraphQL addLabelsToLabelable, `gh pr edit
+  // --add-label`, actions/labeler, raw REST — without granting GITHUB_TOKEN
+  // `issues: write` or `pull-requests: write` (or `write-all`). GitHub enforces
+  // that at the token level; scanning for call sites cannot, because the
+  // transports are open-ended and the label value can be indirected through a
+  // variable. The answerable question is "which workflows COULD label with the
+  // default token", which the permissions block decides; "which workflows DO
+  // label" is not decidable by regex.
+  //
+  // KNOWN, ACCEPTED RESIDUAL: the `permissions:` block constrains only
+  // GITHUB_TOKEN. A workflow holding just `contents: write` that runs, say,
+  // `gh pr edit --add-label squad` authenticated with a `secrets.*` PAT or a
+  // GitHub App token bypasses this guard entirely, because that token's scopes
+  // are not visible in the workflow file. Detecting it is out of scope here and
+  // ruled non-blocking; it lives within the documented residual below. Do not
+  // read the capability claim as absolute — it is a GITHUB_TOKEN claim only.
+  //
+  // RESIDUAL, stated plainly: this is defence-in-depth against a future refactor
+  // reintroducing a standalone labeller. It is NOT the enforced safety property.
+  // That is gate.canAutoScope, which refuses forks and unrostered authors and is
+  // mutation-tested above. A workflow on the allowlist is trusted not to apply
+  // the bare scope label; the secondary guard checks the obvious ways it might,
+  // but cannot prove absence.
+  const workflowDir = path.join(repositoryRoot, '.github/workflows');
+  const names = (await readdir(workflowDir)).filter((n) => /\.ya?ml$/i.test(n));
+  const bodies = new Map();
+  for (const name of names) {
+    bodies.set(name, await readFile(path.join(workflowDir, name), 'utf8'));
+  }
+
+  // GITHUB_TOKEN can be granted label-write capability in several YAML shapes,
+  // all of which GitHub Actions accepts and all of which a regex over the raw
+  // text kept missing — three rounds running, each defeat a piece of valid YAML:
+  //
+  //   permissions: { issues: write }       flow mapping (grant not on its own line)
+  //   permissions:                         block mapping with a quoted inner
+  //     'issues': "write"                   key and value
+  //   "permissions": {"issues": "write"}   quoted OUTER key, defeating both the
+  //                                         capability regex and the /^permissions:/
+  //                                         "inherits default" filter at once
+  //
+  // Block vs flow, quoted vs unquoted, outer-quoted vs bare — these are surface
+  // syntax that all parse to the SAME structure. So DO NOT match text here: parse
+  // the workflow with a real YAML parser and inspect the resulting object. Every
+  // regex attempt was correct-but-incomplete, and an incomplete capability check
+  // is worse than none because a miss silently admits a label writer. Parsing
+  // makes the whole "valid YAML the regex didn't anticipate" class disappear —
+  // if you are tempted to "simplify" this back to a regex, re-read this note.
+  const parseWorkflow = (name) => {
+    try {
+      return yaml.load(bodies.get(name)) ?? {};
+    } catch (error) {
+      // Fail loudly and closed. An unparseable workflow must never be silently
+      // treated as non-capable; it must break this test instead.
+      assert.fail(`workflow ${name} is not parseable YAML: ${error.message}`);
+    }
+  };
+  const docs = new Map(names.map((n) => [n, parseWorkflow(n)]));
+
+  // Every permissions mapping declared in a file: the top-level one plus each
+  // job's own `jobs.<id>.permissions`. A grant at either level is a capability.
+  const permissionBlocks = (doc) => {
+    const blocks = [];
+    if (doc && typeof doc === 'object' && 'permissions' in doc) {
+      blocks.push(doc.permissions);
+    }
+    const jobs = doc && typeof doc === 'object' ? doc.jobs : undefined;
+    if (jobs && typeof jobs === 'object') {
+      for (const job of Object.values(jobs)) {
+        if (job && typeof job === 'object' && 'permissions' in job) {
+          blocks.push(job.permissions);
+        }
+      }
+    }
+    return blocks;
+  };
+
+  // A single permissions value grants label write if it is the `write-all`
+  // scalar shorthand, or a mapping granting `issues: write` or
+  // `pull-requests: write`. `permissions: {}` parses to an empty object and
+  // grants nothing (a reviewer probe pins this); `read-all`, `read`, `none`,
+  // and an absent block likewise grant nothing.
+  const blockGrantsLabelWrite = (permissions) => {
+    if (permissions === 'write-all') return true;
+    if (typeof permissions !== 'object' || permissions === null) return false;
+    return permissions.issues === 'write' ||
+      permissions['pull-requests'] === 'write';
+  };
+
+  const grantsLabelWrite = (name) =>
+    permissionBlocks(docs.get(name)).some(blockGrantsLabelWrite);
+
+  // Workflows permitted to hold label-write capability. Adding an entry is a
+  // deliberate act: any of these could apply the bare scope label and silently
+  // place a PR in scope, which is what the review gate exists to prevent.
+  const permittedLabelWriters = new Set([
+    'close-linked-issues.yml',
+    'squad-blocked-label-sync.yml',
+    'squad-heartbeat.yml',
+    'squad-issue-assign.yml',
+    'squad-label-enforce.yml',
+    'squad-review-verdict.yml',
+    'squad-triage.yml',
+    'sync-squad-labels.yml',
+  ]);
+
+  const capable = names.filter((n) => grantsLabelWrite(n));
+  assert.deepEqual(
+    capable.filter((n) => !permittedLabelWriters.has(n)), [],
+    'a workflow not on the allowlist grants itself issues/pull-requests write and could ' +
+    'therefore apply the bare squad scope label; if legitimate add it above, but first ' +
+    'confirm it cannot place a PR in scope',
+  );
+  // Fail closed the other way too: a stale entry reserves a name and silently
+  // widens the set a reintroduced labeller could occupy.
+  assert.deepEqual(
+    [...permittedLabelWriters].filter((n) => !capable.includes(n)), [],
+    'the allowlist names a workflow that no longer holds label-write capability; prune it',
+  );
+
+  // A workflow omitting `permissions` inherits the repository default. Pinning
+  // the exact set of blockless workflows catches a workflow GAINING or LOSING an
+  // explicit `permissions:` block — an added block might grant label write, and a
+  // removed one drops the file back onto the (unknown) repository default.
+  //
+  // "Has no explicit permissions block" is decided from the PARSED object, not
+  // from text: the earlier `/^\s*permissions:/m` filter shared the quoted-outer-
+  // key blind spot (`"permissions": {...}`), so a file could grant label write
+  // yet still be counted as inheriting the default. `permissionBlocks(...)`
+  // reflects the real structure at both the top level and every job.
+  //
+  // What this does NOT detect: the value of the repository-wide
+  // `default_workflow_permissions` API setting. This test reads workflow files
+  // only; it cannot see that setting, so flipping it from restricted to
+  // permissive would make every blockless workflow label-capable WITHOUT
+  // changing any file here and WITHOUT failing this test. That flip is guarded
+  // elsewhere (org/repo settings), not by this assertion.
+  const inheritsDefault = names
+    .filter((n) => permissionBlocks(docs.get(n)).length === 0)
+    .sort();
+  assert.deepEqual(
+    inheritsDefault,
+    ['bootstrap-ubuntu-ci.yml', 'ci-lint.yml', 'compose-validate.yml',
+     'enforce-path-casing.yml', 'prusa-preseed-build.yml', 'slicer-assets-ci.yml'],
+    'a workflow gained or lost an explicit permissions block; one without a block ' +
+    'inherits the repository default and is label-capable if that default is permissive',
+  );
+
+  // Secondary guard: a permitted writer must not start applying the BARE scope
+  // label. Those seven apply `squad:*`, never `squad`. Covers the literal forms
+  // plus assignment to a variable, which is how an indirected CLI call reads it.
+  //
+  // The last pattern (any `key: squad` line) is intentionally broad and WILL
+  // also flag an innocuous line such as `name: squad` in a permitted writer.
+  // That is left as-is on purpose: it fails toward MORE review, matching the
+  // over-match doctrine above, and — critically — it is the only form that still
+  // catches a label indirected through a variable like `SCOPE_LABEL: squad`,
+  // which a reviewer specifically required. Narrowing it to exclude `name:`
+  // would trade a harmless, self-announcing false positive (a failing test with
+  // the offending file named) for the risk of a silent gap, a bad trade here.
+  const bareScopeLabel = [
+    /squadScopeLabel|canAutoScope/,
+    /labels:\s*\[[^\]]*(['"])squad\1/,
+    /--add-label[=\s]+['"]?squad['"]?(?![\w:-])/,
+    /^\s*[A-Za-z_][\w-]*:\s*(['"])?squad\1?\s*$/m,
+  ];
+  const strays = capable.filter(
+    (n) => n !== 'squad-review-verdict.yml' &&
+           bareScopeLabel.some((re) => re.test(bodies.get(n))),
+  );
+  assert.deepEqual(
+    strays, [],
+    `squad scope labelling must stay in squad-review-verdict.yml; found: ${strays.join(', ')}`,
+  );
 });

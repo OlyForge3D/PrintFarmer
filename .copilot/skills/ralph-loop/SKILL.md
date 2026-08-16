@@ -438,8 +438,29 @@ the closed PR as proof that the issue closed.
 Immediately before acting, re-read `headRefOid`, `isDraft`, `mergeable`, `reviewDecision`,
 and the checks rollup.
 
+- **Scope first: never merge a PR without the `squad` label.** The label marks squad-authored
+  work and is what the review gate applies to. Dependency bumps and ad-hoc human PRs are
+  deliberately out of scope, publish a green `NOT_APPLICABLE` status, and are **not** yours
+  to merge — leave them for a human. Green there means "no review was required", not
+  "reviewed", so treating it as approval would auto-merge every unreviewed PR in the repo.
 - Require an explicit approval or a recorded reviewer verdict **at the current head SHA**.
   An approval recorded for an older SHA is invalid — any head movement supersedes it.
+  Confirm it with the verifier rather than by eye:
+
+  ```bash
+  node scripts/ci/verify-squad-verdict.mjs \
+    --repo OlyForge3D/PrintFarmer --pr <n> --json
+  ```
+
+  | Exit | Classification | Action |
+  |------|----------------|--------|
+  | 0 | `REVIEWED` / `APPROVED` | Clear to merge at `reviewedHeadSha` |
+  | 2 | `CHANGES_REQUESTED` | Route feedback to the author agent |
+  | 3 | `MISSING` / `INVALID` / `SUPERSEDED` | Request review at the current head |
+  | 4 | `NOT_APPLICABLE` | Out of scope — do not merge |
+
+  On exit 4 the JSON omits `reviewedHeadSha` on purpose, so the merge command below cannot
+  be constructed. Do not work around that by substituting `headRefOid`.
 - Green CI alone never authorizes a merge.
 - Never merge a draft.
 - Serialize merges: verify one merge landed and its linked issue closed before starting
@@ -448,7 +469,7 @@ and the checks rollup.
 
   ```bash
   gh pr merge <n> --repo OlyForge3D/PrintFarmer --squash \
-    --match-head-commit <verifiedHeadSha>
+    --match-head-commit <reviewedHeadSha>
   ```
 
 - For conflicting or dirty branches, delegate a fresh fix session from `development`.
