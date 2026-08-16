@@ -80,6 +80,31 @@ public sealed class PrinterVersionCacheTests
             Times.Exactly(2));
     }
 
+    [Fact]
+    public async Task GetAsync_ConsecutiveForceRefreshCalls_AreThrottledToASingleLiveBackendCall()
+    {
+        // Regression coverage for the amplification concern raised in review: an operator (or a
+        // buggy client) mashing the "Refresh version info" button repeatedly must not be able to
+        // force unbounded live backend round-trips. A second forceRefresh request arriving within
+        // the throttle window must downgrade to the normal cache-read path instead.
+        Printer printer = CreatePrinter();
+        var infoClientMock = new Mock<IBackendClient>();
+        infoClientMock.As<ISupportsPrinterInformation>()
+            .Setup(c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new StandardPrinterInfo { Firmware = "v1.0.0", BackendVersion = "v0.9.0", ApiVersion = "1.0.0" });
+
+        PrinterVersionCache cache = CreateCache(printer, infoClientMock);
+
+        PrinterVersionInfoDto? first = await cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true);
+        PrinterVersionInfoDto? second = await cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true);
+
+        first.Should().NotBeNull();
+        second.Should().BeSameAs(first);
+        infoClientMock.As<ISupportsPrinterInformation>().Verify(
+            c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
     private static PrinterVersionCache CreateCache(Printer printer, Mock<IBackendClient> infoClientMock)
     {
         IMemoryCache memoryCache = new MemoryCache(new MemoryCacheOptions());
