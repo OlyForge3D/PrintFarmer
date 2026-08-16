@@ -12,6 +12,7 @@ import {
 import { queryKeys, usePrintJobObjects } from '@/common/hooks/useApi';
 import type {
   Printer,
+  PrinterDetails,
   TempTargets,
   MoveRequest,
   PrinterBackendCapabilitiesDto,
@@ -998,13 +999,14 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                   onClick={async () => {
                     setSpoolActionPending(true);
                     try {
-                      if (!printer.rowVersion) {
+                      const reviewedRowVersion = printer.rowVersion ?? printerDetails?.rowVersion;
+                      if (!reviewedRowVersion) {
                         toast.error('Printer revision unavailable. Refresh and review again.');
                         return;
                       }
                       const nextRowVersion = await apiClient.clearActiveSpool(
                         printer.id,
-                        printer.rowVersion
+                        reviewedRowVersion
                       );
                       queryClient.setQueryData<Printer[]>(['printers'], (old) =>
                         old?.map(p => p.id === printer.id
@@ -1015,6 +1017,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                             }
                           : p
                         )
+                      );
+                      queryClient.setQueryData<PrinterDetails>(
+                        queryKeys.printerDetails(printer.id),
+                        (old) => old ? { ...old, rowVersion: nextRowVersion } : old,
                       );
                       // Reconcile the optimistic update with server truth so
                       // downstream consumers (printer details, coverage) see
@@ -1215,14 +1221,15 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            if (!printer.rowVersion) {
+            const reviewedRowVersion = printer.rowVersion ?? printerDetails?.rowVersion;
+            if (!reviewedRowVersion) {
               toast.error('Printer revision unavailable. Refresh and review again.');
               return;
             }
             const nextRowVersion = await apiClient.setActiveSpool(
               printer.id,
               spoolId,
-              printer.rowVersion
+              reviewedRowVersion
             );
             setShowSpoolPicker(false);
             queryClient.setQueryData<Printer[]>(['printers'], (old) =>
@@ -1245,6 +1252,10 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                   }
                 : p
               )
+            );
+            queryClient.setQueryData<PrinterDetails>(
+              queryKeys.printerDetails(printer.id),
+              (old) => old ? { ...old, rowVersion: nextRowVersion } : old,
             );
           } catch (err) {
             console.error('Failed to set active spool:', err);
