@@ -517,18 +517,20 @@ jobs:
                     // independent of the 300-file cap on `files`) — verified
                     // empirically (a real commit with >300 files still
                     // reports its true total there). Summing the returned
-                    // `files` and comparing to `stats.total` is a reliable
-                    // truncation proof, unlike a bare length check, which
-                    // can't distinguish "exactly at the cap" from "capped".
-                    // Fall back to the length heuristic only if `stats` is
-                    // ever absent.
+                    // `files` and comparing to `stats.total` catches most
+                    // truncation, but is not sufficient alone: a truncated
+                    // page whose missing files happen to be pure renames
+                    // (0 additions, 0 deletions) would still sum-match. Keep
+                    // the length-vs-cap heuristic as a second, independent
+                    // check — either signal firing means the list can't be
+                    // trusted.
                     const singleCommitFilesSum = singleCommitFiles.reduce(
                       (sum, f) => sum + (f.additions ?? 0) + (f.deletions ?? 0), 0,
                     );
                     const singleCommitFilesTruncated =
-                      typeof singleCommit.stats?.total === 'number'
-                        ? singleCommitFilesSum !== singleCommit.stats.total
-                        : singleCommitFiles.length >= compareFilesCap;
+                      singleCommitFiles.length >= compareFilesCap ||
+                      (typeof singleCommit.stats?.total === 'number' &&
+                        singleCommitFilesSum !== singleCommit.stats.total);
                     const { data: parentsCompare } =
                       await github.rest.repos.compareCommitsWithBasehead({
                         owner, repo, basehead: `${parentShas[0]}...${parentShas[1]}`,

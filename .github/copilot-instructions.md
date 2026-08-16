@@ -592,10 +592,13 @@ and `parentsCompare.files` complete before trusting their fingerprint comparison
 deletions summed across the *whole* commit, independent of the 300-file cap on
 `files` — verified empirically against a real commit with over 300 changed files,
 which still reports its true total there); summing the returned `files` and comparing
-to `stats.total` gives a reliable truncation proof rather than a bare length check,
-which can't distinguish "exactly at the cap" from "capped". `compare(parent1...parent2)`
-exposes no equivalent total, so `parentsCompare.files` falls back to the same
-length-vs-`compareFilesCap` heuristic used for the top-level diffs. Either signal
+to `stats.total` catches most truncation, but is not sufficient alone — a truncated
+page whose missing files happen to be pure renames (0 additions, 0 deletions) would
+still sum-match. The workflow therefore checks the `stats.total` mismatch AND the
+length-vs-`compareFilesCap` heuristic together for `singleCommit.files`, disqualifying
+if either fires. `compare(parent1...parent2)` exposes no equivalent total, so
+`parentsCompare.files` uses only the length-vs-cap heuristic used for the top-level
+diffs. Either signal
 fails condition 3 closed (treats it as unproven) rather than guessing.
 
 When a record is carried forward this way, the status and audit trail say so
