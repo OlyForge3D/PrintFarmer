@@ -73,7 +73,6 @@ devnotes/
 .github/workflows/squad-label-enforce.yml
 .github/workflows/squad-main-guard.yml
 .github/workflows/squad-preview.yml
-.github/workflows/squad-promote.yml
 .github/workflows/squad-release.yml
 .github/workflows/squad-triage.yml
 .github/workflows/sync-squad-labels.yml
