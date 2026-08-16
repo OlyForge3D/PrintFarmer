@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Contracts.Printers;
+﻿using System.Collections.Concurrent;
+using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
@@ -22,9 +23,18 @@ public sealed class PrinterVersionCache(
     // bypasses that, so it needs its own short, independent minimum interval.
     private static readonly TimeSpan ForceRefreshMinInterval = TimeSpan.FromSeconds(5);
 
-    private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
+    // Tracks the currently-active forceRefresh throttle window per printer. This must be a
+    // single process-wide table (not per-request/per-scope state) so concurrent requests for
+    // the same printer actually contend with each other. A plain IMemoryCache
+    // TryGetValue-then-Set pair is NOT atomic — two concurrent forceRefresh calls can both
+    // observe "no throttle entry yet" before either writes one, defeating the throttle
+    // entirely. ConcurrentDictionary.AddOrUpdate performs the read-decide-write as a single
+    // atomic operation per key, and a unique per-attempt token (rather than comparing
+    // timestamps) makes the "did I win the race" check exact even if two attempts computed
+    // the same expiry instant.
+    private static readonly ConcurrentDictionary<Guid, (Guid Token, DateTime ExpiresAtUtc)> ForceRefreshWindows = new();
 
-    private static string ForceRefreshThrottleKey(Guid printerId) => $"printer:version:force:{printerId:N}";
+    private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
 
     public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
     {
@@ -33,21 +43,28 @@ public sealed class PrinterVersionCache(
         // (e.g. Klippy unavailable) was active — so it can observe recovery immediately instead
         // of waiting out the normal cache TTL. Automatic polling always passes forceRefresh=false
         // and keeps the normal cache policy below untouched.
-        if (forceRefresh && _cache.TryGetValue(ForceRefreshThrottleKey(printerId), out bool _))
+        if (forceRefresh)
         {
-            // A forced refresh already ran for this printer within the throttle window; fall
-            // back to the normal cache-read behavior instead of forcing another live call.
-            forceRefresh = false;
+            DateTime nowUtc = DateTime.UtcNow;
+            (Guid Token, DateTime ExpiresAtUtc) myWindow = (Guid.NewGuid(), nowUtc.Add(ForceRefreshMinInterval));
+
+            (Guid Token, DateTime ExpiresAtUtc) activeWindow = ForceRefreshWindows.AddOrUpdate(
+                printerId,
+                myWindow,
+                (_, existing) => existing.ExpiresAtUtc > nowUtc ? existing : myWindow);
+
+            if (activeWindow.Token != myWindow.Token)
+            {
+                // Another forceRefresh call already holds an active throttle window for this
+                // printer; fall back to the normal cache-read behavior instead of forcing
+                // another live call.
+                forceRefresh = false;
+            }
         }
 
         if (!forceRefresh && _cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cached) && cached is not null)
         {
             return cached;
-        }
-
-        if (forceRefresh)
-        {
-            _cache.Set(ForceRefreshThrottleKey(printerId), true, ForceRefreshMinInterval);
         }
 
         Printer? printer = await _printersService.FindByIdAsync(printerId, ct);

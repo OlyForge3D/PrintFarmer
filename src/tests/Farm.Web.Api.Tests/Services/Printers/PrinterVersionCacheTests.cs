@@ -105,6 +105,48 @@ public sealed class PrinterVersionCacheTests
             Times.Once);
     }
 
+    [Fact]
+    public async Task GetAsync_ConcurrentForceRefreshCalls_OnlyOneWinsTheThrottleWindowAgainstAWarmCache()
+    {
+        // Regression coverage for the throttle-atomicity finding from review: the throttle claim
+        // must be a single atomic check-and-set so that two forceRefresh calls racing on separate
+        // threads for the same printer cannot both observe "no active window" before either claims
+        // it. This reproduces the realistic scenario the throttle exists for — an operator
+        // double-mashing "Refresh version info" against an already-cached printer — by warming the
+        // cache with an initial call before racing two forceRefresh calls against it. (Racing two
+        // forceRefresh calls against a completely cold cache is a separate, pre-existing
+        // first-fetch race unrelated to this throttle and is out of scope here.)
+        Printer printer = CreatePrinter();
+        var infoClientMock = new Mock<IBackendClient>();
+        infoClientMock.As<ISupportsPrinterInformation>()
+            .Setup(c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(50));
+                return new StandardPrinterInfo { Firmware = "v1.0.0", BackendVersion = "v0.9.0", ApiVersion = "1.0.0" };
+            });
+
+        PrinterVersionCache cache = CreateCache(printer, infoClientMock);
+
+        // Warm the cache so the throttle loser's downgrade-to-normal-cache-read path has a value
+        // to return instead of also needing a live fetch.
+        await cache.GetAsync(printer.Id, CancellationToken.None);
+
+        Task<PrinterVersionInfoDto?> call1 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
+        Task<PrinterVersionInfoDto?> call2 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
+
+        PrinterVersionInfoDto?[] results = await Task.WhenAll(call1, call2);
+
+        results[0].Should().NotBeNull();
+        results[1].Should().NotBeNull();
+
+        // One backend call from warming the cache, plus exactly one more from whichever
+        // forceRefresh call won the throttle window — the loser must not trigger a second.
+        infoClientMock.As<ISupportsPrinterInformation>().Verify(
+            c => c.GetPrinterInformationAsync(printer.BackendUrl, printer.Credential, It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
     private static PrinterVersionCache CreateCache(Printer printer, Mock<IBackendClient> infoClientMock)
     {
         IMemoryCache memoryCache = new MemoryCache(new MemoryCacheOptions());
