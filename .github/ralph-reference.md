@@ -63,9 +63,9 @@ gh pr list --state open --draft --json number,title,author,labels,checks --limit
 
 **Scope — Ralph merges only `squad`-labelled PRs.** A pull request is in scope for
 unattended merge if and only if it carries the bare `squad` label (not a
-`squad:{member}` assignment label). `.github/workflows/squad-pr-label.yml` applies it
-automatically when the PR's author resolves to a squad identity, and squad agents
-apply it when opening a PR.
+`squad:{member}` assignment label). `.github/workflows/squad-review-verdict.yml` applies
+it automatically, in the same run that evaluates the gate, when the PR's author resolves
+to a roster member — never on a fork — and squad agents apply it when opening a PR.
 
 ⚠️ **This coupling is load-bearing, not a convenience.** The review gate is also
 scoped to the `squad` label, so an unlabelled PR reports `NOT_APPLICABLE` and has no

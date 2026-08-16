@@ -90,13 +90,19 @@ name: Record squad review (self-attested)
 # Changes: One Reviewer": documentation-only PRs need one record, everything
 # else needs the bishop/hicks/vasquez panel.
 #
-# OWNER OVERRIDE: a repository administrator satisfies the gate unconditionally,
-# either by approving through GitHub's native review UI at the current head, or
-# by posting a record whose `Squad-Reviewer` is their own GitHub login. Only each
-# administrator's MOST RECENT decisive review at that head counts (APPROVED /
-# CHANGES_REQUESTED / DISMISSED; COMMENTED is not decisive), so a later change
-# request outranks an earlier approval on the same commit. The owner is never
-# locked out of their own repository.
+# OWNER OVERRIDE: on an in-scope PR a repository administrator satisfies the gate
+# unconditionally, either by approving through GitHub's native review UI at the
+# current head, or by posting a record whose `Squad-Reviewer` is their own GitHub
+# login. Only each administrator's MOST RECENT decisive review at that head
+# counts (APPROVED / CHANGES_REQUESTED / DISMISSED; COMMENTED is not decisive),
+# so a later change request outranks an earlier approval on the same commit. The
+# owner is never locked out of their own repository.
+#
+# The override does not apply to an out-of-scope PR, and does not need to: it
+# exists to clear a BLOCKED status, and an unlabelled PR has no such status to
+# clear. NOT_APPLICABLE is green, so an administrator can merge it directly at
+# any time. What the override cannot do there is authorise the UNATTENDED merger,
+# which by design only touches labelled PRs — to hand a PR to Ralph, label it.
 #
 # The job itself always succeeds; the gate result is the `squad/pre-pr-verdict`
 # commit status. Keeping the run conclusion at `success` is what lets
@@ -132,7 +138,11 @@ on:
 permissions:
   contents: read
   issues: read
-  pull-requests: read
+  # write, not read: this workflow applies the `squad` scope label itself. A
+  # separate labelling workflow cannot work here — GitHub does not start new
+  # workflow runs from events caused by the default GITHUB_TOKEN, so its
+  # `labeled` event would never re-trigger the evaluation that depends on it.
+  pull-requests: write
   statuses: write
 
 concurrency:
@@ -202,20 +212,83 @@ jobs:
                 description, target_url: targetUrl,
               });
 
+            // Labels on the issues this PR closes are the most reliable author
+            // signal, so a failure here degrades author resolution rather than
+            // failing the run.
+            async function loadLinkedIssueLabels() {
+              try {
+                const linked = await github.graphql(`
+                  query($owner: String!, $repo: String!, $number: Int!) {
+                    repository(owner: $owner, name: $repo) {
+                      pullRequest(number: $number) {
+                        closingIssuesReferences(first: 20) {
+                          nodes { number labels(first: 50) { nodes { name } } }
+                        }
+                      }
+                    }
+                  }`, { owner, repo, number: prNumber });
+                return (linked.repository.pullRequest
+                  .closingIssuesReferences.nodes ?? [])
+                  .flatMap((node) => (node.labels?.nodes ?? []).map((l) => l.name));
+              } catch (error) {
+                core.warning(`Could not read linked issues: ${error.message}`);
+                return [];
+              }
+            }
+
             const isFork = pull.head.repo?.full_name !== repository;
 
             // Scope check first: the gate covers squad-authored PRs, marked by
             // the `squad` label. Dependency bumps and ad-hoc human PRs are not
             // agent output and get NOT_APPLICABLE instead of an unclearable
-            // BLOCKED. Labels come from the API, and only accounts with write
-            // access can apply them, so nothing an outsider controls can move a
-            // PR into or out of scope. Checked before the fork branch so an
-            // out-of-scope fork PR is reported as out of scope rather than as a
-            // fork needing an administrator.
+            // BLOCKED. Checked before the fork branch so an out-of-scope fork PR
+            // is reported as out of scope rather than as a fork needing an
+            // administrator.
+            //
+            // Labelling happens HERE rather than in a separate workflow. A
+            // dedicated labeller would have to rely on its `labeled` event
+            // waking this workflow up, and GitHub does not start new workflow
+            // runs from events caused by the default GITHUB_TOKEN — so the
+            // re-evaluation would never fire, and the two workflows would race
+            // on `opened`. Doing both in one run removes the race and the token
+            // problem together.
             //
             // Safe as opt-in ONLY because Ralph will not auto-merge an
             // unlabelled PR; see gate.squadScopeLabel and ralph-reference.md.
-            if (!gate.hasSquadScopeLabel(pull.labels ?? [])) {
+            const roster = gate.rosterFromLabels(
+              (await github.paginate(github.rest.issues.listLabelsForRepo,
+                { owner, repo, per_page: 100 })).map((label) => label.name),
+            );
+
+            let squadLabeled = gate.hasSquadScopeLabel(pull.labels ?? []);
+            const author = gate.resolveAuthorMembers({
+              prBody: pull.body ?? '',
+              branchName: pull.head?.ref ?? '',
+              linkedIssueLabels: await loadLinkedIssueLabels(),
+              roster,
+            });
+
+            if (!squadLabeled &&
+                gate.canAutoScope({ authorMembers: author.members, roster, isFork })) {
+              try {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: prNumber,
+                  labels: [gate.squadScopeLabel],
+                });
+                squadLabeled = true;
+                core.notice(
+                  `Applied '${gate.squadScopeLabel}': resolved squad author ` +
+                  `${[...author.members].join('+')} from ${author.source}.`,
+                );
+              } catch (error) {
+                // Labelling is a convenience, not the gate. If it fails the PR
+                // stays out of scope and reports NOT_APPLICABLE, which is the
+                // safe direction: a human owns the merge.
+                core.warning(`Could not apply the scope label: ${error.message}`);
+              }
+            }
+
+            if (!squadLabeled) {
               const outOfScope = gate.evaluateGate({ headSha, squadLabeled: false });
               await postStatus(outOfScope.state, outOfScope.description);
               core.notice(
@@ -310,16 +383,13 @@ jobs:
               return;
             }
 
-            const [labelData, rawComments, fileData] = await Promise.all([
-              github.paginate(github.rest.issues.listLabelsForRepo,
-                { owner, repo, per_page: 100 }),
+            const [rawComments, fileData] = await Promise.all([
               github.paginate(github.rest.issues.listComments,
                 { owner, repo, issue_number: prNumber, per_page: 100 }),
               github.paginate(github.rest.pulls.listFiles,
                 { owner, repo, pull_number: prNumber, per_page: 100 }),
             ]);
 
-            const roster = gate.rosterFromLabels(labelData.map((label) => label.name));
             const changedPaths = fileData.map((file) => file.filename);
 
             // Resolve real repository permission for every account that posted
@@ -344,32 +414,6 @@ jobs:
             }
 
             const reviews = await loadReviews();
-
-            let linkedIssueLabels = [];
-            try {
-              const linked = await github.graphql(`
-                query($owner: String!, $repo: String!, $number: Int!) {
-                  repository(owner: $owner, name: $repo) {
-                    pullRequest(number: $number) {
-                      closingIssuesReferences(first: 20) {
-                        nodes { number labels(first: 50) { nodes { name } } }
-                      }
-                    }
-                  }
-                }`, { owner, repo, number: prNumber });
-              linkedIssueLabels = (linked.repository.pullRequest
-                .closingIssuesReferences.nodes ?? [])
-                .flatMap((node) => (node.labels?.nodes ?? []).map((l) => l.name));
-            } catch (error) {
-              core.warning(`Could not read linked issues: ${error.message}`);
-            }
-
-            const author = gate.resolveAuthorMembers({
-              prBody: pull.body ?? '',
-              branchName: pull.head?.ref ?? '',
-              linkedIssueLabels,
-              roster,
-            });
 
             const result = gate.evaluateGate({
               headSha,

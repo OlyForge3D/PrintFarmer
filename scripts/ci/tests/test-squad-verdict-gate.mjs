@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  canAutoScope,
   classifyChangeScope,
   collectVerdicts,
   evaluateGate,
@@ -621,8 +622,47 @@ test('a panel member who authored the PR is substitutable, not a deadlock', () =
     roster,
     authorMembers: new Set(['bishop']),
     authorSource: 'PR body Squad-Author',
+    squadLabeled: true,
   });
-  assert.equal(result.state, 'success');
+  // Assert the substitution actually happened rather than only that the gate
+  // went green: without squadLabeled this returns success as out-of-scope, so a
+  // bare state check would pass while exercising none of this logic.
+  assert.equal(result.scope, undefined);
+  assert.equal(result.passed, true);
+  assert.ok(
+    result.description.startsWith('REVIEWED'),
+    `expected a REVIEWED record, got: ${result.description}`,
+  );
+  assert.ok(
+    result.description.includes('dallas'),
+    `expected dallas to substitute for the authoring reviewer: ${result.description}`,
+  );
+});
+
+test('auto-scoping refuses forks and unrostered self-declared authors', () => {
+  const inRoster = { authorMembers: new Set(['bishop']), roster, isFork: false };
+  assert.equal(canAutoScope(inRoster), true);
+
+  // A fork PR controls both its body and its branch name, which are exactly the
+  // inputs resolveAuthorMembers reads. If forks could auto-scope, an outsider
+  // could place their own PR into the gate's scope.
+  assert.equal(canAutoScope({ ...inRoster, isFork: true }), false);
+
+  // resolveAuthorMembers does NOT validate a declared Squad-Author against the
+  // roster, so canAutoScope must, or one line of PR body text self-scopes.
+  const declared = resolveAuthorMembers({
+    prBody: 'Squad-Author: attacker',
+    branchName: 'feature/x',
+    roster,
+  });
+  assert.deepEqual([...declared.members], ['attacker']);
+  assert.equal(
+    canAutoScope({ authorMembers: declared.members, roster, isFork: false }),
+    false,
+  );
+
+  assert.equal(canAutoScope({ authorMembers: new Set(), roster, isFork: false }), false);
+  assert.equal(canAutoScope({}), false);
 });
 
 test('workflow keeps its default-branch, SHA-binding and least-privilege controls', async () => {
@@ -632,8 +672,13 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   )).replaceAll('\r\n', '\n');
 
   assert.match(workflow, /^\s+statuses: write$/m);
-  assert.doesNotMatch(workflow, /pull-requests: write/);
+  // pull-requests: write is intentional — this workflow applies the scope label
+  // itself. It is the ONLY write scope beyond statuses, and it does not let a PR
+  // influence the judgement: the gate logic is always read from the default
+  // branch. contents: write would, so it stays out.
+  assert.match(workflow, /^\s+pull-requests: write$/m);
   assert.doesNotMatch(workflow, /contents: write/);
+  assert.doesNotMatch(workflow, /(?:actions|checks|packages|id-token): write/);
   // A pull_request (head-ref) trigger would let a PR rewrite its own gate.
   assert.doesNotMatch(workflow, /^\s{2}pull_request:$/m);
   assert.match(workflow, /^\s{2}pull_request_target:$/m);
@@ -720,12 +765,25 @@ test('the scoping workflow wiring stays intact', async () => {
   assert.match(workflow, /- labeled/);
   assert.match(workflow, /- unlabeled/);
 
-  const labeller = await readFile(
-    path.join(repositoryRoot, '.github/workflows/squad-pr-label.yml'), 'utf8',
+  // Labelling lives in THIS workflow, guarded by canAutoScope, and needs write
+  // access to do it. A separate labelling workflow is not a valid refactor: the
+  // default GITHUB_TOKEN does not start new workflow runs, so its `labeled`
+  // event would never re-trigger the evaluation that depends on it, and the two
+  // workflows would race on `opened`.
+  assert.match(workflow, /gate\.canAutoScope\(/);
+  assert.match(workflow, /issues\.addLabels/);
+  assert.match(workflow, /pull-requests: write/);
+  assert.match(workflow, /isFork/);
+
+  // Labelling must not migrate back out into a dedicated workflow: the default
+  // GITHUB_TOKEN does not start new workflow runs, so a separate labeller's
+  // `labeled` event would never re-trigger the evaluation that depends on it,
+  // and the two would race on `opened`.
+  const workflowDir = path.join(repositoryRoot, '.github/workflows');
+  const strays = (await readdir(workflowDir))
+    .filter((name) => /^squad-pr-label\.ya?ml$/i.test(name));
+  assert.deepEqual(
+    strays, [],
+    `scope labelling must stay in squad-review-verdict.yml; found: ${strays.join(', ')}`,
   );
-  assert.match(labeller, /pull-requests: write/);
-  assert.match(labeller, /types: \[opened, reopened\]/);
-  assert.match(labeller, /gate\.resolveAuthorMembers/);
-  // Never checks out PR-controlled code to classify the PR.
-  assert.match(labeller, /ref: \$\{\{ github\.event\.repository\.default_branch \}\}/);
 });

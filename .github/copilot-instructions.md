@@ -160,9 +160,17 @@ fork contributions — reports `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'sq
 label)`, a green, non-blocking status.
 
 **Squad agents MUST apply the `squad` label when opening a PR** (`gh pr create --label
-squad`). `.github/workflows/squad-pr-label.yml` also applies it automatically when the
-PR author resolves to a squad identity, but identity resolution fails on roughly a
-third of PRs, so do not rely on the automation.
+squad`). `.github/workflows/squad-review-verdict.yml` also applies it automatically, in
+the same run that evaluates the gate, when the PR author resolves to a roster member —
+but identity resolution fails on roughly a third of PRs, so do not rely on it. Automatic
+labelling never applies to a fork, and never trusts a `Squad-Author:` line naming someone
+outside the roster: both the PR body and the branch name are attacker-controlled on a
+fork, so neither may move a PR into scope. Applying the label by hand needs write access.
+
+An administrator's override does not apply to an out-of-scope PR and does not need to:
+the override exists to clear a `BLOCKED` status, and `NOT_APPLICABLE` is green, so an
+administrator can merge such a PR directly at any time. What it cannot do is authorise
+the *unattended* merger — to hand a PR to Ralph, label it.
 
 > **⚠️ Opt-in scoping is only safe because of one coupling: no `squad` label means no
 > gate *and* no unattended merge.** Ralph merges only `squad`-labelled PRs, so a

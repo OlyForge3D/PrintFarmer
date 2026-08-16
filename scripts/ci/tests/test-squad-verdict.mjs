@@ -6,6 +6,7 @@ import {
 } from '../squad-verdict-gate.mjs';
 import {
   bindStatusToHead,
+  exitCodeFor,
   selectSquadVerdict,
   verdictContext,
   verdictWorkflowPath,
@@ -432,7 +433,43 @@ test('every description evaluateGate can emit round-trips through the verifier',
         `${name}: blockedReason must be preserved verbatim`,
       );
     }
+
+    // The exit code is what the unattended merger branches on, so check it for
+    // every description the gate can emit rather than only for hand-written
+    // classifications.
+    const merges = expected === 'REVIEWED' || expected === 'APPROVED';
+    assert.equal(
+      exitCodeFor(verdict.classification),
+      merges ? 0 : { CHANGES_REQUESTED: 2, NOT_APPLICABLE: 4 }[expected] ?? 3,
+      `${name}: wrong exit code for ${expected}`,
+    );
+
+    // reviewedHeadSha is the --match-head-commit argument. It must exist for
+    // real evidence and must NOT exist otherwise — handing it out on a green
+    // NOT_APPLICABLE would supply exactly the argument needed to merge code
+    // nothing reviewed.
+    if (merges) {
+      assert.equal(verdict.reviewedHeadSha, reviewedHeadSha, `${name}: missing head SHA`);
+    } else if (expected === 'NOT_APPLICABLE') {
+      assert.equal(
+        verdict.reviewedHeadSha, undefined,
+        `${name}: out-of-scope results must not supply a mergeable head SHA`,
+      );
+    }
   }
+});
+
+test('exit codes never fail open', () => {
+  assert.equal(exitCodeFor('REVIEWED'), 0);
+  assert.equal(exitCodeFor('APPROVED'), 0);
+  assert.equal(exitCodeFor('CHANGES_REQUESTED'), 2);
+  assert.equal(exitCodeFor('MISSING'), 3);
+  assert.equal(exitCodeFor('INVALID'), 3);
+  assert.equal(exitCodeFor('SUPERSEDED'), 3);
+  assert.equal(exitCodeFor('NOT_APPLICABLE'), 4);
+  // A classification added later must not silently become "clear to merge".
+  assert.equal(exitCodeFor('SOMETHING_NEW'), 3);
+  assert.equal(exitCodeFor(undefined), 3);
 });
 
 test('author-authored lookalike comments cannot satisfy the verifier', () => {

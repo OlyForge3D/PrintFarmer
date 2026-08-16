@@ -49,11 +49,14 @@ export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
  * to merge this by hand", which is strictly more conservative, not less.
  *
  * Two further properties keep it honest:
- *   * Only accounts with repository write access can label a PR, so nothing an
- *     outsider controls can move a PR into or out of scope.
- *   * .github/workflows/squad-pr-label.yml applies the label automatically
- *     whenever a PR resolves a squad author identity, so the common path does
- *     not depend on an agent remembering.
+ *   * Scope is not outsider-influenceable. Applying a label by hand needs write
+ *     access, and the automatic path (see `canAutoScope`) refuses to label a
+ *     fork and requires the resolved author to be a real roster member — so
+ *     neither the PR body nor the branch name, both attacker-controlled on a
+ *     fork, can move a PR into scope.
+ *   * The verdict workflow applies the label itself, in the same run that
+ *     evaluates the gate, so the common path does not depend on an agent
+ *     remembering and cannot race a separate labelling workflow.
  */
 export const squadScopeLabel = 'squad';
 
@@ -73,6 +76,36 @@ export function hasSquadScopeLabel(labels = []) {
     }
   }
   return false;
+}
+
+/**
+ * True when a pull request may have the scope label applied automatically.
+ *
+ * The verdict workflow applies the label itself rather than delegating to a
+ * separate labelling workflow. Two guards matter, and both close real holes:
+ *
+ *   * NEVER auto-label a fork. `resolveAuthorMembers` reads the PR body and the
+ *     head branch name, BOTH of which a fork PR author fully controls, so an
+ *     outsider could otherwise place their own PR into scope. Fork PRs are
+ *     already handled conservatively once in scope (they need an administrator),
+ *     but scope must not be outsider-influenceable at all — that property is
+ *     what justifies opt-in scoping in the first place.
+ *
+ *   * Require every resolved member to be a real roster member. A declared
+ *     `Squad-Author:` line is NOT validated against the roster by
+ *     `resolveAuthorMembers` (by design — the gate only uses it to stop an agent
+ *     reviewing its own work), so without this check one arbitrary line of PR
+ *     body text would be enough to self-scope.
+ *
+ * A maintainer can still label anything by hand; that requires write access, so
+ * it stays inside the trust boundary.
+ */
+export function canAutoScope({ authorMembers, roster, isFork } = {}) {
+  if (isFork) return false;
+  const members = [...(authorMembers ?? [])];
+  if (members.length === 0) return false;
+  const known = roster ?? new Set();
+  return members.every((member) => known.has(member));
 }
 
 /**

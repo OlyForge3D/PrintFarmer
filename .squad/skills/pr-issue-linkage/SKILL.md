@@ -80,10 +80,11 @@ for unattended merge — a human must merge it deliberately. That coupling is wh
 the label safe to forget: forgetting it removes the gate *and* the autonomy together,
 so the worst case is extra manual work, never an unreviewed auto-merge.
 
-`.github/workflows/squad-pr-label.yml` applies the label automatically when the PR
-author resolves to a squad identity (via `Squad-Author:` in the body or a
-`squad:{member}` label on a linked issue), but roughly a third of PRs don't resolve.
-**Do not rely on the automation** — set the label yourself.
+`.github/workflows/squad-review-verdict.yml` applies the label automatically, in the same
+run that evaluates the gate, when the PR author resolves to a roster member (via
+`Squad-Author:` in the body or a `squad:{member}` label on a linked issue), but roughly a
+third of PRs don't resolve and forks never auto-label. **Do not rely on the automation** —
+set the label yourself.
 
 Note `squad` is the bare label. A `squad:{member}` label is an *assignment* label and
 does not put a PR in scope.
