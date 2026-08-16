@@ -1088,6 +1088,26 @@ export class ApiClient {
     return response.data;
   }
 
+  /**
+   * Re-probes the printer's firmware identity on demand and persists the detected
+   * facts to the columns the calibration gate reads.
+   *
+   * This is deliberately separate from `GET /printers/{id}/version`, which reads
+   * firmware live through an in-memory cache and never writes the database. That
+   * split is why a printer can display a firmware version in the sidebar while
+   * calibration still reports the firmware inputs as missing.
+   *
+   * Detection never marks the identity verified — that stays a human action.
+   */
+  async detectPrinterFirmware(
+    id: string
+  ): Promise<import("@/types/api").FirmwareDetectionResultDto> {
+    const response = await this.client.post<import("@/types/api").FirmwareDetectionResultDto>(
+      `/printers/${id}/firmware/detect`
+    );
+    return response.data;
+  }
+
   async applyModelTemplate(id: string): Promise<void> {
     await this.client.post(`/printers/${id}/apply-template`);
   }
