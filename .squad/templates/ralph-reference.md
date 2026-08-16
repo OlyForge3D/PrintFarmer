@@ -55,8 +55,28 @@ gh pr list --state open --draft --json number,title,author,labels,checks --limit
 | **Draft PRs** | PR in draft from squad member | Check if agent needs to continue; if stalled, nudge |
 | **Review feedback** | PR has `CHANGES_REQUESTED` review | Route feedback to PR author agent to address |
 | **CI failures** | PR checks failing | Notify assigned agent to fix, or create a fix issue |
-| **Approved PRs** | PR approved, CI green, ready to merge | Merge and close related issue |
+| **Approved PRs** | PR carries the `squad` label, is approved, and CI is green | Verify squad evidence, then merge and close the related issue |
+| **Unlabelled PRs** | PR has no `squad` label (dependency bumps, ad-hoc human PRs) | **Do not merge.** Out of the squad gate's scope — a human owns it |
 | **No work found** | All clear | Report: "📋 Board is clear. Ralph is idling." Suggest `npx @bradygaster/squad-cli watch` for persistent polling. |
+
+> ⚠️ **Never merge on "approved + CI green" alone.** Squad review evidence is a
+> separate, SHA-bound record and CI does not check it. Before any merge, run:
+>
+> ```bash
+> node scripts/ci/verify-squad-verdict.mjs --repo <owner/repo> --pr <number> --json
+> ```
+>
+> | Exit | Classification | Action |
+> |------|----------------|--------|
+> | 0 | `REVIEWED` / `APPROVED` | Merge with `gh pr merge <n> --match-head-commit <reviewedHeadSha>` |
+> | 2 | `CHANGES_REQUESTED` | Route the feedback back to the author agent |
+> | 3 | `MISSING` / `INVALID` / `SUPERSEDED` | No usable evidence — request review at the current head |
+> | 4 | `NOT_APPLICABLE` | Out of scope. **Do not merge** — leave it for a human |
+>
+> Always pass `--match-head-commit <reviewedHeadSha>` so a push landing between
+> verification and merge cannot substitute unreviewed code. On exit 4 the JSON
+> deliberately omits `reviewedHeadSha`, so the merge command cannot be built —
+> that is the safeguard working, not an error to route around.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

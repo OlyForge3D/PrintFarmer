@@ -1,0 +1,10 @@
+{
+  "name": "printfarmer-repo-tooling",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Root dev-tooling manifest for PrintFarmer CI test scripts (scripts/ci, scripts/compliance). Not an application package; the React app has its own manifest under src/Web/ReactApp.",
+  "license": "SEE LICENSE IN LICENSE",
+  "devDependencies": {
+    "js-yaml": "^4.1.0"
+  }
+}

@@ -118,6 +118,7 @@ function parseDisplayTitle(displayTitle) {
 // The record encodes its outcome in the status state and description:
 //   success  `REVIEWED (self-attested) @ <sha12> by <agents>` -> agents reviewed
 //   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
+//   success  `NOT_APPLICABLE @ <sha12>: <reason>`             -> out of gate scope
 //   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>`        -> findings raised
 //   failure  `BLOCKED @ <sha12>: <reason>`                    -> nothing recorded
 //
@@ -125,6 +126,11 @@ function parseDisplayTitle(displayTitle) {
 // real authorisation by a distinct principal; REVIEWED is a self-attested record
 // that reviewer agents examined the commit, and must never be reported as though
 // an independent party approved it.
+//
+// NOT_APPLICABLE is a `success` state so an out-of-scope PR is not decorated
+// with a red status nobody can clear, but it is emphatically NOT merge evidence:
+// it means no review was required because the PR is out of scope, which is
+// precisely why such a PR must not be merged unattended.
 function parseStatusDescription(status, statusSha) {
   const description = status.description ?? '';
   // `statusSha` may originate from the `--expected-head` command-line argument,
@@ -137,6 +143,12 @@ function parseStatusDescription(status, statusSha) {
     ).exec(description);
     if (reviewed) {
       return { verdict: 'REVIEWED', reviewers: reviewed[1] };
+    }
+    const notApplicable = new RegExp(
+      `^NOT_APPLICABLE @ ${shortSha}: (\\S.*)$`,
+    ).exec(description);
+    if (notApplicable) {
+      return { verdict: 'NOT_APPLICABLE', reviewers: '', detail: notApplicable[1] };
     }
     const owner = new RegExp(
       `^APPROVE \\(owner\\) @ ${shortSha} by (\\S.*)$`,
@@ -167,6 +179,39 @@ function isStatusCreatedDuringRun(status, run) {
   const toleranceMs = 5_000;
   return createdAt >= startedAt - toleranceMs &&
     createdAt <= completedAt + toleranceMs;
+}
+
+/**
+ * Process exit code for a verdict classification.
+ *
+ * Exported so the mapping is executable in tests rather than asserted by
+ * reading the source: this is the single point where "did squad evidence permit
+ * this merge?" becomes a number the unattended merger branches on, so a silent
+ * regression here is a merge-safety regression.
+ *
+ *   0  REVIEWED / APPROVED    — usable merge evidence
+ *   2  CHANGES_REQUESTED      — a current rejection; route back to the author
+ *   3  MISSING / INVALID / SUPERSEDED — no usable evidence; admin approval only
+ *   4  NOT_APPLICABLE         — out of scope; a human owns the merge
+ *
+ * NOT_APPLICABLE deliberately does NOT map to 0. Its commit status is green,
+ * but green there means "no review was required", not "reviewed"; collapsing it
+ * to 0 would turn every unlabelled PR into an unattended merge, which is the
+ * exact failure the scoping exists to prevent. Anything unrecognised falls to 3
+ * (no evidence) rather than 0, so a future classification cannot fail open.
+ */
+export function exitCodeFor(classification) {
+  switch (classification) {
+    case 'APPROVED':
+    case 'REVIEWED':
+      return 0;
+    case 'CHANGES_REQUESTED':
+      return 2;
+    case 'NOT_APPLICABLE':
+      return 4;
+    default:
+      return 3;
+  }
 }
 
 export function verifySquadVerdict({ pull, status, run }) {
@@ -237,6 +282,25 @@ export function verifySquadVerdict({ pull, status, run }) {
       'MISSING',
       `The gate blocked ${statusSha}: ${outcome.detail}`,
       { reviewedHeadSha: statusSha, blockedReason: outcome.detail },
+    );
+  }
+
+  // Out of scope is not merge evidence. It reports success so the PR carries no
+  // unclearable red status, but it means no review was required — so it must
+  // never satisfy the unattended merger. Returned before the superseded check
+  // because scope is a property of the PR, not of a particular commit.
+  //
+  // `reviewedHeadSha` is deliberately left unset. The merge step is
+  // `gh pr merge --match-head-commit <reviewedHeadSha>`, so populating it here
+  // would hand an autonomous merger the exact argument it needs to merge code
+  // nothing reviewed — on a result whose commit status is green. Withholding it
+  // makes the merge command fail to construct rather than relying on the caller
+  // to honour the exit code.
+  if (outcome.verdict === 'NOT_APPLICABLE') {
+    return result(
+      'NOT_APPLICABLE',
+      `The squad review gate does not apply to ${statusSha}: ${outcome.detail}`,
+      { blockedReason: outcome.detail },
     );
   }
 
@@ -402,12 +466,7 @@ async function main() {
     process.stdout.write(`${verdict.classification}: ${verdict.reason}\n`);
   }
 
-  if (verdict.classification === 'APPROVED' || verdict.classification === 'REVIEWED') {
-    return;
-  }
-  // Exit 2 is a current rejection; exit 3 means no usable squad evidence.
-  // Execution failures use exit 1 through the catch handler below.
-  process.exitCode = verdict.classification === 'CHANGES_REQUESTED' ? 2 : 3;
+  process.exitCode = exitCodeFor(verdict.classification);
 }
 
 const invokedPath = process.argv[1]
