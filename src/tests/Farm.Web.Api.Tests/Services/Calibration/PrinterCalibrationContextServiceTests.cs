@@ -350,6 +350,52 @@ public sealed class PrinterCalibrationContextServiceTests
     }
 
     [Fact]
+    public async Task GetContextAsync_WithDerivedToolheadFactsAndMatchingProfile_DoesNotRunCrossValidationAgainstStaleRawColumns()
+    {
+        // #1614 AC-3 regression: the pre-existing profile cross-checks
+        // (ValidateMachineProfile's nozzle-layout comparison and ValidateFilamentSafety's
+        // hotend/heated-bed checks) must run against the *effective* (explicit-or-derived)
+        // values, not the raw (now-null) Calibration*/Toolhead columns. Otherwise a printer
+        // relying entirely on profile derivation for these fields is spuriously rejected by
+        // the very profile that supplies them, or has its safety checks silently skipped.
+        await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();
+        harness.Printer.CalibrationHasHeatedBed = null;
+        Toolhead toolhead = harness.Printer.Toolheads.Single();
+        toolhead.NozzleDiameter = null;
+        toolhead.HotendMaxTemperature = null;
+        _ = await harness.Db.SaveChangesAsync();
+        harness.Profiles = harness.Profiles with
+        {
+            Machine = harness.Profiles.Machine! with
+            {
+                RawJson =
+                    """
+                    {
+                        "gcode_flavor": "klipper",
+                        "nozzle_diameter": [0.4],
+                        "max_hotend_temp": [300],
+                        "has_heated_bed": true
+                    }
+                    """,
+            },
+        };
+
+        CalibrationContextDto context = await harness.GetContextAsync();
+
+        CalibrationToolheadDto activeToolhead =
+            context.Toolheads.Should().ContainSingle().Which;
+        _ = activeToolhead.NozzleDiameter.Should().Be(0.4);
+        _ = activeToolhead.HotendMaxTemperature.Should().Be(300);
+        _ = context.HasHeatedBed.Should().BeTrue();
+        _ = context.Eligible.Should().BeTrue(
+            string.Join(", ", context.RejectionReasons.Select(reason => reason.Code)));
+        _ = context.RejectionReasons.Select(reason => reason.Code).Should().NotContain(
+            "profile_nozzle_mismatch",
+            "filament_hotend_temperature_exceeds_limit",
+            "filament_bed_temperature_requires_heated_bed");
+    }
+
+    [Fact]
     public async Task GetCandidatesAsync_WithNullCalibrationHasHeatedBedAndProfileSilentOnHeatedBed_DoesNotFallBackToGeneralColumn()
     {
         await using CalibrationHarness harness = await CalibrationHarness.CreateAsync();

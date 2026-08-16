@@ -440,6 +440,8 @@ public sealed class PrinterCalibrationContextService(
                 printer,
                 resolved,
                 physicalToolheads,
+                toolheads,
+                hardwareFacts,
                 reasons,
                 missingInputs)
             : CalibrationProfileEvaluation.Empty;
@@ -620,6 +622,8 @@ public sealed class PrinterCalibrationContextService(
         Printer printer,
         ResolvedCalibrationProfiles resolved,
         List<Toolhead> physicalToolheads,
+        CalibrationToolheadDto[] toolheads,
+        EffectiveHardwareFacts hardwareFacts,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
@@ -676,7 +680,7 @@ public sealed class PrinterCalibrationContextService(
         {
             ValidateMachineProfile(
                 machine.Json,
-                physicalToolheads,
+                toolheads,
                 reasons,
                 missingInputs);
         }
@@ -703,12 +707,16 @@ public sealed class PrinterCalibrationContextService(
 
         Toolhead? activeToolhead = physicalToolheads
             .SingleOrDefault(toolhead => toolhead.Index == printer.ActiveToolheadIndex);
+        CalibrationToolheadDto? activeToolheadFacts = toolheads
+            .SingleOrDefault(toolhead => toolhead.Index == printer.ActiveToolheadIndex);
         if (resolved.Filament is not null && activeToolhead is not null)
         {
             ValidateFilamentSafety(
                 resolved.Filament,
                 filament.Json,
                 activeToolhead,
+                activeToolheadFacts?.HotendMaxTemperature,
+                hardwareFacts.HasHeatedBed,
                 printer,
                 reasons,
                 missingInputs);
@@ -717,7 +725,7 @@ public sealed class PrinterCalibrationContextService(
         double? maxVolumetricFlow = activeToolhead?.MaxVolumetricFlow ??
             GetFirstNumber(filament.Json, "filament_max_volumetric_speed");
         CalibrationBaselineSettingsDto baseline = new(
-            activeToolhead?.NozzleDiameter,
+            activeToolheadFacts?.NozzleDiameter,
             resolved.Process?.LayerHeight,
             resolved.Process?.InfillPercentage,
             resolved.Process?.PrintSpeed,
@@ -910,7 +918,7 @@ public sealed class PrinterCalibrationContextService(
 
     private static void ValidateMachineProfile(
         JsonElement? json,
-        List<Toolhead> physicalToolheads,
+        CalibrationToolheadDto[] toolheads,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
     {
@@ -952,13 +960,16 @@ public sealed class PrinterCalibrationContextService(
             return;
         }
 
-        double[] installedNozzles = physicalToolheads
+        // #1614 AC-3: cross-validate against the effective (explicit-override-or-derived)
+        // nozzle diameter, not the raw column, so a toolhead relying on profile derivation is
+        // not spuriously flagged as mismatched against the very profile that supplies it.
+        double[] installedNozzles = toolheads
             .Where(toolhead => toolhead.NozzleDiameter.HasValue)
             .Select(toolhead => toolhead.NozzleDiameter!.Value)
             .Order()
             .ToArray();
         double[] selectedNozzles = profileNozzles.Order().ToArray();
-        if (installedNozzles.Length != physicalToolheads.Count ||
+        if (installedNozzles.Length != toolheads.Length ||
             selectedNozzles.Length != installedNozzles.Length ||
             selectedNozzles.Where((diameter, index) =>
                 Math.Abs(diameter - installedNozzles[index]) > NumericTolerance).Any())
@@ -1011,6 +1022,8 @@ public sealed class PrinterCalibrationContextService(
         ResolvedCalibrationProfile filament,
         JsonElement? json,
         Toolhead activeToolhead,
+        int? effectiveHotendMaxTemperature,
+        bool? effectiveHasHeatedBed,
         Printer printer,
         List<CalibrationRejectionReasonDto> reasons,
         HashSet<string> missingInputs)
@@ -1039,9 +1052,12 @@ public sealed class PrinterCalibrationContextService(
                 "The active toolhead does not declare support for the selected filament material.");
         }
 
+        // #1614 AC-3: validate against the effective (explicit-override-or-derived) hotend
+        // limit, not the raw column, so a toolhead relying on profile derivation is not
+        // silently skipped by this safety check.
         if (filament.NozzleTemperature.HasValue &&
-            activeToolhead.HotendMaxTemperature.HasValue &&
-            filament.NozzleTemperature.Value > activeToolhead.HotendMaxTemperature.Value)
+            effectiveHotendMaxTemperature.HasValue &&
+            filament.NozzleTemperature.Value > effectiveHotendMaxTemperature.Value)
         {
             Reject(
                 reasons,
@@ -1052,7 +1068,7 @@ public sealed class PrinterCalibrationContextService(
         }
 
         if (filament.BedTemperature > 0 &&
-            printer.CalibrationHasHeatedBed == false)
+            effectiveHasHeatedBed == false)
         {
             Reject(
                 reasons,
@@ -1062,7 +1078,7 @@ public sealed class PrinterCalibrationContextService(
                 "The filament profile requires a heated bed that the printer does not have.");
         }
         else if (filament.BedTemperature.HasValue &&
-            printer.CalibrationHasHeatedBed == true &&
+            effectiveHasHeatedBed == true &&
             printer.MaxBedTemp.HasValue &&
             filament.BedTemperature.Value > printer.MaxBedTemp.Value)
         {
