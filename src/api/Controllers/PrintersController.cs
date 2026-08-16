@@ -5360,6 +5360,53 @@ public class PrintersController(
     }
 
     /// <summary>
+    /// Re-probes this printer's firmware identity on demand and persists the detected facts.
+    /// </summary>
+    /// <remarks>
+    /// The persisted firmware columns the calibration gate reads are written only during onboarding
+    /// or as a side effect of a discovery scan posting back a matching <c>ServerUrl</c> (throttled to
+    /// <c>Discovery:FirmwareReprobeIntervalHours</c>). A printer registered before firmware detection
+    /// existed therefore has no way back to a calibratable state. This endpoint is that way back.
+    ///
+    /// Note that the live <c>GET /printers/{id}/version</c> reading is a different value entirely: it
+    /// reports firmware straight from the backend through an in-memory cache and never populates
+    /// these columns, which is why a printer can display a firmware version in the UI while
+    /// calibration still reports the firmware inputs as missing.
+    ///
+    /// Detection never marks the identity verified — that stays a human confirm-only action.
+    /// </remarks>
+    /// <param name="id">Printer id.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>The detected and persisted firmware identity.</returns>
+    /// <response code="200">Returns the detected and persisted firmware identity.</response>
+    /// <response code="404">If the printer does not exist.</response>
+    /// <response code="409">If the printer's backend does not support firmware probing.</response>
+    /// <response code="502">If the printer could not be reached or did not answer a known endpoint.</response>
+    [HttpPost("{id:guid}/firmware/detect")]
+    [ProducesResponseType(typeof(FirmwareDetectionResult), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status502BadGateway)]
+    [RequirePermission(PrintFarmerPermissions.Calibration.Update)]
+    public async Task<IActionResult> DetectPrinterFirmwareAsync(Guid id, CancellationToken ct)
+    {
+        FirmwareDetectionResult result = await _printersService.DetectFirmwareIdentityAsync(id, ct);
+
+        return result.Failure switch
+        {
+            FirmwareDetectionFailure.PrinterNotFound =>
+                NotFound(new { error = $"Printer {id} not found" }),
+            FirmwareDetectionFailure.BackendNotSupported =>
+                Conflict(new { error = "firmware_probe_backend_unsupported" }),
+            FirmwareDetectionFailure.ServerUrlInvalid =>
+                Conflict(new { error = "firmware_probe_server_url_invalid" }),
+            FirmwareDetectionFailure.ProbeFailed =>
+                StatusCode(StatusCodes.Status502BadGateway, new { error = "firmware_probe_failed" }),
+            _ => Ok(result),
+        };
+    }
+
+    /// <summary>
     /// Sets or edits the residual calibration-eligibility fields that remain manual
     /// after profile-owned sourcing (issue #1616, PR-3 of the #1613 decomposition):
     /// per-toolhead metrology (offsets, drive type, isDirectDrive, extruder gear ratio,
