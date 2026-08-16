@@ -16,6 +16,53 @@ public static class MoonrakerOnboardingResolver
     public const string SnapmakerU1ModelName = "Snapmaker U1";
 
     /// <summary>
+    /// Detector/probe-logic version stamp persisted as <c>firmware.detectionVersion</c>. This is
+    /// bumped only when the Moonraker detection/scoring logic itself changes — it is NOT the
+    /// Klipper <c>software_version</c> and NOT a config-schema version (#1618 / #1613 §10.2).
+    /// </summary>
+    public const string FirmwareProbeVersion = "moonraker-probe-v1";
+
+    /// <summary>
+    /// Maps a raw Moonraker probe confidence score (100/90/75) onto the normalized 0.0-1.0 range
+    /// persisted as <c>firmware.detectionConfidence</c> (#1618 / #1613 §10.2).
+    /// </summary>
+    public static decimal MapConfidenceScore(int score) => score switch
+    {
+        100 => 1.0m,
+        90 => 0.9m,
+        75 => 0.75m,
+        _ => Math.Clamp(score / 100m, 0m, 1m)
+    };
+
+    /// <summary>
+    /// Extracts the Klipper <c>result.software_version</c> field from a Moonraker
+    /// <c>/printer/info</c>-shaped JSON payload. Returns null when absent (e.g. the
+    /// <c>/machine/system_info</c> payload used for Snapmaker U1 detection does not carry it) or
+    /// when the content is not valid JSON.
+    /// </summary>
+    public static string? ExtractSoftwareVersion(string content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        try
+        {
+            using JsonDocument doc = JsonDocument.Parse(content);
+            return doc.RootElement.TryGetProperty("result", out JsonElement resultElem) &&
+                resultElem.TryGetProperty("software_version", out JsonElement versionElem) &&
+                versionElem.ValueKind == JsonValueKind.String
+                    ? versionElem.GetString()
+                    : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Tries known Moonraker onboarding endpoints in order, preserving stock Moonraker behavior first.
     /// </summary>
     public static async Task<MoonrakerEndpointResolution?> ResolveAsync(

@@ -31,6 +31,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.Printers;
@@ -94,7 +95,8 @@ public class PrintersService(
     IStoragePathService storagePathService,
     IFilamentCoverageSpoolResolver spoolResolver,
     Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
-    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null) : IPrintersService
+    Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? activityAccumulator = null,
+    IConfiguration? configuration = null) : IPrintersService
 {
     private readonly IUnitOfWork _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
     private readonly AppDbContext _db = db ?? throw new ArgumentNullException(nameof(db));
@@ -122,6 +124,15 @@ public class PrintersService(
     // unit tests that build PrintersService directly need not supply it. Used to discard a printer's
     // accumulated telemetry when it is deleted.
     private readonly Farm.Infrastructure.Services.Maintenance.IToolheadActivityAccumulator? _activityAccumulator = activityAccumulator;
+
+    /// <summary>
+    /// Re-probe cadence (hours) for <see cref="RefreshDetectedFirmwareIdentityAsync"/>, configurable via
+    /// <c>Discovery:FirmwareReprobeIntervalHours</c>. Defaults to 6h — the bottom of the 6-12h range
+    /// disposed for #1618 / #1613 §10.2 — decoupling the (possibly much more frequent) network scan
+    /// tick from the desired firmware-refresh cadence.
+    /// </summary>
+    private readonly int _firmwareReprobeIntervalHours =
+        configuration?.GetValue<int?>("Discovery:FirmwareReprobeIntervalHours") ?? 6;
 
     /// <summary>
     /// Maximum supported toolhead index to prevent runaway gate creation.
@@ -197,6 +208,18 @@ public class PrintersService(
                 dto.Name = resolution.DeviceName;
             }
         }
+
+        // Manual "add printer" resolution is still a live Klipper/Moonraker probe (stock or
+        // Snapmaker U1); persist the same firmware identity fields the network-scan discovery
+        // probe records, so both onboarding paths feed the calibration firmware gate identically
+        // (#1618 / #1613 §4.5.1, §10.2).
+        dto.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+        dto.GcodeDialect = PrinterGcodeDialect.Klipper;
+        dto.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+        dto.FirmwareDetectionConfidence = MoonrakerOnboardingResolver.MapConfidenceScore(resolution.ConfidenceScore);
+        dto.FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion;
+        dto.FirmwareDetectedAtUtc = DateTime.UtcNow;
+        dto.FirmwareVersion = MoonrakerOnboardingResolver.ExtractSoftwareVersion(resolution.ResponseContent);
     }
 
     private static string? FirstNonWhiteSpace(params string?[] values)
@@ -1085,6 +1108,43 @@ public class PrintersService(
     {
         // Use the repository's efficient direct database query instead of loading all printers
         return await _unitOfWork.Printers.FindByServerUrlAsync(serverUrl, ct);
+    }
+
+    /// <summary>
+    /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
+    /// discovery data, subject to the <see cref="_firmwareReprobeIntervalHours"/> cadence guard.
+    /// See #1618 / #1613 PR-5.
+    /// </summary>
+    public async Task<bool> RefreshDetectedFirmwareIdentityAsync(Guid printerId, DiscoveredPrinterDto discovered, CancellationToken ct)
+    {
+        if (discovered is null || discovered.FirmwareFamily is null)
+        {
+            return false;
+        }
+
+        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
+        if (printer is null)
+        {
+            return false;
+        }
+
+        DateTime nowUtc = DateTime.UtcNow;
+        if (printer.FirmwareDetectedAtUtc.HasValue &&
+            nowUtc - printer.FirmwareDetectedAtUtc.Value < TimeSpan.FromHours(_firmwareReprobeIntervalHours))
+        {
+            return false;
+        }
+
+        printer.FirmwareFamily = discovered.FirmwareFamily.Value;
+        printer.GcodeDialect = discovered.GcodeDialect ?? printer.GcodeDialect;
+        printer.FirmwareDetectionSource = discovered.FirmwareDetectionSource ?? FirmwareDetectionSource.Printer;
+        printer.FirmwareVersion = discovered.FirmwareVersion ?? printer.FirmwareVersion;
+        printer.FirmwareDetectionVersion = discovered.FirmwareDetectionVersion ?? printer.FirmwareDetectionVersion;
+        printer.FirmwareDetectionConfidence = discovered.FirmwareDetectionConfidence ?? printer.FirmwareDetectionConfidence;
+        printer.FirmwareDetectedAtUtc = discovered.FirmwareDetectedAtUtc ?? nowUtc;
+
+        await _unitOfWork.SaveChangesAsync(ct);
+        return true;
     }
 
     /// <summary>
@@ -1998,6 +2058,16 @@ public class PrintersService(
             MaxBedTemp = modelTemplate?.MaxBedTemp,
             Wattage = dto.Wattage,
             MachineHourlyRate = dto.MachineHourlyRate,
+
+            // Firmware identity detected during discovery/onboarding (#1618 / PR-5); left at
+            // enum/property defaults (Unknown/null) when the backend has no live-probe detection.
+            FirmwareFamily = dto.FirmwareFamily ?? PrinterFirmwareFamily.Unknown,
+            GcodeDialect = dto.GcodeDialect ?? PrinterGcodeDialect.Unknown,
+            FirmwareDetectionSource = dto.FirmwareDetectionSource ?? FirmwareDetectionSource.Unknown,
+            FirmwareVersion = dto.FirmwareVersion,
+            FirmwareDetectionVersion = dto.FirmwareDetectionVersion,
+            FirmwareDetectionConfidence = dto.FirmwareDetectionConfidence,
+            FirmwareDetectedAtUtc = dto.FirmwareDetectedAtUtc,
 
             // Inherit auto-dispatch defaults from model template
             AutoDispatchEnabled = modelTemplate?.DefaultAutoDispatchState != null
