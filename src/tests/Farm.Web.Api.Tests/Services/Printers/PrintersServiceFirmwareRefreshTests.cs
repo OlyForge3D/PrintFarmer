@@ -327,6 +327,128 @@ public sealed class PrintersServiceFirmwareRefreshTests
         trackedInRequestScope.FirmwareVersion.Should().Be("v-concurrent-winner");
     }
 
+    [Fact]
+    public async Task RefreshDetectedFirmwareIdentityAsync_TwoConcurrentCallsForSamePrinter_SerializeInsteadOfRacing()
+    {
+        // Bishop + Vasquez, PR #1660 review round 3 (blocking): "the reload fix doesn't fully
+        // close the concurrency issue ... request A can save, reload, and return its tracked
+        // entity before request B's later save commits, so A still serves/caches a value that
+        // does not ultimately win in the database." That is a *different* shape than the
+        // round-2 regression test above (which covers "a competing write had already committed
+        // before I even loaded"): here, both requests are genuinely in flight *at the same
+        // time*, each independently deciding — from data loaded before either had written
+        // anything — that a reprobe is due.
+        //
+        // This proves the round-3 fix (a per-printer System.Threading.SemaphoreSlim held across
+        // the *entire* body of RefreshDetectedFirmwareIdentityAsync, not just the save) actually
+        // serializes two such calls: request B's own load of the printer cannot even begin until
+        // request A has fully completed its write, reload, and released the lock. Without the
+        // lock, request B — started while request A is deliberately held open inside
+        // SaveChangesAsync — would run its FindByIdAsync concurrently against the same
+        // (still-stale, still-"due") row A loaded, exactly reproducing the two-successful-writers
+        // race the reviewers described.
+        string dbName = $"PrintersServiceFirmwareRefreshTests_Concurrent_{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
+
+        await using (AppDbContext seedDb = CreateDbContext(dbName))
+        {
+            Printer seed = CreatePrinter();
+            seed.Id = printerId;
+            seed.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+            seed.GcodeDialect = PrinterGcodeDialect.Klipper;
+            seed.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+            seed.FirmwareVersion = "v-seed";
+            // Well past the default cadence window, so both requests independently observe
+            // "reprobe is due" before either one attempts to write anything.
+            seed.FirmwareDetectedAtUtc = DateTime.UtcNow.AddHours(-24);
+            seedDb.Printers.Add(seed);
+            await seedDb.SaveChangesAsync();
+        }
+
+        var requestAEnteredSaveSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseRequestASaveSignal = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // "Request A": its SaveChangesAsync is deliberately held open by releaseRequestASaveSignal
+        // so the test can deterministically control exactly when request A's write commits,
+        // relative to when request B is started — without relying on a race-prone Task.Delay to
+        // approximate "request A is currently mid-write".
+        await using AppDbContext dbA = CreateDbContext(dbName);
+        var unitOfWorkA = new Mock<IUnitOfWork>();
+        unitOfWorkA.Setup(work => work.Printers)
+            .Returns(new EfPrintersRepository(dbA, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
+        unitOfWorkA
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken token) =>
+            {
+                requestAEnteredSaveSignal.TrySetResult();
+                await releaseRequestASaveSignal.Task;
+                return await dbA.SaveChangesAsync(token);
+            });
+        PrintersService serviceA = CreateService(dbA, unitOfWorkA.Object);
+
+        // "Request B": a plain, immediately-completing service instance for the *same* printer
+        // id. FirmwareIdentityWriteLocks is a static, process-wide table (matching the existing
+        // scope of PrinterVersionCache.ForceRefreshWindows and
+        // PrintJobManagementService.PrinterHistorySyncLocks elsewhere in this codebase), so this
+        // separate PrintersService instance still contends for the exact same lock as serviceA.
+        await using AppDbContext dbB = CreateDbContext(dbName);
+        var unitOfWorkB = new Mock<IUnitOfWork>();
+        unitOfWorkB.Setup(work => work.Printers)
+            .Returns(new EfPrintersRepository(dbB, Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>()));
+        unitOfWorkB
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken token) => dbB.SaveChangesAsync(token));
+        PrintersService serviceB = CreateService(dbB, unitOfWorkB.Object);
+
+        DiscoveredPrinterDto discoveredA = new()
+        {
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            FirmwareVersion = "v-request-a",
+            FirmwareDetectedAtUtc = DateTime.UtcNow,
+        };
+        DiscoveredPrinterDto discoveredB = new()
+        {
+            FirmwareFamily = PrinterFirmwareFamily.Klipper,
+            FirmwareVersion = "v-request-b",
+            FirmwareDetectedAtUtc = DateTime.UtcNow,
+        };
+
+        Task<bool> taskA = serviceA.RefreshDetectedFirmwareIdentityAsync(printerId, discoveredA, CancellationToken.None);
+
+        // Wait until request A is definitely holding the lock and mid-write (inside
+        // SaveChangesAsync) before starting request B, so B is guaranteed to have to contend for
+        // the lock rather than possibly acquiring it first by scheduling luck.
+        await requestAEnteredSaveSignal.Task;
+
+        Task<bool> taskB = serviceB.RefreshDetectedFirmwareIdentityAsync(printerId, discoveredB, CancellationToken.None);
+
+        // Give request B every opportunity to run if the lock were not actually enforced: a
+        // regression that dropped the per-printer semaphore would let this complete immediately
+        // (racing its own FindByIdAsync against request A's still-in-flight write), instead of
+        // blocking.
+        await Task.Delay(200);
+        taskB.IsCompleted.Should().BeFalse(
+            "request B must block on the shared per-printer lock while request A is still inside its critical section");
+
+        releaseRequestASaveSignal.TrySetResult();
+
+        bool refreshedA = await taskA;
+        bool refreshedB = await taskB;
+
+        refreshedA.Should().BeTrue("request A's printer was well past the cadence window");
+
+        // Request B's own load could only happen after request A fully committed and released
+        // the lock, so request B observes request A's fresh FirmwareDetectedAtUtc and correctly
+        // declines to reprobe again — it must not have raced request A using the stale data both
+        // would otherwise have loaded before either wrote anything.
+        refreshedB.Should().BeFalse(
+            "request B's load happens only after request A's write is fully committed, so it must see the freshly-detected identity and decline");
+
+        await using AppDbContext verifyDb = CreateDbContext(dbName);
+        Printer persisted = (await verifyDb.Printers.FindAsync(printerId))!;
+        persisted.FirmwareVersion.Should().Be("v-request-a");
+    }
+
     private static AppDbContext CreateDbContext(string? name = null)
     {
         DbContextOptions<AppDbContext> options =

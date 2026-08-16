@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -1123,6 +1124,37 @@ public class PrintersService(
         return await _unitOfWork.Printers.FindByServerUrlAsync(serverUrl, ct);
     }
 
+    // #1656 / PR #1660 review round 3 (Bishop, Vasquez): a per-printer mutual-exclusion gate
+    // over the *entire* read-modify-write critical section of every code path that writes the
+    // authoritative firmware-identity columns on Printer (RefreshDetectedFirmwareIdentityAsync
+    // and DetectFirmwareIdentityAsync below). A single explicit reload after the fact (added in
+    // review round 2) only fixes the case where the racing writer had *already committed* before
+    // this call's own return — it does nothing to order two writers that are both mid-flight at
+    // the same time: both can pass the cadence guard, both call SaveChangesAsync successfully,
+    // and whichever one's own post-write reload happens to run last "wins" the in-memory/cache
+    // view even if the database's actual last-write-wins outcome (governed only by transaction
+    // commit order, which is not the same thing) disagrees. Serializing the whole section per
+    // printer removes that interleaving entirely: at most one writer for a given printer id can
+    // be inside the critical section at a time in this process, so the *next* writer's own
+    // Printers.FindByIdAsync call (in its own DbContext scope, so genuinely untracked and
+    // guaranteed to hit the database) always observes the fully-committed result of the previous
+    // writer before making its own cadence decision — there is no window left for two writers to
+    // disagree about which identity is current.
+    //
+    // This is a single-process (not cluster-wide) guarantee, matching the existing scope of the
+    // per-printer coordination tables already used elsewhere in this codebase for the same
+    // reason (see PrinterVersionCache.ForceRefreshWindows and
+    // PrintJobManagementService.PrinterHistorySyncLocks) — the main API is not currently deployed
+    // with multiple concurrently-writing replicas, and a lock scoped to one process is the
+    // lightest fix that fully closes the race described by Bishop/Vasquez for that deployment
+    // shape. The set of distinct printer ids is bounded by the number of real, already-registered
+    // printers (both writers below only ever run for an id that FindByIdAsync has already
+    // confirmed exists), so this table cannot be grown unboundedly by arbitrary/unknown ids.
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> FirmwareIdentityWriteLocks = new();
+
+    private static SemaphoreSlim GetFirmwareIdentityWriteLock(Guid printerId) =>
+        FirmwareIdentityWriteLocks.GetOrAdd(printerId, static _ => new SemaphoreSlim(1, 1));
+
     /// <summary>
     /// Re-validates and refreshes a registered printer's firmware identity from freshly probed
     /// discovery data, subject to the <see cref="_firmwareReprobeIntervalHours"/> cadence guard.
@@ -1139,17 +1171,26 @@ public class PrintersService(
     /// from the change tracker's identity map without ever re-querying the database. That means
     /// a caller's subsequent "re-read" of the same entity in the same scope is a no-op: it can
     /// never observe a competing write committed by a different request/DbContext, even one that
-    /// committed a moment after this one. Two concurrent cache misses for the same printer can
-    /// therefore both pass the cadence guard below, both probe, and both call
-    /// <see cref="Farm.Infrastructure.Repositories.UnitOfWork.IUnitOfWork.SaveChangesAsync"/>
-    /// successfully — but whichever commits first is then silently overwritten (last-write-wins,
-    /// no exception) by the other. Without an explicit reload, the "loser" would report/cache its
-    /// own now-superseded values for the full success TTL while the calibration gate (a fresh
-    /// <c>DbContext</c> per read) sees the winner's row — recreating the exact split-brain #1656
-    /// exists to eliminate.
+    /// committed a moment after this one.
     /// </para>
     /// <para>
-    /// To close that window, every return path below performs an explicit
+    /// Concurrency, continued (Bishop + Vasquez, PR #1660 review round 3): the round-2 fix
+    /// (explicit reload on every return path, see <see cref="ReloadTrackedPrinterBestEffortAsync"/>)
+    /// only resolves the case where a competing write had already committed by the time this call
+    /// returns — it does not order two writers that are simultaneously mid-flight, since neither
+    /// one's reload can observe a save the other hasn't performed yet. This method (and
+    /// <see cref="DetectFirmwareIdentityAsync"/>, the other writer of these same columns) now
+    /// additionally holds a per-printer <see cref="SemaphoreSlim"/> (<see cref="FirmwareIdentityWriteLocks"/>)
+    /// across the *entire* body, not just the save. That guarantees at most one in-flight writer
+    /// per printer at a time in this process: the next writer's own load of the printer always
+    /// happens after the previous writer fully released the lock (having already committed and
+    /// reloaded), so it is guaranteed to observe a fully up-to-date row before making its own
+    /// cadence decision. This closes the two-concurrent-successful-writers race the earlier fix
+    /// left open.
+    /// </para>
+    /// <para>
+    /// To close the same-scope staleness window described above, every return path below still
+    /// performs an explicit
     /// <see cref="Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry.ReloadAsync"/> —a real
     /// database round-trip that overwrites the tracked entity's current property values in
     /// place— immediately before returning, whether this call declined to reprobe (cadence guard
@@ -1175,79 +1216,92 @@ public class PrintersService(
             return false;
         }
 
-        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
-        if (printer is null)
-        {
-            return false;
-        }
-
-        DateTime nowUtc = DateTime.UtcNow;
-        if (!IsFirmwareReprobeDue(printer, nowUtc))
-        {
-            // #1656: a concurrent request/scope may already have written a newer firmware
-            // identity for this printer between when it was first loaded in this scope and this
-            // cadence check. Reload before returning so this shared tracked entity reflects that
-            // newer row rather than whatever (possibly stale) values it was loaded with.
-            await ReloadTrackedPrinterBestEffortAsync(printer, ct);
-            return false;
-        }
-
-        PrinterFirmwareFamily originalFirmwareFamily = printer.FirmwareFamily;
-        PrinterGcodeDialect originalGcodeDialect = printer.GcodeDialect;
-        FirmwareDetectionSource originalFirmwareDetectionSource = printer.FirmwareDetectionSource;
-        string? originalFirmwareVersion = printer.FirmwareVersion;
-        string? originalFirmwareDetectionVersion = printer.FirmwareDetectionVersion;
-        decimal? originalFirmwareDetectionConfidence = printer.FirmwareDetectionConfidence;
-        DateTime? originalFirmwareDetectedAtUtc = printer.FirmwareDetectedAtUtc;
-
-        printer.FirmwareFamily = discovered.FirmwareFamily.Value;
-        printer.GcodeDialect = discovered.GcodeDialect ?? printer.GcodeDialect;
-        printer.FirmwareDetectionSource = discovered.FirmwareDetectionSource ?? FirmwareDetectionSource.Printer;
-        printer.FirmwareVersion = discovered.FirmwareVersion ?? printer.FirmwareVersion;
-        printer.FirmwareDetectionVersion = discovered.FirmwareDetectionVersion ?? printer.FirmwareDetectionVersion;
-        printer.FirmwareDetectionConfidence = discovered.FirmwareDetectionConfidence ?? printer.FirmwareDetectionConfidence;
-        printer.FirmwareDetectedAtUtc = discovered.FirmwareDetectedAtUtc ?? nowUtc;
-
+        SemaphoreSlim gate = GetFirmwareIdentityWriteLock(printerId);
+        await gate.WaitAsync(ct);
         try
         {
-            await _unitOfWork.SaveChangesAsync(ct);
-        }
-        catch (Exception) when (!ct.IsCancellationRequested)
-        {
-            // Restore the pre-mutation values on the tracked entity first: this guarantees no
-            // caller can observe unsaved mutations even if the reload below also fails (e.g. the
-            // database is unreachable, which is exactly the scenario SaveChangesAsync just hit).
-            printer.FirmwareFamily = originalFirmwareFamily;
-            printer.GcodeDialect = originalGcodeDialect;
-            printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
-            printer.FirmwareVersion = originalFirmwareVersion;
-            printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
-            printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
-            printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+            Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
+            if (printer is null)
+            {
+                return false;
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            if (!IsFirmwareReprobeDue(printer, nowUtc))
+            {
+                // #1656: a concurrent request/scope may already have written a newer firmware
+                // identity for this printer between when it was first loaded in this scope and
+                // this cadence check (e.g. this scope's own object was loaded before the previous
+                // writer released the lock above). Reload before returning so this shared tracked
+                // entity reflects that newer row rather than whatever (possibly stale) values it
+                // was loaded with.
+                await ReloadTrackedPrinterBestEffortAsync(printer, ct);
+                return false;
+            }
+
+            PrinterFirmwareFamily originalFirmwareFamily = printer.FirmwareFamily;
+            PrinterGcodeDialect originalGcodeDialect = printer.GcodeDialect;
+            FirmwareDetectionSource originalFirmwareDetectionSource = printer.FirmwareDetectionSource;
+            string? originalFirmwareVersion = printer.FirmwareVersion;
+            string? originalFirmwareDetectionVersion = printer.FirmwareDetectionVersion;
+            decimal? originalFirmwareDetectionConfidence = printer.FirmwareDetectionConfidence;
+            DateTime? originalFirmwareDetectedAtUtc = printer.FirmwareDetectedAtUtc;
+
+            printer.FirmwareFamily = discovered.FirmwareFamily.Value;
+            printer.GcodeDialect = discovered.GcodeDialect ?? printer.GcodeDialect;
+            printer.FirmwareDetectionSource = discovered.FirmwareDetectionSource ?? FirmwareDetectionSource.Printer;
+            printer.FirmwareVersion = discovered.FirmwareVersion ?? printer.FirmwareVersion;
+            printer.FirmwareDetectionVersion = discovered.FirmwareDetectionVersion ?? printer.FirmwareDetectionVersion;
+            printer.FirmwareDetectionConfidence = discovered.FirmwareDetectionConfidence ?? printer.FirmwareDetectionConfidence;
+            printer.FirmwareDetectedAtUtc = discovered.FirmwareDetectedAtUtc ?? nowUtc;
 
             try
             {
-                await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+                await _unitOfWork.SaveChangesAsync(ct);
             }
-            catch (Exception)
+            catch (Exception) when (!ct.IsCancellationRequested)
             {
-                // Best-effort only: the manual restore above already guarantees the tracked
-                // entity's firmware fields reflect the pre-mutation (last known persisted) state,
-                // so a failed reload here does not reintroduce the split-brain risk.
+                // Restore the pre-mutation values on the tracked entity first: this guarantees no
+                // caller can observe unsaved mutations even if the reload below also fails (e.g.
+                // the database is unreachable, which is exactly the scenario SaveChangesAsync
+                // just hit).
+                printer.FirmwareFamily = originalFirmwareFamily;
+                printer.GcodeDialect = originalGcodeDialect;
+                printer.FirmwareDetectionSource = originalFirmwareDetectionSource;
+                printer.FirmwareVersion = originalFirmwareVersion;
+                printer.FirmwareDetectionVersion = originalFirmwareDetectionVersion;
+                printer.FirmwareDetectionConfidence = originalFirmwareDetectionConfidence;
+                printer.FirmwareDetectedAtUtc = originalFirmwareDetectedAtUtc;
+
+                try
+                {
+                    await _db.Entry(printer).ReloadAsync(CancellationToken.None);
+                }
+                catch (Exception)
+                {
+                    // Best-effort only: the manual restore above already guarantees the tracked
+                    // entity's firmware fields reflect the pre-mutation (last known persisted)
+                    // state, so a failed reload here does not reintroduce the split-brain risk.
+                }
+
+                throw;
             }
 
-            throw;
+            // #1656: our own SaveChangesAsync just succeeded. With the per-printer lock held
+            // across this entire method, no other writer of these columns can be concurrently
+            // mid-flight, so this reload is now purely a same-scope staleness fix (see the
+            // "declined" branch above) rather than a race-closing mechanism — the race itself is
+            // closed by the lock. Reload anyway so the tracked entity reflects the row exactly as
+            // persisted (e.g. any database-computed/normalized values), not merely the in-memory
+            // values this call assigned.
+            await ReloadTrackedPrinterBestEffortAsync(printer, ct);
+
+            return true;
         }
-
-        // #1656: our own SaveChangesAsync just succeeded, but with no concurrency token on
-        // Printer a concurrent writer in a different scope could have committed a still-newer
-        // firmware identity for this same printer a moment later (no exception either way —
-        // plain last-write-wins). Reload so the tracked entity — and any caller reading it via
-        // the identity map — reflects whatever is actually persisted right now rather than
-        // assuming our own write is necessarily the final word.
-        await ReloadTrackedPrinterBestEffortAsync(printer, ct);
-
-        return true;
+        finally
+        {
+            gate.Release();
+        }
     }
 
     /// <summary>
@@ -1256,7 +1310,11 @@ public class PrintersService(
     /// the concurrency remarks on <see cref="RefreshDetectedFirmwareIdentityAsync"/>. Swallows
     /// failures deliberately: a failed reload here never leaves the tracked entity worse off than
     /// it already was (callers already hold whatever values it had before this call), so it must
-    /// not turn an otherwise-successful read/write path into a hard failure.
+    /// not turn an otherwise-successful read/write path into a hard failure. A failure here is
+    /// logged (Vasquez, PR #1660 review round 3: silently swallowing it made a stale reload
+    /// indistinguishable from a fresh one) so it remains diagnosable — it does not, by itself,
+    /// mean stale data is being served, since the per-printer write lock already guarantees no
+    /// other writer of these columns can be concurrently mid-flight while this call holds it.
     /// </summary>
     private async Task ReloadTrackedPrinterBestEffortAsync(Printer printer, CancellationToken ct)
     {
@@ -1268,9 +1326,15 @@ public class PrintersService(
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            // Best-effort only — see summary above.
+            // Best-effort only — see summary above. Logged, not swallowed silently, so a
+            // persistently failing reload (e.g. sustained DB connectivity issues) is observable.
+            _logger.LogWarning(
+                ex,
+                "Best-effort reload of Printer {PrinterId} after a firmware-identity refresh failed; " +
+                "the tracked entity may not reflect the current database row until the next successful read.",
+                printer.Id);
         }
     }
 
@@ -1289,64 +1353,81 @@ public class PrintersService(
     /// identity, bypassing the discovery-scan dependency and cadence guard that
     /// <see cref="RefreshDetectedFirmwareIdentityAsync"/> is subject to. See #1618 / #1613 §4.5.1.
     /// </summary>
+    /// <remarks>
+    /// #1656 / PR #1660 review round 3 (Bishop, Vasquez): holds the same per-printer
+    /// <see cref="FirmwareIdentityWriteLocks"/> gate as <see cref="RefreshDetectedFirmwareIdentityAsync"/>
+    /// across its entire body, since both methods write the same authoritative firmware-identity
+    /// columns on <see cref="Printer"/>. Without a shared gate, this on-demand path and the
+    /// cadence-gated automatic path could still race each other even though each is individually
+    /// serialized against concurrent calls to itself.
+    /// </remarks>
     public async Task<FirmwareDetectionResult> DetectFirmwareIdentityAsync(Guid printerId, CancellationToken ct)
     {
-        Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
-        if (printer is null)
+        SemaphoreSlim gate = GetFirmwareIdentityWriteLock(printerId);
+        await gate.WaitAsync(ct);
+        try
         {
-            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
-        }
+            Printer? printer = await _unitOfWork.Printers.FindByIdAsync(printerId, ct);
+            if (printer is null)
+            {
+                return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.PrinterNotFound);
+            }
 
-        if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+            if ((PrinterBackend)printer.Backend != PrinterBackend.Moonraker)
+            {
+                return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.BackendNotSupported);
+            }
+
+            if (!Uri.TryCreate(printer.ServerUrl, UriKind.Absolute, out Uri? serverUri))
+            {
+                return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ServerUrlInvalid);
+            }
+
+            using HttpClient client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(5);
+
+            MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
+                client,
+                serverUri,
+                printer.BackendPort,
+                ct);
+
+            if (resolution is null)
+            {
+                return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ProbeFailed);
+            }
+
+            DateTime nowUtc = DateTime.UtcNow;
+            decimal confidence = MoonrakerOnboardingResolver.MapConfidenceScore(resolution.ConfidenceScore);
+            string? version = MoonrakerOnboardingResolver.ExtractSoftwareVersion(resolution.ResponseContent);
+
+            printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
+            printer.GcodeDialect = PrinterGcodeDialect.Klipper;
+            printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
+            printer.FirmwareDetectionConfidence = confidence;
+            printer.FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion;
+            printer.FirmwareDetectedAtUtc = nowUtc;
+
+            // A probe that cannot read software_version must not erase a version recorded earlier.
+            printer.FirmwareVersion = version ?? printer.FirmwareVersion;
+
+            // FirmwareIdentityVerified is intentionally left alone: detection populates facts, a
+            // human attests them (#1613 AC #3).
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return new FirmwareDetectionResult(
+                Succeeded: true,
+                Failure: FirmwareDetectionFailure.None,
+                Family: printer.FirmwareFamily,
+                Version: printer.FirmwareVersion,
+                DetectionConfidence: confidence,
+                DetectedAtUtc: nowUtc,
+                IdentityVerified: printer.FirmwareIdentityVerified);
+        }
+        finally
         {
-            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.BackendNotSupported);
+            gate.Release();
         }
-
-        if (!Uri.TryCreate(printer.ServerUrl, UriKind.Absolute, out Uri? serverUri))
-        {
-            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ServerUrlInvalid);
-        }
-
-        using HttpClient client = _httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(5);
-
-        MoonrakerEndpointResolution? resolution = await MoonrakerOnboardingResolver.ResolveAsync(
-            client,
-            serverUri,
-            printer.BackendPort,
-            ct);
-
-        if (resolution is null)
-        {
-            return FirmwareDetectionResult.Failed(FirmwareDetectionFailure.ProbeFailed);
-        }
-
-        DateTime nowUtc = DateTime.UtcNow;
-        decimal confidence = MoonrakerOnboardingResolver.MapConfidenceScore(resolution.ConfidenceScore);
-        string? version = MoonrakerOnboardingResolver.ExtractSoftwareVersion(resolution.ResponseContent);
-
-        printer.FirmwareFamily = PrinterFirmwareFamily.Klipper;
-        printer.GcodeDialect = PrinterGcodeDialect.Klipper;
-        printer.FirmwareDetectionSource = FirmwareDetectionSource.Printer;
-        printer.FirmwareDetectionConfidence = confidence;
-        printer.FirmwareDetectionVersion = MoonrakerOnboardingResolver.FirmwareProbeVersion;
-        printer.FirmwareDetectedAtUtc = nowUtc;
-
-        // A probe that cannot read software_version must not erase a version recorded earlier.
-        printer.FirmwareVersion = version ?? printer.FirmwareVersion;
-
-        // FirmwareIdentityVerified is intentionally left alone: detection populates facts, a human
-        // attests them (#1613 AC #3).
-        await _unitOfWork.SaveChangesAsync(ct);
-
-        return new FirmwareDetectionResult(
-            Succeeded: true,
-            Failure: FirmwareDetectionFailure.None,
-            Family: printer.FirmwareFamily,
-            Version: printer.FirmwareVersion,
-            DetectionConfidence: confidence,
-            DetectedAtUtc: nowUtc,
-            IdentityVerified: printer.FirmwareIdentityVerified);
     }
 
     /// <summary>
