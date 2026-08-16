@@ -1,5 +1,18 @@
+/*
+ * Detailed cards now carry the inline job/history detail surface, so the card must
+ * still fit a 320px phone viewport. PrinterCardGrid renders a single full-width
+ * column below Tailwind's `sm` breakpoint and only switches to
+ * `repeat(auto-fill, 26rem)` columns at 640px, so the 26rem density floor is gated
+ * behind the same breakpoint instead of forcing horizontal overflow on narrow screens.
+ */
 .pf-detailed-printer-card {
-  min-width: 26rem;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .pf-detailed-printer-card {
+    min-width: 26rem;
+  }
 }
 
 .pf-detailed-printer-camera-preview {

@@ -130,6 +130,35 @@ public sealed class PrintersServiceHistoryProbeTests
             .Which.Should().BeOfType(legacyExceptionType);
     }
 
+    [Theory]
+    [InlineData(typeof(HttpRequestException))]
+    [InlineData(typeof(SocketException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(InvalidDataException))]
+    [InlineData(typeof(TimeoutException))]
+    public async Task GetHistoryTotalsAsync_AdapterFailure_Propagates(
+        Type exceptionType)
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryTotalsAsync(
+                It.IsAny<string>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync((Exception)Activator.CreateInstance(exceptionType)!);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        Func<Task> action = async () =>
+            await service.GetHistoryTotalsAsync(
+                printer.Id,
+                CancellationToken.None);
+
+        (await action.Should().ThrowAsync<Exception>())
+            .Which.Should().BeOfType(exceptionType);
+    }
+
     [Fact]
     public async Task ProbeHistoryListAsync_UnexpectedAdapterFailureIsError()
     {
@@ -195,21 +224,21 @@ public sealed class PrintersServiceHistoryProbeTests
     }
 
     [Fact]
-    public async Task ProbeHistoryListAsync_BackendPopulatedThumbnailUrlIsPreserved()
+    public async Task ProbeHistoryListAsync_BackendThumbnailUrl_IsPreserved()
     {
         await using AppDbContext db = CreateDbContext();
-        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
-        var historyWithThumbnail = new HistoryListResponse
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        var history = new HistoryListResponse
         {
             Count = 1,
             Jobs =
             [
                 new HistoryJob
                 {
-                    JobId = "job-1",
+                    JobId = "provider-job",
                     Filename = "calibration.gcode",
                     Status = "completed",
-                    ThumbnailUrl = "http://prusalink/api/v1/files/local/calibration.gcode/thumb",
+                    ThumbnailUrl = "http://moonraker.local/server/files/thumb.png",
                 },
             ],
             AuthorityEvidence = CompleteEvidence(1),
@@ -225,7 +254,7 @@ public sealed class PrintersServiceHistoryProbeTests
                 It.IsAny<string?>(),
                 It.IsAny<PrinterCredential?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(historyWithThumbnail);
+            .ReturnsAsync(history);
         PrintersService service = CreateService(db, printer, historyClient);
 
         HistoryListProbeResult result = await service.ProbeHistoryListAsync(
@@ -234,7 +263,112 @@ public sealed class PrintersServiceHistoryProbeTests
         result.Status.Should().Be(HistoryProbeStatus.Authoritative);
         result.History!.Jobs.Should().ContainSingle()
             .Which.ThumbnailUrl.Should().Be(
-                "http://prusalink/api/v1/files/local/calibration.gcode/thumb");
+                "http://moonraker.local/server/files/thumb.png");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryListAsync_PrusaBackendThumbnail_UsesOnlySameOriginProxy()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        var history = new HistoryListResponse
+        {
+            Jobs =
+            [
+                new HistoryJob
+                {
+                    JobId = "provider/job",
+                    ThumbnailUrl = "http://prusalink.local/thumb.png",
+                },
+            ],
+            Count = 1,
+            AuthorityEvidence = CompleteEvidence(1),
+        };
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(history);
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 100, null, null, null, "desc", CancellationToken.None);
+
+        string thumbnailUrl = result.History!.Jobs[0].ThumbnailUrl!;
+        thumbnailUrl.Should().Be(
+            $"/api/printers/{printer.Id:D}/history/provider%2Fjob/thumbnail");
+        thumbnailUrl.Should().NotContain("prusalink.local");
+
+        // Uri.TryCreate parses a leading-slash path as an absolute file:// URI on Unix
+        // but not on Windows, so assert the origin-preserving property directly instead:
+        // resolving the proxy path against any origin must stay on that origin.
+        Uri resolved = new(new Uri("https://farm.example"), thumbnailUrl);
+        resolved.Scheme.Should().Be("https");
+        resolved.Host.Should().Be("farm.example");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_MissingBackendThumbnail_UsesMetadataFallback()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                "provider-job",
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob
+            {
+                JobId = "provider-job",
+                Metadata = new Dictionary<string, object>
+                {
+                    ["thumbnail"] = "thumb.png",
+                },
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Job!.ThumbnailUrl.Should().Be(
+            "http://moonraker.local/server/files/gcodes/thumb.png");
+    }
+
+    [Fact]
+    public async Task ProbeHistoryJobAsync_PrusaBackendThumbnail_UsesSameOriginProxy()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryJobAsync(
+                It.IsAny<string>(),
+                "provider-job",
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HistoryJob
+            {
+                JobId = "provider-job",
+                Filename = "calibration.gcode",
+                ThumbnailUrl = "http://prusalink.local/thumb.png",
+            });
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
+            printer.Id, "provider-job", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryDetailProbeStatus.Found);
+        result.Job!.ThumbnailUrl.Should().Be(
+            $"/api/printers/{printer.Id:D}/history/provider-job/thumbnail");
     }
 
     [Fact]
@@ -307,6 +441,32 @@ public sealed class PrintersServiceHistoryProbeTests
     }
 
     [Fact]
+    public async Task ProbeHistoryListAsync_InvalidAdapterDataIsCompletenessError()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.OctoPrint);
+        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
+        historyClient
+            .Setup(client => client.GetHistoryListAsync(
+                It.IsAny<string>(),
+                It.IsAny<int?>(),
+                It.IsAny<int?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<PrinterCredential?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidDataException("bounded scan failed"));
+        PrintersService service = CreateService(db, printer, historyClient);
+
+        HistoryListProbeResult result = await service.ProbeHistoryListAsync(
+            printer.Id, 50, null, null, null, "desc", CancellationToken.None);
+
+        result.Status.Should().Be(HistoryProbeStatus.Error);
+        result.FailureCode.Should().Be("history_completeness_unproven");
+    }
+
+    [Fact]
     public async Task ProbeHistoryJobAsync_ValidDetailIsFound()
     {
         await using AppDbContext db = CreateDbContext();
@@ -330,34 +490,6 @@ public sealed class PrintersServiceHistoryProbeTests
 
         result.Status.Should().Be(HistoryDetailProbeStatus.Found);
         result.Job!.JobId.Should().Be("provider-job");
-    }
-
-    [Fact]
-    public async Task ProbeHistoryJobAsync_BackendPopulatedThumbnailUrlIsPreserved()
-    {
-        await using AppDbContext db = CreateDbContext();
-        Printer printer = CreatePrinter(PrinterBackend.PrusaLink);
-        Mock<ISupportsHistory> historyClient = CreateHistoryClient();
-        historyClient
-            .Setup(client => client.GetHistoryJobAsync(
-                It.IsAny<string>(),
-                "provider-job",
-                It.IsAny<PrinterCredential?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new HistoryJob
-            {
-                JobId = "provider-job",
-                Filename = "calibration.gcode",
-                ThumbnailUrl = "http://prusalink/api/v1/files/local/calibration.gcode/thumb",
-            });
-        PrintersService service = CreateService(db, printer, historyClient);
-
-        HistoryJobProbeResult result = await service.ProbeHistoryJobAsync(
-            printer.Id, "provider-job", CancellationToken.None);
-
-        result.Status.Should().Be(HistoryDetailProbeStatus.Found);
-        result.Job!.ThumbnailUrl.Should().Be(
-            "http://prusalink/api/v1/files/local/calibration.gcode/thumb");
     }
 
     [Fact]

@@ -349,11 +349,13 @@ public class PrintersService(
             foreach (HistoryJob job in response.Jobs)
             {
                 // Some backends (e.g. PrusaLink) already populate ThumbnailUrl from
-                // backend-specific data (file refs) before metadata-based extraction runs.
-                // Only fall back to metadata-derived extraction when nothing was set.
-                job.ThumbnailUrl ??= ExtractThumbnailUrl(
-                    job.Metadata ?? new Dictionary<string, object>(),
-                    printer.ServerUrl);
+                // backend-specific data (file refs). GetHistoryThumbnailUrl keeps that value
+                // (routing PrusaLink through the authenticated proxy endpoint) and only falls
+                // back to metadata-derived extraction when nothing was set.
+                job.ThumbnailUrl = GetHistoryThumbnailUrl(
+                    printer,
+                    backend,
+                    job);
             }
 
             return HistoryListProbeResult.Authoritative(response);
@@ -397,6 +399,15 @@ public class PrintersService(
                 printerId);
             return HistoryListProbeResult.Unavailable(
                 HistoryProbeFailureCodes.Timeout);
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "[History] Backend history could not prove the requested range for printer {PrinterId}",
+                printerId);
+            return HistoryListProbeResult.Error(
+                "history_completeness_unproven");
         }
         catch (Exception ex)
         {
@@ -505,7 +516,10 @@ public class PrintersService(
                 return HistoryJobProbeResult.Error("history_job_id_mismatch");
             }
 
-            job.ThumbnailUrl ??= ExtractThumbnailUrl(job.Metadata ?? new Dictionary<string, object>(), printer.ServerUrl);
+            job.ThumbnailUrl = GetHistoryThumbnailUrl(
+                printer,
+                backend,
+                job);
             return HistoryJobProbeResult.Found(job);
         }
         catch (HistoryJobNotFoundException)
@@ -547,6 +561,54 @@ public class PrintersService(
         }
     }
 
+    /// <inheritdoc />
+    public async Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        Guid printerId,
+        string jobId,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(jobId))
+        {
+            throw new ArgumentException("Job ID is required", nameof(jobId));
+        }
+
+        Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false);
+        if (printer is null)
+        {
+            throw new KeyNotFoundException($"Printer {printerId} was not found.");
+        }
+
+        IBackendClient client = GetBackendClient((PrinterBackend)printer.Backend);
+        if (client is not ISupportsHistoryThumbnail thumbnailClient)
+        {
+            throw new NotSupportedException(
+                "The printer backend does not support history thumbnails.");
+        }
+
+        return await thumbnailClient.GetHistoryThumbnailAsync(
+            printer.BackendUrl,
+            jobId,
+            printer.Credential,
+            ct).ConfigureAwait(false);
+    }
+
+    private string? GetHistoryThumbnailUrl(
+        Printer printer,
+        PrinterBackend backend,
+        HistoryJob job)
+    {
+        if (!string.IsNullOrWhiteSpace(job.ThumbnailUrl))
+        {
+            return backend == PrinterBackend.PrusaLink
+                ? $"/api/printers/{printer.Id:D}/history/{Uri.EscapeDataString(job.JobId)}/thumbnail"
+                : job.ThumbnailUrl;
+        }
+
+        return ExtractThumbnailUrl(
+            job.Metadata ?? new Dictionary<string, object>(),
+            printer.ServerUrl);
+    }
+
     /// <summary>
     /// Retrieves aggregate statistics for all print jobs in printer history.
     /// </summary>
@@ -563,41 +625,33 @@ public class PrintersService(
     {
         Printer? printer = await FindByIdAsync(printerId, ct).ConfigureAwait(false) ?? throw new KeyNotFoundException();
 
-        try
+        var backend = (PrinterBackend)printer.Backend;
+
+        if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
         {
-            var backend = (PrinterBackend)printer.Backend;
-
-            if (_capabilityFactory.TryGetHistoryClientTyped(backend, out ISupportsHistory? historyClient))
+            HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
+            if (totals != null)
             {
-                HistoryTotals? totals = await historyClient!.GetHistoryTotalsAsync(printer!.BackendUrl, printer.Credential, ct).ConfigureAwait(false);
-                if (totals != null)
-                {
-                    return totals;
-                }
-
-                // Fallback: get full history and calculate totals
-                HistoryListResponse? response = await historyClient.GetHistoryListAsync(
-                    printer.BackendUrl,
-                    limit: 10000,
-                    start: 0,
-                    since: null,
-                    before: null,
-                    order: null,
-                    credential: printer.Credential,
-                    ct: ct).ConfigureAwait(false);
-                if (response != null)
-                {
-                    return CalculateOctoPrintHistoryTotals(response.Jobs);
-                }
+                return totals;
             }
 
-            return new HistoryTotals { JobTotals = new JobTotals() };
+            // Fallback: get full history and calculate totals
+            HistoryListResponse? response = await historyClient.GetHistoryListAsync(
+                printer.BackendUrl,
+                limit: 10000,
+                start: 0,
+                since: null,
+                before: null,
+                order: null,
+                credential: printer.Credential,
+                ct: ct).ConfigureAwait(false);
+            if (response != null)
+            {
+                return CalculateOctoPrintHistoryTotals(response.Jobs);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[History] Failed to calculate totals for printer {PrinterId}: {Message}", printerId, ex.Message);
-            return new HistoryTotals { JobTotals = new JobTotals() };
-        }
+
+        return new HistoryTotals { JobTotals = new JobTotals() };
     }
 
     /// <summary>

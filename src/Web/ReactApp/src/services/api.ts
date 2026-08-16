@@ -1425,6 +1425,21 @@ export class ApiClient {
     return normalizeHistoryJob(response.data);
   }
 
+  async getPrinterHistoryThumbnail(
+    printerId: string,
+    jobId: string,
+    signal?: AbortSignal
+  ): Promise<Blob> {
+    const response = await this.client.get<Blob>(
+      `/printers/${printerId}/history/${encodeURIComponent(jobId)}/thumbnail`,
+      {
+        responseType: "blob",
+        signal,
+      }
+    );
+    return response.data;
+  }
+
   async getPrinterHistoryTotals(printerId: string): Promise<HistoryTotals> {
     const response = await this.client.get<HistoryTotalsWire>(
       `/printers/${printerId}/history/totals`
