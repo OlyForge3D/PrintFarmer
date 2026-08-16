@@ -1425,7 +1425,9 @@ public class PrintersService(
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
-                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    ConfigurationRevision: p.ConfigurationRevision));
             }
             catch (Exception ex)
             {
@@ -1475,7 +1477,9 @@ public class PrintersService(
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
-                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null,
+                    ConfigurationRevision: p.ConfigurationRevision));
             }
         }
 

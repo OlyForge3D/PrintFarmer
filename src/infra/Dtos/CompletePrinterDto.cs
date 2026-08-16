@@ -59,4 +59,8 @@ public record CompletePrinterDto(
     Guid? BedTypeId = null,
     string? BedTypeName = null,
     string? BedTypeColor = null,
-    bool UseModelDispatchDefaults = true);
+    bool UseModelDispatchDefaults = true,
+
+    // Concurrency / configuration revision (mirrors PrinterDto so list consumers can guard mutations)
+    string? RowVersion = null,
+    long ConfigurationRevision = 0);
