@@ -1,4 +1,6 @@
-﻿using Farm.Infrastructure;
+﻿using System.Collections.Concurrent;
+using System.Reflection;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Printers;
@@ -126,11 +128,29 @@ public sealed class PrinterVersionCacheTests
                 return new StandardPrinterInfo { Firmware = "v1.0.0", BackendVersion = "v0.9.0", ApiVersion = "1.0.0" };
             });
 
-        PrinterVersionCache cache = CreateCache(printer, infoClientMock);
+        Mock<IPrintersService> printersService = CreatePrintersServiceMock(printer);
+        PrinterVersionCache cache = CreateCache(printer, infoClientMock, printersService);
 
         // Warm the cache so the throttle loser's downgrade-to-normal-cache-read path has a value
         // to return instead of also needing a live fetch.
         await cache.GetAsync(printer.Id, CancellationToken.None);
+
+        // Force genuine overlap at the throttle-claim point itself: GetAsync looks up the
+        // printer via FindByIdAsync immediately before making its throttle-claim decision, so
+        // gating both callers on a two-party barrier there guarantees neither thread can reach
+        // the throttle claim until the other has too. Without this, a downstream delay (e.g. in
+        // the backend call) does not reliably reproduce the race — a non-atomic
+        // TryGetValue-then-Set implementation could still pass spuriously depending on scheduler
+        // timing, since nothing forces both callers to actually contend for the claim at the
+        // same instant.
+        using var claimBarrier = new Barrier(2);
+        printersService
+            .Setup(s => s.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                claimBarrier.SignalAndWait(TimeSpan.FromSeconds(5));
+                return printer;
+            });
 
         Task<PrinterVersionInfoDto?> call1 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
         Task<PrinterVersionInfoDto?> call2 = Task.Run(() => cache.GetAsync(printer.Id, CancellationToken.None, forceRefresh: true));
@@ -147,13 +167,50 @@ public sealed class PrinterVersionCacheTests
             Times.Exactly(2));
     }
 
-    private static PrinterVersionCache CreateCache(Printer printer, Mock<IBackendClient> infoClientMock)
+    [Fact]
+    public async Task GetAsync_ForceRefreshForNonexistentPrinter_NeverClaimsAThrottleWindow()
     {
+        // Regression coverage for the unbounded-growth finding from review: the throttle claim
+        // must only ever be taken for a printer id that FindByIdAsync has confirmed to exist.
+        // Otherwise, a forceRefresh request against an arbitrary/nonexistent printer id (e.g. a
+        // stale id, a typo, or a malicious probe) would still add a permanent entry to the
+        // process-wide throttle table — an unbounded memory-growth vector under the same
+        // amplification/DoS threat model this throttle exists to close.
+        Guid missingPrinterId = Guid.NewGuid();
+        var infoClientMock = new Mock<IBackendClient>();
+        var printersService = new Mock<IPrintersService>();
+        printersService
+            .Setup(s => s.FindByIdAsync(missingPrinterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Printer?)null);
+
+        var backendClientFactory = new Mock<IBackendClientFactory>();
+        var options = Options.Create(new PrinterVersionCacheOptions { Ttl = TimeSpan.FromMinutes(10) });
         IMemoryCache memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var cache = new PrinterVersionCache(memoryCache, options, printersService.Object, backendClientFactory.Object);
+
+        FieldInfo throttleField = typeof(PrinterVersionCache).GetField("ForceRefreshWindows", BindingFlags.NonPublic | BindingFlags.Static)!;
+        var throttleTable = (ConcurrentDictionary<Guid, (Guid Token, DateTime ExpiresAtUtc)>)throttleField.GetValue(null)!;
+
+        PrinterVersionInfoDto? result = await cache.GetAsync(missingPrinterId, CancellationToken.None, forceRefresh: true);
+
+        result.Should().BeNull();
+        throttleTable.ContainsKey(missingPrinterId).Should().BeFalse(
+            "a forceRefresh request for a printer that does not exist must never grow the process-wide throttle table");
+    }
+
+    private static Mock<IPrintersService> CreatePrintersServiceMock(Printer printer)
+    {
         var printersService = new Mock<IPrintersService>();
         printersService
             .Setup(s => s.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
+        return printersService;
+    }
+
+    private static PrinterVersionCache CreateCache(Printer printer, Mock<IBackendClient> infoClientMock, Mock<IPrintersService>? printersService = null)
+    {
+        IMemoryCache memoryCache = new MemoryCache(new MemoryCacheOptions());
+        printersService ??= CreatePrintersServiceMock(printer);
 
         var backendClientFactory = new Mock<IBackendClientFactory>();
         backendClientFactory

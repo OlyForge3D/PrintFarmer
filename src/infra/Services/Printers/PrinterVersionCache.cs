@@ -32,20 +32,44 @@ public sealed class PrinterVersionCache(
     // atomic operation per key, and a unique per-attempt token (rather than comparing
     // timestamps) makes the "did I win the race" check exact even if two attempts computed
     // the same expiry instant.
+    //
+    // An entry is only ever claimed for a printer id that FindByIdAsync has already confirmed
+    // to exist (see below), and every claim attempt opportunistically sweeps out expired
+    // entries first, so this table cannot be grown unboundedly by requests against
+    // nonexistent/random printer ids — it is bounded by the number of distinct real printers
+    // that have ever been force-refreshed, and expired windows are reclaimed promptly.
     private static readonly ConcurrentDictionary<Guid, (Guid Token, DateTime ExpiresAtUtc)> ForceRefreshWindows = new();
 
     private static string Key(Guid printerId) => $"printer:version:{printerId:N}";
 
     public async Task<PrinterVersionInfoDto?> GetAsync(Guid printerId, CancellationToken ct, bool forceRefresh = false)
     {
+        // Automatic polling (forceRefresh=false) never needs the printer lookup or the
+        // throttle table when the normal cache already has a value — keep that fast path
+        // exactly as before.
+        if (!forceRefresh && _cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cachedBeforeLookup) && cachedBeforeLookup is not null)
+        {
+            return cachedBeforeLookup;
+        }
+
+        Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
+        if (printer == null)
+        {
+            return null;
+        }
+
         // An explicit operator-initiated refresh (forceRefresh=true) must bypass any cached
         // result — including a cached partial result recorded while a transient backend fault
         // (e.g. Klippy unavailable) was active — so it can observe recovery immediately instead
         // of waiting out the normal cache TTL. Automatic polling always passes forceRefresh=false
-        // and keeps the normal cache policy below untouched.
+        // and keeps the normal cache policy below untouched. The throttle claim only happens
+        // here, after the printer is confirmed to exist, so requests for nonexistent/random
+        // printer ids can never grow the throttle table.
         if (forceRefresh)
         {
             DateTime nowUtc = DateTime.UtcNow;
+            SweepExpiredForceRefreshWindows(nowUtc);
+
             (Guid Token, DateTime ExpiresAtUtc) myWindow = (Guid.NewGuid(), nowUtc.Add(ForceRefreshMinInterval));
 
             (Guid Token, DateTime ExpiresAtUtc) activeWindow = ForceRefreshWindows.AddOrUpdate(
@@ -65,12 +89,6 @@ public sealed class PrinterVersionCache(
         if (!forceRefresh && _cache.TryGetValue(Key(printerId), out PrinterVersionInfoDto? cached) && cached is not null)
         {
             return cached;
-        }
-
-        Printer? printer = await _printersService.FindByIdAsync(printerId, ct);
-        if (printer == null)
-        {
-            return null;
         }
 
         PrinterBackend backend = (PrinterBackend)printer.Backend;
@@ -130,6 +148,23 @@ public sealed class PrinterVersionCache(
 
             _ = _cache.Set(Key(printerId), dto, TimeSpan.FromSeconds(30));
             return dto;
+        }
+    }
+
+    // Opportunistically reclaims expired throttle windows so the table cannot grow without
+    // bound across the lifetime of the process. This runs on every forceRefresh attempt
+    // (a low-frequency, operator-initiated path, so the O(n) scan cost is negligible), and
+    // uses the conditional KeyValuePair-based TryRemove overload so a window that has just
+    // been refreshed by a concurrent claim (i.e. no longer matches the expired snapshot we
+    // observed) is never removed out from under it.
+    private static void SweepExpiredForceRefreshWindows(DateTime nowUtc)
+    {
+        foreach (KeyValuePair<Guid, (Guid Token, DateTime ExpiresAtUtc)> entry in ForceRefreshWindows)
+        {
+            if (entry.Value.ExpiresAtUtc <= nowUtc)
+            {
+                _ = ForceRefreshWindows.TryRemove(entry);
+            }
         }
     }
 }
