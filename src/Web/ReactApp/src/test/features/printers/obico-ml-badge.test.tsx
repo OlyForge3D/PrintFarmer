@@ -117,8 +117,8 @@ vi.mock('@/features/printers/components/SpoolPickerModal', () => ({
   SpoolPickerModal: () => null,
 }));
 
-vi.mock('@/features/printers/components/ToolheadSpoolPicker', () => ({
-  ToolheadSpoolPicker: () => <div data-testid="toolhead-spool-picker" />,
+vi.mock('@/features/printers/components/MaterialLoadout', () => ({
+  MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
@@ -53,11 +53,8 @@ vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () 
 vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
-vi.mock('@/features/printers/components/ToolheadSpoolPicker', () => ({
-  ToolheadSpoolPicker: () => <div data-testid="toolhead-spool-picker" />,
-}));
-vi.mock('@/features/printers/components/AmsSlotVisualization', () => ({
-  AmsSlotVisualization: () => <div data-testid="ams-slot-visualization" />,
+vi.mock('@/features/printers/components/MaterialLoadout', () => ({
+  MaterialLoadout: () => <div data-testid="material-loadout" />,
 }));
 vi.mock('@/features/printers/components/TemperatureControlSection', () => ({
   TemperatureControlSection: () => <div data-testid="temp-section" />,
@@ -110,31 +107,16 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
   });
 
-  it('does not eagerly request printer details when the printer already reports MMU/AMS gate data', () => {
+  it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment', () => {
+    // Previously the details fetch was deferred whenever `mmuStatus.gates`
+    // was populated, on the theory that live MMU gates already told the card
+    // enough to render the materials rail. But without persisted topology the
+    // card cannot safely translate live-gate indices to backend API indices,
+    // so `MaterialLoadout` locks assignment until topology loads. That's a
+    // silent dead end unless topology is actually being fetched. Enable it.
     const printer = makePrinter({
       mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
     } as Partial<Printer>);
-
-    render(<DetailedPrinterCard printer={printer} />);
-
-    expect(usePrinterDetailsMock).toHaveBeenCalledWith(
-      'printer-1',
-      expect.objectContaining({ enabled: false }),
-    );
-  });
-
-  it('preserves the collapsed Material Slots badge for MMU printers using only mmuStatus (no fetch needed)', () => {
-    const printer = makePrinter({
-      mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
-    } as Partial<Printer>);
-
-    render(<DetailedPrinterCard printer={printer} />);
-
-    expect(screen.getByText('Material Slots')).toBeInTheDocument();
-  });
-
-  it('eagerly requests printer details collapsed when there is no MMU/AMS signal at all (narrowest safe gate)', () => {
-    const printer = makePrinter();
 
     render(<DetailedPrinterCard printer={printer} />);
 
@@ -144,20 +126,22 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 
-  it('requests printer details once the Z-Offset wizard is opened, even for an MMU printer that was otherwise deferred', () => {
+  it('preserves the collapsed materials module for MMU printers using only mmuStatus (no fetch needed)', () => {
     const printer = makePrinter({
       mmuStatus: { gates: [{ index: 0, status: 1, color: '#fff', material: 'PLA' }] } as unknown as MmuStatus,
     } as Partial<Printer>);
 
     render(<DetailedPrinterCard printer={printer} />);
-    expect(usePrinterDetailsMock).toHaveBeenLastCalledWith(
-      'printer-1',
-      expect.objectContaining({ enabled: false }),
-    );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Calibrate Z-Offset' }));
+    expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+  });
 
-    expect(usePrinterDetailsMock).toHaveBeenLastCalledWith(
+  it('eagerly requests printer details collapsed when there is no MMU/AMS signal at all (narrowest safe gate)', () => {
+    const printer = makePrinter();
+
+    render(<DetailedPrinterCard printer={printer} />);
+
+    expect(usePrinterDetailsMock).toHaveBeenCalledWith(
       'printer-1',
       expect.objectContaining({ enabled: true }),
     );

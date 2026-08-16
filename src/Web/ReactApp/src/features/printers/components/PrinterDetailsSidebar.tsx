@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, usePrintJobObjects, usePrinter, usePrinterDetails } from '@/common/hooks/useApi';
 import { usePrinterDisplay } from '@/common/hooks/usePrinterDisplay';
@@ -70,14 +70,12 @@ import {
   EjectIcon,
 } from '@/common/components/icons/MdiIcons';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { ToolheadSpoolPicker } from '@/features/printers/components/ToolheadSpoolPicker';
 import { FilamentCoverageBreakdown } from '@/features/filament-coverage/components/FilamentCoverageBreakdown';
 import { FallbackGroupsPanel } from '@/features/fallback-groups/components/FallbackGroupsPanel';
-import { mmuGatesToToolheads } from '@/features/printers/utils/mmuGatesToToolheads';
-import { shouldHideToolheadSpoolPicker } from '@/features/printers/utils/shouldHideToolheadSpoolPicker';
+import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { MmuControlBox } from '@/features/printers/components/MmuControlBox';
-import { AmsSlotVisualization } from '@/features/printers/components/AmsSlotVisualization';
+import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
 import { useAutoDispatchStatus } from '@/features/printers/hooks/useAutoDispatch';
 import { Modal } from '@/common/components/modals/Modal';
 import { toast } from 'sonner';
@@ -160,7 +158,7 @@ interface PrinterDetailsSidebarProps {
   printer?: Printer;
   backendCapabilities?: PrinterBackendCapabilitiesDto;
   onClose: () => void;
-  /** Layout mode: traditional right-side panel, or full-width content takeover */
+  /** Layout mode: drawer panel or bounded content panel. */
   layout?: 'panel' | 'content';
 }
 
@@ -354,6 +352,14 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
       toast.error(`Failed to skip object: ${error.message}`);
     },
   });
+
+  // Resolved once per render and shared by the materials module and the
+  // single-spool fallback, so the two guards cannot disagree. Must sit above
+  // the `printerId` early-return below to keep hook order stable.
+  const materialLoadout = useMemo(
+    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads),
+    [printer?.mmuStatus, printerDetails?.toolheads],
+  );
 
   // Guard early after all hooks are called
   if (!printerId) {
@@ -696,34 +702,41 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   };
 
   return (
-    <div className={`${sidebarShellClassName} z-30`} role="complementary" aria-label={`${printer.name} details`}>
+    <div
+      className={`${sidebarShellClassName} z-30`}
+      role="complementary"
+      aria-label={`${printer.name} details`}
+    >
       {/* Header */}
       <div className={`flex justify-between items-start px-4 pt-4 pb-3 border-b border-white/10 shrink-0 gap-3 ${headerClassName}`}>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
-            <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xs text-xs font-medium shrink-0 bg-black/30 border border-white/20">
-              <span className={`h-2 w-2 rounded-full ${statusIndicatorClassName}`} aria-hidden="true" />
-              <span className="text-pf-text-primary">{statusLabel}</span>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <h2 className="text-2xl font-bebas uppercase tracking-wide leading-none text-pf-text-primary truncate">{printer.name}</h2>
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-xs text-xs font-medium shrink-0 bg-black/30 border border-white/20">
+                <span className={`h-2 w-2 rounded-full ${statusIndicatorClassName}`} aria-hidden="true" />
+                <span className="text-pf-text-primary">{statusLabel}</span>
+              </div>
             </div>
+            <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
+            <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
           </div>
-          <p className="text-xs text-pf-text-secondary">{printer.manufacturerName} {printer.modelName}</p>
-          <p className="text-xs text-pf-text-secondary mt-1">Live printer controls and status</p>
-        </div>
-        <Button
-          type="button"
-          variant="subtle"
-          size="sm"
-          onClick={handleClose}
-          aria-label="Close sidebar"
-          className="p-1! h-auto! shrink-0 bg-black/20 hover:bg-black/30 border border-white/10"
-          title="Close sidebar"
-          iconCenter={<CloseIcon className="h-6 w-6" />}
-        ></Button>
+          <Button
+            type="button"
+            variant="subtle"
+            size="sm"
+            onClick={handleClose}
+            aria-label="Close sidebar"
+            className="p-1! h-auto! shrink-0 bg-black/20 hover:bg-black/30 border border-white/10"
+            title="Close sidebar"
+            iconCenter={<CloseIcon className="h-6 w-6" />}
+          ></Button>
       </div>
 
       {/* Scrollable Content */}
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar">
+      <div
+        ref={scrollRef}
+        className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-pf-sidebar"
+      >
         {/* Statistics */}
         <CollapsibleSection
           title="Statistics"
@@ -1309,50 +1322,43 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
           />
         )}
 
-        {/* AMS/MMU Slot Visualization - prefer live MMU gates when available */}
-        {(() => {
-          const hasLiveMmuGates = !!(displayPrinter?.mmuStatus?.gates && displayPrinter.mmuStatus.gates.length > 0);
-          const toolheads = hasLiveMmuGates
-            ? mmuGatesToToolheads(displayPrinter!.mmuStatus!.gates)
-            : printerDetails?.toolheads && printerDetails.toolheads.length > 1
-              ? printerDetails.toolheads
-              : undefined;
-          if (!toolheads) return null;
+        {/* Consolidated materials module — one slot list drives the rail, the
+            coverage rings and the assignment drawer. */}
+        {materialLoadout && (() => {
+          const persistedToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1
+            ? printerDetails.toolheads
+            : undefined;
           return (
-            <CollapsibleSection title="Material Slots" expanded={true}>
-              <AmsSlotVisualization
-                toolheads={toolheads}
-                printerId={printerId ?? undefined}
+            <CollapsibleSection title="Materials" expanded={true}>
+              <MaterialLoadout
+                printerId={printer.id}
+                mmuStatus={displayPrinter?.mmuStatus}
+                toolheads={printerDetails?.toolheads}
                 reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+                onSpoolChange={() => {
+                  queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
+                }}
               />
+              {persistedToolheads && (
+                <FallbackGroupsPanel printerId={printer.id} toolheads={persistedToolheads} />
+              )}
             </CollapsibleSection>
           );
         })()}
 
-        {/* Spool Section - hide for live MMU printers and AMS-served toolheads to avoid duplicate assignment UIs */}
+        {/* Single-spool printers keep the classic spool card; multi-slot printers are
+            fully described by the materials module above. */}
         {(spoolmanReady || displayPrinter?.spoolInfo || displayPrinter?.currentSpoolId) && (() => {
-          if (shouldHideToolheadSpoolPicker(displayPrinter?.mmuStatus?.gates, printerDetails?.toolheads, displayPrinter?.mmuStatus?.mmuType)) return null;
+          if (materialLoadout) return null;
 
-          // Physical multi-toolhead (e.g., Snapmaker U1): toolheads stored in config DB
-          const hasMultipleToolheads = printerDetails?.toolheads && printerDetails.toolheads.length > 1;
-          const hasMultipleSpoolSources = hasMultipleToolheads;
-          const sectionTitle = hasMultipleSpoolSources ? 'Spools' : 'Spool';
-
-          // For multi-spool mode on physical multi-tool printers, use config DB toolheads.
-          const effectiveToolheads = hasMultipleToolheads
-            ? printerDetails!.toolheads!
-            : undefined;
-          
           return (
             <CollapsibleSection
-              title={sectionTitle}
+              title="Spool"
               expanded={isSpoolExpanded}
               onToggle={setIsSpoolExpanded}
               headerActions={
-                // Only show header actions for single-spool mode
-                !hasMultipleSpoolSources ? (
-                  <div className="flex items-center gap-0.5">
-                    {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
+                <div className="flex items-center gap-0.5">
+                  {(displayPrinter?.spoolInfo?.hasActiveSpool || displayPrinter?.currentSpoolId) && (
                       <Button
                         type="button"
                         variant="ghost"
@@ -1415,35 +1421,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
                     ></Button>
                   </div>
-                ) : undefined
               }
             >
-              {hasMultipleSpoolSources && effectiveToolheads ? (
-                // Multi-toolhead or MMU spool picker
-                <>
-                  <FilamentCoverageBreakdown printerId={printer.id} />
-                  <ToolheadSpoolPicker
-                    printerId={printer.id}
-                    toolheads={effectiveToolheads}
-                    reviewedRowVersion={
-                      displayPrinter?.rowVersion ?? printer.rowVersion
-                    }
-                    onSpoolChange={() => {
-                      queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
-                    }}
-                  />
-                  <FallbackGroupsPanel
-                    printerId={printer.id}
-                    toolheads={effectiveToolheads}
-                  />
-                </>
-              ) : (
-                // Single spool display
-                <>
-                  <FilamentCoverageBreakdown printerId={printer.id} />
-                  <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
-                </>
-              )}
+              <FilamentCoverageBreakdown printerId={printer.id} />
+              <LoadedFilamentCard spoolInfo={displayPrinter?.spoolInfo ?? (displayPrinter?.currentSpoolId ? { hasActiveSpool: true, activeSpoolId: displayPrinter.currentSpoolId } : undefined)} />
             </CollapsibleSection>
           );
         })()}

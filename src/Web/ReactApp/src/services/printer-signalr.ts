@@ -29,7 +29,16 @@ import {
   decodeFallbackGroupsUpdatedEvent,
   type FallbackGroupsUpdatedEvent,
 } from "@/features/fallback-groups/types";
-import { AUTH_SESSION_ESTABLISHED_EVENT } from "@/services/authEvents";
+import {
+  AUTH_SESSION_ESTABLISHED_EVENT,
+  hasStoredAuthToken,
+} from "@/services/authEvents";
+
+/** Fallback SignalR settings used both when the anonymous fetch fails and when it is skipped entirely (no stored session yet). */
+const DEFAULT_SIGNALR_SETTINGS = {
+  logLevel: "Information",
+  consoleLoggingEnabled: true,
+};
 
 type PrinterStatusCallback = (status: PrinterStatusUpdate) => void;
 type JobQueueUpdateCallback = (update: JobQueueUpdateDto) => void;
@@ -423,15 +432,23 @@ export class PrinterSignalRService {
   private queueDrain: Promise<void> | null = null;
 
   constructor() {
-    this.loadSettings().then(() => {
-      if (!this.disposed && !this.connection) {
-        this.buildConnection();
-      }
-    });
-    // The initial load above runs at module-import time, before the user has
-    // authenticated, so the anonymous GET /api/settings/SignalR fails closed
-    // (401) and falls back to defaults. Re-load once a session is established so
-    // the admin-configured log level is actually honoured for the session.
+    // Module-import time runs before the user has authenticated. Only fire the
+    // anonymous GET /api/settings/SignalR when a session might already exist (e.g. a
+    // page refresh while signed in); otherwise skip straight to defaults so signed-out
+    // pages such as /login don't produce a doomed 401 request and console warning.
+    if (hasStoredAuthToken()) {
+      this.loadSettings().then(() => {
+        if (!this.disposed && !this.connection) {
+          this.buildConnection();
+        }
+      });
+    } else {
+      this.signalrSettings = { ...DEFAULT_SIGNALR_SETTINGS };
+      this.buildConnection();
+    }
+    // Re-load once a session is established so the admin-configured log level is
+    // actually honoured for the session (covers both the anonymous-fallback case above
+    // and a later login replacing an already-authenticated load).
     this.authListener = () => {
       void this.refreshSettings();
     };
@@ -455,10 +472,7 @@ export class PrinterSignalRService {
       }>("SignalR"); // calls /api/settings/SignalR
     } catch (error) {
       console.warn("Failed to load SignalR settings, using defaults:", error);
-      nextSettings = {
-        logLevel: "Information",
-        consoleLoggingEnabled: true,
-      };
+      nextSettings = { ...DEFAULT_SIGNALR_SETTINGS };
     }
 
     if (generation !== this.settingsLoadGeneration) {
