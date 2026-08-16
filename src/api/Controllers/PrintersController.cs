@@ -4330,10 +4330,26 @@ public class PrintersController(
     /// traversal-shaped filename ending in an allowed image extension (e.g.
     /// <c>../../etc/passwd.png</c>) is still rejected.
     /// </summary>
+    /// <remarks>
+    /// Deliberately does NOT use <see cref="System.IO.Path.IsPathRooted(string)"/>: its notion of
+    /// "rooted" is host-OS-dependent (e.g. on Linux, a leading backslash, a UNC <c>\\server\share</c>
+    /// prefix, or a Windows drive letter like <c>C:\</c> are not considered rooted at all), while
+    /// this endpoint must reject those shapes regardless of which OS it happens to run on. The
+    /// checks below are evaluated as plain string patterns so behavior is identical on every host.
+    /// </remarks>
     private static bool ContainsPathTraversal(string filename)
     {
-        if (System.IO.Path.IsPathRooted(filename))
+        if (filename.StartsWith('/') || filename.StartsWith('\\'))
         {
+            // Leading '/' (rooted on any OS) or leading '\' (a Windows-rooted path, and the
+            // common prefix of a UNC share like \\server\share\thumb.png).
+            return true;
+        }
+
+        if (filename.Length >= 2 && char.IsAsciiLetter(filename[0]) && filename[1] == ':')
+        {
+            // A Windows drive-letter prefix (e.g. C:\thumbs\evil.png or C:/thumbs/evil.png) is
+            // never a valid backend-relative path, regardless of the host OS evaluating it.
             return true;
         }
 

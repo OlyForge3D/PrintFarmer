@@ -139,12 +139,20 @@ public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetim
     [InlineData("thumbs/../../secret.png")]
     [InlineData("./thumbs/benchy.png")]
     [InlineData("/etc/passwd.png")]
+    [InlineData(@"\etc\passwd.png")]
+    [InlineData(@"\\server\share\thumb.png")]
+    [InlineData(@"C:\thumbs\evil.png")]
+    [InlineData("C:/thumbs/evil.png")]
     public async Task FileThumbnail_PathTraversalShapedFilename_ReturnsBadRequestWithoutService(
         string filename)
     {
         // A traversal-shaped filename must be rejected even when it ends in an allowed image
         // extension - the extension allowlist alone does not stop a segment like ".." from
         // escaping the printer backend's intended files subtree (see issue #1654 review).
+        // The Windows-rooted/UNC/drive-letter shapes above must be rejected regardless of the
+        // host OS running the test (Path.IsPathRooted's notion of "rooted" is OS-dependent and
+        // would miss these on Linux, so the check is implemented with explicit string patterns
+        // instead - see the Bishop re-review finding on PR #1654).
         HttpResponseMessage response = await _client.GetAsync(
             $"/api/printers/{Guid.NewGuid()}/files/thumbnail?filename={Uri.EscapeDataString(filename)}");
 
