@@ -133,6 +133,13 @@ public interface IPrusaLinkApiClient
     /// <summary>Gets details for a specific history job from OctoPrint-compatible history endpoint.</summary>
     Task<HistoryJob?> GetHistoryJobAsync(string baseUrl, string jobId, PrinterCredential? credentials = null, CancellationToken ct = default);
 
+    /// <summary>Gets validated thumbnail content for a history job.</summary>
+    Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credentials = null,
+        CancellationToken ct = default);
+
     /// <summary>Gets aggregated totals computed from available history jobs.</summary>
     Task<HistoryTotals?> GetHistoryTotalsAsync(string baseUrl, PrinterCredential? credentials = null, CancellationToken ct = default);
 

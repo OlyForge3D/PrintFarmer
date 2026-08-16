@@ -484,6 +484,26 @@ public interface ISupportsHistory
 }
 
 /// <summary>
+/// Capability marker for backends that can securely retrieve history thumbnails.
+/// </summary>
+public interface ISupportsHistoryThumbnail
+{
+    /// <summary>
+    /// Retrieves validated thumbnail content for a historical print job.
+    /// </summary>
+    /// <param name="baseUrl">The configured printer backend URL.</param>
+    /// <param name="jobId">The backend-specific history job identifier.</param>
+    /// <param name="credential">Optional printer credential.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Validated image bytes and media type.</returns>
+    Task<HistoryThumbnailContent> GetHistoryThumbnailAsync(
+        string baseUrl,
+        string jobId,
+        PrinterCredential? credential = null,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Capability marker interface for backend clients that support basic printer status retrieval.
 /// Provides standardized online/offline status and printer state information.
 /// </summary>

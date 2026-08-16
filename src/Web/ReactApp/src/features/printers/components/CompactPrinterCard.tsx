@@ -21,7 +21,7 @@ import { PrinterCameraPreview } from '@/features/printers/components/PrinterCame
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { PrinterCoverageSummary } from '@/features/filament-coverage/components/FilamentCoverageBadge';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
-import { PrinterBackend, type Printer, type PrinterBackendCapabilitiesDto, type MmuGate } from '@/types/api';
+import type { Printer, PrinterBackendCapabilitiesDto, MmuGate } from '@/types/api';
 import type { PrinterDisplay } from '@/common/hooks/usePrinterDisplay';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
 import { useFailureDetectionAlert } from '@/features/printers/hooks/useFailureDetectionAlert';
@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import {
   canOpenFiles,
   canOpenHistory,
+  backendSupportsHistory,
   getPrinterSupport,
 } from '@/features/printers/utils/printerSupport';
 import { getStatusHeaderClassName } from '@/features/printers/utils/statusColors';
@@ -207,7 +208,7 @@ export const CompactPrinterCard = React.memo(function CompactPrinterCard({
     : undefined;
 
   const support = getPrinterSupport(backendCapabilities, {
-    supportsHistory: printer.backend === PrinterBackend.Moonraker || printer.backend === PrinterBackend.OctoPrint,
+    supportsHistory: backendSupportsHistory(printer.backend),
   });
 
   const canOpenFilesNow = canOpenFiles({ isOnline, isEnabled, support });

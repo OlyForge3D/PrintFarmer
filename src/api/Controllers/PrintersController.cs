@@ -80,6 +80,8 @@ public class PrintersController(
     AppDbContext? appDbContext = null)
     : ControllerBase
 {
+    private const int MaxHistoryQueryEntries = 2000;
+
     private readonly Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService? _dispatchClaimService = dispatchClaimService;
     private readonly Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService? _queueResourceAuthorization = queueResourceAuthorization;
     private readonly Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService? _physicalActuationService = physicalActuationService;
@@ -4587,6 +4589,33 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryListResponse>> GetHistoryAsync(Guid id, [FromQuery] int? limit = null, [FromQuery] int? start = null, [FromQuery] DateTime? since = null, [FromQuery] DateTime? before = null, [FromQuery] string? order = null, CancellationToken ct = default)
     {
+        if (limit is < 1 or > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"limit must be between 1 and {MaxHistoryQueryEntries}.");
+        }
+
+        if (start is < 0 or > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(start),
+                $"start must be between 0 and {MaxHistoryQueryEntries}.");
+        }
+
+        if (limit.HasValue &&
+            (long)(start ?? 0) + limit.Value > MaxHistoryQueryEntries)
+        {
+            ModelState.AddModelError(
+                nameof(limit),
+                $"start plus limit must not exceed {MaxHistoryQueryEntries}.");
+        }
+
+        if (!ModelState.IsValid)
+        {
+            return ValidationProblem(ModelState);
+        }
+
         if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
         {
             return NotFound();
@@ -4702,9 +4731,116 @@ public class PrintersController(
         }
     }
 
+    /// <summary>
+    /// Returns an authenticated same-origin thumbnail for a historical print job.
+    /// </summary>
+    /// <param name="id">The printer identifier.</param>
+    /// <param name="jobId">The backend-specific history job identifier.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>Validated image content without exposing printer credentials or its private URL.</returns>
+    [HttpGet("{id:guid}/history/{jobId}/thumbnail")]
+    [ProducesResponseType(typeof(FileContentResult), 200)]
+    [ProducesResponseType(400)]
+    [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
+    public async Task<IActionResult> GetHistoryThumbnailAsync(
+        Guid id,
+        string jobId,
+        CancellationToken ct = default)
+    {
+        if (!await CanAccessPrinterAsync(id, PrinterGroupAccessLevel.View, ct))
+        {
+            return NotFound();
+        }
+
+        try
+        {
+            HistoryThumbnailContent thumbnail =
+                await _printersService.GetHistoryThumbnailAsync(id, jobId, ct);
+            Response.Headers.XContentTypeOptions = "nosniff";
+            return File(thumbnail.Content, thumbnail.ContentType);
+        }
+        catch (ArgumentException)
+        {
+            return BadRequest("Job ID is required");
+        }
+        catch (KeyNotFoundException)
+        {
+            return NotFound();
+        }
+        catch (NotSupportedException)
+        {
+            return NotFound();
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Printer {PrinterId} returned invalid history thumbnail content for job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_invalid",
+                "The printer returned an invalid thumbnail.");
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "History thumbnail request timed out for printer {PrinterId}, job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            return HistoryThumbnailProblem(
+                "history_thumbnail_timeout",
+                "The printer thumbnail request timed out.",
+                StatusCodes.Status408RequestTimeout);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or SocketException or IOException)
+        {
+            _logger.LogWarning(
+                ex,
+                "History thumbnail request failed for printer {PrinterId}, job {JobId}",
+                id,
+                LogSanitizer.Sanitize(jobId));
+            return HistoryThumbnailProblem(
+                "history_thumbnail_upstream_failed",
+                "The printer thumbnail is unavailable.");
+        }
+    }
+
+    private ObjectResult HistoryThumbnailProblem(
+        string code,
+        string title,
+        int statusCode = StatusCodes.Status502BadGateway) =>
+        Problem(
+            statusCode: statusCode,
+            title: title,
+            type: $"https://printfarmer.dev/problems/{code}",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = code,
+            });
+
     [HttpGet("{id}/history/totals")]
     [ProducesResponseType(typeof(HistoryTotals), 200)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(408)]
+    [ProducesResponseType(502)]
     [ProducesResponseType(500)]
     public async Task<ActionResult<HistoryTotals>> GetHistoryTotalsAsync(Guid id, CancellationToken ct = default)
     {
@@ -4722,10 +4858,32 @@ public class PrintersController(
         {
             return NotFound();
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (TimeoutException ex)
+        {
+            _logger.LogWarning(ex, "Timeout retrieving history totals for printer {Id}", id);
+            return StatusCode(StatusCodes.Status408RequestTimeout, "Request timeout");
+        }
+        catch (Exception ex) when (
+            ex is HttpRequestException or SocketException or IOException or InvalidDataException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Upstream failure retrieving history totals for printer {Id}",
+                id);
+            return StatusCode(
+                StatusCodes.Status502BadGateway,
+                "Unable to retrieve authoritative printer history totals");
+        }
         catch (Exception ex)
         {
             _logger.LogError("Failed to get history totals for printer {Id}: {Message}", id, LogSanitizer.Sanitize(ex.Message));
-            return new HistoryTotals { JobTotals = new JobTotals() };
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { error = "Failed to retrieve printer history totals" });
         }
     }
 

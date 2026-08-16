@@ -140,6 +140,29 @@ describe("ApiClient", () => {
           longestPrint: 80,
         });
       });
+
+      it("loads history thumbnails as authenticated blobs", async () => {
+        const thumbnail = new Blob(["image"], { type: "image/png" });
+        const mockGet = vi.fn().mockResolvedValue({ data: thumbnail });
+        (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
+          mockGet;
+        const abortController = new AbortController();
+
+        const result = await apiClient.getPrinterHistoryThumbnail(
+          "printer-1",
+          "job/one",
+          abortController.signal
+        );
+
+        expect(mockGet).toHaveBeenCalledWith(
+          "/printers/printer-1/history/job%2Fone/thumbnail",
+          {
+            responseType: "blob",
+            signal: abortController.signal,
+          }
+        );
+        expect(result).toBe(thumbnail);
+      });
     });
   });
 

@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type MmuStatus, type Printer } from '@/types/api';
 
@@ -8,6 +8,7 @@ const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined, isLoading: false }))
 );
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
+const printerHistoryModalMock = vi.hoisted(() => vi.fn(() => null));
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
@@ -50,7 +51,10 @@ vi.mock('@/features/filament-coverage/components/FilamentCoverageBreakdown', () 
   FilamentCoverageBreakdown: () => null,
 }));
 
-vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({ PrinterHistoryModal: () => null }));
+vi.mock('@/features/printers/components/PrinterHistoryModal', () => ({
+  PrinterHistoryModal: (props: { isOpen: boolean }) =>
+    printerHistoryModalMock(props),
+}));
 vi.mock('@/features/printers/components/PrinterFilesModal', () => ({ PrinterFilesModal: () => null }));
 vi.mock('@/features/printers/components/SpoolPickerModal', () => ({ SpoolPickerModal: () => null }));
 vi.mock('@/features/printers/components/MaterialLoadout', () => ({
@@ -105,9 +109,26 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     usePrinterDetailsMock.mockClear();
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
+    printerHistoryModalMock.mockClear();
   });
 
-  it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment', () => {
+  describe('DetailedPrinterCard history modal gating', () => {
+    it('keeps the always-mounted modal closed until history is requested', () => {
+      render(<DetailedPrinterCard printer={makePrinter()} />);
+
+      expect(printerHistoryModalMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOpen: false }),
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'View print history' }));
+
+      expect(printerHistoryModalMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ isOpen: true }),
+      );
+    });
+  });
+
+  it('eagerly requests printer details when the printer reports live MMU/AMS gate data so topology arrives before assignment (#1585 blocker 2)', () => {
     // Previously the details fetch was deferred whenever `mmuStatus.gates`
     // was populated, on the theory that live MMU gates already told the card
     // enough to render the materials rail. But without persisted topology the
@@ -188,5 +209,18 @@ describe('DetailedPrinterCard Open in Browser (#1546)', () => {
 
     expect(screen.getByRole('link', { name: `Open printer ${printer.name} in new tab` }))
       .toHaveAttribute('href', 'http://printer-1.local');
+  });
+});
+
+describe('DetailedPrinterCard inline details (#1584)', () => {
+  it('renders the inline detail sections without an Open details sidebar control', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    expect(screen.queryByRole('button', { name: 'Open details sidebar' })).not.toBeInTheDocument();
+    // The card folds the sidebar's informational sections in directly, so the
+    // detail is reachable without opening a sidebar. Field-level coverage of
+    // those sections lives in DetailedPrinterCard.inlineDetails.test.tsx.
+    expect(screen.getByText('Statistics')).toBeInTheDocument();
+    expect(screen.getByText('Version')).toBeInTheDocument();
   });
 });

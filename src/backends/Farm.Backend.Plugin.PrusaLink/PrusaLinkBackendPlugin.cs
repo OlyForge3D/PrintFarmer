@@ -72,22 +72,41 @@ public class PrusaLinkBackendPlugin : IExtendedBackendPlugin
     /// <param name="services">The service collection to register with.</param>
     public void RegisterAdditionalServices(IServiceCollection services)
     {
-        // Register the PrusaLink API client (internal helper)
-        services.AddScoped<IPrusaLinkApiClient, PrusaLinkApiClient>();
+        // Both direct API-client resolution and the public backend client must use the same
+        // vetted named client. Constructor injection of a bare HttpClient would resolve the
+        // factory's unconfigured default client and silently lose the egress policy.
+        services.AddScoped<IPrusaLinkApiClient>(provider =>
+        {
+            IHttpClientFactory httpClientFactory =
+                provider.GetRequiredService<IHttpClientFactory>();
+            HttpClient httpClient =
+                httpClientFactory.CreateClient("VettedEgress");
+            var timeouts = provider
+                .GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>()
+                .Value;
+            httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
+            ILogger<PrusaLinkApiClient> logger =
+                provider.GetRequiredService<ILogger<PrusaLinkApiClient>>();
+
+            // IHttpClientFactory-created clients should be disposed by their consumer.
+            // The scoped API client is the sole owner; DI tracks and disposes it at scope end.
+#pragma warning disable IDISP005 // DI owns and disposes the scoped implementation returned for this interface.
+            return new PrusaLinkApiClient(
+                httpClient,
+                logger,
+                ownsHttpClient: true);
+#pragma warning restore IDISP005
+        });
 
         // Register the PrusaLink client interface with its implementation
         // Using AddScoped because it needs fresh instances per request
         services.AddScoped<IPrusaLinkClient>(provider =>
         {
-            IHttpClientFactory httpClientFactory = provider.GetRequiredService<IHttpClientFactory>();
-            HttpClient httpClient = httpClientFactory.CreateClient();
-
-            // PrusaLink uses HttpClient.Timeout as the primary timeout mechanism (no per-request CTS).
-            // Use the ceiling from BackendTimeoutSettings so uploads have enough headroom.
-            var timeouts = provider.GetRequiredService<IOptions<Farm.Infrastructure.Settings.BackendTimeoutSettings>>().Value;
-            httpClient.Timeout = timeouts.HttpClientTimeoutCeiling;
-            ILogger<PrusaLinkClient>? logger = provider.GetService<ILoggerFactory>()?.CreateLogger<PrusaLinkClient>();
-            return new PrusaLinkClient(httpClient, logger);
+            IPrusaLinkApiClient apiClient =
+                provider.GetRequiredService<IPrusaLinkApiClient>();
+            ILogger<PrusaLinkClient> logger =
+                provider.GetRequiredService<ILogger<PrusaLinkClient>>();
+            return new PrusaLinkClient(apiClient, logger);
         });
 
         // NOTE: Status clients are NOT registered in DI container. They are instantiated

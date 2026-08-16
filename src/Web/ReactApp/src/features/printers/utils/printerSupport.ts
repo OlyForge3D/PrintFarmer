@@ -1,4 +1,24 @@
-import type { PrinterBackendCapabilitiesDto } from '@/types/api';
+import { PrinterBackend, type PrinterBackendCapabilitiesDto } from '@/types/api';
+
+/**
+ * Backends whose clients implement the server-side `ISupportsHistory` contract.
+ *
+ * `PrinterBackendCapabilitiesService` derives the authoritative `supportsHistory`
+ * flag from exactly that check, so this mirror is only used as the pre-hydration
+ * fallback while `/api/printers/{id}/capabilities` is still in flight. Keep the two
+ * in sync — a backend missing here has its History action hidden until capabilities
+ * arrive, which is the #1584 regression PrusaLink hit.
+ */
+const HISTORY_CAPABLE_BACKENDS: readonly PrinterBackend[] = [
+  PrinterBackend.Moonraker,
+  PrinterBackend.OctoPrint,
+  PrinterBackend.PrusaLink,
+  PrinterBackend.SDCP,
+];
+
+export function backendSupportsHistory(backend: PrinterBackend): boolean {
+  return HISTORY_CAPABLE_BACKENDS.includes(backend);
+}
 
 export interface PrinterSupport {
   supportsControlOperations: boolean;
