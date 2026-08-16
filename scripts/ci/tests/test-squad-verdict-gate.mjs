@@ -791,60 +791,87 @@ test('the scoping workflow wiring stays intact', async () => {
   // `labeled` event would never re-trigger the evaluation that depends on it,
   // and the two would race on `opened`.
   //
-  // Enumerating the ways a workflow can write a label is whack-a-mole — Octokit,
-  // `gh pr edit --add-label`, actions/labeler, raw REST, an indirected variable.
-  // So the primary guard is FAIL-CLOSED: any workflow that writes labels by any
-  // detected mechanism must be on the allowlist below. A reintroduced labeller
-  // shows up as a new entrant and fails this test regardless of its filename or
-  // its choice of transport. Adding an entry is a deliberate act that must be
-  // reviewed, because any label writer could apply the bare scope label and
-  // silently place a PR in scope.
+  // The primary guard keys on CAPABILITY, not on call sites. A workflow cannot
+  // write a label by ANY mechanism — issues.addLabels, issues.update, GraphQL
+  // addLabelsToLabelable, `gh pr edit --add-label`, actions/labeler, raw REST —
+  // without `issues: write` or `pull-requests: write`. GitHub enforces that;
+  // scanning for call sites cannot, because the transports are open-ended and
+  // the label value can be indirected through a variable. The answerable
+  // question is "which workflows COULD label", which the permissions block
+  // decides; "which workflows DO label" is not decidable by regex.
+  //
+  // RESIDUAL, stated plainly: this is defence-in-depth against a future refactor
+  // reintroducing a standalone labeller. It is NOT the enforced safety property.
+  // That is gate.canAutoScope, which refuses forks and unrostered authors and is
+  // mutation-tested above. A workflow on the allowlist is trusted not to apply
+  // the bare scope label; the secondary guard checks the obvious ways it might,
+  // but cannot prove absence.
   const workflowDir = path.join(repositoryRoot, '.github/workflows');
   const names = (await readdir(workflowDir)).filter((n) => /\.ya?ml$/i.test(n));
-
-  const labelWriteMechanisms = [
-    /(?:addLabels|setLabels|removeLabel|_addLabels)\s*\(/,  // Octokit
-    /--add-label|--remove-label/,                           // gh CLI
-    /gh\s+(?:pr|issue)\s+edit/,                             // gh CLI, flag may be indirected
-    /actions\/labeler/,                                     // marketplace action
-    /issues\/[^\s'"]*\/labels/,                             // raw REST
-  ];
-  const permittedLabelWriters = new Set([
-    'squad-blocked-label-sync.yml',
-    'squad-heartbeat.yml',
-    'squad-label-enforce.yml',
-    'squad-review-verdict.yml',
-    'squad-triage.yml',
-  ]);
-
   const bodies = new Map();
   for (const name of names) {
     bodies.set(name, await readFile(path.join(workflowDir, name), 'utf8'));
   }
 
-  const writers = names.filter(
-    (n) => labelWriteMechanisms.some((re) => re.test(bodies.get(n))),
-  );
+  // Matches workflow-level and job-level blocks alike. Over-matching is the safe
+  // direction: it forces an allowlist entry rather than silently permitting one.
+  const grantsLabelWrite = (body) =>
+    /^\s*(?:issues|pull-requests):\s*write\s*$/m.test(body) ||
+    /^\s*permissions:\s*write-all\s*$/m.test(body);
+
+  // Workflows permitted to hold label-write capability. Adding an entry is a
+  // deliberate act: any of these could apply the bare scope label and silently
+  // place a PR in scope, which is what the review gate exists to prevent.
+  const permittedLabelWriters = new Set([
+    'close-linked-issues.yml',
+    'squad-blocked-label-sync.yml',
+    'squad-heartbeat.yml',
+    'squad-issue-assign.yml',
+    'squad-label-enforce.yml',
+    'squad-review-verdict.yml',
+    'squad-triage.yml',
+    'sync-squad-labels.yml',
+  ]);
+
+  const capable = names.filter((n) => grantsLabelWrite(bodies.get(n)));
   assert.deepEqual(
-    writers.filter((n) => !permittedLabelWriters.has(n)), [],
-    'a workflow not on the label-writer allowlist writes labels; if it is legitimate ' +
-    'add it above, but first confirm it cannot apply the bare squad scope label',
+    capable.filter((n) => !permittedLabelWriters.has(n)), [],
+    'a workflow not on the allowlist grants itself issues/pull-requests write and could ' +
+    'therefore apply the bare squad scope label; if legitimate add it above, but first ' +
+    'confirm it cannot place a PR in scope',
   );
-  // Fail closed in the other direction too: a stale allowlist entry silently
-  // widens the set of names a reintroduced labeller could occupy.
+  // Fail closed the other way too: a stale entry reserves a name and silently
+  // widens the set a reintroduced labeller could occupy.
   assert.deepEqual(
-    [...permittedLabelWriters].filter((n) => !writers.includes(n)), [],
-    'the label-writer allowlist names a workflow that no longer writes labels; prune it',
+    [...permittedLabelWriters].filter((n) => !capable.includes(n)), [],
+    'the allowlist names a workflow that no longer holds label-write capability; prune it',
   );
 
-  // Sharper second guard: an ALREADY-permitted workflow must not start applying
-  // the bare scope label either. Those four apply `squad:*` labels, never `squad`.
+  // A workflow omitting `permissions` inherits the repository default, which is
+  // `read` (verified via actions/permissions/workflow). Pinning the set here means
+  // flipping that default to permissive — which would silently make every one of
+  // these label-capable — fails this test rather than passing unnoticed.
+  const inheritsDefault = names
+    .filter((n) => !/^\s*permissions:/m.test(bodies.get(n)))
+    .sort();
+  assert.deepEqual(
+    inheritsDefault,
+    ['bootstrap-ubuntu-ci.yml', 'ci-lint.yml', 'compose-validate.yml',
+     'enforce-path-casing.yml', 'prusa-preseed-build.yml', 'slicer-assets-ci.yml'],
+    'a workflow gained or lost an explicit permissions block; one without a block ' +
+    'inherits the repository default and is label-capable if that default is permissive',
+  );
+
+  // Secondary guard: a permitted writer must not start applying the BARE scope
+  // label. Those seven apply `squad:*`, never `squad`. Covers the literal forms
+  // plus assignment to a variable, which is how an indirected CLI call reads it.
   const bareScopeLabel = [
     /squadScopeLabel|canAutoScope/,
     /labels:\s*\[[^\]]*(['"])squad\1/,
     /--add-label[=\s]+['"]?squad['"]?(?![\w:-])/,
+    /^\s*[A-Za-z_][\w-]*:\s*(['"])?squad\1?\s*$/m,
   ];
-  const strays = writers.filter(
+  const strays = capable.filter(
     (n) => n !== 'squad-review-verdict.yml' &&
            bareScopeLabel.some((re) => re.test(bodies.get(n))),
   );
