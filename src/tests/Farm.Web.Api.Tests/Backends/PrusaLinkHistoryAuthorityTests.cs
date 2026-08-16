@@ -5,6 +5,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using Farm.Backend.Plugin.Core;
 using Farm.Backend.Plugin.PrusaLink;
@@ -1450,6 +1451,37 @@ public sealed class PrusaLinkHistoryAuthorityTests
         firstRequest.Headers.Authorization!.Parameter.Should().Contain("nc=00000001");
         secondRequest.Headers.Authorization!.Parameter.Should().Contain("nc=00000002");
     }
+
+    [Fact]
+    public void DigestAuthenticator_LegacyChallengeWithoutQop_OmitsQopAndComputesTwoPartResponse()
+    {
+        // RFC 2069 legacy mode: no "qop" in the challenge means no nc/cnonce/qop in the
+        // Authorization header, and the response hash is MD5(HA1:nonce:HA2) instead of the
+        // five-part QOP form. This exercises the `else` branch of ComputeDigestResponse's
+        // ternary (the `if` branch is already covered by the qop="auth" tests above).
+        var authenticator = new DigestAuthenticator("maker", "secret");
+        using var challenge = new HttpResponseMessage(HttpStatusCode.Unauthorized);
+        challenge.Headers.WwwAuthenticate.Add(new AuthenticationHeaderValue(
+            "Digest",
+            """realm="Prusalink", nonce="legacy-nonce", algorithm=MD5"""));
+        using var request = new HttpRequestMessage(HttpMethod.Get, "http://prusalink/api/history");
+
+        authenticator.TryAcceptChallenge(challenge).Should().BeTrue();
+        authenticator.ApplyAuthorization(request);
+
+        string parameter = request.Headers.Authorization!.Parameter!;
+        parameter.Should().NotContain("qop=");
+        parameter.Should().NotContain("nc=");
+        parameter.Should().NotContain("cnonce=");
+
+        string ha1 = Md5Hex("maker:Prusalink:secret");
+        string ha2 = Md5Hex("GET:/api/history");
+        string expectedResponse = Md5Hex($"{ha1}:legacy-nonce:{ha2}");
+        parameter.Should().Contain($"response=\"{expectedResponse}\"");
+    }
+
+    private static string Md5Hex(string input) =>
+        Convert.ToHexStringLower(MD5.HashData(Encoding.ASCII.GetBytes(input)));
 
     [Fact]
     public async Task PluginRegistration_DirectApiClient_UsesVettedEgressClient()
