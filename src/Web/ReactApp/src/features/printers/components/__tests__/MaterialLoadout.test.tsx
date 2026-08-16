@@ -8,10 +8,12 @@ import { MmuGateStatus } from '@/types/api';
 const setSpool = vi.fn();
 const clearSpool = vi.fn();
 const coverage = vi.fn();
+const printerDetails = vi.fn();
 
 vi.mock('@/common/hooks/useApi', () => ({
   useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
   useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
+  usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
 
 vi.mock('@/features/filament-coverage/hooks', () => ({
@@ -74,6 +76,7 @@ describe('MaterialLoadout', () => {
     setSpool.mockReset().mockResolvedValue('rev-1');
     clearSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
+    printerDetails.mockReset().mockReturnValue({ data: undefined });
   });
 
   it('renders one slot per physical filament position', () => {
@@ -228,6 +231,33 @@ describe('MaterialLoadout', () => {
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
     expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('uses the authoritative detail revision when the card revision is not yet available', async () => {
+    printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
+    renderLoadout({ reviewedRowVersion: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith({
+        printerId: 'printer-1',
+        toolheadIndex: 1,
+        spoolId: 99,
+        reviewedRowVersion: 'detail-rev-1',
+      }),
+    );
+  });
+
+  it('lets an operator cancel a selected slot without opening a picker', () => {
+    renderLoadout();
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByTestId('loadout-drawer')).not.toBeInTheDocument();
   });
 
   it('joins coverage on the g-code index so figures land on the right slot', () => {

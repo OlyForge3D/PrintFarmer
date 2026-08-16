@@ -1,9 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { Badge, Button, Tooltip } from '@/common/components/ui';
 import { SpoolPickerModal } from '@/features/printers/components/SpoolPickerModal';
-import { useSetToolheadSpool, useClearToolheadSpool } from '@/common/hooks/useApi';
+import {
+  useSetToolheadSpool,
+  useClearToolheadSpool,
+  usePrinterDetails,
+} from '@/common/hooks/useApi';
 import { usePrinterCoverageFromFleet } from '@/features/filament-coverage/hooks';
 import {
   FilamentCoverageBadge,
@@ -228,7 +232,20 @@ export function MaterialLoadout({
   const [lockedRevision, setLockedRevision] = useState<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
+  // The compact printer DTO can arrive before its concurrency token. Fetch the
+  // detail DTO only in that case so spool actions remain available once the
+  // authoritative revision has loaded.
+  const { data: revisionSource } = usePrinterDetails(printerId, {
+    enabled: !reviewedRowVersion,
+  });
   const { data: coverage } = usePrinterCoverageFromFleet(printerId);
+  const effectiveRowVersion = reviewedRowVersion ?? revisionSource?.rowVersion ?? null;
+
+  useEffect(() => {
+    if (selectedKey && !lockedRevision && effectiveRowVersion) {
+      setLockedRevision(effectiveRowVersion);
+    }
+  }, [effectiveRowVersion, lockedRevision, selectedKey]);
 
   const loadout = useMemo(
     () => resolveMaterialLoadout(mmuStatus, toolheads),
@@ -296,7 +313,13 @@ export function MaterialLoadout({
     const next = selectedKey === slot.key ? null : slot.key;
     setSelectedKey(next);
     // Anchor the revision to the state the user is actually looking at.
-    setLockedRevision(next ? reviewedRowVersion ?? null : null);
+    setLockedRevision(next ? effectiveRowVersion : null);
+  };
+
+  const closeDrawer = () => {
+    setPickerOpen(false);
+    setSelectedKey(null);
+    setLockedRevision(null);
   };
 
   const requireRevision = (): string | null => {
@@ -480,6 +503,13 @@ export function MaterialLoadout({
             )}
             <div className="ml-auto flex items-center gap-1.5">
               <Button
+                variant="ghost"
+                size="sm"
+                onClick={closeDrawer}
+              >
+                Cancel
+              </Button>
+              <Button
                 variant="secondary"
                 size="sm"
                 disabled={busy || !canMutate || selected.disabled}
@@ -510,7 +540,7 @@ export function MaterialLoadout({
       {pickerOpen && selected && (
         <SpoolPickerModal
           isOpen
-          onClose={() => setPickerOpen(false)}
+          onClose={closeDrawer}
           onSelect={handlePickerSelect}
           printerId={printerId}
           activeSpoolId={selected.spoolId}
