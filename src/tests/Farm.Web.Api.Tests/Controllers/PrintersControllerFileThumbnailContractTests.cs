@@ -118,10 +118,33 @@ public sealed class PrintersControllerFileThumbnailContractTests : IAsyncLifetim
     [Theory]
     [InlineData("thumbs/benchy.gcode")]
     [InlineData("thumbs/benchy")]
-    [InlineData("../../etc/passwd")]
     public async Task FileThumbnail_NonImageExtension_ReturnsBadRequestWithoutService(
         string filename)
     {
+        HttpResponseMessage response = await _client.GetAsync(
+            $"/api/printers/{Guid.NewGuid()}/files/thumbnail?filename={Uri.EscapeDataString(filename)}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _printers.Verify(
+            service => service.DownloadPrinterFileAsync(
+                It.IsAny<Guid>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Theory]
+    [InlineData("../../etc/passwd")]
+    [InlineData("../../etc/passwd.png")]
+    [InlineData("thumbs/../../secret.png")]
+    [InlineData("./thumbs/benchy.png")]
+    [InlineData("/etc/passwd.png")]
+    public async Task FileThumbnail_PathTraversalShapedFilename_ReturnsBadRequestWithoutService(
+        string filename)
+    {
+        // A traversal-shaped filename must be rejected even when it ends in an allowed image
+        // extension - the extension allowlist alone does not stop a segment like ".." from
+        // escaping the printer backend's intended files subtree (see issue #1654 review).
         HttpResponseMessage response = await _client.GetAsync(
             $"/api/printers/{Guid.NewGuid()}/files/thumbnail?filename={Uri.EscapeDataString(filename)}");
 

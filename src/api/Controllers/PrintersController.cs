@@ -4320,6 +4320,34 @@ public class PrintersController(
             [".webp"] = "image/webp",
         };
 
+    private static readonly char[] PathSegmentSeparators = ['/', '\\'];
+
+    /// <summary>
+    /// Determines whether a backend-relative file path contains a path traversal segment
+    /// (<c>.</c> or <c>..</c>) or is rooted, either of which could escape the printer backend's
+    /// intended files subtree (e.g. Moonraker's <c>gcodes</c> root) when the path is later
+    /// combined with the backend's base URL. This check runs before the extension allowlist so a
+    /// traversal-shaped filename ending in an allowed image extension (e.g.
+    /// <c>../../etc/passwd.png</c>) is still rejected.
+    /// </summary>
+    private static bool ContainsPathTraversal(string filename)
+    {
+        if (System.IO.Path.IsPathRooted(filename))
+        {
+            return true;
+        }
+
+        foreach (string segment in filename.Split(PathSegmentSeparators))
+        {
+            if (segment is "." or "..")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Returns an authenticated same-origin thumbnail image for a file on a printer's storage.
     /// </summary>
@@ -4336,7 +4364,7 @@ public class PrintersController(
     /// via <see cref="CanAccessPrinterAsync"/> must still apply.
     /// </remarks>
     /// <response code="200">Returns the thumbnail image content.</response>
-    /// <response code="400">The filename query parameter is missing, empty, or not a recognized image type.</response>
+    /// <response code="400">The filename query parameter is missing, empty, contains a path traversal segment, or is not a recognized image type.</response>
     /// <response code="404">The printer with the specified ID was not found, or the thumbnail does not exist on the printer.</response>
     /// <response code="503">An error occurred while retrieving the thumbnail from the printer.</response>
     [HttpGet("{id:guid}/files/thumbnail")]
@@ -4350,6 +4378,11 @@ public class PrintersController(
         if (string.IsNullOrWhiteSpace(filename))
         {
             return BadRequest(new { error = "filename query parameter is required" });
+        }
+
+        if (ContainsPathTraversal(filename))
+        {
+            return BadRequest(new { error = "filename must not contain path traversal segments" });
         }
 
         string extension = System.IO.Path.GetExtension(filename);
