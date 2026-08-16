@@ -219,7 +219,7 @@ describe('MaterialLoadout', () => {
     );
   });
 
-  it('blocks assignment up front when the printer revision is unavailable', () => {
+  it('keeps assignment blocked while a selected slot detail revision is loading', () => {
     renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
@@ -231,6 +231,33 @@ describe('MaterialLoadout', () => {
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
     expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('enables assignment when the initial detail revision arrives after a slot is selected', async () => {
+    const { rerender } = renderLoadout({ reviewedRowVersion: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled();
+
+    printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={mmu([gate(0), gate(1), gate(2), gate(3)])}
+        toolheads={persistedQidiBox}
+      />,
+    );
+
+    const assign = screen.getByRole('button', { name: 'Assign' });
+    await waitFor(() => expect(assign).toBeEnabled());
+    fireEvent.click(assign);
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewedRowVersion: 'detail-rev-1' }),
+      ),
+    );
   });
 
   it('uses the authoritative detail revision when the card revision is not yet available', async () => {
@@ -248,6 +275,41 @@ describe('MaterialLoadout', () => {
         spoolId: 99,
         reviewedRowVersion: 'detail-rev-1',
       }),
+    );
+  });
+
+  it('keeps the first delayed detail revision when later detail state is unavailable', async () => {
+    const { rerender } = renderLoadout({ reviewedRowVersion: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+
+    printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={mmu([gate(0), gate(1), gate(2), gate(3)])}
+        toolheads={persistedQidiBox}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Assign' })).toBeEnabled());
+
+    printerDetails.mockReturnValue({ data: undefined });
+    rerender(
+      <MaterialLoadout
+        printerId="printer-1"
+        mmuStatus={mmu([gate(0), gate(1), gate(2), gate(3)])}
+        toolheads={persistedQidiBox}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Assign' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Assign' }));
+    fireEvent.click(await screen.findByTestId('spool-picker'));
+
+    await waitFor(() =>
+      expect(setSpool).toHaveBeenCalledWith(
+        expect.objectContaining({ reviewedRowVersion: 'detail-rev-1' }),
+      ),
     );
   });
 

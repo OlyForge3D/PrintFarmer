@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import { Badge, Button, Tooltip } from '@/common/components/ui';
@@ -230,6 +230,11 @@ export function MaterialLoadout({
   // Assign then Clear) posts the just-written revision instead of the stale
   // one it opened with, and does not spuriously 412 against its own write.
   const [lockedRevision, setLockedRevision] = useState<string | null>(null);
+  const [capturedFallbackRevision, setCapturedFallbackRevision] = useState<string | null>(null);
+  // The detail query can resolve after a slot opens without a card revision.
+  // The reactive snapshot enables the drawer; this ref carries that exact
+  // immutable token into handlers after cache or live updates arrive.
+  const initialFallbackRevisionRef = useRef<string | null>(null);
   const setSpoolMutation = useSetToolheadSpool();
   const clearSpoolMutation = useClearToolheadSpool();
   // The compact printer DTO can arrive before its concurrency token. Fetch the
@@ -239,8 +244,23 @@ export function MaterialLoadout({
     enabled: !reviewedRowVersion,
   });
   const { data: coverage } = usePrinterCoverageFromFleet(printerId);
-  const effectiveRowVersion = reviewedRowVersion ?? revisionSource?.rowVersion ?? null;
-  const activeRevision = lockedRevision ?? effectiveRowVersion;
+  const fallbackRevision = revisionSource?.rowVersion ?? null;
+  const effectiveRowVersion = reviewedRowVersion ?? fallbackRevision;
+  if (selectedKey && !lockedRevision && !capturedFallbackRevision && fallbackRevision) {
+    setCapturedFallbackRevision(fallbackRevision);
+  }
+  const activeRevision = lockedRevision ?? capturedFallbackRevision ?? effectiveRowVersion;
+
+  useEffect(() => {
+    if (
+      selectedKey &&
+      !lockedRevision &&
+      !initialFallbackRevisionRef.current &&
+      capturedFallbackRevision
+    ) {
+      initialFallbackRevisionRef.current = capturedFallbackRevision;
+    }
+  }, [capturedFallbackRevision, lockedRevision, selectedKey]);
 
   const loadout = useMemo(
     () => resolveMaterialLoadout(mmuStatus, toolheads),
@@ -303,6 +323,8 @@ export function MaterialLoadout({
 
   const selectSlot = (slot: LoadoutSlot) => {
     const next = selectedKey === slot.key ? null : slot.key;
+    initialFallbackRevisionRef.current = null;
+    setCapturedFallbackRevision(null);
     setSelectedKey(next);
     // Anchor the revision to the state the user is actually looking at.
     setLockedRevision(next ? effectiveRowVersion : null);
@@ -312,10 +334,13 @@ export function MaterialLoadout({
     setPickerOpen(false);
     setSelectedKey(null);
     setLockedRevision(null);
+    setCapturedFallbackRevision(null);
+    initialFallbackRevisionRef.current = null;
   };
 
   const requireRevision = (): string | null => {
-    if (!activeRevision) {
+    const revision = lockedRevision ?? initialFallbackRevisionRef.current ?? activeRevision;
+    if (!revision) {
       toast.error('Printer revision unavailable. Refresh and review again.');
       return null;
     }
@@ -323,7 +348,7 @@ export function MaterialLoadout({
       toast.error('Materials topology not yet loaded. Refresh and review again.');
       return null;
     }
-    return activeRevision;
+    return revision;
   };
 
   const handleAssign = async (spoolId: number) => {
