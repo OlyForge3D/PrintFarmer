@@ -838,10 +838,8 @@ public abstract class BasePreviewRenderer
         }
 
         Vector3 sum = Vector3.Zero;
-        foreach (int fi in faces)
+        foreach (Vector3 fn in faces.Select(fi => faceNormals[fi]))
         {
-            Vector3 fn = faceNormals[fi];
-
             if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
             {
                 sum += fn;
