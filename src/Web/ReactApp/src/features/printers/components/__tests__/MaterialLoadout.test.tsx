@@ -162,7 +162,9 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    expect(screen.getByRole('button', { name: 'Change' })).toBeDisabled();
+    const change = screen.getByRole('button', { name: 'Change' });
+    expect(change).not.toBeDisabled();
+    expect(change).toHaveAttribute('aria-disabled', 'true');
 
     const clear = screen.getByRole('button', { name: 'Clear' });
     expect(clear).toBeEnabled();
@@ -225,7 +227,9 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
+    expect(assign).toHaveAttribute('tabindex', '0');
     expect(screen.getByText(/Printer revision unavailable/)).toBeInTheDocument();
 
     fireEvent.click(assign);
@@ -237,7 +241,7 @@ describe('MaterialLoadout', () => {
     const { rerender } = renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Assign' })).toHaveAttribute('aria-disabled', 'true');
 
     printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
     rerender(
@@ -392,7 +396,10 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    // explainedDisabled: not natively disabled, but aria-disabled and inert.
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
+    expect(assign).toHaveAttribute('tabindex', '0');
     expect(
       screen.getByText(/Materials topology not yet loaded/),
     ).toBeInTheDocument();
@@ -414,10 +421,26 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText(/Materials topology not yet loaded/)).toBeInTheDocument();
     fireEvent.click(assign);
     expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('uses native disabled (not explainedDisabled) when only busy, not blocked by permission', () => {
+    // When canMutate=true and the slot is not disabled, the Assign button must
+    // be natively enabled (no aria-disabled) — explainedDisabled only activates
+    // for permission/topology blockers, not transient in-flight states.
+    renderLoadout();
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    // Fully enabled: not native disabled, no aria-disabled, normal tab order.
+    expect(assign).toBeEnabled();
+    expect(assign).not.toHaveAttribute('aria-disabled');
+    expect(assign).not.toHaveAttribute('tabindex', '0');
   });
 
   it('keeps external hotend testid distinct from the first MMU gate at G-code 0 (blocker 5)', () => {
@@ -490,7 +513,8 @@ describe('MaterialLoadout', () => {
     expect(within(drawer).getByText('Disabled')).toBeInTheDocument();
 
     const assign = screen.getByRole('button', { name: 'Assign' });
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
     expect(setSpool).not.toHaveBeenCalled();

@@ -555,6 +555,7 @@ export function MaterialLoadout({
                 variant="secondary"
                 size="sm"
                 disabled={busy || !canMutate || selected.disabled}
+                explainedDisabled={!canMutate || selected.disabled}
                 title={selected.disabled ? disabledSlotReason : blockedReason}
                 onClick={() => setPickerOpen(true)}
               >
@@ -565,6 +566,7 @@ export function MaterialLoadout({
                   variant="danger"
                   size="sm"
                   disabled={busy || !canMutate}
+                  explainedDisabled={!canMutate}
                   title={blockedReason}
                   onClick={() => void handleClear()}
                 >
