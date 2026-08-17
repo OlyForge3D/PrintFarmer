@@ -572,7 +572,7 @@ export function MaterialLoadout({
                   disabled={busy || !canMutate}
                   explainedDisabled={!canMutate}
                   title={blockedReason}
-                  aria-describedby={!canMutate ? `loadout-action-desc-${printerId}` : undefined}
+                  aria-describedby={!canMutate ? `loadout-clear-desc-${printerId}` : undefined}
                   onClick={() => void handleClear()}
                 >
                   Clear
@@ -583,6 +583,15 @@ export function MaterialLoadout({
           {(blockedReason || (selected?.disabled && disabledSlotReason)) && (
             <p id={`loadout-action-desc-${printerId}`} className="mt-1 text-[10px] text-pf-text-tertiary">
               {selected?.disabled ? disabledSlotReason : blockedReason}
+            </p>
+          )}
+          {/* Clear is deliberately kept available on a disabled gate (see handleAssign
+              comment above), so its only real blocker is a missing/unresolved revision —
+              never reuse the disabled-gate text here, or a screen-reader user hearing
+              Clear's description would be told the wrong reason it's blocked. */}
+          {selected.spoolId != null && blockedReason && (
+            <p id={`loadout-clear-desc-${printerId}`} className="mt-1 text-[10px] text-pf-text-tertiary">
+              {blockedReason}
             </p>
           )}
         </div>

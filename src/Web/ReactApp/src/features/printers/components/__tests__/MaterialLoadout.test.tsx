@@ -183,6 +183,39 @@ describe('MaterialLoadout', () => {
     expect(setSpool).not.toHaveBeenCalled();
   });
 
+  it("names Clear's real blocker, not the disabled-gate reason, when a gate is both disabled and unrevisioned", () => {
+    // Clear stays available on a disabled gate (see the test above); its only
+    // real blocker here is the missing revision, not the device-disabled
+    // state. A screen-reader user focusing Clear must hear that, not the
+    // disabled-gate text that Assign/Change legitimately shows.
+    renderLoadout({
+      mmuStatus: mmu([
+        gate(0),
+        gate(1, { spoolId: 42, status: MmuGateStatus.Disabled }),
+        gate(2),
+        gate(3),
+      ]),
+      reviewedRowVersion: null,
+    });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-1'));
+
+    const change = screen.getByRole('button', { name: 'Change' });
+    const changeDescId = change.getAttribute('aria-describedby');
+    expect(changeDescId).toBeTruthy();
+    expect(document.getElementById(changeDescId!)).toHaveTextContent(
+      'Disabled on the device — cannot take a spool',
+    );
+
+    const clear = screen.getByRole('button', { name: 'Clear' });
+    const clearDescId = clear.getAttribute('aria-describedby');
+    expect(clearDescId).toBeTruthy();
+    expect(clearDescId).not.toBe(changeDescId);
+    expect(document.getElementById(clearDescId!)).toHaveTextContent(
+      'Printer revision unavailable — refresh to assign spools',
+    );
+  });
+
   it('assigns through non-contiguous persisted gate ordering without offset inference', async () => {
     renderLoadout({
       mmuStatus: mmu([gate(0), gate(1)]),
