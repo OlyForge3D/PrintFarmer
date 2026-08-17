@@ -13,6 +13,7 @@ const mockExcludePrintJobObject = vi.fn();
 let capturedStatisticsQueryOptions: UseQueryOptions<PrinterStatistics> | undefined;
 let mockStatisticsData: PrinterStatistics | undefined;
 let mockPrintJobObjectsData: PrintJobObjectListDto | undefined;
+let mockVersionData: Record<string, unknown> | undefined;
 
 vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: UseQueryOptions<PrinterStatistics>) => {
@@ -20,6 +21,14 @@ vi.mock('@tanstack/react-query', () => ({
       capturedStatisticsQueryOptions = options;
       return {
         data: mockStatisticsData,
+        isLoading: false,
+        refetch: mockRefetch,
+      };
+    }
+
+    if (Array.isArray(options.queryKey) && options.queryKey[0] === 'printerVersion') {
+      return {
+        data: mockVersionData,
         isLoading: false,
         refetch: mockRefetch,
       };
@@ -142,6 +151,7 @@ describe('PrinterDetailsSidebar', () => {
     capturedStatisticsQueryOptions = undefined;
     mockStatisticsData = undefined;
     mockPrintJobObjectsData = undefined;
+    mockVersionData = undefined;
     mockInvalidateQueries.mockClear();
     mockRefetch.mockClear();
     mockPrintJobObjectsRefetch.mockClear();
@@ -260,6 +270,60 @@ describe('PrinterDetailsSidebar', () => {
 
     expect(lastSyncRow).not.toBeNull();
     expect(within(lastSyncRow!).getByText('—')).toBeInTheDocument();
+  });
+
+  it('labels the firmware reading as live-only (not used for calibration) when no recorded identity is returned (#1656)', () => {
+    mockVersionData = {
+      firmwareVersion: '1.2.3',
+      backendVersion: '4.5.6',
+      apiVersion: '7.8.9',
+      supported: true,
+      message: '',
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    expect(screen.getByText('Live reading only — not used for calibration eligibility')).toBeInTheDocument();
+    expect(screen.queryByText('Recorded — used for calibration eligibility')).not.toBeInTheDocument();
+  });
+
+  it('labels the firmware reading as the recorded/calibration-eligible identity when the version endpoint returns one (#1656)', () => {
+    mockVersionData = {
+      firmwareVersion: '1.2.3',
+      backendVersion: '4.5.6',
+      apiVersion: '7.8.9',
+      supported: true,
+      message: '',
+      recordedFirmwareIdentity: {
+        family: 'Klipper',
+        gcodeDialect: 'Klipper',
+        detectionSource: 'printer',
+        version: '1.2.3',
+        detectionVersion: 'moonraker-printer-info-v1',
+        detectionConfidence: 1,
+        detectedAtUtc: '2024-01-01T00:00:00.000Z',
+        verified: false,
+      },
+    };
+
+    render(
+      <PrinterDetailsSidebar
+        printerId={printer.id}
+        printer={printer}
+        onClose={vi.fn()}
+        layout="panel"
+      />
+    );
+
+    expect(screen.getByText('Recorded — used for calibration eligibility')).toBeInTheDocument();
+    expect(screen.queryByText('Live reading only — not used for calibration eligibility')).not.toBeInTheDocument();
   });
 
   it('hides object skip controls when backend capability is false', () => {
