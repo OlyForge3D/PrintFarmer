@@ -838,12 +838,10 @@ public abstract class BasePreviewRenderer
         }
 
         Vector3 sum = Vector3.Zero;
-        foreach (Vector3 fn in faces.Select(fi => faceNormals[fi]))
+        foreach (Vector3 fn in faces.Select(fi => faceNormals[fi])
+                     .Where(fn => sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh))
         {
-            if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
-            {
-                sum += fn;
-            }
+            sum += fn;
         }
 
         if (sum.LengthSquared() < 1e-12f)
