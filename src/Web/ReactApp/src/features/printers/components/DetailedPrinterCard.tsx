@@ -1014,6 +1014,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                 variant="ghost"
                 size="sm"
                 disabled={spoolActionPending || spoolRevisionUnavailable}
+                explainedDisabled={spoolRevisionUnavailable}
                 onClick={() => setShowSpoolPicker(true)}
                 className="p-0.5! h-auto!"
                 title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
@@ -1026,6 +1027,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
                   variant="ghost"
                   size="sm"
                   disabled={spoolActionPending || spoolRevisionUnavailable}
+                  explainedDisabled={spoolRevisionUnavailable}
                   onClick={async () => {
                     setSpoolActionPending(true);
                     try {

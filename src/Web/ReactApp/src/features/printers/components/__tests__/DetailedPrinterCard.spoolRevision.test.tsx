@@ -1,6 +1,7 @@
 import '@testing-library/jest-dom';
 import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type Printer, type SpoolInfo } from '@/types/api';
 
@@ -131,22 +132,63 @@ describe('DetailedPrinterCard single-spool revision guard', () => {
     clearActiveSpoolMock.mockReset().mockResolvedValue('rev-2');
   });
 
-  it('disables the spool controls with an explanation when no revision can be resolved (no silent no-op)', () => {
+  it('keeps revision-blocked spool controls focusable with an accessible explanation and no activation', async () => {
+    const user = userEvent.setup();
     // Printer sourced from the compact list DTO (no rowVersion) and no detail
     // record yet — the token is genuinely unavailable.
     render(<DetailedPrinterCard printer={makePrinter()} />);
 
     const change = screen.getByRole('button', { name: /Change spool/ });
     const eject = screen.getByRole('button', { name: /Eject spool/ });
+    const explanation = 'Printer revision unavailable — refresh to manage spools';
 
-    expect(change).toBeDisabled();
-    expect(eject).toBeDisabled();
-    expect(change).toHaveAttribute('title', 'Printer revision unavailable — refresh to manage spools');
+    expect(change).not.toBeDisabled();
+    expect(eject).not.toBeDisabled();
+    expect(change).toHaveAttribute('aria-disabled', 'true');
+    expect(eject).toHaveAttribute('aria-disabled', 'true');
+    expect(change).toHaveAttribute('tabIndex', '0');
+    expect(eject).toHaveAttribute('tabIndex', '0');
+    expect(change).toHaveAttribute('title', explanation);
+    expect(eject).toHaveAttribute('title', explanation);
+    expect(change).toHaveAccessibleDescription(explanation);
+    expect(eject).toHaveAccessibleDescription(explanation);
 
-    // A click on a disabled control must not issue a mutation.
-    fireEvent.click(change);
+    change.focus();
+    expect(change).toHaveFocus();
+    eject.focus();
+    expect(eject).toHaveFocus();
+
+    await user.click(change);
+    change.focus();
+    await user.type(change, '{Enter}');
+    await user.type(change, ' ');
     expect(screen.queryByTestId('spool-picker-select')).not.toBeInTheDocument();
     expect(setActiveSpoolMock).not.toHaveBeenCalled();
+
+    await user.click(eject);
+    eject.focus();
+    await user.type(eject, '{Enter}');
+    await user.type(eject, ' ');
+    expect(clearActiveSpoolMock).not.toHaveBeenCalled();
+  });
+
+  it('suppresses keyboard activation on revision-blocked spool controls', async () => {
+    const user = userEvent.setup();
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    const change = screen.getByRole('button', { name: /Change spool/ });
+    const eject = screen.getByRole('button', { name: /Eject spool/ });
+
+    change.focus();
+    await user.type(change, '{Enter}');
+    await user.type(change, ' ');
+    expect(screen.queryByTestId('spool-picker-select')).not.toBeInTheDocument();
+    expect(setActiveSpoolMock).not.toHaveBeenCalled();
+
+    eject.focus();
+    await user.type(eject, '{Enter}');
+    await user.type(eject, ' ');
+    expect(clearActiveSpoolMock).not.toHaveBeenCalled();
   });
 
   it('recovers the reviewed revision from the fetched detail record and issues the mutation', async () => {

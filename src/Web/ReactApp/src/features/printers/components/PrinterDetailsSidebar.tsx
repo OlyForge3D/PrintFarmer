@@ -1414,6 +1414,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                         variant="ghost"
                         size="sm"
                         disabled={spoolActionPending || spoolRevisionUnavailable}
+                        explainedDisabled={spoolRevisionUnavailable}
                         onClick={async () => {
                           setSpoolActionPending(true);
                           try {
@@ -1463,6 +1464,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       variant="ghost"
                       size="sm"
                       disabled={spoolActionPending || spoolRevisionUnavailable}
+                      explainedDisabled={spoolRevisionUnavailable}
                       onClick={() => setShowSpoolPicker(true)}
                       className="p-1! h-auto!"
                       title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
