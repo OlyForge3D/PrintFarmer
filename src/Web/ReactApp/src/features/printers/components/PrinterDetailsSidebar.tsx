@@ -173,12 +173,21 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   
-  // Fetch printer details to check for multi-toolhead configuration
-  // Only fetch when printerId is available and Spoolman is configured (when spool section would be shown)
+  // The list endpoint (`/api/printers`) returns a compact DTO that can omit the
+  // concurrency token, so the passed-in prop may lack `rowVersion`. The single
+  // printer GET and the details endpoint both carry it; capture the prop-sourced
+  // token here so the details query below can self-fetch the authoritative one
+  // when it is missing (independent of Spoolman readiness).
+  const propRowVersion = printerProp?.rowVersion ?? apiPrinter?.rowVersion ?? null;
+
+  // Fetch printer details to check for multi-toolhead configuration and to
+  // recover the reviewed revision. Fetch when Spoolman is configured (spool
+  // section would be shown) OR when the prop lacks a revision, so the spool
+  // mutation guards below always have an authoritative token to review against.
   const { data: printerDetails } = usePrinterDetails(
     printerId ?? '', 
     { 
-      enabled: !!printerId && spoolmanReady,
+      enabled: !!printerId && (spoolmanReady || !propRowVersion),
       staleTime: 60000, // Cache for 1 minute since toolhead config doesn't change frequently
     }
   );
@@ -386,6 +395,15 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
 
   // API now returns complete printer DTO with status merged in - no client-side merge needed
   const displayPrinter = printer;
+
+  // Authoritative reviewed revision for spool mutations. `displayPrinter`
+  // (and thus the passed-in prop) can lack `rowVersion` when it was sourced from
+  // the compact list endpoint, so fall back to the details record, which always
+  // carries the concurrency token. Never fabricate one — an unresolved token
+  // must block the action, not send an unreviewed mutation.
+  const spoolReviewedRowVersion = displayPrinter?.rowVersion ?? printerDetails?.rowVersion ?? null;
+  const spoolRevisionUnavailable = !spoolReviewedRowVersion;
+  const spoolRevisionBlockedReason = 'Printer revision unavailable — refresh to manage spools';
   const sidebarShellClassName = layout === 'content'
     ? `w-full max-w-sm overflow-hidden flex flex-col lg:max-h-[calc(100dvh-5rem)] lg:min-h-0 rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.35)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'}`
     : `w-[calc(100%-1.5rem)] h-[calc(100%-1.5rem)] m-3 overflow-hidden flex flex-col rounded-lg border border-white/10 bg-pf-sidebar shadow-[0_24px_48px_rgba(0,0,0,0.4)] ring-1 ring-white/5 ${isClosing ? 'pf-printer-sidebar-exit' : 'pf-printer-sidebar-enter'} shrink-0`;
@@ -1367,7 +1385,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 mmuStatus={displayPrinter?.mmuStatus}
                 toolheads={printerDetails?.toolheads}
                 currentSpoolId={printer?.currentSpoolId}
-                reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+                reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });
                 }}
@@ -1396,12 +1414,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                         type="button"
                         variant="ghost"
                         size="sm"
-                        disabled={spoolActionPending}
+                        disabled={spoolActionPending || spoolRevisionUnavailable}
+                        explainedDisabled={spoolRevisionUnavailable}
                         onClick={async () => {
                           setSpoolActionPending(true);
                           try {
-                            const reviewedRowVersion =
-                              displayPrinter?.rowVersion ?? printer.rowVersion;
+                            const reviewedRowVersion = spoolReviewedRowVersion;
                             if (!reviewedRowVersion) {
                               toast.error('Printer revision unavailable. Refresh and review again.');
                               return;
@@ -1437,8 +1455,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                           }
                         }}
                         className="p-1! h-auto!"
-                        title="Eject spool"
-                        aria-label="Eject spool"
+                        title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Eject spool'}
+                        aria-label={spoolRevisionUnavailable ? `Eject spool — ${spoolRevisionBlockedReason}` : 'Eject spool'}
                         iconCenter={<EjectIcon className="h-4 w-4" />}
                       ></Button>
                     )}
@@ -1446,11 +1464,12 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                       type="button"
                       variant="ghost"
                       size="sm"
-                      disabled={spoolActionPending}
+                      disabled={spoolActionPending || spoolRevisionUnavailable}
+                      explainedDisabled={spoolRevisionUnavailable}
                       onClick={() => setShowSpoolPicker(true)}
                       className="p-1! h-auto!"
-                      title="Change spool"
-                      aria-label="Change spool"
+                      title={spoolRevisionUnavailable ? spoolRevisionBlockedReason : 'Change spool'}
+                      aria-label={spoolRevisionUnavailable ? `Change spool — ${spoolRevisionBlockedReason}` : 'Change spool'}
                       iconCenter={<FilamentChangeIcon className="h-4 w-4" />}
                     ></Button>
                   </div>
@@ -1488,7 +1507,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onClose={() => setShowCalibrationSetup(false)}
         printerId={printer.id}
         printerName={printer.name}
-        rowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
+        rowVersion={spoolReviewedRowVersion}
       />
 
       <Modal
@@ -1543,8 +1562,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
         onSelect={async (spoolId, spool) => {
           setSpoolActionPending(true);
           try {
-            const reviewedRowVersion =
-              displayPrinter?.rowVersion ?? printer.rowVersion;
+            const reviewedRowVersion = spoolReviewedRowVersion;
             if (!reviewedRowVersion) {
               toast.error('Printer revision unavailable. Refresh and review again.');
               return;

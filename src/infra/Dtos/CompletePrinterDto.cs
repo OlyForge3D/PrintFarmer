@@ -59,4 +59,7 @@ public record CompletePrinterDto(
     Guid? BedTypeId = null,
     string? BedTypeName = null,
     string? BedTypeColor = null,
-    bool UseModelDispatchDefaults = true);
+    bool UseModelDispatchDefaults = true,
+
+    // Concurrency token for list consumers to guard mutations.
+    string? RowVersion = null);

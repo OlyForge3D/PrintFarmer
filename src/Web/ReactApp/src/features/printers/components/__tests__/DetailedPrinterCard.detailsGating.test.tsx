@@ -168,15 +168,31 @@ describe('DetailedPrinterCard printerDetails gating (#1146 item 4)', () => {
     );
   });
 
-  it('never requests printer details when Spoolman is not configured, regardless of the collapsed gate', () => {
+  it('does not request printer details when Spoolman is off and the card already carries a revision', () => {
     useSpoolmanConfiguredMock.mockReturnValue({ ready: false });
-    const printer = makePrinter(); // no mmuStatus — would otherwise be the eager/collapsed-probe case
+    // The card already has its concurrency token, so there is nothing to
+    // recover — the details fetch stays disabled to avoid an unnecessary request.
+    const printer = makePrinter({ rowVersion: 'printer-v1' }); // no mmuStatus
 
     render(<DetailedPrinterCard printer={printer} />);
 
     expect(usePrinterDetailsMock).toHaveBeenCalledWith(
       'printer-1',
       expect.objectContaining({ enabled: false }),
+    );
+  });
+
+  it('requests printer details when the card lacks a revision, even with Spoolman off, to recover the concurrency token (revision-guard fallback)', () => {
+    useSpoolmanConfiguredMock.mockReturnValue({ ready: false });
+    // The compact list DTO can omit `rowVersion`; the spool mutation guards need
+    // an authoritative token, so the details fetch must run regardless of Spoolman.
+    const printer = makePrinter(); // no rowVersion, no mmuStatus
+
+    render(<DetailedPrinterCard printer={printer} />);
+
+    expect(usePrinterDetailsMock).toHaveBeenCalledWith(
+      'printer-1',
+      expect.objectContaining({ enabled: true }),
     );
   });
 });

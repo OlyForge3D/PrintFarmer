@@ -87,3 +87,27 @@ that always returns a `BadRequestObjectResult`, declare its return type as
 `BadRequestObjectResult` (not the broader `ActionResult`) or the analyzer
 warns about a boxed return. Small detail but worth remembering — the "0
 warnings" baseline is unforgiving.
+
+
+## Printer list endpoint missing RowVersion (2026-08-16)
+
+`GET /api/printers` (`CompletePrinterDto[]`) omitted `RowVersion` /
+`ConfigurationRevision`, so the React printers page — which sources every printer
+object from that list — hit the `rowVersion`-unavailable guard on every mutation
+(spool assign/eject/change, material loadout, calibration, enable/disable). Fixed by
+adding both members to `CompletePrinterDto` and populating them in
+`GetAllCompleteDtosAsync` (both success and offline-fallback branches), mirroring
+`PrinterDto` / `GetAllWithStatusDtosAsync`.
+
+**Audited the other list DTOs:** `PrinterFastDto` has no live endpoint (`getPrintersFast`
+actually calls `/printers`); `PrinterSummaryDto` is dashboard/alert display-only;
+`PrinterWithCapabilitiesDto` is export-only. None source a mutable printer object, so
+none got `RowVersion` — deliberately avoided bloating unused/display DTOs.
+
+**Encoding gotcha:** editing a large file with `Set-Content` stripped its UTF-8 BOM and
+`dotnet format` flagged CHARSET. Restored with `UTF8Encoding($true)`. Prefer the `edit`
+tool over whole-file PowerShell rewrites on BOM'd C# files.
+
+Added `PrinterListDtoRowVersionTests`: list DTO carries non-null base64 `RowVersion`
+(Revision > 0) and round-trips to the single-printer endpoint value. Build clean (no new
+warnings), all 1370 Farm.Web.Api.Tests pass.
