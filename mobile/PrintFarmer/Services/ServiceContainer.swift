@@ -460,6 +460,25 @@ final class ServiceContainer: @unchecked Sendable {
         serverRegistry.snapshotPurgeHandler = { serverID in
             await store.purge(serverID: serverID)
         }
+        let pinStore = CertificatePinStore()
+        serverRegistry.certificatePinPurgeHandler = { server, remainingServers in
+            guard server.baseURL.scheme?.lowercased() == "https",
+                  let host = server.baseURL.host,
+                  let endpoint = NetworkHostClassifier.endpointKey(host: host, port: server.baseURL.port) else {
+                return true
+            }
+            let endpointStillRegistered = remainingServers.contains { candidate in
+                guard candidate.baseURL.scheme?.lowercased() == "https",
+                      let candidateHost = candidate.baseURL.host else {
+                    return false
+                }
+                return NetworkHostClassifier.endpointKey(
+                    host: candidateHost,
+                    port: candidate.baseURL.port
+                ) == endpoint
+            }
+            return endpointStillRegistered || pinStore.delete(endpoint: endpoint)
+        }
     }
 
     /// Resolved capability snapshot used by demo (mock) services.

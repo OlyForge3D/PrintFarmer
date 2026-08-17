@@ -788,6 +788,7 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         guard let url = components.url else {
             throw NetworkError.invalidURL("hubs/printers/negotiate")
         }
+        try Self.validateTransport(url)
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -821,8 +822,20 @@ final class SignalRService: @unchecked Sendable, SignalRServiceProtocol {
         guard let wsURL = components.url else {
             throw NetworkError.invalidURL("hubs/printers (WebSocket)")
         }
+        try Self.validateTransport(wsURL)
 
         return webSocketFactory(wsURL)
+    }
+
+    private static func validateTransport(_ url: URL) throws {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "ws",
+              let host = url.host else {
+            return
+        }
+        guard NetworkHostClassifier.classify(host) == .local else {
+            throw NetworkError.insecureTransportBlocked(host: host)
+        }
     }
 
     private struct HandshakeResponse: Decodable {

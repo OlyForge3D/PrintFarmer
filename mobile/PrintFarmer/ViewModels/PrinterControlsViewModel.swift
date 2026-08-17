@@ -395,6 +395,8 @@ final class PrinterControlsViewModel: ObservableObject {
             case .unexpectedStatus(let code): return ("Unexpected response (\(code)).", false)
             case .invalidURL, .invalidResponse, .decodingFailed, .authFailed: return ("Command failed.", false)
             case .staleServerResponse: return ("Server changed. Refresh and try again.", false)
+            case .insecureTransportBlocked, .certificateChanged, .certificateNotTrusted:
+                return (net.errorDescription ?? "Secure connection failed.", false)
             }
         }
         if let url = error as? URLError {

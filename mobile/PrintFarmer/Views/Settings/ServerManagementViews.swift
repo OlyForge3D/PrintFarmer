@@ -233,6 +233,8 @@ struct ServerEditorView: View {
     let showsNavigationTitle: Bool
     @State private var saveTask: Task<Void, Never>?
     @State private var healthTask: Task<Void, Never>?
+    @State private var pinRecord: CertificatePinRecord?
+    @State private var showingForgetCertificate = false
     @FocusState private var focusedField: Field?
 
     init(
@@ -300,6 +302,27 @@ struct ServerEditorView: View {
                 Text("PrintFarmer checks /health and /healthz. Any server HTTP response counts as reachable; network failures are shown here.")
             }
 
+            if let pinRecord {
+                Section {
+                    Text(CertificateFingerprint.display(pinRecord.spkiSHA256))
+                        .font(.system(.body, design: .monospaced))
+                        .textSelection(.enabled)
+                        .speechSpellsOutCharacters()
+                        .accessibilityLabel("SHA-256 public-key fingerprint \(CertificateFingerprint.display(pinRecord.spkiSHA256))")
+                    LabeledContent("Confirmed") {
+                        Text(pinRecord.confirmedAt.formatted(date: .abbreviated, time: .shortened))
+                    }
+                    Button("Forget Trusted Certificate", role: .destructive) {
+                        showingForgetCertificate = true
+                    }
+                    .accessibilityIdentifier("forgetTrustedCertificateButton")
+                } header: {
+                    Text("Trusted Certificate")
+                } footer: {
+                    Text("Forget this certificate only after independently verifying that the server certificate was intentionally replaced. The next connection will require confirmation.")
+                }
+            }
+
             if let errorMessage = viewModel.errorMessage {
                 Section {
                     Label(errorMessage, systemImage: "exclamationmark.triangle")
@@ -335,6 +358,19 @@ struct ServerEditorView: View {
             saveTask?.cancel()
             healthTask?.cancel()
             viewModel.resetTransientEditorState()
+        }
+        .alert("Forget Trusted Certificate?", isPresented: $showingForgetCertificate) {
+            Button("Forget Certificate", role: .destructive) {
+                guard let endpoint = pinRecord?.endpoint,
+                      CertificatePinStore().delete(endpoint: endpoint) else {
+                    viewModel.errorMessage = "The trusted certificate could not be removed."
+                    return
+                }
+                pinRecord = nil
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only continue if you intend to verify a replacement certificate on the next connection.")
         }
     }
 
@@ -372,6 +408,11 @@ struct ServerEditorView: View {
             viewModel.prepareForAdd()
         case .edit(let server):
             viewModel.prepareForEdit(server)
+            if server.baseURL.scheme?.lowercased() == "https",
+               let host = server.baseURL.host,
+               let endpoint = NetworkHostClassifier.endpointKey(host: host, port: server.baseURL.port) {
+                pinRecord = CertificatePinStore().load(endpoint: endpoint)
+            }
         }
     }
 }

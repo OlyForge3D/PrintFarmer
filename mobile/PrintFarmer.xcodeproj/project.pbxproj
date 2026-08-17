@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000001 /* NetworkHostClassifier.swift */; };
+		1667A0000000000000000102 /* CertificatePinStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000002 /* CertificatePinStore.swift */; };
+		1667A0000000000000000103 /* CertificateTrustCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000003 /* CertificateTrustCoordinator.swift */; };
+		1667A0000000000000000104 /* CertificateTrustView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000004 /* CertificateTrustView.swift */; };
+		1667A0000000000000000105 /* NetworkHostClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000005 /* NetworkHostClassifierTests.swift */; };
+		1667A0000000000000000106 /* CertificateTrustCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000006 /* CertificateTrustCoordinatorTests.swift */; };
+		1667A0000000000000000107 /* TransportSecurityConfigurationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1667A0000000000000000007 /* TransportSecurityConfigurationTests.swift */; };
 		F78800000000000000000101 /* TaskActionRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000001 /* TaskActionRoute.swift */; };
 		F78800000000000000000102 /* TaskActionRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000002 /* TaskActionRouter.swift */; };
 		F78800000000000000000103 /* TaskActionRouteResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F78800000000000000000003 /* TaskActionRouteResolverTests.swift */; };
@@ -512,6 +519,13 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1667A0000000000000000001 /* NetworkHostClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkHostClassifier.swift; sourceTree = "<group>"; };
+		1667A0000000000000000002 /* CertificatePinStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificatePinStore.swift; sourceTree = "<group>"; };
+		1667A0000000000000000003 /* CertificateTrustCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTrustCoordinator.swift; sourceTree = "<group>"; };
+		1667A0000000000000000004 /* CertificateTrustView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTrustView.swift; sourceTree = "<group>"; };
+		1667A0000000000000000005 /* NetworkHostClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkHostClassifierTests.swift; sourceTree = "<group>"; };
+		1667A0000000000000000006 /* CertificateTrustCoordinatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CertificateTrustCoordinatorTests.swift; sourceTree = "<group>"; };
+		1667A0000000000000000007 /* TransportSecurityConfigurationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportSecurityConfigurationTests.swift; sourceTree = "<group>"; };
 		F78800000000000000000001 /* TaskActionRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRoute.swift; sourceTree = "<group>"; };
 		F78800000000000000000002 /* TaskActionRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRouter.swift; sourceTree = "<group>"; };
 		F78800000000000000000003 /* TaskActionRouteResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskActionRouteResolverTests.swift; sourceTree = "<group>"; };
@@ -991,6 +1005,9 @@
 		15E99E10A0724AD818418752 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				1667A0000000000000000001 /* NetworkHostClassifier.swift */,
+				1667A0000000000000000002 /* CertificatePinStore.swift */,
+				1667A0000000000000000003 /* CertificateTrustCoordinator.swift */,
 				AF7870000000000000000000 /* OfflineWriteQueueModels.swift */,
 				AF7870000000000000000002 /* OfflineWriteQueueStore.swift */,
 				AF7870000000000000000004 /* OfflineWriteReplayTransport.swift */,
@@ -1202,6 +1219,7 @@
 		707B7EA94C57005EC3C622EC /* Auth */ = {
 			isa = PBXGroup;
 			children = (
+				1667A0000000000000000004 /* CertificateTrustView.swift */,
 				574F629AF29665D4872351E8 /* LoginView.swift */,
 				C8C70E99B5CA4E578AF3AAA6 /* OnboardingView.swift */,
 				D5E6F7A8B9C0D1E2F3A4B5C6 /* LocalNetworkPermissionView.swift */,
@@ -1413,6 +1431,9 @@
 		D7EABE37D6B7E8A44802BE1A /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				1667A0000000000000000005 /* NetworkHostClassifierTests.swift */,
+				1667A0000000000000000006 /* CertificateTrustCoordinatorTests.swift */,
+				1667A0000000000000000007 /* TransportSecurityConfigurationTests.swift */,
 				AF787000000000000000000C /* OfflineWriteQueueTests.swift */,
 				AF787000000000000000000E /* OfflineWriteQueueStoreTests.swift */,
 				AF7870000000000000000010 /* OfflineWriteAllowlistTests.swift */,
@@ -1714,6 +1735,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1667A0000000000000000105 /* NetworkHostClassifierTests.swift in Sources */,
+				1667A0000000000000000106 /* CertificateTrustCoordinatorTests.swift in Sources */,
+				1667A0000000000000000107 /* TransportSecurityConfigurationTests.swift in Sources */,
 				F78800000000000000000103 /* TaskActionRouteResolverTests.swift in Sources */,
 				F78800000000000000000104 /* TaskActionRouterTests.swift in Sources */,
 				AF787000000000000000000D /* OfflineWriteQueueTests.swift in Sources */,
@@ -1847,6 +1871,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1667A0000000000000000101 /* NetworkHostClassifier.swift in Sources */,
+				1667A0000000000000000102 /* CertificatePinStore.swift in Sources */,
+				1667A0000000000000000103 /* CertificateTrustCoordinator.swift in Sources */,
+				1667A0000000000000000104 /* CertificateTrustView.swift in Sources */,
 				F78800000000000000000101 /* TaskActionRoute.swift in Sources */,
 				F78800000000000000000102 /* TaskActionRouter.swift in Sources */,
 				AF7870000000000000000001 /* OfflineWriteQueueModels.swift in Sources */,

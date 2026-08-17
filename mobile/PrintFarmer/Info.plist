@@ -16,8 +16,6 @@
 	<string>PrintFarmer scans NFC tags on printers and filament spools for quick identification and management.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
