@@ -30,8 +30,6 @@ public sealed class OctoPrintApiKeyAttribute : Attribute, IAsyncAuthorizationFil
 
         bool allowed = await authService.ValidateApiKeyAsync(
             apiKey,
-            targetPrinterId: null,
-            userId: null,
             requireValidKey: RequireValidKeyForAnonymous);
         if (!allowed)
         {

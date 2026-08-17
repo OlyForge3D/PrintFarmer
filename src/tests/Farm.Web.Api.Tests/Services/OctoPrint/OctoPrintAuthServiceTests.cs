@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Repositories.Users;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Services.OctoPrint;
 using Microsoft.Data.Sqlite;
@@ -47,6 +48,8 @@ public class OctoPrintAuthServiceTests : IDisposable
         return mock.Object;
     }
 
+    private static IUsersRepository CreateMockUsersRepository() => Mock.Of<IUsersRepository>();
+
     [Fact]
     public async Task ValidateApiKeyAsync_AllowsWhenRequireDisabled()
     {
@@ -54,7 +57,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = false });
         var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
 
         bool ok = await svc.ValidateApiKeyAsync(null);
         Assert.True(ok);
@@ -67,7 +70,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         var settingsService = CreateMockSettingsService(new OctoPrintSettings { RequireApiKey = false });
         var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         IConfigurationRoot config = new ConfigurationBuilder().Build();
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
 
         bool ok = await svc.ValidateApiKeyAsync(null, requireValidKey: true);
 
@@ -82,7 +85,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         var repo = new Farm.Infrastructure.Repositories.Api.EfApiKeyRepository(ctx);
         var inMemory = new Dictionary<string, string?> { ["OctoPrint:GlobalApiKey"] = "supersecret" };
         IConfigurationRoot config = new ConfigurationBuilder().AddInMemoryCollection(inMemory).Build();
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
 
         bool ok = await svc.ValidateApiKeyAsync("supersecret");
         Assert.True(ok);
@@ -101,7 +104,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         var ak = new ApiKey { KeyHash = hash, UserId = Guid.NewGuid(), Name = "test" };
         await repo.AddAsync(ak);
 
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
         bool ok = await svc.ValidateApiKeyAsync(raw);
         Assert.True(ok);
     }
@@ -126,7 +129,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         };
         await repo.AddAsync(ak);
 
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
         bool ok = await svc.ValidateApiKeyAsync(raw);
 
         Assert.False(ok);
@@ -151,7 +154,7 @@ public class OctoPrintAuthServiceTests : IDisposable
         };
         await repo.AddAsync(ak);
 
-        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, config);
+        var svc = new OctoPrintAuthService(settingsService, new NullLogger<OctoPrintAuthService>(), repo, CreateMockUsersRepository(), config);
         bool ok = await svc.ValidateApiKeyAsync(raw);
 
         Assert.False(ok);
