@@ -131,9 +131,22 @@ public sealed class PrinterVersionCache(
             return unsupported;
         }
 
-        PrinterVersionInfoDto dto = backend == PrinterBackend.Moonraker
+        PrinterVersionInfoDto? dto = backend == PrinterBackend.Moonraker
             ? await GetMoonrakerVersionAsync(printer, backend, infoClient, ct)
             : await GetThinProbeVersionAsync(printer, backend, infoClient, ct);
+
+        if (dto is null)
+        {
+            // #1656 / PR #1660 review round 9 (Vasquez, blocking): GetMoonrakerVersionAsync
+            // returns null exactly when a concurrent mid-refresh delete was confirmed by the
+            // post-refresh reload — the printer no longer exists. Falling back to any
+            // previously-cached entry here would re-serve the exact stale/deleted firmware
+            // identity the reload was trying to rule out, so any prior cache entry for this id
+            // is evicted and the caller sees a genuine not-found, matching the "printer == null"
+            // early-return above.
+            _cache.Remove(Key(printerId));
+            return null;
+        }
 
         // A non-null Message on a Supported DTO means the live probe failed (see the catch
         // blocks in GetMoonrakerVersionAsync/GetThinProbeVersionAsync) — cache that outcome only
@@ -159,7 +172,7 @@ public sealed class PrinterVersionCache(
     /// writes, so this hot read path cannot write the database more often than that cadence
     /// allows.
     /// </summary>
-    private async Task<PrinterVersionInfoDto> GetMoonrakerVersionAsync(
+    private async Task<PrinterVersionInfoDto?> GetMoonrakerVersionAsync(
         Printer printer,
         PrinterBackend backend,
         ISupportsPrinterInformation infoClient,
@@ -221,11 +234,24 @@ public sealed class PrinterVersionCache(
                 // null. RefreshDetectedFirmwareIdentityAsync's own WasFirmwareIdentityPrinterDeletedAsync
                 // helper now detaches the tracked entity from this DbContext the moment it
                 // confirms the row is genuinely gone, so this FindByIdAsync call is a real,
-                // database-backed re-query in that case and correctly returns null (falling back
-                // to `printer` here only as a last-resort in-memory snapshot for response shaping
-                // — never as a substitute for observing the deletion in RecordedFirmwareIdentity
-                // below, which is computed from the persisted columns).
-                printer = await _printersService.FindByIdAsync(printer.Id, ct) ?? printer;
+                // database-backed re-query in that case and correctly returns null in that case.
+                Printer? reloaded = await _printersService.FindByIdAsync(printer.Id, ct);
+
+                // #1656 / PR #1660 review round 9 (Vasquez, blocking): the round-8 fix made
+                // `reloaded` correctly come back null after a confirmed concurrent delete, but
+                // falling back to the stale in-memory `printer` here (`?? printer`) would still
+                // build and return a response carrying the deleted printer's last-known firmware
+                // identity — silently undoing the round-8 detach fix at the one call site it
+                // exists to protect. A genuine delete must surface as "this printer is gone" all
+                // the way up to the API, not as a firmware reading, so this method now returns
+                // null and GetAsync (the caller) treats that exactly like the "printer not found"
+                // early-return it already has for a request that never found the printer at all.
+                if (reloaded is null)
+                {
+                    return null;
+                }
+
+                printer = reloaded;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

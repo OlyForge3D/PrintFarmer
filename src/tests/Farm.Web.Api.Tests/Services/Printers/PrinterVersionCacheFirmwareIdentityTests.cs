@@ -9,6 +9,7 @@ using Farm.Infrastructure.Contracts.Printers;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.PrinterCalibration;
+using Farm.Infrastructure.Repositories.Printers;
 using Farm.Infrastructure.Repositories.UnitOfWork;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Spoolman;
@@ -104,6 +105,29 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
             configuration,
             TimeProvider.System);
     }
+
+    private static PrintersService CreatePrintersServiceWithUnitOfWork(
+        AppDbContext db,
+        IUnitOfWork unitOfWork,
+        IBackendClientFactory backendFactory) =>
+        new(
+            unitOfWork,
+            db,
+            backendFactory,
+            Mock.Of<IBackendCapabilityFactory>(),
+            Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
+            Mock.Of<IHttpClientFactory>(),
+            NullLogger<PrintersService>.Instance,
+            Mock.Of<IPrinterStatusBroadcaster>(),
+            Mock.Of<IMultiPrinterStatusCoordinator>(),
+            Mock.Of<IPrinterStatusClientFactory>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(),
+            Mock.Of<Farm.Infrastructure.Services.Security.ISensitiveDataProtector>(),
+            Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
+            Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
+            Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
+            Mock.Of<IFilamentCoverageSpoolResolver>());
 
     private static (Mock<IBackendClientFactory> Factory, Mock<ISupportsPrinterInformation> Info) CreateMockedInfoBackend(
         PrinterBackend backend,
@@ -536,6 +560,102 @@ public sealed class PrinterVersionCacheFirmwareIdentityTests
         _ = dto.Should().NotBeNull();
         _ = dto!.Message.Should().BeNullOrEmpty();
         _ = capturingCache.LastAbsoluteExpirationRelativeToNow.Should().Be(options.Ttl);
+    }
+
+    [Fact]
+    public async Task GetAsync_ConcurrentDeleteConfirmedMidRefresh_ReturnsNullInsteadOfStaleFirmwareIdentity()
+    {
+        // #1656 / PR #1660 review round 9 (Vasquez, blocking): round 8 made
+        // WasFirmwareIdentityPrinterDeletedAsync detach the tracked entity on a confirmed
+        // concurrent delete, so the post-refresh FindByIdAsync re-read inside
+        // GetMoonrakerVersionAsync genuinely re-queries the database and observes the deletion
+        // (returns null) instead of being satisfied from the identity map with the stale
+        // pre-delete instance. But the call site still did `?? printer` — silently discarding
+        // that null and falling back to the very same stale in-memory printer, so
+        // GET /api/printers/{id}/version would still serve the deleted printer's last-known
+        // firmware identity instead of surfacing the delete. This exercises the fix end to end
+        // through PrinterVersionCache.GetAsync: a concurrent delete confirmed mid-refresh (via a
+        // genuine DbUpdateConcurrencyException, constructed exactly as
+        // RefreshDetectedFirmwareIdentityAsync's own regression tests do) must surface as
+        // GetAsync returning null, never as a firmware reading of a printer that no longer
+        // exists.
+        string dbName = $"firmware-identity-round9-{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
+
+        await using (AppDbContext seedDb = NewDb(dbName))
+        {
+            Printer seed = CreateNeverProbedMoonrakerPrinter();
+            seed.Id = printerId;
+            _ = seedDb.Printers.Add(seed);
+            _ = await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = NewDb(dbName);
+
+        // Load the printer through this scope's own context, exactly as production code would —
+        // this is the same tracked instance PrinterVersionCache.GetAsync and
+        // RefreshDetectedFirmwareIdentityAsync will both observe via the identity map.
+        Printer printer = (await db.Printers.SingleAsync(p => p.Id == printerId))!;
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry = db.Entry(printer);
+        var updateEntry = (Microsoft.EntityFrameworkCore.Update.IUpdateEntry)
+            ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<Microsoft.EntityFrameworkCore.ChangeTracking.Internal.InternalEntityEntry>)entry).Instance;
+
+        // A wholly separate scope deletes the row for real, out from under this scope's own
+        // tracked entity — this scope is not aware the row is gone until it re-queries the
+        // (shared, same-name) underlying store, exactly what GetDatabaseValuesAsync
+        // (used by WasFirmwareIdentityPrinterDeletedAsync) does.
+        await using (AppDbContext concurrentWriterDb = NewDb(dbName))
+        {
+            Printer toDelete = (await concurrentWriterDb.Printers.SingleAsync(p => p.Id == printerId))!;
+            concurrentWriterDb.Printers.Remove(toDelete);
+            _ = await concurrentWriterDb.SaveChangesAsync();
+        }
+
+        var repository = new Mock<IPrintersRepository>();
+        repository.Setup(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+
+        // Models EF's real identity-map behavior around the round-8 detach fix: before the
+        // tracked entity is detached, a same-scope FindByIdAsync (backed by DbSet.FindAsync) is
+        // satisfied from the identity map with this same in-memory instance regardless of what
+        // happened to the underlying row; once WasFirmwareIdentityPrinterDeletedAsync detaches
+        // it (below), a same-scope FindByIdAsync genuinely re-queries the database and correctly
+        // observes the deletion.
+        repository
+            .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => entry.State == EntityState.Detached ? null : printer);
+
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        unitOfWork
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(_ =>
+            {
+                // Mocking SaveChangesAsync directly bypasses EF's real save pipeline, which
+                // normally calls ChangeTracker.DetectChanges() before evaluating entity states.
+                db.ChangeTracker.DetectChanges();
+                return Task.FromException<int>(new DbUpdateConcurrencyException(
+                    "simulated concurrency conflict: row deleted mid-write",
+                    new[] { updateEntry }));
+            });
+
+        (Mock<IBackendClientFactory> backendFactory, Mock<ISupportsPrinterInformation> info) =
+            CreateMockedInfoBackend(PrinterBackend.Moonraker, "v-should-never-be-observed-as-committed");
+
+        PrintersService printersService = CreatePrintersServiceWithUnitOfWork(db, unitOfWork.Object, backendFactory.Object);
+        PrinterVersionCache cache = new(
+            new MemoryCache(new MemoryCacheOptions()),
+            Options.Create(new PrinterVersionCacheOptions()),
+            printersService,
+            backendFactory.Object);
+
+        PrinterVersionInfoDto? dto = await cache.GetAsync(printerId, CancellationToken.None);
+
+        _ = dto.Should().BeNull(
+            "a printer confirmed deleted mid-refresh must surface as not-found, never as a stale " +
+            "firmware reading built from the deleted printer's last-known in-memory identity");
+        info.Verify(
+            c => c.GetPrinterInformationAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     /// <summary>
