@@ -18,6 +18,8 @@ import type { MmuStatus, ToolheadDto } from '@/types/api';
 import {
   isLightColor,
   resolveMaterialLoadout,
+  resolveActiveSlot,
+  type ActiveSlotInfo,
   type LoadoutKind,
   type LoadoutSlot,
 } from '@/features/printers/utils/materialLoadout';
@@ -73,12 +75,18 @@ function describeSlot(
   slot: LoadoutSlot,
   kind: LoadoutKind,
   coverage: ToolheadCoverage | undefined,
+  activeInfo?: ActiveSlotInfo | null,
 ): string {
   const noun = slot.external ? 'external spool' : slotNoun(kind);
   const material = slot.material ? `loaded with ${slot.material}` : 'empty';
   const risk = coverage?.status === 'runout' ? ', runout risk' : '';
   const disabled = slot.disabled ? ', disabled' : '';
-  return `${slot.label} ${noun}, ${material}${disabled}${risk}`;
+  // Hazard 2: external slots never match activeGate.
+  const isActive = activeInfo && slot.source !== 'external' && slot.gcodeIndex === activeInfo.gcodeIndex;
+  const activeLabel = isActive
+    ? activeInfo.state === 'loaded' ? ', active and loaded' : ', active'
+    : '';
+  return `${slot.label} ${noun}, ${material}${disabled}${activeLabel}${risk}`;
 }
 
 function SlotButton({
@@ -87,6 +95,7 @@ function SlotButton({
   coverage,
   compact,
   selected,
+  active,
   onSelect,
 }: {
   slot: LoadoutSlot;
@@ -94,16 +103,15 @@ function SlotButton({
   coverage: ToolheadCoverage | undefined;
   compact: boolean;
   selected: boolean;
+  active?: ActiveSlotInfo | null;
   onSelect: () => void;
 }) {
   const ring = ringFor(coverage);
   const size = compact ? 44 : 52;
   const atRisk = coverage?.status === 'runout';
   const swatch = slot.color;
-  // Externals share the g-code tool 0 slot with the first gate, so keying a
-  // testid off `gcodeIndex` alone renders two `loadout-slot-0` nodes. Use the
-  // source-namespaced apiIndex for externals so tests and CSS selectors can
-  // distinguish an external hotend from the first MMU gate on the same card.
+  // Hazard 2: External slots must never match activeGate.
+  const isActive = active && slot.source !== 'external' && slot.gcodeIndex === active.gcodeIndex;
   const slotTestId = slot.source === 'external'
     ? `loadout-slot-external-${slot.apiIndex}`
     : `loadout-slot-${slot.gcodeIndex}`;
@@ -114,10 +122,12 @@ function SlotButton({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      aria-label={describeSlot(slot, kind, coverage)}
+      aria-label={describeSlot(slot, kind, coverage, active)}
+      aria-current={isActive ? 'true' : undefined}
       data-testid={slotTestId}
       data-source={slot.source}
       data-disabled={slot.disabled ? 'true' : undefined}
+      data-active={isActive ? (active!.state === 'loaded' ? 'loaded' : 'selected') : undefined}
       data-status={coverage?.status ?? 'unknown'}
       className={clsx(
         'group relative flex shrink-0 flex-col items-center gap-1 rounded-lg px-1.5 py-1.5',
@@ -180,6 +190,15 @@ function SlotButton({
         {atRisk && (
           <span
             className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-pf-warning ring-2 ring-pf-bg-1"
+            aria-hidden="true"
+          />
+        )}
+        {isActive && (
+          <span
+            className={clsx(
+              'absolute -bottom-0.5 left-1/2 h-2 w-2 -translate-x-1/2 rotate-45 rounded-[1px]',
+              active!.state === 'loaded' ? 'bg-pf-success' : 'bg-pf-accent',
+            )}
             aria-hidden="true"
           />
         )}
@@ -265,6 +284,11 @@ export function MaterialLoadout({
   const loadout = useMemo(
     () => resolveMaterialLoadout(mmuStatus, toolheads),
     [mmuStatus, toolheads],
+  );
+
+  const activeSlot = useMemo(
+    () => loadout ? resolveActiveSlot(mmuStatus, loadout.kind) : null,
+    [mmuStatus, loadout],
   );
 
   const coverageByIndex = useMemo(() => {
@@ -465,6 +489,7 @@ export function MaterialLoadout({
               coverage={slotCoverage}
               compact={compact}
               selected={selected?.key === slot.key}
+              active={activeSlot}
               onSelect={() => selectSlot(slot)}
             />
           );
