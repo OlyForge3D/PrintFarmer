@@ -114,3 +114,26 @@ Files I now know cold:
 
 
 ---
+
+
+## 2026-08-16 — Printer revision "dead-end" spool guards (frontend resilience)
+
+**Scope:** `src/Web/ReactApp/` only (Lambert owned the parallel backend DTO fix). Branch `dev/jpapiez/legendary-tribble`, commit `44cabf30c`.
+
+**Bug:** `GET /api/printers` returns a compact DTO omitting `rowVersion`. `PrintersPage` passes those list-sourced objects as the `printer` prop into the sidebar and cards, so every spool mutation guard read `rowVersion` off the prop, found `undefined`, and returned early — single-toolhead/no-AMS eject + change-spool silently issued no network request; controls looked enabled.
+
+**What I changed:**
+- `PrinterDetailsSidebar.tsx`: the old fallback `displayPrinter?.rowVersion ?? printer.rowVersion` traced to the *same* list-sourced prop (no-op). Now resolve from `printerDetails?.rowVersion` (authoritative, from `/printers/{id}/details`) and widen the existing `usePrinterDetails` `enabled` to also fetch when the prop lacks a revision.
+- `DetailedPrinterCard.tsx`: `usePrinterDetails` was `enabled: spoolmanReady` (flaky). Now `spoolmanReady || !printer.rowVersion` — strict superset, so topology resolves whenever it did before; extra fetch only fires while the DTO omits the token and self-corrects after Lambert's fix.
+- Both surfaces: disable the affected control with an explanatory `title`/`aria-label` when no revision resolves, reusing the `MaterialLoadout` disable-with-tooltip pattern. Guard stays strong — never fabricate/default a revision.
+- Fed resolved revisions to `MaterialLoadout`, `CalibrationSetupModal`, `ZOffsetCalibrationWizard`.
+
+**Rationale for reusing `usePrinterDetails` over forcing `usePrinter`:** the sidebar's `usePrinter` is gated `!printerProp && !!printerId` and the grid always passes a prop, so it never fires there. The details query already runs for toolhead topology, shares its cache key (dedupes), has 60s `staleTime`, and there's a single sidebar instance — no redundant per-card request.
+
+**Tests added:** `PrinterDetailsSidebar.spoolRevision.test.tsx` (recover token from detail record; disabled+blocked when no revision; direct prop use post-fix) and `DetailedPrinterCard.spoolRevision.test.tsx` (no silent no-op; recovery from detail record). Updated `DetailedPrinterCard.detailsGating.test.tsx` to split the old flaky assertion into revision-present→no-fetch / revision-absent→fetch.
+
+**Learnings:**
+- A `??` fallback is only real if the operands come from *different sources*. `a?.rowVersion ?? b.rowVersion` where both `a` and `b` derive from one list-sourced prop is a no-op that reads like a safety net — the exact trap here.
+- The compact list DTO (`getPrinters()` → `PrinterFast[]` cast to `Printer[]`) is a recurring hazard: any guard reading a concurrency/state field off a grid-passed `printer` prop must fall back to a detail fetch, not to another view of the same prop.
+- Prefer disabling a control with an accessible reason over letting a click dead-end into a toast — matches `MaterialLoadout`'s existing `canMutate`/`blockedReason` pattern and the a11y rule that disabled controls carry an explanation.
+- Validation: `npm run build` clean; `npm run test:run` 428 files / 4753 tests / 0 failed; `npm run lint` clean.

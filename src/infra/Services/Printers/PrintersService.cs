@@ -1607,11 +1607,11 @@ public class PrintersService(
         {
             // Best-effort only — see summary above. Logged, not swallowed silently, so a
             // persistently failing reload (e.g. sustained DB connectivity issues) is observable.
-            _logger.LogWarning(
-                ex,
+            const string reloadFailedMessage =
                 "Best-effort reload of Printer {PrinterId} after a firmware-identity refresh failed; " +
-                "the tracked entity may not reflect the current database row until the next successful read.",
-                printer.Id);
+                "the tracked entity may not reflect the current database row until the next successful read.";
+
+            _logger.LogWarning(ex, reloadFailedMessage, printer.Id);
         }
     }
 
@@ -2028,7 +2028,8 @@ public class PrintersService(
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
-                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
             }
             catch (Exception ex)
             {
@@ -2078,7 +2079,8 @@ public class PrintersService(
                     BedTypeId: p.BedTypeId,
                     BedTypeName: p.BedType?.Name,
                     BedTypeColor: p.BedType?.Color,
-                    UseModelDispatchDefaults: p.UseModelDispatchDefaults));
+                    UseModelDispatchDefaults: p.UseModelDispatchDefaults,
+                    RowVersion: p.RowVersion is { Length: > 0 } ? Convert.ToBase64String(p.RowVersion) : null));
             }
         }
 
