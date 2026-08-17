@@ -61,6 +61,5 @@ public record CompletePrinterDto(
     string? BedTypeColor = null,
     bool UseModelDispatchDefaults = true,
 
-    // Concurrency / configuration revision (mirrors PrinterDto so list consumers can guard mutations)
-    string? RowVersion = null,
-    long ConfigurationRevision = 0);
+    // Concurrency token for list consumers to guard mutations.
+    string? RowVersion = null);

@@ -79,7 +79,6 @@ public class PrinterListDtoRowVersionTests : IAsyncLifetime
         Action decode = () => Convert.FromBase64String(dto.RowVersion!);
         decode.Should().NotThrow();
 
-        dto.ConfigurationRevision.Should().BeGreaterThan(0);
     }
 
     [Fact]
@@ -93,6 +92,5 @@ public class PrinterListDtoRowVersionTests : IAsyncLifetime
 
         listDto.RowVersion.Should().Be(singleDto.RowVersion,
             "the list and single-printer endpoints must expose the same concurrency token");
-        listDto.ConfigurationRevision.Should().Be(singleDto.ConfigurationRevision);
     }
 }
