@@ -7,6 +7,7 @@ enum ServerRegistryError: LocalizedError, Equatable {
     case serverNotFound(UUID)
     case purgeUnavailable(UUID)
     case purgeFailed(UUID)
+    case certificatePinPurgeFailed(UUID)
 
     var errorDescription: String? {
         switch self {
@@ -20,6 +21,8 @@ enum ServerRegistryError: LocalizedError, Equatable {
             return "Cannot remove this server because its cached data cannot be cleared safely."
         case .purgeFailed:
             return "Could not clear this server's cached data. The server was not removed."
+        case .certificatePinPurgeFailed:
+            return "Could not clear this server's trusted certificate. The server was not removed."
         }
     }
 }
@@ -45,6 +48,7 @@ final class ServerRegistry {
     /// `purgeAndRemove`). Kept out of observation — it is infrastructure wiring,
     /// not view state.
     @ObservationIgnored var snapshotPurgeHandler: (@Sendable (UUID) async -> FarmSnapshotPurgeResult)?
+    @ObservationIgnored var certificatePinPurgeHandler: (@Sendable (RegisteredServer, [RegisteredServer]) async -> Bool)?
 
     @ObservationIgnored private let userDefaults: UserDefaults
     @ObservationIgnored private let now: () -> Date
@@ -250,7 +254,7 @@ final class ServerRegistry {
     /// Fails closed: without a wired purge handler, or when the purge reports a
     /// failure, the server is retained so its cached bytes cannot be orphaned.
     func purgeAndRemove(id: UUID) async throws {
-        guard servers.contains(where: { $0.id == id }) else {
+        guard let index = servers.firstIndex(where: { $0.id == id }) else {
             throw ServerRegistryError.serverNotFound(id)
         }
         guard let handler = snapshotPurgeHandler else {
@@ -259,6 +263,13 @@ final class ServerRegistry {
         let result = await handler(id)
         guard case .purged = result else {
             throw ServerRegistryError.purgeFailed(id)
+        }
+        if let certificatePinPurgeHandler {
+            let server = servers[index]
+            let remaining = servers.filter { $0.id != id }
+            guard await certificatePinPurgeHandler(server, remaining) else {
+                throw ServerRegistryError.certificatePinPurgeFailed(id)
+            }
         }
         try removeEntry(id: id)
     }
@@ -326,19 +337,17 @@ final class ServerRegistry {
             return nil
         }
 
-        if scheme.lowercased() == "http", isIPv4Address(host) {
+        guard let canonicalHost = NetworkHostClassifier.canonicalize(host) else {
+            return nil
+        }
+        if scheme.lowercased() == "http",
+           canonicalHost.classification == .public || canonicalHost.isIPLiteral {
             components.scheme = "https"
         }
+        components.host = canonicalHost.value
 
         guard let url = components.url else { return nil }
         return canonicalURLString(url)
-    }
-
-    private static func isIPv4Address(_ host: String) -> Bool {
-        host.range(
-            of: #"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#,
-            options: .regularExpression
-        ) != nil
     }
 
     private func rejectDuplicate(normalizedURLString: String, ignoring id: UUID? = nil) throws {

@@ -77,13 +77,6 @@ final class APIClientTests: XCTestCase {
         XCTAssertFalse(PrivateNetworkSessionDelegate.isPrivateHost("example.com"))
     }
 
-    func testIPv4HostsSkipStrictHostnameValidation() {
-        XCTAssertTrue(PrivateNetworkSessionDelegate.isIPv4Address("100.119.81.25"))
-        XCTAssertFalse(PrivateNetworkSessionDelegate.isIPv4Address("printfarmer.local"))
-        XCTAssertFalse(PrivateNetworkSessionDelegate.isIPv4Address("example.com"))
-        XCTAssertFalse(PrivateNetworkSessionDelegate.isIPv4Address("localhost"))
-    }
-
     func testLeafAnchorFallbackOnlyAllowedForSingleCertificateChain() {
         XCTAssertTrue(PrivateNetworkSessionDelegate.shouldAttemptLeafAnchorFallback(certificateCount: 1))
         XCTAssertFalse(PrivateNetworkSessionDelegate.shouldAttemptLeafAnchorFallback(certificateCount: 2))

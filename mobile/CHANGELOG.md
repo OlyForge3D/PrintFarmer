@@ -6,6 +6,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Added
 
+- **Explicit trust confirmation for self-signed LAN servers** — The first HTTPS
+  connection to a private server with a self-signed certificate now requires
+  confirming its SHA-256 public-key fingerprint. Confirmed fingerprints are
+  pinned in the device Keychain; an unexpected certificate change is blocked
+  until the old certificate is explicitly forgotten in **Manage Servers**.
 - **Lock-screen notification actions for job attention** — Job-attention pushes
   now register `Pause`, `Resume`, `Cancel`, `Snooze`, and `Open Swap` actions
   directly on the lock screen / Notification Center banner, so you can react

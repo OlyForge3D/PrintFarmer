@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var minimumSplashElapsed = false
     @State private var disconnectTask: Task<Void, Never>?
     @State private var staleRegistrySignOutTask: Task<Void, Never>?
+    @State private var certificateTrustPresentation = CertificateTrustPresentation.shared
 
     var body: some View {
         VStack(spacing: 0) {
@@ -98,6 +99,8 @@ struct RootView: View {
             }
         }
         .onChange(of: services.activeServerGeneration) {
+            certificateTrustPresentation.respond(accepted: false)
+            Task { await CertificateTrustCoordinator.shared.cancelPendingConfirmations() }
             pendingReadyMonitor.stopMonitoring()
             connectionMonitor.stop()
             router.pendingReadyCount = 0
@@ -114,6 +117,20 @@ struct RootView: View {
             connectionMonitor.stop()
             disconnectTask?.cancel()
             staleRegistrySignOutTask?.cancel()
+        }
+        .sheet(
+            item: Binding(
+                get: { certificateTrustPresentation.request },
+                set: { request in
+                    if request == nil {
+                        certificateTrustPresentation.respond(accepted: false)
+                    }
+                }
+            )
+        ) { request in
+            CertificateTrustView(request: request) { accepted in
+                certificateTrustPresentation.respond(accepted: accepted)
+            }
         }
     }
 

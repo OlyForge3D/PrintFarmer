@@ -61,6 +61,30 @@ keeps its own Keychain-stored credentials.
 - Switching servers rebuilds the app's API, authentication, and SignalR services
   for the newly active server.
 
+### HTTPS Certificate Trust
+
+Public servers require HTTPS with normal system certificate trust. Cleartext
+HTTP remains available only for local-network addresses and names such as
+`localhost` and `.local`.
+
+For a private HTTPS server using a self-signed certificate, the app pauses the
+first connection and asks you to verify its SHA-256 public-key fingerprint
+before sending credentials. Compare the displayed value with one obtained
+directly from the server:
+
+```bash
+openssl x509 -in cert.pem -pubkey -noout \
+  | openssl pkey -pubin -outform der \
+  | openssl dgst -sha256
+```
+
+The certificate must contain a subject alternative name matching the connected
+host; certificates used with an IP address need that address as an IP SAN.
+Confirmed pins are device-only. If a certificate key changes, the app blocks
+the connection. After independently verifying an intentional replacement, open
+**Settings** → **Manage Servers**, edit the server, and choose **Forget Trusted
+Certificate** before reconnecting.
+
 ### Development URL Seeding
 
 `PRINTFARMER_API_URL` is now a development seed/override for the server registry,

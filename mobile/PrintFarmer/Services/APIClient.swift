@@ -182,16 +182,32 @@ enum TLSCertificateProfile {
 /// Implements both session-level and task-level challenge handlers to cover all
 /// URLSession API surfaces (completion-handler and async/await).
 final class PrivateNetworkSessionDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
-    private static let ipv4Pattern = #"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#
-    private enum TrustSource: String {
-        case systemTrust
-        case leafAnchor
+    private final class LocalTrustChallenge: @unchecked Sendable {
+        let serverTrust: SecTrust
+        let host: String
+        let port: Int
+        let authenticationMethod: String
+        let completion: (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+
+        init(
+            serverTrust: SecTrust,
+            host: String,
+            port: Int,
+            authenticationMethod: String,
+            completion: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+        ) {
+            self.serverTrust = serverTrust
+            self.host = host
+            self.port = port
+            self.authenticationMethod = authenticationMethod
+            self.completion = completion
+        }
     }
-    private struct TrustEvaluationResult {
-        let credential: URLCredential?
-        let trustError: String?
-        let trustSource: String?
-        let certificateWarning: String?
+
+    private let trustCoordinator: CertificateTrustCoordinator
+
+    init(trustCoordinator: CertificateTrustCoordinator = .shared) {
+        self.trustCoordinator = trustCoordinator
     }
 
     // MARK: - Session-level challenge (covers completion-handler API)
@@ -230,124 +246,82 @@ final class PrivateNetworkSessionDelegate: NSObject, URLSessionDelegate, URLSess
             return
         }
 
-        let host = challenge.protectionSpace.host
-        let isPrivate = Self.isPrivateHost(host)
-
-        if isPrivate {
-            let result = credentialForPrivateHost(serverTrust, host: host)
-            if let credential = result.credential {
-                TLSDiagnostics.recordChallenge(
-                    host: host,
-                    authenticationMethod: challenge.protectionSpace.authenticationMethod,
-                    disposition: "useCredential",
-                    trustSource: result.trustSource,
-                    certificateWarning: result.certificateWarning
-                )
-                completionHandler(.useCredential, credential)
-            } else {
-                TLSDiagnostics.recordChallenge(
-                    host: host,
-                    authenticationMethod: challenge.protectionSpace.authenticationMethod,
-                    disposition: "cancelAuthenticationChallenge",
-                    trustSource: result.trustSource,
-                    trustError: result.trustError,
-                    certificateWarning: result.certificateWarning
-                )
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
-        } else {
+        let protectionSpace = challenge.protectionSpace
+        let host = protectionSpace.host
+        switch NetworkHostClassifier.classify(host) {
+        case .public:
             TLSDiagnostics.recordChallenge(
                 host: host,
-                authenticationMethod: challenge.protectionSpace.authenticationMethod,
+                authenticationMethod: protectionSpace.authenticationMethod,
                 disposition: "defaultHandling"
             )
             completionHandler(.performDefaultHandling, nil)
+        case .invalid:
+            TLSDiagnostics.recordChallenge(
+                host: host,
+                authenticationMethod: protectionSpace.authenticationMethod,
+                disposition: "cancelAuthenticationChallenge",
+                trustError: "invalid host"
+            )
+            completionHandler(.cancelAuthenticationChallenge, nil)
+        case .local:
+            let localChallenge = LocalTrustChallenge(
+                serverTrust: serverTrust,
+                host: host,
+                port: protectionSpace.port,
+                authenticationMethod: protectionSpace.authenticationMethod,
+                completion: completionHandler
+            )
+            Task {
+                let outcome = await trustCoordinator.evaluate(
+                    serverTrust: localChallenge.serverTrust,
+                    host: localChallenge.host,
+                    port: localChallenge.port
+                )
+                switch outcome {
+                case .useSystemTrust:
+                    TLSDiagnostics.recordChallenge(
+                        host: localChallenge.host,
+                        authenticationMethod: localChallenge.authenticationMethod,
+                        disposition: "useCredential",
+                        trustSource: "systemTrust"
+                    )
+                    localChallenge.completion(.useCredential, URLCredential(trust: localChallenge.serverTrust))
+                case .usePinnedLeaf:
+                    TLSDiagnostics.recordChallenge(
+                        host: localChallenge.host,
+                        authenticationMethod: localChallenge.authenticationMethod,
+                        disposition: "useCredential",
+                        trustSource: "confirmedSPKIPin"
+                    )
+                    localChallenge.completion(.useCredential, URLCredential(trust: localChallenge.serverTrust))
+                case .certificateNotTrusted(let endpoint):
+                    TLSDiagnostics.recordChallenge(
+                        host: localChallenge.host,
+                        authenticationMethod: localChallenge.authenticationMethod,
+                        disposition: "cancelAuthenticationChallenge",
+                        trustError: "certificateNotTrusted:\(endpoint)"
+                    )
+                    localChallenge.completion(.cancelAuthenticationChallenge, nil)
+                case .certificateChanged(let endpoint):
+                    TLSDiagnostics.recordChallenge(
+                        host: localChallenge.host,
+                        authenticationMethod: localChallenge.authenticationMethod,
+                        disposition: "cancelAuthenticationChallenge",
+                        trustError: "certificateChanged:\(endpoint)"
+                    )
+                    localChallenge.completion(.cancelAuthenticationChallenge, nil)
+                }
+            }
         }
     }
 
     static func isPrivateHost(_ host: String) -> Bool {
-        isIPv4Address(host) || host.hasSuffix(".local") || host == "localhost"
-    }
-
-    static func isIPv4Address(_ host: String) -> Bool {
-        host.range(of: ipv4Pattern, options: .regularExpression) != nil
+        NetworkHostClassifier.classify(host) == .local
     }
 
     static func shouldAttemptLeafAnchorFallback(certificateCount: Int) -> Bool {
         certificateCount <= 1
-    }
-
-    private func credentialForPrivateHost(_ serverTrust: SecTrust, host: String) -> TrustEvaluationResult {
-        let policy = SecPolicyCreateSSL(true, host as CFString)
-        SecTrustSetPolicies(serverTrust, policy)
-
-        let certificateCount = SecTrustGetCertificateCount(serverTrust)
-        let leafCertificate = (SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate])?.first
-        let certificateWarning = leafCertificate.flatMap(TLSCertificateProfile.warningSummary(for:))
-
-        var systemTrustError: CFError?
-        if SecTrustEvaluateWithError(serverTrust, &systemTrustError) {
-            return TrustEvaluationResult(
-                credential: URLCredential(trust: serverTrust),
-                trustError: nil,
-                trustSource: TrustSource.systemTrust.rawValue,
-                certificateWarning: certificateWarning
-            )
-        }
-
-        guard Self.shouldAttemptLeafAnchorFallback(certificateCount: certificateCount) else {
-            return TrustEvaluationResult(
-                credential: nil,
-                trustError: systemTrustError?.localizedDescription ?? "trust evaluation failed",
-                trustSource: nil,
-                certificateWarning: certificateWarning
-            )
-        }
-
-        guard let leafCertificate else {
-            return TrustEvaluationResult(
-                credential: nil,
-                trustError: systemTrustError?.localizedDescription ?? "missing leaf certificate",
-                trustSource: nil,
-                certificateWarning: nil
-            )
-        }
-
-        SecTrustSetPolicies(serverTrust, policy)
-        SecTrustSetAnchorCertificates(serverTrust, [leafCertificate] as CFArray)
-        SecTrustSetAnchorCertificatesOnly(serverTrust, true)
-
-        var leafAnchorError: CFError?
-        guard SecTrustEvaluateWithError(serverTrust, &leafAnchorError) else {
-            #if DEBUG
-            let systemMessage = systemTrustError?.localizedDescription ?? "unknown error"
-            let leafMessage = leafAnchorError?.localizedDescription ?? "unknown error"
-            print("TLS trust evaluation failed for \(host): system=\(systemMessage) leaf-anchor=\(leafMessage)")
-            #endif
-            let combinedError: String
-            if let systemMessage = systemTrustError?.localizedDescription,
-               let leafMessage = leafAnchorError?.localizedDescription,
-               systemMessage != leafMessage {
-                combinedError = "system trust failed: \(systemMessage); leaf-anchor trust failed: \(leafMessage)"
-            } else {
-                combinedError = leafAnchorError?.localizedDescription
-                    ?? systemTrustError?.localizedDescription
-                    ?? "trust evaluation failed"
-            }
-            return TrustEvaluationResult(
-                credential: nil,
-                trustError: combinedError,
-                trustSource: nil,
-                certificateWarning: certificateWarning
-            )
-        }
-
-        return TrustEvaluationResult(
-            credential: URLCredential(trust: serverTrust),
-            trustError: nil,
-            trustSource: TrustSource.leafAnchor.rawValue,
-            certificateWarning: certificateWarning
-        )
     }
 }
 
@@ -448,7 +422,7 @@ actor APIClient {
     static let serverURLKey = "pf_server_url"
 
     /// Normalizes user-entered server URLs into a canonical string.
-    /// Bare hosts/IPs default to `https://`; explicit `http://` is preserved.
+    /// Bare hosts/IPs default to `https://`; cleartext is limited to local hosts.
     static func normalizedServerURLString(_ raw: String) -> String? {
         normalizeServerURLString(raw, upgradeLegacyIPHTTP: false)
     }
@@ -486,12 +460,23 @@ actor APIClient {
             return nil
         }
 
-        if upgradeLegacyIPHTTP, scheme == "http", isIPv4Address(host) {
-            components.scheme = "https"
+        guard let canonicalHost = NetworkHostClassifier.canonicalize(host),
+              canonicalHost.classification != .invalid else {
+            return nil
+        }
+
+        if scheme == "http" {
+            if upgradeLegacyIPHTTP {
+                if canonicalHost.classification == .public || canonicalHost.isIPLiteral {
+                    components.scheme = "https"
+                }
+            } else if canonicalHost.classification != .local {
+                return nil
+            }
         }
         let effectiveScheme = components.scheme?.lowercased() ?? scheme
         components.scheme = effectiveScheme
-        components.host = host.lowercased()
+        components.host = canonicalHost.value
         if (effectiveScheme == "https" && components.port == 443)
             || (effectiveScheme == "http" && components.port == 80) {
             components.port = nil
@@ -500,13 +485,6 @@ actor APIClient {
         guard let url = components.url else { return nil }
         let absoluteString = url.absoluteString
         return absoluteString.hasSuffix("/") ? String(absoluteString.dropLast()) : absoluteString
-    }
-
-    private static func isIPv4Address(_ host: String) -> Bool {
-        host.range(
-            of: #"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$"#,
-            options: .regularExpression
-        ) != nil
     }
 
     /// ISO 8601 formatter with fractional seconds (matches ASP.NET Core output).
@@ -1249,6 +1227,13 @@ actor APIClient {
     }
 
     private func performRequest(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        if let url = request.url,
+           let scheme = url.scheme?.lowercased(),
+           scheme == "http",
+           let host = url.host,
+           NetworkHostClassifier.classify(host) != .local {
+            throw NetworkError.insecureTransportBlocked(host: host)
+        }
         let requestHost = request.url?.host
         TLSDiagnostics.beginRequest(host: requestHost)
         do {
@@ -1257,10 +1242,19 @@ actor APIClient {
             return result
         } catch let error as URLError {
             var diagnosticUserInfo = error.userInfo
-            if let summary = TLSDiagnostics.recentSummary(for: requestHost) {
+            let summary = TLSDiagnostics.recentSummary(for: requestHost)
+            if let summary {
                 diagnosticUserInfo[TLSDiagnostics.summaryUserInfoKey] = summary
             }
             let diagnosticError = URLError(error.code, userInfo: diagnosticUserInfo)
+            if let marker = summary?.components(separatedBy: "trust=certificateChanged:").last,
+               summary?.contains("trust=certificateChanged:") == true {
+                throw NetworkError.certificateChanged(endpoint: marker.components(separatedBy: ",").first ?? marker)
+            }
+            if let marker = summary?.components(separatedBy: "trust=certificateNotTrusted:").last,
+               summary?.contains("trust=certificateNotTrusted:") == true {
+                throw NetworkError.certificateNotTrusted(endpoint: marker.components(separatedBy: ",").first ?? marker)
+            }
             let isPrivateHTTPSRequest = request.url?.scheme?.lowercased() == "https"
                 && (request.url?.host.map(PrivateNetworkSessionDelegate.isPrivateHost) ?? false)
 
@@ -1439,6 +1433,9 @@ enum NetworkError: LocalizedError, Sendable {
     case transportError(URLError)
     case authFailed(String)
     case staleServerResponse
+    case insecureTransportBlocked(host: String)
+    case certificateChanged(endpoint: String)
+    case certificateNotTrusted(endpoint: String)
 
     var errorDescription: String? {
         switch self {
@@ -1492,6 +1489,12 @@ enum NetworkError: LocalizedError, Sendable {
             return "\(base) [\(details.joined(separator: "] ["))]"
         case .authFailed(let message): return message
         case .staleServerResponse: return "Ignored response from a previous server selection"
+        case .insecureTransportBlocked(let host):
+            return "Cleartext connections to \(host) are blocked. Use HTTPS for public servers."
+        case .certificateChanged(let endpoint):
+            return "The certificate for \(endpoint) changed. Review the server in Server Management and forget the old trusted certificate only after verifying the replacement."
+        case .certificateNotTrusted(let endpoint):
+            return "The certificate for \(endpoint) was not trusted."
         }
     }
 

@@ -16,6 +16,14 @@ final class ServerRegistryTests: XCTestCase {
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
     }
 
+    private actor PinPurgeRecorder {
+        private(set) var values: (serverID: UUID?, remainingIDs: [UUID]) = (nil, [])
+
+        func record(server: RegisteredServer, remaining: [RegisteredServer]) {
+            values = (server.id, remaining.map(\.id))
+        }
+    }
+
     override func tearDown() async throws {
         mockAPIClient = nil
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
@@ -83,6 +91,45 @@ final class ServerRegistryTests: XCTestCase {
 
         XCTAssertEqual(registry.servers.map(\.id), [second.id])
         XCTAssertEqual(registry.activeServerID, second.id)
+    }
+
+    func testRemovePurgesCertificatePinBeforeDroppingRegistryEntry() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
+        let recorder = PinPurgeRecorder()
+        registry.certificatePinPurgeHandler = { server, remaining in
+            await recorder.record(server: server, remaining: remaining)
+            return true
+        }
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://192.168.1.10")!
+        )
+
+        try await registry.purgeAndRemove(id: server.id)
+        let recorded = await recorder.values
+
+        XCTAssertEqual(recorded.serverID, server.id)
+        XCTAssertTrue(recorded.remainingIDs.isEmpty)
+        XCTAssertTrue(registry.servers.isEmpty)
+    }
+
+    func testCertificatePinPurgeFailureRetainsRegistryEntry() async throws {
+        let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
+        registry.snapshotPurgeHandler = { _ in .purged }
+        registry.certificatePinPurgeHandler = { _, _ in false }
+        let server = try registry.add(
+            displayName: "Farm",
+            baseURL: URL(string: "https://192.168.1.10")!
+        )
+
+        do {
+            try await registry.purgeAndRemove(id: server.id)
+            XCTFail("Expected certificate pin purge failure")
+        } catch {
+            XCTAssertEqual(error as? ServerRegistryError, .certificatePinPurgeFailed(server.id))
+        }
+        XCTAssertEqual(registry.servers.map(\.id), [server.id])
     }
 
     func testSetActiveCanSelectAndClearActiveServer() throws {
@@ -203,12 +250,12 @@ final class ServerRegistryTests: XCTestCase {
 
     func testDefaultHTTPPortIsDeduplicated() throws {
         let registry = ServerRegistry(userDefaults: userDefaults, migrateLegacyServerURL: false)
-        _ = try registry.add(displayName: "One", baseURL: URL(string: "http://print.example.com")!)
+        _ = try registry.add(displayName: "One", baseURL: URL(string: "http://printfarmer.local")!)
 
         XCTAssertThrowsError(
-            try registry.add(displayName: "Duplicate", baseURL: URL(string: "http://print.example.com:80")!)
+            try registry.add(displayName: "Duplicate", baseURL: URL(string: "http://printfarmer.local:80")!)
         ) { error in
-            XCTAssertEqual(error as? ServerRegistryError, .duplicateURL("http://print.example.com"))
+            XCTAssertEqual(error as? ServerRegistryError, .duplicateURL("http://printfarmer.local"))
         }
     }
 
