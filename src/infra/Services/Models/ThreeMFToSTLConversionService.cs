@@ -450,6 +450,16 @@ public class ThreeMfToStlConversionService(ILogger<ThreeMfToStlConversionService
 
         _logger.LogInformation("Grid layout: {GridRows} rows × {GridCols} columns", gridRows, gridCols);
 
+        (float[] colWidths, float[] rowHeights) = CalculateCellSizes(sortedComponents, gridCols, gridRows);
+        (float[] colPositions, float[] rowPositions) = CalculateGridPositions(colWidths, rowHeights, padding);
+
+        ApplyPositionsToComponents(sortedComponents, gridCols, colPositions, rowPositions);
+        SyncGridOffsetsBack(components, sortedComponents);
+    }
+
+    private static (float[] ColWidths, float[] RowHeights) CalculateCellSizes(
+        List<ComponentData> sortedComponents, int gridCols, int gridRows)
+    {
         // Calculate column widths and row heights for better packing
         float[] colWidths = new float[gridCols];
         float[] rowHeights = new float[gridRows];
@@ -464,24 +474,36 @@ public class ThreeMfToStlConversionService(ILogger<ThreeMfToStlConversionService
             rowHeights[row] = Math.Max(rowHeights[row], sortedComponents[i].Length);
         }
 
+        return (colWidths, rowHeights);
+    }
+
+    private static (float[] ColPositions, float[] RowPositions) CalculateGridPositions(
+        float[] colWidths, float[] rowHeights, float padding)
+    {
         // Calculate positions based on accumulated widths and heights
-        float[] colPositions = new float[gridCols];
-        float[] rowPositions = new float[gridRows];
+        float[] colPositions = new float[colWidths.Length];
+        float[] rowPositions = new float[rowHeights.Length];
 
         float accum = 0;
-        for (int col = 0; col < gridCols; col++)
+        for (int col = 0; col < colWidths.Length; col++)
         {
             colPositions[col] = accum;
             accum += colWidths[col] + padding;
         }
 
         accum = 0;
-        for (int row = 0; row < gridRows; row++)
+        for (int row = 0; row < rowHeights.Length; row++)
         {
             rowPositions[row] = accum;
             accum += rowHeights[row] + padding;
         }
 
+        return (colPositions, rowPositions);
+    }
+
+    private void ApplyPositionsToComponents(
+        List<ComponentData> sortedComponents, int gridCols, float[] colPositions, float[] rowPositions)
+    {
         // Apply grid positions to components
         for (int i = 0; i < sortedComponents.Count; i++)
         {
@@ -494,7 +516,10 @@ public class ThreeMfToStlConversionService(ILogger<ThreeMfToStlConversionService
 
             _logger.LogInformation("Component {I}: grid position ({Row}, {Col}) → offset ({Value3:F1}, {Value4:F1})", i, row, col, sortedComponents[i].GridOffsetX, sortedComponents[i].GridOffsetY);
         }
+    }
 
+    private static void SyncGridOffsetsBack(List<ComponentData> components, List<ComponentData> sortedComponents)
+    {
         // Re-sync back to original components list
         for (int i = 0; i < components.Count; i++)
         {

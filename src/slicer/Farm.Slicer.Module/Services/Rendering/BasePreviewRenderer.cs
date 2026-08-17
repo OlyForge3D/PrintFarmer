@@ -781,7 +781,18 @@ public abstract class BasePreviewRenderer
     // Computes smooth, area‑weighted normals per vertex (no geometry smoothing, just shading).
     protected void ComputeVertexNormals(NormalizedMesh mesh, RenderOptions meshOptions)
     {
-        // Precompute face normals
+        Vector3[] faceNormals = ComputeFaceNormals(mesh);
+        List<int>[] vertexFaces = BuildVertexFaceAdjacency(mesh);
+        float cosThresh = MathF.Cos(MathF.PI * meshOptions.NormalSmoothingAngleDeg / 180f);
+
+        for (int v = 0; v < mesh.Vertices.Count; v++)
+        {
+            mesh.Normals[v] = ComputeSmoothedVertexNormal(vertexFaces[v], faceNormals, cosThresh);
+        }
+    }
+
+    private static Vector3[] ComputeFaceNormals(NormalizedMesh mesh)
+    {
         var faceNormals = new Vector3[mesh.Faces.Count];
         for (int fi = 0; fi < mesh.Faces.Count; fi++)
         {
@@ -794,7 +805,11 @@ public abstract class BasePreviewRenderer
             faceNormals[fi] = fn.LengthSquared() < 1e-12f ? Vector3.UnitZ : Vector3.Normalize(fn);
         }
 
-        // Build adjacency list (faces touching each vertex)
+        return faceNormals;
+    }
+
+    private static List<int>[] BuildVertexFaceAdjacency(NormalizedMesh mesh)
+    {
         var vertexFaces = new List<int>[mesh.Vertices.Count];
         for (int i = 0; i < vertexFaces.Length; i++)
         {
@@ -809,35 +824,36 @@ public abstract class BasePreviewRenderer
             vertexFaces[f.Indices[2]].Add(fi);
         }
 
-        float cosThresh = MathF.Cos(MathF.PI * meshOptions.NormalSmoothingAngleDeg / 180f);
+        return vertexFaces;
+    }
 
-        for (int v = 0; v < mesh.Vertices.Count; v++)
+    // Area-weighted average of adjacent face normals, discarding faces whose normal deviates too
+    // far from the running sum (crease-aware smoothing), with a flat-shading fallback when the
+    // averaged normal degenerates to (near) zero.
+    private static Vector3 ComputeSmoothedVertexNormal(List<int> faces, Vector3[] faceNormals, float cosThresh)
+    {
+        if (faces.Count == 0)
         {
-            List<int> faces = vertexFaces[v];
-            if (faces.Count == 0)
-            {
-                mesh.Normals[v] = Vector3.UnitZ;
-                continue;
-            }
-
-            Vector3 sum = Vector3.Zero;
-            foreach (int fi in faces)
-            {
-                Vector3 fn = faceNormals[fi];
-
-                if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
-                {
-                    sum += fn;
-                }
-            }
-
-            if (sum.LengthSquared() < 1e-12f)
-            {
-                sum = faceNormals[faces[0]];
-            }
-
-            mesh.Normals[v] = Vector3.Normalize(sum);
+            return Vector3.UnitZ;
         }
+
+        Vector3 sum = Vector3.Zero;
+        foreach (int fi in faces)
+        {
+            Vector3 fn = faceNormals[fi];
+
+            if (sum == Vector3.Zero || Vector3.Dot(Vector3.Normalize(sum), fn) >= cosThresh)
+            {
+                sum += fn;
+            }
+        }
+
+        if (sum.LengthSquared() < 1e-12f)
+        {
+            sum = faceNormals[faces[0]];
+        }
+
+        return Vector3.Normalize(sum);
     }
 
     // --------------------------------------------------------
