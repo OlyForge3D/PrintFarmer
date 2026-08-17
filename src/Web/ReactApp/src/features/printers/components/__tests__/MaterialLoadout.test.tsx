@@ -9,10 +9,11 @@ const setSpool = vi.fn();
 const clearSpool = vi.fn();
 const coverage = vi.fn();
 const printerDetails = vi.fn();
+const pending = vi.hoisted(() => ({ set: false, clear: false }));
 
 vi.mock('@/common/hooks/useApi', () => ({
-  useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
-  useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
+  useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: pending.set }),
+  useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: pending.clear }),
   usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
 
@@ -77,6 +78,8 @@ describe('MaterialLoadout', () => {
     clearSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
     printerDetails.mockReset().mockReturnValue({ data: undefined });
+    pending.set = false;
+    pending.clear = false;
   });
 
   it('renders one slot per physical filament position', () => {
@@ -162,7 +165,9 @@ describe('MaterialLoadout', () => {
     });
 
     fireEvent.click(screen.getByTestId('loadout-slot-1'));
-    expect(screen.getByRole('button', { name: 'Change' })).toBeDisabled();
+    const change = screen.getByRole('button', { name: 'Change' });
+    expect(change).not.toBeDisabled();
+    expect(change).toHaveAttribute('aria-disabled', 'true');
 
     const clear = screen.getByRole('button', { name: 'Clear' });
     expect(clear).toBeEnabled();
@@ -225,7 +230,9 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
+    expect(assign).toHaveAttribute('tabindex', '0');
     expect(screen.getByText(/Printer revision unavailable/)).toBeInTheDocument();
 
     fireEvent.click(assign);
@@ -237,7 +244,7 @@ describe('MaterialLoadout', () => {
     const { rerender } = renderLoadout({ reviewedRowVersion: undefined });
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
-    expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Assign' })).toHaveAttribute('aria-disabled', 'true');
 
     printerDetails.mockReturnValue({ data: { rowVersion: 'detail-rev-1' } });
     rerender(
@@ -375,12 +382,11 @@ describe('MaterialLoadout', () => {
     );
   });
 
-  it('renders nothing for a printer with a single filament source', () => {
-    const { container } = render(
-      <MaterialLoadout printerId="printer-1" toolheads={[persistedQidiBox[0]]} />,
-    );
+  it('renders a single-slot rail for a printer with one physical toolhead', () => {
+    renderLoadout({ mmuStatus: undefined, toolheads: [persistedQidiBox[0]] });
 
-    expect(container).toBeEmptyDOMElement();
+    const rail = screen.getByTestId('material-loadout');
+    expect(within(rail).getAllByRole('button')).toHaveLength(1);
   });
 
   it('gates spool mutation on persisted topology for a live-MMU printer (blocker 2)', () => {
@@ -393,7 +399,10 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    // explainedDisabled: not natively disabled, but aria-disabled and inert.
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
+    expect(assign).toHaveAttribute('tabindex', '0');
     expect(
       screen.getByText(/Materials topology not yet loaded/),
     ).toBeInTheDocument();
@@ -415,10 +424,52 @@ describe('MaterialLoadout', () => {
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
     expect(screen.getByText(/Materials topology not yet loaded/)).toBeInTheDocument();
     fireEvent.click(assign);
     expect(setSpool).not.toHaveBeenCalled();
+  });
+
+  it('leaves Assign fully enabled when nothing blocks it', () => {
+    // When canMutate=true, slot not disabled, and not busy — button is fully enabled.
+    renderLoadout();
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toBeEnabled();
+    expect(assign).not.toHaveAttribute('aria-disabled');
+    expect(assign).not.toHaveAttribute('tabindex', '0');
+  });
+
+  it('uses native disabled (not explainedDisabled) when only busy', () => {
+    // When busy (isPending) but canMutate=true and slot not disabled, the button
+    // must be natively disabled (out of tab order) — NOT explainedDisabled.
+    // A transient in-flight state needs no explanation and should not linger focusable.
+    pending.set = true;
+    renderLoadout();
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toBeDisabled();
+    expect(assign).not.toHaveAttribute('aria-disabled', 'true');
+    expect(assign).not.toHaveAttribute('tabindex', '0');
+  });
+
+  it('associates blocked buttons with an accessible description via aria-describedby', () => {
+    // When canMutate is false, the reason text rendered in the drawer must be
+    // programmatically associated with the button so screen readers announce it.
+    renderLoadout({ reviewedRowVersion: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toHaveAttribute('aria-describedby', 'loadout-action-desc-printer-1');
+    const desc = document.getElementById('loadout-action-desc-printer-1');
+    expect(desc).toBeInTheDocument();
+    expect(desc).toHaveTextContent(/revision unavailable/i);
   });
 
   it('keeps external hotend testid distinct from the first MMU gate at G-code 0 (blocker 5)', () => {
@@ -491,7 +542,8 @@ describe('MaterialLoadout', () => {
     expect(within(drawer).getByText('Disabled')).toBeInTheDocument();
 
     const assign = screen.getByRole('button', { name: 'Assign' });
-    expect(assign).toBeDisabled();
+    expect(assign).not.toBeDisabled();
+    expect(assign).toHaveAttribute('aria-disabled', 'true');
     fireEvent.click(assign);
     expect(screen.queryByTestId('spool-picker')).not.toBeInTheDocument();
     expect(setSpool).not.toHaveBeenCalled();
@@ -681,5 +733,121 @@ describe('MaterialLoadout', () => {
 
     const rail = screen.getByTestId('material-loadout');
     expect(within(rail).getAllByRole('button')).toHaveLength(4);
+  });
+
+  it('renders a single-slot rail for a single-toolhead printer', () => {
+    const singleToolhead: ToolheadDto[] = [
+      { id: 'th-0', index: 0, name: 'Hotend', toolheadType: 'Physical', currentMaterial: 'PLA', currentFilamentColor: '#00ff00' } as ToolheadDto,
+    ];
+    renderLoadout({ mmuStatus: undefined, toolheads: singleToolhead });
+
+    const rail = screen.getByTestId('material-loadout');
+    expect(within(rail).getAllByRole('button')).toHaveLength(1);
+    expect(screen.getByTestId('loadout-slot-0')).toBeInTheDocument();
+  });
+
+  it('marks the active slot for an MMU gate with filament loaded', () => {
+    const status = {
+      ...mmu([gate(0), gate(1), gate(2), gate(3)]),
+      activeGate: 2,
+      activeTool: 0,
+      filamentState: 'Loaded',
+    };
+    renderLoadout({ mmuStatus: status });
+
+    const slot2 = screen.getByTestId('loadout-slot-2');
+    expect(slot2).toHaveAttribute('data-active', 'loaded');
+    expect(slot2).toHaveAttribute('aria-current', 'true');
+  });
+
+  it('marks the active slot as selected (not loaded) when filamentState is Unloaded', () => {
+    const status = {
+      ...mmu([gate(0), gate(1), gate(2), gate(3)]),
+      activeGate: 1,
+      activeTool: 0,
+      filamentState: 'Unloaded',
+    };
+    renderLoadout({ mmuStatus: status });
+
+    const slot1 = screen.getByTestId('loadout-slot-1');
+    expect(slot1).toHaveAttribute('data-active', 'selected');
+  });
+
+  it('marks the active slot for a toolchanger using activeTool', () => {
+    const status = {
+      ...mmu([gate(0), gate(1)], MmuProtocol.SnapmakerU1),
+      activeGate: 1,
+      activeTool: 1,
+      filamentState: 'Loaded',
+    };
+    renderLoadout({ mmuStatus: status, toolheads: undefined });
+
+    const slot1 = screen.getByTestId('loadout-slot-1');
+    expect(slot1).toHaveAttribute('data-active', 'loaded');
+  });
+
+  it('does not mark any slot active when sentinel is -1', () => {
+    const status = {
+      ...mmu([gate(0), gate(1), gate(2), gate(3)]),
+      activeGate: -1,
+      activeTool: -1,
+    };
+    renderLoadout({ mmuStatus: status });
+
+    const buttons = screen.getAllByRole('button');
+    buttons.forEach((btn) => {
+      expect(btn).not.toHaveAttribute('data-active');
+    });
+  });
+
+  it('does not mark any slot active when sentinel is -2', () => {
+    const status = {
+      ...mmu([gate(0), gate(1), gate(2), gate(3)]),
+      activeGate: -2,
+      activeTool: -2,
+    };
+    renderLoadout({ mmuStatus: status });
+
+    const buttons = screen.getAllByRole('button');
+    buttons.forEach((btn) => {
+      expect(btn).not.toHaveAttribute('data-active');
+    });
+  });
+
+  it('never marks an external slot as active even when activeGate matches its apiIndex', () => {
+    // Use the toolheads-only path (no live gates) which creates external slots
+    // from physical toolheads alongside MmuGate entries.
+    const physicalWithSpool: ToolheadDto[] = [
+      { id: 'th-0', index: 0, name: 'Hotend', toolheadType: 'Physical', currentSpoolId: 5, currentMaterial: 'ABS' } as ToolheadDto,
+      { id: 'th-1', index: 1, name: 'Gate 1', toolheadType: 'MmuGate' } as ToolheadDto,
+      { id: 'th-2', index: 2, name: 'Gate 2', toolheadType: 'MmuGate' } as ToolheadDto,
+    ];
+    // mmuStatus has activeGate=0 but no live gates — forces the toolheads-only path.
+    const status = {
+      enabled: true,
+      mmuType: MmuProtocol.Qidibox,
+      numGates: 0,
+      gates: [],
+      activeGate: 0,
+      activeTool: 0,
+      filamentState: 'Loaded',
+    } as unknown as MmuStatus;
+    renderLoadout({ mmuStatus: status, toolheads: physicalWithSpool });
+
+    const externalSlot = screen.getByTestId('loadout-slot-external-0');
+    expect(externalSlot).not.toHaveAttribute('data-active');
+  });
+
+  it('includes active/loaded status in aria-label', () => {
+    const status = {
+      ...mmu([gate(0), gate(1), gate(2), gate(3)]),
+      activeGate: 1,
+      activeTool: 0,
+      filamentState: 'Loaded',
+    };
+    renderLoadout({ mmuStatus: status });
+
+    const slot1 = screen.getByTestId('loadout-slot-1');
+    expect(slot1.getAttribute('aria-label')).toContain('active and loaded');
   });
 });

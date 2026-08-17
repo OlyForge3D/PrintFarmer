@@ -384,8 +384,8 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // single-spool fallback, so the two guards cannot disagree. Must sit above
   // the `printerId` early-return below to keep hook order stable.
   const materialLoadout = useMemo(
-    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads),
-    [printer?.mmuStatus, printerDetails?.toolheads],
+    () => resolveMaterialLoadout(printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId),
+    [printer?.mmuStatus, printerDetails?.toolheads, printer?.currentSpoolId],
   );
 
   // Guard early after all hooks are called
@@ -1384,6 +1384,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 printerId={printer.id}
                 mmuStatus={displayPrinter?.mmuStatus}
                 toolheads={printerDetails?.toolheads}
+                currentSpoolId={printer?.currentSpoolId}
                 reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });

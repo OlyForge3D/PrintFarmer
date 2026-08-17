@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveMaterialLoadout, isLightColor } from '@/features/printers/utils/materialLoadout';
+import { resolveMaterialLoadout, resolveActiveSlot, isLightColor } from '@/features/printers/utils/materialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
 import { MmuGateStatus } from '@/types/api';
@@ -215,10 +215,28 @@ describe('resolveMaterialLoadout', () => {
     expect(gate0.apiIndex).toBe(1);
   });
 
-  it('returns nothing for a printer with a single filament source', () => {
-    expect(resolveMaterialLoadout(undefined, [toolhead(0)])).toBeNull();
+  it('returns nothing when truly empty (no toolheads, no spool, no MMU)', () => {
     expect(resolveMaterialLoadout(undefined, undefined)).toBeNull();
     expect(resolveMaterialLoadout(mmu([]), undefined)).toBeNull();
+    expect(resolveMaterialLoadout(undefined, [])).toBeNull();
+  });
+
+  it('returns a single-slot loadout for a single-toolhead printer', () => {
+    const loadout = resolveMaterialLoadout(undefined, [toolhead(0)]);
+    expect(loadout).not.toBeNull();
+    expect(loadout!.kind).toBe('tool');
+    expect(loadout!.unitLabel).toBe('Toolhead');
+    expect(loadout!.slots).toHaveLength(1);
+    expect(loadout!.slots[0].label).toBe('T0');
+    expect(loadout!.slots[0].gcodeIndex).toBe(0);
+  });
+
+  it('returns a slot for zero toolheads but a currentSpoolId', () => {
+    const loadout = resolveMaterialLoadout(undefined, undefined, 42);
+    expect(loadout).not.toBeNull();
+    expect(loadout!.slots).toHaveLength(1);
+    expect(loadout!.slots[0].spoolId).toBe(42);
+    expect(loadout!.slots[0].label).toBe('T0');
   });
 
   it('names each vendor unit rather than defaulting everything to AMS', () => {
@@ -287,5 +305,41 @@ describe('isLightColor', () => {
   it('rejects malformed hex without throwing', () => {
     expect(isLightColor('#zz')).toBe(false);
     expect(isLightColor('not-a-color')).toBe(false);
+  });
+});
+
+describe('resolveActiveSlot', () => {
+  it('returns the active gate for an MMU with filament loaded', () => {
+    const status = { ...mmu([gate(0), gate(1), gate(2)]), activeGate: 1, activeTool: 0, filamentState: 'Loaded' };
+    const result = resolveActiveSlot(status, 'gate');
+    expect(result).toEqual({ gcodeIndex: 1, state: 'loaded' });
+  });
+
+  it('returns the active tool for a toolchanger', () => {
+    const status = { ...mmu([gate(0), gate(1)], MmuProtocol.SnapmakerU1), activeTool: 1, activeGate: 1, filamentState: 'Loaded' };
+    const result = resolveActiveSlot(status, 'tool');
+    expect(result).toEqual({ gcodeIndex: 1, state: 'loaded' });
+  });
+
+  it('distinguishes loaded vs selected via filamentState', () => {
+    const status = { ...mmu([gate(0), gate(1)]), activeGate: 0, activeTool: 0, filamentState: 'Unloaded' };
+    const result = resolveActiveSlot(status, 'gate');
+    expect(result).toEqual({ gcodeIndex: 0, state: 'selected' });
+  });
+
+  it('returns null for sentinel -1 (none)', () => {
+    const status = { ...mmu([gate(0)]), activeGate: -1, activeTool: -1 };
+    expect(resolveActiveSlot(status, 'gate')).toBeNull();
+    expect(resolveActiveSlot(status, 'tool')).toBeNull();
+  });
+
+  it('returns null for sentinel -2 (unknown)', () => {
+    const status = { ...mmu([gate(0)]), activeGate: -2, activeTool: -2 };
+    expect(resolveActiveSlot(status, 'gate')).toBeNull();
+    expect(resolveActiveSlot(status, 'tool')).toBeNull();
+  });
+
+  it('returns null when mmuStatus is undefined', () => {
+    expect(resolveActiveSlot(undefined, 'gate')).toBeNull();
   });
 });

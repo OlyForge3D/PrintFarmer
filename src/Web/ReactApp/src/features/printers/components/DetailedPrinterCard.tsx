@@ -220,8 +220,8 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
   // single-spool fallback below. Calling the resolver separately in each
   // branch let the two guards drift out of sync (and did the work twice).
   const materialLoadout = useMemo(
-    () => resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads),
-    [mmuStatus, printerDetails?.toolheads],
+    () => resolveMaterialLoadout(mmuStatus, printerDetails?.toolheads, printer.currentSpoolId),
+    [mmuStatus, printerDetails?.toolheads, printer.currentSpoolId],
   );
 
   const { event: recentFailure, recentEvents = [] } = useFailureDetectionAlert(printer.id);
@@ -996,6 +996,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           printerId={printer.id}
           mmuStatus={mmuStatus}
           toolheads={printerDetails?.toolheads}
+          currentSpoolId={printer.currentSpoolId}
           reviewedRowVersion={spoolReviewedRowVersion ?? undefined}
           compact
           className="mb-2"

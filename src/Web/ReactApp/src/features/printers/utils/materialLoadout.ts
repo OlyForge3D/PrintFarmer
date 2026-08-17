@@ -79,8 +79,8 @@ function isToolchangerProtocol(mmuType?: string): boolean {
   return mmuType === MmuProtocol.SnapmakerU1;
 }
 
-function unitLabelFor(kind: LoadoutKind, mmuType?: string): string {
-  if (kind === 'tool') return 'Toolheads';
+function unitLabelFor(kind: LoadoutKind, mmuType?: string, slotCount?: number): string {
+  if (kind === 'tool') return slotCount === 1 ? 'Toolhead' : 'Toolheads';
   switch (mmuType) {
     case MmuProtocol.Qidibox:
       return 'QidiBox';
@@ -201,6 +201,7 @@ function externalSlotFromToolhead(
 export function resolveMaterialLoadout(
   mmuStatus: MmuStatus | undefined,
   toolheads: ToolheadDto[] | undefined,
+  currentSpoolId?: number | null,
 ): MaterialLoadout | null {
   const liveGates = mmuStatus?.gates;
 
@@ -217,7 +218,7 @@ export function resolveMaterialLoadout(
     const hasResolvedTopology = kind === 'tool' || persistedGateIndices !== null;
     return {
       kind,
-      unitLabel: unitLabelFor(kind, mmuStatus?.mmuType),
+      unitLabel: unitLabelFor(kind, mmuStatus?.mmuType, sorted.length),
       slots: sorted.map((gate, position) =>
         slotFromGate(
           gate,
@@ -231,7 +232,39 @@ export function resolveMaterialLoadout(
     };
   }
 
-  if (!toolheads || toolheads.length <= 1) return null;
+  // Single-toolhead (or zero-toolhead) printers: render a one-slot rail rather
+  // than falling through to the legacy Spool section.
+  if (!toolheads || toolheads.length <= 1) {
+    const single = toolheads?.[0];
+    if (single) {
+      return {
+        kind: 'tool',
+        unitLabel: unitLabelFor('tool', undefined, 1),
+        slots: [slotFromToolhead(single, 0, 'tool')],
+        hasResolvedTopology: true,
+      };
+    }
+    // No persisted toolheads at all — synthesize a slot from printer-level spool
+    // if one exists (Hazard 6: zero toolheads with currentSpoolId still needs a rail).
+    if (currentSpoolId != null && currentSpoolId > 0) {
+      return {
+        kind: 'tool',
+        unitLabel: unitLabelFor('tool', undefined, 1),
+        slots: [{
+          key: 'toolhead-0',
+          apiIndex: 0,
+          gcodeIndex: 0,
+          label: 'T0',
+          material: undefined,
+          color: undefined,
+          spoolId: currentSpoolId,
+          source: 'tool',
+        }],
+        hasResolvedTopology: true,
+      };
+    }
+    return null;
+  }
 
   const gates = toolheads.filter(isMmuGate).sort((a, b) => a.index - b.index);
   const physical = toolheads.filter((t) => !isMmuGate(t)).sort((a, b) => a.index - b.index);
@@ -239,7 +272,7 @@ export function resolveMaterialLoadout(
   if (gates.length === 0) {
     return {
       kind: 'tool',
-      unitLabel: unitLabelFor('tool'),
+      unitLabel: unitLabelFor('tool', undefined, physical.length),
       slots: physical.map((t, position) => slotFromToolhead(t, position, 'tool')),
       hasResolvedTopology: true,
     };
@@ -249,15 +282,58 @@ export function resolveMaterialLoadout(
     .filter((t) => t.currentSpoolId != null || t.currentMaterial != null)
     .map((t) => externalSlotFromToolhead(t));
 
+  // Persisted-only gate fallback (no live MMU status). Slots key gcodeIndex by
+  // position, which coincides with activeGate only when persisted gates are
+  // 0-based and contiguous. In practice activeGate is -1/-2 on this path (no
+  // live MMU data), so the active indicator is intentionally suppressed here.
   return {
     kind: 'gate',
-    unitLabel: unitLabelFor('gate'),
+    unitLabel: unitLabelFor('gate', undefined, gates.length),
     slots: [
       ...gates.map((t, position) => slotFromToolhead(t, position, 'gate')),
       ...externals,
     ],
     hasResolvedTopology: true,
   };
+}
+
+/**
+ * The filament-loaded state on the active slot. `loaded` means filament is
+ * physically engaged (not merely selected); `selected` means the gate/tool is
+ * active but filament may not be engaged; `none` means no slot is active.
+ */
+export type ActiveSlotState = 'loaded' | 'selected' | 'none';
+
+export interface ActiveSlotInfo {
+  /** The live g-code index of the active gate/tool. */
+  gcodeIndex: number;
+  state: ActiveSlotState;
+}
+
+/**
+ * Resolve which slot is active (and whether filament is loaded) from MMU status.
+ *
+ * Hazards addressed:
+ * - Sentinels -1 (none) and -2 (unknown) → returns null.
+ * - External slots must never match → caller checks `slot.source !== 'external'`.
+ * - Uses `filamentState` to distinguish loaded vs merely selected.
+ * - For toolchangers, `activeTool` is used; for MMU/AMS, `activeGate`.
+ */
+export function resolveActiveSlot(
+  mmuStatus: MmuStatus | undefined,
+  kind: LoadoutKind,
+): ActiveSlotInfo | null {
+  if (!mmuStatus) return null;
+
+  const rawIndex = kind === 'tool' ? mmuStatus.activeTool : mmuStatus.activeGate;
+
+  // Hazard 4: sentinels -1 (none) and -2 (unknown) must not map to slot 0.
+  if (rawIndex == null || rawIndex < 0) return null;
+
+  const filament = mmuStatus.filamentState?.toLowerCase();
+  const state: ActiveSlotState = filament === 'loaded' ? 'loaded' : 'selected';
+
+  return { gcodeIndex: rawIndex, state };
 }
 
 /** Determine if a hex color is light enough to need a visible border. */
