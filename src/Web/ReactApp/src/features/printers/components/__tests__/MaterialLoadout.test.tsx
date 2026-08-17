@@ -9,10 +9,11 @@ const setSpool = vi.fn();
 const clearSpool = vi.fn();
 const coverage = vi.fn();
 const printerDetails = vi.fn();
+const pending = vi.hoisted(() => ({ set: false, clear: false }));
 
 vi.mock('@/common/hooks/useApi', () => ({
-  useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: false }),
-  useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: false }),
+  useSetToolheadSpool: () => ({ mutateAsync: setSpool, isPending: pending.set }),
+  useClearToolheadSpool: () => ({ mutateAsync: clearSpool, isPending: pending.clear }),
   usePrinterDetails: (...args: unknown[]) => printerDetails(...args),
 }));
 
@@ -77,6 +78,8 @@ describe('MaterialLoadout', () => {
     clearSpool.mockReset().mockResolvedValue('rev-1');
     coverage.mockReset().mockReturnValue(undefined);
     printerDetails.mockReset().mockReturnValue({ data: undefined });
+    pending.set = false;
+    pending.clear = false;
   });
 
   it('renders one slot per physical filament position', () => {
@@ -428,18 +431,30 @@ describe('MaterialLoadout', () => {
     expect(setSpool).not.toHaveBeenCalled();
   });
 
-  it('uses native disabled (not explainedDisabled) when only busy, not blocked by permission', () => {
-    // When canMutate=true and the slot is not disabled, the Assign button must
-    // be natively enabled (no aria-disabled) — explainedDisabled only activates
-    // for permission/topology blockers, not transient in-flight states.
+  it('leaves Assign fully enabled when nothing blocks it', () => {
+    // When canMutate=true, slot not disabled, and not busy — button is fully enabled.
     renderLoadout();
 
     fireEvent.click(screen.getByTestId('loadout-slot-0'));
     const assign = screen.getByRole('button', { name: 'Assign' });
 
-    // Fully enabled: not native disabled, no aria-disabled, normal tab order.
     expect(assign).toBeEnabled();
     expect(assign).not.toHaveAttribute('aria-disabled');
+    expect(assign).not.toHaveAttribute('tabindex', '0');
+  });
+
+  it('uses native disabled (not explainedDisabled) when only busy', () => {
+    // When busy (isPending) but canMutate=true and slot not disabled, the button
+    // must be natively disabled (out of tab order) — NOT explainedDisabled.
+    // A transient in-flight state needs no explanation and should not linger focusable.
+    pending.set = true;
+    renderLoadout();
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toBeDisabled();
+    expect(assign).not.toHaveAttribute('aria-disabled', 'true');
     expect(assign).not.toHaveAttribute('tabindex', '0');
   });
 
