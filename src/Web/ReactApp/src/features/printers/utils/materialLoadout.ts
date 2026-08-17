@@ -282,6 +282,10 @@ export function resolveMaterialLoadout(
     .filter((t) => t.currentSpoolId != null || t.currentMaterial != null)
     .map((t) => externalSlotFromToolhead(t));
 
+  // Persisted-only gate fallback (no live MMU status). Slots key gcodeIndex by
+  // position, which coincides with activeGate only when persisted gates are
+  // 0-based and contiguous. In practice activeGate is -1/-2 on this path (no
+  // live MMU data), so the active indicator is intentionally suppressed here.
   return {
     kind: 'gate',
     unitLabel: unitLabelFor('gate', undefined, gates.length),

@@ -981,6 +981,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           printerId={printer.id}
           mmuStatus={mmuStatus}
           toolheads={printerDetails?.toolheads}
+          currentSpoolId={printer.currentSpoolId}
           reviewedRowVersion={printerDetails?.rowVersion ?? printer.rowVersion}
           compact
           className="mb-2"

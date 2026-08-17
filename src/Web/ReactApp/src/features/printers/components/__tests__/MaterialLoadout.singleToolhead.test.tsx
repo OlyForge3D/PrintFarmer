@@ -65,17 +65,33 @@ describe('MaterialLoadout — single-toolhead printer (#1665)', () => {
   });
 
   it('renders zero-toolhead printer with currentSpoolId through the rail', () => {
-    // The component's own resolveMaterialLoadout doesn't receive currentSpoolId
-    // (that's passed at the sidebar level), but we verify the component renders
-    // for a single toolhead which is the gate condition.
+    // Zero toolheads (or undefined) + currentSpoolId must synthesize a T0 slot.
+    // Before the fix, the component's internal resolver didn't receive
+    // currentSpoolId, so it returned null and rendered nothing.
     render(
       <MaterialLoadout
         printerId="printer-1"
-        toolheads={singleToolhead}
+        toolheads={[]}
+        currentSpoolId={42}
         reviewedRowVersion="rev-1"
       />,
     );
 
     expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+    expect(screen.getByTestId('loadout-slot-0')).toBeInTheDocument();
+  });
+
+  it('renders zero-toolhead printer with undefined toolheads + currentSpoolId', () => {
+    render(
+      <MaterialLoadout
+        printerId="printer-1"
+        toolheads={undefined}
+        currentSpoolId={7}
+        reviewedRowVersion="rev-1"
+      />,
+    );
+
+    expect(screen.getByTestId('material-loadout')).toBeInTheDocument();
+    expect(screen.getByTestId('loadout-slot-0')).toBeInTheDocument();
   });
 });

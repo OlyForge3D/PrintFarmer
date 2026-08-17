@@ -458,6 +458,20 @@ describe('MaterialLoadout', () => {
     expect(assign).not.toHaveAttribute('tabindex', '0');
   });
 
+  it('associates blocked buttons with an accessible description via aria-describedby', () => {
+    // When canMutate is false, the reason text rendered in the drawer must be
+    // programmatically associated with the button so screen readers announce it.
+    renderLoadout({ reviewedRowVersion: undefined });
+
+    fireEvent.click(screen.getByTestId('loadout-slot-0'));
+    const assign = screen.getByRole('button', { name: 'Assign' });
+
+    expect(assign).toHaveAttribute('aria-describedby', 'loadout-action-desc-printer-1');
+    const desc = document.getElementById('loadout-action-desc-printer-1');
+    expect(desc).toBeInTheDocument();
+    expect(desc).toHaveTextContent(/revision unavailable/i);
+  });
+
   it('keeps external hotend testid distinct from the first MMU gate at G-code 0 (blocker 5)', () => {
     // Persisted-only fallback with an external hotend at physical index 0 and
     // gates starting at persisted index 1 (gcode 0). The two rows must remain

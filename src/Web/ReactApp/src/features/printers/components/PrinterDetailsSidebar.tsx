@@ -1366,6 +1366,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
                 printerId={printer.id}
                 mmuStatus={displayPrinter?.mmuStatus}
                 toolheads={printerDetails?.toolheads}
+                currentSpoolId={printer?.currentSpoolId}
                 reviewedRowVersion={displayPrinter?.rowVersion ?? printer.rowVersion}
                 onSpoolChange={() => {
                   queryClient.invalidateQueries({ queryKey: ['printers', printer.id, 'details'] });

@@ -30,6 +30,8 @@ export interface MaterialLoadoutProps {
   mmuStatus?: MmuStatus;
   /** Persisted toolhead topology; used to translate slot indices for the API. */
   toolheads?: ToolheadDto[];
+  /** Current spool loaded on a single-toolhead printer without AMS/MMU topology. */
+  currentSpoolId?: number | null;
   /** Printer revision required by the optimistic-concurrency spool endpoints. */
   reviewedRowVersion?: string | null;
   /** Denser rendering for the printer card. */
@@ -232,6 +234,7 @@ export function MaterialLoadout({
   printerId,
   mmuStatus,
   toolheads,
+  currentSpoolId,
   reviewedRowVersion,
   compact = false,
   onSpoolChange,
@@ -282,8 +285,8 @@ export function MaterialLoadout({
   }, [capturedFallbackRevision, lockedRevision, selectedKey]);
 
   const loadout = useMemo(
-    () => resolveMaterialLoadout(mmuStatus, toolheads),
-    [mmuStatus, toolheads],
+    () => resolveMaterialLoadout(mmuStatus, toolheads, currentSpoolId),
+    [mmuStatus, toolheads, currentSpoolId],
   );
 
   const activeSlot = useMemo(
@@ -557,6 +560,7 @@ export function MaterialLoadout({
                 disabled={busy || !canMutate || selected.disabled}
                 explainedDisabled={!canMutate || selected.disabled}
                 title={selected.disabled ? disabledSlotReason : blockedReason}
+                aria-describedby={(!canMutate || selected.disabled) ? `loadout-action-desc-${printerId}` : undefined}
                 onClick={() => setPickerOpen(true)}
               >
                 {selected.spoolId != null ? 'Change' : 'Assign'}
@@ -568,6 +572,7 @@ export function MaterialLoadout({
                   disabled={busy || !canMutate}
                   explainedDisabled={!canMutate}
                   title={blockedReason}
+                  aria-describedby={!canMutate ? `loadout-action-desc-${printerId}` : undefined}
                   onClick={() => void handleClear()}
                 >
                   Clear
@@ -575,8 +580,10 @@ export function MaterialLoadout({
               )}
             </div>
           </div>
-          {blockedReason && (
-            <p className="mt-1 text-[10px] text-pf-text-tertiary">{blockedReason}</p>
+          {(blockedReason || (selected?.disabled && disabledSlotReason)) && (
+            <p id={`loadout-action-desc-${printerId}`} className="mt-1 text-[10px] text-pf-text-tertiary">
+              {selected?.disabled ? disabledSlotReason : blockedReason}
+            </p>
           )}
         </div>
       )}
@@ -593,3 +600,4 @@ export function MaterialLoadout({
     </section>
   );
 }
+
