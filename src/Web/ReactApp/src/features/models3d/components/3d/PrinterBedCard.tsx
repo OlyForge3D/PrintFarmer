@@ -257,7 +257,7 @@ export const PrinterBedCard: React.FC<PrinterBedCardProps> = ({
           )}
 
           {/* Error Message */}
-          {status.state === 'Error' && status.state === 'Error' && (
+          {status.state === 'Error' && (
             <div className="bg-pf-error/10 border border-pf-error rounded-sm p-2">
               <p className="text-xs text-pf-error">Error: Check printer status</p>
             </div>

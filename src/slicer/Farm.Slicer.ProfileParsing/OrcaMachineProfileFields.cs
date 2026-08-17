@@ -141,13 +141,14 @@ public static class OrcaMachineProfileFields
     {
         if (root.ValueKind == JsonValueKind.Object)
         {
-            foreach (JsonProperty property in root.EnumerateObject())
+            JsonElement? match = root.EnumerateObject()
+                .Where(p => string.Equals(p.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                .Select(p => (JsonElement?)p.Value)
+                .FirstOrDefault();
+            if (match.HasValue)
             {
-                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
-                {
-                    value = property.Value;
-                    return true;
-                }
+                value = match.Value;
+                return true;
             }
         }
 

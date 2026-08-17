@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PrinterBackend, type Printer, type PrintJobObjectDto } from '@/types/api';
 
@@ -14,9 +14,9 @@ const usePrintJobObjectsMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }))
 );
 const useQueryMock = vi.hoisted(() => vi.fn());
-const excludeObjectMutateMock = vi.hoisted(() => vi.fn());
 const excludePrintJobObjectMock = vi.hoisted(() => vi.fn());
 const getPrinterVersionInfoMock = vi.hoisted(() => vi.fn());
+const setQueryDataMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
@@ -39,10 +39,33 @@ vi.mock('@/services/api', () => ({
   },
 }));
 
+// The real useMutation actually invokes mutationFn/onSuccess/onError, so this fake
+// preserves that contract instead of stubbing `mutate` to a bare spy — otherwise a
+// regression like #1651 (a mutation quietly writing to the wrong cache key, or never
+// calling the API with the right options) would not be caught by any test using it.
+const useMutationMock = vi.hoisted(() =>
+  vi.fn(
+    (options: {
+      mutationFn: (arg?: unknown) => unknown;
+      onSuccess?: (data: unknown, arg?: unknown) => void;
+      onError?: (error: unknown) => void;
+    }) => ({
+      mutate: (arg?: unknown) => {
+        const result = options.mutationFn(arg);
+        Promise.resolve(result).then(
+          (data) => options.onSuccess?.(data, arg),
+          (error) => options.onError?.(error)
+        );
+      },
+      isPending: false,
+    })
+  )
+);
+
 vi.mock('@tanstack/react-query', () => ({
-  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: setQueryDataMock }),
   useQuery: useQueryMock,
-  useMutation: () => ({ mutate: excludeObjectMutateMock, isPending: false }),
+  useMutation: useMutationMock,
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
@@ -130,9 +153,17 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     usePrinterDetailsMock.mockReturnValue({ data: undefined, isLoading: false });
     useSpoolmanConfiguredMock.mockReturnValue({ ready: true });
     usePrintJobObjectsMock.mockReturnValue({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() });
-    excludeObjectMutateMock.mockClear();
     excludePrintJobObjectMock.mockClear();
+    excludePrintJobObjectMock.mockResolvedValue({ success: true });
     getPrinterVersionInfoMock.mockClear();
+    getPrinterVersionInfoMock.mockResolvedValue({
+      firmwareVersion: '9.9.9',
+      backendVersion: '9.9.9',
+      apiVersion: '9.9.9',
+      supported: true,
+      message: '',
+    });
+    setQueryDataMock.mockClear();
 
     useQueryMock.mockImplementation(({ queryKey, enabled }: { queryKey: unknown[]; enabled?: boolean }) => {
       if (queryKey[0] === 'printerStatistics') {
@@ -205,7 +236,75 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
     expect(screen.getByText('7.8.9')).toBeInTheDocument();
   });
 
-  it('renders the Print Objects section with a Skip action when object exclusion is supported and a print is active', () => {
+  it('labels the firmware reading as live-only (not used for calibration) when no recorded identity is returned (#1656)', () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    fireEvent.click(screen.getByText('Version'));
+
+    expect(screen.getByText('Live reading only — not used for calibration eligibility')).toBeInTheDocument();
+    expect(screen.queryByText('Recorded — used for calibration eligibility')).not.toBeInTheDocument();
+  });
+
+  it('labels the firmware reading as the recorded/calibration-eligible identity when the version endpoint returns one (#1656)', () => {
+    useQueryMock.mockImplementation(({ queryKey, enabled }: { queryKey: unknown[]; enabled?: boolean }) => {
+      if (queryKey[0] === 'printerVersion') {
+        return enabled
+          ? {
+              data: {
+                firmwareVersion: '1.2.3',
+                backendVersion: '4.5.6',
+                apiVersion: '7.8.9',
+                supported: true,
+                message: '',
+                recordedFirmwareIdentity: {
+                  family: 'Klipper',
+                  gcodeDialect: 'Klipper',
+                  detectionSource: 'printer',
+                  version: '1.2.3',
+                  detectionVersion: 'moonraker-printer-info-v1',
+                  detectionConfidence: 1,
+                  detectedAtUtc: '2024-01-01T00:00:00.000Z',
+                  verified: false,
+                },
+              },
+              isLoading: false,
+              isFetching: false,
+              refetch: vi.fn(),
+            }
+          : { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
+      }
+      return { data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() };
+    });
+
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    fireEvent.click(screen.getByText('Version'));
+
+    expect(screen.getByText('Recorded — used for calibration eligibility')).toBeInTheDocument();
+    expect(screen.queryByText('Live reading only — not used for calibration eligibility')).not.toBeInTheDocument();
+  });
+
+  // Regression coverage for #1651: after a transient Klippy fault clears, the explicit
+  // "Refresh version info" button must force-refresh instead of re-reading whatever is
+  // still cached, and the recovered result must land back in the same React Query cache
+  // entry the Version section reads from.
+  it('force-refreshes version info and writes the result into the printerVersion query cache on click', async () => {
+    render(<DetailedPrinterCard printer={makePrinter()} />);
+
+    fireEvent.click(screen.getByText('Version'));
+    fireEvent.click(screen.getByRole('button', { name: /refresh version info/i }));
+
+    expect(getPrinterVersionInfoMock).toHaveBeenCalledWith('printer-1', { forceRefresh: true });
+
+    await waitFor(() =>
+      expect(setQueryDataMock).toHaveBeenCalledWith(
+        ['printerVersion', 'printer-1'],
+        expect.objectContaining({ firmwareVersion: '9.9.9', backendVersion: '9.9.9', apiVersion: '9.9.9' })
+      )
+    );
+  });
+
+  it('renders the Print Objects section with a Skip action when object exclusion is supported and a print is active', async () => {
     usePrintJobObjectsMock.mockReturnValue({
       data: { objects: [makeObject({ name: 'part_1' }), makeObject({ name: 'part_2', isCurrent: true })] },
       isLoading: false,
@@ -233,7 +332,7 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Skip object' }));
 
-    expect(excludeObjectMutateMock).toHaveBeenCalledWith('part_1');
+    await waitFor(() => expect(excludePrintJobObjectMock).toHaveBeenCalledWith('printer-1', 'part_1'));
   });
 
   it('does not render the Print Objects section when the backend does not support object exclusion', () => {

@@ -44,6 +44,12 @@ public sealed class PrintersServiceFirmwareDetectTests
         repository
             .Setup(r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Printer?)null);
+        // #1656 round 5 (Vasquez): the id used below is never registered, so the existence
+        // pre-check (added to stop the lock table from growing for nonexistent ids) must also
+        // report it as absent.
+        repository
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
@@ -54,6 +60,175 @@ public sealed class PrintersServiceFirmwareDetectTests
         result.Succeeded.Should().BeFalse();
         result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
         unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    /// <summary>
+    /// #1656 / PR #1660 review round 5 (Vasquez, blocking): DetectFirmwareIdentityAsync is
+    /// reachable from POST /printers/{id}/firmware/detect with the raw, caller-supplied route id.
+    /// Before the fix, a lock-table entry (FirmwareIdentityWriteLocks, a static, never-evicted
+    /// ConcurrentDictionary) was allocated for whatever id was passed in *before* confirming the
+    /// printer existed, so any authenticated caller could grow that table without bound just by
+    /// repeatedly requesting detection for nonexistent GUIDs — an unbounded process-memory sink.
+    /// This proves a request for a nonexistent id never even touches the repository's write path
+    /// (FindByIdAsync is never called), which is the observable proxy for "no lock entry was
+    /// allocated for this id" available from this test's vantage point.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_PrinterDoesNotExist_NeverCallsFindByIdAsync()
+    {
+        await using AppDbContext db = CreateDbContext();
+        var repository = new Mock<IPrintersRepository>();
+        repository
+            .Setup(r => r.ExistsAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(Guid.NewGuid(), CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        repository.Verify(
+            r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a nonexistent printer id must be rejected by the cheap existence check before any lock-table entry is allocated or the tracked entity is loaded");
+    }
+
+    /// <summary>
+    /// #1656 / PR #1660 review round 6 (Vasquez, blocking): the round-5 pre-lock existence check
+    /// only closes the window before this call acquires the per-printer lock — a concurrent delete
+    /// from a different scope/request between that check and lock acquisition (or while waiting on
+    /// it) must still be caught, and must not leave the lock-table entry retained forever.
+    /// FindByIdAsync alone cannot be trusted to detect this: it is backed by DbSet.FindAsync
+    /// (identity-map lookup), which can return an already-tracked, non-null instance without ever
+    /// re-querying the database. This simulates the delete-after-exists window with ExistsAsync
+    /// answering "yes" pre-lock and "no" post-lock, and asserts the write path never reaches
+    /// FindByIdAsync/SaveChangesAsync once the printer is confirmed gone, and that the lock-table
+    /// entry allocated for the pre-lock check is evicted rather than leaked.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_PrinterDeletedAfterPreLockExistsCheck_DoesNotWriteAndEvictsLock()
+    {
+        await using AppDbContext db = CreateDbContext();
+        Guid printerId = Guid.NewGuid();
+
+        var repository = new Mock<IPrintersRepository>();
+        repository
+            .SetupSequence(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)  // pre-lock check: printer is still real
+            .ReturnsAsync(false); // post-lock check: printer vanished while waiting for/after the lock
+        repository
+            .Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "FindByIdAsync must never be called once the post-lock existence recheck reports the printer gone."));
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(printerId, CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        repository.Verify(r => r.FindByIdAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        unitOfWork.Verify(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        PrintersService.HasFirmwareIdentityWriteLockForTests(printerId).Should().BeFalse(
+            "the lock-table entry allocated for the pre-lock existence check must be evicted once the printer is confirmed deleted, not retained forever");
+    }
+
+    /// <summary>
+    /// #1656 / PR #1660 review round 7 (Bishop + Vasquez, blocking): round 6 only closed the
+    /// window up to and including the post-lock existence recheck — a delete landing after that
+    /// recheck but before/during the write itself was never caught, since every fix so far was
+    /// another check-then-act layer with its own gap after it. The structural fix makes the write
+    /// (SaveChangesAsync) itself the atomic existence boundary. This simulates that shape: both
+    /// existence rechecks still report the printer present, and only SaveChangesAsync itself
+    /// discovers the row is gone via a genuine DbUpdateConcurrencyException wrapping an
+    /// EntityEntry whose current database values are null — exactly what
+    /// WasFirmwareIdentityPrinterDeletedAsync looks for.
+    /// </summary>
+    [Fact]
+    public async Task DetectFirmwareIdentityAsync_SaveChangesThrowsConcurrencyExceptionForDeletedRow_ReturnsPrinterNotFoundAndEvictsLock()
+    {
+        string dbName = $"PrintersServiceFirmwareDetectTests_ConcurrencyDeleted_{Guid.NewGuid():N}";
+        Guid printerId = Guid.NewGuid();
+
+        await using (AppDbContext seedDb = CreateDbContext(dbName))
+        {
+            Printer seed = CreatePrinter();
+            seed.Id = printerId;
+            seedDb.Printers.Add(seed);
+            await seedDb.SaveChangesAsync();
+        }
+
+        await using AppDbContext db = CreateDbContext(dbName);
+
+        // Load the printer through this scope's own context, exactly as production code would --
+        // this is the tracked instance/EntityEntry whose database values will be re-queried by
+        // WasFirmwareIdentityPrinterDeletedAsync.
+        Printer printer = (await db.Printers.SingleAsync(p => p.Id == printerId))!;
+        Microsoft.EntityFrameworkCore.ChangeTracking.EntityEntry entry = db.Entry(printer);
+        var updateEntry = (Microsoft.EntityFrameworkCore.Update.IUpdateEntry)
+            ((Microsoft.EntityFrameworkCore.Infrastructure.IInfrastructure<Microsoft.EntityFrameworkCore.ChangeTracking.Internal.InternalEntityEntry>)entry).Instance;
+
+        // A wholly separate scope deletes the row for real, out from under this scope's own
+        // tracked entity -- this scope's own context is not aware the row is gone until it
+        // re-queries the (shared, same-name) underlying store, which is exactly what
+        // GetDatabaseValuesAsync (used by WasFirmwareIdentityPrinterDeletedAsync) does.
+        await using (AppDbContext concurrentWriterDb = CreateDbContext(dbName))
+        {
+            Printer toDelete = (await concurrentWriterDb.Printers.SingleAsync(p => p.Id == printerId))!;
+            concurrentWriterDb.Printers.Remove(toDelete);
+            await concurrentWriterDb.SaveChangesAsync();
+        }
+
+        var repository = new Mock<IPrintersRepository>();
+        // The pre-lock and post-lock existence rechecks (round 5/6) are mocked to still report
+        // the printer present -- from their point of view, nothing has happened yet. Only the
+        // write itself (below) discovers the row is genuinely gone.
+        repository.Setup(r => r.ExistsAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        repository.Setup(r => r.FindByIdAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
+
+        var unitOfWork = new Mock<IUnitOfWork>();
+        unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
+        unitOfWork
+            .Setup(work => work.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns<CancellationToken>(_ =>
+            {
+                // Mocking SaveChangesAsync directly bypasses EF's real save pipeline, which
+                // normally calls ChangeTracker.DetectChanges() before evaluating entity states --
+                // without it, `entry` would still read as Unchanged (production's field mutations
+                // just above are not yet detected), and DbUpdateException.Entries filters out
+                // anything that isn't Added/Modified/Deleted at the moment it's first accessed.
+                // Detecting changes here, at the same point the real SaveChangesAsync would, is
+                // what makes the constructed exception genuinely equivalent to one EF would throw.
+                db.ChangeTracker.DetectChanges();
+                return Task.FromException<int>(new DbUpdateConcurrencyException(
+                    "simulated concurrency conflict: row deleted mid-write",
+                    new[] { updateEntry }));
+            });
+
+        PrintersService service = CreateService(db, unitOfWork.Object, RespondWith(PrinterInfoPayload));
+
+        FirmwareDetectionResult result =
+            await service.DetectFirmwareIdentityAsync(printerId, CancellationToken.None);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure.Should().Be(FirmwareDetectionFailure.PrinterNotFound);
+        PrintersService.HasFirmwareIdentityWriteLockForTests(printerId).Should().BeFalse(
+            "a delete discovered only when the write itself fails must still evict this printer's lock-table entry, not just the pre-write recheck path");
+
+        // #1656 / PR #1660 review round 8 (Bishop, blocking): confirming the delete is not
+        // enough on its own -- this scope's `db` must no longer be tracking the deleted `printer`
+        // instance, or a subsequent same-scope repository lookup would be satisfied from the
+        // identity map with this stale, since-deleted instance instead of genuinely re-querying
+        // the database and observing the deletion.
+        entry.State.Should().Be(Microsoft.EntityFrameworkCore.EntityState.Detached,
+            "the confirmed-deleted printer's tracked entity must be detached, otherwise a same-scope FindAsync re-read after this call would still be satisfied from the identity map with the stale pre-delete instance instead of observing the deletion");
+        (await db.Printers.FindAsync(new object?[] { printerId }, CancellationToken.None)).Should().BeNull(
+            "with the tracked entity detached, a same-scope FindAsync re-read must genuinely re-query the database and observe the deletion, not silently return the stale identity-mapped instance");
     }
 
     [Fact]
@@ -201,11 +376,11 @@ public sealed class PrintersServiceFirmwareDetectTests
         printer.FirmwareVersion.Should().Be("v0.12.0-321");
     }
 
-    private static AppDbContext CreateDbContext()
+    private static AppDbContext CreateDbContext(string? name = null)
     {
         DbContextOptions<AppDbContext> options =
             new DbContextOptionsBuilder<AppDbContext>()
-                .UseInMemoryDatabase($"PrintersServiceFirmwareDetectTests_{Guid.NewGuid():N}")
+                .UseInMemoryDatabase(name ?? $"PrintersServiceFirmwareDetectTests_{Guid.NewGuid():N}")
                 .Options;
         return new AppDbContext(options);
     }
@@ -225,6 +400,11 @@ public sealed class PrintersServiceFirmwareDetectTests
         repository
             .Setup(r => r.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(printer);
+        // #1656 round 5 (Vasquez): DetectFirmwareIdentityAsync now confirms existence before
+        // allocating a lock-table entry; this printer id is real.
+        repository
+            .Setup(r => r.ExistsAsync(printer.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
         var unitOfWork = new Mock<IUnitOfWork>();
         unitOfWork.Setup(work => work.Printers).Returns(repository.Object);
         return unitOfWork;

@@ -1325,8 +1325,16 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
             using HttpResponseMessage response = await client.SendAsync(request, ct);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(
+                ex,
+                "PrusaLink history job delete failed for job {JobId}",
+                LogSanitizer.Sanitize(jobId));
             return false;
         }
     }
@@ -1521,7 +1529,7 @@ public class PrusaLinkApiClient : IPrusaLinkApiClient, IDisposable
 
             return job;
         }
-        catch (Exception)
+        catch (Exception ex) when (ex is FormatException or InvalidOperationException or OverflowException)
         {
             return null;
         }

@@ -227,12 +227,17 @@ public class PrintersController(
     /// Values are best-effort and may be null when not available.
     /// </summary>
     /// <param name="printerId">The ID of the printer.</param>
+    /// <param name="forceRefresh">
+    /// When <c>true</c>, bypasses any cached version result (including a cached partial result
+    /// recorded during a transient backend fault) and re-queries the backend live. Intended for
+    /// the explicit "Refresh version info" operator action; automatic polling should omit this.
+    /// </param>
     /// <param name="ct">Cancellation token for the operation.</param>
     [HttpGet("{printerId:guid}/version")]
     [ProducesResponseType(typeof(PrinterVersionInfoDto), 200)]
     [ProducesResponseType(404)]
     [ProducesResponseType(500)]
-    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, CancellationToken ct)
+    public async Task<ActionResult<PrinterVersionInfoDto>> GetPrinterVersionAsync(Guid printerId, [FromQuery] bool forceRefresh = false, CancellationToken ct = default)
     {
         if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.View, ct))
         {
@@ -241,7 +246,7 @@ public class PrintersController(
 
         try
         {
-            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct);
+            PrinterVersionInfoDto? dto = await _printerVersionCache.GetAsync(printerId, ct, forceRefresh);
             return dto == null ? NotFound($"Printer with ID {printerId} not found") : Ok(dto);
         }
         catch (Exception ex) when (IsTransientStartupDbException(ex))
@@ -4353,15 +4358,7 @@ public class PrintersController(
             return true;
         }
 
-        foreach (string segment in filename.Split(PathSegmentSeparators))
-        {
-            if (segment is "." or "..")
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return filename.Split(PathSegmentSeparators).Any(segment => segment is "." or "..");
     }
 
     /// <summary>
@@ -5532,20 +5529,7 @@ public class PrintersController(
 
         WritePrinterEtag(printer);
 
-        CalibrationFirmwareIdentityDto firmware = new(
-            printer.FirmwareFamily.ToString(),
-            printer.GcodeDialect.ToString(),
-            printer.FirmwareDetectionSource switch
-            {
-                FirmwareDetectionSource.Printer => "printer",
-                FirmwareDetectionSource.Configured => "configured",
-                _ => "unknown",
-            },
-            printer.FirmwareVersion,
-            printer.FirmwareDetectionVersion,
-            printer.FirmwareDetectionConfidence,
-            printer.FirmwareDetectedAtUtc,
-            printer.FirmwareIdentityVerified);
+        CalibrationFirmwareIdentityDto firmware = CalibrationFirmwareIdentityDto.FromPrinter(printer);
 
         CalibrationExcludedRegionDto[] excludedRegions =
             string.IsNullOrWhiteSpace(printer.ExcludedRegionsJson)
