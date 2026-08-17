@@ -326,7 +326,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
                 _logger.LogInformation(
                     "Re-registering slicer service {ServiceId} for stable worker instance {InstanceId}; issuing fresh credentials.",
                     svc.Id,
-                    dto.InstanceId);
+                    LogSanitizer.Sanitize(dto.InstanceId));
 
                 svc.Name = dto.Name ?? svc.Name;
                 svc.SlicerType = dto.SlicerType;
@@ -423,7 +423,7 @@ public class SlicersService : Farm.Slicer.Module.Services.ISlicersService
             {
                 _logger.LogInformation(
                     "Concurrent registration for instance {InstanceId} won the race to insert a new row; retrying as an update against its record.",
-                    dto.InstanceId);
+                    LogSanitizer.Sanitize(dto.InstanceId));
                 _repo.ClearTracking();
             }
         }

@@ -234,6 +234,56 @@ public class SlicersServiceWorkerSyncTests
         _ = worker.LastHeartbeat.Should().BeAfter(firstHeartbeat!.Value, "the heartbeat must be refreshed on re-registration");
     }
 
+    [Fact(DisplayName = "RegisterAsync sanitizes a CRLF-injected InstanceId before logging it (cs/log-forging)")]
+    public async Task RegisterAsync_WithCrlfInInstanceId_SanitizesLoggedValue()
+    {
+        using SlicerDbContext db = CreateDb();
+        EfSlicersRepository slicerRepo = new EfSlicersRepository(db);
+        EfWorkerRepository workerRepo = new EfWorkerRepository(db);
+        Mock<IHubContext<SlicerHub>> mockHub = CreateMockHub(out _);
+        SlicerServiceMetrics metrics = CreateMetrics();
+        IOptionsMonitor<Farm.Slicer.Module.Settings.SlicerSettings> settings = CreateMockSlicerSettings();
+        HttpClient httpClient = CreateMockHttpClient();
+        Mock<IProcessProfileRepository> profileRepo = CreateMockProfileRepository();
+        Mock<IFilamentProfileRepository> filamentProfileRepo = CreateMockFilamentProfileRepository();
+        Mock<ILogger<SlicersService>> loggerMock = new Mock<ILogger<SlicersService>>();
+        Mock<ICatalogService> catalogService = CreateMockCatalogService();
+        Mock<IPrinterModelAliasService> aliasService = CreateMockAliasService();
+        Mock<Farm.Infrastructure.Settings.ISettingsService> settingsService = CreateMockSettingsService();
+        Mock<IMachineProfileRepository> machineProfileRepo = CreateMockMachineProfileRepository();
+        Mock<IMachineModelProfileRepository> machineModelProfileRepo = CreateMockMachineModelProfileRepository();
+        SlicersService svc = new SlicersService(slicerRepo, workerRepo, profileRepo.Object, filamentProfileRepo.Object, machineProfileRepo.Object, machineModelProfileRepo.Object, catalogService.Object, aliasService.Object, settingsService.Object, mockHub.Object, metrics, httpClient, loggerMock.Object, settings);
+
+        const string maliciousInstanceId = "orcaslicer-worker-1\r\nFAKE LOG LINE: admin logged in";
+        RegisterSlicerDto dto = new RegisterSlicerDto
+        {
+            Name = "crlf-worker",
+            SlicerType = 0,
+            Version = "0.9.0",
+            Host = "http://worker-host",
+            MaxConcurrentJobs = 3,
+            CapabilitiesJson = "[\"orcaslicer\"]",
+            InstanceId = maliciousInstanceId
+        };
+
+        // First call inserts the row; the second call hits the "Re-registering" log path
+        // (svc is not null) that interpolates InstanceId directly.
+        _ = await svc.RegisterAsync(dto, CancellationToken.None);
+        _ = await svc.RegisterAsync(dto, CancellationToken.None);
+
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, t) =>
+                    v.ToString()!.Contains("Re-registering slicer service", StringComparison.Ordinal) &&
+                    v.ToString()!.Contains("orcaslicer-worker-1\\r\\nFAKE LOG LINE", StringComparison.Ordinal) &&
+                    !v.ToString()!.Contains("\r\nFAKE", StringComparison.Ordinal)),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
     [Fact(DisplayName = "RegisterAsync without an InstanceId always creates a new service/worker (scaled replicas stay distinct)")]
     public async Task RegisterAsync_WithoutInstanceId_AlwaysCreatesNewRecord()
     {
